@@ -77,6 +77,13 @@
           </svg>
         </a>
       {% endif %}
+      {% if settings.PUBLIC_MEDIUM_URL %}
+        <a href="{{ settings.PUBLIC_MEDIUM_URL }}" target="_blank" rel="noopener" aria-label="Read our Medium blog" class="text-slate-700 hover:text-black transition-colors">
+          <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+            <path d="M9.025 8c0 2.485-2.015 4.5-4.512 4.5S0 10.485 0 8s2.015-4.5 4.513-4.5S9.025 5.515 9.025 8m4.95 0c0 2.34-1.007 4.236-2.25 4.236S9.475 10.34 9.475 8s1.007-4.236 2.25-4.236S13.975 5.66 13.975 8M16 8c0 2.096-.355 3.795-.794 3.795-.438 0-.793-1.699-.793-3.795s.355-3.795.793-3.795C15.645 4.205 16 5.904 16 8"/>
+          </svg>
+        </a>
+      {% endif %}
       <!-- You can add more social icons here in the future -->
     </div>
   </div>
