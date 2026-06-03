@@ -138,7 +138,7 @@ def _hubspot_native_prompt_instructions(agent) -> str:
     return (
         "Use `http_request` for HubSpot REST API calls. Native HubSpot OAuth is applied automatically for "
         "`https://api.hubapi.com/` requests.\n"
-        "If setup is needed, tell the user to open `" + integrations_url + "` and connect HubSpot.\n"
+        f"If setup is needed, tell the user to open `{integrations_url}` and connect HubSpot.\n"
         "Use HubSpot CRM v3 endpoints for core CRM work. Keep requests bounded with explicit filters, "
         "`limit`, and `after` pagination where applicable; report when more pages remain.\n"
         "Representative calls:\n"
