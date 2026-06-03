@@ -3,14 +3,13 @@ COMPARISON_STATUS_PUBLISHED = "published"
 
 COMPARISON_CATALOG = (
     {
-        "slug": "gobii-vs-openclaw",
+        "slug": "openclaw-vs-gobii",
         "competitor_name": "OpenClaw",
-        "title": "Gobii vs OpenClaw",
-        "seo_title": "Gobii vs OpenClaw: AI Agent Platform Comparison",
+        "title": "OpenClaw vs Gobii",
+        "seo_title": "OpenClaw vs Gobii: AI Agent Platform Comparison | Gobii",
         "seo_description": (
-            "Compare Gobii and OpenClaw across always-on execution, browser automation, "
-            "agent identity, security, memory, and deployment model. See why Gobii is the "
-            "stronger fit for production team workflows."
+            "Comparing OpenClaw vs Gobii? See how Gobii and OpenClaw differ across "
+            "always-on execution, browser automation, security, memory, and deployment model."
         ),
         "summary": (
             "A formal comparison for teams evaluating always-on AI agents, production "
@@ -18,6 +17,7 @@ COMPARISON_CATALOG = (
         ),
         "status": COMPARISON_STATUS_PUBLISHED,
         "target_keywords": (
+            "OpenClaw vs Gobii",
             "Gobii vs OpenClaw",
             "OpenClaw alternative",
             "AI agent platform comparison",
