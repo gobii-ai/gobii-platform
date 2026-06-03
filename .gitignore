@@ -40,4 +40,5 @@ mediafiles/
 # AI
 .claude/
 .ra-aid/
+.seo-cache/
 *.swp
