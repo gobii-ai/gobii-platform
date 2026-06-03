@@ -593,7 +593,8 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
         if definition:
             set_setting_value(definition, True)
         flag, _ = Flag.objects.get_or_create(name="sandbox_compute")
-        flag.users.add(agent.user)
+        if agent.user_id:
+            flag.users.add(agent.user)
 
     def _planning_guardrail_mocks(self):
         return {

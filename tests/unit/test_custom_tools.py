@@ -500,6 +500,33 @@ def run(params, ctx):
         self.assertEqual(schema["type"], "object")
         self.assertNotIn("oneOf", schema)
 
+        nested_schema = {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["active", "inactive"],
+                    "oneOf": [{"type": "string"}],
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "anyOf": [{"type": "string"}],
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        sanitized = sanitize_tool_parameters_schema_for_llm(nested_schema)
+        self.assertNotIn("enum", sanitized["properties"]["status"])
+        self.assertNotIn("oneOf", sanitized["properties"]["status"])
+        self.assertNotIn("anyOf", sanitized["properties"]["items"]["items"]["properties"]["kind"])
+
     def test_persistent_agent_custom_tool_model_clean_canonicalizes_nested_schema_types(self):
         tool = PersistentAgentCustomTool(
             agent=self.agent,
