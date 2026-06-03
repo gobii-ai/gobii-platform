@@ -69,8 +69,8 @@ APOLLO_NATIVE_CASES = (
         slug=APOLLO_NATIVE_PEOPLE_SEARCH,
         description="Search Apollo people through the native Apollo REST API.",
         prompt=(
-            "Use the native Apollo integration to search for VP Sales contacts at healthcare SaaS companies "
-            "in Boston. Return the top matches."
+            "Use the native Apollo integration to search the first page of VP Sales contacts at healthcare "
+            "SaaS companies in Boston. Return the matches Apollo returns."
         ),
         http_rules=(
             _apollo_rule(

@@ -6,6 +6,7 @@ import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.scenarios.apollo_native import (
     APOLLO_NATIVE_CASES,
     APOLLO_NATIVE_CREATE_CONTACT,
+    APOLLO_NATIVE_PEOPLE_SEARCH,
     APOLLO_NATIVE_SCENARIO_SLUGS,
     APOLLO_NATIVE_SUITE_SLUG,
     FORBIDDEN_APOLLO_DISCOVERY_TOOL_NAMES,
@@ -61,6 +62,13 @@ class ApolloNativeScenarioTests(SimpleTestCase):
             self.assertNotIn("apollo_io-", prompt_and_description)
             for tool_name in FORBIDDEN_APOLLO_DISCOVERY_TOOL_NAMES:
                 self.assertNotIn(tool_name, prompt_and_description)
+
+    def test_people_search_prompt_is_bounded_to_returned_matches(self):
+        case = next(case for case in APOLLO_NATIVE_CASES if case.slug == APOLLO_NATIVE_PEOPLE_SEARCH)
+
+        self.assertIn("first page", case.prompt.lower())
+        self.assertIn("Return the matches Apollo returns.", case.prompt)
+        self.assertNotIn("top matches", case.prompt.lower())
 
     def test_eval_stop_policy_allows_sqlite_batch_for_result_shaping(self):
         scenario = ScenarioRegistry.get(APOLLO_NATIVE_SCENARIO_SLUGS[0])
