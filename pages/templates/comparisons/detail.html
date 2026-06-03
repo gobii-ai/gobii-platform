@@ -29,23 +29,32 @@
 {% block content %}
 <main id="main-content" class="bg-white">
   <section class="relative isolate overflow-hidden bg-slate-950 text-white">
-    <img
-      src="{% static 'images/solutions/engineering-hero.jpg' %}"
-      srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
-              {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
-              {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
-              {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w,
-              {% static 'images/solutions/engineering-hero.jpg' %} 2560w"
-      sizes="100vw"
-      alt="AI agent platform evaluation workspace"
-      class="absolute inset-0 h-full w-full object-cover opacity-35"
-      width="1600"
-      height="900"
-      loading="eager"
-      decoding="async"
-      fetchpriority="high"
-      style="opacity: 0.72;"
-    >
+    <picture>
+      <source
+        type="image/webp"
+        srcset="{% static 'images/solutions/engineering-hero-640.webp' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.webp' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.webp' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.webp' %} 1920w"
+        sizes="100vw"
+      >
+      <img
+        src="{% static 'images/solutions/engineering-hero-1280.jpg' %}"
+        srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w"
+        sizes="100vw"
+        alt="AI agent platform evaluation workspace"
+        class="absolute inset-0 h-full w-full object-cover opacity-35"
+        width="1280"
+        height="720"
+        loading="eager"
+        decoding="async"
+        fetchpriority="high"
+        style="opacity: 0.72;"
+      >
+    </picture>
     <div class="absolute inset-0" style="background: linear-gradient(90deg, rgba(2, 6, 23, 0.82) 0%, rgba(15, 23, 42, 0.68) 48%, rgba(15, 23, 42, 0.34) 100%);"></div>
     <div class="relative mx-auto max-w-7xl px-6 py-20 sm:px-8 sm:py-24 lg:px-12 lg:py-28">
       <div class="max-w-4xl rounded-lg border border-white/15 p-6 sm:p-8 lg:p-10" style="background: rgba(2, 6, 23, 0.58); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
@@ -55,7 +64,7 @@
         </a>
         <p class="mt-8 text-sm font-semibold uppercase text-cyan-200">OpenClaw vs Gobii</p>
         <h1 class="mt-5 text-4xl font-light leading-[1.08] text-white sm:text-5xl lg:text-6xl">
-          Choose Gobii for AI agents that need to run real business workflows
+          OpenClaw vs Gobii: AI agents for real business workflows
         </h1>
         <p class="mt-6 max-w-3xl text-lg leading-8 text-cyan-50">
           Comparing OpenClaw vs Gobii? OpenClaw is a capable local-first assistant for developers and power users. Gobii is built for teams that need always-on AI agents with schedules, browser sessions, structured state, secure credentials, files, communication endpoints, and production deployment controls.
@@ -344,6 +353,9 @@
           <h2 class="text-lg font-semibold text-slate-950">Source note</h2>
           <p class="mt-4 text-sm leading-6 text-slate-700">
             This comparison is based on public documentation, public repository information, and Gobii platform architecture reviewed in {{ comparison.source_reviewed }}.
+          </p>
+          <p class="mt-3 text-sm leading-6 text-slate-700">
+            Last reviewed {{ comparison.last_reviewed_display }} by {{ comparison.reviewed_by }}.
           </p>
           <div class="mt-5 flex flex-col gap-3 text-sm font-semibold">
             <a href="https://docs.openclaw.ai/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">

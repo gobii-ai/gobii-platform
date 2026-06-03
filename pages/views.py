@@ -3210,12 +3210,13 @@ class PricingView(TemplateView):
 
 class ComparisonsIndexView(TemplateView):
     template_name = "comparisons/index.html"
-    seo_title = "AI Agent Platform Comparisons | Gobii"
+    seo_title = "AI Agent Platform Comparisons and Alternatives | Gobii"
     seo_description = (
-        "Compare Gobii with other AI agent platforms across deployment, browser automation, "
-        "agent operations, and production readiness."
+        "Compare Gobii with AI agent platform alternatives across deployment, browser automation, "
+        "agent operations, security, governance, and production readiness."
     )
     social_image_path = "images/gobii_fish_social_1280x640.png"
+    last_modified_date = "2026-06-03"
 
     def dispatch(self, request, *args, **kwargs):
         if not settings.GOBII_PROPRIETARY_MODE:
@@ -3227,27 +3228,48 @@ class ComparisonsIndexView(TemplateView):
         canonical_url = self.request.build_absolute_uri(self.request.path)
         home_url = self.request.build_absolute_uri(reverse("pages:home"))
         social_image_url = self.request.build_absolute_uri(static(self.social_image_path))
+        item_list_elements = [
+            {
+                "@type": "ListItem",
+                "position": index,
+                "url": self.request.build_absolute_uri(
+                    reverse("proprietary:comparison_detail", kwargs={"slug": comparison["slug"]})
+                ),
+                "name": comparison["title"],
+                "description": comparison["summary"],
+            }
+            for index, comparison in enumerate(get_published_comparisons(), start=1)
+        ]
 
         structured_data = {
             "@context": "https://schema.org",
             "@type": "CollectionPage",
+            "@id": f"{canonical_url}#collection",
             "name": self.seo_title,
             "description": self.seo_description,
             "url": canonical_url,
             "image": social_image_url,
+            "dateModified": self.last_modified_date,
             "publisher": {
                 "@type": "Organization",
                 "name": "Gobii",
+                "url": home_url,
             },
             "isPartOf": {
                 "@type": "WebSite",
                 "name": "Gobii",
                 "url": home_url,
             },
+            "mainEntity": {
+                "@type": "ItemList",
+                "itemListElement": item_list_elements,
+            },
             "about": [
                 {
-                    "@type": "Thing",
+                    "@type": "SoftwareApplication",
                     "name": comparison["competitor_name"],
+                    "applicationCategory": "AI agent platform",
+                    "url": comparison["competitor_url"],
                 }
                 for comparison in COMPARISON_CATALOG
             ],
@@ -3273,7 +3295,12 @@ class ComparisonsIndexView(TemplateView):
 
         context.update(
             {
+                "suppress_htmx": True,
                 "suppress_preline": True,
+                "suppress_public_conversion_assets": True,
+                "suppress_phone_format_js": True,
+                "suppress_rewardful_js": True,
+                "suppress_stripe_js": True,
                 "comparisons": COMPARISON_CATALOG,
                 "comparisons_seo_title": self.seo_title,
                 "comparisons_seo_description": self.seo_description,
@@ -3311,13 +3338,26 @@ class ComparisonDetailView(TemplateView):
         structured_data = {
             "@context": "https://schema.org",
             "@type": "WebPage",
+            "@id": f"{canonical_url}#webpage",
             "name": comparison["seo_title"],
             "description": comparison["seo_description"],
             "url": canonical_url,
             "image": social_image_url,
+            "primaryImageOfPage": {
+                "@type": "ImageObject",
+                "url": social_image_url,
+            },
+            "datePublished": comparison["published_date"],
+            "dateModified": comparison["last_reviewed_date"],
             "publisher": {
                 "@type": "Organization",
                 "name": "Gobii",
+                "url": home_url,
+            },
+            "reviewedBy": {
+                "@type": "Organization",
+                "name": comparison["reviewed_by"],
+                "url": home_url,
             },
             "isPartOf": {
                 "@type": "WebSite",
@@ -3329,11 +3369,13 @@ class ComparisonDetailView(TemplateView):
                     "@type": "SoftwareApplication",
                     "name": "Gobii",
                     "applicationCategory": "AI agent platform",
+                    "url": home_url,
                 },
                 {
                     "@type": "SoftwareApplication",
                     "name": comparison["competitor_name"],
                     "applicationCategory": "AI agent platform",
+                    "url": comparison["competitor_url"],
                 },
             ],
         }
@@ -3365,6 +3407,9 @@ class ComparisonDetailView(TemplateView):
         context.update(
             {
                 "suppress_preline": True,
+                "suppress_public_conversion_assets": True,
+                "suppress_phone_format_js": True,
+                "suppress_stripe_js": True,
                 "comparison": comparison,
                 "comparison_seo_title": comparison["seo_title"],
                 "comparison_seo_description": comparison["seo_description"],

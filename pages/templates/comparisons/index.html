@@ -29,23 +29,32 @@
 {% block content %}
 <main id="main-content" class="bg-white">
   <section class="relative isolate overflow-hidden bg-slate-950 text-white">
-    <img
-      src="{% static 'images/solutions/engineering-hero.jpg' %}"
-      srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
-              {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
-              {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
-              {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w,
-              {% static 'images/solutions/engineering-hero.jpg' %} 2560w"
-      sizes="100vw"
-      alt="AI agent platform evaluation workspace"
-      class="absolute inset-0 h-full w-full object-cover"
-      width="1600"
-      height="900"
-      loading="eager"
-      decoding="async"
-      fetchpriority="high"
-      style="opacity: 0.72;"
-    >
+    <picture>
+      <source
+        type="image/webp"
+        srcset="{% static 'images/solutions/engineering-hero-640.webp' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.webp' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.webp' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.webp' %} 1920w"
+        sizes="100vw"
+      >
+      <img
+        src="{% static 'images/solutions/engineering-hero-1280.jpg' %}"
+        srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w"
+        sizes="100vw"
+        alt="AI agent platform evaluation workspace"
+        class="absolute inset-0 h-full w-full object-cover"
+        width="1280"
+        height="720"
+        loading="eager"
+        decoding="async"
+        fetchpriority="high"
+        style="opacity: 0.72;"
+      >
+    </picture>
     <div class="absolute inset-0" style="background: linear-gradient(90deg, rgba(2, 6, 23, 0.82) 0%, rgba(15, 23, 42, 0.68) 48%, rgba(15, 23, 42, 0.34) 100%);"></div>
     <div class="relative mx-auto max-w-6xl px-6 py-20 sm:px-8 sm:py-24 lg:px-12 lg:py-28">
       <div class="max-w-3xl rounded-lg border border-white/15 p-6 sm:p-8 lg:p-10" style="background: rgba(2, 6, 23, 0.58); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">

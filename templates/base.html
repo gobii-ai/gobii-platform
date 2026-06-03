@@ -398,16 +398,18 @@
   </script>
 
   <script src="{% static 'js/gobii_analytics.js' %}" defer></script>
-  {% if settings.TURNSTILE_ENABLED %}
+  {% if settings.TURNSTILE_ENABLED and not suppress_public_conversion_assets %}
     {% if cta_signup_modal_config.enabled or request.resolver_match.url_name == 'account_login' or request.resolver_match.url_name == 'account_signup' %}
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
     {% endif %}
   {% endif %}
+  {% if not suppress_public_conversion_assets %}
   <script src="{% static 'js/account_identity_signals.js' %}" defer></script>
   <script src="{% static 'js/account_auth_forms.js' %}" defer></script>
   <script src="{% static 'js/cta_signup_modal.js' %}" defer></script>
   <script src="{% static 'js/cta_tracking.js' %}" defer></script>
   <script src="{% static 'js/signup_tracking.js' %}" defer></script>
+  {% endif %}
   <style type="text/css">
     .htmx-indicator {
       width: 0;           /* matches spinner dimensions */
@@ -450,7 +452,7 @@
   {% endif %}
 
 
-  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_ID %}
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_ID and not suppress_rewardful_js %}
   <script>(function(w,r){w._rwq=r;w[r]=w[r]||function(){(w[r].q=w[r].q||[]).push(arguments)}})(window,'rewardful');</script>
   <script async src='https://r.wdfl.co/rw.js' data-rewardful='{{ settings.REWARDFUL_ID }}'></script>
   {% endif %}
@@ -584,7 +586,7 @@
     {% block content %}{% endblock %}
     <!-- HTMX injects modals here -->
     <div id="modal-container">
-      {% if cta_signup_modal_config.enabled %}
+      {% if cta_signup_modal_config.enabled and not suppress_public_conversion_assets %}
         {{ cta_signup_modal_config|json_script:"gobii-cta-signup-modal-config" }}
         {% include "partials/_cta_signup_modal.html" %}
       {% endif %}
@@ -622,7 +624,7 @@
   </noscript>
   {% endif %}
 
-  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_ID %}
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_ID and not suppress_rewardful_js %}
   <script>
     rewardful('ready', function() {
       if(Rewardful.referral) {
@@ -632,8 +634,10 @@
   </script>
   {% endif %}
 
+  {% if not suppress_phone_format_js %}
   <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js" defer></script>
   <script type="text/javascript" src="{% static 'js/phone_format.js' %}" defer></script>
+  {% endif %}
 
   {# Allow pages to inject additional scripts after the global includes. #}
   {% block extra_js %}{% endblock %}
