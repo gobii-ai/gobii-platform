@@ -1,6 +1,6 @@
 {% load static %}
 <footer class="bg-white text-slate-900">
-  <div class="max-w-5xl mx-auto px-4 py-12 grid grid-cols-2 lg:grid-cols-4 gap-8 text-sm">
+  <div class="max-w-6xl mx-auto px-4 py-12 grid grid-cols-2 {% if settings.GOBII_PROPRIETARY_MODE %}lg:grid-cols-5{% else %}lg:grid-cols-4{% endif %} gap-8 text-sm">
     <div>
       <h3 class="font-semibold mb-4">Product</h3>
       <ul class="space-y-2">
@@ -24,6 +24,14 @@
         <li><a href="{% url 'proprietary:careers' %}" class="text-slate-700 hover:text-blue-600">Careers</a></li>
         <li><a href="{% url 'proprietary:blog_index' %}" class="text-slate-700 hover:text-blue-600">Blog</a></li>
         <li><a href="{% url 'proprietary:contact' %}" class="text-slate-700 hover:text-blue-600">Contact</a></li>
+      </ul>
+    </div>
+    {% endif %}
+    {% if settings.GOBII_PROPRIETARY_MODE %}
+    <div>
+      <h3 class="font-semibold mb-4">Comparisons</h3>
+      <ul class="space-y-2">
+        <li><a href="{% url 'proprietary:comparisons' %}" class="text-slate-700 hover:text-blue-600">AI agent comparisons</a></li>
       </ul>
     </div>
     {% endif %}

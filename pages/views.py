@@ -160,6 +160,7 @@ from .public_template_urls import (
     public_template_launch_path,
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
+from .comparisons import COMPARISON_CATALOG
 from .forms import MarketingContactForm
 from console.agent_creation import (
     AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
@@ -3201,6 +3202,86 @@ class ScaleCheckoutView(NoIndexFollowMixin, LoginRequiredMixin, View):
 class PricingView(TemplateView):
     pass
 
+
+class ComparisonsIndexView(TemplateView):
+    template_name = "comparisons/index.html"
+    seo_title = "AI Agent Platform Comparisons | Gobii"
+    seo_description = (
+        "Compare Gobii with other AI agent platforms across deployment, browser automation, "
+        "agent operations, and production readiness."
+    )
+    social_image_path = "images/gobii_fish_social_1280x640.png"
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            raise Http404()
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        canonical_url = self.request.build_absolute_uri(self.request.path)
+        home_url = self.request.build_absolute_uri(reverse("pages:home"))
+        social_image_url = self.request.build_absolute_uri(static(self.social_image_path))
+
+        structured_data = {
+            "@context": "https://schema.org",
+            "@type": "CollectionPage",
+            "name": self.seo_title,
+            "description": self.seo_description,
+            "url": canonical_url,
+            "image": social_image_url,
+            "publisher": {
+                "@type": "Organization",
+                "name": "Gobii",
+            },
+            "isPartOf": {
+                "@type": "WebSite",
+                "name": "Gobii",
+                "url": home_url,
+            },
+            "about": [
+                {
+                    "@type": "Thing",
+                    "name": comparison["competitor_name"],
+                }
+                for comparison in COMPARISON_CATALOG
+            ],
+        }
+        breadcrumb_data = {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": home_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Comparisons",
+                    "item": canonical_url,
+                },
+            ],
+        }
+
+        context.update(
+            {
+                "suppress_preline": True,
+                "comparisons": COMPARISON_CATALOG,
+                "comparisons_seo_title": self.seo_title,
+                "comparisons_seo_description": self.seo_description,
+                "comparisons_social_image_url": social_image_url,
+                "comparisons_social_image_alt": "Gobii AI agent platform comparison guide",
+                "comparisons_structured_data_json": html_safe_json_dumps(structured_data),
+                "comparisons_breadcrumb_json": html_safe_json_dumps(breadcrumb_data),
+                "canonical_url": canonical_url,
+            }
+        )
+        return context
+
+
 class StaticViewSitemap(sitemaps.Sitemap):
     priority = 0.5
     changefreq = 'weekly'
@@ -3222,6 +3303,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 items.insert(5, 'proprietary:team')
                 items.insert(6, 'proprietary:careers')
                 items.insert(7, 'proprietary:blog_index')
+                items.insert(8, 'proprietary:comparisons')
             else:
                 items.append('pages:docs_index')
         except Exception:

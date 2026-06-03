@@ -3,6 +3,7 @@ from django.urls import path
 from pages.views import (
     AboutView,
     CareersView,
+    ComparisonsIndexView,
     DataDeletionPolicyView,
     PrivacyPolicyView,
     ScaleCheckoutView,
@@ -20,6 +21,7 @@ urlpatterns = [
     path("qualify/", PrequalifyView.as_view(), name="prequalify"),
     path("support/", SupportView.as_view(), name="support"),
     path("contact/", ContactView.as_view(), name="contact"),
+    path("comparisons/", ComparisonsIndexView.as_view(), name="comparisons"),
     path("about/", AboutView.as_view(), name="about"),
     path("team/", TeamView.as_view(), name="team"),
     path("careers/", CareersView.as_view(), name="careers"),
