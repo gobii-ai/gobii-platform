@@ -1467,8 +1467,8 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "function": {
             "name": "search_tools",
             "description": (
-                "Discover and enable the right tools and skills for the current task, including saved custom tools. "
-                "Use this when no currently enabled tool clearly fits, including named integration connection/use requests. "
+                "Discover and enable tools and skills for the task, including saved custom tools. "
+                "Use when no enabled tool clearly fits, including named integration requests. "
                 "Use it when you need to choose between structured extractors, web search, scraping, browser automation, or a specialized integration. "
                 "Use already-enabled direct tools such as sqlite_batch, create_csv, or a named integration tool; do not rediscover a matching enabled app/tool. "
                 "Call it again when the task changes and you need different capabilities."

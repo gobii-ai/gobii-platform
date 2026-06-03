@@ -3271,7 +3271,7 @@ def _get_planning_mode_prompt_block() -> str:
         "end_planning as the first meaningful action; no welcome-only or question-first turn. Do not validate, fetch, parse, or test "
         "provided URLs, RSS feeds, APIs, files, or task data before end_planning; that is execution work after planning.\n"
         "- Use read-only research during planning only when the scope is unclear; do not fetch, parse, or summarize sources to answer a clear task before end_planning.\n"
-        "- `search_tools` is planning-safe for named integration/tool feasibility. If the user asks to connect or use a named integration and no enabled tool clearly fits, call search_tools before asking how to connect; otherwise end_planning if the plan is sufficient, or request_human_input if blocked.\n"
+        "- Named integration setup/use: if no enabled tool fits, call search_tools before asking how to connect; otherwise end_planning if sufficient or request_human_input if blocked.\n"
         "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
         "- Do not update the runtime plan, schedule/__agent_config.schedule, or begin deliverable work until planning is completed. "
         "Do not do substantive execution or deliverable work before planning ends.\n"
