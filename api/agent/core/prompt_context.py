@@ -2540,8 +2540,8 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
 
     return (
         "Sandbox access is enabled. `python_exec` and `run_command` run inside your sandbox workspace. "
-        "`create_custom_tool` is available through `search_tools` for repetitive, paginated, bulk, deterministic, "
-        "or MCP/API fan-out work where a reusable Python tool would reduce repeated manual tool calls. "
+        "Use enabled `create_custom_tool` directly for repetitive, paginated, bulk, deterministic, "
+        "or MCP/API fan-out work; use `search_tools` only if create_custom_tool is missing. "
         "Gobii tool arguments use filespace paths like `/tools/foo.py`; shell commands use workspace paths like "
         "`tools/foo.py` or `/workspace/tools/foo.py`. "
         "Only env-var secrets reach sandboxed code via `os.environ`; request them with "
@@ -3578,7 +3578,7 @@ def _get_system_instruction(
         "```\n"
         "small_result_answers -> answer directly\n"
         "provided exact URL -> use it directly; do not search for it\n"
-        "recurring setup with URL -> sqlite_batch charter+schedule first; no URL fetch unless asked to run now\n"
+        "recurring setup with URL -> sqlite_batch charter+schedule first; no URL search/read/fetch unless asked to run now\n"
         "scheduled exact feed/API briefing -> http_request then send concise sourced report; no update_plan/files/charts unless asked\n"
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "read_file path -> filespace path only; never http(s) URL\n"

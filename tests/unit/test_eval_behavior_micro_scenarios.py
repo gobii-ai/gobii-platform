@@ -109,9 +109,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
 
-        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 135)
-        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 135)
-        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 135)
+        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 134)
+        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 134)
+        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 134)
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
 
@@ -241,10 +241,6 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("market timestamp", by_slug["common_use_case_105_current_finance_snapshot"].prompt)
         self.assertIn("review evidence", by_slug["common_use_case_106_maps_dental_lead_screen"].prompt)
         self.assertIn("do not run it now", by_slug["common_use_case_107_schedule_vc_digest"].prompt)
-        self.assertEqual(
-            by_slug["common_use_case_108_sheets_read_before_upsert"].expected_tools,
-            ("google_sheets-find-row", "google_sheets-upsert-row"),
-        )
         new_intelligent_work_slugs = {
             f"common_use_case_{index:03d}_{suffix}"
             for index, suffix in [
@@ -253,7 +249,6 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 (111, "prior_results_sqlite_rank"),
                 (112, "file_json_dedupe_report"),
                 (113, "file_pipeline_sqlite_summary"),
-                (114, "sheets_default_update_row"),
                 (115, "sheets_read_sqlite_rank"),
                 (116, "maps_default_city_reviews"),
                 (117, "linkedin_default_company_jobs"),
@@ -277,7 +272,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 (135, "search_scrape_two_sources"),
             ]
         }
-        self.assertEqual(len(new_intelligent_work_slugs), 27)
+        self.assertEqual(len(new_intelligent_work_slugs), 26)
         self.assertTrue(new_intelligent_work_slugs.issubset(by_slug))
         self.assertEqual(
             len({by_slug[slug].prompt for slug in new_intelligent_work_slugs}),
@@ -697,6 +692,18 @@ class BehaviorMicroHelperTests(TestCase):
         policy = scenario._build_eval_stop_policy()
 
         self.assertIn("search_tools", policy["allowed_tool_names"])
+
+    def test_custom_tool_common_use_case_exposes_enabled_sandbox_builtin(self):
+        scenario = ScenarioRegistry.get("common_use_case_122_custom_tool_bulk_api_sqlite")
+
+        scenario._enable_builtin_tools(self.agent.id, ["create_custom_tool"])
+        scenario._enable_sandbox_tool_visibility(self.agent.id)
+
+        names = {
+            definition["function"]["name"]
+            for definition in get_enabled_tool_definitions(self.agent)
+        }
+        self.assertIn("create_custom_tool", names)
 
     def test_google_sheets_eval_synthetic_tools_are_defined(self):
         for tool_name in GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES:

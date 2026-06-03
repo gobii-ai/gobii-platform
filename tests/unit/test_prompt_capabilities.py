@@ -132,7 +132,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         context, _, _ = build_prompt_context(self.agent)
         contents = "\n".join(message["content"] for message in context)
 
-        self.assertIn("`create_custom_tool` is available through `search_tools`", contents)
+        self.assertIn("Use enabled `create_custom_tool` directly", contents)
         self.assertNotIn("System Skill: Custom Tool Development", contents)
         self.assertNotIn("Current custom-tool state:", contents)
         self.assertNotIn("PHILOSOPHY:", contents)
@@ -228,10 +228,10 @@ class AgentCapabilitiesPromptTests(TestCase):
     def test_sandbox_summary_mentions_custom_tool_discovery_for_bulk_work(self, _mock_sandbox):
         summary = _get_sandbox_prompt_summary(self.agent)
 
-        self.assertIn("`create_custom_tool` is available through `search_tools`", summary)
+        self.assertIn("Use enabled `create_custom_tool` directly", summary)
         self.assertIn("repetitive, paginated, bulk, deterministic", summary)
         self.assertIn("MCP/API fan-out", summary)
-        self.assertIn("reusable Python tool", summary)
+        self.assertIn("use `search_tools` only if create_custom_tool is missing", summary)
         self.assertNotIn("source_path='/tools/name.py'", summary)
         self.assertNotIn("retry create_custom_tool, not create_file", summary)
 

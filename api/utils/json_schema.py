@@ -197,4 +197,6 @@ def sanitize_tool_parameters_schema_for_llm(value: Any) -> Dict[str, Any]:
     normalized = normalize_parameters_schema(value)
     if normalized is None:
         return {"type": "object", "properties": {}, "required": []}
+    for keyword in ("oneOf", "anyOf", "allOf", "enum", "not"):
+        normalized.pop(keyword, None)
     return normalized
