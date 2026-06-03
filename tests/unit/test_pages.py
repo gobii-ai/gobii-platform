@@ -100,6 +100,41 @@ class HomePageTests(TestCase):
         self.assertEqual(len(main_landmarks), 1)
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
 
+    def test_home_page_organization_schema_uses_configured_linkedin_url(self):
+        linkedin_url = "https://www.linkedin.com/company/example-ai"
+
+        with override_settings(PUBLIC_LINKEDIN_URL=linkedin_url):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        schemas = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        organization_schema = next(
+            schema for schema in schemas if schema.get("@id", "").endswith("/#organization")
+        )
+
+        self.assertIn(linkedin_url, organization_schema["sameAs"])
+        self.assertNotIn("https://www.linkedin.com/company/gobii-ai", organization_schema["sameAs"])
+
+    def test_home_page_organization_schema_omits_empty_linkedin_url(self):
+        with override_settings(PUBLIC_LINKEDIN_URL=""):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        schemas = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        organization_schema = next(
+            schema for schema in schemas if schema.get("@id", "").endswith("/#organization")
+        )
+
+        self.assertNotIn("https://www.linkedin.com/company/gobii-ai", organization_schema["sameAs"])
+
     def test_home_page_charter_textarea_has_hidden_accessible_label(self):
         response = self.client.get("/")
 

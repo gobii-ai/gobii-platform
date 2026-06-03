@@ -16,7 +16,7 @@
       "logo": "{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}/static/images/gobii_fish_icon_512.png",
       "sameAs": [
         "{{ settings.PUBLIC_GITHUB_URL|default:'https://github.com/gobii-ai' }}",
-        "https://www.linkedin.com/company/gobii-ai",
+        {% if settings.PUBLIC_LINKEDIN_URL %}"{{ settings.PUBLIC_LINKEDIN_URL }}",{% endif %}
         "{{ settings.PUBLIC_X_URL|default:'https://x.com/gobii_ai' }}"
       ]
     }

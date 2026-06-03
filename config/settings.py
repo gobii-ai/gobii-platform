@@ -353,6 +353,14 @@ PUBLIC_X_URL = env(
         fallback=_community_default("brand", "PUBLIC_X_URL"),
     ),
 )
+PUBLIC_LINKEDIN_URL = env(
+    "PUBLIC_LINKEDIN_URL",
+    default=_proprietary_default("brand", "PUBLIC_LINKEDIN_URL"),
+)
+PUBLIC_MEDIUM_URL = env(
+    "PUBLIC_MEDIUM_URL",
+    default=_proprietary_default("brand", "PUBLIC_MEDIUM_URL"),
+)
 
 INSTALLED_APPS = [
     # Django

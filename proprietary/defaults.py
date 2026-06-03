@@ -17,6 +17,8 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
         "PUBLIC_GITHUB_URL": "https://github.com/gobii-ai",
         "PUBLIC_DISCORD_URL": "https://discord.gg/yyDB8GwxtE",
         "PUBLIC_X_URL": "https://x.com/gobii_ai",
+        "PUBLIC_LINKEDIN_URL": "https://www.linkedin.com/company/gobii-ai",
+        "PUBLIC_MEDIUM_URL": "https://medium.com/gobiiai",
     },
     "support": {
         "DEFAULT_FROM_EMAIL": "Gobii <noreply@mg.getgobii.com>",
