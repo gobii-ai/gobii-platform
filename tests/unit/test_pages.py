@@ -1531,6 +1531,8 @@ class SitemapTests(TestCase):
 
 @tag("batch_pages")
 class ComparisonPageTests(TestCase):
+    comparison_slug = "openclaw-vs-gobii"
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_comparisons_page_renders_with_metadata_and_openclaw_link(self):
         response = self.client.get(reverse("proprietary:comparisons"))
@@ -1605,24 +1607,24 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(headings[0].get_text(" ", strip=True), "AI agent platform comparisons")
         openclaw_card = soup.find("article", {"id": "openclaw"})
         self.assertIsNotNone(openclaw_card)
-        self.assertIn("Gobii vs OpenClaw", openclaw_card.get_text(" ", strip=True))
+        self.assertIn("OpenClaw vs Gobii", openclaw_card.get_text(" ", strip=True))
         self.assertIn("Published", openclaw_card.get_text(" ", strip=True))
         self.assertIsNotNone(
             soup.find(
                 "a",
-                {"href": reverse("proprietary:comparison_detail", kwargs={"slug": "gobii-vs-openclaw"})},
+                {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.comparison_slug})},
             )
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_openclaw_comparison_page_renders_with_metadata_and_decision_copy(self):
         response = self.client.get(
-            reverse("proprietary:comparison_detail", kwargs={"slug": "gobii-vs-openclaw"})
+            reverse("proprietary:comparison_detail", kwargs={"slug": self.comparison_slug})
         )
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
-        comparison = page_views.get_comparison("gobii-vs-openclaw")
+        comparison = page_views.get_comparison(self.comparison_slug)
         expected_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
         expected_image_url = response.wsgi_request.build_absolute_uri(
             static(page_views.ComparisonDetailView.social_image_path)
@@ -1656,10 +1658,11 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(breadcrumb_data["@type"], "BreadcrumbList")
         self.assertEqual(
             [item["name"] for item in breadcrumb_data["itemListElement"]],
-            ["Home", "Comparisons", "Gobii vs OpenClaw"],
+            ["Home", "Comparisons", "OpenClaw vs Gobii"],
         )
 
         content = soup.get_text(" ", strip=True)
+        self.assertIn("OpenClaw vs Gobii", content)
         self.assertIn("Choose Gobii for AI agents that need to run real business workflows", content)
         self.assertIn("Choose OpenClaw if", content)
         self.assertIn("Choose Gobii if", content)
@@ -1690,17 +1693,17 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(comparisons_link.get_text(strip=True), "AI agent comparisons")
         openclaw_link = footer.find(
             "a",
-            {"href": reverse("proprietary:comparison_detail", kwargs={"slug": "gobii-vs-openclaw"})},
+            {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.comparison_slug})},
         )
         self.assertIsNotNone(openclaw_link)
-        self.assertEqual(openclaw_link.get_text(strip=True), "Gobii vs OpenClaw")
+        self.assertEqual(openclaw_link.get_text(strip=True), "OpenClaw vs Gobii")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_comparison_pages_and_footer_column_are_absent_in_community_mode(self):
         comparisons_response = self.client.get(reverse("proprietary:comparisons"))
         self.assertEqual(comparisons_response.status_code, 404)
         detail_response = self.client.get(
-            reverse("proprietary:comparison_detail", kwargs={"slug": "gobii-vs-openclaw"})
+            reverse("proprietary:comparison_detail", kwargs={"slug": self.comparison_slug})
         )
         self.assertEqual(detail_response.status_code, 404)
 
@@ -1724,7 +1727,8 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("<loc>http://example.com/comparisons/</loc>", content)
-        self.assertIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
+        self.assertIn(f"<loc>http://example.com/comparisons/{self.comparison_slug}/</loc>", content)
+        self.assertNotIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_community_sitemap_excludes_comparison_urls(self):
@@ -1733,7 +1737,7 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertNotIn("<loc>http://example.com/comparisons/</loc>", content)
-        self.assertNotIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
+        self.assertNotIn(f"<loc>http://example.com/comparisons/{self.comparison_slug}/</loc>", content)
 
 
 @tag("batch_pages")
