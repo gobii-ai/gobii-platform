@@ -189,7 +189,27 @@ class NativeIntegrationTests(TestCase):
                     "authorization_endpoint": "https://app.apollo.io/#/oauth/authorize",
                     "token_endpoint": "https://app.apollo.io/api/v1/oauth/token",
                     "api_url_prefixes": ("https://api.apollo.io/", "https://app.apollo.io/api/v1/users/api_profile"),
-                    "scopes": ("read_user_profile", "contacts_search", "person_read"),
+                    "scopes": (
+                        "read_user_profile",
+                        "app_scopes",
+                        "mixed_people_api_search",
+                        "mixed_companies_search",
+                        "people_match",
+                        "people_bulk_match",
+                        "person_read",
+                        "organizations_search",
+                        "organization_read",
+                        "organizations_enrich",
+                        "organizations_bulk_enrich",
+                        "contacts_search",
+                        "contact_read",
+                        "accounts_search",
+                        "account_read",
+                        "email_accounts_list",
+                        "users_list",
+                        "api_usage_stats_read",
+                        "credit_usage_stats_read",
+                    ),
                 },
             ),
         )
@@ -294,7 +314,13 @@ class NativeIntegrationTests(TestCase):
                 (
                     "https://app.apollo.io/#/oauth/authorize",
                     "client_id=apollo-client-id",
-                    "scope=read_user_profile+contacts_search+person_read",
+                    (
+                        "scope=read_user_profile+app_scopes+mixed_people_api_search+mixed_companies_search+"
+                        "people_match+people_bulk_match+person_read+organizations_search+organization_read+"
+                        "organizations_enrich+organizations_bulk_enrich+contacts_search+contact_read+"
+                        "accounts_search+account_read+email_accounts_list+users_list+api_usage_stats_read+"
+                        "credit_usage_stats_read"
+                    ),
                 ),
             ),
         )

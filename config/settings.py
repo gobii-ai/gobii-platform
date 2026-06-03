@@ -1620,9 +1620,30 @@ GOOGLE_PICKER_APP_ID = GOOGLE_CLOUD_PROJECT_NUMBER or (
 # Apollo
 APOLLO_CLIENT_ID = env("APOLLO_CLIENT_ID", default="")
 APOLLO_CLIENT_SECRET = env("APOLLO_CLIENT_SECRET", default="")
+APOLLO_DEFAULT_OAUTH_SCOPES = (
+    "read_user_profile",
+    "app_scopes",
+    "mixed_people_api_search",
+    "mixed_companies_search",
+    "people_match",
+    "people_bulk_match",
+    "person_read",
+    "organizations_search",
+    "organization_read",
+    "organizations_enrich",
+    "organizations_bulk_enrich",
+    "contacts_search",
+    "contact_read",
+    "accounts_search",
+    "account_read",
+    "email_accounts_list",
+    "users_list",
+    "api_usage_stats_read",
+    "credit_usage_stats_read",
+)
 APOLLO_OAUTH_SCOPES = tuple(
     scope
-    for scope in env("APOLLO_OAUTH_SCOPES", default="read_user_profile contacts_search person_read").replace(",", " ").split()
+    for scope in env("APOLLO_OAUTH_SCOPES", default=" ".join(APOLLO_DEFAULT_OAUTH_SCOPES)).replace(",", " ").split()
     if scope
 )
 
