@@ -65,6 +65,7 @@ const TOOL_SEARCH_TOOL_NAMES = new Set(['search_tools', 'search_web', 'web_searc
 const APOLLO_ICON_SRC = '/static/images/integrations/native/apollo.svg'
 const GOOGLE_SHEETS_ICON_SRC = '/static/images/integrations/pipedream/google_sheets.svg'
 const GOOGLE_DRIVE_ICON_SRC = '/static/images/integrations/native/google_drive.svg'
+const HUBSPOT_ICON_SRC = '/static/images/integrations/native/hubspot.svg'
 
 export type ToolMetadataConfig = {
   name: string
@@ -238,6 +239,77 @@ function deriveApolloApiRequest(parameters: Record<string, unknown> | null): Too
     iconSrc: APOLLO_ICON_SRC,
     iconBgClass: 'bg-[#F8FF2C]',
     iconColorClass: 'text-slate-950',
+  }
+}
+
+const HUBSPOT_OBJECT_LABELS: Record<string, string> = {
+  contacts: 'contacts',
+  companies: 'companies',
+  deals: 'deals',
+}
+
+const HUBSPOT_OBJECT_SINGULAR_LABELS: Record<string, string> = {
+  contacts: 'contact',
+  companies: 'company',
+  deals: 'deal',
+}
+
+function describeHubSpotEndpoint(method: string, pathname: string): { label: string; captionSubject: string } {
+  const objectMatch = pathname.match(/^\/crm\/v3\/objects\/([^/]+)(?:\/([^/]+))?(?:\/(search))?$/)
+  if (objectMatch) {
+    const objectType = objectMatch[1] ?? ''
+    const objectLabel = HUBSPOT_OBJECT_LABELS[objectType] ?? objectType
+    const singularObjectLabel = HUBSPOT_OBJECT_SINGULAR_LABELS[objectType] ?? objectLabel
+    const objectId = objectMatch[2] ?? ''
+    const isSearch = objectId === 'search' || objectMatch[3] === 'search'
+    if (isSearch) {
+      return { label: `Search HubSpot ${objectLabel}`, captionSubject: `${objectLabel} search` }
+    }
+    if (method === 'POST' && !objectId) {
+      return { label: `Create HubSpot ${singularObjectLabel}`, captionSubject: objectLabel }
+    }
+    if (['PATCH', 'PUT'].includes(method)) {
+      return { label: `Update HubSpot ${singularObjectLabel}`, captionSubject: objectId || objectLabel }
+    }
+    return { label: `Read HubSpot ${objectLabel}`, captionSubject: objectId || objectLabel }
+  }
+
+  if (pathname.startsWith('/crm/v3/owners')) {
+    return { label: 'Read HubSpot owners', captionSubject: 'owners' }
+  }
+  if (pathname.startsWith('/crm/v3/properties/')) {
+    return { label: 'Read HubSpot properties', captionSubject: pathname.split('/').filter(Boolean).pop() ?? 'properties' }
+  }
+  if (pathname.includes('/associations/')) {
+    return { label: 'Manage HubSpot associations', captionSubject: 'associations' }
+  }
+  return {
+    label: 'HubSpot API request',
+    captionSubject: pathname.replace(/^\/+/, '') || 'api request',
+  }
+}
+
+function deriveHubSpotApiRequest(parameters: Record<string, unknown> | null): ToolDescriptorTransform | null {
+  const rawUrl = coerceString(parameters?.url) || coerceString(parameters?.endpoint)
+  const parsedUrl = parseToolUrl(rawUrl)
+  if (!parsedUrl) {
+    return null
+  }
+
+  const method = (coerceString(parameters?.method) || 'GET').toUpperCase()
+  const host = parsedUrl.hostname.toLowerCase()
+  if (host !== 'api.hubapi.com') {
+    return null
+  }
+
+  const { label, captionSubject } = describeHubSpotEndpoint(method, parsedUrl.pathname.replace(/\/+$/, ''))
+  return {
+    label,
+    caption: [method, captionSubject].filter(Boolean).join(' • '),
+    icon: Network,
+    iconSrc: HUBSPOT_ICON_SRC,
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-700',
   }
 }
 
@@ -618,6 +690,10 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const googleApiRequest = deriveGoogleApiRequest(parameters)
       if (googleApiRequest) {
         return googleApiRequest
+      }
+      const hubspotApiRequest = deriveHubSpotApiRequest(parameters)
+      if (hubspotApiRequest) {
+        return hubspotApiRequest
       }
       const url = coerceString(parameters?.url) || coerceString(parameters?.endpoint)
       const method = coerceString(parameters?.method)

@@ -19,6 +19,7 @@ from api.services.native_integrations import (
     NativeIntegrationConfigurationError,
     NativeIntegrationFileListError,
     NativeIntegrationTokenRequestError,
+    build_native_integration_permission_summary,
     build_oauth_credentials_bundle,
     delete_native_integration_credentials,
     get_native_integration_provider,
@@ -61,11 +62,18 @@ def _owner_id(owner_user, owner_org) -> str:
 def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
     secret = get_native_integration_secret(provider.key, owner_user, owner_org)
     credentials: dict[str, Any] = {}
+    credentials_valid = False
     if secret is not None:
         try:
             credentials = load_native_integration_credentials(secret)
+            credentials_valid = True
         except NativeIntegrationAuthError:
             credentials = {}
+    permission_summary = build_native_integration_permission_summary(
+        provider,
+        credentials if credentials_valid else None,
+        connected=secret is not None and credentials_valid,
+    )
 
     return {
         "provider_key": provider.key,
@@ -77,6 +85,13 @@ def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
         "scopes": list(provider.scopes),
         "connected": secret is not None,
         "scope": credentials.get("scope") or "",
+        "granted_scopes": permission_summary["granted_scopes"],
+        "requested_scopes": permission_summary["requested_scopes"],
+        "available_capabilities": permission_summary["available_capabilities"],
+        "missing_capabilities": permission_summary["missing_capabilities"],
+        "missing_scopes": permission_summary["missing_scopes"],
+        "capability_summary": permission_summary["status_text"],
+        "setup_url": permission_summary["setup_url"],
         "expires_at": credentials.get("expires_at"),
         "connect_url": reverse("console-native-integration-connect", args=[provider.key]),
         "files_url": reverse("console-native-integration-files", args=[provider.key]),

@@ -338,6 +338,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   nativeIntegrationsUrl?: string | null
   googleSheetsDriveTabEnabled?: boolean
   apolloNativeTabEnabled?: boolean
+  hubspotNativeTabEnabled?: boolean
   pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInputRequest?: (
     response:
@@ -527,6 +528,7 @@ export function AgentChatLayout({
   nativeIntegrationsUrl = null,
   googleSheetsDriveTabEnabled = false,
   apolloNativeTabEnabled = false,
+  hubspotNativeTabEnabled = false,
   pendingActionRequests = [],
   onRespondHumanInputRequest,
   onDismissHumanInputRequest,
@@ -1898,6 +1900,7 @@ export function AgentChatLayout({
               nativeIntegrationsUrl={nativeIntegrationsUrl}
               googleSheetsDriveTabEnabled={googleSheetsDriveTabEnabled}
               apolloNativeTabEnabled={apolloNativeTabEnabled}
+              hubspotNativeTabEnabled={hubspotNativeTabEnabled}
             />
           )}
           </div>

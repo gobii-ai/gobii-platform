@@ -429,11 +429,11 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     body = _replace_placeholders(body)
 
     try:
-        headers = apply_native_integration_auth(agent, url, headers)
+        headers = apply_native_integration_auth(agent, url, headers, method=method)
     except NativeIntegrationConfigurationError as exc:
-        return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": str(exc), **exc.to_dict()}
     except NativeIntegrationAuthError as exc:
-        return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": str(exc), **exc.to_dict()}
 
     # Log secret placeholder usage (without actual values)
     if found_placeholders:

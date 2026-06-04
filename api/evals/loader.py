@@ -33,6 +33,10 @@ from api.evals.scenarios.apollo_native import (
     APOLLO_NATIVE_SCENARIO_SLUGS,
     APOLLO_NATIVE_SUITE_SLUG,
 )
+from api.evals.scenarios.hubspot_native import (
+    HUBSPOT_NATIVE_SCENARIO_SLUGS,
+    HUBSPOT_NATIVE_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -108,6 +112,11 @@ register_builtin_suites(
             slug=APOLLO_NATIVE_SUITE_SLUG,
             description="Native Apollo system-skill evals over mocked Apollo REST APIs.",
             scenario_slugs=APOLLO_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=HUBSPOT_NATIVE_SUITE_SLUG,
+            description="Native HubSpot system-skill evals over mocked HubSpot REST APIs.",
+            scenario_slugs=HUBSPOT_NATIVE_SCENARIO_SLUGS,
         ),
     ]
 )

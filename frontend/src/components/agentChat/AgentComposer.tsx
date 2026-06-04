@@ -6,6 +6,7 @@ import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, Load
 import { InsightEventCard } from './insights'
 import { ApolloInsightPanel } from './insights/ApolloInsightPanel'
 import { GoogleDriveInsightPanel } from './insights/GoogleDriveInsightPanel'
+import { HubSpotInsightPanel } from './insights/HubSpotInsightPanel'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
@@ -143,7 +144,7 @@ type WorkingPanelTab =
   | { id: string; kind: 'insight'; insight: InsightEvent; insightIndex: number }
   | { id: NativeWorkingTabKind; kind: NativeWorkingTabKind }
 
-type NativeWorkingTabKind = 'google_drive' | 'apollo'
+type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot'
 
 const NATIVE_WORKING_TAB_CONFIG = {
   google_drive: {
@@ -163,6 +164,13 @@ const NATIVE_WORKING_TAB_CONFIG = {
         <img src="/static/images/integrations/native/apollo.svg" alt="" className="h-3 w-3 object-contain" />
       </span>
     ),
+  },
+  hubspot: {
+    label: 'HubSpot',
+    title: 'HubSpot',
+    ariaLabel: 'View HubSpot connection',
+    panel: HubSpotInsightPanel,
+    icon: <img src="/static/images/integrations/native/hubspot.svg" alt="" className="composer-insight-tab-image" />,
   },
 } as const
 
@@ -383,6 +391,7 @@ type AgentComposerProps = {
   nativeIntegrationsUrl?: string | null
   googleSheetsDriveTabEnabled?: boolean
   apolloNativeTabEnabled?: boolean
+  hubspotNativeTabEnabled?: boolean
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -440,6 +449,7 @@ export const AgentComposer = memo(function AgentComposer({
   nativeIntegrationsUrl = null,
   googleSheetsDriveTabEnabled = false,
   apolloNativeTabEnabled = false,
+  hubspotNativeTabEnabled = false,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -550,12 +560,14 @@ export const AgentComposer = memo(function AgentComposer({
   const hasInsights = totalInsights > 0
   const googleDriveTabAvailable = Boolean(googleSheetsDriveTabEnabled && canManageAgent)
   const apolloTabAvailable = Boolean(apolloNativeTabEnabled && canManageAgent)
+  const hubspotTabAvailable = Boolean(hubspotNativeTabEnabled && canManageAgent)
   const nativeTabAvailability = useMemo(
     () => [
       { kind: 'google_drive', available: googleDriveTabAvailable },
       { kind: 'apollo', available: apolloTabAvailable },
+      { kind: 'hubspot', available: hubspotTabAvailable },
     ] as const,
-    [apolloTabAvailable, googleDriveTabAvailable],
+    [apolloTabAvailable, googleDriveTabAvailable, hubspotTabAvailable],
   )
   const currentInsightTabId = currentInsight ? `insight:${currentInsight.insightId}` : null
   const workingTabs = useMemo<WorkingPanelTab[]>(() => {

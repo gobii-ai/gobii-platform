@@ -121,6 +121,7 @@ const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
 const RESOLVED_NOISE_DARK_TEXTURE_URL = new URL(noiseDarkTextureUrl, import.meta.url).toString()
 const GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = 'google_sheets_native'
 const APOLLO_NATIVE_SYSTEM_SKILL_KEY = 'apollo_native'
+const HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = 'hubspot_native'
 
 function timelineHasSystemSkillEnablement(events: TimelineEvent[], skillKey: string): boolean {
   for (const event of events) {
@@ -2363,6 +2364,9 @@ export function AgentChatPage({
   const rosterApolloNativeTabEnabled = Boolean(
     activeRosterMeta?.enabledSystemSkills?.includes(APOLLO_NATIVE_SYSTEM_SKILL_KEY),
   )
+  const rosterHubSpotNativeTabEnabled = Boolean(
+    activeRosterMeta?.enabledSystemSkills?.includes(HUBSPOT_NATIVE_SYSTEM_SKILL_KEY),
+  )
   const liveGoogleSheetsDriveTabEnabled = useMemo(
     () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY)),
     [activeAgentId, timelineEvents],
@@ -2371,19 +2375,29 @@ export function AgentChatPage({
     () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, APOLLO_NATIVE_SYSTEM_SKILL_KEY)),
     [activeAgentId, timelineEvents],
   )
+  const liveHubSpotNativeTabEnabled = useMemo(
+    () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, HUBSPOT_NATIVE_SYSTEM_SKILL_KEY)),
+    [activeAgentId, timelineEvents],
+  )
   const googleSheetsDriveTabEnabled = rosterGoogleSheetsDriveTabEnabled || liveGoogleSheetsDriveTabEnabled
   const apolloNativeTabEnabled = rosterApolloNativeTabEnabled || liveApolloNativeTabEnabled
+  const hubspotNativeTabEnabled = rosterHubSpotNativeTabEnabled || liveHubSpotNativeTabEnabled
   useEffect(() => {
-    if (!activeAgentId || (!liveGoogleSheetsDriveTabEnabled && !liveApolloNativeTabEnabled)) {
+    if (!activeAgentId || (!liveGoogleSheetsDriveTabEnabled && !liveApolloNativeTabEnabled && !liveHubSpotNativeTabEnabled)) {
       return
     }
-    const refreshKey = `${activeAgentId}:${liveGoogleSheetsDriveTabEnabled ? GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY : ''}:${liveApolloNativeTabEnabled ? APOLLO_NATIVE_SYSTEM_SKILL_KEY : ''}`
+    const refreshKey = [
+      activeAgentId,
+      liveGoogleSheetsDriveTabEnabled ? GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY : '',
+      liveApolloNativeTabEnabled ? APOLLO_NATIVE_SYSTEM_SKILL_KEY : '',
+      liveHubSpotNativeTabEnabled ? HUBSPOT_NATIVE_SYSTEM_SKILL_KEY : '',
+    ].join(':')
     if (googleSheetsRosterRefreshAgentsRef.current.has(refreshKey)) {
       return
     }
     googleSheetsRosterRefreshAgentsRef.current.add(refreshKey)
     void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
-  }, [activeAgentId, liveApolloNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, queryClient])
+  }, [activeAgentId, liveApolloNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, liveHubSpotNativeTabEnabled, queryClient])
   const visibleRosterAgentIds = useMemo(
     () => rosterAgents.map((agent) => agent.id),
     [rosterAgents],
@@ -4903,6 +4917,7 @@ export function AgentChatPage({
         nativeIntegrationsUrl={nativeIntegrationsUrl}
         googleSheetsDriveTabEnabled={googleSheetsDriveTabEnabled}
         apolloNativeTabEnabled={apolloNativeTabEnabled}
+        hubspotNativeTabEnabled={hubspotNativeTabEnabled}
         pendingActionRequests={pendingActionRequests}
         events={timelineEvents}
         displayEvents={displayEvents}

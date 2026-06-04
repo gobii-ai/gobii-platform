@@ -405,7 +405,12 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("Skill: skill-3 (v1)", block)
         self.assertIn("Skill: skill-2 (v1)", block)
         self.assertIn("Skill: skill-1 (v1)", block)
+        self.assertIn("<skill_skill_3_v1>", block)
+        self.assertIn("</skill_skill_3_v1>", block)
+        self.assertIn("<skill_skill_2_v1>", block)
+        self.assertIn("<skill_skill_1_v1>", block)
         self.assertNotIn("Skill: skill-0 (v1)", block)
+        self.assertNotIn("<skill_skill_0_v1>", block)
         self.assertNotIn("System Skill: Runtime Planning\nKey:", block)
         self.assertLess(block.index("Skill: skill-1 (v1)"), block.index("Skill: skill-2 (v1)"))
         self.assertLess(block.index("Skill: skill-2 (v1)"), block.index("Skill: skill-3 (v1)"))
@@ -415,9 +420,40 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("Use `search_tools` with an exact omitted skill name or key", block)
         self.assertIn("instructions for skill 3", block)
 
+    def test_prompt_block_disambiguates_saved_skill_tag_collisions(self):
+        now = timezone.now()
+        first = PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="Daily Brief",
+            description="First daily brief",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Use first daily brief.",
+        )
+        second = PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="Daily-Brief",
+            description="Second daily brief",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Use second daily brief.",
+        )
+        PersistentAgentSkill.objects.filter(id=first.id).update(last_used_at=now)
+        PersistentAgentSkill.objects.filter(id=second.id).update(last_used_at=now + timedelta(minutes=1))
+
+        block = format_recent_skills_for_prompt(self.agent, limit=2)
+
+        self.assertIn("<skill_daily_brief_v1>", block)
+        self.assertIn("</skill_daily_brief_v1>", block)
+        self.assertIn("<skill_daily_brief_v1_2>", block)
+        self.assertIn("</skill_daily_brief_v1_2>", block)
+        self.assertIn("Skill: Daily Brief (v1)", block)
+        self.assertIn("Skill: Daily-Brief (v1)", block)
+
     def test_prompt_block_includes_default_runtime_planning_system_skill(self):
         block = format_recent_skills_for_prompt(self.agent, limit=1)
 
+        self.assertIn("<skill_runtime_planning>", block)
         self.assertIn("System Skill: Runtime Planning", block)
         self.assertIn("Tools: update_plan", block)
         self.assertIn("Use `update_plan` only for substantial multi-step work", block)
@@ -425,6 +461,7 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("each call replaces the full active plan", block)
         self.assertIn("Send the final user-facing report before any final completion update", block)
         self.assertIn("Current plan: none", block)
+        self.assertIn("</skill_runtime_planning>", block)
 
     def test_custom_tool_development_system_skill_is_not_default_enabled(self):
         self.assertNotIn(CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY, default_enabled_system_skill_keys())

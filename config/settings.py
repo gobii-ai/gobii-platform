@@ -1663,6 +1663,28 @@ APOLLO_OAUTH_SCOPES = tuple(
     if scope
 )
 
+# HubSpot
+HUBSPOT_CLIENT_ID = env("HUBSPOT_CLIENT_ID", default="")
+HUBSPOT_CLIENT_SECRET = env("HUBSPOT_CLIENT_SECRET", default="")
+HUBSPOT_DEFAULT_OAUTH_SCOPES = (
+    "oauth",
+    "crm.objects.contacts.read",
+    "crm.objects.contacts.write",
+    "crm.objects.companies.read",
+    "crm.objects.companies.write",
+    "crm.objects.deals.read",
+    "crm.objects.deals.write",
+    "crm.objects.owners.read",
+    "crm.schemas.contacts.read",
+    "crm.schemas.companies.read",
+    "crm.schemas.deals.read",
+)
+HUBSPOT_OAUTH_SCOPES = tuple(
+    scope
+    for scope in env("HUBSPOT_OAUTH_SCOPES", default=" ".join(HUBSPOT_DEFAULT_OAUTH_SCOPES)).replace(",", " ").split()
+    if scope
+)
+
 # ────────── Native Discord Bot ──────────
 DISCORD_CLIENT_ID = env("DISCORD_CLIENT_ID", default="")
 DISCORD_CLIENT_SECRET = env("DISCORD_CLIENT_SECRET", default="")
