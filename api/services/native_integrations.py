@@ -27,6 +27,49 @@ GOOGLE_DOCS_MIME_TYPE = "application/vnd.google-apps.document"
 class NativeIntegrationError(Exception):
     """Base error for native integration failures."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "",
+        provider_key: str = "",
+        provider_name: str = "",
+        setup_url: str = "",
+        missing_scopes: list[str] | tuple[str, ...] | None = None,
+        granted_scopes: list[str] | tuple[str, ...] | None = None,
+        requested_scopes: list[str] | tuple[str, ...] | None = None,
+        retryable: bool | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.provider_key = provider_key
+        self.provider_name = provider_name
+        self.setup_url = setup_url
+        self.missing_scopes = list(missing_scopes or [])
+        self.granted_scopes = list(granted_scopes or [])
+        self.requested_scopes = list(requested_scopes or [])
+        self.retryable = retryable
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.code:
+            payload["code"] = self.code
+        if self.provider_key:
+            payload["provider_key"] = self.provider_key
+        if self.provider_name:
+            payload["provider_name"] = self.provider_name
+        if self.setup_url:
+            payload["setup_url"] = self.setup_url
+        if self.missing_scopes:
+            payload["missing_scopes"] = self.missing_scopes
+        if self.granted_scopes:
+            payload["granted_scopes"] = self.granted_scopes
+        if self.requested_scopes:
+            payload["requested_scopes"] = self.requested_scopes
+        if self.retryable is not None:
+            payload["retryable"] = self.retryable
+        return payload
+
 
 class NativeIntegrationConfigurationError(NativeIntegrationError):
     """Raised when a provider is not configured on this deployment."""
@@ -83,6 +126,32 @@ class NativeIntegrationProvider:
     @property
     def scope_string(self) -> str:
         return " ".join(self.scopes)
+
+
+@dataclass(frozen=True)
+class NativeIntegrationCapability:
+    key: str
+    provider_key: str
+    resource: str
+    operation: str
+    label: str
+    required_scopes: tuple[str, ...]
+    endpoint_hints: tuple[str, ...]
+    write_risk: str
+    setup_guidance: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "provider_key": self.provider_key,
+            "resource": self.resource,
+            "operation": self.operation,
+            "label": self.label,
+            "required_scopes": list(self.required_scopes),
+            "endpoint_hints": list(self.endpoint_hints),
+            "write_risk": self.write_risk,
+            "setup_guidance": self.setup_guidance,
+        }
 
 
 @dataclass(frozen=True)
@@ -160,9 +229,206 @@ NATIVE_INTEGRATION_PROVIDERS = {
     HUBSPOT_PROVIDER.key: HUBSPOT_PROVIDER,
 }
 
+NATIVE_INTEGRATION_CAPABILITIES: dict[str, tuple[NativeIntegrationCapability, ...]] = {
+    GOOGLE_DRIVE_PROVIDER.key: (
+        NativeIntegrationCapability(
+            key="google_drive_file_discovery",
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            resource="drive_files",
+            operation="list",
+            label="List selected Google Drive spreadsheets and docs",
+            required_scopes=("https://www.googleapis.com/auth/drive.file",),
+            endpoint_hints=("GET https://www.googleapis.com/drive/v3/files",),
+            write_risk="read",
+            setup_guidance="Connect Google Drive and choose the relevant file in Google Picker.",
+        ),
+        NativeIntegrationCapability(
+            key="google_sheets_read",
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            resource="google_sheets",
+            operation="read",
+            label="Read selected Google Sheets metadata and values",
+            required_scopes=("https://www.googleapis.com/auth/drive.file",),
+            endpoint_hints=(
+                "GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}",
+                "GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{range}",
+            ),
+            write_risk="read",
+            setup_guidance="Connect Google Drive and choose the spreadsheet in Google Picker.",
+        ),
+        NativeIntegrationCapability(
+            key="google_sheets_write",
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            resource="google_sheets",
+            operation="write",
+            label="Update or append rows in selected Google Sheets",
+            required_scopes=("https://www.googleapis.com/auth/drive.file",),
+            endpoint_hints=(
+                "PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{range}",
+                "POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{range}:append",
+            ),
+            write_risk="write",
+            setup_guidance="Connect Google Drive and choose the spreadsheet in Google Picker.",
+        ),
+    ),
+    APOLLO_PROVIDER.key: (
+        NativeIntegrationCapability(
+            key="apollo_people_search",
+            provider_key=APOLLO_PROVIDER.key,
+            resource="people",
+            operation="search",
+            label="Search Apollo people",
+            required_scopes=("mixed_people_api_search",),
+            endpoint_hints=("POST https://api.apollo.io/api/v1/mixed_people/api_search",),
+            write_risk="read",
+        ),
+        NativeIntegrationCapability(
+            key="apollo_company_search",
+            provider_key=APOLLO_PROVIDER.key,
+            resource="companies",
+            operation="search",
+            label="Search Apollo organizations",
+            required_scopes=("mixed_companies_search",),
+            endpoint_hints=("POST https://api.apollo.io/api/v1/mixed_companies/search",),
+            write_risk="read",
+        ),
+        NativeIntegrationCapability(
+            key="apollo_people_enrich",
+            provider_key=APOLLO_PROVIDER.key,
+            resource="people",
+            operation="enrich",
+            label="Enrich Apollo people",
+            required_scopes=("people_match",),
+            endpoint_hints=(
+                "POST https://api.apollo.io/api/v1/people/match",
+                "POST https://api.apollo.io/api/v1/people/bulk_match",
+            ),
+            write_risk="sensitive",
+            setup_guidance="Reconnect Apollo if enrichment scopes are missing.",
+        ),
+        NativeIntegrationCapability(
+            key="apollo_contacts_write",
+            provider_key=APOLLO_PROVIDER.key,
+            resource="contacts",
+            operation="write",
+            label="Create or update Apollo contacts",
+            required_scopes=("contact_write", "contact_update"),
+            endpoint_hints=("POST/PATCH https://api.apollo.io/api/v1/contacts",),
+            write_risk="write",
+            setup_guidance="Reconnect Apollo if contact write scopes are missing.",
+        ),
+        NativeIntegrationCapability(
+            key="apollo_usage_read",
+            provider_key=APOLLO_PROVIDER.key,
+            resource="usage",
+            operation="read",
+            label="Read Apollo API and credit usage",
+            required_scopes=("api_usage_stats_read", "credit_usage_stats_read"),
+            endpoint_hints=("GET https://api.apollo.io/api/v1/usage_stats",),
+            write_risk="read",
+        ),
+    ),
+    HUBSPOT_PROVIDER.key: (
+        NativeIntegrationCapability(
+            key="hubspot_contacts_read",
+            provider_key=HUBSPOT_PROVIDER.key,
+            resource="contacts",
+            operation="read",
+            label="Search and read HubSpot contacts",
+            required_scopes=("crm.objects.contacts.read",),
+            endpoint_hints=("POST https://api.hubapi.com/crm/v3/objects/contacts/search",),
+            write_risk="read",
+        ),
+        NativeIntegrationCapability(
+            key="hubspot_contacts_write",
+            provider_key=HUBSPOT_PROVIDER.key,
+            resource="contacts",
+            operation="write",
+            label="Create or update HubSpot contacts",
+            required_scopes=("crm.objects.contacts.write",),
+            endpoint_hints=("POST/PATCH https://api.hubapi.com/crm/v3/objects/contacts",),
+            write_risk="write",
+            setup_guidance="Reconnect HubSpot if contact write scopes are missing.",
+        ),
+        NativeIntegrationCapability(
+            key="hubspot_companies_read",
+            provider_key=HUBSPOT_PROVIDER.key,
+            resource="companies",
+            operation="read",
+            label="Search and read HubSpot companies",
+            required_scopes=("crm.objects.companies.read",),
+            endpoint_hints=("POST https://api.hubapi.com/crm/v3/objects/companies/search",),
+            write_risk="read",
+        ),
+        NativeIntegrationCapability(
+            key="hubspot_companies_write",
+            provider_key=HUBSPOT_PROVIDER.key,
+            resource="companies",
+            operation="write",
+            label="Create or update HubSpot companies",
+            required_scopes=("crm.objects.companies.write",),
+            endpoint_hints=("POST/PATCH https://api.hubapi.com/crm/v3/objects/companies",),
+            write_risk="write",
+            setup_guidance="Reconnect HubSpot if company write scopes are missing.",
+        ),
+        NativeIntegrationCapability(
+            key="hubspot_deals_read",
+            provider_key=HUBSPOT_PROVIDER.key,
+            resource="deals",
+            operation="read",
+            label="Search and read HubSpot deals",
+            required_scopes=("crm.objects.deals.read",),
+            endpoint_hints=("POST https://api.hubapi.com/crm/v3/objects/deals/search",),
+            write_risk="read",
+        ),
+        NativeIntegrationCapability(
+            key="hubspot_deals_write",
+            provider_key=HUBSPOT_PROVIDER.key,
+            resource="deals",
+            operation="write",
+            label="Create or update HubSpot deals",
+            required_scopes=("crm.objects.deals.write",),
+            endpoint_hints=("POST/PATCH https://api.hubapi.com/crm/v3/objects/deals",),
+            write_risk="write",
+            setup_guidance="Reconnect HubSpot if deal write scopes are missing.",
+        ),
+        NativeIntegrationCapability(
+            key="hubspot_metadata_read",
+            provider_key=HUBSPOT_PROVIDER.key,
+            resource="metadata",
+            operation="read",
+            label="Read HubSpot owners and CRM properties",
+            required_scopes=(
+                "crm.objects.owners.read",
+                "crm.schemas.contacts.read",
+                "crm.schemas.companies.read",
+                "crm.schemas.deals.read",
+            ),
+            endpoint_hints=(
+                "GET https://api.hubapi.com/crm/v3/owners/",
+                "GET https://api.hubapi.com/crm/v3/properties/{objectType}",
+            ),
+            write_risk="read",
+        ),
+    ),
+}
+
 
 def list_native_integration_providers() -> list[NativeIntegrationProvider]:
     return list(NATIVE_INTEGRATION_PROVIDERS.values())
+
+
+def list_native_integration_capabilities(provider_key: str) -> list[NativeIntegrationCapability]:
+    provider = get_native_integration_provider(provider_key)
+    return list(NATIVE_INTEGRATION_CAPABILITIES.get(provider.key, ()))
+
+
+def get_native_integration_capability(provider_key: str, capability_key: str) -> NativeIntegrationCapability:
+    normalized_key = str(capability_key or "").strip()
+    for capability in list_native_integration_capabilities(provider_key):
+        if capability.key == normalized_key:
+            return capability
+    raise KeyError(capability_key)
 
 
 def get_native_integration_provider(provider_key: str) -> NativeIntegrationProvider:
@@ -215,6 +481,225 @@ def _native_integration_not_connected_guidance(provider: NativeIntegrationProvid
             "and choose the relevant file."
         )
     return f"Ask the user to open {setup_url} and connect {provider.display_name}."
+
+
+def parse_native_integration_scopes(value: object) -> tuple[str, ...]:
+    if not value:
+        return ()
+    if isinstance(value, str):
+        raw_scopes = value.replace(",", " ").split()
+    elif isinstance(value, (list, tuple, set)):
+        raw_scopes = []
+        for item in value:
+            raw_scopes.extend(parse_native_integration_scopes(item))
+    else:
+        raw_scopes = str(value).replace(",", " ").split()
+
+    seen: set[str] = set()
+    scopes: list[str] = []
+    for raw_scope in raw_scopes:
+        scope = str(raw_scope or "").strip()
+        if not scope or scope in seen:
+            continue
+        seen.add(scope)
+        scopes.append(scope)
+    return tuple(scopes)
+
+
+def _credentials_granted_scopes(credentials: dict[str, Any] | None, provider: NativeIntegrationProvider) -> tuple[str, ...]:
+    if not credentials:
+        return ()
+    granted_scopes = parse_native_integration_scopes(credentials.get("scope"))
+    if not granted_scopes:
+        granted_scopes = parse_native_integration_scopes(credentials.get("scopes"))
+    if not granted_scopes:
+        metadata = credentials.get("metadata")
+        if isinstance(metadata, dict):
+            granted_scopes = parse_native_integration_scopes(metadata.get("scopes"))
+    return granted_scopes or provider.scopes
+
+
+def _capability_status(capability: NativeIntegrationCapability, connected: bool, granted_scopes: tuple[str, ...]) -> dict[str, Any]:
+    granted_set = set(granted_scopes)
+    missing_scopes = [
+        scope
+        for scope in capability.required_scopes
+        if scope not in granted_set
+    ]
+    available = bool(connected and not missing_scopes)
+    return {
+        **capability.to_dict(),
+        "available": available,
+        "missing_scopes": missing_scopes,
+    }
+
+
+def build_native_integration_permission_summary(
+    provider: NativeIntegrationProvider,
+    credentials: dict[str, Any] | None = None,
+    *,
+    connected: bool | None = None,
+) -> dict[str, Any]:
+    is_connected = bool(credentials) if connected is None else bool(connected)
+    granted_scopes = _credentials_granted_scopes(credentials, provider) if is_connected else ()
+    requested_scopes = parse_native_integration_scopes(provider.scopes)
+    capability_statuses = [
+        _capability_status(capability, is_connected, granted_scopes)
+        for capability in list_native_integration_capabilities(provider.key)
+    ]
+    available = [capability for capability in capability_statuses if capability["available"]]
+    missing = [capability for capability in capability_statuses if not capability["available"]]
+    missing_scopes = sorted(
+        {
+            scope
+            for capability in missing
+            for scope in capability.get("missing_scopes", [])
+        }
+    )
+
+    if not is_connected:
+        status_text = (
+            f"{provider.display_name} is not connected. "
+            f"{_native_integration_not_connected_guidance(provider)}"
+        )
+    elif missing_scopes:
+        status_text = (
+            f"{provider.display_name} is connected, but some capabilities need additional scopes: "
+            f"{', '.join(missing_scopes)}."
+        )
+    else:
+        labels = [str(capability["label"]) for capability in available]
+        status_text = f"{provider.display_name} is connected with access for: {', '.join(labels)}."
+
+    return {
+        "provider_key": provider.key,
+        "provider_name": provider.display_name,
+        "connected": is_connected,
+        "setup_url": native_integration_setup_url(),
+        "requested_scopes": list(requested_scopes),
+        "granted_scopes": list(granted_scopes),
+        "granted_scope_string": " ".join(granted_scopes),
+        "available_capabilities": available,
+        "missing_capabilities": missing,
+        "missing_scopes": missing_scopes,
+        "status_text": status_text,
+    }
+
+
+def format_native_integration_permission_prompt(
+    provider_key: str,
+    owner_user,
+    owner_org,
+    *,
+    max_capabilities: int = 6,
+) -> str:
+    provider = get_native_integration_provider(provider_key)
+    secret = get_native_integration_secret(provider.key, owner_user, owner_org)
+    credentials: dict[str, Any] | None = None
+    if secret is not None:
+        try:
+            credentials = load_native_integration_credentials(secret)
+        except NativeIntegrationAuthError:
+            credentials = None
+    summary = build_native_integration_permission_summary(
+        provider,
+        credentials,
+        connected=secret is not None and credentials is not None,
+    )
+    if not summary["connected"]:
+        prompt_status = f"{provider.display_name} is not connected."
+    elif summary["missing_scopes"]:
+        prompt_status = f"{provider.display_name} is connected, but some capabilities need additional scopes."
+    else:
+        prompt_status = f"{provider.display_name} is connected."
+
+    lines = [
+        "Native integration permissions:",
+        f"- Status: {prompt_status}",
+    ]
+    available_labels = [capability["label"] for capability in summary["available_capabilities"][:max_capabilities]]
+    if available_labels:
+        lines.append(f"- Available capabilities: {', '.join(available_labels)}")
+    missing_capabilities = summary["missing_capabilities"]
+    if missing_capabilities:
+        missing_labels = [capability["label"] for capability in missing_capabilities[:max_capabilities]]
+        lines.append(f"- Not currently available: {', '.join(missing_labels)}")
+    if summary["granted_scopes"]:
+        lines.append(f"- Granted scopes: {', '.join(summary['granted_scopes'])}")
+    if summary["missing_scopes"]:
+        lines.append(f"- Missing scopes: {', '.join(summary['missing_scopes'])}")
+    if not summary["connected"]:
+        lines.append(f"- Setup: {_native_integration_not_connected_guidance(provider)}")
+    return "\n".join(lines)
+
+
+def preflight_native_integration_capability(
+    agent: PersistentAgent,
+    provider_key: str,
+    capability_key: str,
+) -> dict[str, Any]:
+    provider = get_native_integration_provider(provider_key)
+    capability = get_native_integration_capability(provider.key, capability_key)
+    owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
+    secret = get_native_integration_secret(provider.key, owner_user, owner_org)
+    credentials: dict[str, Any] | None = None
+    if secret is not None:
+        try:
+            credentials = load_native_integration_credentials(secret)
+        except NativeIntegrationAuthError:
+            credentials = None
+
+    summary = build_native_integration_permission_summary(
+        provider,
+        credentials,
+        connected=secret is not None and credentials is not None,
+    )
+    granted_scopes = tuple(summary["granted_scopes"])
+    capability_summary = _capability_status(capability, bool(summary["connected"]), granted_scopes)
+    allowed = bool(capability_summary["available"])
+    if allowed:
+        next_action = f"Use `http_request` for {capability.label}."
+    elif not summary["connected"]:
+        next_action = _native_integration_not_connected_guidance(provider)
+    else:
+        next_action = (
+            f"Reconnect {provider.display_name} from {native_integration_setup_url()} "
+            f"to grant: {', '.join(capability_summary['missing_scopes'])}."
+        )
+
+    return {
+        "provider_key": provider.key,
+        "provider_name": provider.display_name,
+        "capability": capability_summary,
+        "connected": summary["connected"],
+        "allowed": allowed,
+        "granted_scopes": summary["granted_scopes"],
+        "requested_scopes": summary["requested_scopes"],
+        "missing_scopes": capability_summary["missing_scopes"],
+        "setup_url": summary["setup_url"],
+        "recommended_next_action": next_action,
+    }
+
+
+def _native_integration_error_kwargs(
+    provider: NativeIntegrationProvider,
+    *,
+    code: str,
+    credentials: dict[str, Any] | None = None,
+    missing_scopes: list[str] | tuple[str, ...] | None = None,
+    retryable: bool | None = None,
+) -> dict[str, Any]:
+    granted_scopes = _credentials_granted_scopes(credentials, provider)
+    return {
+        "code": code,
+        "provider_key": provider.key,
+        "provider_name": provider.display_name,
+        "setup_url": native_integration_setup_url(),
+        "missing_scopes": list(missing_scopes or []),
+        "granted_scopes": list(granted_scopes),
+        "requested_scopes": list(parse_native_integration_scopes(provider.scopes)),
+        "retryable": retryable,
+    }
 
 
 def get_native_integration_secret(provider_key: str, owner_user, owner_org) -> GlobalSecret | None:
@@ -379,6 +864,61 @@ def find_provider_for_url(url: str) -> NativeIntegrationProvider | None:
     return None
 
 
+def native_integration_capability_for_request(
+    provider: NativeIntegrationProvider,
+    url: str,
+    method: str = "GET",
+) -> NativeIntegrationCapability | None:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+    normalized_method = str(method or "GET").strip().upper()
+
+    capability_key = ""
+    if provider.key == GOOGLE_DRIVE_PROVIDER.key:
+        if host == "sheets.googleapis.com":
+            if normalized_method in {"POST", "PUT", "PATCH", "DELETE"}:
+                capability_key = "google_sheets_write"
+            else:
+                capability_key = "google_sheets_read"
+        elif host == "www.googleapis.com" and path.startswith("/drive/"):
+            capability_key = "google_drive_file_discovery"
+        elif host in {"drive.googleapis.com", "docs.googleapis.com"}:
+            capability_key = "google_drive_file_discovery"
+    elif provider.key == APOLLO_PROVIDER.key:
+        if "/mixed_people/api_search" in path:
+            capability_key = "apollo_people_search"
+        elif "/mixed_companies/search" in path:
+            capability_key = "apollo_company_search"
+        elif "/people/match" in path or "/people/bulk_match" in path:
+            capability_key = "apollo_people_enrich"
+        elif "/contacts" in path and normalized_method in {"POST", "PUT", "PATCH", "DELETE"}:
+            capability_key = "apollo_contacts_write"
+        elif "usage" in path:
+            capability_key = "apollo_usage_read"
+    elif provider.key == HUBSPOT_PROVIDER.key:
+        is_write = normalized_method in {"POST", "PUT", "PATCH", "DELETE"}
+        is_search = path.endswith("/search")
+        if "/crm/v3/objects/contacts" in path:
+            capability_key = "hubspot_contacts_read" if is_search or not is_write else "hubspot_contacts_write"
+        elif "/crm/v3/objects/companies" in path:
+            capability_key = "hubspot_companies_read" if is_search or not is_write else "hubspot_companies_write"
+        elif "/crm/v3/objects/deals" in path:
+            capability_key = "hubspot_deals_read" if is_search or not is_write else "hubspot_deals_write"
+        elif "/crm/v3/owners" in path or "/crm/v3/properties" in path:
+            capability_key = "hubspot_metadata_read"
+
+    if not capability_key:
+        return None
+    try:
+        return get_native_integration_capability(provider.key, capability_key)
+    except KeyError:
+        return None
+
+
 def native_integration_setup_url() -> str:
     public_site_url = str(settings.PUBLIC_SITE_URL or "").strip().rstrip("/")
     if public_site_url:
@@ -414,11 +954,27 @@ def refresh_oauth_credentials_if_needed(
 
     refresh_token = str(credentials.get("refresh_token") or "")
     if not refresh_token:
-        raise NativeIntegrationAuthError(f"{provider.display_name} must be reconnected.")
+        raise NativeIntegrationAuthError(
+            f"{provider.display_name} must be reconnected.",
+            **_native_integration_error_kwargs(
+                provider,
+                code="native_integration_reconnect_required",
+                credentials=credentials,
+                retryable=False,
+            ),
+        )
 
     client_id, client_secret = native_integration_client_credentials(provider)
     if not client_id or not client_secret:
-        raise NativeIntegrationConfigurationError(f"{provider.display_name} OAuth is not configured.")
+        raise NativeIntegrationConfigurationError(
+            f"{provider.display_name} OAuth is not configured.",
+            **_native_integration_error_kwargs(
+                provider,
+                code="native_integration_oauth_not_configured",
+                credentials=credentials,
+                retryable=False,
+            ),
+        )
 
     token_payload = request_oauth_token(
         provider,
@@ -452,7 +1008,15 @@ def list_google_drive_accessible_files(
     credentials = refresh_oauth_credentials_if_needed(provider, secret, credentials)
     access_token = str(credentials.get("access_token") or "")
     if not access_token:
-        raise NativeIntegrationAuthError(f"{provider.display_name} must be reconnected.")
+        raise NativeIntegrationAuthError(
+            f"{provider.display_name} must be reconnected.",
+            **_native_integration_error_kwargs(
+                provider,
+                code="native_integration_reconnect_required",
+                credentials=credentials,
+                retryable=False,
+            ),
+        )
 
     try:
         response = httpx.get(
@@ -508,7 +1072,13 @@ def list_google_drive_accessible_files(
     return results
 
 
-def apply_native_integration_auth(agent: PersistentAgent, url: str, headers: dict[str, str]) -> dict[str, str]:
+def apply_native_integration_auth(
+    agent: PersistentAgent,
+    url: str,
+    headers: dict[str, str],
+    *,
+    method: str = "GET",
+) -> dict[str, str]:
     provider = find_provider_for_url(url)
     if provider is None:
         return headers
@@ -521,16 +1091,51 @@ def apply_native_integration_auth(agent: PersistentAgent, url: str, headers: dic
     if secret is None:
         raise NativeIntegrationAuthError(
             f"native_integration_not_connected: {provider.display_name} is not connected. "
-            f"{_native_integration_not_connected_guidance(provider)}"
+            f"{_native_integration_not_connected_guidance(provider)}",
+            **_native_integration_error_kwargs(
+                provider,
+                code="native_integration_not_connected",
+                retryable=False,
+            ),
         )
 
     credentials = load_native_integration_credentials(secret)
     credentials = refresh_oauth_credentials_if_needed(provider, secret, credentials)
 
+    capability = native_integration_capability_for_request(provider, url, method=method)
+    if capability is not None:
+        granted_scopes = _credentials_granted_scopes(credentials, provider)
+        missing_scopes = [
+            scope
+            for scope in capability.required_scopes
+            if scope not in set(granted_scopes)
+        ]
+        if missing_scopes:
+            raise NativeIntegrationAuthError(
+                f"native_integration_missing_scopes: {provider.display_name} is connected, "
+                f"but `{capability.label}` requires additional scopes: {', '.join(missing_scopes)}. "
+                f"Ask the user to reconnect {provider.display_name} at {native_integration_setup_url()}.",
+                **_native_integration_error_kwargs(
+                    provider,
+                    code="native_integration_missing_scopes",
+                    credentials=credentials,
+                    missing_scopes=missing_scopes,
+                    retryable=False,
+                ),
+            )
+
     if provider.auth_type == "oauth2":
         access_token = str(credentials.get("access_token") or "")
         if not access_token:
-            raise NativeIntegrationAuthError(f"{provider.display_name} must be reconnected.")
+            raise NativeIntegrationAuthError(
+                f"{provider.display_name} must be reconnected.",
+                **_native_integration_error_kwargs(
+                    provider,
+                    code="native_integration_reconnect_required",
+                    credentials=credentials,
+                    retryable=False,
+                ),
+            )
         token_type = str(credentials.get("token_type") or "Bearer")
         updated = dict(headers)
         updated["Authorization"] = f"{token_type} {access_token}"

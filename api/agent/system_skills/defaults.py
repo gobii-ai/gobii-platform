@@ -71,6 +71,26 @@ def _app_integrations_url() -> str:
     return f"{str(settings.PUBLIC_SITE_URL or '').strip().rstrip('/')}/app/integrations"
 
 
+def _native_integration_prompt_context(agent, provider_key: str) -> str:
+    from api.services.native_integrations import format_native_integration_permission_prompt
+    from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
+
+    owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
+    return format_native_integration_permission_prompt(provider_key, owner_user, owner_org)
+
+
+def _google_sheets_native_prompt_context(agent) -> str:
+    return _native_integration_prompt_context(agent, "google_drive")
+
+
+def _apollo_native_prompt_context(agent) -> str:
+    return _native_integration_prompt_context(agent, "apollo")
+
+
+def _hubspot_native_prompt_context(agent) -> str:
+    return _native_integration_prompt_context(agent, "hubspot")
+
+
 def _google_sheets_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
     return (
@@ -310,6 +330,7 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "drive file spreadsheet",
     ),
     prompt_instructions_renderer=_google_sheets_native_prompt_instructions,
+    prompt_context_renderer=_google_sheets_native_prompt_context,
 )
 
 
@@ -352,6 +373,7 @@ APOLLO_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "rate limits",
     ),
     prompt_instructions_renderer=_apollo_native_prompt_instructions,
+    prompt_context_renderer=_apollo_native_prompt_context,
 )
 
 
@@ -388,6 +410,7 @@ HUBSPOT_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "hubspot properties",
     ),
     prompt_instructions_renderer=_hubspot_native_prompt_instructions,
+    prompt_context_renderer=_hubspot_native_prompt_context,
 )
 
 

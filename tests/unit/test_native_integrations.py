@@ -33,7 +33,11 @@ from api.services.native_integrations import (
     GOOGLE_DRIVE_PROVIDER,
     HUBSPOT_PROVIDER,
     apply_native_integration_auth,
+    build_native_integration_permission_summary,
     get_native_integration_provider,
+    list_native_integration_capabilities,
+    parse_native_integration_scopes,
+    preflight_native_integration_capability,
 )
 
 
@@ -114,7 +118,7 @@ class NativeIntegrationTests(TestCase):
         session["context_name"] = self.org.name
         session.save()
 
-    def _credentials(self, *, provider=GOOGLE_DRIVE_PROVIDER, access_token=None, refresh_token=None, expires_at=None):
+    def _credentials(self, *, provider=GOOGLE_DRIVE_PROVIDER, access_token=None, refresh_token=None, expires_at=None, scope=None):
         default_prefix = "" if provider.key == GOOGLE_DRIVE_PROVIDER.key else provider.key
         token_prefix = f"{default_prefix}-" if default_prefix else ""
         return {
@@ -123,7 +127,7 @@ class NativeIntegrationTests(TestCase):
             "access_token": access_token or f"{token_prefix}access-token",
             "refresh_token": refresh_token or f"{token_prefix}refresh-token",
             "token_type": "Bearer",
-            "scope": provider.scope_string,
+            "scope": provider.scope_string if scope is None else scope,
             "expires_at": expires_at or (timezone.now() + timedelta(hours=1)).isoformat(),
         }
 
@@ -260,6 +264,80 @@ class NativeIntegrationTests(TestCase):
                         continue
                     self.assertEqual(getattr(provider, attr), value)
 
+    def test_provider_capability_registry_covers_native_system_skills(self):
+        cases = (
+            (
+                "google_drive",
+                {
+                    "google_drive_file_discovery",
+                    "google_sheets_read",
+                    "google_sheets_write",
+                },
+            ),
+            (
+                "apollo",
+                {
+                    "apollo_people_search",
+                    "apollo_company_search",
+                    "apollo_people_enrich",
+                    "apollo_contacts_write",
+                    "apollo_usage_read",
+                },
+            ),
+            (
+                "hubspot",
+                {
+                    "hubspot_contacts_read",
+                    "hubspot_contacts_write",
+                    "hubspot_companies_read",
+                    "hubspot_companies_write",
+                    "hubspot_deals_read",
+                    "hubspot_deals_write",
+                    "hubspot_metadata_read",
+                },
+            ),
+        )
+        for provider_key, expected_keys in cases:
+            with self.subTest(provider_key=provider_key):
+                capabilities = list_native_integration_capabilities(provider_key)
+                self.assertEqual({capability.key for capability in capabilities}, expected_keys)
+                for capability in capabilities:
+                    self.assertEqual(capability.provider_key, get_native_integration_provider(provider_key).key)
+                    self.assertTrue(capability.label)
+                    self.assertTrue(capability.required_scopes)
+                    self.assertIn(capability.write_risk, {"read", "write", "sensitive"})
+
+    def test_parse_native_integration_scopes_accepts_strings_and_arrays(self):
+        self.assertEqual(
+            parse_native_integration_scopes("oauth crm.objects.contacts.read,crm.objects.deals.write oauth"),
+            ("oauth", "crm.objects.contacts.read", "crm.objects.deals.write"),
+        )
+        self.assertEqual(
+            parse_native_integration_scopes(["oauth", "crm.objects.contacts.read crm.objects.contacts.write"]),
+            ("oauth", "crm.objects.contacts.read", "crm.objects.contacts.write"),
+        )
+
+    def test_permission_summary_distinguishes_connection_and_scope_states(self):
+        disconnected = build_native_integration_permission_summary(HUBSPOT_PROVIDER, None, connected=False)
+        self.assertFalse(disconnected["connected"])
+        self.assertIn("HubSpot is not connected", disconnected["status_text"])
+        self.assertEqual(disconnected["available_capabilities"], [])
+        self.assertTrue(disconnected["missing_capabilities"])
+
+        partial = build_native_integration_permission_summary(
+            HUBSPOT_PROVIDER,
+            self._credentials(provider=HUBSPOT_PROVIDER, scope="oauth crm.objects.contacts.read"),
+        )
+        self.assertTrue(partial["connected"])
+        self.assertIn("Search and read HubSpot contacts", [item["label"] for item in partial["available_capabilities"]])
+        self.assertIn("crm.objects.deals.write", partial["missing_scopes"])
+        self.assertIn("additional scopes", partial["status_text"])
+
+        full = build_native_integration_permission_summary(HUBSPOT_PROVIDER, self._credentials(provider=HUBSPOT_PROVIDER))
+        self.assertTrue(full["connected"])
+        self.assertEqual(full["missing_scopes"], [])
+        self.assertIn("Create or update HubSpot deals", [item["label"] for item in full["available_capabilities"]])
+
     def test_provider_registry_accepts_google_sheets_alias(self):
         provider = get_native_integration_provider("google_sheets")
 
@@ -282,6 +360,12 @@ class NativeIntegrationTests(TestCase):
             provider["picker_token_url"],
             reverse("console-native-integration-picker-token", args=["google_drive"]),
         )
+        self.assertIn("granted_scopes", provider)
+        self.assertIn("requested_scopes", provider)
+        self.assertIn("available_capabilities", provider)
+        self.assertIn("missing_capabilities", provider)
+        self.assertIn("capability_summary", provider)
+        self.assertIn("Read selected Google Sheets", provider["capability_summary"])
 
     def test_list_reports_connected_state_for_apollo(self):
         cases = (
@@ -674,10 +758,86 @@ class NativeIntegrationTests(TestCase):
                 )
                 self.assertEqual(result["status"], "error")
                 self.assertIn("native_integration_not_connected", result["message"])
+                self.assertEqual(result["code"], "native_integration_not_connected")
+                self.assertIn("provider_key", result)
+                self.assertIn("setup_url", result)
+                self.assertIn("requested_scopes", result)
                 self.assertIn("/app/integrations", result["message"])
                 for term in expected_terms:
                     self.assertIn(term, result["message"])
         mock_request.assert_not_called()
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_http_request_returns_structured_missing_scope_error_before_provider_call(self, mock_request, mock_proxy):
+        self._create_integration_secret(
+            owner_user=self.user,
+            provider=HUBSPOT_PROVIDER,
+            credentials=self._credentials(
+                provider=HUBSPOT_PROVIDER,
+                scope="oauth crm.objects.contacts.read",
+            ),
+        )
+        mock_proxy.return_value = None
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "PATCH",
+                "url": "https://api.hubapi.com/crm/v3/objects/deals/deal_123",
+                "body": json.dumps({"properties": {"amount": "25000"}}),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["code"], "native_integration_missing_scopes")
+        self.assertEqual(result["provider_key"], "hubspot")
+        self.assertEqual(result["provider_name"], "HubSpot")
+        self.assertEqual(result["missing_scopes"], ["crm.objects.deals.write"])
+        self.assertIn("crm.objects.contacts.read", result["granted_scopes"])
+        self.assertIn("native_integration_missing_scopes", result["message"])
+        mock_request.assert_not_called()
+
+    def test_preflight_native_integration_capability_reports_allowed_and_missing_scopes(self):
+        self._create_integration_secret(
+            owner_user=self.user,
+            provider=HUBSPOT_PROVIDER,
+            credentials=self._credentials(
+                provider=HUBSPOT_PROVIDER,
+                scope="oauth crm.objects.contacts.read",
+            ),
+        )
+
+        read_result = preflight_native_integration_capability(
+            self.agent,
+            "hubspot",
+            "hubspot_contacts_read",
+        )
+        self.assertTrue(read_result["allowed"])
+        self.assertEqual(read_result["missing_scopes"], [])
+        self.assertEqual(read_result["recommended_next_action"], "Use `http_request` for Search and read HubSpot contacts.")
+
+        write_result = preflight_native_integration_capability(
+            self.agent,
+            "hubspot",
+            "hubspot_deals_write",
+        )
+        self.assertFalse(write_result["allowed"])
+        self.assertEqual(write_result["missing_scopes"], ["crm.objects.deals.write"])
+        self.assertIn("/app/integrations", write_result["recommended_next_action"])
+
+    def test_preflight_native_integration_capability_reports_missing_connection(self):
+        result = preflight_native_integration_capability(
+            self.agent,
+            "apollo",
+            "apollo_people_search",
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertFalse(result["connected"])
+        self.assertEqual(result["provider_key"], "apollo")
+        self.assertIn("connect Apollo", result["recommended_next_action"])
 
     def test_native_integration_auth_matches_provider_api_urls(self):
         self._create_integration_secret(owner_user=self.user)
@@ -831,6 +991,7 @@ class NativeIntegrationTests(TestCase):
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_google_sheets_prompt_tells_agent_how_to_discover_accessible_spreadsheets(self):
+        self._create_integration_secret(owner_user=self.user)
         enable_system_skills(self.agent, [GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY])
 
         block = format_recent_skills_for_prompt(self.agent, limit=3)
@@ -851,9 +1012,18 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("?q=name%20contains%20", block)
         self.assertIn("omit the name predicate", block)
         self.assertIn("drive.file", block)
+        self.assertIn("Native integration permissions", block)
+        self.assertIn("- Status: Google Drive is connected.", block)
+        self.assertIn("Available capabilities", block)
+        self.assertIn("Read selected Google Sheets", block)
+        self.assertEqual(block.count("Read selected Google Sheets metadata and values"), 1)
+        self.assertNotIn("connected with access for", block)
+        self.assertIn("Granted scopes", block)
+        self.assertNotIn("native_google_drive", block)
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_apollo_prompt_tells_agent_how_to_use_native_rest_api(self):
+        self._create_integration_secret(owner_user=self.user, provider=APOLLO_PROVIDER)
         enable_system_skills(self.agent, [APOLLO_NATIVE_SYSTEM_SKILL_KEY])
 
         block = format_recent_skills_for_prompt(self.agent, limit=3)
@@ -871,9 +1041,13 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("do not use `/mixed_people/search`", block)
         self.assertIn("mixed_companies/search", block)
         self.assertIn("people/match", block)
+        self.assertIn("Native integration permissions", block)
+        self.assertIn("Search Apollo people", block)
+        self.assertIn("Granted scopes", block)
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_hubspot_prompt_tells_agent_how_to_use_native_rest_api(self):
+        self._create_integration_secret(owner_user=self.user, provider=HUBSPOT_PROVIDER)
         enable_system_skills(self.agent, [HUBSPOT_NATIVE_SYSTEM_SKILL_KEY])
 
         block = format_recent_skills_for_prompt(self.agent, limit=3)
@@ -889,3 +1063,6 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("properties", block)
         self.assertIn("side-effecting operations", block)
         self.assertIn("/app/integrations", block)
+        self.assertIn("Native integration permissions", block)
+        self.assertIn("Search and read HubSpot contacts", block)
+        self.assertIn("Granted scopes", block)
