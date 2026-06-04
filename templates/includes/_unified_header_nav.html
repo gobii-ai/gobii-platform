@@ -62,6 +62,12 @@
                     </div>
                     <span class="text-sm font-medium text-slate-700 group-hover:text-white">Sales</span>
                   </a>
+                  <a href="{% url 'pages:solution' slug='startups' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
+                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
+                      <i aria-hidden="true" data-lucide="rocket" class="h-4 w-4"></i>
+                    </div>
+                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Startups</span>
+                  </a>
                   <a href="{% url 'pages:solution' slug='health-care' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
                     <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
                       <i aria-hidden="true" data-lucide="activity" class="h-4 w-4"></i>
@@ -317,6 +323,10 @@
                 <a href="{% url 'pages:solution' slug='sales' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
                     <i aria-hidden="true" data-lucide="briefcase" class="h-4 w-4"></i>
                     Sales
+                </a>
+                <a href="{% url 'pages:solution' slug='startups' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                    <i aria-hidden="true" data-lucide="rocket" class="h-4 w-4"></i>
+                    Startups
                 </a>
                 <a href="{% url 'pages:solution' slug='health-care' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
                     <i aria-hidden="true" data-lucide="activity" class="h-4 w-4"></i>

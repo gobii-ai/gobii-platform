@@ -1,0 +1,579 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ solution_seo_title }}{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+{% include "solutions/_seo_meta.html" %}
+<style>
+  .startups-panel {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    background:
+      linear-gradient(135deg, rgba(241, 245, 249, 0.95) 0%, rgba(255, 255, 255, 0.96) 42%, rgba(236, 253, 245, 0.76) 100%);
+  }
+
+  .startups-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,0.75) 0%, transparent 72%);
+    z-index: 1;
+  }
+
+  .startups-hero-image {
+    box-shadow: 0 28px 70px -36px rgba(15, 23, 42, 0.65);
+  }
+
+  .startup-agent-card,
+  .startup-work-card,
+  .startup-integration-card {
+    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .startup-agent-card:hover,
+  .startup-work-card:hover,
+  .startup-integration-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(79, 70, 229, 0.28);
+    box-shadow: 0 22px 46px -30px rgba(15, 23, 42, 0.55);
+  }
+
+  .startup-function-grid {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<div class="relative startups-panel lg:-mt-16">
+  <section class="relative z-10 mx-auto grid min-h-[660px] max-w-7xl items-center gap-12 px-6 pb-20 pt-32 sm:px-8 lg:grid-cols-[0.98fr_1.02fr] lg:px-12 lg:pb-24 lg:pt-32 xl:px-16">
+    <div class="max-w-3xl">
+      <div class="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700 shadow-sm">
+        <i aria-hidden="true" data-lucide="rocket" class="h-3.5 w-3.5"></i>
+        Built for early-stage teams
+      </div>
+
+      <h1 class="mt-6 text-4xl font-light leading-[1.06] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
+        AI agents for the roles
+        <span class="font-normal text-indigo-700">you cannot hire yet</span>
+      </h1>
+
+      <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
+        Early-stage teams do not have a marketing hire, finance hire, recruiter, analyst, or chief of staff. Gobii agents pick up the recurring work that would otherwise sit in the backlog.
+      </p>
+
+      <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+        <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="startups_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="startups_hero" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-700 px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200/60 transition hover:bg-indigo-800">
+            {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
+            <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </form>
+        <a href="#startup-agent-bench" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/80 px-7 py-3.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-indigo-200 hover:bg-white sm:w-auto" data-analytics-cta-id="startups_hero_bench" data-analytics-placement="hero" data-analytics-intent="view_agent_bench">
+          See the agent bench
+          <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
+        </a>
+      </div>
+
+      {% include "solutions/_crawlable_related_link.html" %}
+
+      <div class="mt-14 grid max-w-xl grid-cols-1 gap-5 sm:grid-cols-3">
+        <div>
+          <div class="text-3xl font-light text-slate-950">2-3</div>
+          <p class="mt-1 text-sm leading-5 text-slate-600">founders on the team</p>
+        </div>
+        <div>
+          <div class="text-3xl font-light text-slate-950">5+</div>
+          <p class="mt-1 text-sm leading-5 text-slate-600">functions covered</p>
+        </div>
+        <div>
+          <div class="text-3xl font-light text-slate-950">24/7</div>
+          <p class="mt-1 text-sm leading-5 text-slate-600">recurring work handled</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="relative">
+      <div class="rounded-3xl border border-white bg-white/75 p-3 shadow-2xl shadow-slate-300/35">
+        <img
+          src="{% static 'images/blog/newsletters/newsletter-2026-01-20-watch-your-agents-work-in-real-time-hero.png' %}"
+          alt="Gobii agent working in the background and sending an always-on update"
+          class="startups-hero-image aspect-[1.14/1] w-full rounded-2xl object-cover object-left-top"
+          width="854"
+          height="749"
+          loading="eager"
+          fetchpriority="high"
+          decoding="async"
+        >
+      </div>
+      <div class="mt-4 grid grid-cols-2 gap-3">
+        <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Today</p>
+          <p class="mt-1 text-sm font-medium text-slate-950">12 prospects researched</p>
+        </div>
+        <div class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Finance</p>
+          <p class="mt-1 text-sm font-medium text-emerald-950">Brex anomaly flagged</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Framing Section -->
+<section class="bg-white py-16 lg:py-20">
+  <div class="mx-auto max-w-6xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">The startup wedge</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">
+          The alternative is not hiring. It is the work never getting done.
+        </h2>
+      </div>
+      <div class="space-y-5 text-base leading-7 text-slate-700">
+        <p>
+          Early-stage teams know exactly what should be happening: better outbound, cleaner investor research, weekly metrics, customer follow-up, candidate sourcing, finance checks, competitor monitoring. The problem is ownership.
+        </p>
+        <p>
+          Gobii gives each neglected function a lightweight operator. Founders stay focused on product, customers, and fundraising while agents handle the recurring research, lists, alerts, drafts, and reports.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Agent Bench Section -->
+<section id="startup-agent-bench" class="startup-function-grid bg-slate-50 py-16 lg:py-20 scroll-mt-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="max-w-3xl">
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Your first operating bench</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Give every unowned function an agent</h2>
+      <p class="mt-4 text-base leading-7 text-slate-700">
+        Start with one high-friction workflow, then add agents as the company needs more coverage.
+      </p>
+    </div>
+
+    <div class="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+      <div class="startup-agent-card rounded-2xl border border-slate-200 bg-white p-6">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+          <i aria-hidden="true" data-lucide="target" class="h-6 w-6"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Growth Operator</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">
+          Finds prospects, researches accounts, monitors buying signals, drafts outreach, and updates the lightweight CRM or sheet.
+        </p>
+        <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="mt-5 inline-flex" data-analytics-cta-id="startups_growth_operator" data-analytics-placement="agent_bench" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="startups_growth_operator" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-700 hover:text-indigo-900">
+            Start with Lead Hunter
+            <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </form>
+      </div>
+
+      <div class="startup-agent-card rounded-2xl border border-slate-200 bg-white p-6">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+          <i aria-hidden="true" data-lucide="credit-card" class="h-6 w-6"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Finance Ops Analyst</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">
+          Watches spend, vendor activity, renewals, invoices, cash-impacting changes, and weekly operating metrics.
+        </p>
+        <form method="post" action="{% url 'pages:pretrained_worker_hire' 'vendor-price-analyst' %}" class="mt-5 inline-flex" data-analytics-cta-id="startups_finance_ops" data-analytics-placement="agent_bench" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="startups_finance_ops" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 hover:text-emerald-900">
+            Start with Vendor Price Analyst
+            <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </form>
+      </div>
+
+      <div class="startup-agent-card rounded-2xl border border-slate-200 bg-white p-6">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+          <i aria-hidden="true" data-lucide="messages-square" class="h-6 w-6"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Customer Signal Monitor</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">
+          Reviews support notes, product feedback, usage changes, and customer comments so founder follow-up happens on time.
+        </p>
+        <form method="post" action="{% url 'pages:pretrained_worker_hire' 'customer-health-monitor' %}" class="mt-5 inline-flex" data-analytics-cta-id="startups_customer_signal" data-analytics-placement="agent_bench" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="startups_customer_signal" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-sky-700 hover:text-sky-900">
+            Start with Customer Health Monitor
+            <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </form>
+      </div>
+
+      <div class="startup-agent-card rounded-2xl border border-slate-200 bg-white p-6">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+          <i aria-hidden="true" data-lucide="radar" class="h-6 w-6"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Competitor Watch</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">
+          Monitors pricing, launches, positioning, hiring, and content so your team sees market movement before the next investor update.
+        </p>
+        <form method="post" action="{% url 'pages:pretrained_worker_hire' 'competitor-intelligence-analyst' %}" class="mt-5 inline-flex" data-analytics-cta-id="startups_competitor_watch" data-analytics-placement="agent_bench" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="startups_competitor_watch" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-700 hover:text-amber-900">
+            Start with Competitor Analyst
+            <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </form>
+      </div>
+
+      <div class="startup-agent-card rounded-2xl border border-slate-200 bg-white p-6">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+          <i aria-hidden="true" data-lucide="user-search" class="h-6 w-6"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Hiring Scout</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">
+          Builds candidate lists before you can afford a recruiter and keeps early hiring research from stalling.
+        </p>
+        <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="mt-5 inline-flex" data-analytics-cta-id="startups_hiring_scout" data-analytics-placement="agent_bench" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="startups_hiring_scout" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-700 hover:text-violet-900">
+            Start with Talent Scout
+            <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </form>
+      </div>
+
+      <div class="startup-agent-card rounded-2xl border border-slate-200 bg-white p-6">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+          <i aria-hidden="true" data-lucide="clipboard-list" class="h-6 w-6"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Founder Chief of Staff</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">
+          Tracks milestones, blockers, follow-ups, weekly recaps, and the loose operating work that otherwise lives in founder memory.
+        </p>
+        <form method="post" action="{% url 'pages:pretrained_worker_hire' 'project-manager' %}" class="mt-5 inline-flex" data-analytics-cta-id="startups_founder_cos" data-analytics-placement="agent_bench" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="startups_founder_cos" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-700 hover:text-slate-950">
+            Start with Project Manager
+            <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Integrations Section -->
+<section class="bg-white py-16 lg:py-20">
+  <div class="mx-auto grid max-w-7xl gap-12 px-6 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:px-12 lg:items-center">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Startup-critical integrations</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">
+        Connect the systems where money, customers, and work already move
+      </h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        Integrations make the startup story real. A finance ops agent can watch Stripe and Brex, a growth agent can push to Sheets or HubSpot, and every agent can report back in Slack.
+      </p>
+
+      <div class="mt-8 grid gap-3 sm:grid-cols-2">
+        <div class="startup-integration-card rounded-2xl border border-slate-200 bg-white p-4">
+          <div class="flex items-center gap-3">
+            <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">S</span>
+            <div>
+              <h3 class="font-semibold text-slate-950">Stripe</h3>
+              <p class="text-sm text-slate-600">Revenue, failed payments, new customers, churn signals.</p>
+            </div>
+          </div>
+        </div>
+        <div class="startup-integration-card rounded-2xl border border-slate-200 bg-white p-4">
+          <div class="flex items-center gap-3">
+            <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-700 text-sm font-bold text-white">B</span>
+            <div>
+              <h3 class="font-semibold text-slate-950">Brex</h3>
+              <p class="text-sm text-slate-600">Spend, vendors, renewal dates, anomalies, close prep.</p>
+            </div>
+          </div>
+        </div>
+        <div class="startup-integration-card rounded-2xl border border-slate-200 bg-white p-4">
+          <div class="flex items-center gap-3">
+            <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+              <i aria-hidden="true" data-lucide="table-2" class="h-5 w-5"></i>
+            </span>
+            <div>
+              <h3 class="font-semibold text-slate-950">Google Sheets</h3>
+              <p class="text-sm text-slate-600">Lightweight dashboards, trackers, lists, exports.</p>
+            </div>
+          </div>
+        </div>
+        <div class="startup-integration-card rounded-2xl border border-slate-200 bg-white p-4">
+          <div class="flex items-center gap-3">
+            <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+              <i aria-hidden="true" data-lucide="message-square" class="h-5 w-5"></i>
+            </span>
+            <div>
+              <h3 class="font-semibold text-slate-950">Slack</h3>
+              <p class="text-sm text-slate-600">Daily briefs, approvals, alerts, and team handoffs.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-3xl border border-slate-200 bg-slate-50 p-3 shadow-xl shadow-slate-200/70">
+      <img
+        src="{% static 'images/blog/newsletters/newsletter-2026-03-17-one-click-integrations-for-your-agents-hero.png' %}"
+        alt="Gobii integration picker showing startup tools including Brex, Slack, HubSpot, Apollo, and Google Sheets"
+        class="aspect-[1.23/1] w-full rounded-2xl object-cover object-left-top"
+        width="1008"
+        height="820"
+        loading="lazy"
+        decoding="async"
+      >
+    </div>
+  </div>
+</section>
+
+<!-- Workflow Section -->
+<section id="how-it-works" class="bg-slate-950 py-16 text-white lg:py-20 scroll-mt-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">How it works</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">Delegate like you are assigning an owner</h2>
+        <p class="mt-5 text-base leading-7 text-slate-300">
+          Gobii agents can run on a schedule, respond to events, browse the web, use connected tools, and send real deliverables back to your team.
+        </p>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div class="text-sm font-semibold text-emerald-300">01</div>
+          <h3 class="mt-3 text-lg font-semibold">Brief the function</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-300">Tell the agent the job, cadence, sources, tools, and output format in plain English.</p>
+        </div>
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div class="text-sm font-semibold text-emerald-300">02</div>
+          <h3 class="mt-3 text-lg font-semibold">Connect the workspace</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-300">Use Stripe, Brex, Slack, Sheets, HubSpot, Apollo, or browser sessions depending on the workflow.</p>
+        </div>
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div class="text-sm font-semibold text-emerald-300">03</div>
+          <h3 class="mt-3 text-lg font-semibold">Let it run</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-300">Agents collect data, monitor changes, compile lists, draft updates, and flag exceptions while founders work elsewhere.</p>
+        </div>
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div class="text-sm font-semibold text-emerald-300">04</div>
+          <h3 class="mt-3 text-lg font-semibold">Review and redirect</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-300">Keep humans in the loop for judgment. Approve outreach, refine criteria, and shift priorities as the startup changes.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Work That Stops Falling Through Cracks -->
+<section class="bg-white py-16 lg:py-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="max-w-3xl">
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">What stops falling through the cracks</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Important work gets an owner before you have the headcount</h2>
+    </div>
+
+    <div class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="startup-work-card rounded-2xl border border-slate-200 bg-white p-5">
+        <i aria-hidden="true" data-lucide="user-round-plus" class="h-5 w-5 text-indigo-700"></i>
+        <h3 class="mt-4 font-semibold text-slate-950">Prospect lists</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-600">Fresh accounts, contacts, fit notes, and outreach context.</p>
+      </div>
+      <div class="startup-work-card rounded-2xl border border-slate-200 bg-white p-5">
+        <i aria-hidden="true" data-lucide="badge-dollar-sign" class="h-5 w-5 text-emerald-700"></i>
+        <h3 class="mt-4 font-semibold text-slate-950">Weekly finance brief</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-600">Cash coming in, cash going out, vendor changes, and anomalies.</p>
+      </div>
+      <div class="startup-work-card rounded-2xl border border-slate-200 bg-white p-5">
+        <i aria-hidden="true" data-lucide="search" class="h-5 w-5 text-sky-700"></i>
+        <h3 class="mt-4 font-semibold text-slate-950">Investor research</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-600">Partner fits, recent deals, thesis notes, and warm-intro targets.</p>
+      </div>
+      <div class="startup-work-card rounded-2xl border border-slate-200 bg-white p-5">
+        <i aria-hidden="true" data-lucide="megaphone" class="h-5 w-5 text-amber-700"></i>
+        <h3 class="mt-4 font-semibold text-slate-950">Launch prep</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-600">Checklist updates, campaign drafts, social copy, and launch monitoring.</p>
+      </div>
+      <div class="startup-work-card rounded-2xl border border-slate-200 bg-white p-5">
+        <i aria-hidden="true" data-lucide="message-circle-heart" class="h-5 w-5 text-rose-700"></i>
+        <h3 class="mt-4 font-semibold text-slate-950">Customer follow-up</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-600">Support themes, success notes, churn risk, and reminders.</p>
+      </div>
+      <div class="startup-work-card rounded-2xl border border-slate-200 bg-white p-5">
+        <i aria-hidden="true" data-lucide="binoculars" class="h-5 w-5 text-violet-700"></i>
+        <h3 class="mt-4 font-semibold text-slate-950">Competitor monitoring</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-600">Pricing, positioning, new features, content, and hiring changes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Benefits Section -->
+<section class="bg-slate-50 py-16 lg:py-20">
+  <div class="mx-auto grid max-w-7xl gap-12 px-6 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:px-12 lg:items-center">
+    <div>
+      <h2 class="text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Why early-stage teams choose Gobii</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        A founding team does not need another dashboard to maintain. It needs useful work back in the format the team can act on.
+      </p>
+    </div>
+    <div class="grid gap-5">
+      <div class="flex gap-5 rounded-2xl border border-slate-200 bg-white p-5">
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+          <i aria-hidden="true" data-lucide="users-round" class="h-6 w-6"></i>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-950">Functional coverage before headcount</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-600">Add capacity for growth, finance ops, customer research, recruiting, and admin without pretending every function needs a full-time hire today.</p>
+        </div>
+      </div>
+      <div class="flex gap-5 rounded-2xl border border-slate-200 bg-white p-5">
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+          <i aria-hidden="true" data-lucide="file-check-2" class="h-6 w-6"></i>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-950">Real deliverables, not chat answers</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-600">Agents produce lists, reports, CSVs, briefs, alerts, and drafts that move work forward.</p>
+        </div>
+      </div>
+      <div class="flex gap-5 rounded-2xl border border-slate-200 bg-white p-5">
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+          <i aria-hidden="true" data-lucide="circle-check-big" class="h-6 w-6"></i>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-950">Human approval where judgment matters</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-600">Use agents for recurring legwork while founders keep control over strategy, messaging, hiring, finances, and customer decisions.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ Section -->
+<section class="bg-white py-16 lg:py-20">
+  <div class="mx-auto max-w-3xl px-6 sm:px-8">
+    <div class="text-center">
+      <h2 class="text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Questions</h2>
+    </div>
+
+    <div class="mt-10 divide-y divide-slate-200">
+      <details class="group py-6">
+        <summary class="flex cursor-pointer list-none items-center justify-between">
+          <span class="pr-8 text-lg font-medium text-slate-950">Is Gobii meant to replace hiring?</span>
+          <i aria-hidden="true" data-lucide="plus" class="h-5 w-5 shrink-0 text-slate-400 transition group-open:rotate-45"></i>
+        </summary>
+        <p class="mt-4 text-slate-600 leading-7">
+          No. The startup use case is about work that would otherwise go unowned because an early-stage team cannot justify the hire yet. Gobii gives those workflows an operator until the company is ready to hire.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex cursor-pointer list-none items-center justify-between">
+          <span class="pr-8 text-lg font-medium text-slate-950">Which startup workflows should we delegate first?</span>
+          <i aria-hidden="true" data-lucide="plus" class="h-5 w-5 shrink-0 text-slate-400 transition group-open:rotate-45"></i>
+        </summary>
+        <p class="mt-4 text-slate-600 leading-7">
+          Start with high-frequency work that needs research, monitoring, list building, or structured output: outbound prospecting, competitor tracking, weekly finance ops, customer follow-up, candidate sourcing, and investor research.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex cursor-pointer list-none items-center justify-between">
+          <span class="pr-8 text-lg font-medium text-slate-950">Can agents connect to Stripe and Brex?</span>
+          <i aria-hidden="true" data-lucide="plus" class="h-5 w-5 shrink-0 text-slate-400 transition group-open:rotate-45"></i>
+        </summary>
+        <p class="mt-4 text-slate-600 leading-7">
+          Yes. Startup agents can use connected systems like Stripe and Brex to watch revenue, spend, vendors, failed payments, renewal dates, and cash-impacting changes, then report back through Slack, Sheets, or email.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex cursor-pointer list-none items-center justify-between">
+          <span class="pr-8 text-lg font-medium text-slate-950">Do founders approve work before it goes out?</span>
+          <i aria-hidden="true" data-lucide="plus" class="h-5 w-5 shrink-0 text-slate-400 transition group-open:rotate-45"></i>
+        </summary>
+        <p class="mt-4 text-slate-600 leading-7">
+          You decide the workflow. Agents can draft messages, prepare lists, flag issues, and ask for approval before outreach, financial decisions, customer replies, or hiring actions.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex cursor-pointer list-none items-center justify-between">
+          <span class="pr-8 text-lg font-medium text-slate-950">What plan fits an early-stage startup?</span>
+          <i aria-hidden="true" data-lucide="plus" class="h-5 w-5 shrink-0 text-slate-400 transition group-open:rotate-45"></i>
+        </summary>
+        <p class="mt-4 text-slate-600 leading-7">
+          Most lean teams can start with Pro, then move to Scale when agents are running more frequent workflows, higher volumes, or multiple functions at once.
+        </p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- Final CTA -->
+<section class="bg-slate-950 py-16 text-white lg:py-20">
+  <div class="mx-auto max-w-4xl px-6 text-center sm:px-8">
+    <div class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-emerald-200">
+      <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+      Ready to give the backlog an owner
+    </div>
+    <h2 class="mt-6 text-4xl font-light tracking-tight sm:text-5xl">Start with one function your team cannot hire for yet</h2>
+    <p class="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-300">
+      Deploy a Gobii agent for growth, finance ops, customer research, recruiting, or founder admin, then add more as your operating rhythm matures.
+    </p>
+
+    <div class="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
+      <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="startups_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
+        {% csrf_token %}
+        <input type="hidden" name="source_page" value="startups_final_cta" />
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+        <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-8 py-4 text-sm font-semibold text-slate-950 transition hover:bg-slate-100">
+          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
+          <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+        </button>
+      </form>
+      <a href="{% url 'pages:library' %}" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-8 py-4 text-sm font-semibold text-white transition hover:bg-white/10 sm:w-auto" data-analytics-cta-id="startups_final_library" data-analytics-placement="final_cta" data-analytics-intent="browse_templates">
+        Browse agent templates
+        <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}
