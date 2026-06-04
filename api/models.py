@@ -2587,6 +2587,11 @@ class BrowserUseAgentTask(models.Model):
         default=StatusChoices.PENDING
     )
     error_message = models.TextField(null=True, blank=True)
+    filespace_artifacts = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Filespace metadata for browser-use attachment artifacts persisted after task completion.",
+    )
     # Token usage tracking fields
     prompt_tokens = models.IntegerField(
         null=True,

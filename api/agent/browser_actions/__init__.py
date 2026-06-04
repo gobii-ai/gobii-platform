@@ -6,11 +6,13 @@ the default browser use agent capabilities.
 """
 
 from .captcha_solver import register_captcha_actions
+from .artifacts import persist_browser_task_artifacts_sync
 from .file_download import register_download_listener
 from .file_upload import register_upload_actions
 from .web_search import register_web_search_action
 
 __all__ = [
+    'persist_browser_task_artifacts_sync',
     'register_captcha_actions',
     'register_download_listener',
     'register_upload_actions',

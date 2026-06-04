@@ -886,7 +886,7 @@ async def _run_agent(
     extraction_max_output_tokens: Optional[int] = None,
     extraction_provider_key: Optional[str] = None,
     captcha_enabled: bool = False,
-) -> Tuple[Optional[str], Optional[dict]]:
+) -> Tuple[Optional[str], Optional[dict], list[dict[str, Any]]]:
     """Execute the Browser‑Use agent for a single provider."""
     if baggage:
         baggage.set_baggage("task.id", str(task_id))
@@ -1242,6 +1242,16 @@ async def _run_agent(
             effective_max_steps = max_steps_override or DEFAULT_MAX_BROWSER_STEPS
             agent_span.set_attribute("browser_use.max_steps", int(effective_max_steps))
             history = await agent.run(max_steps=effective_max_steps)
+            from ..agent.browser_actions import persist_browser_task_artifacts_sync
+            filespace_artifacts = await asyncio.to_thread(
+                persist_browser_task_artifacts_sync,
+                history=history,
+                persistent_agent_id=persistent_agent_id,
+                task_id=task_id,
+                excluded_local_paths=set(getattr(browser_session, "downloaded_files", None) or []),
+            )
+            if filespace_artifacts:
+                agent_span.set_attribute("browser_use.filespace_artifact_count", len(filespace_artifacts))
 
             # Extract usage details (if available) and annotate tracing
             token_usage = None
@@ -1302,7 +1312,7 @@ async def _run_agent(
             except Exception as e:
                 logger.warning("Usage logging failed with exception", exc_info=e)
 
-            return history.final_result(), token_usage
+            return history.final_result(), token_usage, filespace_artifacts
 
         finally:
             await _safe_aclose(browser_session, "stop")
@@ -1493,7 +1503,8 @@ def _execute_agent_with_failover(
     max_steps: Optional[int] = None,
     vision_detail_level: Optional[str] = None,
     captcha_enabled: bool = False,
-) -> Tuple[Optional[str], Optional[dict]]:
+    include_filespace_artifacts: bool = False,
+) -> Tuple[Optional[str], Optional[dict]] | Tuple[Optional[str], Optional[dict], list[dict[str, Any]]]:
     """
     Execute the agent with tiered, weighted load-balancing and fail-over.
 
@@ -1651,7 +1662,7 @@ def _execute_agent_with_failover(
                 extraction_provider = extraction_cfg.get("provider_key")
 
             try:
-                result, token_usage = asyncio.run(
+                run_result = asyncio.run(
                     _run_agent(
                         task_input=task_input,
                         llm_api_key=llm_api_key,
@@ -1681,6 +1692,11 @@ def _execute_agent_with_failover(
                         captcha_enabled=captcha_enabled,
                     )
                 )
+                if len(run_result) == 2:
+                    result, token_usage = run_result
+                    filespace_artifacts = []
+                else:
+                    result, token_usage, filespace_artifacts = run_result
 
                 if _result_is_invalid(result):
                     raise RuntimeError("Provider returned empty or invalid result")
@@ -1691,6 +1707,8 @@ def _execute_agent_with_failover(
                     task_id,
                     tier_idx,
                 )
+                if include_filespace_artifacts:
+                    return result, token_usage, filespace_artifacts
                 return result, token_usage
 
             except Exception as exc:  # noqa: BLE001
@@ -1974,7 +1992,7 @@ def _process_browser_use_task_core(
 
                     provider_priority = filtered_priority
 
-                raw_result, token_usage = _execute_agent_with_failover(
+                execute_result = _execute_agent_with_failover(
                     task_input=task_obj.prompt,
                     task_id=str(task_obj.id),
                     proxy_server=proxy_server,
@@ -1988,7 +2006,13 @@ def _process_browser_use_task_core(
                     max_steps=plan_settings.max_browser_steps,
                     vision_detail_level=plan_settings.vision_detail_level,
                     captcha_enabled=captcha_enabled,
+                    include_filespace_artifacts=True,
                 )
+                if len(execute_result) == 2:
+                    raw_result, token_usage = execute_result
+                    filespace_artifacts = []
+                else:
+                    raw_result, token_usage, filespace_artifacts = execute_result
 
                 safe_result = _jsonify(raw_result)
                 if isinstance(raw_result, str) and task_obj.output_schema:
@@ -2044,6 +2068,7 @@ def _process_browser_use_task_core(
 
                 task_obj.status = BrowserUseAgentTask.StatusChoices.COMPLETED
                 task_obj.error_message = None
+                task_obj.filespace_artifacts = filespace_artifacts
 
                 agent_span.set_attribute('task.id', str(task_obj.id))
                 agent_span.set_attribute('task.status', str(BrowserUseAgentTask.StatusChoices.COMPLETED))
@@ -2120,6 +2145,7 @@ def _process_browser_use_task_core(
                     "input_cost_cached",
                     "output_cost",
                     "total_cost",
+                    "filespace_artifacts",
                 ])
             except OperationalError:
                 close_old_connections()
@@ -2138,6 +2164,7 @@ def _process_browser_use_task_core(
                     "input_cost_cached",
                     "output_cost",
                     "total_cost",
+                    "filespace_artifacts",
                 ])
 
             # Trigger agent event processing if this task belongs to a persistent agent

@@ -257,6 +257,7 @@ class PromptContextBuilderTests(TestCase):
         result_value=None,
         status=BrowserUseAgentTask.StatusChoices.COMPLETED,
         error_message: str | None = None,
+        filespace_artifacts=None,
     ) -> BrowserUseAgentTask:
         task = BrowserUseAgentTask.objects.create(
             agent=self.browser_agent,
@@ -264,6 +265,7 @@ class PromptContextBuilderTests(TestCase):
             prompt=prompt,
             status=status,
             error_message=error_message,
+            filespace_artifacts=filespace_artifacts or [],
         )
         if result_value is None and status == BrowserUseAgentTask.StatusChoices.COMPLETED:
             result_value = {"task": prompt}
@@ -1937,7 +1939,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertLess(content.index(older_prompt), content.index(newer_prompt))
         self.assertLess(content.index(newer_prompt), content.index(newest_prompt))
 
-    def test_completed_browser_task_results_are_stored_in_sqlite_without_inline_duplication(self):
+    def test_completed_browser_task_results_are_visible_and_stored_in_sqlite(self):
         self._configure_unified_history_limits(
             tool_limit=5,
             unified_limit=10,
@@ -1958,6 +1960,33 @@ class PromptContextBuilderTests(TestCase):
             prompt="Extract all registry items as JSON.",
             updated_at=timezone.now(),
             result_value=browser_result,
+            filespace_artifacts=[
+                {
+                    "filename": "registry-summary.txt",
+                    "path": f"/browser_tasks/task-placeholder/registry-summary.txt",
+                    "node_id": "node-summary",
+                    "mime_type": "text/plain",
+                    "size_bytes": 128,
+                }
+            ],
+        )
+        BrowserUseAgentTask.objects.filter(pk=task.pk).update(
+            filespace_artifacts=[
+                {
+                    "filename": "registry-summary.txt",
+                    "path": f"/browser_tasks/{task.id}/registry-summary.txt",
+                    "node_id": "node-summary",
+                    "mime_type": "text/plain",
+                    "size_bytes": 128,
+                }
+            ]
+        )
+        task.refresh_from_db()
+        self._create_history_step(
+            created_at=task.updated_at - timedelta(seconds=10),
+            description="Tool call: spawn_web_task",
+            tool_name="spawn_web_task",
+            result={"status": "pending", "task_id": str(task.id), "auto_sleep_ok": True},
         )
 
         sqlite_tmp = tempfile.TemporaryDirectory()
@@ -1970,8 +1999,19 @@ class PromptContextBuilderTests(TestCase):
 
             self.assertIn(str(task.id), content)
             self.assertIn(expected_result_id, content)
-            self.assertNotIn("Natural Glass Bottle", content)
-            self.assertNotIn("Successfully extracted all 2 registry items.", content)
+            self.assertIn("<prompt>Extract all registry items as JSON.</prompt>", content)
+            self.assertIn("<result_meta>", content)
+            self.assertIn("status=completed", content)
+            self.assertIn("files=1", content)
+            self.assertIn("<files>", content)
+            self.assertIn("registry-summary.txt", content)
+            self.assertIn(f"/browser_tasks/{task.id}/registry-summary.txt", content)
+            self.assertIn("<result_summary>", content)
+            self.assertIn("Successfully extracted all 2 registry items.", content)
+            self.assertIn("[structured result stored in __tool_results]", content)
+            self.assertNotIn("<result>{\"task_id\"", content)
+            self.assertNotIn("\"status\":\"pending\"", content)
+            self.assertNotIn("fields: path,filename", content)
 
             conn = sqlite3.connect(db_path)
             try:
@@ -1983,9 +2023,18 @@ class PromptContextBuilderTests(TestCase):
                     """,
                     (expected_result_id, "spawn_web_task_result"),
                 ).fetchone()
+                pending_spawn_row = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM __tool_results
+                    WHERE tool_name = ?
+                    """,
+                    ("spawn_web_task",),
+                ).fetchone()
             finally:
                 conn.close()
             self.assertIsNotNone(row)
+            self.assertEqual(0, pending_spawn_row[0])
 
             payload = json.loads(row[0])
             self.assertEqual(str(task.id), payload["task_id"])
@@ -2022,7 +2071,8 @@ class PromptContextBuilderTests(TestCase):
             expected_result_id = str(task.id)
 
             self.assertIn(expected_result_id, content)
-            self.assertNotIn("Navigation timeout while loading dashboard.", content)
+            self.assertIn("<result_summary>Navigation timeout while loading dashboard.</result_summary>", content)
+            self.assertNotIn('"error_message":"Navigation timeout while loading dashboard."', content)
 
             conn = sqlite3.connect(db_path)
             try:

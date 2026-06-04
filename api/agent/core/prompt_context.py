@@ -421,6 +421,9 @@ def _build_browser_task_result_payload(
         "status": task.status,
         "prompt": task.prompt or "",
     }
+    files = _browser_task_files_payload(task)
+    if files:
+        payload["files"] = files
 
     if task.status == BrowserUseAgentTask.StatusChoices.FAILED:
         payload["error_message"] = task.error_message or "Task failed."
@@ -439,6 +442,77 @@ def _build_browser_task_result_payload(
     else:
         payload["result"] = result_value
     return payload
+
+
+def _browser_task_files_payload(task: BrowserUseAgentTask) -> list[dict[str, str]]:
+    filespace_artifacts = getattr(task, "filespace_artifacts", None) or []
+    if not isinstance(filespace_artifacts, list):
+        return []
+
+    files: list[dict[str, str]] = []
+    for artifact in filespace_artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        path = artifact.get("path")
+        filename = artifact.get("filename")
+        if path and filename:
+            files.append({"path": path, "filename": filename})
+    return files
+
+
+def _format_browser_task_files(files: Sequence[Mapping[str, str]]) -> str:
+    lines = []
+    for file_info in files:
+        path = file_info.get("path")
+        filename = file_info.get("filename")
+        if not path or not filename:
+            continue
+        lines.append(f"- $[{path}] ({filename})")
+    return "\n".join(lines)
+
+
+def _browser_task_result_summary(result_step: Optional[BrowserUseAgentTaskStep]) -> str:
+    if result_step is None or result_step.result_value is None:
+        return ""
+
+    result_value = result_step.result_value
+    if isinstance(result_value, str):
+        return BROWSER_TASK_RESULT_BLOCK_RE.sub("[structured result stored in __tool_results]", result_value).strip()
+    try:
+        return json.dumps(result_value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(result_value)
+
+
+def _browser_task_result_meta(
+    task: BrowserUseAgentTask,
+    result_info: ToolResultPromptInfo,
+    files: Sequence[Mapping[str, str]],
+) -> str:
+    parts = [
+        f"result_id={result_info.result_id}",
+        "in_db=1",
+        f"status={task.status}",
+    ]
+    bytes_match = re.search(r"(?:^|,\s*)bytes=(\d+)", result_info.meta)
+    if bytes_match:
+        parts.append(f"bytes={bytes_match.group(1)}")
+    if files:
+        parts.append(f"files={len(files)}")
+    return ", ".join(parts)
+
+
+def _extract_spawn_web_task_task_id(result_text: object) -> Optional[str]:
+    if not isinstance(result_text, str) or not result_text.strip():
+        return None
+    try:
+        payload = json.loads(result_text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    task_id = payload.get("task_id")
+    return str(task_id) if task_id else None
 
 
 def _build_browser_task_tool_result_record(
@@ -4201,6 +4275,7 @@ def _get_unified_history_prompt(
     tool_result_prompt_info: Dict[str, ToolResultPromptInfo] = {}
     tool_call_records: List[ToolCallResultRecord] = []
     browser_task_result_record_ids: Dict[str, str] = {}
+    completed_browser_task_ids = {str(task.id) for task in completed_tasks}
     recency_positions: Dict[str, int] = {}
     fresh_tool_call_step_ids: Set[str] = set()
     if steps:
@@ -4218,6 +4293,11 @@ def _get_unified_history_prompt(
                 continue
             result_text = row.get("result") or ""
             if not result_text:
+                continue
+            if (
+                row.get("tool_name") == "spawn_web_task"
+                and _extract_spawn_web_task_task_id(result_text) in completed_browser_task_ids
+            ):
                 continue
             completion_id = row.get("step__completion_id")
             tool_call_completion_ids[step_id] = str(completion_id) if completion_id else None
@@ -4461,14 +4541,35 @@ def _get_unified_history_prompt(
 
     # Include most recent completed browser tasks as structured events
     for t in completed_tasks:
+        result_steps = getattr(t, "result_steps_prefetched", None)
+        result_step = result_steps[0] if result_steps else None
+        files = _browser_task_files_payload(t)
         components = {
-            "meta": f"[{t.updated_at.isoformat()}] Browser task (id={t.id}) completed with status '{t.status}': {t.prompt}"
+            "meta": f"[{t.updated_at.isoformat()}] Browser task completed with status '{t.status}' (id={t.id}).",
+            "prompt": t.prompt or "",
         }
         result_info = tool_result_prompt_info.get(
             browser_task_result_record_ids.get(str(t.id), "")
         )
         if result_info is not None:
             components["result_id"] = result_info.result_id
+            components["result_meta"] = _browser_task_result_meta(t, result_info, files)
+            if files:
+                components["files"] = _format_browser_task_files(files)
+            result_summary = _browser_task_result_summary(result_step)
+            if not result_summary and t.status == BrowserUseAgentTask.StatusChoices.FAILED:
+                result_summary = t.error_message or "Browser task failed."
+            elif not result_summary and t.status == BrowserUseAgentTask.StatusChoices.CANCELLED:
+                result_summary = "Browser task was cancelled."
+            if result_summary:
+                components["result_summary"] = result_summary
+            if (
+                result_info.preview_text
+                and not files
+                and t.status == BrowserUseAgentTask.StatusChoices.COMPLETED
+            ):
+                key = "result" if result_info.is_inline else "result_preview"
+                components[key] = result_info.preview_text
 
         structured_events.append((t.updated_at, "browser_task", components))
 
@@ -4505,10 +4606,13 @@ def _get_unified_history_prompt(
             "meta": 3,        # High priority - always want to see what happened
             "cost": 2,        # Helpful for budgeting; small and should remain visible
             "params": 1,      # Low priority - can be shrunk aggressively
+            "prompt": 1,      # Browser task/user prompt context; useful but repeatable
             "result": 1,      # Low priority - can be shrunk aggressively
             "result_meta": 2, # Medium priority - supports tool result lookup
             "result_schema": 1, # Low priority - schema can be shrunk aggressively
             "result_preview": 1, # Low priority - preview only
+            "result_summary": 1, # Low priority - browser task prose summary
+            "files": 3,       # High priority - direct filespace paths for follow-up actions
             "content": 2,     # Medium priority for message content (SMS, etc.)
             "attachments": 2, # Medium priority for message attachment paths
             "description": 2, # Medium priority for step descriptions
@@ -4537,7 +4641,7 @@ def _get_unified_history_prompt(
                 # Apply HMT shrinking to bulky content
                 shrinker = None
                 if (
-                    component_name in ("params", "result", "result_preview", "result_schema", "body") or
+                    component_name in ("params", "prompt", "result", "result_preview", "result_schema", "result_summary", "body") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
                     shrinker = "hmt"
