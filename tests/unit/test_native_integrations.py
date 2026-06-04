@@ -864,6 +864,21 @@ class NativeIntegrationTests(TestCase):
                 else:
                     self.assertNotIn("Authorization", headers)
 
+    def test_native_integration_auth_canonicalizes_lowercase_bearer_token_type(self):
+        self._create_integration_secret(
+            owner_user=self.user,
+            provider=HUBSPOT_PROVIDER,
+            credentials=self._credentials(provider=HUBSPOT_PROVIDER) | {"token_type": "bearer"},
+        )
+
+        headers = apply_native_integration_auth(
+            self.agent,
+            "https://api.hubapi.com/crm/v3/owners/?limit=1",
+            {},
+        )
+
+        self.assertEqual(headers["Authorization"], "Bearer hubspot-access-token")
+
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
     @patch("api.services.native_integrations.httpx.post")

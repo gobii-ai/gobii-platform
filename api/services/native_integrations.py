@@ -1136,7 +1136,9 @@ def apply_native_integration_auth(
                     retryable=False,
                 ),
             )
-        token_type = str(credentials.get("token_type") or "Bearer")
+        token_type = str(credentials.get("token_type") or "Bearer").strip() or "Bearer"
+        if token_type.lower() == "bearer":
+            token_type = "Bearer"
         updated = dict(headers)
         updated["Authorization"] = f"{token_type} {access_token}"
         return updated
