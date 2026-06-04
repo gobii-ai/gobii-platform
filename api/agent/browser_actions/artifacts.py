@@ -48,6 +48,13 @@ def _compute_sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
+def _delete_stale_artifact_node(node: AgentFsNode) -> None:
+    try:
+        node.delete()
+    except Exception:
+        logger.warning("Failed to delete stale browser task artifact node %s", node.id, exc_info=True)
+
+
 def _create_artifact_node(
     *,
     agent: PersistentAgent,
@@ -59,7 +66,16 @@ def _create_artifact_node(
     filespace = get_or_create_default_filespace(agent)
     browser_tasks_dir = get_or_create_dir(filespace, None, "browser_tasks")
     task_dir = get_or_create_dir(filespace, browser_tasks_dir, task_id)
-    checksum = _compute_sha256_file(local_path)
+    try:
+        checksum = _compute_sha256_file(local_path)
+    except OSError:
+        logger.warning(
+            "Skipping browser task artifact for task %s because file checksum could not be read: %s",
+            task_id,
+            local_path,
+            exc_info=True,
+        )
+        return None
 
     for attempt in range(5):
         name = dedupe_name(filespace, task_dir, filename)
@@ -89,14 +105,14 @@ def _create_artifact_node(
         with open(local_path, "rb") as artifact_file:
             node.content.save(node.name, DjangoFile(artifact_file), save=True)
         node.refresh_from_db()
-    except OSError:
+    except Exception:
         logger.warning(
-            "Skipping browser task artifact for task %s because file could not be read: %s",
+            "Skipping browser task artifact for task %s because file could not be saved: %s",
             task_id,
             local_path,
             exc_info=True,
         )
-        node.delete()
+        _delete_stale_artifact_node(node)
         return None
 
     return node

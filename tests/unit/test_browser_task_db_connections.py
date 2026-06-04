@@ -279,6 +279,68 @@ class BrowserTaskDbConnectionTests(TestCase):
         )
         self.assertTrue(all(artifact.get("node_id") for artifact in artifacts))
 
+    def test_browser_task_artifact_disappearing_before_checksum_is_skipped(self):
+        from api.agent.browser_actions.artifacts import persist_browser_task_artifacts_sync
+
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="save files",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            summary_path = os.path.join(tmpdir, "summary.md")
+            with open(summary_path, "w", encoding="utf-8") as f:
+                f.write("summary")
+
+            history = SimpleNamespace(action_results=lambda: [SimpleNamespace(attachments=[summary_path])])
+
+            with patch("api.agent.browser_actions.artifacts._compute_sha256_file", side_effect=OSError("gone")):
+                artifacts = persist_browser_task_artifacts_sync(
+                    history=history,
+                    persistent_agent_id=str(self.persistent_agent.id),
+                    task_id=str(task.id),
+                )
+
+        self.assertEqual(artifacts, [])
+        self.assertFalse(
+            AgentFsNode.objects.filter(
+                path=f"/browser_tasks/{task.id}/summary.md",
+                node_type=AgentFsNode.NodeType.FILE,
+            ).exists()
+        )
+
+    def test_browser_task_artifact_save_failure_deletes_stale_node(self):
+        from api.agent.browser_actions.artifacts import persist_browser_task_artifacts_sync
+
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="save files",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            summary_path = os.path.join(tmpdir, "summary.md")
+            with open(summary_path, "w", encoding="utf-8") as f:
+                f.write("summary")
+
+            history = SimpleNamespace(action_results=lambda: [SimpleNamespace(attachments=[summary_path])])
+
+            with patch("django.db.models.fields.files.FieldFile.save", side_effect=RuntimeError("storage down")):
+                artifacts = persist_browser_task_artifacts_sync(
+                    history=history,
+                    persistent_agent_id=str(self.persistent_agent.id),
+                    task_id=str(task.id),
+                )
+
+        self.assertEqual(artifacts, [])
+        self.assertFalse(
+            AgentFsNode.objects.filter(
+                path=f"/browser_tasks/{task.id}/summary.md",
+                node_type=AgentFsNode.NodeType.FILE,
+            ).exists()
+        )
+
     def test_process_browser_task_saves_filespace_artifacts_from_provider_result(self):
         task = BrowserUseAgentTask.objects.create(
             agent=self.agent,
