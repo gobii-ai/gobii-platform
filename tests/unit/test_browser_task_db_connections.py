@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.db.utils import OperationalError
@@ -16,6 +18,7 @@ from api.models import (
     BrowserLLMPolicy,
     BrowserLLMTier,
     EvalRun,
+    AgentFsNode,
     BrowserTierEndpoint,
     BrowserModelEndpoint,
     LLMProvider,
@@ -229,6 +232,137 @@ class BrowserTaskDbConnectionTests(TestCase):
         steps = BrowserUseAgentTaskStep.objects.filter(task=task, step_number=1)
         self.assertEqual(steps.count(), 1)
         self.assertTrue(steps.first().is_result)
+
+    def test_browser_task_artifacts_persist_unique_existing_attachments(self):
+        from api.agent.browser_actions.artifacts import persist_browser_task_artifacts_sync
+
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="save files",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            summary_path = os.path.join(tmpdir, "summary.md")
+            pdf_path = os.path.join(tmpdir, "page.pdf")
+            missing_path = os.path.join(tmpdir, "missing.txt")
+            with open(summary_path, "w", encoding="utf-8") as f:
+                f.write("summary")
+            with open(pdf_path, "wb") as f:
+                f.write(b"%PDF-1.4\n")
+
+            history = SimpleNamespace(
+                action_results=lambda: [
+                    SimpleNamespace(attachments=[summary_path, pdf_path, summary_path, missing_path]),
+                    SimpleNamespace(attachments=None),
+                ]
+            )
+
+            artifacts = persist_browser_task_artifacts_sync(
+                history=history,
+                persistent_agent_id=str(self.persistent_agent.id),
+                task_id=str(task.id),
+            )
+
+        self.assertEqual(len(artifacts), 2)
+        paths = {artifact["path"] for artifact in artifacts}
+        self.assertEqual(
+            paths,
+            {
+                f"/browser_tasks/{task.id}/summary.md",
+                f"/browser_tasks/{task.id}/page.pdf",
+            },
+        )
+        self.assertEqual(
+            AgentFsNode.objects.filter(path__in=paths, node_type=AgentFsNode.NodeType.FILE).count(),
+            2,
+        )
+        self.assertTrue(all(artifact.get("node_id") for artifact in artifacts))
+
+    def test_process_browser_task_saves_filespace_artifacts_from_provider_result(self):
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="simple",
+        )
+        artifacts = [
+            {
+                "filename": "summary.md",
+                "path": f"/browser_tasks/{task.id}/summary.md",
+                "node_id": "node-1",
+                "mime_type": "text/markdown",
+                "size_bytes": 7,
+            }
+        ]
+
+        with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
+             patch("api.tasks.browser_agent_tasks.Controller"), \
+             patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
+             patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value=({"ok": True}, None, artifacts)), \
+             patch("api.tasks.browser_agent_tasks.close_old_connections"):
+            from api.tasks.browser_agent_tasks import _process_browser_use_task_core
+
+            _process_browser_use_task_core(str(task.id))
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, BrowserUseAgentTask.StatusChoices.COMPLETED)
+        self.assertEqual(task.filespace_artifacts, artifacts)
+
+    def test_browser_task_result_payload_includes_filespace_artifact_files(self):
+        from api.agent.core.prompt_context import _build_browser_task_result_payload
+
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="simple",
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            filespace_artifacts=[
+                {
+                    "filename": "summary.md",
+                    "path": "/browser_tasks/task-1/summary.md",
+                    "node_id": "node-1",
+                    "mime_type": "text/markdown",
+                    "size_bytes": 7,
+                }
+            ],
+        )
+        step = BrowserUseAgentTaskStep.objects.create(
+            task=task,
+            step_number=1,
+            description="done",
+            is_result=True,
+            result_value={"ok": True},
+        )
+
+        payload = _build_browser_task_result_payload(task, step)
+
+        self.assertEqual(payload["result"], {"ok": True})
+        self.assertEqual(
+            payload["files"],
+            [{"path": "/browser_tasks/task-1/summary.md", "filename": "summary.md"}],
+        )
+
+    def test_browser_task_result_payload_omits_files_when_no_artifacts(self):
+        from api.agent.core.prompt_context import _build_browser_task_result_payload
+
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="simple",
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+        )
+        step = BrowserUseAgentTaskStep.objects.create(
+            task=task,
+            step_number=1,
+            description="done",
+            is_result=True,
+            result_value={"ok": True},
+        )
+
+        payload = _build_browser_task_result_payload(task, step)
+
+        self.assertEqual(payload["result"], {"ok": True})
+        self.assertNotIn("files", payload)
 
 
 @tag("batch_browser_task_db")

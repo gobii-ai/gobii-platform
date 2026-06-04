@@ -705,9 +705,6 @@ def _build_prompt_preview(
     - preview_text is a sample of the result
     - is_inline is True only for small results that fit entirely
     """
-    if tool_name == SPAWN_WEB_TASK_RESULT_TOOL_NAME:
-        return None, False
-
     # Small results are ALWAYS inlined - critical for tools like create_chart
     # where the result contains essential data (paths) that the agent needs
     # even if many subsequent tool calls push it outside the recency window.
