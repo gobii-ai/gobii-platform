@@ -3758,6 +3758,7 @@ class SolutionView(TemplateView):
             'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.',
             'seo_title': 'AI Recruiting Agents - Automate Sourcing & Screening | Gobii',
             'seo_description': "Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on digital workers.",
+            'date_modified': '2026-06-04',
             'social_image': 'images/solutions/recruiting-hero.jpg',
             'social_image_alt': 'Gobii AI recruiting agents for candidate sourcing and screening',
             'related_link': {
@@ -3889,6 +3890,8 @@ class SolutionView(TemplateView):
                 },
             },
         }
+        if data.get('date_modified'):
+            structured_data["dateModified"] = data['date_modified']
         breadcrumb_data = {
             "@context": "https://schema.org",
             "@type": "BreadcrumbList",

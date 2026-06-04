@@ -2823,6 +2823,10 @@ class SolutionCtaCopyTests(TestCase):
                 self.assertEqual(structured_data["description"], data["seo_description"])
                 self.assertEqual(structured_data["url"], expected_solution_url)
                 self.assertEqual(structured_data["image"], expected_image_url)
+                if data.get("date_modified"):
+                    self.assertEqual(structured_data["dateModified"], data["date_modified"])
+                else:
+                    self.assertNotIn("dateModified", structured_data)
                 self.assertEqual(structured_data["publisher"]["name"], "Gobii")
                 self.assertEqual(structured_data["isPartOf"]["@type"], "WebSite")
                 self.assertEqual(structured_data["isPartOf"]["name"], "Gobii")
