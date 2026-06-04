@@ -2,10 +2,40 @@
 {% load vite_tags %}
 {% load waffle_tags %}
 {% load cta_tags %}
-{% block title %}{{ settings.PUBLIC_BRAND_NAME|default:"Gobii" }} — AI Coworkers for Teams With Real Work to Do{% endblock %}
+{% block title %}{{ home_meta_title }}{% endblock %}
+{% block canonical_link %}
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and home_canonical_url %}
+  {% if not default_charter or agent_charter_saved %}
+  <link rel="canonical" href="{{ home_canonical_url }}">
+  {% endif %}
+  {% endif %}
+{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">
+  <meta name="description" content="{{ home_meta_description }}">
+  {% if default_charter and not agent_charter_saved %}
+  <meta name="robots" content="noindex, follow">
+  {% endif %}
+  {% if home_social_metadata_enabled %}
+  {% if not default_charter or agent_charter_saved %}
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="{{ home_meta_title }}">
+  <meta property="og:description" content="{{ home_meta_description }}">
+  <meta property="og:url" content="{{ home_canonical_url }}">
+  <meta property="og:site_name" content="{{ home_brand_name }}">
+  <meta property="og:image" content="{{ home_social_image_url }}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="{{ home_social_image_alt }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ home_meta_title }}">
+  <meta name="twitter:description" content="{{ home_meta_description }}">
+  <meta name="twitter:image" content="{{ home_social_image_url }}">
+  <meta name="twitter:image:alt" content="{{ home_social_image_alt }}">
+  {% endif %}
+  {% endif %}
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
