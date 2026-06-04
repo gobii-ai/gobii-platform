@@ -6072,45 +6072,6 @@ class BrowserEndpointDetailAPIView(SystemAdminAPIView):
         return _json_ok()
 
 
-class EmbeddingEndpointListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        endpoint, error_response = _create_aux_llm_endpoint_from_payload(
-            payload,
-            endpoint_model=EmbeddingsModelEndpoint,
-        )
-        if error_response:
-            return error_response
-        return _json_ok(endpoint_id=str(endpoint.id))
-
-
-class EmbeddingEndpointDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
-        endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        error_response = _update_aux_llm_endpoint_from_payload(endpoint, payload)
-        if error_response:
-            return error_response
-        return _json_ok(endpoint_id=str(endpoint.id))
-
-    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
-        endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
-        error_response = _delete_endpoint_with_tier_guard(endpoint)
-        if error_response:
-            return error_response
-        return _json_ok()
-
-
 class BrowserTierListCreateAPIView(SystemAdminAPIView):
     http_method_names = ["post"]
 
@@ -6229,88 +6190,12 @@ class BrowserTierEndpointDetailAPIView(SystemAdminAPIView):
         return _json_ok()
 
 
-class EmbeddingTierListCreateAPIView(SystemAdminAPIView):
+class AuxEndpointListCreateAPIView(SystemAdminAPIView):
     http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        tier = _create_aux_tier_from_payload(
-            payload,
-            tier_model=EmbeddingsLLMTier,
-            next_order_fn=_next_embedding_order,
-        )
-        return _json_ok(tier_id=str(tier.id))
-
-
-class EmbeddingTierDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(EmbeddingsLLMTier, pk=tier_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        error_response = _update_aux_tier_from_payload(
-            tier,
-            payload,
-            queryset=EmbeddingsLLMTier.objects.all(),
-        )
-        if error_response:
-            return error_response
-        return _json_ok(tier_id=str(tier.id))
-
-    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(EmbeddingsLLMTier, pk=tier_id)
-        tier.delete()
-        return _json_ok()
-
-
-class EmbeddingTierEndpointListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(EmbeddingsLLMTier, pk=tier_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        te, error_response = _create_aux_tier_endpoint_from_payload(
-            payload,
-            tier=tier,
-            endpoint_model=EmbeddingsModelEndpoint,
-            tier_endpoint_model=EmbeddingsTierEndpoint,
-        )
-        if error_response:
-            return error_response
-        return _json_ok(tier_endpoint_id=str(te.id))
-
-
-class EmbeddingTierEndpointDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        tier_endpoint = get_object_or_404(EmbeddingsTierEndpoint, pk=tier_endpoint_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        error_response = _update_weighted_tier_endpoint_from_payload(tier_endpoint, payload)
-        if error_response:
-            return error_response
-        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
-
-    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        tier_endpoint = get_object_or_404(EmbeddingsTierEndpoint, pk=tier_endpoint_id)
-        tier_endpoint.delete()
-        return _json_ok()
-
-
-class FileHandlerEndpointListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["post"]
+    endpoint_model = None
+    include_supports_vision = False
+    include_supports_image_to_image = False
+    include_supports_image_to_video = False
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
         try:
@@ -6319,19 +6204,25 @@ class FileHandlerEndpointListCreateAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest(str(exc))
         endpoint, error_response = _create_aux_llm_endpoint_from_payload(
             payload,
-            endpoint_model=FileHandlerModelEndpoint,
-            include_supports_vision=True,
+            endpoint_model=self.endpoint_model,
+            include_supports_vision=self.include_supports_vision,
+            include_supports_image_to_image=self.include_supports_image_to_image,
+            include_supports_image_to_video=self.include_supports_image_to_video,
         )
         if error_response:
             return error_response
         return _json_ok(endpoint_id=str(endpoint.id))
 
 
-class FileHandlerEndpointDetailAPIView(SystemAdminAPIView):
+class AuxEndpointDetailAPIView(SystemAdminAPIView):
     http_method_names = ["patch", "delete"]
+    endpoint_model = None
+    include_supports_vision = False
+    include_supports_image_to_image = False
+    include_supports_image_to_video = False
 
     def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
-        endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=endpoint_id)
+        endpoint = get_object_or_404(self.endpoint_model, pk=endpoint_id)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -6339,172 +6230,70 @@ class FileHandlerEndpointDetailAPIView(SystemAdminAPIView):
         error_response = _update_aux_llm_endpoint_from_payload(
             endpoint,
             payload,
-            include_supports_vision=True,
+            include_supports_vision=self.include_supports_vision,
+            include_supports_image_to_image=self.include_supports_image_to_image,
+            include_supports_image_to_video=self.include_supports_image_to_video,
         )
         if error_response:
             return error_response
         return _json_ok(endpoint_id=str(endpoint.id))
 
     def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
-        endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=endpoint_id)
+        endpoint = get_object_or_404(self.endpoint_model, pk=endpoint_id)
         error_response = _delete_endpoint_with_tier_guard(endpoint)
         if error_response:
             return error_response
         return _json_ok()
 
 
-class FileHandlerTierListCreateAPIView(SystemAdminAPIView):
+class AuxTierListCreateAPIView(SystemAdminAPIView):
     http_method_names = ["post"]
+    tier_model = None
+    next_order_fn = None
+    default_use_case = None
+    valid_use_cases = None
+    next_order_for_use_case_fn = None
 
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        tier = _create_aux_tier_from_payload(
-            payload,
-            tier_model=FileHandlerLLMTier,
-            next_order_fn=_next_file_handler_order,
-        )
-        return _json_ok(tier_id=str(tier.id))
+    def _resolve_create_options(self, payload: dict[str, Any]):
+        if self.default_use_case is None:
+            return {}, self.next_order_fn, None
 
-
-class FileHandlerTierDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(FileHandlerLLMTier, pk=tier_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        error_response = _update_aux_tier_from_payload(
-            tier,
-            payload,
-            queryset=FileHandlerLLMTier.objects.all(),
-        )
-        if error_response:
-            return error_response
-        return _json_ok(tier_id=str(tier.id))
-
-    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(FileHandlerLLMTier, pk=tier_id)
-        tier.delete()
-        return _json_ok()
-
-
-class FileHandlerTierEndpointListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(FileHandlerLLMTier, pk=tier_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        te, error_response = _create_aux_tier_endpoint_from_payload(
-            payload,
-            tier=tier,
-            endpoint_model=FileHandlerModelEndpoint,
-            tier_endpoint_model=FileHandlerTierEndpoint,
-        )
-        if error_response:
-            return error_response
-        return _json_ok(tier_endpoint_id=str(te.id))
-
-
-class FileHandlerTierEndpointDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        tier_endpoint = get_object_or_404(FileHandlerTierEndpoint, pk=tier_endpoint_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        error_response = _update_weighted_tier_endpoint_from_payload(tier_endpoint, payload)
-        if error_response:
-            return error_response
-        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
-
-    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        tier_endpoint = get_object_or_404(FileHandlerTierEndpoint, pk=tier_endpoint_id)
-        tier_endpoint.delete()
-        return _json_ok()
-
-
-class ImageGenerationEndpointListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        endpoint, error_response = _create_aux_llm_endpoint_from_payload(
-            payload,
-            endpoint_model=ImageGenerationModelEndpoint,
-            include_supports_image_to_image=True,
-        )
-        if error_response:
-            return error_response
-        return _json_ok(endpoint_id=str(endpoint.id))
-
-
-class ImageGenerationEndpointDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
-        endpoint = get_object_or_404(ImageGenerationModelEndpoint, pk=endpoint_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        error_response = _update_aux_llm_endpoint_from_payload(
-            endpoint,
-            payload,
-            include_supports_image_to_image=True,
-        )
-        if error_response:
-            return error_response
-        return _json_ok(endpoint_id=str(endpoint.id))
-
-    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
-        endpoint = get_object_or_404(ImageGenerationModelEndpoint, pk=endpoint_id)
-        error_response = _delete_endpoint_with_tier_guard(endpoint)
-        if error_response:
-            return error_response
-        return _json_ok()
-
-
-class ImageGenerationTierListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        use_case = (payload.get("use_case") or ImageGenerationLLMTier.UseCase.CREATE_IMAGE).strip()
-        valid_use_cases = set(ImageGenerationLLMTier.UseCase.values)
+        use_case = (payload.get("use_case") or self.default_use_case).strip()
+        valid_use_cases = set(self.valid_use_cases)
         if use_case not in valid_use_cases:
             allowed = ", ".join(sorted(valid_use_cases))
-            return HttpResponseBadRequest(f"use_case must be one of: {allowed}")
+            return None, None, HttpResponseBadRequest(f"use_case must be one of: {allowed}")
+        return {"use_case": use_case}, lambda: self.next_order_for_use_case_fn(use_case), None
 
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        extra_create_kwargs, next_order_fn, error_response = self._resolve_create_options(payload)
+        if error_response:
+            return error_response
         tier = _create_aux_tier_from_payload(
             payload,
-            tier_model=ImageGenerationLLMTier,
-            next_order_fn=lambda: _next_image_generation_order(use_case),
-            extra_create_kwargs={"use_case": use_case},
+            tier_model=self.tier_model,
+            next_order_fn=next_order_fn,
+            extra_create_kwargs=extra_create_kwargs,
         )
         return _json_ok(tier_id=str(tier.id))
 
 
-class ImageGenerationTierDetailAPIView(SystemAdminAPIView):
+class AuxTierDetailAPIView(SystemAdminAPIView):
     http_method_names = ["patch", "delete"]
+    tier_model = None
+    scope_queryset_by_use_case = False
+
+    def _sibling_queryset(self, tier):
+        if self.scope_queryset_by_use_case:
+            return self.tier_model.objects.filter(use_case=tier.use_case)
+        return self.tier_model.objects.all()
 
     def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(ImageGenerationLLMTier, pk=tier_id)
+        tier = get_object_or_404(self.tier_model, pk=tier_id)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -6512,23 +6301,26 @@ class ImageGenerationTierDetailAPIView(SystemAdminAPIView):
         error_response = _update_aux_tier_from_payload(
             tier,
             payload,
-            queryset=ImageGenerationLLMTier.objects.filter(use_case=tier.use_case),
+            queryset=self._sibling_queryset(tier),
         )
         if error_response:
             return error_response
         return _json_ok(tier_id=str(tier.id))
 
     def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(ImageGenerationLLMTier, pk=tier_id)
+        tier = get_object_or_404(self.tier_model, pk=tier_id)
         tier.delete()
         return _json_ok()
 
 
-class ImageGenerationTierEndpointListCreateAPIView(SystemAdminAPIView):
+class AuxTierEndpointListCreateAPIView(SystemAdminAPIView):
     http_method_names = ["post"]
+    tier_model = None
+    endpoint_model = None
+    tier_endpoint_model = None
 
     def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(ImageGenerationLLMTier, pk=tier_id)
+        tier = get_object_or_404(self.tier_model, pk=tier_id)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -6536,19 +6328,20 @@ class ImageGenerationTierEndpointListCreateAPIView(SystemAdminAPIView):
         te, error_response = _create_aux_tier_endpoint_from_payload(
             payload,
             tier=tier,
-            endpoint_model=ImageGenerationModelEndpoint,
-            tier_endpoint_model=ImageGenerationTierEndpoint,
+            endpoint_model=self.endpoint_model,
+            tier_endpoint_model=self.tier_endpoint_model,
         )
         if error_response:
             return error_response
         return _json_ok(tier_endpoint_id=str(te.id))
 
 
-class ImageGenerationTierEndpointDetailAPIView(SystemAdminAPIView):
+class AuxTierEndpointDetailAPIView(SystemAdminAPIView):
     http_method_names = ["patch", "delete"]
+    tier_endpoint_model = None
 
     def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        tier_endpoint = get_object_or_404(ImageGenerationTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint = get_object_or_404(self.tier_endpoint_model, pk=tier_endpoint_id)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -6559,9 +6352,97 @@ class ImageGenerationTierEndpointDetailAPIView(SystemAdminAPIView):
         return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
 
     def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        tier_endpoint = get_object_or_404(ImageGenerationTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint = get_object_or_404(self.tier_endpoint_model, pk=tier_endpoint_id)
         tier_endpoint.delete()
         return _json_ok()
+
+
+class EmbeddingEndpointListCreateAPIView(AuxEndpointListCreateAPIView):
+    endpoint_model = EmbeddingsModelEndpoint
+
+
+class EmbeddingEndpointDetailAPIView(AuxEndpointDetailAPIView):
+    endpoint_model = EmbeddingsModelEndpoint
+
+
+class EmbeddingTierListCreateAPIView(AuxTierListCreateAPIView):
+    tier_model = EmbeddingsLLMTier
+    next_order_fn = staticmethod(_next_embedding_order)
+
+
+class EmbeddingTierDetailAPIView(AuxTierDetailAPIView):
+    tier_model = EmbeddingsLLMTier
+
+
+class EmbeddingTierEndpointListCreateAPIView(AuxTierEndpointListCreateAPIView):
+    tier_model = EmbeddingsLLMTier
+    endpoint_model = EmbeddingsModelEndpoint
+    tier_endpoint_model = EmbeddingsTierEndpoint
+
+
+class EmbeddingTierEndpointDetailAPIView(AuxTierEndpointDetailAPIView):
+    tier_endpoint_model = EmbeddingsTierEndpoint
+
+
+class FileHandlerEndpointListCreateAPIView(AuxEndpointListCreateAPIView):
+    endpoint_model = FileHandlerModelEndpoint
+    include_supports_vision = True
+
+
+class FileHandlerEndpointDetailAPIView(AuxEndpointDetailAPIView):
+    endpoint_model = FileHandlerModelEndpoint
+    include_supports_vision = True
+
+
+class FileHandlerTierListCreateAPIView(AuxTierListCreateAPIView):
+    tier_model = FileHandlerLLMTier
+    next_order_fn = staticmethod(_next_file_handler_order)
+
+
+class FileHandlerTierDetailAPIView(AuxTierDetailAPIView):
+    tier_model = FileHandlerLLMTier
+
+
+class FileHandlerTierEndpointListCreateAPIView(AuxTierEndpointListCreateAPIView):
+    tier_model = FileHandlerLLMTier
+    endpoint_model = FileHandlerModelEndpoint
+    tier_endpoint_model = FileHandlerTierEndpoint
+
+
+class FileHandlerTierEndpointDetailAPIView(AuxTierEndpointDetailAPIView):
+    tier_endpoint_model = FileHandlerTierEndpoint
+
+
+class ImageGenerationEndpointListCreateAPIView(AuxEndpointListCreateAPIView):
+    endpoint_model = ImageGenerationModelEndpoint
+    include_supports_image_to_image = True
+
+
+class ImageGenerationEndpointDetailAPIView(AuxEndpointDetailAPIView):
+    endpoint_model = ImageGenerationModelEndpoint
+    include_supports_image_to_image = True
+
+
+class ImageGenerationTierListCreateAPIView(AuxTierListCreateAPIView):
+    tier_model = ImageGenerationLLMTier
+    default_use_case = ImageGenerationLLMTier.UseCase.CREATE_IMAGE
+    valid_use_cases = ImageGenerationLLMTier.UseCase.values
+    next_order_for_use_case_fn = staticmethod(_next_image_generation_order)
+
+
+class ImageGenerationTierDetailAPIView(AuxTierDetailAPIView):
+    tier_model = ImageGenerationLLMTier
+    scope_queryset_by_use_case = True
+
+
+class ImageGenerationTierEndpointListCreateAPIView(AuxTierEndpointListCreateAPIView):
+    tier_model = ImageGenerationLLMTier
+    endpoint_model = ImageGenerationModelEndpoint
+    tier_endpoint_model = ImageGenerationTierEndpoint
+
+
+class ImageGenerationTierEndpointDetailAPIView(AuxTierEndpointDetailAPIView):
+    tier_endpoint_model = ImageGenerationTierEndpoint
 
 
 # =============================================================================
@@ -6569,135 +6450,36 @@ class ImageGenerationTierEndpointDetailAPIView(SystemAdminAPIView):
 # =============================================================================
 
 
-class VideoGenerationEndpointListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        endpoint, error_response = _create_aux_llm_endpoint_from_payload(
-            payload,
-            endpoint_model=VideoGenerationModelEndpoint,
-            include_supports_image_to_video=True,
-        )
-        if error_response:
-            return error_response
-        return _json_ok(endpoint_id=str(endpoint.id))
+class VideoGenerationEndpointListCreateAPIView(AuxEndpointListCreateAPIView):
+    endpoint_model = VideoGenerationModelEndpoint
+    include_supports_image_to_video = True
 
 
-class VideoGenerationEndpointDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
-        endpoint = get_object_or_404(VideoGenerationModelEndpoint, pk=endpoint_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        error_response = _update_aux_llm_endpoint_from_payload(
-            endpoint,
-            payload,
-            include_supports_image_to_video=True,
-        )
-        if error_response:
-            return error_response
-        return _json_ok(endpoint_id=str(endpoint.id))
-
-    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
-        endpoint = get_object_or_404(VideoGenerationModelEndpoint, pk=endpoint_id)
-        error_response = _delete_endpoint_with_tier_guard(endpoint)
-        if error_response:
-            return error_response
-        return _json_ok()
+class VideoGenerationEndpointDetailAPIView(AuxEndpointDetailAPIView):
+    endpoint_model = VideoGenerationModelEndpoint
+    include_supports_image_to_video = True
 
 
-class VideoGenerationTierListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        use_case = (payload.get("use_case") or VideoGenerationLLMTier.UseCase.CREATE_VIDEO).strip()
-        valid_use_cases = set(VideoGenerationLLMTier.UseCase.values)
-        if use_case not in valid_use_cases:
-            allowed = ", ".join(sorted(valid_use_cases))
-            return HttpResponseBadRequest(f"use_case must be one of: {allowed}")
-
-        tier = _create_aux_tier_from_payload(
-            payload,
-            tier_model=VideoGenerationLLMTier,
-            next_order_fn=lambda: _next_video_generation_order(use_case),
-            extra_create_kwargs={"use_case": use_case},
-        )
-        return _json_ok(tier_id=str(tier.id))
+class VideoGenerationTierListCreateAPIView(AuxTierListCreateAPIView):
+    tier_model = VideoGenerationLLMTier
+    default_use_case = VideoGenerationLLMTier.UseCase.CREATE_VIDEO
+    valid_use_cases = VideoGenerationLLMTier.UseCase.values
+    next_order_for_use_case_fn = staticmethod(_next_video_generation_order)
 
 
-class VideoGenerationTierDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(VideoGenerationLLMTier, pk=tier_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        error_response = _update_aux_tier_from_payload(
-            tier,
-            payload,
-            queryset=VideoGenerationLLMTier.objects.filter(use_case=tier.use_case),
-        )
-        if error_response:
-            return error_response
-        return _json_ok(tier_id=str(tier.id))
-
-    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(VideoGenerationLLMTier, pk=tier_id)
-        tier.delete()
-        return _json_ok()
+class VideoGenerationTierDetailAPIView(AuxTierDetailAPIView):
+    tier_model = VideoGenerationLLMTier
+    scope_queryset_by_use_case = True
 
 
-class VideoGenerationTierEndpointListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(VideoGenerationLLMTier, pk=tier_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        te, error_response = _create_aux_tier_endpoint_from_payload(
-            payload,
-            tier=tier,
-            endpoint_model=VideoGenerationModelEndpoint,
-            tier_endpoint_model=VideoGenerationTierEndpoint,
-        )
-        if error_response:
-            return error_response
-        return _json_ok(tier_endpoint_id=str(te.id))
+class VideoGenerationTierEndpointListCreateAPIView(AuxTierEndpointListCreateAPIView):
+    tier_model = VideoGenerationLLMTier
+    endpoint_model = VideoGenerationModelEndpoint
+    tier_endpoint_model = VideoGenerationTierEndpoint
 
 
-class VideoGenerationTierEndpointDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        tier_endpoint = get_object_or_404(VideoGenerationTierEndpoint, pk=tier_endpoint_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        error_response = _update_weighted_tier_endpoint_from_payload(tier_endpoint, payload)
-        if error_response:
-            return error_response
-        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
-
-    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        tier_endpoint = get_object_or_404(VideoGenerationTierEndpoint, pk=tier_endpoint_id)
-        tier_endpoint.delete()
-        return _json_ok()
+class VideoGenerationTierEndpointDetailAPIView(AuxTierEndpointDetailAPIView):
+    tier_endpoint_model = VideoGenerationTierEndpoint
 
 
 # =============================================================================

@@ -1,6 +1,5 @@
-import { useCallback, useMemo, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Plus, ShieldCheck } from 'lucide-react'
+import { useCallback, useMemo } from 'react'
+import { ExternalLink, Plus } from 'lucide-react'
 
 import {
   fetchAgentSecrets,
@@ -10,15 +9,12 @@ import {
   promoteAgentSecret,
   type AgentSecretListResponse,
   type SecretDTO,
-  type CreateSecretPayload,
-  type UpdateSecretPayload,
 } from '../api/secrets'
 import { SecretTable } from '../components/secrets/SecretTable'
-import { SecretFormModal } from '../components/secrets/SecretFormModal'
-import { DeleteSecretDialog } from '../components/secrets/DeleteSecretDialog'
+import { SecretSecurityNotice } from '../components/secrets/SecretSecurityNotice'
+import { useSecretCrud } from '../components/secrets/useSecretCrud'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
-import { useModal } from '../hooks/useModal'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 
 type AgentSecretsScreenProps = {
@@ -46,82 +42,41 @@ export function AgentSecretsScreen({
   onBack,
   onOpenRequests,
 }: AgentSecretsScreenProps) {
-  const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['agent-secrets', agentId] as const, [agentId])
-  const [modal, showModal] = useModal()
-  const [banner, setBanner] = useState<string | null>(null)
-  const [errorBanner, setErrorBanner] = useState<string | null>(null)
-
-  const { data, isLoading, error } = useQuery<AgentSecretListResponse>({
+  const secretDetailUrl = useCallback(
+    (secretId: string) => detailUrlTemplate.replace(PLACEHOLDER_TOKEN, secretId),
+    [detailUrlTemplate],
+  )
+  const secretPromoteUrl = useCallback(
+    (secretId: string) => promoteUrlTemplate.replace(PLACEHOLDER_TOKEN, secretId),
+    [promoteUrlTemplate],
+  )
+  const {
+    data,
+    isLoading,
+    listError,
+    modal,
+    banner,
+    errorBanner,
+    setErrorBanner,
+    handleCreate,
+    handleEdit,
+    handleDelete,
+    handleSuccess,
+  } = useSecretCrud<AgentSecretListResponse>({
     queryKey,
-    queryFn: ({ signal }) => fetchAgentSecrets(listUrl, signal),
+    listUrl,
+    detailUrl: secretDetailUrl,
+    fetchSecrets: fetchAgentSecrets,
+    createSecret: createAgentSecret,
+    updateSecret: updateAgentSecret,
+    deleteSecret: deleteAgentSecret,
+    showVisibilityToggle: true,
   })
 
   const agentSecrets = data?.agent_secrets ?? []
   const globalSecrets = data?.global_secrets ?? []
   const requestedSecrets = data?.requested_secrets ?? []
-  const listError = error instanceof Error ? error.message : null
-
-  const refresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey })
-  }, [queryClient, queryKey])
-
-  const handleSuccess = useCallback(
-    (message: string) => {
-      setBanner(message)
-      setErrorBanner(null)
-      refresh()
-    },
-    [refresh],
-  )
-
-  const secretDetailUrl = (secretId: string) => detailUrlTemplate.replace(PLACEHOLDER_TOKEN, secretId)
-  const secretPromoteUrl = (secretId: string) => promoteUrlTemplate.replace(PLACEHOLDER_TOKEN, secretId)
-
-  const handleCreate = useCallback(() => {
-    showModal((onClose) => (
-      <SecretFormModal
-        showVisibilityToggle
-        onClose={onClose}
-        onSubmit={async (data) => {
-          await createAgentSecret(listUrl, data as CreateSecretPayload)
-          handleSuccess('Secret created.')
-        }}
-      />
-    ))
-  }, [listUrl, showModal, handleSuccess])
-
-  const handleEdit = useCallback(
-    (secret: SecretDTO) => {
-      showModal((onClose) => (
-        <SecretFormModal
-          editSecret={secret}
-          onClose={onClose}
-          onSubmit={async (data) => {
-            await updateAgentSecret(secretDetailUrl(secret.id), data as UpdateSecretPayload)
-            handleSuccess('Secret updated.')
-          }}
-        />
-      ))
-    },
-    [showModal, handleSuccess],
-  )
-
-  const handleDelete = useCallback(
-    (secret: SecretDTO) => {
-      showModal((onClose) => (
-        <DeleteSecretDialog
-          secretName={secret.name}
-          onClose={onClose}
-          onConfirm={async () => {
-            await deleteAgentSecret(secretDetailUrl(secret.id))
-            handleSuccess('Secret deleted.')
-          }}
-        />
-      ))
-    },
-    [showModal, handleSuccess],
-  )
 
   const handlePromote = useCallback(
     (secret: SecretDTO) => {
@@ -134,7 +89,7 @@ export function AgentSecretsScreen({
           setErrorBanner(err instanceof Error ? err.message : 'Failed to promote secret.')
         })
     },
-    [handleSuccess],
+    [handleSuccess, secretPromoteUrl, setErrorBanner],
   )
 
   return (
@@ -158,23 +113,10 @@ export function AgentSecretsScreen({
         )}
       />
 
-      {/* Security Notice */}
-      <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`}>
-        <div className="p-4 sm:p-6">
-          <div className="flex gap-x-4">
-            <div className="flex-shrink-0">
-              <ShieldCheck className="h-6 w-6 text-slate-300" />
-            </div>
-            <div>
-              <h3 className="mb-1 text-sm font-semibold text-slate-100">Secure Encryption</h3>
-              <p className="text-sm text-slate-300">
-                All secrets are encrypted with AES-256-GCM before storage. Credential secrets can be used via
-                placeholders.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SecretSecurityNotice>
+        All secrets are encrypted with AES-256-GCM before storage. Credential secrets can be used via
+        placeholders.
+      </SecretSecurityNotice>
 
       {/* Banners */}
       {banner && (
