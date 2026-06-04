@@ -640,12 +640,7 @@ def native_integration_is_connected(
 ) -> bool:
     provider = get_native_integration_provider(provider_key)
     secret = get_native_integration_secret(provider.key, owner_user, owner_org)
-    if secret is None:
-        return False
-    try:
-        return load_native_integration_credentials(secret) is not None
-    except NativeIntegrationAuthError:
-        return False
+    return secret is not None
 
 
 def preflight_native_integration_capability(

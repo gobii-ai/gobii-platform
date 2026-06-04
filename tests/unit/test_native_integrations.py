@@ -37,6 +37,7 @@ from api.services.native_integrations import (
     build_native_integration_permission_summary,
     get_native_integration_provider,
     list_native_integration_capabilities,
+    native_integration_is_connected,
     parse_native_integration_scopes,
     preflight_native_integration_capability,
 )
@@ -338,6 +339,15 @@ class NativeIntegrationTests(TestCase):
         self.assertTrue(full["connected"])
         self.assertEqual(full["missing_scopes"], [])
         self.assertIn("Create or update HubSpot deals", [item["label"] for item in full["available_capabilities"]])
+
+    def test_native_integration_is_connected_uses_secret_existence_without_decrypting(self):
+        self._create_integration_secret(owner_user=self.user, provider=APOLLO_PROVIDER)
+
+        with patch(
+            "api.services.native_integrations.load_native_integration_credentials",
+            side_effect=AssertionError("should not decrypt"),
+        ):
+            self.assertTrue(native_integration_is_connected("apollo", self.user, None))
 
     def test_provider_registry_accepts_google_sheets_alias(self):
         provider = get_native_integration_provider("google_sheets")

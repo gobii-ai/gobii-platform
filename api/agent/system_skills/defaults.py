@@ -64,7 +64,7 @@ def _hubspot_native_prompt_context(agent) -> str:
 def _google_sheets_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
     setup_text = (
-        "If setup is needed, tell the user to open `" + integrations_url + "`, connect Google Drive, "
+        f"If setup is needed, tell the user to open `{integrations_url}`, connect Google Drive, "
         "then choose the spreadsheet(s) the agent should be allowed to access.\n"
         if not _native_integration_connected(agent, "google_drive")
         else ""
@@ -109,7 +109,7 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
 def _apollo_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
     setup_text = (
-        "If setup is needed, tell the user to open `" + integrations_url + "` and connect Apollo. "
+        f"If setup is needed, tell the user to open `{integrations_url}` and connect Apollo. "
         if not _native_integration_connected(agent, "apollo")
         else ""
     )
