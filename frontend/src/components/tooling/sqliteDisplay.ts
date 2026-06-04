@@ -10,6 +10,7 @@ import { parseResultObject } from '../../util/objectUtils'
 import type { DetailKind } from '../agentChat/toolDetails'
 import type { SqliteInternalTableKind, SqliteStatementOperation } from './agentConfigSql'
 import { expandSqlStatements } from './agentConfigSql'
+import { splitSqlByComma } from './sqlFormatting'
 
 function truncate(value: string, max = 60): string {
   if (value.length <= max) return value
@@ -113,80 +114,6 @@ function sqliteOperationDisplayLabel(operation: SqliteStatementOperation): strin
 
 function sqliteOperationSummaryKind(operation: SqliteStatementOperation): 'query' | 'update' {
   return operation === 'select' ? 'query' : 'update'
-}
-
-function splitSqlByComma(value: string): string[] {
-  const parts: string[] = []
-  let current = ''
-  let depth = 0
-  let inSingle = false
-  let inDouble = false
-
-  for (let idx = 0; idx < value.length; idx += 1) {
-    const char = value[idx]
-    const next = idx + 1 < value.length ? value[idx + 1] : ''
-
-    if (inSingle) {
-      current += char
-      if (char === "'" && next === "'") {
-        current += next
-        idx += 1
-      } else if (char === "'") {
-        inSingle = false
-      }
-      continue
-    }
-
-    if (inDouble) {
-      current += char
-      if (char === '"' && next === '"') {
-        current += next
-        idx += 1
-      } else if (char === '"') {
-        inDouble = false
-      }
-      continue
-    }
-
-    if (char === "'") {
-      inSingle = true
-      current += char
-      continue
-    }
-    if (char === '"') {
-      inDouble = true
-      current += char
-      continue
-    }
-    if (char === '(') {
-      depth += 1
-      current += char
-      continue
-    }
-    if (char === ')') {
-      if (depth > 0) {
-        depth -= 1
-      }
-      current += char
-      continue
-    }
-    if (char === ',' && depth === 0) {
-      const trimmed = current.trim()
-      if (trimmed) {
-        parts.push(trimmed)
-      }
-      current = ''
-      continue
-    }
-
-    current += char
-  }
-
-  const trailing = current.trim()
-  if (trailing) {
-    parts.push(trailing)
-  }
-  return parts
 }
 
 function decodeSqlLiteral(value: string): string | null {
