@@ -3901,6 +3901,7 @@ class SolutionsIndexView(TemplateView):
 class SolutionView(TemplateView):
     # Solutions with dedicated landing page templates
     DEDICATED_TEMPLATES = {
+        'startups': 'solutions/startups.html',
         'recruiting': 'solutions/recruiting.html',
         'recruiting/candidate-sourcing': 'solutions/recruiting_candidate_sourcing.html',
         'sales': 'solutions/sales.html',
@@ -3919,6 +3920,21 @@ class SolutionView(TemplateView):
     )
 
     SOLUTION_DATA = {
+        'startups': {
+            'title': 'Startups',
+            'tagline': 'Delegate the roles your early-stage team cannot hire yet.',
+            'description': 'Give a 2-3 person startup always-on agents for growth, finance ops, customer research, recruiting, and founder admin.',
+            'seo_title': 'AI Agents for Startups - Delegate Marketing, Sales, Finance & Ops | Gobii',
+            'seo_description': 'Gobii gives early-stage startups AI agents for the work they cannot hire for yet. Delegate growth, finance ops, customer research, recruiting, and founder admin to always-on agents.',
+            'social_image': 'images/blog/newsletters/newsletter-2026-03-17-one-click-integrations-for-your-agents-hero.png',
+            'social_image_alt': 'Gobii startup agents connected to apps like Stripe, Brex, Slack, and Google Sheets',
+            'related_link': {
+                'intro': 'Want a growth workflow to inspect?',
+                'label': 'View the Lead Hunter AI sales agent',
+                'route': 'pages:pretrained_worker_detail',
+                'kwargs': {'slug': 'lead-hunter'},
+            },
+        },
         'recruiting': {
             'title': 'Recruiting',
             'tagline': 'Automate candidate sourcing and screening.',
