@@ -27,6 +27,7 @@ from api.models import (
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentEnabledTool,
+    PersistentAgentSystemSkillState,
 )
 from api.services.native_integrations import (
     APOLLO_PROVIDER,
@@ -1035,8 +1036,30 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(block.count("Read selected Google Sheets metadata and values"), 1)
         self.assertNotIn("connected with access for", block)
         self.assertIn("Granted scopes", block)
+        self.assertNotIn("/app/integrations", block)
         self.assertNotIn("native_google_drive", block)
         self.assertIn("</skill_google_sheets_native>", block)
+
+    @override_settings(PUBLIC_SITE_URL="https://app.example.test")
+    def test_native_system_skill_prompts_include_setup_link_only_when_disconnected(self):
+        cases = (
+            (GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY, "Google Drive"),
+            (APOLLO_NATIVE_SYSTEM_SKILL_KEY, "Apollo"),
+            (HUBSPOT_NATIVE_SYSTEM_SKILL_KEY, "HubSpot"),
+        )
+
+        for skill_key, provider_name in cases:
+            with self.subTest(skill_key=skill_key):
+                PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="http_request").delete()
+                PersistentAgentSystemSkillState.objects.filter(agent=self.agent, skill_key=skill_key).delete()
+
+                result = enable_system_skills(self.agent, [skill_key])
+                self.assertEqual(result["invalid"], [])
+
+                block = format_recent_skills_for_prompt(self.agent, limit=3)
+
+                self.assertIn(f"{provider_name} is not connected", block)
+                self.assertIn("https://app.example.test/app/integrations", block)
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_apollo_prompt_tells_agent_how_to_use_native_rest_api(self):
@@ -1054,7 +1077,7 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("per_page", block)
         self.assertIn("credit-sensitive", block)
         self.assertIn("Never invent webhook URLs", block)
-        self.assertIn("/app/integrations", block)
+        self.assertNotIn("/app/integrations", block)
         self.assertIn("mixed_people/api_search", block)
         self.assertIn("do not use `/mixed_people/search`", block)
         self.assertIn("mixed_companies/search", block)
@@ -1082,7 +1105,7 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("/crm/v3/owners/", block)
         self.assertIn("properties", block)
         self.assertIn("side-effecting operations", block)
-        self.assertIn("/app/integrations", block)
+        self.assertNotIn("/app/integrations", block)
         self.assertIn("Native integration permissions", block)
         self.assertIn("Search and read HubSpot contacts", block)
         self.assertIn("Granted scopes", block)

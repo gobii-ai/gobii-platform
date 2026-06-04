@@ -88,6 +88,7 @@ from .step_compaction import llm_summarise_steps
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
 from ..tools.attachment_guidance import SYSTEM_ATTACHMENT_PREFLIGHT_GUIDANCE
+from ..tools.plan import format_current_plan_for_prompt
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_state import (
@@ -1287,6 +1288,13 @@ def _render_prompt_context_once(
             weight=2,
             non_shrinkable=True,
         )
+
+    important_group.section_text(
+        "current_plan",
+        format_current_plan_for_prompt(agent),
+        weight=3,
+        non_shrinkable=True,
+    )
 
     # Schedule block
     schedule_str = agent.schedule if agent.schedule else "No schedule configured"
@@ -3623,7 +3631,11 @@ def _get_system_instruction(
         "Respect one-off preferences like 'stand by' or 'don't follow up unless I ask' in the current conversation without mutating config. When in doubt, leave config unchanged, deliver the result, and stop.\n\n"
 
         "## Plan Discipline (CRITICAL)\n\n"
-        "update_plan is for real multi-step work that benefits from a user-visible plan. Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. For deep work, use at most one initial plan update; update it again only to finish an existing visible plan before stopping.\n\n"
+        "Use `update_plan` only for substantial multi-step work where a visible plan helps. "
+        "Keep plans short, current, and verifiable; each call replaces the full active plan. "
+        "Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. "
+        "For deep work, use at most one initial plan update; update it again only to finish an existing visible plan before stopping. "
+        "Send the final user-facing report before any final completion update.\n\n"
 
         "## Silent Work (CRITICAL)\n\n"
         "Do not announce what you're about to do. Make tool calls with no text until findings, blocker, needed human question, or final answer. Text is for results, not narration; tools execute silently.\n\n"

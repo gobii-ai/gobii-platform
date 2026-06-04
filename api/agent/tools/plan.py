@@ -468,6 +468,28 @@ def build_plan_snapshot(agent) -> PlanSnapshot:
     )
 
 
+def format_current_plan_for_prompt(agent) -> str:
+    snapshot = build_plan_snapshot(agent)
+    if not (snapshot.todo_count or snapshot.doing_count or snapshot.done_count):
+        return "Current plan: none"
+
+    lines = [
+        "Current plan:",
+        f"- Doing: {snapshot.doing_count}",
+        f"- Todo: {snapshot.todo_count}",
+        f"- Done: {snapshot.done_count}",
+    ]
+    for label, titles in (
+        ("Doing", snapshot.doing_titles),
+        ("Todo", snapshot.todo_titles),
+        ("Done", snapshot.done_titles),
+    ):
+        if titles:
+            lines.append(f"{label}:")
+            lines.extend(f"- {title}" for title in titles[:20])
+    return "\n".join(lines)
+
+
 def _validate_update_plan_params(agent, params: dict[str, Any]) -> dict[str, Any]:
     errors: list[str] = []
     raw_plan = params.get("plan")

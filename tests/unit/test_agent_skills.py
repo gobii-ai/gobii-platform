@@ -416,7 +416,7 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertLess(block.index("Skill: skill-2 (v1)"), block.index("Skill: skill-3 (v1)"))
         self.assertIn("Omitted skills due to prompt limit:", block)
         self.assertIn("- skill-0", block)
-        self.assertIn("- System Skill: Runtime Planning (runtime_planning)", block)
+        self.assertNotIn("System Skill: Runtime Planning", block)
         self.assertIn("Use `search_tools` with an exact omitted skill name or key", block)
         self.assertIn("instructions for skill 3", block)
 
@@ -450,18 +450,12 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("Skill: Daily Brief (v1)", block)
         self.assertIn("Skill: Daily-Brief (v1)", block)
 
-    def test_prompt_block_includes_default_runtime_planning_system_skill(self):
+    def test_prompt_block_does_not_include_runtime_planning_system_skill(self):
+        self.assertNotIn("runtime_planning", default_enabled_system_skill_keys())
+
         block = format_recent_skills_for_prompt(self.agent, limit=1)
 
-        self.assertIn("<skill_runtime_planning>", block)
-        self.assertIn("System Skill: Runtime Planning", block)
-        self.assertIn("Tools: update_plan", block)
-        self.assertIn("Use `update_plan` only for substantial multi-step work", block)
-        self.assertIn("Keep plans short, current, and verifiable", block)
-        self.assertIn("each call replaces the full active plan", block)
-        self.assertIn("Send the final user-facing report before any final completion update", block)
-        self.assertIn("Current plan: none", block)
-        self.assertIn("</skill_runtime_planning>", block)
+        self.assertEqual(block, "")
 
     def test_custom_tool_development_system_skill_is_not_default_enabled(self):
         self.assertNotIn(CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY, default_enabled_system_skill_keys())
@@ -585,26 +579,19 @@ class AgentSkillsPersistenceTests(TestCase):
             tools=["sqlite_batch"],
             instructions="Use sqlite.",
         )
-        format_recent_skills_for_prompt(self.agent, limit=1)
-        system_state = PersistentAgentSystemSkillState.objects.get(
-            agent=self.agent,
-            skill_key="runtime_planning",
-        )
-
         refresh_skills_for_tool(self.agent, "sqlite_batch")
         saved.refresh_from_db()
-        system_state.refresh_from_db()
 
         self.assertIsNotNone(saved.last_used_at)
         self.assertEqual(saved.usage_count, 1)
-        self.assertIsNone(system_state.last_used_at)
-        self.assertEqual(system_state.usage_count, 0)
 
-        refresh_skills_for_tool(self.agent, "update_plan")
-        system_state.refresh_from_db()
-
-        self.assertIsNotNone(system_state.last_used_at)
-        self.assertEqual(system_state.usage_count, 1)
+        self.assertEqual(refresh_skills_for_tool(self.agent, "update_plan"), [])
+        self.assertFalse(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key="runtime_planning",
+            ).exists()
+        )
 
     def test_prompt_block_reports_required_pending_and_missing_secrets(self):
         global_secret = GlobalSecret(
