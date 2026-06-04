@@ -186,6 +186,10 @@ class HomePageTests(TestCase):
 
         self.assertIsNone(soup.find("link", rel="canonical"))
         self.assertEqual(
+            soup.find("meta", attrs={"name": "robots"})["content"],
+            "noindex, follow",
+        )
+        self.assertEqual(
             soup.find("meta", property="og:title")["content"],
             "Vendor Security Watch - Gobii",
         )
