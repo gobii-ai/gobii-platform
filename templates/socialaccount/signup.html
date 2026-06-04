@@ -36,6 +36,7 @@
         <input id="{{ field.id_for_label }}" name="{{ field.name }}" type="{{ field.field.widget.input_type }}" required
                value="{{ field.value|default_if_none:'' }}"
                class="block w-full rounded-lg border border-gray-300 px-4 py-2.5 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 sm:text-sm {% if field.errors %}border-red-500{% endif %}"
+               {% if field.name == 'password1' or field.name == 'password2' %}maxlength="{{ settings.ACCOUNT_PASSWORD_MAX_LENGTH }}"{% endif %}
                {% if field.field.widget.attrs.placeholder %}placeholder="{{ field.field.widget.attrs.placeholder }}"{% endif %}>
         {% if field.errors %}
           <div class="mt-1">

@@ -1,7 +1,9 @@
 from allauth.account.adapter import get_adapter
+from bs4 import BeautifulSoup
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase, override_settings, tag
+from django.test import SimpleTestCase, TestCase, override_settings, tag
+from django.urls import reverse
 
 from config.password_validation import MaximumLengthPasswordValidator
 
@@ -37,3 +39,27 @@ class AccountPasswordMaxLengthTests(SimpleTestCase):
             exc.exception.messages,
             ["This password is too long. It must contain at most 8 characters."],
         )
+
+
+@tag("batch_system_settings")
+class AccountPasswordMaxLengthTemplateTests(TestCase):
+    @override_settings(ACCOUNT_PASSWORD_MAX_LENGTH=12)
+    def test_signup_new_password_fields_include_configured_maxlength(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        for field_name in ("password1", "password2"):
+            password_input = soup.select_one(f'input[name="{field_name}"]')
+            self.assertIsNotNone(password_input)
+            self.assertEqual(password_input.get("maxlength"), "12")
+
+    @override_settings(ACCOUNT_PASSWORD_MAX_LENGTH=12)
+    def test_login_password_field_does_not_include_maxlength(self):
+        response = self.client.get(reverse("account_login"))
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        password_input = soup.select_one('input[name="password"]')
+        self.assertIsNotNone(password_input)
+        self.assertIsNone(password_input.get("maxlength"))
