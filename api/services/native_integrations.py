@@ -633,6 +633,16 @@ def format_native_integration_permission_prompt(
     return "\n".join(lines)
 
 
+def native_integration_is_connected(
+    provider_key: str,
+    owner_user,
+    owner_org,
+) -> bool:
+    provider = get_native_integration_provider(provider_key)
+    secret = get_native_integration_secret(provider.key, owner_user, owner_org)
+    return secret is not None
+
+
 def preflight_native_integration_capability(
     agent: PersistentAgent,
     provider_key: str,

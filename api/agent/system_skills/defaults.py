@@ -14,44 +14,6 @@ APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
 HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 
 
-def _format_runtime_planning_context(agent) -> str:
-    from api.models import PersistentAgentKanbanCard
-
-    cards = list(
-        PersistentAgentKanbanCard.objects.filter(assigned_agent=agent)
-        .only("title", "status", "priority", "created_at")
-        .order_by("-priority", "created_at")
-    )
-    if not cards:
-        return "Current plan: none"
-
-    groups = {
-        PersistentAgentKanbanCard.Status.DOING: [],
-        PersistentAgentKanbanCard.Status.TODO: [],
-        PersistentAgentKanbanCard.Status.DONE: [],
-    }
-    for card in cards:
-        if card.status in groups:
-            groups[card.status].append(card.title)
-
-    lines = [
-        "Current plan:",
-        f"- Doing: {len(groups[PersistentAgentKanbanCard.Status.DOING])}",
-        f"- Todo: {len(groups[PersistentAgentKanbanCard.Status.TODO])}",
-        f"- Done: {len(groups[PersistentAgentKanbanCard.Status.DONE])}",
-    ]
-    for label, status in (
-        ("Doing", PersistentAgentKanbanCard.Status.DOING),
-        ("Todo", PersistentAgentKanbanCard.Status.TODO),
-        ("Done", PersistentAgentKanbanCard.Status.DONE),
-    ):
-        titles = groups[status]
-        if titles:
-            lines.append(f"{label}:")
-            lines.extend(f"- {title}" for title in titles[:20])
-    return "\n".join(lines)
-
-
 def _custom_tool_development_prompt_available(agent) -> bool:
     from api.agent.system_skills.service import get_available_system_skill_tool_names
 
@@ -79,6 +41,14 @@ def _native_integration_prompt_context(agent, provider_key: str) -> str:
     return format_native_integration_permission_prompt(provider_key, owner_user, owner_org)
 
 
+def _native_integration_connected(agent, provider_key: str) -> bool:
+    from api.services.native_integrations import native_integration_is_connected
+    from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
+
+    owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
+    return native_integration_is_connected(provider_key, owner_user, owner_org)
+
+
 def _google_sheets_native_prompt_context(agent) -> str:
     return _native_integration_prompt_context(agent, "google_drive")
 
@@ -93,6 +63,16 @@ def _hubspot_native_prompt_context(agent) -> str:
 
 def _google_sheets_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
+    setup_text = (
+        f"If setup is needed, tell the user to open `{integrations_url}`, connect Google Drive, "
+        "then choose the spreadsheet(s) the agent should be allowed to access.\n"
+        if not _native_integration_connected(agent, "google_drive")
+        else ""
+    )
+    missing_file_text = (
+        "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
+        "integration before making Sheets API calls for that file."
+    )
     return (
         "Use `http_request` for Google Sheets and Drive API calls. Native Google Drive OAuth is applied "
         "automatically for `https://sheets.googleapis.com/` and `https://www.googleapis.com/drive/` requests.\n"
@@ -102,8 +82,7 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
         "uses Google `drive.file`, so missing spreadsheets may need to be selected in Google Picker first.\n"
         "When the user asks to find or search for one of their sheets by name, use Drive file discovery over "
         "connected files. Do not use web search or public `docs.google.com` results to choose a private sheet.\n"
-        "If setup is needed, tell the user to open `" + integrations_url + "`, connect Google Drive, "
-        "then choose the spreadsheet(s) the agent should be allowed to access.\n"
+        f"{setup_text}"
         "For Drive spreadsheet discovery, first build the complete `q` string in your reasoning, then URL-encode it "
         "and call `http_request`. The canonical base query is exactly "
         "`mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`; add "
@@ -123,18 +102,22 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
         "{url_encoded_range}?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
         "- Append rows: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
         "{url_encoded_range}:append?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
-        "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
-        "integration at `" + integrations_url + "` before making Sheets API calls for that file."
+        f"{missing_file_text}"
     )
 
 
 def _apollo_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
+    setup_text = (
+        f"If setup is needed, tell the user to open `{integrations_url}` and connect Apollo. "
+        if not _native_integration_connected(agent, "apollo")
+        else ""
+    )
     return (
         "Use `http_request` for Apollo REST API calls. Native Apollo OAuth is applied automatically for "
         "`https://api.apollo.io/` requests and the Apollo profile endpoint "
         "`https://app.apollo.io/api/v1/users/api_profile`.\n"
-        "If setup is needed, tell the user to open `" + integrations_url + "` and connect Apollo. Use "
+        f"{setup_text}Use "
         "`https://api.apollo.io/api/v1/...` for Apollo API work unless a documented OAuth metadata endpoint "
         "specifically uses `https://app.apollo.io/api/v1/...`.\n"
         "Use bounded requests with explicit filters plus `page` and `per_page`; avoid broad unbounded exports or "
@@ -155,10 +138,15 @@ def _apollo_native_prompt_instructions(agent) -> str:
 
 def _hubspot_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
+    setup_text = (
+        f"If setup is needed, tell the user to open `{integrations_url}` and connect HubSpot.\n"
+        if not _native_integration_connected(agent, "hubspot")
+        else ""
+    )
     return (
         "Use `http_request` for HubSpot REST API calls. Native HubSpot OAuth is applied automatically for "
         "`https://api.hubapi.com/` requests.\n"
-        f"If setup is needed, tell the user to open `{integrations_url}` and connect HubSpot.\n"
+        f"{setup_text}"
         "Use HubSpot CRM v3 endpoints for core CRM work. Keep requests bounded with explicit filters, "
         "`limit`, and `after` pagination where applicable; report when more pages remain.\n"
         "Representative calls:\n"
@@ -176,36 +164,6 @@ def _hubspot_native_prompt_instructions(agent) -> str:
         "Do not use Pipedream HubSpot tools, browser automation, web search, or manually supplied private-app "
         "tokens when the connected native HubSpot API can do the work."
     )
-
-
-RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
-    skill_key="runtime_planning",
-    name="Runtime Planning",
-    search_summary="Track multi-step runtime work with visible plan steps and deliverables.",
-    tool_names=("update_plan",),
-    enables=(
-        "visible task plans",
-        "runtime step tracking",
-        "file and message deliverable references",
-    ),
-    use_when=(
-        "work is non-trivial and requires multiple actions",
-        "work has logical phases or dependencies",
-        "work has ambiguity that benefits from outlining goals",
-        "intermediate checkpoints would help",
-        "the user asked for multiple things",
-        "the user explicitly asked for TODOs or a plan",
-        "extra steps are discovered before yielding",
-    ),
-    query_aliases=("plan", "planning", "todo", "todos", "update plan", "task steps"),
-    prompt_instructions=(
-        "Use `update_plan` only for substantial multi-step work where a visible plan helps. "
-        "Keep plans short, current, and verifiable; each call replaces the full active plan. "
-        "Send the final user-facing report before any final completion update."
-    ),
-    prompt_context_renderer=_format_runtime_planning_context,
-    default_enabled=True,
-)
 
 
 CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
@@ -770,7 +728,6 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
 
 
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
-    RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,

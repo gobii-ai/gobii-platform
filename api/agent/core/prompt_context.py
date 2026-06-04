@@ -88,6 +88,7 @@ from .step_compaction import llm_summarise_steps
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
 from ..tools.attachment_guidance import SYSTEM_ATTACHMENT_PREFLIGHT_GUIDANCE
+from ..tools.plan import format_current_plan_for_prompt
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_state import (
@@ -134,6 +135,11 @@ SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 MESSAGE_ONLY_TOOL_NAMES_TEXT = (
     "send_email, send_sms, send_chat_message, and send_agent_message"
+)
+SQLITE_EFFICIENCY_WARNING = (
+    "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
+    "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
+    "json_extract/json_each/aggregation, or create a durable working table first."
 )
 BROWSER_TASK_RESULT_BLOCK_RE = re.compile(
     r"<result>\s*(?P<payload>.*?)\s*</result>",
@@ -1288,6 +1294,13 @@ def _render_prompt_context_once(
             non_shrinkable=True,
         )
 
+    important_group.section_text(
+        "current_plan",
+        format_current_plan_for_prompt(agent),
+        weight=3,
+        non_shrinkable=True,
+    )
+
     # Schedule block
     schedule_str = agent.schedule if agent.schedule else "No schedule configured"
     # Provide the schedule details and a helpful note as separate sections so Prompt can
@@ -1370,8 +1383,7 @@ def _render_prompt_context_once(
         (
             "Request credentials only when you'll use them immediately: use domain-scoped credentials for `http_request`, "
             "login credentials for `spawn_web_task`, and `secret_type='env_var'` for custom tools, `python_exec`, `run_command`, "
-            "or MCP servers that read secrets from `os.environ`. Avoid 2FA/MFA unless the user explicitly asks for it, "
-            "because those flows may hit system limitations; prefer non-2FA paths when available."
+            "or MCP servers that read secrets from `os.environ`."
         ),
         weight=1,
         non_shrinkable=True
@@ -3046,22 +3058,14 @@ def _build_sqlite_retry_warning(
     summary = summarize_sqlite_tool_result_sql(sql_values)
     if not result_id_counts:
         if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
-            return (
-                "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
-                "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
-                "json_extract/json_each/aggregation, or create a durable working table first."
-            )
+            return SQLITE_EFFICIENCY_WARNING
         return ""
 
     result_id, call_count = result_id_counts.most_common(1)[0]
     empty_count = empty_counts[result_id]
     if call_count < 4 or empty_count < 2:
         if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
-            return (
-                "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
-                "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
-                "json_extract/json_each/aggregation, or create a durable working table first."
-            )
+            return SQLITE_EFFICIENCY_WARNING
         return ""
 
     return (
@@ -3623,7 +3627,11 @@ def _get_system_instruction(
         "Respect one-off preferences like 'stand by' or 'don't follow up unless I ask' in the current conversation without mutating config. When in doubt, leave config unchanged, deliver the result, and stop.\n\n"
 
         "## Plan Discipline (CRITICAL)\n\n"
-        "update_plan is for real multi-step work that benefits from a user-visible plan. Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. For deep work, use at most one initial plan update; update it again only to finish an existing visible plan before stopping.\n\n"
+        "Use `update_plan` only for substantial multi-step work where a visible plan helps. "
+        "Keep plans short, current, and verifiable; each call replaces the full active plan. "
+        "Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. "
+        "For deep work, use at most one initial plan update; update it again only to finish an existing visible plan before stopping. "
+        "Send the final user-facing report before any final completion update.\n\n"
 
         "## Silent Work (CRITICAL)\n\n"
         "Do not announce what you're about to do. Make tool calls with no text until findings, blocker, needed human question, or final answer. Text is for results, not narration; tools execute silently.\n\n"

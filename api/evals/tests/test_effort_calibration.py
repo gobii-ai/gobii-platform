@@ -8,9 +8,8 @@ from django.test import SimpleTestCase, TestCase, tag
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.event_processing import _get_completed_process_run_count
 from api.agent.core.event_processing import _looks_like_blocking_human_input_request
-from api.agent.core.prompt_context import build_prompt_context_preview
+from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context_preview
 from api.agent.core.tool_results import _wrap_as_sqlite_result
-from api.agent.system_skills.defaults import RUNTIME_PLANNING_SYSTEM_SKILL
 from api.agent.tools.create_chart import get_create_chart_tool
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS
 from api.agent.tools.plan import get_update_plan_tool
@@ -281,8 +280,24 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("Do not use for quick lookups", description)
         self.assertIn("one-shot chart requests", description)
 
-    def test_runtime_planning_skill_excludes_bounded_current_research(self):
-        instructions = RUNTIME_PLANNING_SYSTEM_SKILL.prompt_instructions
+    def test_plan_discipline_excludes_bounded_current_research(self):
+        class NoPeerLinks:
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def exists(self):
+                return False
+
+        agent = SimpleNamespace(
+            id="effort-plan-discipline-agent",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+            organization_id=None,
+        )
+        with patch("api.agent.core.prompt_context.AgentPeerLink.objects.filter", return_value=NoPeerLinks()), patch(
+            "api.agent.core.prompt_context.CommsAllowlistEntry.objects.filter",
+            return_value=NoPeerLinks(),
+        ):
+            instructions = _get_system_instruction(agent, system_directive_block="")
 
         self.assertIn("Use `update_plan` only for substantial multi-step work", instructions)
         self.assertIn("where a visible plan helps", instructions)

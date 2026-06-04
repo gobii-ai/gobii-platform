@@ -332,11 +332,13 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("Omitted skills due to prompt limit:", content)
         self.assertIn("- prompt-skill-1", content)
         self.assertIn("- prompt-skill-0", content)
-        self.assertIn("- System Skill: Runtime Planning (runtime_planning)", content)
+        self.assertNotIn("- System Skill: Runtime Planning (runtime_planning)", content)
+        self.assertIn("<current_plan>", content)
+        self.assertIn("Current plan: none", content)
 
-    def test_prompt_includes_default_runtime_planning_system_skill_when_limit_allows(self):
+    def test_prompt_includes_current_plan_independent_of_skill_limit(self):
         config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
-        config.standard_skill_prompt_limit = 1
+        config.standard_skill_prompt_limit = 0
         config.save()
         invalidate_prompt_settings_cache()
 
@@ -349,13 +351,20 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(user_message)
         content = user_message["content"]
 
-        self.assertIn("<agent_skills>", content)
-        self.assertIn("<skill_runtime_planning>", content)
-        self.assertIn("System Skill: Runtime Planning", content)
-        self.assertIn("Use `update_plan` only for substantial multi-step work", content)
-        self.assertIn("</skill_runtime_planning>", content)
+        self.assertNotIn("<agent_skills>", content)
+        self.assertIn("<current_plan>", content)
+        self.assertIn("Current plan: none", content)
+        self.assertIn("</current_plan>", content)
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        self.assertIsNotNone(system_message)
+        assert system_message is not None
+        system_content = system_message["content"]
+        self.assertIn("Use `update_plan` only for substantial multi-step work", system_content)
+        self.assertIn("Keep plans short, current, and verifiable", system_content)
+        self.assertIn("each call replaces the full active plan", system_content)
+        self.assertIn("Send the final user-facing report before any final completion update", system_content)
 
-    def test_update_plan_tool_execution_refreshes_runtime_planning_system_skill(self):
+    def test_update_plan_tool_execution_does_not_refresh_runtime_planning_system_skill(self):
         prepared = _PreparedToolExecution(
             idx=0,
             tool_name="update_plan",
@@ -379,12 +388,23 @@ class PromptContextBuilderTests(TestCase):
         )
 
         self.assertEqual(outcome.result["status"], "ok")
-        state = PersistentAgentSystemSkillState.objects.get(
-            agent=self.agent,
-            skill_key="runtime_planning",
+        self.assertFalse(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key="runtime_planning",
+            ).exists()
         )
-        self.assertIsNotNone(state.last_used_at)
-        self.assertEqual(state.usage_count, 1)
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("<current_plan>", content)
+        self.assertIn("- Doing: 1", content)
+        self.assertIn("Doing:\n- Check source", content)
 
     def test_prompt_omits_skill_section_when_skill_prompt_limit_is_zero(self):
         config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
