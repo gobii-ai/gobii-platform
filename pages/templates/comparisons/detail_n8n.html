@@ -1,0 +1,402 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ comparison_seo_title }}{% endblock %}
+
+{% block canonical_link %}
+<link rel="canonical" href="{{ canonical_url }}">
+{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="{{ comparison_seo_description }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ comparison_seo_title }}">
+<meta property="og:description" content="{{ comparison_seo_description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="Gobii">
+<meta property="og:image" content="{{ comparison_social_image_url }}">
+<meta property="og:image:alt" content="{{ comparison_social_image_alt }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ comparison_seo_title }}">
+<meta name="twitter:description" content="{{ comparison_seo_description }}">
+<meta name="twitter:image" content="{{ comparison_social_image_url }}">
+<meta name="twitter:image:alt" content="{{ comparison_social_image_alt }}">
+<script type="application/ld+json">{{ comparison_structured_data_json }}</script>
+<script type="application/ld+json">{{ comparison_breadcrumb_json }}</script>
+{% endblock %}
+
+{% block content %}
+<main id="main-content" class="bg-white">
+  <section class="relative isolate overflow-hidden bg-slate-950 text-white">
+    <picture>
+      <source
+        type="image/webp"
+        srcset="{% static 'images/solutions/engineering-hero-640.webp' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.webp' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.webp' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.webp' %} 1920w"
+        sizes="100vw"
+      >
+      <img
+        src="{% static 'images/solutions/engineering-hero-1280.jpg' %}"
+        srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w"
+        sizes="100vw"
+        alt="AI agent platform evaluation workspace"
+        class="absolute inset-0 h-full w-full object-cover"
+        width="1280"
+        height="720"
+        loading="eager"
+        decoding="async"
+        fetchpriority="high"
+        style="opacity: 0.72;"
+      >
+    </picture>
+    <div class="absolute inset-0" style="background: linear-gradient(90deg, rgba(2, 6, 23, 0.84) 0%, rgba(15, 23, 42, 0.70) 48%, rgba(15, 23, 42, 0.34) 100%);"></div>
+    <div class="relative mx-auto max-w-7xl px-6 py-20 sm:px-8 sm:py-24 lg:px-12 lg:py-28">
+      <div class="max-w-4xl rounded-lg border border-white/15 p-6 sm:p-8 lg:p-10" style="background: rgba(2, 6, 23, 0.58); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+        <a href="{% url 'proprietary:comparisons' %}" class="inline-flex items-center text-sm font-semibold text-cyan-200 hover:text-white">
+          <i aria-hidden="true" data-lucide="arrow-left" class="mr-2 size-4"></i>
+          Comparisons
+        </a>
+        <p class="mt-8 text-sm font-semibold uppercase text-cyan-200">n8n vs Gobii</p>
+        <h1 class="mt-5 text-4xl font-light leading-[1.08] text-white sm:text-5xl lg:text-6xl">
+          n8n vs Gobii: workflow automation or AI coworkers?
+        </h1>
+        <p class="mt-6 max-w-3xl text-lg leading-8 text-cyan-50">
+          Comparing n8n vs Gobii? n8n is a strong workflow automation platform for technical teams that want visual control, code, APIs, and a large integration ecosystem. Gobii is built for teams that want persistent AI coworkers with real browsers, agent identity, files, structured state, schedules, and finished deliverables.
+        </p>
+        <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+          <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center rounded-lg bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-50">
+            Create Your First Gobii Agent
+            <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg border border-white/50 bg-slate-950/35 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/15">
+            Review the Open Source Repo
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Executive summary</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">
+            The short version: n8n helps builders connect systems. Gobii helps teams delegate work.
+          </h2>
+        </div>
+        <div class="space-y-5 text-base leading-7 text-slate-700">
+          <p>
+            n8n is strongest when a technical team wants to design automation on a canvas: triggers, nodes, API calls, JavaScript or Python, human approvals, data transformations, AI Agent nodes, and integrations across common business systems.
+          </p>
+          <p>
+            Gobii starts from a different product model. A Gobii agent is an always-on AI coworker with a name, communication endpoints, a real browser, persistent files, structured state, schedules, and the ability to return reports, CSVs, PDFs, and other work products.
+          </p>
+          <p>
+            The choice is not whether n8n can automate work. It can. The sharper question is whether your team wants to build and maintain workflow diagrams, or delegate browser-native work to persistent agents that operate more like teammates.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-cyan-50 py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-cyan-800">Which should you choose?</p>
+        <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">Pick based on the work model, not the feature checklist.</h2>
+      </div>
+      <div class="mt-10 grid gap-5 lg:grid-cols-2">
+        <article class="rounded-lg border border-cyan-200 bg-white p-6">
+          <div class="flex items-center gap-3">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-cyan-700 text-white">
+              <i aria-hidden="true" data-lucide="workflow" class="size-5"></i>
+            </span>
+            <h3 class="text-xl font-semibold text-slate-950">Choose n8n if...</h3>
+          </div>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            You want a flexible workflow automation builder for apps, APIs, data transformations, custom code, approval steps, and deterministic logic that your technical team can inspect and tune on a visual canvas.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-indigo-200 bg-white p-6">
+          <div class="flex items-center gap-3">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-indigo-700 text-white">
+              <i aria-hidden="true" data-lucide="briefcase" class="size-5"></i>
+            </span>
+            <h3 class="text-xl font-semibold text-slate-950">Choose Gobii if...</h3>
+          </div>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            You want always-on AI coworkers that can browse websites, log into portals, collect data, maintain context, use files, wake from schedules or messages, and deliver finished work back to your team.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-indigo-700">At a glance</p>
+        <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">The practical comparison</h2>
+      </div>
+      <div class="mt-10 overflow-x-auto rounded-lg border border-indigo-200">
+        <table class="min-w-[1040px] divide-y divide-indigo-100 text-left text-sm">
+          <thead class="bg-indigo-950 text-white">
+            <tr>
+              <th scope="col" class="px-5 py-4 font-semibold">Dimension</th>
+              <th scope="col" class="px-5 py-4 font-semibold">Gobii</th>
+              <th scope="col" class="px-5 py-4 font-semibold">n8n</th>
+              <th scope="col" class="px-5 py-4 font-semibold">Why it matters</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-indigo-100 bg-white">
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Best fit</th>
+              <td class="px-5 py-5 text-slate-700">Persistent AI coworkers for recurring browser-native business work</td>
+              <td class="px-5 py-5 text-slate-700">Technical workflow automation across apps, APIs, nodes, and code</td>
+              <td class="px-5 py-5 text-slate-700">The same automation goal can require a different operating model.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Primary abstraction</th>
+              <td class="px-5 py-5 text-slate-700">An agent with identity, memory, files, browser sessions, schedules, and work history</td>
+              <td class="px-5 py-5 text-slate-700">A workflow composed of triggers, nodes, tools, integrations, and optional AI agent steps</td>
+              <td class="px-5 py-5 text-slate-700">Gobii is designed around delegation; n8n is designed around workflow construction.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Browser automation</th>
+              <td class="px-5 py-5 text-slate-700">First-class real browser runtime with persistent sessions, downloads, files, and proxy-aware execution</td>
+              <td class="px-5 py-5 text-slate-700">Browser automation available through integrations and tools such as Browser Use Cloud</td>
+              <td class="px-5 py-5 text-slate-700">Portal work, research, scraping, and form workflows often need browser infrastructure, not only API orchestration.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Always-on behavior</th>
+              <td class="px-5 py-5 text-slate-700">Agents wake from schedules, email, SMS, webhooks, API calls, and queued events</td>
+              <td class="px-5 py-5 text-slate-700">Workflows run from configured triggers; AI Agent nodes operate inside those workflows</td>
+              <td class="px-5 py-5 text-slate-700">Recurring responsibility is easier to reason about when each agent has its own durable lifecycle.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Communication model</th>
+              <td class="px-5 py-5 text-slate-700">Agents can be contacted like coworkers through email, SMS, chat, webhooks, and API calls</td>
+              <td class="px-5 py-5 text-slate-700">Communication is usually modeled as triggers, chat nodes, messaging integrations, and workflow outputs</td>
+              <td class="px-5 py-5 text-slate-700">Identity-bearing agents make delegation, follow-up, routing, and accountability more natural for teams.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Structured state and outputs</th>
+              <td class="px-5 py-5 text-slate-700">Per-agent database, persistent filespace, reports, charts, PDFs, CSV exports, and attachments</td>
+              <td class="px-5 py-5 text-slate-700">Data tables, files, transforms, integrations, and workflow outputs assembled as needed</td>
+              <td class="px-5 py-5 text-slate-700">Many business tasks end in maintained records and deliverables, not a single message.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Integration strategy</th>
+              <td class="px-5 py-5 text-slate-700">Strongest when APIs are incomplete and the real work happens in websites, portals, dashboards, and documents</td>
+              <td class="px-5 py-5 text-slate-700">Large ecosystem of prebuilt integrations, templates, HTTP requests, custom nodes, and code</td>
+              <td class="px-5 py-5 text-slate-700">n8n has the connector-count advantage; Gobii is strongest when the work must cross the messy web.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Licensing posture</th>
+              <td class="px-5 py-5 text-slate-700">Self-hosted source code is MIT-licensed; commercial components require agreement where applicable</td>
+              <td class="px-5 py-5 text-slate-700">Source-available, fair-code licensing under Sustainable Use and Enterprise licenses</td>
+              <td class="px-5 py-5 text-slate-700">Permissive licensing can matter when teams want fewer use restrictions in self-hosted deployments.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Pricing model</th>
+              <td class="px-5 py-5 text-slate-700">Task-based plans aligned to submitted agent jobs and always-on workers</td>
+              <td class="px-5 py-5 text-slate-700">Execution-based plans aligned to workflow runs, with unlimited users, workflows, and integrations on listed plans</td>
+              <td class="px-5 py-5 text-slate-700">Neither model is universally cheaper; compare based on how your actual work runs.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-indigo-950 py-16 text-white sm:py-20">
+    <div class="mx-auto grid max-w-7xl gap-12 px-6 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:px-12">
+      <div>
+        <p class="text-sm font-semibold uppercase text-cyan-200">Key finding</p>
+        <h2 class="mt-4 text-3xl font-light sm:text-4xl">n8n is a canvas. Gobii is a coworker runtime.</h2>
+      </div>
+      <div class="space-y-5 text-base leading-7 text-indigo-50">
+        <p>
+          n8n gives builders high control. You can see the workflow, add logic, attach tools, transform data, call APIs, insert code, debug each step, and decide where AI belongs in a larger automation.
+        </p>
+        <p>
+          Gobii gives teams a different path: create an agent, give it a recurring responsibility, contact it through normal channels, and let it operate websites and systems with persistent context. That is the better fit when the work looks less like a data pipeline and more like something a teammate would do in a browser every week.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-8 lg:grid-cols-2">
+        <article class="rounded-lg border border-cyan-200 bg-cyan-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">Built for the messy web</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            Many real business processes still happen inside websites with logins, tables, forms, files, changing layouts, missing APIs, and human-oriented workflows.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            n8n can reach browser automation through integrations. Gobii makes the browser central: each agent has a real browser, persistent sessions, a filespace, structured state, and infrastructure for recurring web work.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-emerald-200 bg-emerald-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">Delegate outcomes, not diagrams</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            n8n is valuable when you want the workflow itself to be the artifact: every step visible, editable, testable, and tied into a technical automation process.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii is valuable when the output is the artifact: a lead list, vendor report, competitor monitor, recruiting pipeline update, compliance check, customer health summary, or PDF your team can use.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-amber-200 bg-amber-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">Persistent context over time</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            Workflow automations are often stateless unless the builder intentionally adds memory, storage, and persistence nodes.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii agents are designed to accumulate context. Each agent can maintain structured data, reuse files, preserve browser sessions, wake from external events, and continue responsibilities across many runs.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-rose-200 bg-rose-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">A clearer permissive-license story</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            n8n is source-available and self-hostable under its fair-code model, but its own documentation explains that the license includes use restrictions and is not described as OSI open source.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii's self-hosted source code is MIT-licensed, while proprietary mode and non-MIT components require a commercial agreement. For teams evaluating self-hosting, that distinction can matter.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-cyan-50 py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr]">
+        <div>
+          <p class="text-sm font-semibold uppercase text-cyan-800">Where n8n fits</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">A strong choice for technical workflow automation.</h2>
+        </div>
+        <div class="space-y-5 text-base leading-7 text-slate-700">
+          <p>
+            n8n deserves serious consideration when your team wants a workflow automation platform with a visual editor, deterministic logic, app connectors, custom API calls, code steps, self-hosting, cloud hosting, AI workflow nodes, and enterprise governance options.
+          </p>
+          <p>
+            It is especially strong for app-to-app automation: move data from one system to another, transform JSON, call an API, process webhook events, route approvals, update a CRM, or give developers a shared canvas for repeatable automations.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-2">
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Where Gobii fits</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">A stronger fit for persistent browser-agent work.</h2>
+          <p class="mt-5 text-base leading-7 text-slate-700">
+            Gobii is purpose-built for work that a human teammate would otherwise handle in a browser: log in, search, compare, collect, fill, download, summarize, update, report, and follow up.
+          </p>
+          <p class="mt-4 text-base leading-7 text-slate-700">
+            Instead of wiring an automation from scratch, you assign an agent a responsibility and let the platform handle the browser runtime, identity, memory, files, scheduling, and delivery path.
+          </p>
+        </div>
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Common Gobii workloads</p>
+          <ul class="mt-6 grid gap-3 text-sm leading-6 text-slate-700 sm:grid-cols-2">
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Lead research and enrichment</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Competitor and pricing monitoring</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Recruiting and candidate sourcing</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Vendor and supplier checks</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Customer health summaries</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Compliance and public-record monitoring</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Portal workflows and report downloads</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Recurring team operations</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-indigo-950 py-16 text-white sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-cyan-200">Bottom line</p>
+        <h2 class="mt-4 text-3xl font-light sm:text-4xl">n8n is excellent for building automations. Gobii is built for assigning work.</h2>
+        <p class="mt-6 text-base leading-7 text-indigo-50">
+          If your team wants a technical automation canvas with connectors, code, triggers, and precise workflow control, n8n is worth evaluating. If your team wants persistent AI coworkers that can operate the web, keep context, use files, wake from events, and deliver business-ready output, Gobii is the stronger fit.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-[1fr_0.8fr] lg:items-start">
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Deploy AI coworkers built for real web work</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">Start with one recurring responsibility. Scale into an AI workforce your team can contact directly.</h2>
+          <p class="mt-6 max-w-3xl text-base leading-7 text-slate-700">
+            Gobii gives teams always-on agents with browser automation, persistent state, secure credentials, files, direct communication endpoints, and cloud or self-hosted deployment options.
+          </p>
+          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+            <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center rounded-lg bg-indigo-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-800">
+              Create Your First Gobii Agent
+              <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-white px-6 py-3 text-sm font-semibold text-indigo-800 transition hover:border-indigo-300 hover:bg-indigo-50">
+              Review the Open Source Repo
+            </a>
+          </div>
+        </div>
+        <aside class="rounded-lg border border-indigo-200 bg-indigo-50 p-6">
+          <h2 class="text-lg font-semibold text-slate-950">Source note</h2>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            This comparison is based on public Gobii and n8n documentation, pricing pages, public repository information, and product pages reviewed in {{ comparison.source_reviewed }}.
+          </p>
+          <p class="mt-3 text-sm leading-6 text-slate-700">
+            Last reviewed {{ comparison.last_reviewed_display }} by {{ comparison.reviewed_by }}.
+          </p>
+          <div class="mt-5 flex flex-col gap-3 text-sm font-semibold">
+            <a href="https://n8n.io/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              n8n product overview
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://n8n.io/ai-agents/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              n8n AI agents
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://n8n.io/integrations/browser-use/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              n8n Browser Use integration
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://docs.n8n.io/sustainable-use-license/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              n8n license documentation
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://gobii.ai/solutions/engineering/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Gobii developer platform
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Gobii open source repo
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

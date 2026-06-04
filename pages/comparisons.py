@@ -6,6 +6,7 @@ COMPARISON_CATALOG = (
         "slug": "openclaw-vs-gobii",
         "competitor_name": "OpenClaw",
         "title": "OpenClaw vs Gobii",
+        "template_name": "comparisons/detail.html",
         "seo_title": "OpenClaw vs Gobii: AI Agent Platform Comparison | Gobii",
         "seo_description": (
             "Comparing OpenClaw vs Gobii? See how Gobii and OpenClaw differ across "
@@ -26,6 +27,34 @@ COMPARISON_CATALOG = (
         "published_date": "2026-06-03",
         "last_reviewed_date": "2026-06-03",
         "last_reviewed_display": "June 3, 2026",
+        "reviewed_by": "Gobii editorial team",
+        "source_reviewed": "June 2026",
+    },
+    {
+        "slug": "n8n-vs-gobii",
+        "competitor_name": "n8n",
+        "title": "n8n vs Gobii",
+        "template_name": "comparisons/detail_n8n.html",
+        "seo_title": "n8n vs Gobii: Workflow Automation or AI Coworkers? | Gobii",
+        "seo_description": (
+            "Comparing n8n vs Gobii? See when to choose n8n's technical workflow "
+            "automation canvas and when to choose Gobii's persistent browser-native AI coworkers."
+        ),
+        "summary": (
+            "A professional comparison for teams deciding between technical workflow "
+            "automation in n8n and persistent Gobii agents for browser-native business work."
+        ),
+        "status": COMPARISON_STATUS_PUBLISHED,
+        "target_keywords": (
+            "n8n vs Gobii",
+            "Gobii vs n8n",
+            "n8n alternative",
+            "AI workflow automation comparison",
+        ),
+        "competitor_url": "https://n8n.io/",
+        "published_date": "2026-06-04",
+        "last_reviewed_date": "2026-06-04",
+        "last_reviewed_display": "June 4, 2026",
         "reviewed_by": "Gobii editorial team",
         "source_reviewed": "June 2026",
     },
