@@ -7,6 +7,7 @@ back to Postgres after tool execution.
 
 import json
 import logging
+import re
 import sqlite3
 from dataclasses import dataclass
 from typing import Optional, Sequence
@@ -82,6 +83,7 @@ class _SQLiteSkillRow:
 @dataclass(frozen=True)
 class _PromptSkillEntry:
     rendered: str
+    tag_name: str
     last_used_at: object
     fallback_at: object
     label: str
@@ -516,6 +518,38 @@ def _render_system_skill_for_prompt(agent, state: PersistentAgentSystemSkillStat
     return "\n".join(lines)
 
 
+def _skill_prompt_tag_suffix(value: object, fallback: str) -> str:
+    suffix = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
+    suffix = re.sub(r"_+", "_", suffix).strip("_")
+    return suffix or fallback
+
+
+def _saved_skill_prompt_tag_name(skill: PersistentAgentSkill) -> str:
+    name_suffix = _skill_prompt_tag_suffix(skill.name, "unnamed")
+    version_suffix = _skill_prompt_tag_suffix(skill.version, "0")
+    return f"skill_{name_suffix}_v{version_suffix}"
+
+
+def _system_skill_prompt_tag_name(skill_key: str) -> str:
+    key_suffix = _skill_prompt_tag_suffix(skill_key, "system")
+    return f"skill_{key_suffix}"
+
+
+def _wrap_prompt_skill_entry(entry: _PromptSkillEntry, tag_name: str) -> str:
+    return f"<{tag_name}>\n{entry.rendered}\n</{tag_name}>"
+
+
+def _render_wrapped_prompt_skill_entries(entries: list[_PromptSkillEntry]) -> list[str]:
+    seen: dict[str, int] = {}
+    wrapped_blocks: list[str] = []
+    for entry in entries:
+        count = seen.get(entry.tag_name, 0) + 1
+        seen[entry.tag_name] = count
+        tag_name = entry.tag_name if count == 1 else f"{entry.tag_name}_{count}"
+        wrapped_blocks.append(_wrap_prompt_skill_entry(entry, tag_name))
+    return wrapped_blocks
+
+
 def _prompt_skill_sort_key(entry: _PromptSkillEntry):
     return (
         entry.last_used_at is not None,
@@ -538,6 +572,7 @@ def format_recent_skills_for_prompt(agent, limit: int = 3) -> str:
         entries.append(
             _PromptSkillEntry(
                 rendered=_render_saved_skill_for_prompt(skill, secret_status_sets),
+                tag_name=_saved_skill_prompt_tag_name(skill),
                 last_used_at=skill.last_used_at,
                 fallback_at=skill.updated_at,
                 label=f"skill:{skill.name}",
@@ -556,6 +591,7 @@ def format_recent_skills_for_prompt(agent, limit: int = 3) -> str:
         entries.append(
             _PromptSkillEntry(
                 rendered=rendered,
+                tag_name=_system_skill_prompt_tag_name(definition.skill_key),
                 last_used_at=state.last_used_at,
                 fallback_at=state.enabled_at,
                 label=f"system:{state.skill_key}",
@@ -573,7 +609,7 @@ def format_recent_skills_for_prompt(agent, limit: int = 3) -> str:
         entries[limit:],
         key=lambda entry: (entry.sort_name.casefold(), entry.label),
     )
-    rendered_blocks = [entry.rendered for entry in included_entries]
+    rendered_blocks = _render_wrapped_prompt_skill_entries(included_entries)
     omitted = [entry.omitted_name for entry in omitted_entries]
     if omitted:
         omitted_lines = [

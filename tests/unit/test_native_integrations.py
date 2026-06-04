@@ -996,6 +996,7 @@ class NativeIntegrationTests(TestCase):
 
         block = format_recent_skills_for_prompt(self.agent, limit=3)
 
+        self.assertIn("<skill_google_sheets_native>", block)
         self.assertIn("System Skill: Google Sheets", block)
         self.assertIn("Tools: http_request", block)
         self.assertIn("If the user supplies a concrete spreadsheet ID, use it directly with the Sheets API", block)
@@ -1020,6 +1021,7 @@ class NativeIntegrationTests(TestCase):
         self.assertNotIn("connected with access for", block)
         self.assertIn("Granted scopes", block)
         self.assertNotIn("native_google_drive", block)
+        self.assertIn("</skill_google_sheets_native>", block)
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_apollo_prompt_tells_agent_how_to_use_native_rest_api(self):
@@ -1028,6 +1030,7 @@ class NativeIntegrationTests(TestCase):
 
         block = format_recent_skills_for_prompt(self.agent, limit=3)
 
+        self.assertIn("<skill_apollo_native>", block)
         self.assertIn("System Skill: Apollo", block)
         self.assertIn("Tools: http_request", block)
         self.assertIn("https://api.apollo.io/api/v1", block)
@@ -1044,6 +1047,7 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("Native integration permissions", block)
         self.assertIn("Search Apollo people", block)
         self.assertIn("Granted scopes", block)
+        self.assertIn("</skill_apollo_native>", block)
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_hubspot_prompt_tells_agent_how_to_use_native_rest_api(self):
@@ -1052,6 +1056,7 @@ class NativeIntegrationTests(TestCase):
 
         block = format_recent_skills_for_prompt(self.agent, limit=3)
 
+        self.assertIn("<skill_hubspot_native>", block)
         self.assertIn("System Skill: HubSpot", block)
         self.assertIn("Tools: http_request", block)
         self.assertIn("https://api.hubapi.com", block)
@@ -1066,3 +1071,4 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("Native integration permissions", block)
         self.assertIn("Search and read HubSpot contacts", block)
         self.assertIn("Granted scopes", block)
+        self.assertIn("</skill_hubspot_native>", block)
