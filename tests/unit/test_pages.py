@@ -101,7 +101,7 @@ class HomePageTests(TestCase):
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
 
     @override_settings(
-        PUBLIC_BRAND_NAME="Gobii",
+        PUBLIC_BRAND_NAME="Acme",
         PUBLIC_SITE_URL="https://www.gobii.ai",
         GOBII_RELEASE_ENV="prod",
         GOBII_PROPRIETARY_MODE=True,
@@ -111,9 +111,9 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        title = "Gobii — AI Coworkers for Teams With Real Work to Do"
+        title = "Acme — AI Coworkers for Teams With Real Work to Do"
         description = (
-            "Gobii agents are virtual coworkers with their own identity, memory, "
+            "Acme agents are virtual coworkers with their own identity, memory, "
             "and tools. Email them, text them — they browse the web, collect data, "
             "and deliver reports 24/7."
         )
@@ -132,14 +132,14 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find("meta", property="og:title")["content"], title)
         self.assertEqual(soup.find("meta", property="og:description")["content"], description)
         self.assertEqual(soup.find("meta", property="og:url")["content"], "https://www.gobii.ai/")
-        self.assertEqual(soup.find("meta", property="og:site_name")["content"], "Gobii")
+        self.assertEqual(soup.find("meta", property="og:site_name")["content"], "Acme")
         self.assertEqual(soup.find("meta", property="og:image")["content"], image_url)
         self.assertEqual(soup.find("meta", property="og:image:type")["content"], "image/png")
         self.assertEqual(soup.find("meta", property="og:image:width")["content"], "1200")
         self.assertEqual(soup.find("meta", property="og:image:height")["content"], "630")
         self.assertEqual(
             soup.find("meta", property="og:image:alt")["content"],
-            "Gobii AI coworker platform preview",
+            "Acme AI coworker platform preview",
         )
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:card"})["content"],
@@ -153,7 +153,7 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find("meta", attrs={"name": "twitter:image"})["content"], image_url)
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],
-            "Gobii AI coworker platform preview",
+            "Acme AI coworker platform preview",
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -167,6 +167,28 @@ class HomePageTests(TestCase):
         self.assertIsNone(soup.find("meta", property="og:title"))
         self.assertIsNone(soup.find("meta", attrs={"name": "twitter:card"}))
         self.assertIsNone(soup.find("meta", attrs={"name": "twitter:image"}))
+
+    @override_settings(
+        PUBLIC_SITE_URL="https://www.gobii.ai",
+        GOBII_RELEASE_ENV="prod",
+        GOBII_PROPRIETARY_MODE=True,
+    )
+    def test_home_page_landing_render_omits_generic_canonical(self):
+        landing = LandingPage.objects.create(
+            charter="Find vendor security updates every morning.",
+            title="Vendor Security Watch",
+        )
+
+        response = self.client.get("/", {"g": landing.code}, HTTP_HOST="preview.local")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+
+        self.assertIsNone(soup.find("link", rel="canonical"))
+        self.assertEqual(
+            soup.find("meta", property="og:title")["content"],
+            "Vendor Security Watch - Gobii",
+        )
 
     def test_home_page_organization_schema_uses_configured_linkedin_url(self):
         linkedin_url = "https://www.linkedin.com/company/example-ai"
@@ -340,11 +362,12 @@ class HomePageTests(TestCase):
                     self.assertEqual(response.status_code, 200)
                     self.assertContains(response, 'data-gobii-fish-cursor')
 
+    @override_settings(PUBLIC_BRAND_NAME="Acme")
     def test_home_page_has_meta_description(self):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
+            '<meta name="description" content="Acme agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
         )
 
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
