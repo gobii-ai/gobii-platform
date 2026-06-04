@@ -197,4 +197,17 @@ def sanitize_tool_parameters_schema_for_llm(value: Any) -> Dict[str, Any]:
     normalized = normalize_parameters_schema(value)
     if normalized is None:
         return {"type": "object", "properties": {}, "required": []}
-    return normalized
+    rejected_keywords = {"oneOf", "anyOf", "allOf", "enum", "not"}
+
+    def sanitize_node(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {
+                key: sanitize_node(item)
+                for key, item in node.items()
+                if key not in rejected_keywords
+            }
+        if isinstance(node, list):
+            return [sanitize_node(item) for item in node]
+        return node
+
+    return sanitize_node(normalized)

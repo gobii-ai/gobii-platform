@@ -23,6 +23,7 @@ from .behavior_micro import (
     PlanningClearTaskEndsPlanningFirstScenario,
     PlanningExecuteRequestStaysInPlanningScenario,
     PlanningFinalReportCompletesVisiblePlanScenario,
+    PlanningIntegrationSetupSearchesBeforeQuestionScenario,
     PlanningNoDirectScheduleOrConfigUpdatesScenario,
     ToolChoiceExactJsonUrlUsesHttpRequestScenario,
     ToolChoiceCsvDeliverableUsesCreateCsvScenario,

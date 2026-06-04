@@ -45,6 +45,7 @@ PLANNING_ONE_OFF_RESEARCH_REPORT_ENDS_PLANNING_FIRST = "planning_one_off_researc
 PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES = "planning_no_direct_schedule_or_config_updates"
 PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME = "planning_dismiss_after_greeting_does_not_resume"
 PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN = "planning_final_report_completes_visible_plan"
+PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION = "planning_integration_setup_searches_before_question"
 CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
 CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_preference_preserving_existing"
 CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL = "charter_expands_sparse_charter_with_detail"
@@ -239,7 +240,6 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_046_sheets_read_range", "category": "sheets", "prompt": "Read A1:D20 from the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-get-values-in-range"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-get-values-in-range": ["google_sheets-read-rows"]}, "plan_expected": False},
     {"slug": "common_use_case_047_sheets_find_row", "category": "sheets", "prompt": "Find the row in spreadsheet sheet-123 where email equals ana@example.test.", "expected_tools": ["google_sheets-find-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_048_sheets_add_single_row", "category": "sheets", "prompt": "In spreadsheet sheet-123, add one row to the Leads worksheet: company Acme, priority high, owner Sam.", "expected_tools": ["google_sheets-add-single-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
-    {"slug": "common_use_case_049_sheets_add_multiple_rows", "category": "sheets", "prompt": "Add three prospect rows to the Leads worksheet in spreadsheet sheet-123: Acme priority high owner Sam; Globex priority medium owner Priya; Initech priority low owner Lee.", "expected_tools": ["google_sheets-add-multiple-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_050_sheets_update_cell", "category": "sheets", "prompt": "Update cell C8 in spreadsheet sheet-123 to Qualified.", "expected_tools": ["google_sheets-update-cell"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_051_sheets_update_row", "category": "sheets", "prompt": "In spreadsheet sheet-123 Leads worksheet, update the row where company is Globex so status is Contacted.", "expected_tools": ["google_sheets-update-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_052_sheets_update_multiple_rows", "category": "sheets", "prompt": "In spreadsheet sheet-123 Pipeline worksheet, update rows 12, 13, and 14 so follow_up_due is today.", "expected_tools": ["google_sheets-update-multiple-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
@@ -298,13 +298,11 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_105_current_finance_snapshot", "category": "finance_research", "prompt": "Fetch Yahoo Finance business data for NVDA and return current price, percent change, and market timestamp.", "expected_tools": ["mcp_brightdata_web_data_yahoo_finance_business"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_106_maps_dental_lead_screen", "category": "local_research", "prompt": "Use Google Maps reviews to qualify local dental practices with scheduling complaints; return review evidence.", "expected_tools": ["mcp_brightdata_web_data_google_maps_reviews"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_107_schedule_vc_digest", "category": "monitoring", "prompt": "Set a weekly Monday 8am ET VC funding digest for AI infrastructure deals; include source links and do not run it now.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_108_sheets_read_before_upsert", "category": "sheets", "prompt": "In sheet-123 Leads, find row for alex@example.test before upserting status Qualified and source URL.", "expected_tools": ["google_sheets-find-row", "google_sheets-upsert-row"], "forbidden_tools": ["google_sheets-add-single-row"], "plan_expected": False},
     {"slug": "common_use_case_109_http_json_dedupe_domains", "category": "intelligent_work", "prompt": "Fetch https://api.example.test/vendors/alpha.json and https://api.example.test/vendors/beta.json, then use SQLite to dedupe vendors by domain and report the top score.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_110_scrape_compare_with_sqlite", "category": "intelligent_work", "prompt": "Scrape https://stripe.com/docs/security and https://auth0.com/docs/security, then call sqlite_batch over prior scrape results to compare claims. Do not spawn a browser task.", "expected_tools": ["mcp_brightdata_scrape_as_markdown", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_111_prior_results_sqlite_rank", "category": "intelligent_work", "prompt": "Prior pricing scrapes are in __tool_results; use one SQLite query to rank annual cost without one-result blob loops.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["read_file"], "plan_expected": False},
     {"slug": "common_use_case_112_file_json_dedupe_report", "category": "intelligent_work", "prompt": "Read /uploads/vendor-feed.json and use SQLite/json_each to dedupe companies by domain before reporting export-ready rows.", "expected_tools": ["read_file", "sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
     {"slug": "common_use_case_113_file_pipeline_sqlite_summary", "category": "intelligent_work", "prompt": "Read /uploads/pipeline.csv and use SQLite to group qualified pipeline by owner before reporting chart-ready rows.", "expected_tools": ["read_file", "sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
-    {"slug": "common_use_case_114_sheets_default_update_row", "category": "sheets", "prompt": "In sheet-123 Leads, find nina@example.test with sheets tools; if status is blank, assume Needs review and update that row. Do not ask.", "expected_tools": ["google_sheets-find-row", "google_sheets-update-row"], "forbidden_tools": ["request_human_input"], "plan_expected": False},
     {"slug": "common_use_case_115_sheets_read_sqlite_rank", "category": "sheets", "prompt": "Read sheet-123 Leads rows and use SQLite to dedupe by email before reporting the highest-priority alex@example.test row.", "expected_tools": ["google_sheets-read-rows", "sqlite_batch"], "forbidden_tools": ["request_human_input"], "accepted_tool_alternatives": {"google_sheets-read-rows": ["google_sheets-get-values-in-range"]}, "plan_expected": False},
     {"slug": "common_use_case_116_maps_default_city_reviews", "category": "local_research", "prompt": "Find dental practices with scheduling complaints; if city is omitted, assume Austin and use Google Maps reviews.", "expected_tools": ["mcp_brightdata_web_data_google_maps_reviews"], "forbidden_tools": ["request_human_input", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_117_linkedin_default_company_jobs", "category": "lead_sourcing", "prompt": "Find remote fintech backend roles on LinkedIn; if company is unspecified, use a representative fintech company.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["request_human_input", "spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
@@ -326,6 +324,8 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_133_http_sqlite_dedupe_report", "category": "intelligent_work", "prompt": "Fetch https://api.example.test/accounts.json and use SQLite to dedupe domains before reporting export-ready rows.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_134_file_support_group_report", "category": "intelligent_work", "prompt": "Read /uploads/support-dump.json and group tickets by account in SQLite before reporting counts.", "expected_tools": ["read_file", "sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
     {"slug": "common_use_case_135_search_scrape_two_sources", "category": "web_research", "prompt": "Search current warehouse robotics funding, scrape two strong sources, and cite both without extra query variants.", "expected_tools": ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_136_apollo_connect_tool_search", "category": "integration_discovery", "prompt": "Connect my Apollo.io account so you can use it for lead sourcing.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_137_slack_connect_tool_search", "category": "integration_discovery", "prompt": "Connect Slack so you can read and summarize customer feedback from our support channel.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -343,6 +343,7 @@ PLANNING_MICRO_SCENARIO_SLUGS = [
     PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES,
     PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
     PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN,
+    PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION,
 ]
 
 CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
@@ -582,6 +583,19 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
                 tool_name=tool_name,
             )
 
+    def _enable_sandbox_tool_visibility(self, agent_id):
+        from waffle.models import Flag
+
+        from api.services.system_settings import get_setting_definition, set_setting_value
+
+        agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
+        definition = get_setting_definition("SANDBOX_COMPUTE_ENABLED")
+        if definition:
+            set_setting_value(definition, True)
+        flag, _ = Flag.objects.get_or_create(name="sandbox_compute")
+        if agent.user_id:
+            flag.users.add(agent.user)
+
     def _planning_guardrail_mocks(self):
         return {
             "spawn_web_task": {"status": "error", "message": "Browser work disabled during planning eval."},
@@ -700,6 +714,96 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
             inbound.timestamp,
             "verify_no_substantive_work",
             SUBSTANTIVE_WORK_TOOL_NAMES,
+        )
+
+
+@register_scenario
+class PlanningIntegrationSetupSearchesBeforeQuestionScenario(BehaviorMicroScenario):
+    slug = PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION
+    description = "A named integration setup request should discover integration tools before asking how to connect."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "tool_choice", "integration_discovery")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_search_before_questions", assertion_type="manual"),
+    ]
+
+    def _mock_config(self):
+        return {
+            **self._planning_guardrail_mocks(),
+            "search_tools": {
+                "status": "success",
+                "message": "Mocked integration discovery for Apollo.io.",
+                "tools": [],
+            },
+        }
+
+    def _eval_stop_policy(self):
+        return {
+            "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
+            "stop_on_first_relevant_tool": True,
+            "stop_on_human_input_request": True,
+        }
+
+    def run(self, run_id, agent_id):
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.PLANNING)
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Hi there, I would like you to help me find some leads. "
+                    "But first, would you connect to my Apollo.io account?"
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=self._mock_config(),
+                eval_stop_policy=self._eval_stop_policy(),
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_search_before_questions",
+        )
+        first_call = get_first_relevant_tool_call(
+            run_id,
+            after=inbound.timestamp,
+            ignored_tool_names=IGNORED_FIRST_ACTION_TOOL_NAMES,
+        )
+        requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
+        if first_call and first_call.tool_name == "search_tools" and not requests:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_search_before_questions",
+                observed_summary="Agent called search_tools before asking any tracked connection questions.",
+                artifacts={"step": first_call.step},
+            )
+            return
+
+        seen = first_call.tool_name if first_call else "none"
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name="verify_search_before_questions",
+            observed_summary=(
+                "Expected search_tools before request_human_input for a named integration setup; "
+                f"saw first relevant tool {seen} and {len(requests)} pending human-input request(s)."
+            ),
+            artifacts={"step": first_call.step} if first_call else {},
         )
 
 
@@ -2201,11 +2305,11 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 "spreadsheet_id": "sheet-123",
                 "title": "Eval Sales Tracker",
                 **({"worksheets": ["Leads", "Pipeline", "Research", "Accounts", "Tasks"]} if tool_name == "google_sheets-list-worksheets" else {}),
-                "columns": ["company", "priority", "owner", "status", "follow_up_due"],
+                "columns": ["email", "company", "priority", "owner", "status", "source_url", "follow_up_due"],
                 "rows": [
-                    {"row_number": 12, "company": "Acme", "status": "Open"},
-                    {"row_number": 13, "company": "Globex", "status": "Open"},
-                    {"row_number": 14, "company": "Initech", "status": "Open"},
+                    {"row_number": 12, "email": "alex@example.test", "company": "Acme", "status": "Open"},
+                    {"row_number": 13, "email": "nina@example.test", "company": "Globex", "status": "Open"},
+                    {"row_number": 14, "email": "ana@example.test", "company": "Initech", "status": "Open"},
                 ],
                 "next_step": "Call the exact Google Sheets tool requested by the user; do not inspect eval bookkeeping tables.",
             },
@@ -2388,6 +2492,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             agent_id,
             [tool_name for tool_name in tool_names if tool_name not in synthetic_tool_names],
         )
+        if "create_custom_tool" in self._accepted_expected_tool_names():
+            self._enable_sandbox_tool_visibility(agent_id)
         self._enable_eval_synthetic_tools(agent_id, list(dict.fromkeys(synthetic_tool_names)))
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")

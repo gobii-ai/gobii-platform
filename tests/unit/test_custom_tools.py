@@ -33,6 +33,7 @@ from api.agent.tools.custom_tools import (
     validate_custom_tool_source_code,
 )
 from api.agent.tools.custom_tool_names import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
+from api.agent.tools.create_file import get_create_file_tool
 from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
@@ -47,6 +48,7 @@ from api.services.system_skill_profiles import set_default_system_skill_profile,
 from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
 from api.services.sandbox_kubernetes import KubernetesSandboxBackend
 from api.services.sandbox_compute import SandboxComputeService, SandboxSessionUpdate, LocalSandboxBackend
+from api.utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from api.models import (
     AgentComputeSession,
     AgentFsNode,
@@ -489,6 +491,41 @@ def run(params, ctx):
                 "required": [],
             },
         )
+
+    def test_llm_schema_sanitizer_removes_provider_rejected_top_level_keywords(self):
+        schema = sanitize_tool_parameters_schema_for_llm(
+            get_create_file_tool()["function"]["parameters"]
+        )
+
+        self.assertEqual(schema["type"], "object")
+        self.assertNotIn("oneOf", schema)
+
+        nested_schema = {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["active", "inactive"],
+                    "oneOf": [{"type": "string"}],
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "anyOf": [{"type": "string"}],
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        sanitized = sanitize_tool_parameters_schema_for_llm(nested_schema)
+        self.assertNotIn("enum", sanitized["properties"]["status"])
+        self.assertNotIn("oneOf", sanitized["properties"]["status"])
+        self.assertNotIn("anyOf", sanitized["properties"]["items"]["items"]["properties"]["kind"])
 
     def test_persistent_agent_custom_tool_model_clean_canonicalizes_nested_schema_types(self):
         tool = PersistentAgentCustomTool(
