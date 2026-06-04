@@ -4549,9 +4549,17 @@ def _get_unified_history_prompt(
             if files:
                 components["files"] = _format_browser_task_files(files)
             result_summary = _browser_task_result_summary(result_step)
+            if not result_summary and t.status == BrowserUseAgentTask.StatusChoices.FAILED:
+                result_summary = t.error_message or "Browser task failed."
+            elif not result_summary and t.status == BrowserUseAgentTask.StatusChoices.CANCELLED:
+                result_summary = "Browser task was cancelled."
             if result_summary:
                 components["result_summary"] = result_summary
-            if result_info.preview_text and not files:
+            if (
+                result_info.preview_text
+                and not files
+                and t.status == BrowserUseAgentTask.StatusChoices.COMPLETED
+            ):
                 key = "result" if result_info.is_inline else "result_preview"
                 components[key] = result_info.preview_text
 

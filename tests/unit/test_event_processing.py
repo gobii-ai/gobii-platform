@@ -2051,7 +2051,8 @@ class PromptContextBuilderTests(TestCase):
             expected_result_id = str(task.id)
 
             self.assertIn(expected_result_id, content)
-            self.assertNotIn("Navigation timeout while loading dashboard.", content)
+            self.assertIn("<result_summary>Navigation timeout while loading dashboard.</result_summary>", content)
+            self.assertNotIn('"error_message":"Navigation timeout while loading dashboard."', content)
 
             conn = sqlite3.connect(db_path)
             try:
