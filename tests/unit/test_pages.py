@@ -2881,6 +2881,28 @@ class SolutionCtaCopyTests(TestCase):
                 self.assertEqual(len(headings), 1)
                 self.assertEqual(headings[0].get_text(" ", strip=True), expected_heading)
 
+    def test_recruiting_page_includes_human_review_faq_content(self):
+        soup = self._solution_recruiting_soup()
+        page_text = soup.get_text(" ", strip=True)
+        expected_questions = [
+            "What are Gobii AI recruiting agents?",
+            "How do Gobii recruiting agents source candidates?",
+            "Which recruiting tasks can Gobii automate?",
+            "How is Gobii different from ATS automation?",
+            "What outputs can recruiting teams export?",
+            "How should teams review AI-sourced candidates?",
+            "What data and privacy controls matter for recruiting workflows?",
+        ]
+
+        self.assertIsNotNone(soup.find(id="recruiting-questions"))
+        self.assertIn("Recruiting automation, without losing the recruiter", page_text)
+        self.assertIn("Human-reviewed workflows", page_text)
+        self.assertIn("not by replacing human judgment in hiring decisions", page_text)
+        for question in expected_questions:
+            self.assertIn(question, page_text)
+        for label in ("Criteria", "Search", "Export", "Review"):
+            self.assertIn(label, page_text)
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):
         unauth_recruiting = self.client.get("/solutions/recruiting/")
