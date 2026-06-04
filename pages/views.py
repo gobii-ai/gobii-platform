@@ -237,6 +237,8 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "slack": "images/integrations/pipedream/slack.svg",
     "trello": "images/integrations/pipedream/trello.svg",
 }
+HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
+HOMEPAGE_SOCIAL_IMAGE_ALT = "Gobii AI coworker platform preview"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
 
@@ -1024,6 +1026,12 @@ class HomePage(TemplateView):
         context["suppress_htmx"] = True
         context["suppress_preline"] = True
         context["suppress_stripe_js"] = not self._has_direct_checkout_cta()
+        context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
+        context["home_canonical_url"] = _public_site_absolute_url("/")
+        context["home_social_image_url"] = _public_site_absolute_url(
+            static(HOMEPAGE_SOCIAL_IMAGE_PATH)
+        )
+        context["home_social_image_alt"] = HOMEPAGE_SOCIAL_IMAGE_ALT
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 

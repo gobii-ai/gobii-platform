@@ -100,6 +100,74 @@ class HomePageTests(TestCase):
         self.assertEqual(len(main_landmarks), 1)
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
 
+    @override_settings(
+        PUBLIC_BRAND_NAME="Gobii",
+        PUBLIC_SITE_URL="https://www.gobii.ai",
+        GOBII_RELEASE_ENV="prod",
+        GOBII_PROPRIETARY_MODE=True,
+    )
+    def test_home_page_includes_social_metadata(self):
+        response = self.client.get("/", HTTP_HOST="preview.local")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        title = "Gobii — AI Coworkers for Teams With Real Work to Do"
+        description = (
+            "Gobii agents are virtual coworkers with their own identity, memory, "
+            "and tools. Email them, text them — they browse the web, collect data, "
+            "and deliver reports 24/7."
+        )
+        image_url = "https://www.gobii.ai/static/images/gobii_og_image_1200x630.png"
+
+        self.assertEqual(
+            soup.find("link", rel="canonical")["href"],
+            "https://www.gobii.ai/",
+        )
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            description,
+        )
+        self.assertEqual(soup.find("meta", property="og:type")["content"], "website")
+        self.assertEqual(soup.find("meta", property="og:locale")["content"], "en_US")
+        self.assertEqual(soup.find("meta", property="og:title")["content"], title)
+        self.assertEqual(soup.find("meta", property="og:description")["content"], description)
+        self.assertEqual(soup.find("meta", property="og:url")["content"], "https://www.gobii.ai/")
+        self.assertEqual(soup.find("meta", property="og:site_name")["content"], "Gobii")
+        self.assertEqual(soup.find("meta", property="og:image")["content"], image_url)
+        self.assertEqual(soup.find("meta", property="og:image:type")["content"], "image/png")
+        self.assertEqual(soup.find("meta", property="og:image:width")["content"], "1200")
+        self.assertEqual(soup.find("meta", property="og:image:height")["content"], "630")
+        self.assertEqual(
+            soup.find("meta", property="og:image:alt")["content"],
+            "Gobii AI coworker platform preview",
+        )
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "twitter:card"})["content"],
+            "summary_large_image",
+        )
+        self.assertEqual(soup.find("meta", attrs={"name": "twitter:title"})["content"], title)
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "twitter:description"})["content"],
+            description,
+        )
+        self.assertEqual(soup.find("meta", attrs={"name": "twitter:image"})["content"], image_url)
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],
+            "Gobii AI coworker platform preview",
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_home_page_omits_social_metadata_in_community_mode(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+
+        self.assertIsNone(soup.find("meta", property="og:image"))
+        self.assertIsNone(soup.find("meta", property="og:title"))
+        self.assertIsNone(soup.find("meta", attrs={"name": "twitter:card"}))
+        self.assertIsNone(soup.find("meta", attrs={"name": "twitter:image"}))
+
     def test_home_page_organization_schema_uses_configured_linkedin_url(self):
         linkedin_url = "https://www.linkedin.com/company/example-ai"
 
