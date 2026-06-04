@@ -136,6 +136,11 @@ SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 MESSAGE_ONLY_TOOL_NAMES_TEXT = (
     "send_email, send_sms, send_chat_message, and send_agent_message"
 )
+SQLITE_EFFICIENCY_WARNING = (
+    "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
+    "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
+    "json_extract/json_each/aggregation, or create a durable working table first."
+)
 BROWSER_TASK_RESULT_BLOCK_RE = re.compile(
     r"<result>\s*(?P<payload>.*?)\s*</result>",
     re.DOTALL | re.IGNORECASE,
@@ -1378,8 +1383,7 @@ def _render_prompt_context_once(
         (
             "Request credentials only when you'll use them immediately: use domain-scoped credentials for `http_request`, "
             "login credentials for `spawn_web_task`, and `secret_type='env_var'` for custom tools, `python_exec`, `run_command`, "
-            "or MCP servers that read secrets from `os.environ`. Avoid 2FA/MFA unless the user explicitly asks for it, "
-            "because those flows may hit system limitations; prefer non-2FA paths when available."
+            "or MCP servers that read secrets from `os.environ`."
         ),
         weight=1,
         non_shrinkable=True
@@ -3054,22 +3058,14 @@ def _build_sqlite_retry_warning(
     summary = summarize_sqlite_tool_result_sql(sql_values)
     if not result_id_counts:
         if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
-            return (
-                "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
-                "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
-                "json_extract/json_each/aggregation, or create a durable working table first."
-            )
+            return SQLITE_EFFICIENCY_WARNING
         return ""
 
     result_id, call_count = result_id_counts.most_common(1)[0]
     empty_count = empty_counts[result_id]
     if call_count < 4 or empty_count < 2:
         if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
-            return (
-                "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
-                "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
-                "json_extract/json_each/aggregation, or create a durable working table first."
-            )
+            return SQLITE_EFFICIENCY_WARNING
         return ""
 
     return (
