@@ -52,6 +52,10 @@ COMPARISON_CATALOG = (
             "AI workflow automation comparison",
         ),
         "competitor_url": "https://n8n.io/",
+        "competitor_application_category": "Workflow automation platform",
+        "competitor_schema_description": (
+            "Workflow automation platform for apps, APIs, integrations, and technical automation."
+        ),
         "published_date": "2026-06-04",
         "last_reviewed_date": "2026-06-04",
         "last_reviewed_display": "June 4, 2026",

@@ -3393,12 +3393,23 @@ class ComparisonDetailView(TemplateView):
                     "name": "Gobii",
                     "applicationCategory": "AI agent platform",
                     "url": home_url,
+                    "description": (
+                        "AI coworker platform for persistent browser-native business work."
+                    ),
                 },
                 {
                     "@type": "SoftwareApplication",
                     "name": comparison["competitor_name"],
-                    "applicationCategory": "AI agent platform",
+                    "applicationCategory": comparison.get(
+                        "competitor_application_category",
+                        "AI agent platform",
+                    ),
                     "url": comparison["competitor_url"],
+                    **(
+                        {"description": comparison["competitor_schema_description"]}
+                        if "competitor_schema_description" in comparison
+                        else {}
+                    ),
                 },
             ],
         }

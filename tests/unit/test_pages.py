@@ -1965,6 +1965,18 @@ class ComparisonPageTests(TestCase):
             [item["name"] for item in structured_data["about"]],
             ["Gobii", "n8n"],
         )
+        self.assertEqual(
+            structured_data["about"][0]["description"],
+            "AI coworker platform for persistent browser-native business work.",
+        )
+        self.assertEqual(
+            structured_data["about"][1]["applicationCategory"],
+            "Workflow automation platform",
+        )
+        self.assertEqual(
+            structured_data["about"][1]["description"],
+            "Workflow automation platform for apps, APIs, integrations, and technical automation.",
+        )
         self.assertEqual(structured_data["about"][1]["url"], comparison["competitor_url"])
 
         breadcrumb_data = json.loads(json_ld_scripts[1].string)
@@ -1981,6 +1993,8 @@ class ComparisonPageTests(TestCase):
         self.assertIn("Choose Gobii if", content)
         self.assertIn("n8n helps builders connect systems. Gobii helps teams delegate work.", content)
         self.assertIn("n8n is a canvas. Gobii is a coworker runtime.", content)
+        self.assertIn("Gobii vs n8n comparison", content)
+        self.assertIn("n8n alternative", content)
         self.assertIn("Source note", content)
         self.assertIn("Last reviewed June 4, 2026 by Gobii editorial team.", content)
         webp_source = soup.find("source", {"type": "image/webp"})
