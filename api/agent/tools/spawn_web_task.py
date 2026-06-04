@@ -111,7 +111,9 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
         "function": {
             "name": "spawn_web_task",
             "description": (
-                "Async headless browser; returns task_id. Slow/expensive, so use only when search/scrape/structured-data/API tools cannot answer and rendered page state, JavaScript, login, or user interaction is required. "
+                "Async headless browser; returns task_id. Use for webpage screenshots, visual capture, PDFs, rendered page artifacts, and tasks that need a real browser. "
+                "It can navigate pages, interact with sites, take screenshots, save pages as PDFs, write result files, and return persisted filespace paths for generated browser artifacts. "
+                "For text-only public pages, prefer search/scrape/structured-data/API tools when they fully satisfy the request; if the user asks for a screenshot or visual proof of a webpage, use this tool. "
                 "Give detailed, realistic instructions; ask for URLs if needed. Mention secrets by direct name, e.g. google_username, not <<<google_username>>>. "
                 "Stored secrets are for classic username/password logins only; OAuth uses MCP connect/auth links. "
                 f"Completion notifies you; do not poll. If blocked waiting, use sleep_until_next_trigger. {limit_sentence}"
@@ -123,7 +125,8 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
                     "requires_vision": {
                         "type": "boolean",
                         "description": (
-                            "Set this to true if and only if this web task is likely to require vision capabilities (seeing UI elements, images, etc.) "
+                            "Set this to true if and only if this web task is likely to require vision capabilities (seeing UI elements, reading images, inspecting visual layout, etc.). "
+                            "A request to capture a screenshot does not by itself require vision unless the browser agent must interpret visual content. "
                             "Otherwise, set it to false to save tokens."
                         ),
                     },

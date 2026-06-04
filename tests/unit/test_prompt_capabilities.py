@@ -221,8 +221,22 @@ class AgentCapabilitiesPromptTests(TestCase):
         tool = get_spawn_web_task_tool(self.agent)
         description = tool["function"]["description"]
 
-        self.assertIn("search/scrape/structured-data/API tools cannot answer", description)
-        self.assertIn("rendered page state, JavaScript, login, or user interaction", description)
+        self.assertIn("prefer search/scrape/structured-data/API tools", description)
+        self.assertIn("webpage screenshots", description)
+        self.assertIn("save pages as PDFs", description)
+        self.assertIn("persisted filespace paths", description)
+        self.assertIn("if the user asks for a screenshot or visual proof of a webpage, use this tool", description)
+
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_tool_rules_route_webpage_screenshots_to_browser_task(self, _mock_comms, _mock_steps):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn(
+            "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task",
+            contents,
+        )
 
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     def test_sandbox_summary_mentions_custom_tool_discovery_for_bulk_work(self, _mock_sandbox):
