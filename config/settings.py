@@ -640,6 +640,11 @@ ACCOUNT_ALLOW_PASSWORD_SIGNUP = env.bool("ACCOUNT_ALLOW_PASSWORD_SIGNUP", defaul
 ACCOUNT_ALLOW_SOCIAL_SIGNUP = env.bool("ACCOUNT_ALLOW_SOCIAL_SIGNUP", default=True)
 ACCOUNT_ALLOW_PASSWORD_LOGIN = env.bool("ACCOUNT_ALLOW_PASSWORD_LOGIN", default=True)
 ACCOUNT_ALLOW_SOCIAL_LOGIN = env.bool("ACCOUNT_ALLOW_SOCIAL_LOGIN", default=True)
+ACCOUNT_PASSWORD_MAX_LENGTH = env.int("ACCOUNT_PASSWORD_MAX_LENGTH", default=128)
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "config.password_validation.MaximumLengthPasswordValidator"},
+]
+
 
 def _parse_domain_set(raw_value: str) -> set[str]:
     return {
