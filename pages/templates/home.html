@@ -13,6 +13,9 @@
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="{{ home_meta_description }}">
+  {% if default_charter and not agent_charter_saved %}
+  <meta name="robots" content="noindex, follow">
+  {% endif %}
   {% if home_social_metadata_enabled %}
   {% if not default_charter or agent_charter_saved %}
   <meta property="og:type" content="website">
