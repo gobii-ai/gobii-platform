@@ -3659,6 +3659,7 @@ def _get_system_instruction(
         "recurring setup with URL -> sqlite_batch charter+schedule first; no URL search/read/fetch unless asked to run now\n"
         "scheduled exact feed/API briefing -> http_request then send concise sourced report; no update_plan/files/charts unless asked\n"
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
+        "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
         "read_file path -> filespace path only; never http(s) URL\n"
         "data/api/feed/file URL -> http_request (PDF may need read_file; browser only if blocked or rendered/login needed)\n"
         "HTML page to read -> scrape_as_markdown or structured extractor; known platforms/social -> structured extractor first\n"
