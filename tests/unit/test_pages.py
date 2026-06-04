@@ -102,7 +102,7 @@ class HomePageTests(TestCase):
 
     @override_settings(
         PUBLIC_BRAND_NAME="Acme",
-        PUBLIC_SITE_URL="https://www.gobii.ai",
+        PUBLIC_SITE_URL="https://gobii.ai",
         GOBII_RELEASE_ENV="prod",
         GOBII_PROPRIETARY_MODE=True,
     )
@@ -117,11 +117,11 @@ class HomePageTests(TestCase):
             "and tools. Email them, text them — they browse the web, collect data, "
             "and deliver reports 24/7."
         )
-        image_url = "https://www.gobii.ai/static/images/gobii_og_image_1200x630.png"
+        image_url = "https://gobii.ai/static/images/gobii_og_image_1200x630.png"
 
         self.assertEqual(
             soup.find("link", rel="canonical")["href"],
-            "https://www.gobii.ai/",
+            "https://gobii.ai/",
         )
         self.assertEqual(
             soup.find("meta", attrs={"name": "description"})["content"],
@@ -131,7 +131,7 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find("meta", property="og:locale")["content"], "en_US")
         self.assertEqual(soup.find("meta", property="og:title")["content"], title)
         self.assertEqual(soup.find("meta", property="og:description")["content"], description)
-        self.assertEqual(soup.find("meta", property="og:url")["content"], "https://www.gobii.ai/")
+        self.assertEqual(soup.find("meta", property="og:url")["content"], "https://gobii.ai/")
         self.assertEqual(soup.find("meta", property="og:site_name")["content"], "Acme")
         self.assertEqual(soup.find("meta", property="og:image")["content"], image_url)
         self.assertEqual(soup.find("meta", property="og:image:type")["content"], "image/png")
@@ -169,7 +169,7 @@ class HomePageTests(TestCase):
         self.assertIsNone(soup.find("meta", attrs={"name": "twitter:image"}))
 
     @override_settings(
-        PUBLIC_SITE_URL="https://www.gobii.ai",
+        PUBLIC_SITE_URL="https://gobii.ai",
         GOBII_RELEASE_ENV="prod",
         GOBII_PROPRIETARY_MODE=True,
     )
@@ -1557,10 +1557,14 @@ class CanonicalLinkTests(TestCase):
                 ]
                 self.assertEqual(canonical_hrefs, [expected_url])
 
-    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
+    @override_settings(
+        PUBLIC_SITE_URL="https://gobii.ai",
+        GOBII_RELEASE_ENV="prod",
+        GOBII_PROPRIETARY_MODE=True,
+    )
     def test_canonical_present_in_production_proprietary(self):
         response = self.client.get("/")
-        self.assertContains(response, '<link rel="canonical" href="http://testserver/">')
+        self.assertContains(response, '<link rel="canonical" href="https://gobii.ai/">')
 
     @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=False)
     def test_canonical_absent_when_not_proprietary(self):
