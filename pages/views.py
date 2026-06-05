@@ -3751,6 +3751,15 @@ class SolutionView(TemplateView):
         'engineering': 'solutions/engineering.html',
     }
 
+    ORGANIZATION_LOGO_PATH = "images/gobii_fish_with_text_purple_nav_2x.webp"
+    ORGANIZATION_SAME_AS = (
+        "https://www.linkedin.com/company/gobii-ai",
+        "https://github.com/gobii-ai",
+        "https://x.com/gobii_ai",
+        "https://medium.com/gobiiai",
+        "https://docs.gobii.ai/",
+    )
+
     SOLUTION_DATA = {
         'recruiting': {
             'title': 'Recruiting',
@@ -3774,6 +3783,7 @@ class SolutionView(TemplateView):
             'description': 'Scale your prospecting and personalized messaging to fill your pipeline automatically.',
             'seo_title': 'AI Sales Agents - Automate Lead Gen & Outreach | Gobii',
             'seo_description': "Deploy AI sales agents that work 24/7 to find prospects, research accounts, and fill your pipeline. Book more demos with Gobii's always-on digital workers.",
+            'date_modified': '2026-06-05',
             'social_image': 'images/solutions/sales-hero.jpg',
             'social_image_alt': 'Gobii AI sales agents for lead generation and account research',
             'related_link': {
@@ -3847,6 +3857,13 @@ class SolutionView(TemplateView):
         solutions_url = self.request.build_absolute_uri(reverse('pages:solutions'))
         home_url = self.request.build_absolute_uri(reverse('pages:home'))
         social_image_url = self.request.build_absolute_uri(static(data['social_image']))
+        organization_schema = {
+            "@type": "Organization",
+            "name": "Gobii",
+            "url": home_url,
+            "logo": self.request.build_absolute_uri(static(self.ORGANIZATION_LOGO_PATH)),
+            "sameAs": list(self.ORGANIZATION_SAME_AS),
+        }
 
         solution_spawn_requires_trial = False
         if self.request.user.is_authenticated:
@@ -3867,10 +3884,7 @@ class SolutionView(TemplateView):
             "description": data['seo_description'],
             "url": solution_url,
             "image": social_image_url,
-            "publisher": {
-                "@type": "Organization",
-                "name": "Gobii",
-            },
+            "publisher": organization_schema,
             "isPartOf": {
                 "@type": "WebSite",
                 "name": "Gobii",
@@ -3884,10 +3898,7 @@ class SolutionView(TemplateView):
                 "image": social_image_url,
                 "serviceType": "AI agent solution",
                 "category": data['title'],
-                "provider": {
-                    "@type": "Organization",
-                    "name": "Gobii",
-                },
+                "provider": organization_schema,
             },
         }
         if data.get('date_modified'):

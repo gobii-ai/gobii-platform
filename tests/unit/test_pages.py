@@ -2836,6 +2836,20 @@ class SolutionCtaCopyTests(TestCase):
                 else:
                     self.assertNotIn("dateModified", structured_data)
                 self.assertEqual(structured_data["publisher"]["name"], "Gobii")
+                self.assertEqual(
+                    structured_data["publisher"]["url"],
+                    response.wsgi_request.build_absolute_uri(reverse("pages:home")),
+                )
+                self.assertEqual(
+                    structured_data["publisher"]["logo"],
+                    response.wsgi_request.build_absolute_uri(
+                        static(page_views.SolutionView.ORGANIZATION_LOGO_PATH)
+                    ),
+                )
+                self.assertEqual(
+                    structured_data["publisher"]["sameAs"],
+                    list(page_views.SolutionView.ORGANIZATION_SAME_AS),
+                )
                 self.assertEqual(structured_data["isPartOf"]["@type"], "WebSite")
                 self.assertEqual(structured_data["isPartOf"]["name"], "Gobii")
                 self.assertEqual(structured_data["mainEntity"]["@type"], "Service")
@@ -2845,7 +2859,7 @@ class SolutionCtaCopyTests(TestCase):
                 )
                 self.assertEqual(structured_data["mainEntity"]["serviceType"], "AI agent solution")
                 self.assertEqual(structured_data["mainEntity"]["category"], data["title"])
-                self.assertEqual(structured_data["mainEntity"]["provider"]["name"], "Gobii")
+                self.assertEqual(structured_data["mainEntity"]["provider"], structured_data["publisher"])
 
                 breadcrumb_data = json.loads(json_ld_scripts[1].string)
                 self.assertEqual(breadcrumb_data["@context"], "https://schema.org")
