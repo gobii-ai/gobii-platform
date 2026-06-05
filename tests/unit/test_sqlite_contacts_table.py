@@ -10,9 +10,8 @@ from django.utils import timezone
 from unittest.mock import patch
 
 from api.agent.core.contact_results import ContactSQLiteRecord, store_contacts_for_prompt
-from api.agent.core.prompt_context import (
-    _ConfigAuthorityResolver,
-    _build_sqlite_contacts_snapshot_records,
+from api.agent.core.contact_snapshot import (
+    build_contacts_snapshot_records,
 )
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.models import (
@@ -165,10 +164,20 @@ class SqliteContactsSnapshotBuilderTests(TestCase):
             charter="Test contacts snapshot.",
             browser_use_agent=self.browser_agent,
         )
-        self.config_authority = _ConfigAuthorityResolver(self.agent)
+        self.configure_user_ids = {self.owner.id}
+
+    def _display_name_for_user(self, user):
+        return (user.get_full_name() or "").strip() or None
+
+    def _user_can_configure(self, user_id):
+        return user_id in self.configure_user_ids
 
     def _records_by_address(self):
-        records = _build_sqlite_contacts_snapshot_records(self.agent, self.config_authority)
+        records = build_contacts_snapshot_records(
+            self.agent,
+            display_name_for_user=self._display_name_for_user,
+            user_can_configure=self._user_can_configure,
+        )
         return {(record.channel, record.normalized_address): record for record in records}
 
     def test_owner_implicit_contact_appears_allowed(self):
@@ -246,7 +255,7 @@ class SqliteContactsSnapshotBuilderTests(TestCase):
         records = self._records_by_address()
 
         record = records[(CommsChannel.EMAIL, "approved-but-missing@example.com")]
-        self.assertEqual(record.status, "approved_request_no_active_entry")
+        self.assertEqual(record.status, "approved_missing_allowlist")
         self.assertFalse(record.allow_outbound)
 
     def test_allowed_row_overrides_request_for_same_address(self):
@@ -294,6 +303,7 @@ class SqliteContactsSnapshotBuilderTests(TestCase):
             role=OrganizationMembership.OrgRole.ADMIN,
             status=OrganizationMembership.OrgStatus.ACTIVE,
         )
+        self.configure_user_ids.add(org_member.id)
         UserPhoneNumber.objects.create(
             user=org_member,
             phone_number="+15555550123",
@@ -306,7 +316,6 @@ class SqliteContactsSnapshotBuilderTests(TestCase):
             last_name="User",
         )
         AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
-        self.config_authority = _ConfigAuthorityResolver(self.agent)
 
         records = self._records_by_address()
 

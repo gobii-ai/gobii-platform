@@ -50,7 +50,6 @@ from ...models import (
     parse_web_user_address,
     AgentCollaborator,
     CommsAllowlistEntry,
-    CommsAllowlistRequest,
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -116,7 +115,8 @@ from .tool_results import (
     prepare_tool_results_for_prompt,
 )
 from .daily_limit_mode import is_daily_hard_limit_message_only_mode
-from .contact_results import ContactSQLiteRecord, store_contacts_for_prompt
+from .contact_results import store_contacts_for_prompt
+from .contact_snapshot import build_contacts_snapshot_records
 from .file_results import FileSQLiteRecord, store_files_for_prompt
 from .message_results import MessageSQLiteRecord, store_messages_for_prompt
 from api.services.email_verification import has_verified_email
@@ -1441,7 +1441,13 @@ def _render_prompt_context_once(
 
     # Contacts block - use promptree natively
     recent_contacts_text = _build_contacts_block(agent, important_group, span, config_authority)
-    store_contacts_for_prompt(_build_sqlite_contacts_snapshot_records(agent, config_authority))
+    store_contacts_for_prompt(
+        build_contacts_snapshot_records(
+            agent,
+            display_name_for_user=_build_user_display_name,
+            user_can_configure=config_authority.user_can_configure,
+        )
+    )
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
@@ -2099,267 +2105,6 @@ class _ConfigAuthorityResolver:
         can_configure = self.address_can_configure(endpoint.channel, endpoint.address)
         self.endpoint_cache[endpoint.id] = can_configure
         return can_configure
-
-
-def _normalize_contact_address(channel: str, address: str) -> str:
-    raw = (address or "").strip()
-    if channel == CommsChannel.EMAIL:
-        return (parseaddr(raw)[1] or raw).strip().lower()
-    return raw
-
-
-def _contact_record_key(record: ContactSQLiteRecord) -> tuple[str, str]:
-    return record.channel, record.normalized_address
-
-
-def _contact_record_priority(record: ContactSQLiteRecord) -> int:
-    if record.status == "allowed":
-        if record.source == "owner":
-            return 100
-        if record.source == "org_member":
-            return 90
-        if record.source == "collaborator":
-            return 80
-        return 70
-    if record.status == "approved_request_no_active_entry":
-        return 40
-    if record.status == "pending_request":
-        return 30
-    if record.status == "rejected_request":
-        return 20
-    if record.status == "expired_request":
-        return 10
-    if record.status == "inactive":
-        return 5
-    return 0
-
-
-def _put_contact_record(
-    records_by_key: dict[tuple[str, str], ContactSQLiteRecord],
-    record: ContactSQLiteRecord,
-) -> None:
-    key = _contact_record_key(record)
-    if not key[1]:
-        return
-    existing = records_by_key.get(key)
-    if existing is None or _contact_record_priority(record) > _contact_record_priority(existing):
-        records_by_key[key] = record
-
-
-def _contact_record(
-    *,
-    contact_id: str,
-    channel: str,
-    address: str,
-    display_name: str = "",
-    source: str,
-    status: str,
-    allow_inbound: bool,
-    allow_outbound: bool,
-    can_configure: bool = False,
-    requested_at: Optional[str] = None,
-    responded_at: Optional[str] = None,
-    updated_at: Optional[str] = None,
-) -> ContactSQLiteRecord:
-    return ContactSQLiteRecord(
-        contact_id=contact_id,
-        channel=channel,
-        address=(address or "").strip(),
-        normalized_address=_normalize_contact_address(channel, address),
-        display_name=display_name or "",
-        source=source,
-        status=status,
-        allow_inbound=allow_inbound,
-        allow_outbound=allow_outbound,
-        can_configure=can_configure,
-        requested_at=requested_at,
-        responded_at=responded_at,
-        updated_at=updated_at,
-    )
-
-
-def _contact_request_status(request: CommsAllowlistRequest) -> str:
-    if request.status == CommsAllowlistRequest.RequestStatus.PENDING:
-        return "expired_request" if request.is_expired() else "pending_request"
-    if request.status == CommsAllowlistRequest.RequestStatus.REJECTED:
-        return "rejected_request"
-    if request.status == CommsAllowlistRequest.RequestStatus.EXPIRED:
-        return "expired_request"
-    if request.status == CommsAllowlistRequest.RequestStatus.APPROVED:
-        return "approved_request_no_active_entry"
-    return f"{request.status}_request"
-
-
-def _build_sqlite_contacts_snapshot_records(
-    agent: PersistentAgent,
-    config_authority: _ConfigAuthorityResolver,
-) -> List[ContactSQLiteRecord]:
-    records_by_key: dict[tuple[str, str], ContactSQLiteRecord] = {}
-    owner_email_verified = has_verified_email(agent.user) if agent.user else False
-
-    if owner_email_verified and agent.user and agent.user.email:
-        _put_contact_record(
-            records_by_key,
-            _contact_record(
-                contact_id=f"owner:email:{agent.user_id}",
-                channel=CommsChannel.EMAIL,
-                address=agent.user.email,
-                display_name=_build_user_display_name(agent.user) or "",
-                source="owner",
-                status="allowed",
-                allow_inbound=True,
-                allow_outbound=True,
-                can_configure=config_authority.user_can_configure(agent.user_id),
-            ),
-        )
-        owner_phones = UserPhoneNumber.objects.filter(
-            user=agent.user,
-            is_verified=True,
-        ).order_by("phone_number")
-        for phone in owner_phones:
-            _put_contact_record(
-                records_by_key,
-                _contact_record(
-                    contact_id=f"owner:sms:{phone.id}",
-                    channel=CommsChannel.SMS,
-                    address=phone.phone_number,
-                    display_name=_build_user_display_name(agent.user) or "",
-                    source="owner",
-                    status="allowed",
-                    allow_inbound=True,
-                    allow_outbound=True,
-                    can_configure=config_authority.user_can_configure(agent.user_id),
-                ),
-            )
-
-    if owner_email_verified and agent.organization_id:
-        memberships = (
-            OrganizationMembership.objects.filter(
-                org_id=agent.organization_id,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-                user__email__isnull=False,
-            )
-            .exclude(user__email="")
-            .select_related("user")
-            .order_by("user__email")
-        )
-        org_user_ids: list[int] = []
-        for membership in memberships:
-            org_user_ids.append(membership.user_id)
-            role_can_configure = membership.role in ORG_AGENT_CONFIG_AUTHORITY_ROLES
-            _put_contact_record(
-                records_by_key,
-                _contact_record(
-                    contact_id=f"org_member:email:{membership.id}",
-                    channel=CommsChannel.EMAIL,
-                    address=membership.user.email,
-                    display_name=_build_user_display_name(membership.user) or "",
-                    source="org_member",
-                    status="allowed",
-                    allow_inbound=True,
-                    allow_outbound=True,
-                    can_configure=role_can_configure,
-                ),
-            )
-
-        org_phones = (
-            UserPhoneNumber.objects.filter(
-                user_id__in=org_user_ids,
-                is_verified=True,
-            )
-            .select_related("user")
-            .order_by("phone_number")
-        )
-        for phone in org_phones:
-            _put_contact_record(
-                records_by_key,
-                _contact_record(
-                    contact_id=f"org_member:sms:{phone.id}",
-                    channel=CommsChannel.SMS,
-                    address=phone.phone_number,
-                    display_name=_build_user_display_name(phone.user) or "",
-                    source="org_member",
-                    status="allowed",
-                    allow_inbound=True,
-                    allow_outbound=False,
-                    can_configure=config_authority.user_can_configure(phone.user_id),
-                ),
-            )
-
-    if owner_email_verified:
-        collaborators = (
-            AgentCollaborator.objects.filter(agent=agent, user__email__isnull=False)
-            .exclude(user__email="")
-            .select_related("user")
-            .order_by("user__email")
-        )
-        for collaborator in collaborators:
-            _put_contact_record(
-                records_by_key,
-                _contact_record(
-                    contact_id=f"collaborator:email:{collaborator.id}",
-                    channel=CommsChannel.EMAIL,
-                    address=collaborator.user.email,
-                    display_name=_build_user_display_name(collaborator.user) or "",
-                    source="collaborator",
-                    status="allowed",
-                    allow_inbound=True,
-                    allow_outbound=True,
-                    can_configure=config_authority.user_can_configure(collaborator.user_id),
-                    updated_at=collaborator.created_at.isoformat() if collaborator.created_at else None,
-                ),
-            )
-
-        allowlist_entries = (
-            CommsAllowlistEntry.objects.filter(agent=agent)
-            .order_by("-is_active", "channel", "address")
-        )
-        for entry in allowlist_entries:
-            status = "allowed" if entry.is_active else "inactive"
-            _put_contact_record(
-                records_by_key,
-                _contact_record(
-                    contact_id=f"allowlist_entry:{entry.id}",
-                    channel=entry.channel,
-                    address=entry.address,
-                    source="allowlist_entry",
-                    status=status,
-                    allow_inbound=entry.allow_inbound if entry.is_active else False,
-                    allow_outbound=entry.allow_outbound if entry.is_active else False,
-                    can_configure=entry.can_configure if entry.is_active else False,
-                    updated_at=entry.updated_at.isoformat() if entry.updated_at else None,
-                ),
-            )
-
-    contact_requests = (
-        CommsAllowlistRequest.objects.filter(agent=agent)
-        .order_by("-requested_at")
-    )
-    for request in contact_requests:
-        _put_contact_record(
-            records_by_key,
-            _contact_record(
-                contact_id=f"contact_request:{request.id}",
-                channel=request.channel,
-                address=request.address,
-                display_name=request.name or "",
-                source="contact_request",
-                status=_contact_request_status(request),
-                allow_inbound=False,
-                allow_outbound=False,
-                can_configure=False,
-                requested_at=request.requested_at.isoformat() if request.requested_at else None,
-                responded_at=request.responded_at.isoformat() if request.responded_at else None,
-                updated_at=request.responded_at.isoformat() if request.responded_at else (
-                    request.requested_at.isoformat() if request.requested_at else None
-                ),
-            ),
-        )
-
-    return sorted(
-        records_by_key.values(),
-        key=lambda record: (record.channel, record.normalized_address, record.source),
-    )
 
 
 def _get_interacted_web_user_info_by_endpoint(
