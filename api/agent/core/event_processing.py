@@ -201,12 +201,6 @@ from constants.feature_flags import AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVA
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from .gemini_cache import (
-    GEMINI_CACHE_BLOCKLIST,
-    GeminiCachedContentManager,
-    disable_gemini_cache_for,
-    is_gemini_cache_conflict_error,
-)
 from .web_streaming import WebStreamBroadcaster, resolve_web_stream_target
 
 logger = logging.getLogger(__name__)
@@ -2360,6 +2354,30 @@ def _record_duplicate_http_request_skip(
     attach_prompt_archive(step)
 
 
+_DIRECT_TOOL_EXECUTORS = {
+    "spawn_web_task": "execute_spawn_web_task",
+    "send_email": "execute_send_email",
+    "send_sms": "execute_send_sms",
+    "send_chat_message": "execute_send_chat_message",
+    "send_agent_message": "execute_send_agent_message",
+    "send_webhook_event": "execute_send_webhook_event",
+    "update_schedule": "execute_update_schedule",
+    "update_charter": "execute_update_charter",
+    "update_plan": "execute_update_plan",
+    "secure_credentials_request": "execute_secure_credentials_request",
+    "request_contact_permission": "execute_request_contact_permission",
+    "request_human_input": "execute_request_human_input",
+    "spawn_agent": "execute_spawn_agent",
+    "file_str_replace": "execute_file_str_replace",
+}
+
+_REFRESHING_TOOL_EXECUTORS = {
+    "search_tools": "execute_search_tools",
+    CREATE_CUSTOM_TOOL_NAME: "execute_create_custom_tool",
+    "end_planning": "execute_end_planning",
+}
+
+
 def _execute_tool_call_runtime(
     agent: PersistentAgent,
     *,
@@ -2395,44 +2413,12 @@ def _execute_tool_call_runtime(
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
         ), updated_tools
-    if tool_name == "spawn_web_task":
-        return execute_spawn_web_task(agent, exec_params), updated_tools
-    if tool_name == "send_email":
-        return execute_send_email(agent, exec_params), updated_tools
-    if tool_name == "send_sms":
-        return execute_send_sms(agent, exec_params), updated_tools
-    if tool_name == "send_chat_message":
-        return execute_send_chat_message(agent, exec_params), updated_tools
-    if tool_name == "send_agent_message":
-        return execute_send_agent_message(agent, exec_params), updated_tools
-    if tool_name == "send_webhook_event":
-        return execute_send_webhook_event(agent, exec_params), updated_tools
-    if tool_name == "update_schedule":
-        return execute_update_schedule(agent, exec_params), updated_tools
-    if tool_name == "update_charter":
-        return execute_update_charter(agent, exec_params), updated_tools
-    if tool_name == "update_plan":
-        return execute_update_plan(agent, exec_params), updated_tools
-    if tool_name == "secure_credentials_request":
-        return execute_secure_credentials_request(agent, exec_params), updated_tools
-    if tool_name == "request_contact_permission":
-        return execute_request_contact_permission(agent, exec_params), updated_tools
-    if tool_name == "request_human_input":
-        return execute_request_human_input(agent, exec_params), updated_tools
-    if tool_name == "spawn_agent":
-        return execute_spawn_agent(agent, exec_params), updated_tools
-    if tool_name == "search_tools":
-        result = execute_search_tools(agent, exec_params)
-        updated_tools = get_agent_tools(agent)
-        return result, updated_tools
-    if tool_name == CREATE_CUSTOM_TOOL_NAME:
-        result = execute_create_custom_tool(agent, exec_params)
-        updated_tools = get_agent_tools(agent)
-        return result, updated_tools
-    if tool_name == "file_str_replace":
-        return execute_file_str_replace(agent, exec_params), updated_tools
-    if tool_name == "end_planning":
-        result = execute_end_planning(agent, exec_params)
+    executor_name = _DIRECT_TOOL_EXECUTORS.get(tool_name)
+    if executor_name:
+        return globals()[executor_name](agent, exec_params), updated_tools
+    refreshing_executor_name = _REFRESHING_TOOL_EXECUTORS.get(tool_name)
+    if refreshing_executor_name:
+        result = globals()[refreshing_executor_name](agent, exec_params)
         updated_tools = get_agent_tools(agent)
         return result, updated_tools
     return execute_enabled_tool(
@@ -3389,9 +3375,7 @@ def _build_implied_send_tool_call(
     """
     Build an implied send tool call based on current context.
 
-    Routes to the appropriate channel:
-    - Active web chat session (highest priority)
-    - Most recent inbound message sender (email, SMS, web, or peer DM)
+    Implied delivery is limited to active web chat sessions.
     """
     from .prompt_context import _get_implied_send_context
 
@@ -3407,77 +3391,29 @@ def _build_implied_send_tool_call(
     if channel != "web":
         return None, "Implied send failed: active web session required."
 
-    if channel == "web":
-        if _looks_like_blocking_human_input_request(message_text):
-            tool_params = {
-                "question": _extract_human_input_question(message_text),
-                "will_continue_work": will_continue_work,
-            }
-            return (
-                {
-                    "id": "implied_human_input",
-                    "function": {"name": "request_human_input", "arguments": json.dumps(tool_params)},
-                },
-                None,
-            )
-
-        tool_params = {"to_address": to_address, "body": message_text}
-        if will_continue_work:
-            tool_params["will_continue_work"] = True
-        return (
-            {
-                "id": "implied_send",
-                "function": {"name": "send_chat_message", "arguments": json.dumps(tool_params)},
-            },
-            None,
-        )
-
-    elif channel == "sms":
-        tool_params = {"to_number": to_address, "body": message_text}
-        if will_continue_work:
-            tool_params["will_continue_work"] = True
-        return (
-            {
-                "id": "implied_send",
-                "function": {"name": "send_sms", "arguments": json.dumps(tool_params)},
-            },
-            None,
-        )
-
-    elif channel == "email":
-        # Wrap plain text in simple HTML paragraph, auto-generate subject
-        html_body = f"<p>{message_text}</p>"
+    if _looks_like_blocking_human_input_request(message_text):
         tool_params = {
-            "to_address": to_address,
-            "subject": "Re: Follow-up",
-            "mobile_first_html": html_body,
+            "question": _extract_human_input_question(message_text),
+            "will_continue_work": will_continue_work,
         }
-        if will_continue_work:
-            tool_params["will_continue_work"] = True
         return (
             {
-                "id": "implied_send",
-                "function": {"name": "send_email", "arguments": json.dumps(tool_params)},
+                "id": "implied_human_input",
+                "function": {"name": "request_human_input", "arguments": json.dumps(tool_params)},
             },
             None,
         )
 
-    elif channel == "peer_dm":
-        peer_agent_id = ctx.get("peer_agent_id")
-        if not peer_agent_id:
-            return None, "Implied send failed: peer agent ID not available."
-        tool_params = {"peer_agent_id": peer_agent_id, "message": message_text}
-        if will_continue_work:
-            tool_params["will_continue_work"] = True
-        return (
-            {
-                "id": "implied_send",
-                "function": {"name": "send_agent_message", "arguments": json.dumps(tool_params)},
-            },
-            None,
-        )
-
-    return None, f"Implied send failed: unsupported channel '{channel}'."
+    tool_params = {"to_address": to_address, "body": message_text}
+    if will_continue_work:
+        tool_params["will_continue_work"] = True
+    return (
+        {
+            "id": "implied_send",
+            "function": {"name": "send_chat_message", "arguments": json.dumps(tool_params)},
+        },
+        None,
+    )
 
 def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[BudgetContext]) -> None:
     """Best-effort attempt to close the budget cycle when the agent goes idle."""
@@ -3888,10 +3824,6 @@ def _stream_completion_with_broadcast(
     return response
 
 
-_GEMINI_CACHE_MANAGER = GeminiCachedContentManager()
-_GEMINI_CACHE_BLOCKLIST = GEMINI_CACHE_BLOCKLIST
-
-
 def _attach_completion_runtime_hints(response: Any, **hints: Any) -> None:
     if response is None or not hints:
         return
@@ -4055,7 +3987,6 @@ def _completion_with_failover(
                 # If OpenAI family, add safety_identifier hint when available
                 request_messages = base_messages
                 request_tools_payload: Optional[List[dict]] = list(base_tools) if base_tools else None
-                use_gemini_cache = False
 
                 if (provider.startswith("openai") or provider == "openai") and safety_identifier:
                     params["safety_identifier"] = str(safety_identifier)
@@ -4132,8 +4063,6 @@ def _completion_with_failover(
                 active_stream_broadcaster.cancel()
             raise
         except Exception as exc:
-            if use_gemini_cache and is_gemini_cache_conflict_error(exc):
-                disable_gemini_cache_for(provider, model)
             last_exc = exc
             current_span = trace.get_current_span()
             mark_span_failed_with_exception(current_span, exc, f"LLM completion failed with {provider}")
