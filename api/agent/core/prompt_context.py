@@ -48,7 +48,9 @@ from ...models import (
     BrowserUseAgentTaskStep,
     build_web_user_address,
     parse_web_user_address,
+    AgentCollaborator,
     CommsAllowlistEntry,
+    CommsAllowlistRequest,
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -94,6 +96,7 @@ from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_state import (
     AGENT_CONFIG_TABLE,
     AGENT_SKILLS_TABLE,
+    CONTACTS_TABLE,
     FILES_TABLE,
     get_sqlite_digest_prompt,
     get_sqlite_schema_prompt,
@@ -113,6 +116,7 @@ from .tool_results import (
     prepare_tool_results_for_prompt,
 )
 from .daily_limit_mode import is_daily_hard_limit_message_only_mode
+from .contact_results import ContactSQLiteRecord, store_contacts_for_prompt
 from .file_results import FileSQLiteRecord, store_files_for_prompt
 from .message_results import MessageSQLiteRecord, store_messages_for_prompt
 from api.services.email_verification import has_verified_email
@@ -133,6 +137,8 @@ SIGNED_FILES_URL_RE = re.compile(
 )
 SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
+CONTACT_PROMPT_INLINE_LIMIT = 25
+CONTACT_PROMPT_SAMPLE_LIMIT = 10
 MESSAGE_ONLY_TOOL_NAMES_TEXT = (
     "send_email, send_sms, send_chat_message, and send_agent_message"
 )
@@ -615,6 +621,8 @@ columns: result_id, tool_name, created_at, result_json, result_text, analysis_js
 columns include message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, body_bytes, body_is_truncated, attachment_paths_json, attachment_count, rejected_attachments_json, latest_status, latest_sent_at, latest_delivered_at, latest_error_message. message_id is the internal Gobii id accepted by send_email.reply_to_message_id. attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json). Use __messages only for structured analysis/history, not freshness checks.
 # __files (special table; metadata only)
 columns: node_id, filespace_id, path, name, parent_path, mime_type, size_bytes, checksum_sha256, created_at, updated_at. recent_files → SELECT * FROM __files ORDER BY updated_at DESC LIMIT 30. metadata only; read_file gets contents.
+# __contacts (special table)
+columns: contact_id, channel, address, normalized_address, display_name, source, status, allow_inbound, allow_outbound, can_configure, requested_at, responded_at, updated_at. Safe outbound recipients require status='allowed' AND allow_outbound=1. Bulk outreach join example: lower(leads.email)=__contacts.normalized_address AND __contacts.channel='email' AND __contacts.status='allowed' AND __contacts.allow_outbound=1. Do not infer approval from local lead status or an empty pending request queue.
 # JSON: path from hint, field from hint
 hint PATH $.data.items → json_each(result_json, '$.data.items'). hint FIELDS name,url → json_extract(r.value, '$.name'), json_extract(r.value, '$.url'). hint absent → inspect result_text/result_json first.
 ## CSV Parsing
@@ -1433,6 +1441,7 @@ def _render_prompt_context_once(
 
     # Contacts block - use promptree natively
     recent_contacts_text = _build_contacts_block(agent, important_group, span, config_authority)
+    store_contacts_for_prompt(_build_sqlite_contacts_snapshot_records(agent, config_authority))
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
@@ -1573,11 +1582,14 @@ def _render_prompt_context_once(
 
     sqlite_note = (
         "SQLite is always available. Snapshots: __tool_results for prior outputs, "
-        f"__messages for recent comms, {FILES_TABLE} for file metadata. "
+        f"__messages for recent comms, {FILES_TABLE} for file metadata, "
+        f"{CONTACTS_TABLE} for effective contacts/contact requests. "
         "Use sqlite_batch for filtering, joins, aggregation, charts, large/truncated data, or durable tables. "
         "Multiple prior outputs: query rows together with IN/CTEs/json_each or CREATE TABLE AS SELECT; do not read one result_text blob per source. "
         "Use __messages for structured history only, not freshness checks. "
-        "Use read_file for contents of known filespace paths; use sqlite_batch on __tool_results or __files only for prior tool outputs or file metadata."
+        f"For bulk or exact recipient checks, join against {CONTACTS_TABLE} where status='allowed' and allow_outbound=1; "
+        "do not infer approval from local lead status or an empty pending contact queue. "
+        "Use read_file for contents of known filespace paths; use sqlite_batch on __tool_results, __files, or __contacts only for prior outputs, file metadata, or contact authority."
     )
     variable_group.section_text(
         "sqlite_note",
@@ -2089,6 +2101,267 @@ class _ConfigAuthorityResolver:
         return can_configure
 
 
+def _normalize_contact_address(channel: str, address: str) -> str:
+    raw = (address or "").strip()
+    if channel == CommsChannel.EMAIL:
+        return (parseaddr(raw)[1] or raw).strip().lower()
+    return raw
+
+
+def _contact_record_key(record: ContactSQLiteRecord) -> tuple[str, str]:
+    return record.channel, record.normalized_address
+
+
+def _contact_record_priority(record: ContactSQLiteRecord) -> int:
+    if record.status == "allowed":
+        if record.source == "owner":
+            return 100
+        if record.source == "org_member":
+            return 90
+        if record.source == "collaborator":
+            return 80
+        return 70
+    if record.status == "approved_request_no_active_entry":
+        return 40
+    if record.status == "pending_request":
+        return 30
+    if record.status == "rejected_request":
+        return 20
+    if record.status == "expired_request":
+        return 10
+    if record.status == "inactive":
+        return 5
+    return 0
+
+
+def _put_contact_record(
+    records_by_key: dict[tuple[str, str], ContactSQLiteRecord],
+    record: ContactSQLiteRecord,
+) -> None:
+    key = _contact_record_key(record)
+    if not key[1]:
+        return
+    existing = records_by_key.get(key)
+    if existing is None or _contact_record_priority(record) > _contact_record_priority(existing):
+        records_by_key[key] = record
+
+
+def _contact_record(
+    *,
+    contact_id: str,
+    channel: str,
+    address: str,
+    display_name: str = "",
+    source: str,
+    status: str,
+    allow_inbound: bool,
+    allow_outbound: bool,
+    can_configure: bool = False,
+    requested_at: Optional[str] = None,
+    responded_at: Optional[str] = None,
+    updated_at: Optional[str] = None,
+) -> ContactSQLiteRecord:
+    return ContactSQLiteRecord(
+        contact_id=contact_id,
+        channel=channel,
+        address=(address or "").strip(),
+        normalized_address=_normalize_contact_address(channel, address),
+        display_name=display_name or "",
+        source=source,
+        status=status,
+        allow_inbound=allow_inbound,
+        allow_outbound=allow_outbound,
+        can_configure=can_configure,
+        requested_at=requested_at,
+        responded_at=responded_at,
+        updated_at=updated_at,
+    )
+
+
+def _contact_request_status(request: CommsAllowlistRequest) -> str:
+    if request.status == CommsAllowlistRequest.RequestStatus.PENDING:
+        return "expired_request" if request.is_expired() else "pending_request"
+    if request.status == CommsAllowlistRequest.RequestStatus.REJECTED:
+        return "rejected_request"
+    if request.status == CommsAllowlistRequest.RequestStatus.EXPIRED:
+        return "expired_request"
+    if request.status == CommsAllowlistRequest.RequestStatus.APPROVED:
+        return "approved_request_no_active_entry"
+    return f"{request.status}_request"
+
+
+def _build_sqlite_contacts_snapshot_records(
+    agent: PersistentAgent,
+    config_authority: _ConfigAuthorityResolver,
+) -> List[ContactSQLiteRecord]:
+    records_by_key: dict[tuple[str, str], ContactSQLiteRecord] = {}
+    owner_email_verified = has_verified_email(agent.user) if agent.user else False
+
+    if owner_email_verified and agent.user and agent.user.email:
+        _put_contact_record(
+            records_by_key,
+            _contact_record(
+                contact_id=f"owner:email:{agent.user_id}",
+                channel=CommsChannel.EMAIL,
+                address=agent.user.email,
+                display_name=_build_user_display_name(agent.user) or "",
+                source="owner",
+                status="allowed",
+                allow_inbound=True,
+                allow_outbound=True,
+                can_configure=config_authority.user_can_configure(agent.user_id),
+            ),
+        )
+        owner_phones = UserPhoneNumber.objects.filter(
+            user=agent.user,
+            is_verified=True,
+        ).order_by("phone_number")
+        for phone in owner_phones:
+            _put_contact_record(
+                records_by_key,
+                _contact_record(
+                    contact_id=f"owner:sms:{phone.id}",
+                    channel=CommsChannel.SMS,
+                    address=phone.phone_number,
+                    display_name=_build_user_display_name(agent.user) or "",
+                    source="owner",
+                    status="allowed",
+                    allow_inbound=True,
+                    allow_outbound=True,
+                    can_configure=config_authority.user_can_configure(agent.user_id),
+                ),
+            )
+
+    if owner_email_verified and agent.organization_id:
+        memberships = (
+            OrganizationMembership.objects.filter(
+                org_id=agent.organization_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                user__email__isnull=False,
+            )
+            .exclude(user__email="")
+            .select_related("user")
+            .order_by("user__email")
+        )
+        org_user_ids: list[int] = []
+        for membership in memberships:
+            org_user_ids.append(membership.user_id)
+            role_can_configure = membership.role in ORG_AGENT_CONFIG_AUTHORITY_ROLES
+            _put_contact_record(
+                records_by_key,
+                _contact_record(
+                    contact_id=f"org_member:email:{membership.id}",
+                    channel=CommsChannel.EMAIL,
+                    address=membership.user.email,
+                    display_name=_build_user_display_name(membership.user) or "",
+                    source="org_member",
+                    status="allowed",
+                    allow_inbound=True,
+                    allow_outbound=True,
+                    can_configure=role_can_configure,
+                ),
+            )
+
+        org_phones = (
+            UserPhoneNumber.objects.filter(
+                user_id__in=org_user_ids,
+                is_verified=True,
+            )
+            .select_related("user")
+            .order_by("phone_number")
+        )
+        for phone in org_phones:
+            _put_contact_record(
+                records_by_key,
+                _contact_record(
+                    contact_id=f"org_member:sms:{phone.id}",
+                    channel=CommsChannel.SMS,
+                    address=phone.phone_number,
+                    display_name=_build_user_display_name(phone.user) or "",
+                    source="org_member",
+                    status="allowed",
+                    allow_inbound=True,
+                    allow_outbound=False,
+                    can_configure=config_authority.user_can_configure(phone.user_id),
+                ),
+            )
+
+    if owner_email_verified:
+        collaborators = (
+            AgentCollaborator.objects.filter(agent=agent, user__email__isnull=False)
+            .exclude(user__email="")
+            .select_related("user")
+            .order_by("user__email")
+        )
+        for collaborator in collaborators:
+            _put_contact_record(
+                records_by_key,
+                _contact_record(
+                    contact_id=f"collaborator:email:{collaborator.id}",
+                    channel=CommsChannel.EMAIL,
+                    address=collaborator.user.email,
+                    display_name=_build_user_display_name(collaborator.user) or "",
+                    source="collaborator",
+                    status="allowed",
+                    allow_inbound=True,
+                    allow_outbound=True,
+                    can_configure=config_authority.user_can_configure(collaborator.user_id),
+                    updated_at=collaborator.created_at.isoformat() if collaborator.created_at else None,
+                ),
+            )
+
+        allowlist_entries = (
+            CommsAllowlistEntry.objects.filter(agent=agent)
+            .order_by("-is_active", "channel", "address")
+        )
+        for entry in allowlist_entries:
+            status = "allowed" if entry.is_active else "inactive"
+            _put_contact_record(
+                records_by_key,
+                _contact_record(
+                    contact_id=f"allowlist_entry:{entry.id}",
+                    channel=entry.channel,
+                    address=entry.address,
+                    source="allowlist_entry",
+                    status=status,
+                    allow_inbound=entry.allow_inbound if entry.is_active else False,
+                    allow_outbound=entry.allow_outbound if entry.is_active else False,
+                    can_configure=entry.can_configure if entry.is_active else False,
+                    updated_at=entry.updated_at.isoformat() if entry.updated_at else None,
+                ),
+            )
+
+    contact_requests = (
+        CommsAllowlistRequest.objects.filter(agent=agent)
+        .order_by("-requested_at")
+    )
+    for request in contact_requests:
+        _put_contact_record(
+            records_by_key,
+            _contact_record(
+                contact_id=f"contact_request:{request.id}",
+                channel=request.channel,
+                address=request.address,
+                display_name=request.name or "",
+                source="contact_request",
+                status=_contact_request_status(request),
+                allow_inbound=False,
+                allow_outbound=False,
+                can_configure=False,
+                requested_at=request.requested_at.isoformat() if request.requested_at else None,
+                responded_at=request.responded_at.isoformat() if request.responded_at else None,
+                updated_at=request.responded_at.isoformat() if request.responded_at else (
+                    request.requested_at.isoformat() if request.requested_at else None
+                ),
+            ),
+        )
+
+    return sorted(
+        records_by_key.values(),
+        key=lambda record: (record.channel, record.normalized_address, record.source),
+    )
+
+
 def _get_interacted_web_user_info_by_endpoint(
     agent: PersistentAgent,
     endpoints: Sequence[PersistentAgentCommsEndpoint],
@@ -2469,9 +2742,8 @@ def _build_contacts_block(
         )
 
     # Add explicitly allowed contacts from CommsAllowlistEntry (only if verified)
-    from api.models import AgentCollaborator
     if owner_email_verified:
-        allowed_contacts = (
+        allowed_contacts = list(
             CommsAllowlistEntry.objects.filter(
                 agent=agent,
                 is_active=True,
@@ -2480,7 +2752,14 @@ def _build_contacts_block(
         )
         if allowed_contacts:
             allowed_lines.append("Additional allowed contacts (inbound = can receive from them; outbound = can send to them):")
-            for entry in allowed_contacts:
+            display_contacts = allowed_contacts
+            if len(allowed_contacts) > CONTACT_PROMPT_INLINE_LIMIT:
+                allowed_lines.append(
+                    f"- {len(allowed_contacts)} active contacts are available; query {CONTACTS_TABLE} for the complete exact list."
+                )
+                display_contacts = allowed_contacts[:CONTACT_PROMPT_SAMPLE_LIMIT]
+                allowed_lines.append(f"Sample active contacts (first {len(display_contacts)}):")
+            for entry in display_contacts:
                 name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
                 config_marker = " [can configure]" if entry.can_configure else ""
                 perms = ("inbound" if entry.allow_inbound else "") + ("/" if entry.allow_inbound and entry.allow_outbound else "") + ("outbound" if entry.allow_outbound else "")
@@ -2499,6 +2778,9 @@ def _build_contacts_block(
 
     if owner_email_verified:
         allowed_lines.append("Only contact people listed here or in recent conversations.")
+        allowed_lines.append(
+            f"For bulk or exact recipient checks, query {CONTACTS_TABLE}; safe outbound recipients have status='allowed' AND allow_outbound=1. Do not infer approval from local lead status or an empty pending contacts queue."
+        )
         allowed_lines.append("To reach someone new, use request_contact_permission—it returns a link to share with the user.")
         allowed_lines.append(
             "If the user asks you to email or text a specific new address or phone number, request contact permission before reading files, searching, drafting, tool search, or asking non-blocking follow-up questions."
