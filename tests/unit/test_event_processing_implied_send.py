@@ -2859,6 +2859,59 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         self.assertEqual(mock_completion.call_count, 2)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_progress_content_with_tool_call_is_not_implied_send(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        mock_enabled_tool,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        tool_call = MagicMock()
+        tool_call.id = "call_dummy"
+        tool_call.function = MagicMock()
+        tool_call.function.name = "dummy_tool"
+        tool_call.function.arguments = json.dumps({"will_continue_work": True})
+
+        msg = MagicMock()
+        msg.tool_calls = [tool_call]
+        msg.function_call = None
+        msg.content = (
+            "I need to fix the vendor/source_url NULL issue and then query for the recommendation. "
+            "Let me recreate the table properly and run the analysis"
+        )
+        msg.reasoning_content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        self.assertTrue(mock_enabled_tool.called)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")

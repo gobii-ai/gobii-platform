@@ -72,7 +72,7 @@ _RESULTS_STATUS_PROGRESS_RE = re.compile(
     r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)|"
     r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+claims?\s+extracted|"
     r"from\s+(?:the\s+)?(?:scrapes|sources|pages|results),?\s+(?:i|we)\s+(?:now\s+)?(?:have|got)\s+(?:all\s+)?(?:the\s+)?(?:data|source material|results?)|"
-    r"all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)\s+(?:are|were)\s+(?:fetched|scraped|loaded|processed|done)|"
+    r"all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)\s+(?:(?:are|were)\s+)?(?:fetched|scraped|loaded|processed|done)(?:\s+and\s+claims?\s+extracted)?|"
     r"the\s+data\s+is\s+(?:already\s+)?in(?:\s+(?:the\s+)?[`\"']?[\w-]+[`\"']?(?:\s+table)?)?)\b",
     re.IGNORECASE,
 )
@@ -90,6 +90,14 @@ _PENDING_WORK_THEN_PROGRESS_RE = re.compile(
     r"\b(?:let me|i(?:'ll| will| need to| am going to)|next|then)\s+"
     r"(?:extract|query|try|inspect|use|build|create|run|rerun|report|send|deliver|share|write|summari[sz]e|"
     r"synthesi[sz]e|compile|process|parse|structure|format|rank|dedupe)\b",
+    re.IGNORECASE,
+)
+_INTERNAL_FIX_THEN_PROGRESS_RE = re.compile(
+    r"\bi\s+need\s+to\s+"
+    r"(?:fix|correct|repair|resolve|check|inspect|recreate|rerun|query|extract|verify|use)\b"
+    r".{0,180}\b(?:let me|and then|then|i(?:'ll| will| need to| am going to))\s+"
+    r"(?:fix|correct|repair|resolve|recreate|run|rerun|query|extract|inspect|check|analy[sz]e|"
+    r"summari[sz]e|report|deliver)\b",
     re.IGNORECASE,
 )
 _FORWARD_PROGRESS_ACTION_RE = re.compile(
@@ -190,6 +198,8 @@ def _looks_like_routine_progress_message(body: str) -> bool:
         return True
     if _PENDING_WORK_THEN_PROGRESS_RE.search(text):
         return True
+    if _INTERNAL_FIX_THEN_PROGRESS_RE.search(text):
+        return True
     answer_shape = bool(
         re.search(r"\bhere(?:'s| is) (?:the )?(?:analysis|answer|recommendation|report)\b", text, re.I)
         or re.search(r"\b(?:claims extracted|strongest unique claims|source urls?)\b.{0,180}(?:^|\s)\|[^|]+\|", text, re.I)
@@ -221,6 +231,7 @@ def _looks_like_stop_marked_progress_message(body: str) -> bool:
         or _RECOVERY_THEN_PROGRESS_RE.search(text)
         or _RETURNED_DATA_THEN_PROGRESS_RE.search(text)
         or _PENDING_WORK_THEN_PROGRESS_RE.search(text)
+        or _INTERNAL_FIX_THEN_PROGRESS_RE.search(text)
     ):
         return True
     result_status = bool(_RESULTS_STATUS_PROGRESS_RE.search(text))

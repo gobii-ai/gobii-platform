@@ -148,7 +148,11 @@ from ..tools.tool_manager import (
     should_skip_auto_substitution,
 )
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
-from ..tools.web_chat_sender import execute_send_chat_message, has_other_contact_channel
+from ..tools.web_chat_sender import (
+    execute_send_chat_message,
+    has_other_contact_channel,
+    _looks_like_routine_progress_message,
+)
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
 from ..tools.agent_variables import (
@@ -6541,7 +6545,16 @@ def _run_agent_loop(
                     implied_send_disabled_reason = "Implied send disabled by prompt configuration."
                 elif not selected_model_allows_implied_send:
                     implied_send_disabled_reason = "Implied send disabled for the selected model."
-                if message_text and not has_explicit_send:
+                suppress_progress_implied_send = (
+                    has_other_tool_calls
+                    and _looks_like_routine_progress_message(message_text)
+                )
+                if message_text and not has_explicit_send and suppress_progress_implied_send:
+                    logger.info(
+                        "Agent %s: suppressing progress-only message content while executing tool calls.",
+                        agent.id,
+                    )
+                elif message_text and not has_explicit_send:
                     # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                     # This is safer—agent won't keep running unexpectedly.
                     implied_will_continue = _should_imply_continue(
