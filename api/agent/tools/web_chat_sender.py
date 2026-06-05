@@ -85,6 +85,13 @@ _RETURNED_DATA_THEN_PROGRESS_RE = re.compile(
     r"(?:update|set up|configure|report|send|deliver|share|write|summari[sz]e|extract|synthesi[sz]e|compile|process|parse)\b",
     re.IGNORECASE,
 )
+_PENDING_WORK_THEN_PROGRESS_RE = re.compile(
+    r"\b(?:pending|still pending|not (?:done|complete|finished)|remaining|left)\b.{0,180}"
+    r"\b(?:let me|i(?:'ll| will| need to| am going to)|next|then)\s+"
+    r"(?:extract|query|try|inspect|use|build|create|run|rerun|report|send|deliver|share|write|summari[sz]e|"
+    r"synthesi[sz]e|compile|process|parse|structure|format|rank|dedupe)\b",
+    re.IGNORECASE,
+)
 _FORWARD_PROGRESS_ACTION_RE = re.compile(
     r"\b(?:let me|i(?:'ll| will| need to| can| am going to)|next|then)\s+"
     r"(?:open|scrape|fetch|query|read|review|use|analy[sz]e|synthesi[sz]e|compile|prepare|write|send|deliver|report|summari[sz]e|extract|check|update|configure|set up|dedupe|rank)\b",
@@ -181,6 +188,8 @@ def _looks_like_routine_progress_message(body: str) -> bool:
         return True
     if _RETURNED_DATA_THEN_PROGRESS_RE.search(text):
         return True
+    if _PENDING_WORK_THEN_PROGRESS_RE.search(text):
+        return True
     answer_shape = bool(
         re.search(r"\bhere(?:'s| is) (?:the )?(?:analysis|answer|recommendation|report)\b", text, re.I)
         or re.search(r"\b(?:claims extracted|strongest unique claims|source urls?)\b.{0,180}(?:^|\s)\|[^|]+\|", text, re.I)
@@ -211,6 +220,7 @@ def _looks_like_stop_marked_progress_message(body: str) -> bool:
         _TOOL_FRUSTRATION_PROGRESS_RE.search(text)
         or _RECOVERY_THEN_PROGRESS_RE.search(text)
         or _RETURNED_DATA_THEN_PROGRESS_RE.search(text)
+        or _PENDING_WORK_THEN_PROGRESS_RE.search(text)
     ):
         return True
     result_status = bool(_RESULTS_STATUS_PROGRESS_RE.search(text))

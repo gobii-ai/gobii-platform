@@ -488,6 +488,7 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
             "The data is in. Let me run the final analysis query and deliver the recommendation",
             "The `plan_candidates` table is populated with 8 rows. Now let me query it for the best plan.",
             "The data is already in the `plan_candidates` table. Let me run the compliance-filtered query to get the final recommendation",
+            "I see the scrapes and query were done but the structured comparison and recommendations are still pending. Let me extract the key data points from each page in a clean structured query.",
             "Hey! I'm Eval Agent. Let's dig up three current remote job listings from different sources right now.",
         )
         final_answers = (

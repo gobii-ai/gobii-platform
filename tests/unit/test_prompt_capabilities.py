@@ -313,6 +313,10 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("do not treat the new schedule as permission to resume the queued batch immediately", contents)
         self.assertIn("Do not use update_plan for partial-result preservation or resume scheduling", contents)
         self.assertIn("do not use search_tools, SQLite preflight reads, or prior __tool_results checks", contents)
+        self.assertIn(
+            "For sourced web/scrape synthesis, keep a source_url column",
+            contents,
+        )
 
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
