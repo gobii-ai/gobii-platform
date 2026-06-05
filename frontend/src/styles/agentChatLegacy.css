@@ -552,25 +552,6 @@
   line-height: 1.2;
 }
 
-.banner-overflow-item-description {
-  margin-top: 0.15rem;
-  font-size: 0.69rem;
-  line-height: 1.35;
-  color: #6b5b95;
-}
-
-.banner-overflow-item-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #4f46e5;
-  flex-shrink: 0;
-}
-
-.banner-overflow-item-check--hidden {
-  visibility: hidden;
-}
-
 .banner-settings {
   display: flex;
   align-items: center;
@@ -1647,10 +1628,6 @@
   scroll-padding-bottom: 1rem;
 }
 
-#timeline-events.timeline-align-end {
-  justify-content: flex-end;
-}
-
 #timeline-shell::-webkit-scrollbar {
   display: none;
   width: 0;
@@ -1966,10 +1943,6 @@
   display: inline;
 }
 
-.composer-intelligence-trigger-multiplier {
-  display: none;
-}
-
 .composer-intelligence-trigger-chevron {
   width: 0.75rem;
   height: 0.75rem;
@@ -2076,10 +2049,6 @@
 
 .composer-intelligence-option-multiplier--locked {
   color: #f97316;
-}
-
-.composer-intelligence-option-indicator {
-  display: none;
 }
 
 .composer-intelligence-note {
@@ -2933,17 +2902,12 @@
   transition: all 0.2s ease;
 }
 
-/* Offset for sidebar */
-.has-sidebar .jump-to-latest,
-.has-sidebar--collapsed .jump-to-latest,
 .agent-chat-main .jump-to-latest {
   left: calc(50% + (var(--agent-chat-sidebar-current-width, var(--agent-chat-sidebar-width, 18rem)) / 2));
 }
 
 @media (max-width: 767px) {
-  .agent-chat-main .jump-to-latest,
-  .has-sidebar .jump-to-latest,
-  .has-sidebar--collapsed .jump-to-latest {
+  .agent-chat-main .jump-to-latest {
     left: 50%;
   }
 }
@@ -3087,13 +3051,6 @@
   margin: 0;
   padding: 0;
   border: 0;
-}
-
-.timeline-history-label {
-  font-size: 0.75rem;
-  color: #94a3b8;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 /* ==========================================================================
@@ -3518,28 +3475,7 @@
   }
 }
 
-.timeline-event--incoming {
-  animation: timelineEventIncoming 350ms cubic-bezier(0.25, 1, 0.5, 1);
-}
-
-@keyframes timelineEventIncoming {
-  0% {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .timeline-event--incoming {
-    animation-duration: 1ms;
-    animation-iteration-count: 1;
-    animation-timing-function: linear;
-  }
-
   .scheduled-resume-card__spark {
     animation: none;
     opacity: 0;
@@ -6671,13 +6607,6 @@
   outline-color: rgba(167, 139, 250, 0.35);
 }
 
-.chat-sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  flex: 1;
-}
-
 .chat-sidebar-section {
   display: flex;
   flex-direction: column;
@@ -8125,24 +8054,9 @@
   }
 }
 
-/* Adjust main content when sidebar is present */
-.has-sidebar {
-  padding-left: var(--agent-chat-sidebar-current-width, var(--agent-chat-sidebar-width, 18rem));
-  transition: padding-left 0.24s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.has-sidebar--collapsed {
-  padding-left: var(--agent-chat-sidebar-current-width, var(--agent-chat-sidebar-width-collapsed, 5rem));
-}
-
 @media (max-width: 767px) {
   .chat-sidebar {
     display: none;
-  }
-
-  .has-sidebar,
-  .has-sidebar--collapsed {
-    padding-left: 0;
   }
 }
 
@@ -8738,11 +8652,6 @@
   min-height: var(--agent-list-working-dot-size);
 }
 
-.chat-sidebar-gallery-card-current,
-.agent-drawer-gallery-card-current {
-  cursor: default;
-}
-
 @keyframes sidebarGalleryEnter {
   from {
     opacity: 0;
@@ -9088,11 +8997,6 @@
   color: #0f172a;
 }
 
-.agent-settings-reset {
-  font-size: 0.75rem;
-  color: #475569;
-}
-
 .agent-settings-slider {
   display: flex;
   flex-direction: column;
@@ -9386,14 +9290,6 @@
 
 .billing-screen--embedded input[type='radio'] {
   accent-color: #8b5cf6;
-}
-
-.billing-screen--embedded .billing-screen__floating-actions {
-  border: 1px solid rgba(196, 181, 253, 0.18);
-  background: rgba(8, 7, 21, 0.76);
-  box-shadow: none;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
 }
 
 /* Embedded profile inside the gallery shell */
