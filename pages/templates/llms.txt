@@ -19,6 +19,7 @@ Gobii solves problems and gets real work done - the AI alone isn't the product, 
 
 - Lead generation
 - Recruiting and candidate sourcing
+- Engineering and developer workflow automation
 - Market research
 - Spreadsheet automation
 - File and document analysis
@@ -58,6 +59,21 @@ Gobii is not an AI toy or chatbot-only interface. It is designed to solve practi
 - Gobii sales agents are persistent digital workers that can search permitted web sources, evaluate companies and contacts against seller-provided ICP criteria, enrich prospect records with account context, and organize leads for review.
 - Sales workflows can export to Google Sheets, CSV, webhooks, and configured CRM integrations such as HubSpot, Salesforce, or enterprise CRM workflows.
 - Gobii is best described as an AI agent platform for delegated prospecting, account research, enrichment, and outreach preparation, not as a replacement for sales judgment, consent review, or compliance controls.
+
+### Engineering
+
+- [AI agent API for developers](https://gobii.ai/solutions/engineering/): Gobii's Agentic AI API for building, running, and managing persistent browser agents in the cloud or through self-hosted open-source deployment.
+- [Standup Coordinator](https://gobii.ai/pretrained-workers/team-standup-coordinator/): Pretrained developer workflow agent for coordinating team updates (agent template)
+- [Engineering templates](https://gobii.ai/library/engineering/): Public engineering and developer workflow agent templates.
+- [Developer documentation](https://docs.gobii.ai/developers/developer-basics): API setup, developer basics, and implementation guidance.
+
+### Engineering facts
+
+- Gobii engineering workflows are built around persistent AI agents that can browse websites, complete multi-step tasks, store state, use files, write structured records, and return outputs through API-driven workflows.
+- Common engineering use cases include web research agents, data collection pipelines, monitoring and alerts, workflow automation, form submission, report generation, browser-use production deployments, and agents that push structured results into downstream systems.
+- Gobii provides the production infrastructure around browser-use style automation, including cloud browsers, persistent sessions, per-agent files, embedded SQLite storage, webhooks, managed proxies, and cloud or self-hosted deployment options.
+- Gobii engineering agents can return structured data, files, screenshots, database records, webhook payloads, and workflow status updates for human review or downstream systems.
+- Gobii is best described as an agent platform and API for delegated browser automation workflows, not as a replacement for engineering judgment, security review, approval controls, or traditional software ownership.
 
 ### Recruiting
 

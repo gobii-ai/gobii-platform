@@ -1517,6 +1517,12 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "https://gobii.ai/solutions/sales/")
         self.assertContains(response, "### Sales facts")
         self.assertContains(response, "seller-provided ICP criteria")
+        self.assertContains(response, "### Engineering")
+        self.assertContains(response, "https://gobii.ai/solutions/engineering/")
+        self.assertContains(response, "https://gobii.ai/pretrained-workers/team-standup-coordinator/")
+        self.assertContains(response, "### Engineering facts")
+        self.assertContains(response, "browser-use production deployments")
+        self.assertContains(response, "structured data, files, screenshots, database records")
 
     def test_llms_full_txt_is_served_from_root(self):
         response = self.client.get("/llms-full.txt")
@@ -1530,6 +1536,13 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "https://gobii.ai/pretrained-workers/lead-hunter/")
         self.assertContains(response, "### Sales facts")
         self.assertContains(response, "configured CRM integrations")
+        self.assertContains(response, "### Engineering")
+        self.assertContains(response, "https://docs.gobii.ai/developers/developer-basics")
+        self.assertContains(response, "https://github.com/browser-use/browser-use")
+        self.assertContains(response, "### Engineering facts")
+        self.assertContains(response, "traditional Robotic Process Automation (RPA)")
+        self.assertContains(response, "Cloud API is the fastest path")
+        self.assertContains(response, "human approval around sensitive")
 
 
 @tag("batch_pages")
