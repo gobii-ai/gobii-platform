@@ -389,7 +389,6 @@ export function PipedreamAppsModal({
 
   return (
     <PipedreamModalShell
-      isMobile={isMobile}
       title={activeApp ? 'Manage connections' : 'Manage integrations'}
       subtitle={activeApp ? `${activeApp.name} connections across agents.` : 'Search apps and manage agent connections.'}
       onClose={onClose}

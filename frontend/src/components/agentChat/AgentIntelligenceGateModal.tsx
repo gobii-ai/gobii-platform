@@ -3,7 +3,7 @@ import { Lock, Zap } from 'lucide-react'
 import type { IntelligenceTierKey } from '../../types/llmIntelligence'
 import type { PlanTier } from '../../stores/subscriptionStore'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
-import { Modal } from '../common/Modal'
+import { ImmersiveDialog } from '../common/ImmersiveDialog'
 
 type GateReason = 'plan' | 'credits' | 'both'
 
@@ -90,15 +90,16 @@ export function AgentIntelligenceGateModal({
   const continueLabel = needsPlanUpgrade ? `Continue with ${allowedLabel}` : 'Continue anyway'
 
   return (
-    <Modal
+    <ImmersiveDialog
+      open={open}
       title={title}
       subtitle={subtitle}
       onClose={onClose}
       icon={needsPlanUpgrade ? Lock : Zap}
-      iconBgClass={needsPlanUpgrade ? 'bg-gradient-to-br from-amber-100 to-orange-100' : 'bg-gradient-to-br from-indigo-100 to-blue-100'}
-      iconColorClass={needsPlanUpgrade ? 'text-amber-600' : 'text-indigo-600'}
-      widthClass="sm:max-w-2xl"
-      bodyClassName="pr-1"
+      desktopIconBgClass={needsPlanUpgrade ? 'bg-gradient-to-br from-amber-100 to-orange-100' : 'bg-gradient-to-br from-indigo-100 to-blue-100'}
+      desktopIconColorClass={needsPlanUpgrade ? 'text-amber-600' : 'text-indigo-600'}
+      desktopWidthClass="sm:max-w-2xl"
+      desktopBodyClassName="pr-1"
     >
       {creditsTight && !needsPlanUpgrade ? (
         <div className="mb-4 flex items-start gap-3 rounded-xl bg-indigo-50/50 p-3 text-sm">
@@ -144,6 +145,6 @@ export function AgentIntelligenceGateModal({
           {continueLabel}
         </button>
       </div>
-    </Modal>
+    </ImmersiveDialog>
   )
 }

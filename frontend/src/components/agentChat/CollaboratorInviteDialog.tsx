@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Mail, UserPlus } from 'lucide-react'
 
 import { getCsrfToken } from '../../api/http'
-import { Modal } from '../common/Modal'
-import { AgentChatMobileSheet } from './AgentChatMobileSheet'
+import { ImmersiveDialog } from '../common/ImmersiveDialog'
 
 type CollaboratorInviteDialogProps = {
   open: boolean
@@ -24,7 +23,6 @@ export function CollaboratorInviteDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [isMobile, setIsMobile] = useState(false)
 
   const displayName = useMemo(() => (agentName || '').trim() || 'this agent', [agentName])
   const canInvite = Boolean(inviteUrl && canManage)
@@ -39,15 +37,6 @@ export function CollaboratorInviteDialog({
     setError(null)
     setSuccess(null)
   }, [open])
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
 
   if (!open) {
     return null
@@ -142,33 +131,21 @@ export function CollaboratorInviteDialog({
     </>
   )
 
-  if (isMobile) {
-    return (
-      <AgentChatMobileSheet
-        open={open}
-        onClose={onClose}
-        title={title}
-        subtitle={subtitle}
-        icon={UserPlus}
-        ariaLabel={title}
-      >
-        <div className="space-y-4">{body}</div>
-      </AgentChatMobileSheet>
-    )
-  }
-
   return (
-    <Modal
+    <ImmersiveDialog
+      open={open}
       title={title}
       subtitle={subtitle}
       onClose={onClose}
       icon={UserPlus}
-      iconBgClass="bg-emerald-100"
-      iconColorClass="text-emerald-600"
-      widthClass="sm:max-w-lg"
-      bodyClassName="space-y-4"
+      ariaLabel={title}
+      desktopIconBgClass="bg-emerald-100"
+      desktopIconColorClass="text-emerald-600"
+      desktopWidthClass="sm:max-w-lg"
+      desktopBodyClassName="space-y-4"
+      mobileChildren={<div className="space-y-4">{body}</div>}
     >
       {body}
-    </Modal>
+    </ImmersiveDialog>
   )
 }

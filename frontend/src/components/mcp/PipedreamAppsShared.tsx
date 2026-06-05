@@ -3,8 +3,7 @@ import { Loader2, Plug, Search, Sparkles, Trash2, Unplug } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
 import type { PipedreamAppAgentConnection, PipedreamAppSummary } from '../../api/mcp'
-import { AgentChatMobileSheet } from '../agentChat/AgentChatMobileSheet'
-import { Modal } from '../common/Modal'
+import { ImmersiveDialog } from '../common/ImmersiveDialog'
 export { useIsMobile } from '../../hooks/useIsMobile'
 
 export type PipedreamStatusMessage = {
@@ -61,50 +60,38 @@ export function useWindowFocusRefetch(refetch: () => unknown, enabled = true): v
 }
 
 export function PipedreamModalShell({
-  isMobile,
   title,
   subtitle,
   ariaLabel,
   onClose,
   children,
 }: {
-  isMobile: boolean
   title: string
   subtitle: string
   ariaLabel?: string
   onClose: () => void
   children: ReactNode
 }) {
-  if (isMobile) {
-    return (
-      <AgentChatMobileSheet
-        open
-        onClose={onClose}
-        title={title}
-        subtitle={subtitle}
-        icon={Sparkles}
-        ariaLabel={ariaLabel ?? title}
-        bodyPadding={false}
-      >
-        <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-6 pt-4">
-          {children}
-        </div>
-      </AgentChatMobileSheet>
-    )
-  }
-
   return (
-    <Modal
+    <ImmersiveDialog
+      open
       title={title}
       subtitle={subtitle}
       onClose={onClose}
-      widthClass="sm:max-w-5xl"
       icon={Sparkles}
-      iconBgClass="bg-blue-100"
-      iconColorClass="text-blue-700"
+      ariaLabel={ariaLabel ?? title}
+      bodyPadding={false}
+      desktopWidthClass="sm:max-w-5xl"
+      desktopIconBgClass="bg-blue-100"
+      desktopIconColorClass="text-blue-700"
+      mobileChildren={(
+        <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-6 pt-4">
+          {children}
+        </div>
+      )}
     >
       {children}
-    </Modal>
+    </ImmersiveDialog>
   )
 }
 

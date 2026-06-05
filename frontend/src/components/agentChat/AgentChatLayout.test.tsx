@@ -117,6 +117,22 @@ vi.mock('./AgentChatMobileSheet', () => ({
   ),
 }))
 
+vi.mock('../common/ImmersiveDialog', () => ({
+  ImmersiveDialog: ({
+    open,
+    title,
+    tone,
+  }: {
+    open: boolean
+    title: string
+    tone?: string
+  }) => (
+    open ? (
+      <div data-testid={`mobile-sheet-${title}`} data-tone={tone ?? ''} />
+    ) : null
+  ),
+}))
+
 vi.mock('./AgentChatSettingsPanel', () => ({
   AgentChatSettingsPanel: ({
     open,
