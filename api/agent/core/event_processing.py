@@ -118,7 +118,6 @@ from ..tools.sms_sender import execute_send_sms
 from ..tools.spawn_web_task import execute_spawn_web_task
 from ..tools.schedule_updater import execute_update_schedule
 from ..tools.charter_updater import execute_update_charter
-from ..tools.database_enabler import execute_enable_database
 from ..tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     seed_sqlite_agent_config,
@@ -2412,10 +2411,6 @@ def _execute_tool_call_runtime(
         return execute_update_plan(agent, exec_params), updated_tools
     if tool_name == "secure_credentials_request":
         return execute_secure_credentials_request(agent, exec_params), updated_tools
-    if tool_name == "enable_database":
-        result = execute_enable_database(agent, exec_params)
-        updated_tools = get_agent_tools(agent)
-        return result, updated_tools
     if tool_name == "request_contact_permission":
         return execute_request_contact_permission(agent, exec_params), updated_tools
     if tool_name == "request_human_input":
