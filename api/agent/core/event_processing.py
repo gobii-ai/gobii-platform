@@ -69,6 +69,10 @@ from .llm_utils import (
     raise_if_invalid_litellm_response,
     run_completion,
 )
+from .multimodal_context import (
+    collect_fresh_read_file_image_attachments,
+    prepare_multimodal_read_file_request,
+)
 from .llm_streaming import StreamAccumulator
 from .token_usage import (
     completion_kwargs_from_usage,
@@ -5900,6 +5904,48 @@ def _run_agent_loop(
                         failover_configs,
                         agent_id=str(agent.id),
                     )
+                request_history = history
+                request_failover_configs = failover_configs
+                fresh_tool_call_step_ids = prompt_metadata.get("fresh_tool_call_step_ids") or []
+                image_attachments = collect_fresh_read_file_image_attachments(
+                    agent,
+                    fresh_tool_call_step_ids,
+                )
+                if image_attachments:
+                    candidate_failover_configs = failover_configs
+                    if not any(bool((params or {}).get("supports_vision")) for _, _, params in failover_configs):
+                        try:
+                            candidate_failover_configs = get_llm_config_with_failover(
+                                agent_id=str(agent.id),
+                                token_count=fitted_token_count,
+                                agent=agent,
+                                is_first_loop=is_first_run,
+                                routing_profile=routing_profile,
+                                prefer_low_latency=prefer_low_latency,
+                                ignore_agent_tier_cap=True,
+                            )
+                        except LLMNotConfiguredError:
+                            candidate_failover_configs = failover_configs
+                    (
+                        request_history,
+                        request_failover_configs,
+                        multimodal_attached,
+                    ) = prepare_multimodal_read_file_request(
+                        history,
+                        candidate_failover_configs,
+                        image_attachments,
+                    )
+                    if multimodal_attached:
+                        logger.info(
+                            "Agent %s: attached %d read_file image(s) to multimodal orchestrator request",
+                            agent.id,
+                            len(image_attachments),
+                        )
+                    else:
+                        logger.info(
+                            "Agent %s: read_file image context available but no vision-capable orchestrator endpoint found",
+                            agent.id,
+                        )
                 stream_broadcaster = None
                 try:
                     stream_target = resolve_web_stream_target(agent)
@@ -5910,9 +5956,9 @@ def _run_agent_loop(
 
                 try:
                     response, token_usage = _completion_with_failover(
-                        messages=history,
+                        messages=request_history,
                         tools=iteration_tools,
-                        failover_configs=failover_configs,
+                        failover_configs=request_failover_configs,
                         agent_id=str(agent.id),
                         safety_identifier=agent.user.id if agent.user else None,
                         preferred_config=preferred_config,

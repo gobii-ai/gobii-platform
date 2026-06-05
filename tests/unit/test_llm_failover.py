@@ -541,6 +541,65 @@ class TestLLMFailover(TestCase):
         self.assertEqual(endpoint_order, ["openai_max", "openai_premium", "openai_standard"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_ignore_agent_tier_cap_includes_higher_vision_tier(self):
+        clear_llm_db()
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+        PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+        PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='openai',
+            display_name='OpenAI',
+            enabled=True,
+            env_var_name='OPENAI_API_KEY',
+            browser_backend='OPENAI',
+        )
+        standard_endpoint = PersistentModelEndpoint.objects.create(
+            key='openai_standard_text',
+            provider=provider,
+            enabled=True,
+            litellm_model='openai/gpt-4o-mini',
+            supports_tool_choice=True,
+            supports_vision=False,
+        )
+        ultra_endpoint = PersistentModelEndpoint.objects.create(
+            key='openai_ultra_vision',
+            provider=provider,
+            enabled=True,
+            litellm_model='openai/gpt-4.1',
+            supports_tool_choice=True,
+            supports_vision=True,
+        )
+
+        token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
+        standard_tier = PersistentLLMTier.objects.create(
+            token_range=token_range,
+            order=1,
+            intelligence_tier=get_intelligence_tier("standard"),
+        )
+        ultra_tier = PersistentLLMTier.objects.create(
+            token_range=token_range,
+            order=1,
+            intelligence_tier=get_intelligence_tier("ultra_max"),
+        )
+        PersistentTierEndpoint.objects.create(tier=standard_tier, endpoint=standard_endpoint, weight=1.0)
+        PersistentTierEndpoint.objects.create(tier=ultra_tier, endpoint=ultra_endpoint, weight=1.0)
+
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
+            with mock.patch("api.agent.core.llm_config.get_agent_llm_tier", return_value=AgentLLMTier.STANDARD):
+                capped_configs = get_llm_config_with_failover(token_count=0)
+                uncapped_configs = get_llm_config_with_failover(
+                    token_count=0,
+                    ignore_agent_tier_cap=True,
+                )
+
+        self.assertEqual([cfg[0] for cfg in capped_configs], ["openai_standard_text"])
+        self.assertEqual([cfg[0] for cfg in uncapped_configs], ["openai_ultra_vision", "openai_standard_text"])
+        self.assertTrue(uncapped_configs[0][2]["supports_vision"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_premium_tiers_preferred_for_paid_plan(self):
         clear_llm_db()
         seeded = self._seed_premium_setup(include_premium=True)
