@@ -1513,6 +1513,19 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "http://testserver/llms-full.txt")
         self.assertContains(response, "https://docs.gobii.ai/")
+        self.assertContains(response, "### Sales")
+        self.assertContains(response, "http://testserver/solutions/sales/")
+        self.assertContains(response, "### Sales facts")
+        self.assertContains(response, "seller-provided ICP criteria")
+        self.assertContains(response, "### Engineering")
+        self.assertContains(response, "http://testserver/solutions/engineering/")
+        self.assertContains(response, "http://testserver/pretrained-workers/team-standup-coordinator/")
+        self.assertContains(response, "### Engineering facts")
+        self.assertContains(response, "browser-use production deployments")
+        self.assertContains(response, "structured data, files, screenshots, database records")
+        self.assertNotContains(response, "https://gobii.ai/solutions/")
+        self.assertNotContains(response, "https://gobii.ai/pretrained-workers/")
+        self.assertNotContains(response, "https://gobii.ai/library/")
 
     def test_llms_full_txt_is_served_from_root(self):
         response = self.client.get("/llms-full.txt")
@@ -1522,6 +1535,20 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "## Overview")
         self.assertContains(response, "http://testserver/library/")
+        self.assertContains(response, "### Sales")
+        self.assertContains(response, "http://testserver/pretrained-workers/lead-hunter/")
+        self.assertContains(response, "### Sales facts")
+        self.assertContains(response, "configured CRM integrations")
+        self.assertContains(response, "### Engineering")
+        self.assertContains(response, "https://docs.gobii.ai/developers/developer-basics")
+        self.assertContains(response, "https://github.com/browser-use/browser-use")
+        self.assertContains(response, "### Engineering facts")
+        self.assertContains(response, "traditional Robotic Process Automation (RPA)")
+        self.assertContains(response, "Cloud API is the fastest path")
+        self.assertContains(response, "human approval around sensitive")
+        self.assertNotContains(response, "https://gobii.ai/solutions/")
+        self.assertNotContains(response, "https://gobii.ai/pretrained-workers/")
+        self.assertNotContains(response, "https://gobii.ai/library/")
 
 
 @tag("batch_pages")
@@ -2742,6 +2769,31 @@ class SolutionCtaCopyTests(TestCase):
             )
         self.assertEqual(len(soup.find_all("script", {"type": "application/ld+json"})), 3)
 
+    def test_engineering_solution_uses_webp_hero_with_optimized_jpeg_fallback(self):
+        response = self.client.get("/solutions/engineering/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        hero = soup.select_one(".hero-image-bg picture")
+        self.assertIsNotNone(hero)
+
+        webp_source = hero.find("source", {"type": "image/webp"})
+        self.assertIsNotNone(webp_source)
+        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
+        self.assertIn("engineering-hero-1920.webp", webp_source.get("srcset"))
+        self.assertNotIn("engineering-hero.jpg", webp_source.get("srcset"))
+
+        hero_image = hero.find("img")
+        self.assertIsNotNone(hero_image)
+        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        self.assertNotIn("engineering-hero.jpg", hero_image.get("src"))
+        self.assertIn("engineering-hero-1920.jpg", hero_image.get("srcset"))
+        self.assertNotIn("engineering-hero.jpg", hero_image.get("srcset"))
+        self.assertEqual(hero_image.get("loading"), "eager")
+        self.assertEqual(hero_image.get("fetchpriority"), "high")
+        self.assertEqual(hero_image.get("width"), "1280")
+        self.assertEqual(hero_image.get("height"), "543")
+
     def test_solution_pages_do_not_load_preline(self):
         for path in ("/solutions/", "/solutions/recruiting/"):
             with self.subTest(path=path):
@@ -2823,7 +2875,25 @@ class SolutionCtaCopyTests(TestCase):
                 self.assertEqual(structured_data["description"], data["seo_description"])
                 self.assertEqual(structured_data["url"], expected_solution_url)
                 self.assertEqual(structured_data["image"], expected_image_url)
+                if data.get("date_modified"):
+                    self.assertEqual(structured_data["dateModified"], data["date_modified"])
+                else:
+                    self.assertNotIn("dateModified", structured_data)
                 self.assertEqual(structured_data["publisher"]["name"], "Gobii")
+                self.assertEqual(
+                    structured_data["publisher"]["url"],
+                    response.wsgi_request.build_absolute_uri(reverse("pages:home")),
+                )
+                self.assertEqual(
+                    structured_data["publisher"]["logo"],
+                    response.wsgi_request.build_absolute_uri(
+                        static(page_views.SolutionView.ORGANIZATION_LOGO_PATH)
+                    ),
+                )
+                self.assertEqual(
+                    structured_data["publisher"]["sameAs"],
+                    list(page_views.SolutionView.ORGANIZATION_SAME_AS),
+                )
                 self.assertEqual(structured_data["isPartOf"]["@type"], "WebSite")
                 self.assertEqual(structured_data["isPartOf"]["name"], "Gobii")
                 self.assertEqual(structured_data["mainEntity"]["@type"], "Service")
@@ -2833,7 +2903,7 @@ class SolutionCtaCopyTests(TestCase):
                 )
                 self.assertEqual(structured_data["mainEntity"]["serviceType"], "AI agent solution")
                 self.assertEqual(structured_data["mainEntity"]["category"], data["title"])
-                self.assertEqual(structured_data["mainEntity"]["provider"]["name"], "Gobii")
+                self.assertEqual(structured_data["mainEntity"]["provider"], structured_data["publisher"])
 
                 breadcrumb_data = json.loads(json_ld_scripts[1].string)
                 self.assertEqual(breadcrumb_data["@context"], "https://schema.org")
@@ -2880,6 +2950,78 @@ class SolutionCtaCopyTests(TestCase):
                 headings = soup.find_all("h1")
                 self.assertEqual(len(headings), 1)
                 self.assertEqual(headings[0].get_text(" ", strip=True), expected_heading)
+
+    def test_recruiting_page_includes_human_review_faq_content(self):
+        soup = self._solution_recruiting_soup()
+        page_text = soup.get_text(" ", strip=True)
+        expected_questions = [
+            "What are Gobii AI recruiting agents?",
+            "How do Gobii recruiting agents source candidates?",
+            "Which recruiting tasks can Gobii automate?",
+            "How is Gobii different from ATS automation?",
+            "What outputs can recruiting teams export?",
+            "How should teams review AI-sourced candidates?",
+            "What data and privacy controls matter for recruiting workflows?",
+        ]
+
+        self.assertIsNotNone(soup.find(id="recruiting-questions"))
+        self.assertIn("Recruiting automation, without losing the recruiter", page_text)
+        self.assertIn("Human-reviewed workflows", page_text)
+        self.assertIn("not by replacing human judgment in hiring decisions", page_text)
+        for question in expected_questions:
+            self.assertIn(question, page_text)
+        for label in ("Criteria", "Search", "Export", "Review"):
+            self.assertIn(label, page_text)
+
+    def test_sales_page_includes_human_review_faq_content(self):
+        response = self.client.get("/solutions/sales/")
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_text = soup.get_text(" ", strip=True)
+        expected_questions = [
+            "What are Gobii AI sales agents?",
+            "How do Gobii sales agents find prospects?",
+            "Which sales tasks can Gobii automate?",
+            "How is Gobii different from a lead database or sales engagement tool?",
+            "What outputs can sales teams export?",
+            "How should teams review AI-sourced leads?",
+            "What data and privacy controls matter for sales prospecting workflows?",
+        ]
+
+        self.assertIsNotNone(soup.find(id="sales-questions"))
+        self.assertIn("Sales automation, without losing the seller", page_text)
+        self.assertIn("Human-reviewed workflows", page_text)
+        self.assertIn("not by replacing human ownership of targeting", page_text)
+        for question in expected_questions:
+            self.assertIn(question, page_text)
+        for label in ("Criteria", "Research", "Export", "Review"):
+            self.assertIn(label, page_text)
+
+    def test_engineering_page_includes_developer_agent_questions(self):
+        response = self.client.get("/solutions/engineering/")
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_text = soup.get_text(" ", strip=True)
+        expected_questions = [
+            "What is Gobii's Agentic AI API?",
+            "What can developers build with Gobii?",
+            "How is Gobii different from browser-use alone?",
+            "How is Gobii different from traditional Robotic Process Automation (RPA)?",
+            "What outputs can Gobii agents return to engineering teams?",
+            "When should teams use Gobii Cloud API versus self-hosting?",
+            "What data and privacy controls matter for developer agent workflows?",
+        ]
+
+        self.assertIsNotNone(soup.find(id="engineering-questions"))
+        self.assertIn("Browser automation, without building browser infrastructure", page_text)
+        self.assertIn("Developer-controlled agents", page_text)
+        self.assertIn("not only fixed scripts or recorded click paths", page_text)
+        self.assertIn("cloud reduces setup and maintenance", page_text)
+        self.assertIn("separate agent execution from human approval", page_text)
+        for question in expected_questions:
+            self.assertIn(question, page_text)
+        for label in ("API", "Browsers", "Export", "Review"):
+            self.assertIn(label, page_text)
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):
