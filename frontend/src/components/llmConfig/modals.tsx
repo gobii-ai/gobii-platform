@@ -1,9 +1,10 @@
-import { AlertCircle, Loader2, LoaderCircle, Plus, X } from 'lucide-react'
-import { useState, type FormEvent, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { AlertCircle, Loader2, Plus, X } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
 
 import * as llmApi from '../../api/llmConfig'
 import { HttpError } from '../../api/http'
+import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
+import { ModalForm } from '../common/ModalForm'
 import {
   button,
   type ConfirmDialogConfig,
@@ -120,55 +121,6 @@ export function AddEndpointModal({
   )
 }
 
-function ConfirmActionModal({
-  title,
-  message,
-  confirmLabel,
-  cancelLabel,
-  intent,
-  busy,
-  onConfirm,
-  onCancel,
-}: {
-  title: string
-  message: ReactNode
-  confirmLabel: string
-  cancelLabel: string
-  intent: 'danger' | 'primary'
-  busy: boolean
-  onConfirm: () => void
-  onCancel: () => void
-}) {
-  const accentClasses =
-    intent === 'danger'
-      ? { iconBg: 'bg-rose-100 text-rose-600', button: 'inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500/40 disabled:opacity-50' }
-      : { iconBg: 'bg-blue-100 text-blue-600', button: button.primary }
-  return (
-    <div className="fixed inset-0 z-[210] flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4">
-      <div className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto overflow-x-hidden rounded-2xl bg-white p-6 shadow-xl space-y-4">
-        <div className="flex items-start gap-3">
-          <div className={`shrink-0 rounded-full p-2 ${accentClasses.iconBg}`}>
-            <AlertCircle className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1 space-y-1">
-            <h3 className="break-words text-lg font-semibold text-slate-900">{title}</h3>
-            <div className="min-w-0 text-sm text-slate-600">{message}</div>
-          </div>
-        </div>
-        <div className="flex flex-wrap justify-end gap-3 pt-2">
-          <button type="button" className={button.secondary} onClick={onCancel} disabled={busy}>
-            {cancelLabel}
-          </button>
-          <button type="button" className={accentClasses.button} onClick={onConfirm} disabled={busy}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-            <span>{confirmLabel}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export function EndpointDeleteMessage({
   usage,
 }: {
@@ -252,14 +204,17 @@ export function ConfirmModalWrapper({
     onConfirm,
   } = options
 
-  return createPortal(
-    <ConfirmActionModal
+  return (
+    <ActionConfirmDialog
+      open
       title={title}
-      message={message}
+      description={message}
       confirmLabel={confirmLabel}
       cancelLabel={cancelLabel}
-      intent={intent}
+      danger={intent === 'danger'}
       busy={busy}
+      icon={AlertCircle}
+      widthClass="sm:max-w-2xl"
       onConfirm={async () => {
         setBusy(true)
         try {
@@ -273,12 +228,11 @@ export function ConfirmModalWrapper({
           setBusy(false)
         }
       }}
-      onCancel={() => {
+      onClose={() => {
         onResolve()
         onClose()
       }}
-    />,
-    document.body,
+    />
   )
 }
 
@@ -303,50 +257,35 @@ export function CreateProfileModal({
     }
   }
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h3 className="text-lg font-semibold text-slate-900">Create Routing Profile</h3>
-          <button type="button" className={button.icon} onClick={onClose}>
-            <X className="size-5" />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Profile Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="e.g., Production, Staging, Eval A"
-              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-              autoFocus
-              disabled={submitting}
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              A unique identifier will be generated from the name.
-            </p>
-          </div>
-          <div className="flex justify-end gap-3">
-            <button type="button" className={button.secondary} onClick={onClose} disabled={submitting}>
-              Cancel
-            </button>
-            <button type="submit" className={button.primary} disabled={!name.trim() || submitting}>
-              {submitting ? (
-                <>
-                  <LoaderCircle className="size-4 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                'Create Profile'
-              )}
-            </button>
-          </div>
-        </form>
+  return (
+    <ModalForm
+      id="llm-create-profile-form"
+      title="Create Routing Profile"
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      widthClass="sm:max-w-md"
+      icon={null}
+      submitLabel="Create Profile"
+      submittingLabel="Creating..."
+      submitting={submitting}
+      submitDisabled={!name.trim()}
+    >
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">Profile Name</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="e.g., Production, Staging, Eval A"
+          className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+          autoFocus
+          disabled={submitting}
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          A unique identifier will be generated from the name.
+        </p>
       </div>
-    </div>,
-    document.body,
+    </ModalForm>
   )
 }
 
@@ -380,61 +319,42 @@ export function EditProfileModal({
     }
   }
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h3 className="text-lg font-semibold text-slate-900">Edit Routing Profile</h3>
-          <button type="button" className={button.icon} onClick={onClose}>
-            <X className="size-5" />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="e.g., Production, Staging, Eval A"
-              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-              autoFocus
-              disabled={submitting}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-            <textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Optional description for this profile"
-              rows={3}
-              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
-              disabled={submitting}
-            />
-          </div>
-          <div className="flex justify-end gap-3">
-            <button type="button" className={button.secondary} onClick={onClose} disabled={submitting}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className={button.primary}
-              disabled={!displayName.trim() || submitting}
-            >
-              {submitting ? (
-                <>
-                  <LoaderCircle className="size-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                'Save Changes'
-              )}
-            </button>
-          </div>
-        </form>
+  return (
+    <ModalForm
+      id="llm-edit-profile-form"
+      title="Edit Routing Profile"
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      widthClass="sm:max-w-md"
+      icon={null}
+      submitLabel="Save Changes"
+      submittingLabel="Saving..."
+      submitting={submitting}
+      submitDisabled={!displayName.trim()}
+    >
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
+        <input
+          type="text"
+          value={displayName}
+          onChange={(event) => setDisplayName(event.target.value)}
+          placeholder="e.g., Production, Staging, Eval A"
+          className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+          autoFocus
+          disabled={submitting}
+        />
       </div>
-    </div>,
-    document.body,
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+        <textarea
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder="Optional description for this profile"
+          rows={3}
+          className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
+          disabled={submitting}
+        />
+      </div>
+    </ModalForm>
   )
 }

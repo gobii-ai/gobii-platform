@@ -16,7 +16,8 @@ import {
 } from '../api/organization'
 import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
-import { Modal } from '../components/common/Modal'
+import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
+import { ModalForm } from '../components/common/ModalForm'
 import { navigateWithinApp } from '../util/appNavigation'
 
 type ConfirmAction = {
@@ -128,41 +129,19 @@ function ConfirmOrganizationActionModal({
     }
   }
 
-  const footer = (
-    <>
-      <button
-        type="button"
-        className="inline-flex w-full justify-center rounded-md border border-transparent bg-red-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm"
-        onClick={handleConfirm}
-        disabled={busy}
-      >
-        {busy ? 'Working...' : isRemove ? 'Remove Member' : 'Revoke Invite'}
-      </button>
-      <button
-        type="button"
-        className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm"
-        onClick={onClose}
-        disabled={busy}
-      >
-        Cancel
-      </button>
-    </>
-  )
-
   return (
-    <Modal
+    <ActionConfirmDialog
+      open
       title={title}
-      subtitle={subtitle}
+      description={subtitle}
       onClose={onClose}
-      footer={footer}
-      widthClass="sm:max-w-lg"
       icon={isRemove ? UserMinus : ShieldAlert}
-      iconBgClass="bg-red-100"
-      iconColorClass="text-red-600"
-      dismissible={!busy}
-    >
-      {error ? <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
-    </Modal>
+      confirmLabel={isRemove ? 'Remove Member' : 'Revoke Invite'}
+      busy={busy}
+      danger
+      onConfirm={handleConfirm}
+      localError={error}
+    />
   )
 }
 
@@ -191,49 +170,26 @@ function AddMemberModal({
 }) {
   const noSeatsAvailable = seatsAvailable !== null && seatsAvailable <= 0
   const selectedRoleRequiresSeat = role !== SOLUTIONS_PARTNER_ROLE
-  const submitDisabled = busy || !role || (noSeatsAvailable && selectedRoleRequiresSeat)
-
-  const footer = (
-    <>
-      <button
-        type="submit"
-        form="organization-add-member-form"
-        className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm"
-        disabled={submitDisabled}
-      >
-        {busy ? 'Sending...' : 'Send Invite'}
-      </button>
-      <button
-        type="button"
-        className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm"
-        onClick={onClose}
-        disabled={busy}
-      >
-        Cancel
-      </button>
-    </>
-  )
+  const submitDisabled = !role || (noSeatsAvailable && selectedRoleRequiresSeat)
 
   return (
-    <Modal
+    <ModalForm
+      id="organization-add-member-form"
       title="Add Member"
       subtitle="Send an invitation to join this organization."
       onClose={onClose}
-      footer={footer}
+      onSubmit={onSubmit}
       widthClass="sm:max-w-lg"
       icon={Users}
       iconBgClass="bg-blue-100"
       iconColorClass="text-blue-600"
       dismissible={!busy}
+      submitLabel="Send Invite"
+      submittingLabel="Sending..."
+      submitting={busy}
+      submitDisabled={submitDisabled && !busy}
+      errorMessages={errors}
     >
-      <form id="organization-add-member-form" onSubmit={onSubmit} className="space-y-4">
-        {errors.length > 0 ? (
-          <div className="rounded-md border border-red-200 bg-red-50 p-3">
-            {errors.map((message) => (
-              <p key={message} className="text-sm text-red-700">{message}</p>
-            ))}
-          </div>
-        ) : null}
         <div>
           <label htmlFor="organization-member-email" className="block text-sm font-medium text-slate-700">
             Email
@@ -269,8 +225,7 @@ function AddMemberModal({
             No standard member seats are available. Select Solutions Partner or add seats first.
           </p>
         ) : null}
-      </form>
-    </Modal>
+    </ModalForm>
   )
 }
 

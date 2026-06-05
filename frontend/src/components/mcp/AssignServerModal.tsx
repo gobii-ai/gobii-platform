@@ -9,7 +9,7 @@ import {
   type McpServerAssignmentAgent,
   type McpServerAssignmentResponse,
 } from '../../api/mcp'
-import { Modal } from '../common/Modal'
+import { ModalForm } from '../common/ModalForm'
 import { HttpError } from '../../api/http'
 
 type AssignServerModalProps = {
@@ -100,42 +100,21 @@ export function AssignServerModal({
 
   const subtitle = `Assign ${server.displayName} to agents in this ${server.scope === 'organization' ? 'workspace' : 'account'}.`
 
-  const footer = (
-    <>
-      <button
-        type="submit"
-        form="assign-server-form"
-        className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-60"
-        disabled={mutation.isPending || isLoading}
-      >
-        {mutation.isPending ? 'Saving…' : 'Save Assignments'}
-      </button>
-      <button
-        type="button"
-        className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto sm:text-sm"
-        onClick={onClose}
-        disabled={mutation.isPending}
-      >
-        Cancel
-      </button>
-    </>
-  )
-
   return (
-    <Modal
+    <ModalForm
+      id="assign-server-form"
       title={`Assign Agents – ${server.displayName}`}
       subtitle={subtitle}
       onClose={onClose}
-      footer={footer}
+      onSubmit={handleSubmit}
       widthClass="sm:max-w-3xl"
+      submitLabel="Save Assignments"
+      submittingLabel="Saving…"
+      submitting={mutation.isPending}
+      submitDisabled={isLoading}
+      errorMessages={statusMessage ? [statusMessage] : null}
+      formClassName="space-y-6 p-1"
     >
-      <form id="assign-server-form" className="space-y-6 p-1" onSubmit={handleSubmit}>
-        {statusMessage && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {statusMessage}
-          </div>
-        )}
-
         {isLoading ? (
           <div className="flex items-center gap-2 py-12 text-sm text-slate-500">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -227,8 +206,7 @@ export function AssignServerModal({
             </div>
           </div>
         )}
-      </form>
-    </Modal>
+    </ModalForm>
   )
 }
 

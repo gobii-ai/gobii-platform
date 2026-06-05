@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Check, Mail } from 'lucide-react'
 import { Checkbox as AriaCheckbox } from 'react-aria-components'
 
-import { Modal } from '../common/Modal'
+import { ModalForm } from '../common/ModalForm'
 import type { AllowlistInput } from './contactTypes'
 
 type AddContactModalProps = {
@@ -42,14 +42,20 @@ export function AddContactModal({ onSubmit, onClose }: AddContactModalProps) {
   }
 
   return (
-    <Modal
+    <ModalForm
+      id="allowlist-contact-form"
       title="Add Contact"
       subtitle="Add an email contact to this agent's allowlist."
       onClose={onClose}
+      onSubmit={handleSubmit}
       widthClass="sm:max-w-lg"
       icon={Mail}
+      submitLabel="Add Contact"
+      submitting={submitting}
+      submitDisabled={!address.trim()}
+      errorMessages={error ? [error] : null}
+      formClassName="space-y-5"
     >
-      <form className="space-y-5" onSubmit={handleSubmit}>
         <div>
           <label htmlFor="allowlist-contact-address" className="block text-sm font-medium text-gray-700">
             Email address
@@ -116,27 +122,6 @@ export function AddContactModal({ onSubmit, onClose }: AddContactModalProps) {
             )}
           </AriaCheckbox>
         </div>
-
-        {error && <div className="text-sm text-rose-600">{error}</div>}
-
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            type="button"
-            className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={submitting || !address.trim()}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60"
-          >
-            Add Contact
-          </button>
-        </div>
-      </form>
-    </Modal>
+    </ModalForm>
   )
 }
