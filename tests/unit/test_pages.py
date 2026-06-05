@@ -2978,6 +2978,32 @@ class SolutionCtaCopyTests(TestCase):
         for label in ("Criteria", "Research", "Export", "Review"):
             self.assertIn(label, page_text)
 
+    def test_engineering_page_includes_developer_agent_questions(self):
+        response = self.client.get("/solutions/engineering/")
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_text = soup.get_text(" ", strip=True)
+        expected_questions = [
+            "What is Gobii's Agentic AI API?",
+            "What can developers build with Gobii?",
+            "How is Gobii different from browser-use alone?",
+            "How is Gobii different from traditional Robotic Process Automation (RPA)?",
+            "What outputs can Gobii agents return to engineering teams?",
+            "When should teams use Gobii Cloud API versus self-hosting?",
+            "What data and privacy controls matter for developer agent workflows?",
+        ]
+
+        self.assertIsNotNone(soup.find(id="engineering-questions"))
+        self.assertIn("Browser automation, without building browser infrastructure", page_text)
+        self.assertIn("Developer-controlled agents", page_text)
+        self.assertIn("not only fixed scripts or recorded click paths", page_text)
+        self.assertIn("cloud reduces setup and maintenance", page_text)
+        self.assertIn("separate agent execution from human approval", page_text)
+        for question in expected_questions:
+            self.assertIn(question, page_text)
+        for label in ("API", "Browsers", "Export", "Review"):
+            self.assertIn(label, page_text)
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):
         unauth_recruiting = self.client.get("/solutions/recruiting/")
