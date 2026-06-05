@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ExternalLink, PlusSquare, ShieldAlert } from 'lucide-react'
 
-import { Modal } from '../common/Modal'
-import { AgentChatMobileSheet } from './AgentChatMobileSheet'
+import { ImmersiveDialog } from '../common/ImmersiveDialog'
 import { ConfirmDialog } from '../../screens/billing/ConfirmDialog'
 import type { AddonPackOption, ContactCapInfo, TrialInfo } from '../../types/agentAddons'
 
@@ -47,7 +46,6 @@ export function AgentChatAddonsPanel({
   manageBillingUrl = null,
   onClose,
 }: AgentChatAddonsPanelProps) {
-  const [isMobile, setIsMobile] = useState(false)
   const [packQuantities, setPackQuantities] = useState<Record<string, number>>({})
   const [packError, setPackError] = useState<string | null>(null)
   const [trialConfirmOpen, setTrialConfirmOpen] = useState(false)
@@ -70,15 +68,6 @@ export function AgentChatAddonsPanel({
     if (Number.isNaN(d.getTime())) return null
     return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(d)
   }, [trial?.trialEndsAtIso])
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -346,38 +335,22 @@ export function AgentChatAddonsPanel({
     />
   )
 
-  if (!isMobile) {
-    return (
-      <>
-        {trialConfirmationDialog}
-        <Modal
-          title="Add-ons"
-          subtitle={subtitle}
-          onClose={onClose}
-          icon={PlusSquare}
-          iconBgClass="bg-blue-100"
-          iconColorClass="text-blue-600"
-          bodyClassName="agent-settings-modal-body"
-        >
-          {body}
-        </Modal>
-      </>
-    )
-  }
-
   return (
     <>
       {trialConfirmationDialog}
-      <AgentChatMobileSheet
+      <ImmersiveDialog
         open={open}
         onClose={onClose}
         title="Add-ons"
         subtitle={subtitle}
         icon={PlusSquare}
         ariaLabel="Add-ons"
+        desktopIconBgClass="bg-blue-100"
+        desktopIconColorClass="text-blue-600"
+        desktopBodyClassName="agent-settings-modal-body"
       >
         {body}
-      </AgentChatMobileSheet>
+      </ImmersiveDialog>
     </>
   )
 }

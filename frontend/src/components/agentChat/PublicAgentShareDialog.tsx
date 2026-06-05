@@ -6,9 +6,7 @@ import {
   fetchAgentTemplateShareInfo,
   type TemplateShareInfoResponse,
 } from '../../api/agentTemplates'
-import { useIsMobile } from '../../hooks/useIsMobile'
-import { Modal } from '../common/Modal'
-import { AgentChatMobileSheet } from './AgentChatMobileSheet'
+import { ImmersiveDialog } from '../common/ImmersiveDialog'
 
 type PublicAgentShareDialogProps = {
   open: boolean
@@ -36,7 +34,6 @@ export function PublicAgentShareDialog({
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const isMobile = useIsMobile()
   const displayName = (shareInfo?.agentName || agentName || '').trim() || 'this agent'
   const title = `Share ${displayName}`
   const hasTemplate = Boolean(shareInfo?.templateUrl)
@@ -189,33 +186,20 @@ export function PublicAgentShareDialog({
     </div>
   )
 
-  if (isMobile) {
-    return (
-      <AgentChatMobileSheet
-        open={open}
-        onClose={onClose}
-        title={title}
-        subtitle="Create a public template link that others can copy."
-        icon={Globe}
-        ariaLabel={title}
-      >
-        {body}
-      </AgentChatMobileSheet>
-    )
-  }
-
   return (
-    <Modal
+    <ImmersiveDialog
+      open={open}
       title={title}
       subtitle="Create a public template link that others can copy."
       onClose={onClose}
       icon={Globe}
-      iconBgClass="bg-[#f4eafb]"
-      iconColorClass="text-[#7c4ca0]"
-      widthClass="sm:max-w-lg"
-      bodyClassName="space-y-4"
+      ariaLabel={title}
+      desktopIconBgClass="bg-[#f4eafb]"
+      desktopIconColorClass="text-[#7c4ca0]"
+      desktopWidthClass="sm:max-w-lg"
+      desktopBodyClassName="space-y-4"
     >
       {body}
-    </Modal>
+    </ImmersiveDialog>
   )
 }

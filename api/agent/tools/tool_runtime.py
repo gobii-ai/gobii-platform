@@ -6,7 +6,6 @@ from api.services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blac
 from .charter_updater import execute_update_charter
 from .custom_tools import execute_create_custom_tool
 from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
-from .database_enabler import execute_enable_database
 from .email_sender import execute_send_email
 from .file_str_replace import execute_file_str_replace
 from .peer_dm import execute_send_agent_message
@@ -69,10 +68,6 @@ def execute_runtime_tool_call(
         return execute_update_charter(agent, exec_params), updated_tools
     if tool_name == "secure_credentials_request":
         return execute_secure_credentials_request(agent, exec_params), updated_tools
-    if tool_name == "enable_database":
-        result = execute_enable_database(agent, exec_params)
-        updated_tools = _refresh_agent_tools(agent)
-        return result, updated_tools
     if tool_name == "request_contact_permission":
         return execute_request_contact_permission(agent, exec_params), updated_tools
     if tool_name == "request_human_input":

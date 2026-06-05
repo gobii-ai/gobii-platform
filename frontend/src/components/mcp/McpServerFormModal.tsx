@@ -1,5 +1,5 @@
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, Loader2, ServerCog } from 'lucide-react'
 
@@ -13,6 +13,7 @@ import {
 import { HttpError } from '../../api/http'
 import { useMcpOAuth } from '../../hooks/useMcpOAuth'
 import { Modal } from '../common/Modal'
+import { ModalForm } from '../common/ModalForm'
 
 type HeaderEntry = { key: string; value: string }
 type EnvEntry = { key: string; value: string }
@@ -252,46 +253,24 @@ export function McpServerFormModal({
     )
   }
 
-  const footer = (
-    <Fragment>
-      <button
-        type="submit"
-        form="mcp-server-form"
-        className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-60"
-        disabled={isSubmitting}
-      >
-        {isSubmitting ? 'Saving…' : 'Save Server'}
-      </button>
-      <button
-        type="button"
-        className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto sm:text-sm"
-        onClick={onClose}
-        disabled={isSubmitting}
-      >
-        Cancel
-      </button>
-    </Fragment>
-  )
-
   return (
-    <Modal
+    <ModalForm
+      id="mcp-server-form"
       title={formTitle}
       subtitle={modalSubtitle}
       onClose={onClose}
-      footer={footer}
+      onSubmit={handleSubmit}
       widthClass="sm:max-w-3xl"
       icon={ServerCog}
+      submitLabel="Save Server"
+      submittingLabel="Saving…"
+      submitting={isSubmitting}
+      errorMessages={[
+        ...(statusMessage ? [statusMessage] : []),
+        ...nonFieldErrors,
+      ]}
+      formClassName="space-y-6 p-1"
     >
-      <form id="mcp-server-form" className="space-y-6 p-1" onSubmit={handleSubmit}>
-        {(statusMessage || nonFieldErrors.length > 0) && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 space-y-1">
-            {statusMessage && <p>{statusMessage}</p>}
-            {nonFieldErrors.map((error) => (
-              <p key={error}>{error}</p>
-            ))}
-          </div>
-        )}
-
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700">Display Name</label>
@@ -703,8 +682,7 @@ export function McpServerFormModal({
             )}
           </div>
         )}
-      </form>
-    </Modal>
+    </ModalForm>
   )
 }
 

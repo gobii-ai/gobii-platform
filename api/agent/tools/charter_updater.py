@@ -28,27 +28,6 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
         return normalized in {"1", "true", "yes"}
     return bool(raw)
 
-def get_update_charter_tool() -> Dict[str, Any]:
-    """Return the update_charter tool definition for the LLM."""
-    return {
-        "type": "function",
-        "function": {
-            "name": "update_charter",
-            "description": "Updates the agent's charter.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "new_charter": {"type": "string", "description": "New charter text."},
-                    "will_continue_work": {
-                        "type": "boolean",
-                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
-                    },
-                },
-                "required": ["new_charter", "will_continue_work"],
-            },
-        },
-    }
-
 
 def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the update_charter tool for a persistent agent."""

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ExternalLink, Settings } from 'lucide-react'
 
-import { Modal } from '../common/Modal'
-import { AgentChatMobileSheet } from './AgentChatMobileSheet'
+import { ImmersiveDialog } from '../common/ImmersiveDialog'
 import { AgentIntelligenceSlider } from '../common/AgentIntelligenceSlider'
 import type { ConsoleContext } from '../../api/context'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
@@ -58,7 +57,6 @@ export function AgentChatSettingsPanel({
   onOpenFullSettings,
   onClose,
 }: AgentChatSettingsPanelProps) {
-  const [isMobile, setIsMobile] = useState(false)
   const [sliderValue, setSliderValue] = useState(0)
   const [dailyCreditInput, setDailyCreditInput] = useState('')
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -174,15 +172,6 @@ export function AgentChatSettingsPanel({
       : ''
     return `/app/agents/${agentId}/settings${query}`
   }, [agentId, context])
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
 
   useEffect(() => {
     if (!open || !dailyCredits) return
@@ -425,30 +414,18 @@ export function AgentChatSettingsPanel({
     return null
   }
 
-  if (!isMobile) {
-    return (
-      <Modal
-        title="Agent settings"
-        onClose={onClose}
-        icon={Settings}
-        iconBgClass="bg-amber-100"
-        iconColorClass="text-amber-600"
-        bodyClassName="agent-settings-modal-body"
-      >
-        {body}
-      </Modal>
-    )
-  }
-
   return (
-    <AgentChatMobileSheet
+    <ImmersiveDialog
       open={open}
       onClose={onClose}
       title="Agent settings"
       icon={Settings}
       ariaLabel="Agent settings"
+      desktopIconBgClass="bg-amber-100"
+      desktopIconColorClass="text-amber-600"
+      desktopBodyClassName="agent-settings-modal-body"
     >
       {body}
-    </AgentChatMobileSheet>
+    </ImmersiveDialog>
   )
 }

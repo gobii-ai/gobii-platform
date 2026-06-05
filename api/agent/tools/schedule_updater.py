@@ -150,28 +150,3 @@ def execute_update_schedule(agent, params: dict) -> dict:
         agent.schedule = original_schedule
         logger.exception("Failed to update schedule for agent %s", agent.id)
         return {"status": "error", "message": f"Failed to update schedule: {e}"}
-
-
-def get_update_schedule_tool() -> dict:
-    """Return the update_schedule tool definition for LLM function calling."""
-    return {
-        "type": "function",
-        "function": {
-            "name": "update_schedule",
-            "description": "Update the agent's cron schedule for recurring checks, digests, monitors, and alerts. If recurrence is clear but time is omitted, choose a reasonable local default such as weekday/daily 9am instead of asking. Do not fetch or validate target URLs first unless asked. Preserve precise user timing; otherwise randomize to avoid a thundering herd.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "new_schedule": {
-                        "type": "string",
-                        "description": "Cron expression or '@daily', '@every 2h'. Use '' or null to disable. Preserve precise user timing such as 9am ET; otherwise choose a reasonable non-clustered time.",
-                    },
-                    "will_continue_work": {
-                        "type": "boolean",
-                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
-                    },
-                },
-                "required": ["will_continue_work"],
-            },
-        },
-    }

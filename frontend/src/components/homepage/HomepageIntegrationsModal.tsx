@@ -15,8 +15,8 @@ import {
   type NativeIntegrationProviderDTO,
 } from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
-import { AgentChatMobileSheet } from '../agentChat/AgentChatMobileSheet'
-import { Modal } from '../common/Modal'
+import { useIsMobile } from '../../hooks/useIsMobile'
+import { ImmersiveDialog } from '../common/ImmersiveDialog'
 import {
   NativeIntegrationFilesDisclosure,
   NativeProviderIconTile,
@@ -98,7 +98,7 @@ export function HomepageIntegrationsModal({
 }: HomepageIntegrationsModalProps) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(Boolean(initialOpen || initialSearchTerm))
-  const [isMobile, setIsMobile] = useState(false)
+  const isMobile = useIsMobile()
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm)
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(initialSearchTerm.trim())
   const [selectedSlugs, setSelectedSlugs] = useState<string[]>(() => initialSelectedAppSlugs)
@@ -123,15 +123,6 @@ export function HomepageIntegrationsModal({
     () => nativeProviders.map(mapNativeIntegrationProvider),
     [nativeProviders],
   )
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -536,19 +527,23 @@ export function HomepageIntegrationsModal({
     </div>
   )
 
-  if (isMobile) {
-    return (
-      <>
-        {hiddenFieldsPortal}
-        <AgentChatMobileSheet
-          open={open}
-          onClose={() => setOpen(false)}
-          title="Manage integrations"
-          subtitle="Search available apps and enable additional ones."
-          icon={Sparkles}
-          ariaLabel="Manage integrations"
-          bodyPadding={false}
-        >
+  return (
+    <>
+      {hiddenFieldsPortal}
+      <ImmersiveDialog
+        open={open}
+        title="Manage integrations"
+        subtitle="Search available apps and enable additional ones."
+        onClose={() => setOpen(false)}
+        footer={actions}
+        desktopWidthClass="sm:max-w-4xl"
+        icon={Sparkles}
+        ariaLabel="Manage integrations"
+        bodyPadding={false}
+        desktopIconBgClass="bg-blue-100"
+        desktopIconColorClass="text-blue-700"
+        dismissible={!nativePickerMutation.isPending}
+        mobileChildren={(
           <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-6">
             <div className="pt-4">
               {body}
@@ -557,29 +552,10 @@ export function HomepageIntegrationsModal({
               {actions}
             </div>
           </div>
-        </AgentChatMobileSheet>
-      </>
-    )
-  }
-
-  return (
-    <>
-      {hiddenFieldsPortal}
-      {open ? (
-        <Modal
-          title="Manage integrations"
-          subtitle="Search available apps and enable additional ones."
-          onClose={() => setOpen(false)}
-          footer={actions}
-          widthClass="sm:max-w-4xl"
-          icon={Sparkles}
-          iconBgClass="bg-blue-100"
-          iconColorClass="text-blue-700"
-          dismissible={!nativePickerMutation.isPending}
-        >
-          {body}
-        </Modal>
-      ) : null}
+        )}
+      >
+        {body}
+      </ImmersiveDialog>
     </>
   )
 }

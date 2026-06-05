@@ -1,19 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { slugify } from '../../util/slugify'
-import { AgentChatMobileSheet } from './AgentChatMobileSheet'
+import { MobileSheet } from '../common/MobileSheet'
 import { ActivityEntryList } from './ActivityEntryList'
 import type { ToolEntryDisplay } from './tooling/types'
-
-function isMobileViewport() {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  return window.innerWidth < 768
-}
 
 type ToolClusterTimelineOverlayProps = {
   open: boolean
@@ -34,26 +27,12 @@ export function ToolClusterTimelineOverlay({
   initialOpenEntryId = null,
   onClose,
 }: ToolClusterTimelineOverlayProps) {
-  const [, setIsMobile] = useState(isMobileViewport)
+  const isMobile = useIsMobile()
   const titleId = useMemo(() => `tool-cluster-timeline-title-${slugify(overlayId)}`, [overlayId])
   const dialogId = useMemo(() => `tool-cluster-timeline-dialog-${slugify(overlayId)}`, [overlayId])
 
   useEffect(() => {
-    if (!open || typeof window === 'undefined') {
-      return undefined
-    }
-
-    const handleResize = () => {
-      setIsMobile(isMobileViewport())
-    }
-
-    handleResize()
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [open])
-
-  useEffect(() => {
-    if (!open) {
+    if (!open || isMobile) {
       return undefined
     }
 
@@ -70,22 +49,21 @@ export function ToolClusterTimelineOverlay({
       document.removeEventListener('keydown', handleKey)
       document.body.style.overflow = originalOverflow
     }
-  }, [onClose, open])
+  }, [isMobile, onClose, open])
 
   if (!open) {
     return null
   }
 
-  const shouldUseMobileSheet = isMobileViewport()
   const overlayBody = (
     <div className="tool-cluster-timeline-body">
       <ActivityEntryList entries={entries} initialOpenEntryId={initialOpenEntryId} />
     </div>
   )
 
-  if (shouldUseMobileSheet) {
+  if (isMobile) {
     return (
-      <AgentChatMobileSheet
+      <MobileSheet
         open={open}
         onClose={onClose}
         title={title}
@@ -94,7 +72,7 @@ export function ToolClusterTimelineOverlay({
         bodyPadding={false}
       >
         {overlayBody}
-      </AgentChatMobileSheet>
+      </MobileSheet>
     )
   }
 

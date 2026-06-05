@@ -230,7 +230,6 @@ export function AgentPipedreamAppsModal({
 
   return (
     <PipedreamModalShell
-      isMobile={isMobile}
       title="Apps"
       subtitle="Search, connect, and disconnect apps for this agent."
       ariaLabel="Manage agent apps"

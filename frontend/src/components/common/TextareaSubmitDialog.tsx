@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Loader2, type LucideIcon } from 'lucide-react'
 
-import { Modal } from './Modal'
+import { ImmersiveDialog } from './ImmersiveDialog'
 
 type TextareaSubmitDialogProps = {
   open: boolean
@@ -67,14 +67,15 @@ export function TextareaSubmitDialog({
   }
 
   return (
-    <Modal
+    <ImmersiveDialog
+      open={open}
       title={title}
       subtitle={subtitle}
       onClose={onClose}
       icon={icon}
-      iconBgClass="bg-white"
-      iconColorClass="text-slate-700"
-      widthClass="sm:max-w-lg"
+      desktopIconBgClass="bg-white"
+      desktopIconColorClass="text-slate-700"
+      desktopWidthClass="sm:max-w-lg"
       dismissible={!busy}
     >
       {successMessage ? (
@@ -133,6 +134,6 @@ export function TextareaSubmitDialog({
           </div>
         </form>
       )}
-    </Modal>
+    </ImmersiveDialog>
   )
 }

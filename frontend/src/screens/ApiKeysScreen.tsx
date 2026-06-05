@@ -13,6 +13,7 @@ import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
 import { Modal } from '../components/common/Modal'
+import { ModalForm } from '../components/common/ModalForm'
 import { useModal } from '../hooks/useModal'
 
 type CreatedKeyState = {
@@ -81,47 +82,22 @@ function CreateApiKeyModal({
     }
   }
 
-  const footer = (
-    <>
-      <button
-        type="submit"
-        form="api-key-form"
-        className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm"
-        disabled={busy}
-      >
-        {busy ? 'Creating...' : 'Create Key'}
-      </button>
-      <button
-        type="button"
-        className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm"
-        onClick={onClose}
-        disabled={busy}
-      >
-        Cancel
-      </button>
-    </>
-  )
-
   return (
-    <Modal
+    <ModalForm
+      id="api-key-form"
       title="Create API Key"
       subtitle="Name this key so you can identify where it is used."
       onClose={onClose}
-      footer={footer}
+      onSubmit={handleSubmit}
       widthClass="sm:max-w-lg"
       icon={KeyRound}
       iconBgClass="bg-blue-100"
       iconColorClass="text-blue-600"
+      submitLabel="Create Key"
+      submittingLabel="Creating..."
+      submitting={busy}
+      errorMessages={errors}
     >
-      <form id="api-key-form" onSubmit={handleSubmit} className="space-y-4">
-        {errors.length > 0 ? (
-          <div className="rounded-md border border-red-200 bg-red-50 p-3">
-            {errors.map((message) => (
-              <p key={message} className="text-sm text-red-700">{message}</p>
-            ))}
-          </div>
-        ) : null}
-
         <div>
           <label htmlFor="api-key-name" className="block text-sm font-medium text-slate-700">
             Key Name
@@ -137,8 +113,7 @@ function CreateApiKeyModal({
             onFocus={(event) => event.currentTarget.select()}
           />
         </div>
-      </form>
-    </Modal>
+    </ModalForm>
   )
 }
 

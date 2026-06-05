@@ -3,7 +3,7 @@ import { KeyRound } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
 import type { SecretDTO, CreateSecretPayload, UpdateSecretPayload } from '../../api/secrets'
-import { Modal } from '../common/Modal'
+import { ModalForm } from '../common/ModalForm'
 
 type SecretFormModalProps = {
   /** Existing secret to edit, or null for create mode. */
@@ -78,47 +78,23 @@ export function SecretFormModal({
 
   const allErrors = Object.values(errors).flat()
 
-  const footer = (
-    <>
-      <button
-        type="submit"
-        form="secret-form"
-        className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-60"
-        disabled={busy}
-      >
-        {busy ? 'Saving\u2026' : isEdit ? 'Update Secret' : 'Create Secret'}
-      </button>
-      <button
-        type="button"
-        className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-60"
-        onClick={onClose}
-        disabled={busy}
-      >
-        Cancel
-      </button>
-    </>
-  )
-
   return (
-    <Modal
+    <ModalForm
+      id="secret-form"
       title={isEdit ? 'Edit Secret' : 'Add Secret'}
       subtitle={isEdit ? `Update "${editSecret?.name}"` : 'Create a new encrypted secret'}
       onClose={onClose}
-      footer={footer}
+      onSubmit={handleSubmit}
       widthClass="sm:max-w-lg"
       icon={KeyRound}
       iconBgClass="bg-blue-100"
       iconColorClass="text-blue-600"
+      submitLabel={isEdit ? 'Update Secret' : 'Create Secret'}
+      submittingLabel="Saving…"
+      submitting={busy}
+      errorMessages={allErrors}
+      autoComplete="off"
     >
-      <form id="secret-form" onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
-        {allErrors.length > 0 && (
-          <div className="rounded-md bg-red-50 p-3">
-            {allErrors.map((msg, i) => (
-              <p key={i} className="text-sm text-red-700">{msg}</p>
-            ))}
-          </div>
-        )}
-
         <div>
           <label htmlFor="secret-name" className="block text-sm font-medium text-slate-700">
             Name
@@ -215,7 +191,6 @@ export function SecretFormModal({
             </label>
           </div>
         )}
-      </form>
-    </Modal>
+    </ModalForm>
   )
 }

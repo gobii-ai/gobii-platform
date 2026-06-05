@@ -257,10 +257,6 @@ export function fetchSuiteRunDetail(suiteRunId: string): Promise<{ suite_run: Ev
   return jsonFetch(`/console/api/evals/suite-runs/${suiteRunId}/`, { method: 'GET' })
 }
 
-export function fetchRunDetail(runId: string): Promise<{ run: EvalRun }> {
-  return jsonFetch(`/console/api/evals/runs/${runId}/`, { method: 'GET' })
-}
-
 export type CreateSuiteRunPayload = {
   suite_slugs?: string[]
   scenario_slugs?: string[]

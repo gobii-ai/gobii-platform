@@ -216,10 +216,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("https://status.example.test/support", by_slug["common_use_case_092_schedule_hourly_monitor"].prompt)
         self.assertIn("BTC-USD", by_slug["common_use_case_096_schedule_price_alert"].prompt)
         self.assertIn("https://borough.example.test/permits/decks", by_slug["common_use_case_097_schedule_permit_check"].prompt)
-        self.assertEqual(
-            by_slug["common_use_case_089_enable_database"].accepted_tool_alternatives,
-            {"enable_database": ("sqlite_batch",)},
-        )
+        self.assertEqual(by_slug["common_use_case_089_sqlite_database_setup"].expected_tools, ("sqlite_batch",))
         self.assertFalse(by_slug["common_use_case_031_linkedin_person_profile"].plan_expected)
         self.assertEqual(
             by_slug["common_use_case_031_linkedin_person_profile"].allowed_preamble_tools,

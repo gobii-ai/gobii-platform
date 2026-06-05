@@ -2779,38 +2779,6 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(mock_completion.call_count, 2)
         mock_billing_snapshot.assert_called_once_with(self.user)
 
-    def test_agent_loop_excludes_enable_database_from_tools(self):
-        """LLM tool payload should not expose enable_database."""
-        enable_tools(self.agent, ["sqlite_batch"])
-
-        response_message = MagicMock()
-        response_message.tool_calls = None
-        response_message.function_call = None
-        response_message.content = "Reasoning output"
-        response_choice = MagicMock(message=response_message)
-        response = MagicMock()
-        response.choices = [response_choice]
-        response.model_extra = {}
-        token_usage = {"model": "mock-model", "provider": "mock-provider"}
-
-        with patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
-             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
-             patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
-            from api.agent.core import event_processing as ep
-            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
-                _run_agent_loop(self.agent, is_first_run=False)
-
-        passed_tools = mock_completion.call_args.kwargs["tools"]
-        tool_names = [
-            entry.get("function", {}).get("name")
-            for entry in passed_tools
-            if isinstance(entry, dict)
-        ]
-        completion = PersistentAgentCompletion.objects.get(agent=self.agent)
-        self.assertEqual(completion.llm_tool_names, tool_names)
-        self.assertNotIn("enable_database", tool_names)
-        self.assertIn("sqlite_batch", tool_names)
-
     def test_warning_status_requires_followup(self):
         """Tool warning status should trigger another loop iteration."""
         enable_tools(self.agent, ["sqlite_batch"])

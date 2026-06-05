@@ -11,7 +11,6 @@ import { StreamingReplyCard } from './StreamingReplyCard'
 import { StreamingThinkingCard } from './StreamingThinkingCard'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
-import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
@@ -28,6 +27,8 @@ import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import { TextareaSubmitDialog } from '../common/TextareaSubmitDialog'
+import { ImmersiveDialog } from '../common/ImmersiveDialog'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { SelectionShellPage } from './SelectionShellPageSwitcher'
 import type { AgentTimelineProps } from './types'
@@ -574,10 +575,7 @@ export function AgentChatLayout({
       ? `Start ${maxTrialDays}-day Free Trial`
     : 'Upgrade your plan'
   const upgradeSubtitle = useTrialUpgradeCopy ? 'Choose your plan to continue' : 'Choose the plan that fits your needs'
-  const [isMobileUpgrade, setIsMobileUpgrade] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.innerWidth < 768
-  })
+  const isMobileUpgrade = useIsMobile()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addonsMode, setAddonsMode] = useState<'contacts' | 'tasks' | null>(null)
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
@@ -713,15 +711,6 @@ export function AgentChatLayout({
       setReportSubmitting(false)
     }
   }, [agentId, reportMessage])
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobileUpgrade(window.innerWidth < 768)
-    }
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
 
   useEffect(() => {
     if (showEmbeddedSettings || showGalleryShellPanel) {
@@ -1928,13 +1917,14 @@ export function AgentChatLayout({
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
       </main>
-      <AgentChatMobileSheet
+      <ImmersiveDialog
         open={showPlanInterface && planSheetOpen}
         onClose={() => setPlanSheetOpen(false)}
         title="Plan"
         ariaLabel="Plan"
         bodyPadding={false}
         tone="plan"
+        forceMode="sheet"
       >
         <PlanPanel
           plan={displayPlanSnapshot}
@@ -1942,7 +1932,7 @@ export function AgentChatLayout({
           compact
           isAgentWorking={isWorkingNow}
         />
-      </AgentChatMobileSheet>
+      </ImmersiveDialog>
       <TextareaSubmitDialog
         open={Boolean(reportMessage)}
         title="Report message"
@@ -1962,7 +1952,7 @@ export function AgentChatLayout({
       />
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
         isMobileUpgrade && upgradeModalDismissible ? (
-          <AgentChatMobileSheet
+          <ImmersiveDialog
             open={isUpgradeModalOpen}
             onClose={handleUpgradeModalDismiss}
             title={upgradeTitle}
@@ -1970,13 +1960,14 @@ export function AgentChatLayout({
             icon={Zap}
             ariaLabel={upgradeTitle}
             bodyPadding={false}
+            forceMode="sheet"
           >
             <SubscriptionUpgradePlans
               currentPlan={subscriptionPlan}
               onUpgrade={handleUpgradeSelection}
               source={upgradeModalSource ?? undefined}
             />
-          </AgentChatMobileSheet>
+          </ImmersiveDialog>
         ) : (
           <SubscriptionUpgradeModal
             currentPlan={subscriptionPlan}

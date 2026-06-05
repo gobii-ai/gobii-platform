@@ -2,7 +2,7 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { Mail, UserPlus } from 'lucide-react'
 
-import { Modal } from '../common/Modal'
+import { ModalForm } from '../common/ModalForm'
 
 type AddCollaboratorModalProps = {
   onSubmit: (email: string) => Promise<void> | void
@@ -34,16 +34,22 @@ export function AddCollaboratorModal({ onSubmit, onClose }: AddCollaboratorModal
   }
 
   return (
-    <Modal
+    <ModalForm
+      id="collaborator-form"
       title="Invite Collaborator"
       subtitle="Invite a coworker to chat and exchange files with this agent."
       onClose={onClose}
+      onSubmit={handleSubmit}
       icon={UserPlus}
       iconBgClass="bg-emerald-100"
       iconColorClass="text-emerald-600"
       widthClass="sm:max-w-lg"
+      submitLabel="Send Invite"
+      submitting={submitting}
+      submitDisabled={!email.trim()}
+      errorMessages={error ? [error] : null}
+      formClassName="space-y-5"
     >
-      <form className="space-y-5" onSubmit={handleSubmit}>
         <div>
           <label htmlFor="collaborator-email-field" className="block text-sm font-medium text-gray-700">
             Collaborator email
@@ -63,27 +69,6 @@ export function AddCollaboratorModal({ onSubmit, onClose }: AddCollaboratorModal
             />
           </div>
         </div>
-
-        {error && <div className="text-sm text-rose-600">{error}</div>}
-
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            type="button"
-            className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={submitting || !email.trim()}
-            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-60"
-          >
-            Send Invite
-          </button>
-        </div>
-      </form>
-    </Modal>
+    </ModalForm>
   )
 }
