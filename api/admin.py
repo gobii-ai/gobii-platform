@@ -5951,6 +5951,7 @@ from .models import (
     FileHandlerModelEndpoint,
     FileHandlerLLMTier,
     FileHandlerTierEndpoint,
+    RealtimeVoiceModelEndpoint,
     BrowserModelEndpoint,
     BrowserLLMPolicy,
     BrowserLLMTier,
@@ -6104,6 +6105,23 @@ class FileHandlerLLMTierAdmin(admin.ModelAdmin):
     search_fields = ("description", "tier_endpoints__endpoint__key")
     ordering = ("order",)
     inlines = [FileHandlerTierEndpointInline]
+
+
+@admin.register(RealtimeVoiceModelEndpoint)
+class RealtimeVoiceModelEndpointAdmin(admin.ModelAdmin):
+    list_display = ("key", "provider", "deployment", "api_base", "voice", "transcription_model", "low_latency", "enabled")
+    list_filter = ("enabled", "low_latency", "provider")
+    search_fields = ("key", "deployment", "api_base", "voice", "transcription_model")
+    fields = (
+        "key",
+        "provider",
+        "enabled",
+        "low_latency",
+        "deployment",
+        "api_base",
+        "voice",
+        "transcription_model",
+    )
 
 
 class IntelligenceTierAdminForm(forms.ModelForm):

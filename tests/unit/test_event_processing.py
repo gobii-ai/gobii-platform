@@ -293,6 +293,54 @@ class PromptContextBuilderTests(TestCase):
         message.refresh_from_db()
         return message
 
+    def test_prompt_context_marks_recent_voice_mode_turn(self):
+        start_web_session(self.agent, self.user, source="voice")
+        web_agent_address = build_web_agent_address(self.agent.id)
+        web_user_address = build_web_user_address(self.user.id, self.agent.id)
+        web_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=web_agent_address,
+            is_primary=False,
+        )
+        web_user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=web_user_address,
+            is_primary=False,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=web_user_address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=web_user_endpoint,
+            to_endpoint=web_agent_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body="Can you check the account while we talk?",
+            raw_payload={
+                "source": "voice",
+                "realtime_item_id": "item_voice_123",
+            },
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_content = next(message["content"] for message in context if message["role"] == "system")
+        all_content = "\n".join(message["content"] for message in context)
+
+        self.assertIn("## Voice Mode", system_content)
+        self.assertIn("current human turn came from live voice", system_content)
+        self.assertIn("Do not reply through email, SMS, peer-agent, or other outbound channels", system_content)
+        self.assertIn("unless the user explicitly asks for that channel as the task deliverable", system_content)
+        self.assertIn("Realtime voice companion handles spoken acknowledgements and status", system_content)
+        self.assertIn("On web voice transcript", all_content)
+
     def test_prompt_uses_configured_skill_prompt_limit(self):
         config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
         config.standard_skill_prompt_limit = 2

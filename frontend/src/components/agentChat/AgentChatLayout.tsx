@@ -25,6 +25,7 @@ import { reportAgentMessageIssue, trackAgentMessageCopy } from '../../api/agentC
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
+import { useAgentVoiceRealtime } from '../../hooks/useAgentVoiceRealtime'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import { TextareaSubmitDialog } from '../common/TextareaSubmitDialog'
@@ -36,6 +37,7 @@ import type {
   AgentMessage,
   ProcessingWebTask,
   StreamState,
+  TimelineEvent,
   PlanSnapshot,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
@@ -340,6 +342,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   apolloNativeTabEnabled?: boolean
   hubspotNativeTabEnabled?: boolean
   pendingActionRequests?: PendingActionRequest[]
+  onVoiceTimelineEvent?: (event: TimelineEvent) => void
   onRespondHumanInputRequest?: (
     response:
       | { requestId: string; selectedOptionKey?: string; freeText?: string }
@@ -530,6 +533,7 @@ export function AgentChatLayout({
   apolloNativeTabEnabled = false,
   hubspotNativeTabEnabled = false,
   pendingActionRequests = [],
+  onVoiceTimelineEvent,
   onRespondHumanInputRequest,
   onDismissHumanInputRequest,
   onResolveSpawnRequest,
@@ -543,6 +547,14 @@ export function AgentChatLayout({
   onViewAllContactRequests,
 }: AgentChatLayoutProps) {
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
+  const voiceControl = useAgentVoiceRealtime({
+    agentId: activeAgentId ?? agentId ?? null,
+    processingActive,
+    processingTasks: processingWebTasks,
+    pendingActionRequests,
+    timelineEvents: events,
+    onTimelineEvent: onVoiceTimelineEvent,
+  })
 
   const [sidebarMode, setSidebarMode] = useState(getInitialAgentChatSidebarMode)
   const preEmbeddedSidebarModeRef = useRef<'collapsed' | 'list' | 'gallery' | null>(null)
@@ -1901,6 +1913,7 @@ export function AgentChatLayout({
               googleSheetsDriveTabEnabled={googleSheetsDriveTabEnabled}
               apolloNativeTabEnabled={apolloNativeTabEnabled}
               hubspotNativeTabEnabled={hubspotNativeTabEnabled}
+              voiceControl={voiceControl}
             />
           )}
           </div>

@@ -35,6 +35,7 @@ from api.models import (
     ProfilePersistentTier,
     ProfilePersistentTierEndpoint,
     ProfileTokenRange,
+    RealtimeVoiceModelEndpoint,
     VideoGenerationLLMTier,
     VideoGenerationTierEndpoint,
     VideoGenerationModelEndpoint,
@@ -156,6 +157,23 @@ def _serialize_video_generation_endpoint(endpoint: VideoGenerationModelEndpoint)
     return _serialize_aux_endpoint(endpoint, endpoint_type="video_generation")
 
 
+def _serialize_realtime_voice_endpoint(endpoint: RealtimeVoiceModelEndpoint) -> dict[str, Any]:
+    label = f"{endpoint.provider.display_name if endpoint.provider else 'Unlinked'} · {endpoint.deployment}"
+    data = _serialize_endpoint_common(endpoint, label=label)
+    data.update(
+        {
+            "key": endpoint.key,
+            "model": endpoint.deployment,
+            "api_base": endpoint.api_base,
+            "voice": endpoint.voice,
+            "transcription_model": endpoint.transcription_model,
+            "provider_id": str(endpoint.provider_id) if endpoint.provider_id else None,
+            "type": "realtime_voice",
+        }
+    )
+    return data
+
+
 def _serialize_weighted_endpoint_reference(endpoint, tier_endpoint) -> dict[str, Any]:
     provider_name = endpoint.provider.display_name if endpoint.provider else "Unlinked"
     return {
@@ -197,6 +215,7 @@ def build_llm_overview() -> dict[str, Any]:
             Prefetch("file_handler_endpoints", queryset=FileHandlerModelEndpoint.objects.select_related("provider")),
             Prefetch("image_generation_endpoints", queryset=ImageGenerationModelEndpoint.objects.select_related("provider")),
             Prefetch("video_generation_endpoints", queryset=VideoGenerationModelEndpoint.objects.select_related("provider")),
+            Prefetch("realtime_voice_endpoints", queryset=RealtimeVoiceModelEndpoint.objects.select_related("provider")),
         )
     )
     persistent_tier_usage_by_endpoint = build_persistent_endpoint_tier_usage_map(
@@ -217,6 +236,7 @@ def build_llm_overview() -> dict[str, Any]:
     file_handler_choices: list[dict[str, Any]] = []
     image_generation_choices: list[dict[str, Any]] = []
     video_generation_choices: list[dict[str, Any]] = []
+    realtime_voice_choices: list[dict[str, Any]] = []
 
     for provider in providers:
         persistent_endpoints = [
@@ -243,6 +263,10 @@ def build_llm_overview() -> dict[str, Any]:
             _serialize_video_generation_endpoint(endpoint)
             for endpoint in provider.video_generation_endpoints.all()
         ]
+        realtime_voice_endpoints = [
+            _serialize_realtime_voice_endpoint(endpoint)
+            for endpoint in provider.realtime_voice_endpoints.all()
+        ]
 
         persistent_choices.extend(persistent_endpoints)
         browser_choices.extend(browser_endpoints)
@@ -250,6 +274,7 @@ def build_llm_overview() -> dict[str, Any]:
         file_handler_choices.extend(file_handler_endpoints)
         image_generation_choices.extend(image_generation_endpoints)
         video_generation_choices.extend(video_generation_endpoints)
+        realtime_voice_choices.extend(realtime_voice_endpoints)
 
         provider_payload.append(
             {
@@ -270,6 +295,7 @@ def build_llm_overview() -> dict[str, Any]:
                     + file_handler_endpoints
                     + image_generation_endpoints
                     + video_generation_endpoints
+                    + realtime_voice_endpoints
                 ),
             }
         )
@@ -478,6 +504,7 @@ def build_llm_overview() -> dict[str, Any]:
             "file_handler_endpoints": file_handler_choices,
             "image_generation_endpoints": image_generation_choices,
             "video_generation_endpoints": video_generation_choices,
+            "realtime_voice_endpoints": realtime_voice_choices,
         },
     }
 
@@ -499,6 +526,7 @@ def serialize_routing_profile_list_item(profile: LLMRoutingProfile) -> dict[str,
             str(profile.summarization_endpoint_id) if profile.summarization_endpoint_id else None
         ),
         "agent_judge_endpoint_id": str(profile.agent_judge_endpoint_id) if profile.agent_judge_endpoint_id else None,
+        "voice_endpoint_id": str(profile.voice_endpoint_id) if profile.voice_endpoint_id else None,
     }
 
 
@@ -616,6 +644,19 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
             "model": ep.litellm_model,
         }
 
+    voice_endpoint = None
+    if profile.voice_endpoint:
+        ep = profile.voice_endpoint
+        provider_name = ep.provider.display_name if ep.provider else "Unlinked"
+        voice_endpoint = {
+            "endpoint_id": str(ep.id),
+            "endpoint_key": ep.key,
+            "label": f"{provider_name} · {ep.deployment}",
+            "model": ep.deployment,
+            "voice": ep.voice,
+            "transcription_model": ep.transcription_model,
+        }
+
     return {
         "id": str(profile.id),
         "name": profile.name,
@@ -629,6 +670,7 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
         "eval_judge_endpoint": eval_judge_endpoint,
         "summarization_endpoint": summarization_endpoint,
         "agent_judge_endpoint": agent_judge_endpoint,
+        "voice_endpoint": voice_endpoint,
         "persistent": {"ranges": persistent_ranges},
         "browser": {"tiers": browser_tiers},
         "embeddings": {"tiers": embedding_tiers},
@@ -693,6 +735,7 @@ def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
         "eval_judge_endpoint__provider",
         "summarization_endpoint__provider",
         "agent_judge_endpoint__provider",
+        "voice_endpoint__provider",
     ).prefetch_related(
         persistent_range_prefetch,
         browser_tier_prefetch,

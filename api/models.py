@@ -3808,6 +3808,64 @@ class VideoGenerationModelEndpoint(models.Model):
         return f"{self.key} → {self.litellm_model} ({provider})"
 
 
+class RealtimeVoiceModelEndpoint(models.Model):
+    """Realtime voice endpoint configuration used by agent chat voice mode."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'azure_realtime_default'")
+    provider = models.ForeignKey(
+        LLMProvider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="realtime_voice_endpoints",
+        help_text="Provider supplying credentials for this Realtime endpoint.",
+    )
+    enabled = models.BooleanField(default=False)
+    low_latency = models.BooleanField(
+        default=True,
+        help_text="Marks this endpoint as low latency/high performance.",
+    )
+
+    deployment = models.CharField(
+        max_length=256,
+        blank=True,
+        help_text="Azure OpenAI Realtime deployment name.",
+    )
+    api_base = models.CharField(
+        max_length=256,
+        blank=True,
+        help_text="Azure OpenAI resource endpoint, e.g. https://resource.openai.azure.com.",
+    )
+    voice = models.CharField(
+        max_length=64,
+        blank=True,
+        default="marin",
+        help_text="Default Realtime output voice.",
+    )
+    transcription_model = models.CharField(
+        max_length=128,
+        blank=True,
+        default="gpt-4o-transcribe-latest",
+        help_text="Realtime input transcription model used for transcript events.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider__display_name", "deployment"]
+        indexes = [
+            models.Index(fields=["key"]),
+            models.Index(fields=["enabled"]),
+            models.Index(fields=["provider"]),
+        ]
+
+    def __str__(self):
+        provider = self.provider.display_name if self.provider else "no-provider"
+        return f"{self.key} → {self.deployment or 'unconfigured'} ({provider})"
+
+
 class VideoGenerationLLMTier(models.Model):
     """Fallback tier ordering for video generation endpoints."""
 
@@ -4049,6 +4107,14 @@ class LLMRoutingProfile(models.Model):
         on_delete=models.SET_NULL,
         related_name="agent_judge_profiles",
         help_text="Endpoint used for advisory persistent-agent trajectory judge calls.",
+    )
+    voice_endpoint = models.ForeignKey(
+        "RealtimeVoiceModelEndpoint",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="voice_profiles",
+        help_text="Endpoint used for agent chat Realtime voice mode.",
     )
 
     class Meta:

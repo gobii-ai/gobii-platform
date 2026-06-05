@@ -4919,6 +4919,7 @@ export function AgentChatPage({
         apolloNativeTabEnabled={apolloNativeTabEnabled}
         hubspotNativeTabEnabled={hubspotNativeTabEnabled}
         pendingActionRequests={pendingActionRequests}
+        onVoiceTimelineEvent={receiveRealtimeEvent}
         events={timelineEvents}
         displayEvents={displayEvents}
         statusExpansionTargets={statusExpansionTargets}

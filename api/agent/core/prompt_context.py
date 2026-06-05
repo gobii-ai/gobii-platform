@@ -1244,12 +1244,14 @@ def _render_prompt_context_once(
         allow_implied_send=prompt_allows_implied_send,
     )
     implied_send_active = implied_send_context is not None
+    voice_mode_context = _get_active_voice_mode_context(agent)
     system_prompt = _get_system_instruction(
         agent,
         is_first_run=is_first_run,
         peer_dm_context=peer_dm_context,
         proactive_context=proactive_context,
         implied_send_context=implied_send_context,
+        voice_mode_context=voice_mode_context,
         continuation_notice=continuation_notice,
         system_directive_block=system_directive_block,
     )
@@ -2940,6 +2942,38 @@ def _get_implied_send_context(
 
     return None
 
+
+def _message_is_voice_mode_turn(message: PersistentAgentMessage) -> bool:
+    if message.is_outbound:
+        return False
+    if not message.from_endpoint or message.from_endpoint.channel != CommsChannel.WEB:
+        return False
+    raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+    return str(raw_payload.get("source") or "").strip().lower() == "voice"
+
+
+def _get_active_voice_mode_context(agent: PersistentAgent) -> dict | None:
+    cutoff = dj_timezone.now() - timedelta(minutes=settings.WEB_SESSION_STALE_GRACE_MINUTES)
+    latest_inbound = (
+        PersistentAgentMessage.objects.filter(
+            owner_agent=agent,
+            is_outbound=False,
+            timestamp__gte=cutoff,
+        )
+        .select_related("from_endpoint")
+        .order_by("-timestamp")
+        .first()
+    )
+    if latest_inbound is None or not _message_is_voice_mode_turn(latest_inbound):
+        return None
+
+    raw_payload = latest_inbound.raw_payload if isinstance(latest_inbound.raw_payload, dict) else {}
+    return {
+        "message_id": str(latest_inbound.id),
+        "realtime_item_id": raw_payload.get("realtime_item_id"),
+    }
+
+
 def _get_web_chat_formatting_guidance() -> str:
     """Return rich Markdown guidance for chat surfaces with full rendering support."""
 
@@ -3381,6 +3415,7 @@ def _get_system_instruction(
     peer_dm_context: dict | None = None,
     proactive_context: dict | None = None,
     implied_send_context: dict | None = None,
+    voice_mode_context: dict | None = None,
     continuation_notice: str | None = None,
     system_directive_block: str | None = None,
 ) -> str:
@@ -3389,6 +3424,15 @@ def _get_system_instruction(
     planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
     implied_send_active = implied_send_context is not None
     continuation_mode_block = "" if is_first_run else _get_continuation_mode_prompt_block()
+    voice_mode_note = (
+        "## Voice Mode\n\n"
+        "The current human turn came from live voice. Treat the voice/web chat surface as the active conversation. "
+        "Do not reply through email, SMS, peer-agent, or other outbound channels unless the user explicitly asks for that channel as the task deliverable. "
+        "The Realtime voice companion handles spoken acknowledgements and status; while working, stay silent and use tools. "
+        "For blockers, needed human answers, findings, or final results, use the normal current web chat/implied-send behavior.\n\n"
+        if voice_mode_context is not None
+        else ""
+    )
 
     if implied_send_active:
         display_name = implied_send_context.get("display_name") if implied_send_context else "active web chat user"
@@ -3404,6 +3448,7 @@ def _get_system_instruction(
             "- Other contacts: `send_email()`, `send_sms()`\n"
             "- Peer agents: `send_agent_message()`\n\n"
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
+            f"{voice_mode_note}"
         )
         response_structure = (
             "Response structure: tools only while working; message for blockers/questions/findings/finals; request_human_input for blocking answers; empty response sleeps. "
@@ -3419,6 +3464,7 @@ def _get_system_instruction(
             "If notifying by email/SMS too, include the same questions in that outbound body. "
             "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts. "
             "Focus on tool calls—text alone is not delivered.\n\n"
+            f"{voice_mode_note}"
         )
         response_structure = (
             "Response structure: tools while working; empty response sleeps; message + send tool only for FINDINGS, blockers, config changes, or final output. "
@@ -4389,6 +4435,8 @@ def _get_unified_history_prompt(
                 if is_webhook:
                     label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "unknown webhook"
                     header = f'[{m.timestamp.isoformat()}] Inbound webhook "{label}" triggered:'
+                elif _message_is_voice_mode_turn(m):
+                    header = f"[{m.timestamp.isoformat()}] On {channel} voice transcript, you received a message from {from_addr}:"
                 elif source_label:
                     header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {source_label}:"
                 else:

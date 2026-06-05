@@ -27,6 +27,7 @@ from api.agent.core.prompt_context import build_prompt_context
 from api.agent.tasks.reported_message_judge import run_reported_agent_judge_task
 from api.agent.peer_comm import PeerMessagingService
 from api.agent.tools.plan import PlanFileDeliverable, PlanMessageDeliverable, PlanSnapshot, PlanStepChange
+from api.encryption import SecretsEncryption
 from api.models import (
     AgentCollaborator,
     AgentPeerLink,
@@ -37,6 +38,8 @@ from api.models import (
     CommsChannel,
     DeliveryStatus,
     IntelligenceTier,
+    LLMProvider,
+    LLMRoutingProfile,
     PersistentAgent,
     PersistentAgentKanbanCard,
     PersistentAgentKanbanEvent,
@@ -55,6 +58,7 @@ from api.models import (
     Organization,
     OrganizationMembership,
     PipedreamAppSelection,
+    RealtimeVoiceModelEndpoint,
     SmsContactPurpose,
     build_web_agent_address,
     build_web_user_address,
@@ -171,6 +175,41 @@ class AgentChatAPITests(TestCase):
     def setUp(self):
         self.client = Client()
         self.client.force_login(self.user)
+
+    def _configure_realtime_voice(
+        self,
+        *,
+        enabled=True,
+        endpoint="https://example-resource.openai.azure.com",
+        api_key="secret-realtime-key",
+        deployment="gpt-realtime",
+        voice="marin",
+        transcription_model="gpt-4o-transcribe-latest",
+    ):
+        provider, _ = LLMProvider.objects.update_or_create(
+            key="azure_openai_realtime",
+            defaults={
+                "display_name": "Azure OpenAI Realtime",
+                "enabled": True,
+                "env_var_name": "AZURE_OPENAI_REALTIME_API_KEY",
+                "browser_backend": LLMProvider.BrowserBackend.OPENAI_COMPAT,
+            },
+        )
+        provider.api_key_encrypted = SecretsEncryption.encrypt_value(api_key) if api_key else None
+        provider.save(update_fields=["api_key_encrypted"])
+        RealtimeVoiceModelEndpoint.objects.update_or_create(
+            key="azure_openai_realtime_default",
+            defaults={
+                "provider": provider,
+                "enabled": enabled,
+                "low_latency": True,
+                "api_base": endpoint,
+                "deployment": deployment,
+                "voice": voice,
+                "transcription_model": transcription_model,
+            },
+        )
+        return provider
 
     def _create_org_owned_agent_for_other_creator(self):
         creator = get_user_model().objects.create_user(
@@ -2690,6 +2729,267 @@ class AgentChatAPITests(TestCase):
         )
         self.assertIsNotNone(stored)
         self.assertEqual(stored.from_endpoint.address, self.user_address)
+
+    @tag("batch_agent_chat")
+    def test_voice_realtime_session_rejects_when_disabled(self):
+        self._configure_realtime_voice(enabled=False)
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/voice/realtime-session/",
+            data={},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error"], "Voice mode is not enabled.")
+
+    @tag("batch_agent_chat")
+    def test_voice_realtime_session_rejects_when_not_configured(self):
+        self._configure_realtime_voice(endpoint="", api_key="test-key", deployment="gpt-realtime")
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/voice/realtime-session/",
+            data={},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error"], "Voice mode is not configured.")
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.voice_realtime.httpx.post")
+    def test_voice_realtime_session_posts_expected_azure_shape(self, mock_post):
+        self.user.first_name = "Taylor"
+        self.user.last_name = "Owner"
+        self.user.save(update_fields=["first_name", "last_name"])
+        provider = self._configure_realtime_voice(endpoint="https://example-resource.openai.azure.com/openai/v1")
+        selected_endpoint = RealtimeVoiceModelEndpoint.objects.create(
+            key="azure_realtime_profile",
+            provider=provider,
+            enabled=True,
+            low_latency=True,
+            api_base="https://profile-resource.openai.azure.com",
+            deployment="gpt-realtime-profile",
+            voice="marin",
+            transcription_model="gpt-4o-transcribe-latest",
+        )
+        LLMRoutingProfile.objects.create(
+            name="voice_profile",
+            display_name="Voice Profile",
+            is_active=True,
+            voice_endpoint=selected_endpoint,
+        )
+        azure_response = MagicMock()
+        azure_response.status_code = 200
+        azure_response.json.return_value = {
+            "client_secret": {
+                "value": "ephemeral-client-secret",
+                "expires_at": 1917280000,
+            }
+        }
+        mock_post.return_value = azure_response
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/voice/realtime-session/",
+            data=json.dumps({"voice": "verse"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["clientSecret"], "ephemeral-client-secret")
+        self.assertEqual(payload["callsUrl"], "https://profile-resource.openai.azure.com/openai/v1/realtime/calls?webrtcfilter=on")
+        self.assertEqual(payload["expiresAt"], 1917280000)
+        self.assertEqual(payload["voice"], "verse")
+        self.assertEqual(payload["deployment"], "gpt-realtime-profile")
+        self.assertEqual(payload["transcriptionModel"], "gpt-4o-transcribe-latest")
+
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["headers"]["api-key"], "secret-realtime-key")
+        self.assertEqual(kwargs["timeout"], 10.0)
+        self.assertEqual(kwargs["json"]["session"]["type"], "realtime")
+        self.assertEqual(kwargs["json"]["session"]["model"], "gpt-realtime-profile")
+        self.assertEqual(kwargs["json"]["session"]["audio"]["output"]["voice"], "verse")
+        self.assertNotIn("voice", kwargs["json"]["session"])
+        self.assertEqual(kwargs["json"]["session"]["audio"]["input"]["turn_detection"]["type"], "server_vad")
+        self.assertTrue(kwargs["json"]["session"]["audio"]["input"]["turn_detection"]["interrupt_response"])
+        self.assertEqual(kwargs["json"]["session"]["audio"]["input"]["transcription"]["model"], "gpt-4o-transcribe-latest")
+        self.assertNotIn("turn_detection", kwargs["json"]["session"])
+        self.assertNotIn("input_audio_transcription", kwargs["json"]["session"])
+        instructions = kwargs["json"]["session"]["instructions"]
+        self.assertIn("Do not send messages", instructions)
+        self.assertIn("main orchestrator agent", instructions)
+        self.assertIn("pass it to the main agent", instructions)
+        self.assertIn("## Agent", instructions)
+        self.assertIn("Console Tester", instructions)
+        self.assertIn("Do useful things", instructions)
+        self.assertIn("## Human", instructions)
+        self.assertIn("Taylor Owner", instructions)
+        self.assertIn("## Voice Handoff", instructions)
+        self.assertIn("Hello from the owner", instructions)
+        self.assertIn("## Recent Tool Calls", instructions)
+        self.assertIn("send_email", instructions)
+        self.assertIn("queued", instructions)
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.voice_realtime.httpx.post")
+    def test_voice_realtime_session_returns_safe_provider_error(self, mock_post):
+        self._configure_realtime_voice()
+        azure_response = MagicMock()
+        azure_response.status_code = 401
+        azure_response.text = '{"error":{"message":"secret-realtime-key is invalid"}}'
+        azure_response.json.return_value = {"error": {"message": "secret-realtime-key is invalid"}}
+        mock_post.return_value = azure_response
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/voice/realtime-session/",
+            data={},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["error"], "Could not start voice mode.")
+        self.assertNotIn("secret-realtime-key", response.content.decode())
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.voice_realtime.httpx.post")
+    def test_voice_realtime_session_enforces_agent_access(self, mock_post):
+        self._configure_realtime_voice(api_key="test-key")
+        other_user = get_user_model().objects.create_user(
+            username="other-agent-owner",
+            email="other-agent-owner@example.com",
+            password="password123",
+        )
+        browser_agent = BrowserUseAgent.objects.create(user=other_user, name="Other Browser Agent")
+        other_agent = PersistentAgent.objects.create(
+            user=other_user,
+            name="Other Agent",
+            charter="Private work",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.post(
+            f"/console/api/agents/{other_agent.id}/voice/realtime-session/",
+            data={},
+            content_type="application/json",
+        )
+
+        self.assertIn(response.status_code, {403, 404})
+        mock_post.assert_not_called()
+
+    @tag("batch_agent_chat")
+    def test_llm_realtime_voice_endpoint_api_uses_provider_inventory(self):
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        provider = LLMProvider.objects.create(
+            key="azure_openai_realtime",
+            display_name="Azure OpenAI Realtime",
+            enabled=True,
+            env_var_name="AZURE_OPENAI_REALTIME_API_KEY",
+            browser_backend=LLMProvider.BrowserBackend.OPENAI_COMPAT,
+            api_key_encrypted=SecretsEncryption.encrypt_value("new-secret-key"),
+        )
+
+        response = self.client.post(
+            "/console/api/llm/realtime-voice/endpoints/",
+            data=json.dumps(
+                {
+                    "provider_id": str(provider.id),
+                    "key": "azure_realtime_prod",
+                    "model": "gpt-realtime-prod",
+                    "api_base": "https://voice-resource.openai.azure.com/openai/v1",
+                    "voice": "cedar",
+                    "transcription_model": "gpt-4o-mini-transcribe",
+                    "enabled": True,
+                    "low_latency": True,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        endpoint_id = response.json()["endpoint_id"]
+        self.assertNotIn("new-secret-key", response.content.decode())
+
+        self.assertEqual(SecretsEncryption.decrypt_value(provider.api_key_encrypted), "new-secret-key")
+        endpoint = RealtimeVoiceModelEndpoint.objects.get(pk=endpoint_id)
+        self.assertTrue(endpoint.enabled)
+        self.assertEqual(endpoint.provider, provider)
+        self.assertEqual(endpoint.key, "azure_realtime_prod")
+        self.assertEqual(endpoint.api_base, "https://voice-resource.openai.azure.com/openai/v1")
+        self.assertEqual(endpoint.deployment, "gpt-realtime-prod")
+        self.assertEqual(endpoint.voice, "cedar")
+        self.assertEqual(endpoint.transcription_model, "gpt-4o-mini-transcribe")
+
+        overview_response = self.client.get("/console/api/llm/overview/")
+        self.assertEqual(overview_response.status_code, 200, overview_response.content)
+        overview = overview_response.json()
+        realtime_endpoint = overview["choices"]["realtime_voice_endpoints"][0]
+        self.assertEqual(realtime_endpoint["id"], endpoint_id)
+        self.assertEqual(realtime_endpoint["type"], "realtime_voice")
+        self.assertEqual(realtime_endpoint["model"], "gpt-realtime-prod")
+        self.assertEqual(realtime_endpoint["voice"], "cedar")
+        self.assertEqual(realtime_endpoint["transcription_model"], "gpt-4o-mini-transcribe")
+        self.assertNotIn("new-secret-key", overview_response.content.decode())
+
+        profile = LLMRoutingProfile.objects.create(
+            name="voice_selector_profile",
+            display_name="Voice Selector",
+            is_active=True,
+        )
+        update_response = self.client.patch(
+            f"/console/api/llm/routing-profiles/{profile.id}/",
+            data=json.dumps({"voice_endpoint_id": endpoint_id}),
+            content_type="application/json",
+        )
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+        profile.refresh_from_db()
+        self.assertEqual(str(profile.voice_endpoint_id), endpoint_id)
+
+        detail_response = self.client.get(f"/console/api/llm/routing-profiles/{profile.id}/")
+        self.assertEqual(detail_response.status_code, 200, detail_response.content)
+        self.assertEqual(detail_response.json()["profile"]["voice_endpoint"]["endpoint_id"], endpoint_id)
+        self.assertEqual(
+            detail_response.json()["profile"]["voice_endpoint"]["transcription_model"],
+            "gpt-4o-mini-transcribe",
+        )
+
+    @tag("batch_agent_chat")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_voice_turn_persists_web_inbound_message_and_queues_processing(self, mock_delay):
+        transcript = "Can you send the customer a recap after checking the account?"
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/voice/turns/",
+                data=json.dumps(
+                    {
+                        "transcript": transcript,
+                        "realtimeItemId": "item_123",
+                        "startedAt": "2026-06-04T12:00:01Z",
+                        "endedAt": "2026-06-04T12:00:04Z",
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertEqual(payload["event"]["kind"], "message")
+        self.assertEqual(payload["event"]["message"]["bodyText"], transcript)
+
+        stored = PersistentAgentMessage.objects.get(owner_agent=self.agent, body=transcript)
+        self.assertEqual(stored.from_endpoint.address, self.user_address)
+        self.assertEqual(stored.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(stored.raw_payload["source"], "voice")
+        self.assertEqual(stored.raw_payload["realtime_item_id"], "item_123")
+        self.assertEqual(stored.raw_payload["started_at"], "2026-06-04T12:00:01Z")
+        self.assertEqual(stored.raw_payload["ended_at"], "2026-06-04T12:00:04Z")
+        self.assertEqual(
+            PersistentAgentWebSession.objects.get(agent=self.agent, user=self.user).last_seen_source,
+            "voice",
+        )
+        mock_delay.assert_called()
 
     @tag("batch_agent_chat")
     def test_message_post_rejects_customer_account_pause(self):

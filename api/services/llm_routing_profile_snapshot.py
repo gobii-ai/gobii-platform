@@ -65,6 +65,7 @@ def create_eval_profile_snapshot(source_profile, suite_run_id: str):
             eval_judge_endpoint=source_profile.eval_judge_endpoint,
             summarization_endpoint=source_profile.summarization_endpoint,
             agent_judge_endpoint=source_profile.agent_judge_endpoint,
+            voice_endpoint=source_profile.voice_endpoint,
         )
 
         # Clone token ranges and their tiers

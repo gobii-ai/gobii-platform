@@ -447,6 +447,42 @@ export async function sendAgentMessage(agentId: string, body: string, attachment
   return response.event
 }
 
+export type AgentVoiceRealtimeSession = {
+  clientSecret: string
+  callsUrl: string
+  expiresAt?: string | number | null
+  voice: string
+  deployment: string
+  transcriptionModel?: string
+}
+
+export type AgentVoiceTurnPayload = {
+  transcript: string
+  realtimeItemId?: string
+  startedAt?: string
+  endedAt?: string
+}
+
+export async function createAgentVoiceRealtimeSession(
+  agentId: string,
+  voice?: string,
+): Promise<AgentVoiceRealtimeSession> {
+  return jsonRequest<AgentVoiceRealtimeSession>(`/console/api/agents/${agentId}/voice/realtime-session/`, {
+    method: 'POST',
+    includeCsrf: true,
+    json: voice ? { voice } : {},
+  })
+}
+
+export async function sendAgentVoiceTurn(agentId: string, payload: AgentVoiceTurnPayload): Promise<TimelineEvent> {
+  const response = await jsonRequest<{ event: TimelineEvent }>(`/console/api/agents/${agentId}/voice/turns/`, {
+    method: 'POST',
+    includeCsrf: true,
+    json: payload,
+  })
+  return response.event
+}
+
 export type AgentMessageReportResponse = {
   ok: boolean
   judge?: {

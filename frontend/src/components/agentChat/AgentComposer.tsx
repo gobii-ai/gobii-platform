@@ -1,7 +1,7 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
-import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, Loader2, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, Loader2, MessageSquare, MessageSquareQuote, Mic, MicOff, OctagonAlert, Paperclip, PhoneOff, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { ApolloInsightPanel } from './insights/ApolloInsightPanel'
@@ -21,6 +21,7 @@ import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { PlanningState } from '../../types/agentRoster'
+import type { AgentVoiceRealtimeState } from '../../hooks/useAgentVoiceRealtime'
 
 // Detect if user is on macOS
 function isMacOS(): boolean {
@@ -138,6 +139,17 @@ type HumanInputComposerResponse = {
 type HumanInputComposerBatchResponse = {
   batchId: string
   responses: HumanInputComposerResponse[]
+}
+
+type AgentComposerVoiceControl = {
+  state: AgentVoiceRealtimeState
+  muted: boolean
+  error: string | null
+  connected: boolean
+  available: boolean
+  connect: () => void | Promise<void>
+  disconnect: () => void
+  toggleMute: () => void
 }
 
 type WorkingPanelTab =
@@ -392,6 +404,7 @@ type AgentComposerProps = {
   googleSheetsDriveTabEnabled?: boolean
   apolloNativeTabEnabled?: boolean
   hubspotNativeTabEnabled?: boolean
+  voiceControl?: AgentComposerVoiceControl | null
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -450,6 +463,7 @@ export const AgentComposer = memo(function AgentComposer({
   googleSheetsDriveTabEnabled = false,
   apolloNativeTabEnabled = false,
   hubspotNativeTabEnabled = false,
+  voiceControl = null,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -1476,6 +1490,67 @@ export const AgentComposer = memo(function AgentComposer({
   const sendTitle = stopProcessingBusy
     ? 'Stopping'
     : disabledReason || (sendButtonBusy ? activeHumanInputUsesMainComposer ? 'Submitting' : 'Sending' : `${activeHumanInputUsesMainComposer ? 'Submit' : 'Send'} (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
+  const voiceTitle = useMemo(() => {
+    if (!voiceControl) return 'Voice mode'
+    if (!voiceControl.available) return voiceControl.error || 'Voice mode is unavailable'
+    if (voiceControl.state === 'connecting') return 'Connecting voice mode'
+    if (voiceControl.connected) return voiceControl.muted ? 'Unmute voice' : 'Mute voice'
+    if (voiceControl.state === 'error') return voiceControl.error || 'Retry voice mode'
+    return 'Start voice mode'
+  }, [voiceControl])
+
+  const renderVoiceControls = () => {
+    if (!voiceControl) {
+      return null
+    }
+
+    const voiceBusy = voiceControl.state === 'connecting'
+    const voiceDisabled = disabled || voiceBusy || !voiceControl.available
+    const activeVoice = voiceControl.connected
+    return (
+      <>
+        <button
+          type="button"
+          className={`composer-voice-button${activeVoice ? ' composer-voice-button--active' : ''}${voiceControl.muted ? ' composer-voice-button--muted' : ''}`}
+          disabled={voiceDisabled}
+          title={voiceTitle}
+          aria-label={voiceTitle}
+          data-state={voiceControl.state}
+          onClick={(event) => {
+            event.preventDefault()
+            if (voiceControl.connected) {
+              voiceControl.toggleMute()
+            } else {
+              void voiceControl.connect()
+            }
+          }}
+        >
+          {voiceBusy ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : voiceControl.muted || voiceControl.state === 'unavailable' ? (
+            <MicOff className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <Mic className="h-4 w-4" aria-hidden="true" />
+          )}
+        </button>
+        {activeVoice ? (
+          <button
+            type="button"
+            className="composer-voice-button composer-voice-button--disconnect"
+            title="Disconnect voice"
+            aria-label="Disconnect voice"
+            onClick={(event) => {
+              event.preventDefault()
+              voiceControl.disconnect()
+            }}
+          >
+            <PhoneOff className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
+      </>
+    )
+  }
+
   const renderSkipPlanningButton = (className = 'composer-skip-planning-button') => (
     <button
       type="button"
@@ -1546,6 +1621,7 @@ export const AgentComposer = memo(function AgentComposer({
             error={intelligenceError}
           />
         ) : null}
+        {renderVoiceControls()}
         {showStopProcessing ? (
           <button
             type="button"

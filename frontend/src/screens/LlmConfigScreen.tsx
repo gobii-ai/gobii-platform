@@ -68,6 +68,7 @@ const addEndpointOptions: Array<{ id: llmApi.ProviderEndpoint['type']; label: st
   { id: 'file_handler', label: 'File handler' },
   { id: 'image_generation', label: 'Image generation' },
   { id: 'video_generation', label: 'Video generation' },
+  { id: 'realtime_voice', label: 'Realtime voice' },
 ]
 
 const reasoningEffortOptions = [
@@ -184,6 +185,8 @@ type ProviderEndpointCard = {
   supports_vision?: boolean
   supports_image_to_image?: boolean
   supports_image_to_video?: boolean
+  voice?: string
+  transcription_model?: string
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
   allow_implied_send?: boolean
@@ -213,7 +216,7 @@ type ImageGenerationUseCase = 'create_image' | 'avatar'
 type VideoGenerationUseCase = 'create_video'
 type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation' | 'video_generation'
 type ProfileTierScope = Exclude<TierScope, 'file_handler' | 'image_generation' | 'video_generation'>
-type EndpointKind = Extract<llmApi.ProviderEndpoint['type'], TierScope>
+type EndpointKind = llmApi.ProviderEndpoint['type']
 type TierEndpointWeightPayload = { weight: number }
 type TierEndpointCreatePayload = { endpoint_id: string; weight: number }
 
@@ -224,6 +227,7 @@ const ENDPOINT_KIND_MAP: Record<llmApi.ProviderEndpoint['type'], EndpointKind> =
   file_handler: 'file_handler',
   image_generation: 'image_generation',
   video_generation: 'video_generation',
+  realtime_voice: 'realtime_voice',
 }
 
 const endpointKindFromType = (type: llmApi.ProviderEndpoint['type']): EndpointKind => ENDPOINT_KIND_MAP[type]
@@ -379,6 +383,8 @@ type EndpointFormValues = {
   supportsVision?: boolean
   supportsImageToImage?: boolean
   supportsImageToVideo?: boolean
+  voice?: string
+  transcriptionModel?: string
   supportsReasoning?: boolean
   reasoningEffort?: string | null
   openrouterPreset?: string
@@ -966,6 +972,8 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       supports_vision: endpoint.supports_vision,
       supports_image_to_image: endpoint.supports_image_to_image,
       supports_image_to_video: endpoint.supports_image_to_video,
+      voice: endpoint.voice,
+      transcription_model: endpoint.transcription_model,
       supports_tool_choice: endpoint.supports_tool_choice,
       use_parallel_tool_calls: endpoint.use_parallel_tool_calls,
       allow_implied_send: endpoint.allow_implied_send,
@@ -1706,7 +1714,9 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
                         ? 'Edit image generation endpoint'
                         : endpoint.type === 'video_generation'
                           ? 'Edit video generation endpoint'
-                        : 'Edit embedding endpoint'}
+                          : endpoint.type === 'realtime_voice'
+                            ? 'Edit realtime voice endpoint'
+                            : 'Edit embedding endpoint'}
               </h3>
               <button
                 onClick={() => {
@@ -1826,9 +1836,11 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
                         <p className="text-xs text-slate-500 uppercase">{endpoint.type}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button type="button" className={button.secondary} onClick={() => handlers.onTestEndpoint(endpoint).catch(() => {})} disabled={testBusy}>
-                          {testBusy ? <Loader2 className="size-4 animate-spin" /> : 'Test'}
-                        </button>
+                        {endpoint.type !== 'realtime_voice' ? (
+                          <button type="button" className={button.secondary} onClick={() => handlers.onTestEndpoint(endpoint).catch(() => {})} disabled={testBusy}>
+                            {testBusy ? <Loader2 className="size-4 animate-spin" /> : 'Test'}
+                          </button>
+                        ) : null}
                         <button className={button.secondary} onClick={() => openEndpointEditor(endpoint)}>
                           {isEditing ? 'Close' : 'Edit'}
                         </button>
@@ -1931,6 +1943,8 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const [supportsVision, setSupportsVision] = useState(Boolean(endpoint.supports_vision))
   const [supportsImageToImage, setSupportsImageToImage] = useState(Boolean(endpoint.supports_image_to_image))
   const [supportsImageToVideo, setSupportsImageToVideo] = useState(Boolean(endpoint.supports_image_to_video))
+  const [voice, setVoice] = useState(endpoint.voice || 'marin')
+  const [transcriptionModel, setTranscriptionModel] = useState(endpoint.transcription_model || 'gpt-4o-transcribe-latest')
   const [supportsToolChoice, setSupportsToolChoice] = useState(Boolean(endpoint.supports_tool_choice))
   const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
   const [allowImpliedSend, setAllowImpliedSend] = useState(endpoint.allow_implied_send ?? true)
@@ -1954,6 +1968,8 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       supportsVision: supportsVision,
       supportsImageToImage,
       supportsImageToVideo,
+      voice,
+      transcriptionModel,
       supportsReasoning,
       reasoningEffort,
       openrouterPreset,
@@ -1967,9 +1983,10 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const isFileHandler = endpoint.type === 'file_handler'
   const isImageGeneration = endpoint.type === 'image_generation'
   const isVideoGeneration = endpoint.type === 'video_generation'
+  const isRealtimeVoice = endpoint.type === 'realtime_voice'
   const isPersistent = endpoint.type === 'persistent'
   const isMediaGeneration = isImageGeneration || isVideoGeneration
-  const isToolingEndpoint = !isEmbedding && !isFileHandler && !isMediaGeneration
+  const isToolingEndpoint = !isEmbedding && !isFileHandler && !isMediaGeneration && !isRealtimeVoice
 
   return (
     <div className="space-y-3">
@@ -1978,7 +1995,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <label className="text-xs text-slate-500">Model identifier</label>
           <input value={model} onChange={(event) => setModel(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
         </div>
-        {!isBrowser && !isMediaGeneration && (
+        {!isBrowser && !isMediaGeneration && !isRealtimeVoice && (
           <div>
             <label className="text-xs text-slate-500">Temperature override</label>
             <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
@@ -1986,8 +2003,20 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
         )}
         <div>
           <label className="text-xs text-slate-500">API base URL</label>
-          <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://api.example.com/v1" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+          <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder={isRealtimeVoice ? 'https://your-resource.openai.azure.com' : 'https://api.example.com/v1'} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
         </div>
+        {isRealtimeVoice && (
+          <div>
+            <label className="text-xs text-slate-500">Voice</label>
+            <input value={voice} onChange={(event) => setVoice(event.target.value)} placeholder="marin" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+          </div>
+        )}
+        {isRealtimeVoice && (
+          <div>
+            <label className="text-xs text-slate-500">Transcription model</label>
+            <input value={transcriptionModel} onChange={(event) => setTranscriptionModel(event.target.value)} placeholder="gpt-4o-transcribe-latest" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+          </div>
+        )}
         {isPersistent && (
           <div className="md:col-span-2">
             <label className="text-xs text-slate-500">OpenRouter preset</label>
@@ -2013,13 +2042,13 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
         )}
       </div>
       <div className="flex flex-wrap gap-4 text-sm">
-        {!isMediaGeneration && (
+        {!isMediaGeneration && !isRealtimeVoice && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
             Supports temperature
           </label>
         )}
-        {!isMediaGeneration && (
+        {!isMediaGeneration && !isRealtimeVoice && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
             Vision
@@ -2126,6 +2155,8 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [supportsVision, setSupportsVision] = useState(false)
   const [supportsImageToImage, setSupportsImageToImage] = useState(false)
   const [supportsImageToVideo, setSupportsImageToVideo] = useState(false)
+  const [voice, setVoice] = useState('marin')
+  const [transcriptionModel, setTranscriptionModel] = useState('gpt-4o-transcribe-latest')
   const [supportsTemperature, setSupportsTemperature] = useState(true)
   const [supportsTools, setSupportsTools] = useState(true)
   const [parallelTools, setParallelTools] = useState(true)
@@ -2134,7 +2165,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [reasoningEffort, setReasoningEffort] = useState('')
   const [temperature, setTemperature] = useState('')
   const [openrouterPreset, setOpenrouterPreset] = useState('')
-  const [lowLatency, setLowLatency] = useState(false)
+  const [lowLatency, setLowLatency] = useState(type === 'realtime_voice')
   const [submitting, setSubmitting] = useState(false)
   const isSubmitting = busy || submitting
 
@@ -2145,6 +2176,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
     file_handler: 'Add file handler endpoint',
     image_generation: 'Add image generation endpoint',
     video_generation: 'Add video generation endpoint',
+    realtime_voice: 'Add realtime voice endpoint',
   }[type]
 
   const handleSubmit = async () => {
@@ -2161,6 +2193,8 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         supportsVision,
         supportsImageToImage,
         supportsImageToVideo,
+        voice,
+        transcriptionModel,
         supportsToolChoice: supportsTools,
         useParallelToolCalls: parallelTools,
         allowImpliedSend,
@@ -2215,8 +2249,20 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
             )}
             <div className="md:col-span-2">
               <label className="text-xs text-slate-500">API base URL</label>
-              <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://api.example.com/v1" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+              <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder={type === 'realtime_voice' ? 'https://your-resource.openai.azure.com' : 'https://api.example.com/v1'} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
             </div>
+            {type === 'realtime_voice' && (
+              <div>
+                <label className="text-xs text-slate-500">Voice</label>
+                <input value={voice} onChange={(event) => setVoice(event.target.value)} placeholder="marin" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+              </div>
+            )}
+            {type === 'realtime_voice' && (
+              <div>
+                <label className="text-xs text-slate-500">Transcription model</label>
+                <input value={transcriptionModel} onChange={(event) => setTranscriptionModel(event.target.value)} placeholder="gpt-4o-transcribe-latest" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+              </div>
+            )}
             {type === 'persistent' && (
               <div className="md:col-span-2">
                 <label className="text-xs text-slate-500">OpenRouter preset</label>
@@ -2230,13 +2276,13 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
             )}
           </div>
           <div className="flex flex-wrap gap-4 text-sm">
-            {type !== 'image_generation' && type !== 'video_generation' && (
+            {type !== 'image_generation' && type !== 'video_generation' && type !== 'realtime_voice' && (
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
                 Supports temperature
               </label>
             )}
-            {type !== 'image_generation' && type !== 'video_generation' && (
+            {type !== 'image_generation' && type !== 'video_generation' && type !== 'realtime_voice' && (
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
                 Vision
@@ -2278,7 +2324,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                 Reasoning
               </label>
             )}
-            {type !== 'embedding' && type !== 'file_handler' && type !== 'image_generation' && type !== 'video_generation' && (
+            {type !== 'embedding' && type !== 'file_handler' && type !== 'image_generation' && type !== 'video_generation' && type !== 'realtime_voice' && (
               <>
                 <label className="inline-flex items-center gap-2">
                   <input type="checkbox" checked={supportsTools} onChange={(event) => setSupportsTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
@@ -3330,6 +3376,7 @@ export function LlmConfigScreen() {
     file_handler_endpoints: [],
     image_generation_endpoints: [],
     video_generation_endpoints: [],
+    realtime_voice_endpoints: [],
   }
 
   useEffect(() => {
@@ -3592,6 +3639,13 @@ export function LlmConfigScreen() {
       payload.api_base = values.api_base || ''
       payload.supports_image_to_video = values.supportsImageToVideo ?? false
       payload.enabled = true
+    } else if (type === 'realtime_voice') {
+      payload.model = values.model
+      payload.deployment = values.model
+      payload.api_base = values.api_base || ''
+      payload.voice = values.voice || 'marin'
+      payload.transcription_model = values.transcriptionModel || 'gpt-4o-transcribe-latest'
+      payload.enabled = true
     } else {
       payload.model = values.model
       payload.litellm_model = values.model
@@ -3630,7 +3684,8 @@ export function LlmConfigScreen() {
     if (values.model) {
       payload.model = values.model
       if (kind === 'browser') payload.browser_model = values.model
-      if (kind !== 'browser') payload.litellm_model = values.model
+      if (kind === 'realtime_voice') payload.deployment = values.model
+      if (kind !== 'browser' && kind !== 'realtime_voice') payload.litellm_model = values.model
     }
     if (values.api_base) {
       payload.api_base = values.api_base
@@ -3643,12 +3698,12 @@ export function LlmConfigScreen() {
       const parsed = parseNumber(values.max_output_tokens)
       payload.max_output_tokens = parsed ?? null
     }
-    if (kind !== 'browser' && kind !== 'image_generation' && kind !== 'video_generation' && values.temperature !== undefined) {
+    if (kind !== 'browser' && kind !== 'image_generation' && kind !== 'video_generation' && kind !== 'realtime_voice' && values.temperature !== undefined) {
       const parsed = parseNumber(values.temperature)
       payload.temperature_override = parsed ?? null
     }
-    if (kind !== 'image_generation' && kind !== 'video_generation' && values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
-    if (kind !== 'image_generation' && kind !== 'video_generation' && values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
+    if (kind !== 'image_generation' && kind !== 'video_generation' && kind !== 'realtime_voice' && values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
+    if (kind !== 'image_generation' && kind !== 'video_generation' && kind !== 'realtime_voice' && values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
     if (kind === 'image_generation' && values.supportsImageToImage !== undefined) {
       payload.supports_image_to_image = values.supportsImageToImage
     }
@@ -3658,6 +3713,8 @@ export function LlmConfigScreen() {
     if (kind === 'persistent' && values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (kind === 'persistent' && values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
     if (kind === 'persistent' && values.allowImpliedSend !== undefined) payload.allow_implied_send = values.allowImpliedSend
+    if (kind === 'realtime_voice' && values.voice !== undefined) payload.voice = values.voice || 'marin'
+    if (kind === 'realtime_voice' && values.transcriptionModel !== undefined) payload.transcription_model = values.transcriptionModel || 'gpt-4o-transcribe-latest'
     if (values.lowLatency !== undefined) payload.low_latency = values.lowLatency
     if (kind === 'persistent') {
       if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
@@ -4317,6 +4374,23 @@ export function LlmConfigScreen() {
     )
   }
 
+  const handleUpdateVoiceEndpoint = async (endpointId: string | null) => {
+    if (!selectedProfileId) return
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateRoutingProfile(selectedProfileId, { voice_endpoint_id: endpointId })
+        await invalidateProfiles()
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: endpointId ? 'Voice model updated' : 'Voice model cleared',
+        label: 'Updating voice model…',
+        busyKey: actionKey('profile', selectedProfileId, 'voice'),
+        context: 'Voice model',
+      },
+    )
+  }
+
   // ===============================
   // Profile-Specific Tier Handlers
   // ===============================
@@ -4961,7 +5035,7 @@ export function LlmConfigScreen() {
         </SectionCard>
         <SectionCard
           title="Other model consumers"
-          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, judge models, embeddings, file handling, image generation, and video generation.'}
+          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, judge models, voice, embeddings, file handling, image generation, and video generation.'}
         >
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -5057,6 +5131,49 @@ export function LlmConfigScreen() {
                   <div>
                     <h4 className="font-semibold text-slate-900/90">Search tools</h4>
                     <p className="text-sm text-slate-600">Decisions are delegated to the main agent tiers.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200/80 bg-white p-4">
+                <div className="flex items-start gap-3">
+                  <PlugZap className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-slate-900/90">Voice model</h4>
+                    <p className="text-sm text-slate-600 mb-3">
+                      Realtime voice endpoint used for live agent chat audio.
+                    </p>
+                    {selectedProfile ? (
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                          value={selectedProfile.voice_endpoint?.endpoint_id ?? ''}
+                          onChange={(e) => handleUpdateVoiceEndpoint(e.target.value || null)}
+                          disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'voice'))}
+                        >
+                          <option value="">— Use first enabled voice endpoint —</option>
+                          {endpointChoices.realtime_voice_endpoints.map((ep) => (
+                            <option key={ep.id} value={ep.id}>
+                              {ep.label} ({ep.model}{ep.voice ? `, ${ep.voice}` : ''}{ep.transcription_model ? `, ${ep.transcription_model}` : ''})
+                            </option>
+                          ))}
+                        </select>
+                        {selectedProfile.voice_endpoint && (
+                          <button
+                            type="button"
+                            className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => handleUpdateVoiceEndpoint(null)}
+                            disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'voice'))}
+                          >
+                            <X className="size-4" />
+                          </button>
+                        )}
+                        {isBusy(actionKey('profile', selectedProfileId ?? '', 'voice')) && (
+                          <Loader2 className="size-4 text-blue-600 animate-spin flex-shrink-0" />
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">Select a routing profile to configure this voice model.</p>
+                    )}
                   </div>
                 </div>
               </div>

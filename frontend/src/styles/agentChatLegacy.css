@@ -1742,6 +1742,54 @@
   box-shadow: none;
 }
 
+.composer-voice-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  padding: 0;
+  color: color-mix(in srgb, var(--composer-accent, #6366f1) 78%, #1f2937);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid color-mix(in srgb, var(--composer-accent, #6366f1) 28%, rgba(255, 255, 255, 0.96));
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
+}
+
+.composer-voice-button:hover:not([disabled]) {
+  transform: translateY(-1px);
+  color: var(--composer-accent-dark, #4f46e5);
+  border-color: color-mix(in srgb, var(--composer-accent, #6366f1) 50%, rgba(255, 255, 255, 0.96));
+}
+
+.composer-voice-button:focus-visible {
+  outline: 3px solid var(--composer-accent-focus, rgba(99, 102, 241, 0.4));
+  outline-offset: 2px;
+}
+
+.composer-voice-button[disabled] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.composer-voice-button--active {
+  color: var(--composer-accent-text, #ffffff);
+  background: var(--composer-accent, #6366f1);
+  border-color: var(--composer-accent, #6366f1);
+}
+
+.composer-voice-button--muted,
+.composer-voice-button--disconnect {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.34);
+}
+
+.composer-voice-button--disconnect:hover:not([disabled]) {
+  color: #991b1b;
+  border-color: rgba(185, 28, 28, 0.5);
+}
+
 .composer-send-button--stop {
   animation: composerStopButtonPulse 1.8s ease-in-out infinite;
 }

@@ -21,13 +21,15 @@ export type ProviderEndpoint = {
   supports_vision?: boolean
   supports_image_to_image?: boolean
   supports_image_to_video?: boolean
+  voice?: string
+  transcription_model?: string
   browser_base_url?: string
   max_output_tokens?: number | null
   max_input_tokens?: number | null
   supports_reasoning?: boolean
   reasoning_effort?: string | null
   openrouter_preset?: string | null
-  type: 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation' | 'video_generation'
+  type: 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation' | 'video_generation' | 'realtime_voice'
   low_latency?: boolean
   enabled: boolean
   provider_id: string
@@ -149,6 +151,7 @@ export type EndpointChoices = {
   file_handler_endpoints: ProviderEndpoint[]
   image_generation_endpoints: ProviderEndpoint[]
   video_generation_endpoints: ProviderEndpoint[]
+  realtime_voice_endpoints: ProviderEndpoint[]
 }
 
 export type LlmOverviewResponse = {
@@ -202,6 +205,7 @@ const endpointPaths = {
   file_handler: `${base}/file-handlers/endpoints/`,
   image_generation: `${base}/image-generations/endpoints/`,
   video_generation: `${base}/video-generations/endpoints/`,
+  realtime_voice: `${base}/realtime-voice/endpoints/`,
 } as const
 
 type EndpointKind = keyof typeof endpointPaths
@@ -556,6 +560,7 @@ export type RoutingProfileListItem = {
   eval_judge_endpoint_id: string | null
   summarization_endpoint_id: string | null
   agent_judge_endpoint_id: string | null
+  voice_endpoint_id: string | null
 }
 
 export type EvalJudgeEndpoint = {
@@ -563,6 +568,8 @@ export type EvalJudgeEndpoint = {
   endpoint_key: string
   label: string
   model: string
+  voice?: string
+  transcription_model?: string
 }
 
 export type ProfilePersistentTier = {
@@ -608,6 +615,7 @@ export type RoutingProfileDetail = {
   eval_judge_endpoint: EvalJudgeEndpoint | null
   summarization_endpoint: EvalJudgeEndpoint | null
   agent_judge_endpoint: EvalJudgeEndpoint | null
+  voice_endpoint: EvalJudgeEndpoint | null
   persistent: { ranges: ProfileTokenRange[] }
   browser: { tiers: ProfileBrowserTier[] }
   embeddings: { tiers: ProfileEmbeddingTier[] }

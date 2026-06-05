@@ -91,6 +91,7 @@ from api.models import (
     ImageGenerationLLMTier,
     ImageGenerationModelEndpoint,
     ImageGenerationTierEndpoint,
+    RealtimeVoiceModelEndpoint,
     VideoGenerationLLMTier,
     VideoGenerationModelEndpoint,
     VideoGenerationTierEndpoint,
@@ -215,6 +216,11 @@ from console.agent_chat.timeline import (
     serialize_processing_snapshot,
 )
 from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_timeline_suggestions
+from console.agent_chat.voice_realtime import (
+    VoiceRealtimeConfigurationError,
+    VoiceRealtimeProviderError,
+    create_azure_realtime_session,
+)
 from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
 from console.context_helpers import build_console_context, resolve_console_context
 from console.context_overrides import get_context_override
@@ -1980,6 +1986,65 @@ def _update_aux_llm_endpoint_from_payload(
         endpoint.supports_image_to_image = _coerce_bool(payload.get("supports_image_to_image"))
     if include_supports_image_to_video and "supports_image_to_video" in payload:
         endpoint.supports_image_to_video = _coerce_bool(payload.get("supports_image_to_video"))
+    if "low_latency" in payload:
+        endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
+    if "enabled" in payload:
+        endpoint.enabled = _coerce_bool(payload.get("enabled"))
+    if "provider_id" in payload:
+        provider_id = payload.get("provider_id")
+        if provider_id:
+            endpoint.provider = get_object_or_404(LLMProvider, pk=provider_id)
+        else:
+            endpoint.provider = None
+    endpoint.save()
+    return None
+
+
+def _create_realtime_voice_endpoint_from_payload(
+    payload: dict[str, Any],
+) -> tuple[RealtimeVoiceModelEndpoint | None, HttpResponseBadRequest | None]:
+    key = (payload.get("key") or "").strip()
+    deployment = (payload.get("model") or payload.get("deployment") or "").strip()
+    if not key or not deployment:
+        return None, HttpResponseBadRequest("key and model are required")
+    if RealtimeVoiceModelEndpoint.objects.filter(key=key).exists():
+        return None, HttpResponseBadRequest("Endpoint key already exists")
+
+    provider = None
+    provider_id = payload.get("provider_id")
+    if provider_id:
+        provider = get_object_or_404(LLMProvider, pk=provider_id)
+
+    endpoint = RealtimeVoiceModelEndpoint.objects.create(
+        key=key,
+        provider=provider,
+        deployment=deployment,
+        api_base=(payload.get("api_base") or "").strip(),
+        voice=(payload.get("voice") or "marin").strip() or "marin",
+        transcription_model=(payload.get("transcription_model") or "gpt-4o-transcribe-latest").strip() or "gpt-4o-transcribe-latest",
+        low_latency=_coerce_bool(payload.get("low_latency", True)),
+        enabled=_coerce_bool(payload.get("enabled", True)),
+    )
+    return endpoint, None
+
+
+def _update_realtime_voice_endpoint_from_payload(
+    endpoint: RealtimeVoiceModelEndpoint,
+    payload: dict[str, Any],
+) -> HttpResponseBadRequest | None:
+    if "model" in payload or "deployment" in payload:
+        deployment = (payload.get("model") or payload.get("deployment") or "").strip()
+        if deployment:
+            endpoint.deployment = deployment
+    if "api_base" in payload:
+        endpoint.api_base = (payload.get("api_base") or "").strip()
+    if "voice" in payload:
+        endpoint.voice = (payload.get("voice") or "").strip() or "marin"
+    if "transcription_model" in payload:
+        endpoint.transcription_model = (
+            (payload.get("transcription_model") or "").strip()
+            or "gpt-4o-transcribe-latest"
+        )
     if "low_latency" in payload:
         endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
     if "enabled" in payload:
@@ -4611,6 +4676,116 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         return JsonResponse({"event": event}, status=201)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentVoiceRealtimeSessionAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        owner = agent.organization or agent.user
+        if owner is not None and bool(get_owner_account_pause_state(owner).get("customer_paused")):
+            return JsonResponse({"error": _customer_account_pause_block_message(owner)}, status=403)
+
+        try:
+            payload = _parse_json_body(request)
+        except ValueError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        voice = payload.get("voice")
+        if voice is not None and not isinstance(voice, str):
+            return JsonResponse({"error": "voice must be a string."}, status=400)
+
+        try:
+            session = create_azure_realtime_session(voice=voice, agent=agent, user=request.user)
+        except VoiceRealtimeConfigurationError as exc:
+            return JsonResponse({"error": str(exc)}, status=503)
+        except VoiceRealtimeProviderError:
+            return JsonResponse({"error": "Could not start voice mode."}, status=502)
+
+        return JsonResponse(
+            {
+                "clientSecret": session.client_secret,
+                "callsUrl": session.calls_url,
+                "expiresAt": session.expires_at,
+                "voice": session.voice,
+                "deployment": session.deployment,
+                "transcriptionModel": session.transcription_model,
+            }
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentVoiceTurnCreateAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+    max_transcript_length = 10000
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        owner = agent.organization or agent.user
+        if owner is not None and bool(get_owner_account_pause_state(owner).get("customer_paused")):
+            return JsonResponse({"error": _customer_account_pause_block_message(owner)}, status=403)
+
+        try:
+            payload = _parse_json_body(request)
+        except ValueError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        transcript = payload.get("transcript")
+        if not isinstance(transcript, str) or not transcript.strip():
+            return JsonResponse({"error": "transcript is required."}, status=400)
+        transcript = transcript.strip()
+        if len(transcript) > self.max_transcript_length:
+            return JsonResponse({"error": "transcript is too long."}, status=400)
+
+        sender_address, recipient_address = _ensure_console_endpoints(agent, request.user)
+        touch_web_session(
+            agent,
+            request.user,
+            source="voice",
+            create=True,
+            ttl_seconds=WEB_SESSION_TTL_SECONDS,
+            is_visible=True,
+        )
+
+        if not agent.is_sender_whitelisted(CommsChannel.WEB, sender_address):
+            return HttpResponseForbidden("You are not allowed to message this agent.")
+
+        raw_payload = {
+            "source": "voice",
+            "user_id": request.user.id,
+        }
+        for request_key, payload_key in (
+            ("realtimeItemId", "realtime_item_id"),
+            ("startedAt", "started_at"),
+            ("endedAt", "ended_at"),
+        ):
+            value = payload.get(request_key)
+            if isinstance(value, str) and value:
+                raw_payload[payload_key] = value
+
+        parsed = ParsedMessage(
+            sender=sender_address,
+            recipient=recipient_address,
+            subject=None,
+            body=transcript,
+            attachments=[],
+            raw_payload=raw_payload,
+            msg_channel=CommsChannel.WEB,
+        )
+        info = ingest_inbound_message(CommsChannel.WEB, parsed, filespace_import_mode="sync")
+        return JsonResponse({"event": serialize_message_event(info.message)}, status=201)
+
+
 AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH = 2000
 
 
@@ -5467,6 +5642,8 @@ class LLMProviderDetailAPIView(SystemAdminAPIView):
             or provider.embedding_endpoints.exists()
             or provider.file_handler_endpoints.exists()
             or provider.image_generation_endpoints.exists()
+            or provider.video_generation_endpoints.exists()
+            or provider.realtime_voice_endpoints.exists()
         )
         if has_dependents:
             return HttpResponseBadRequest("Provider cannot be deleted while endpoints exist")
@@ -6460,6 +6637,40 @@ class VideoGenerationEndpointDetailAPIView(AuxEndpointDetailAPIView):
     include_supports_image_to_video = True
 
 
+class RealtimeVoiceEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        endpoint, error_response = _create_realtime_voice_endpoint_from_payload(payload)
+        if error_response:
+            return error_response
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+
+class RealtimeVoiceEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(RealtimeVoiceModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_realtime_voice_endpoint_from_payload(endpoint, payload)
+        if error_response:
+            return error_response
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(RealtimeVoiceModelEndpoint, pk=endpoint_id)
+        endpoint.delete()
+        return _json_ok()
+
+
 class VideoGenerationTierListCreateAPIView(AuxTierListCreateAPIView):
     tier_model = VideoGenerationLLMTier
     default_use_case = VideoGenerationLLMTier.UseCase.CREATE_VIDEO
@@ -6590,6 +6801,17 @@ class LLMRoutingProfileDetailAPIView(SystemAdminAPIView):
                 except (PersistentModelEndpoint.DoesNotExist, ValidationError):
                     return HttpResponseBadRequest("Invalid agent judge endpoint ID")
 
+        if "voice_endpoint_id" in payload:
+            endpoint_id = payload.get("voice_endpoint_id")
+            if endpoint_id is None or endpoint_id == "":
+                profile.voice_endpoint = None
+            else:
+                try:
+                    endpoint = RealtimeVoiceModelEndpoint.objects.get(pk=endpoint_id)
+                    profile.voice_endpoint = endpoint
+                except (RealtimeVoiceModelEndpoint.DoesNotExist, ValidationError):
+                    return HttpResponseBadRequest("Invalid voice endpoint ID")
+
         profile.save()
         return _json_ok(profile_id=str(profile.id))
 
@@ -6674,6 +6896,7 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
                 eval_judge_endpoint=source.eval_judge_endpoint,
                 summarization_endpoint=source.summarization_endpoint,
                 agent_judge_endpoint=source.agent_judge_endpoint,
+                voice_endpoint=source.voice_endpoint,
             )
 
             # Clone persistent config: token ranges -> tiers -> endpoints
