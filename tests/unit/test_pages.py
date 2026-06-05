@@ -1513,6 +1513,10 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "http://testserver/llms-full.txt")
         self.assertContains(response, "https://docs.gobii.ai/")
+        self.assertContains(response, "### Sales")
+        self.assertContains(response, "https://gobii.ai/solutions/sales/")
+        self.assertContains(response, "### Sales facts")
+        self.assertContains(response, "seller-provided ICP criteria")
 
     def test_llms_full_txt_is_served_from_root(self):
         response = self.client.get("/llms-full.txt")
@@ -1522,6 +1526,10 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "## Overview")
         self.assertContains(response, "http://testserver/library/")
+        self.assertContains(response, "### Sales")
+        self.assertContains(response, "https://gobii.ai/pretrained-workers/lead-hunter/")
+        self.assertContains(response, "### Sales facts")
+        self.assertContains(response, "configured CRM integrations")
 
 
 @tag("batch_pages")

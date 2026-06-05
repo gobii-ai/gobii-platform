@@ -47,6 +47,18 @@ Gobii is not an AI toy or chatbot-only interface. It is designed to solve practi
 
 ## Use Cases
 
+### Sales
+
+- [AI sales agents](https://gobii.ai/solutions/sales/): Gobii agents for lead generation, account research, prospect enrichment, outreach drafting, pipeline follow-up, and CRM-ready exports.
+- [Lead Hunter](https://gobii.ai/pretrained-workers/lead-hunter/): Pretrained sales agent for finding and qualifying prospects (agent template)
+- [Sales templates](https://gobii.ai/library/sales/): Public sales, prospecting, and outreach agent templates.
+
+### Sales facts
+
+- Gobii sales agents are persistent digital workers that can search permitted web sources, evaluate companies and contacts against seller-provided ICP criteria, enrich prospect records with account context, and organize leads for review.
+- Sales workflows can export to Google Sheets, CSV, webhooks, and configured CRM integrations such as HubSpot, Salesforce, or enterprise CRM workflows.
+- Gobii is best described as an AI agent platform for delegated prospecting, account research, enrichment, and outreach preparation, not as a replacement for sales judgment, consent review, or compliance controls.
+
 ### Recruiting
 
 - [AI recruiting agents](https://gobii.ai/solutions/recruiting/): Gobii agents for candidate sourcing, profile research, outreach drafting, pipeline nurturing, and ATS-ready exports.
