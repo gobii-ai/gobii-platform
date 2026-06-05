@@ -56,6 +56,8 @@ def _resolve_read_file_path(params: Mapping[str, Any] | None) -> str | None:
         if cleaned.startswith("$[") and cleaned.endswith("]"):
             cleaned = cleaned[2:-1].strip()
         if cleaned:
+            if not cleaned.startswith("/"):
+                cleaned = f"/{cleaned}"
             return cleaned
     return None
 

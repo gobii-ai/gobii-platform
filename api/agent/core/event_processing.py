@@ -4159,6 +4159,42 @@ def _completion_with_failover(
     raise RuntimeError("No LLM provider available")
 
 
+def _prepare_multimodal_read_file_completion_request(
+    *,
+    agent: PersistentAgent,
+    history: List[dict],
+    failover_configs: List[Tuple[str, str, dict]],
+    image_attachments: list,
+    fitted_token_count: int,
+    is_first_run: bool,
+    routing_profile: Any,
+    prefer_low_latency: Optional[bool],
+) -> tuple[List[dict], List[Tuple[str, str, dict]], bool]:
+    candidate_failover_configs = failover_configs
+    if not any(bool((params or {}).get("supports_vision")) for _, _, params in failover_configs):
+        try:
+            candidate_failover_configs = get_llm_config_with_failover(
+                agent_id=str(agent.id),
+                token_count=fitted_token_count,
+                agent=agent,
+                is_first_loop=is_first_run,
+                routing_profile=routing_profile,
+                prefer_low_latency=prefer_low_latency,
+                ignore_agent_tier_cap=True,
+            )
+        except LLMNotConfiguredError:
+            candidate_failover_configs = failover_configs
+
+    request_history, request_failover_configs, multimodal_attached = prepare_multimodal_read_file_request(
+        history,
+        candidate_failover_configs,
+        image_attachments,
+    )
+    if not multimodal_attached:
+        request_failover_configs = failover_configs
+    return request_history, request_failover_configs, multimodal_attached
+
+
 def _get_completed_process_run_count(agent: Optional[PersistentAgent]) -> int:
     """Return how many PROCESS_EVENTS loops completed for the agent."""
     if agent is None:
@@ -5912,28 +5948,19 @@ def _run_agent_loop(
                     fresh_tool_call_step_ids,
                 )
                 if image_attachments:
-                    candidate_failover_configs = failover_configs
-                    if not any(bool((params or {}).get("supports_vision")) for _, _, params in failover_configs):
-                        try:
-                            candidate_failover_configs = get_llm_config_with_failover(
-                                agent_id=str(agent.id),
-                                token_count=fitted_token_count,
-                                agent=agent,
-                                is_first_loop=is_first_run,
-                                routing_profile=routing_profile,
-                                prefer_low_latency=prefer_low_latency,
-                                ignore_agent_tier_cap=True,
-                            )
-                        except LLMNotConfiguredError:
-                            candidate_failover_configs = failover_configs
                     (
                         request_history,
                         request_failover_configs,
                         multimodal_attached,
-                    ) = prepare_multimodal_read_file_request(
-                        history,
-                        candidate_failover_configs,
-                        image_attachments,
+                    ) = _prepare_multimodal_read_file_completion_request(
+                        agent=agent,
+                        history=history,
+                        failover_configs=failover_configs,
+                        image_attachments=image_attachments,
+                        fitted_token_count=fitted_token_count,
+                        is_first_run=is_first_run,
+                        routing_profile=routing_profile,
+                        prefer_low_latency=prefer_low_latency,
                     )
                     if multimodal_attached:
                         logger.info(

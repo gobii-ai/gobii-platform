@@ -4,7 +4,9 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
+from api.agent.core.event_processing import _prepare_multimodal_read_file_completion_request
 from api.agent.core.multimodal_context import (
+    ReadFileImageAttachment,
     attach_read_file_images_to_messages,
     collect_fresh_read_file_image_attachments,
     filter_vision_capable_failover_configs,
@@ -93,6 +95,15 @@ class MultimodalReadFileContextTests(TestCase):
         self.assertEqual(attachments[0].path, "/images/photo.png")
         self.assertEqual(attachments[0].mime_type, "image/png")
         self.assertTrue(attachments[0].data_url.startswith("data:image/png;base64,"))
+
+    def test_collect_normalizes_unprefixed_read_file_paths(self):
+        self._write_file(path="/images/no-prefix.png", content=b"png", mime_type="image/png")
+        step = self._create_read_file_step(path="images/no-prefix.png")
+
+        attachments = collect_fresh_read_file_image_attachments(self.agent, {str(step.id)})
+
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0].path, "/images/no-prefix.png")
 
     def test_collects_multiple_fresh_images_with_cap(self):
         steps = []
@@ -188,8 +199,6 @@ class MultimodalReadFileContextTests(TestCase):
 
     @patch("api.agent.core.event_processing.get_llm_config_with_failover")
     def test_orchestrator_can_fetch_uncapped_vision_configs_for_image_context(self, mock_get_configs):
-        from api.agent.core import event_processing
-
         self._write_file(path="/images/photo.png", content=b"png", mime_type="image/png")
         step = self._create_read_file_step(path="/images/photo.png")
         attachments = collect_fresh_read_file_image_attachments(self.agent, {str(step.id)})
@@ -200,21 +209,15 @@ class MultimodalReadFileContextTests(TestCase):
         ]
         mock_get_configs.return_value = uncapped_configs
 
-        candidate_configs = capped_configs
-        if not any(bool((params or {}).get("supports_vision")) for _, _, params in capped_configs):
-            candidate_configs = event_processing.get_llm_config_with_failover(
-                agent_id=str(self.agent.id),
-                token_count=123,
-                agent=self.agent,
-                is_first_loop=False,
-                routing_profile=None,
-                prefer_low_latency=False,
-                ignore_agent_tier_cap=True,
-            )
-        updated_messages, updated_configs, attached = prepare_multimodal_read_file_request(
-            [{"role": "user", "content": "Inspect it."}],
-            candidate_configs,
-            attachments,
+        updated_messages, updated_configs, attached = _prepare_multimodal_read_file_completion_request(
+            agent=self.agent,
+            history=[{"role": "user", "content": "Inspect it."}],
+            failover_configs=capped_configs,
+            image_attachments=attachments,
+            fitted_token_count=123,
+            is_first_run=False,
+            routing_profile=None,
+            prefer_low_latency=False,
         )
 
         self.assertTrue(attached)
@@ -229,6 +232,34 @@ class MultimodalReadFileContextTests(TestCase):
             prefer_low_latency=False,
             ignore_agent_tier_cap=True,
         )
+
+    @patch("api.agent.core.event_processing.get_llm_config_with_failover")
+    def test_orchestrator_keeps_capped_configs_when_uncapped_search_has_no_vision(self, mock_get_configs):
+        capped_configs = [("standard-text", "model-a", {"supports_vision": False})]
+        mock_get_configs.return_value = [("ultra-text", "model-b", {"supports_vision": False})]
+        attachments = [
+            ReadFileImageAttachment(
+                path="/images/photo.png",
+                mime_type="image/png",
+                data_url="data:image/png;base64,cG5n",
+            )
+        ]
+        history = [{"role": "user", "content": "Inspect it."}]
+
+        updated_messages, updated_configs, attached = _prepare_multimodal_read_file_completion_request(
+            agent=self.agent,
+            history=history,
+            failover_configs=capped_configs,
+            image_attachments=attachments,
+            fitted_token_count=123,
+            is_first_run=False,
+            routing_profile=None,
+            prefer_low_latency=False,
+        )
+
+        self.assertFalse(attached)
+        self.assertEqual(updated_messages, history)
+        self.assertEqual(updated_configs, capped_configs)
 
     def test_attach_read_file_images_to_messages_preserves_existing_list_content(self):
         self._write_file(path="/images/photo.jpg", content=b"jpeg", mime_type="image/jpeg")
