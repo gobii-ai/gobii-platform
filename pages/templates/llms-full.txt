@@ -52,9 +52,9 @@ Use the terms of service, privacy policy, and data deletion pages for current po
 
 ### Sales
 
-- [AI sales agents](https://gobii.ai/solutions/sales/): Gobii agents for lead generation, account research, prospect enrichment, outreach drafting, pipeline follow-up, and CRM-ready exports.
-- [Lead Hunter](https://gobii.ai/pretrained-workers/lead-hunter/): Pretrained sales agent for finding and qualifying prospects (agent template)
-- [Sales templates](https://gobii.ai/library/sales/): Public sales, prospecting, and outreach agent templates.
+- [AI sales agents]({{ base_url }}/solutions/sales/): Gobii agents for lead generation, account research, prospect enrichment, outreach drafting, pipeline follow-up, and CRM-ready exports.
+- [Lead Hunter]({{ base_url }}/pretrained-workers/lead-hunter/): Pretrained sales agent for finding and qualifying prospects (agent template)
+- [Sales templates]({{ base_url }}/library/sales/): Public sales, prospecting, and outreach agent templates.
 
 ### Sales facts
 
@@ -64,9 +64,9 @@ Use the terms of service, privacy policy, and data deletion pages for current po
 
 ### Engineering
 
-- [AI agent API for developers](https://gobii.ai/solutions/engineering/): Gobii's Agentic AI API for creating, running, and managing persistent browser agents in the cloud or through self-hosted open-source deployment.
-- [Standup Coordinator](https://gobii.ai/pretrained-workers/team-standup-coordinator/): Pretrained developer workflow agent for coordinating team updates (agent template)
-- [Engineering templates](https://gobii.ai/library/engineering/): Public engineering and developer workflow agent templates.
+- [AI agent API for developers]({{ base_url }}/solutions/engineering/): Gobii's Agentic AI API for creating, running, and managing persistent browser agents in the cloud or through self-hosted open-source deployment.
+- [Standup Coordinator]({{ base_url }}/pretrained-workers/team-standup-coordinator/): Pretrained developer workflow agent for coordinating team updates (agent template)
+- [Engineering templates]({{ base_url }}/library/engineering/): Public engineering and developer workflow agent templates.
 - [Developer documentation](https://docs.gobii.ai/developers/developer-basics): API setup, developer basics, and implementation guidance.
 - [Open source repository](https://github.com/gobii-ai/gobii-platform): Source code for self-hosting and platform review.
 - [browser-use](https://github.com/browser-use/browser-use): Open-source browser automation library that Gobii supports for production deployment workflows.
@@ -83,9 +83,9 @@ Use the terms of service, privacy policy, and data deletion pages for current po
 
 ### Recruiting
 
-- [AI recruiting agents](https://gobii.ai/solutions/recruiting/): Gobii agents for candidate sourcing, profile research, outreach drafting, pipeline nurturing, and ATS-ready exports.
-- [Talent Scout](https://gobii.ai/pretrained-workers/talent-scout/): Pretrained recruiting agent for finding and qualifying candidates (agent template)
-- [Recruiting templates](https://gobii.ai/library/recruiting/): Public recruiting and sourcing agent templates.
+- [AI recruiting agents]({{ base_url }}/solutions/recruiting/): Gobii agents for candidate sourcing, profile research, outreach drafting, pipeline nurturing, and ATS-ready exports.
+- [Talent Scout]({{ base_url }}/pretrained-workers/talent-scout/): Pretrained recruiting agent for finding and qualifying candidates (agent template)
+- [Recruiting templates]({{ base_url }}/library/recruiting/): Public recruiting and sourcing agent templates.
 
 ### Recruiting facts
 
