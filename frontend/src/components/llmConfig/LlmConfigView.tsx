@@ -29,100 +29,20 @@ import { actionKey, button } from './shared'
 import type { LlmConfigController } from './useLlmConfigController'
 
 export function LlmConfigView({ controller }: { controller: LlmConfigController }) {
-  const {
-    modal,
-    notices,
-    activeLabels,
-    dismissNotice,
-    overviewQuery,
-    statsCards,
-    profilesQuery,
-    profileDetailQuery,
-    selectedProfile,
-    profiles,
-    selectedProfileId,
-    setSelectedProfileId,
-    isBusy,
-    openCreateProfileModal,
-    openEditProfileModal,
-    handleCloneProfile,
-    handleActivateProfile,
-    handleDeleteProfile,
-    endpointChoices,
-    handleUpdateEvalJudge,
-    handleUpdateSummarizationEndpoint,
-    handleUpdateAgentJudgeEndpoint,
-    providers,
-    providerHandlers,
-    endpointTestStatuses,
-    showModal,
-    closeModal,
-    persistentStructures,
-    intelligenceTiers,
-    handleProfileRangeAdd,
-    handleAddRange,
-    handleProfileRangeUpdate,
-    handleRangeUpdate,
-    handleProfileRangeRemove,
-    handleRangeRemove,
-    handleProfileTierAdd,
-    handleTierAdd,
-    handleProfileTierMove,
-    handleTierMove,
-    handleProfileTierRemove,
-    handleTierRemove,
-    handleTierEndpointAdd,
-    pendingWeights,
-    savingTierIds,
-    dirtyTierIds,
-    stageTierEndpointWeight,
-    commitProfileTierEndpointWeights,
-    commitTierEndpointWeights,
-    handleProfileTierEndpointRemove,
-    handleTierEndpointRemove,
-    handleTierEndpointReasoning,
-    browserTierGroups,
-    handleProfileBrowserTierAdd,
-    handleBrowserTierAdd,
-    handleProfileBrowserTierMove,
-    handleBrowserTierMove,
-    handleProfileBrowserTierRemove,
-    handleBrowserTierRemove,
-    handleProfileTierEndpointExtraction,
-    handleTierEndpointExtraction,
-    embeddingTiers,
-    handleProfileEmbeddingTierAdd,
-    handleEmbeddingTierAdd,
-    handleProfileEmbeddingTierMove,
-    handleEmbeddingTierMove,
-    handleProfileEmbeddingTierRemove,
-    handleEmbeddingTierRemove,
-    fileHandlerTiers,
-    handleFileHandlerTierAdd,
-    handleFileHandlerTierMove,
-    handleFileHandlerTierRemove,
-    imageGenerationSections,
-    handleImageGenerationTierAdd,
-    handleImageGenerationTierMove,
-    handleImageGenerationTierRemove,
-    videoGenerationSections,
-    handleVideoGenerationTierAdd,
-    handleVideoGenerationTierMove,
-    handleVideoGenerationTierRemove,
-    performanceResult,
-    handleRunPerformanceTest,
-  } = controller
+  const { data, feedback, modal, showModal, closeModal, statsCards, provider: providerState, routing, performance } = controller
+  const selectedProfile = data.selectedProfile
+  const selectedProfileId = data.selectedProfileId
 
   return (
     <>
       {modal}
-      <ActivityDock notices={notices} activeLabels={activeLabels} onDismiss={dismissNotice} />
+      <ActivityDock notices={feedback.notices} activeLabels={feedback.activeLabels} onDismiss={feedback.dismissNotice} />
       <div className="space-y-8">
         <div className="gobii-card-base space-y-2 px-6 py-6">
           <h1 className="text-2xl font-semibold text-slate-900/90">LLM configuration</h1>
           <p className="text-sm text-slate-600">Review providers, endpoints, and token tiers powering orchestrator, browser-use, and embedding flows.</p>
         </div>
-        {overviewQuery.isError && (
+        {data.overviewQuery.isError && (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700 flex items-center gap-2">
             <AlertCircle className="size-4" />
             Unable to load configuration. Please refresh.
@@ -149,7 +69,7 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {profilesQuery.isPending ? (
+              {data.profilesQuery.isPending ? (
                 <div className="flex items-center gap-2 text-slate-500 text-sm">
                   <LoaderCircle className="size-4 animate-spin" /> Loading profiles...
                 </div>
@@ -157,11 +77,11 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                 <>
                   <select
                     value={selectedProfileId || ''}
-                    onChange={(e) => setSelectedProfileId(e.target.value || null)}
+                    onChange={(e) => data.setSelectedProfileId(e.target.value || null)}
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 min-w-[200px]"
                   >
-                    {profiles.length === 0 && <option value="">No profiles</option>}
-                    {profiles.map((profile) => (
+                    {data.profiles.length === 0 && <option value="">No profiles</option>}
+                    {data.profiles.map((profile) => (
                       <option key={profile.id} value={profile.id}>
                         {profile.display_name || profile.name}
                         {profile.is_active ? ' (Active)' : ''}
@@ -173,10 +93,10 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                       <button
                         type="button"
                         className={button.primary}
-                        onClick={() => handleActivateProfile(selectedProfile.id)}
-                        disabled={isBusy(actionKey('profile', selectedProfile.id, 'activate'))}
+                        onClick={() => routing.handleActivateProfile(selectedProfile.id)}
+                        disabled={feedback.isBusy(actionKey('profile', selectedProfile.id, 'activate'))}
                       >
-                        {isBusy(actionKey('profile', selectedProfile.id, 'activate')) ? (
+                        {feedback.isBusy(actionKey('profile', selectedProfile.id, 'activate')) ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : (
                           <Check className="size-4" />
@@ -194,11 +114,11 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                       <button
                         type="button"
                         className={button.secondary}
-                        onClick={() => openEditProfileModal(selectedProfile)}
-                        disabled={isBusy(actionKey('profile', selectedProfile.id, 'update'))}
+                        onClick={() => routing.openEditProfileModal(selectedProfile)}
+                        disabled={feedback.isBusy(actionKey('profile', selectedProfile.id, 'update'))}
                         title="Edit this profile"
                       >
-                        {isBusy(actionKey('profile', selectedProfile.id, 'update')) ? (
+                        {feedback.isBusy(actionKey('profile', selectedProfile.id, 'update')) ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : (
                           <Pencil className="size-4" />
@@ -210,11 +130,11 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                       <button
                         type="button"
                         className={button.secondary}
-                        onClick={() => handleCloneProfile(selectedProfile.id)}
-                        disabled={isBusy(actionKey('profile', selectedProfile.id, 'clone'))}
+                        onClick={() => routing.handleCloneProfile(selectedProfile.id)}
+                        disabled={feedback.isBusy(actionKey('profile', selectedProfile.id, 'clone'))}
                         title="Clone this profile"
                       >
-                        {isBusy(actionKey('profile', selectedProfile.id, 'clone')) ? (
+                        {feedback.isBusy(actionKey('profile', selectedProfile.id, 'clone')) ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : (
                           <Copy className="size-4" />
@@ -225,7 +145,7 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                     <button
                       type="button"
                       className={button.secondary}
-                      onClick={openCreateProfileModal}
+                      onClick={routing.openCreateProfileModal}
                     >
                       <Plus className="size-4" />
                       New
@@ -234,11 +154,11 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                       <button
                         type="button"
                         className={button.iconDanger}
-                        onClick={() => handleDeleteProfile(selectedProfile.id, selectedProfile.display_name || selectedProfile.name)}
-                        disabled={isBusy(actionKey('profile', selectedProfile.id, 'delete'))}
+                        onClick={() => routing.handleDeleteProfile(selectedProfile.id, selectedProfile.display_name || selectedProfile.name)}
+                        disabled={feedback.isBusy(actionKey('profile', selectedProfile.id, 'delete'))}
                         title="Delete this profile"
                       >
-                        {isBusy(actionKey('profile', selectedProfile.id, 'delete')) ? (
+                        {feedback.isBusy(actionKey('profile', selectedProfile.id, 'delete')) ? (
                           <LoaderCircle className="size-4 animate-spin" />
                         ) : (
                           <Trash2 className="size-4" />
@@ -253,10 +173,10 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
         </div>
 
         <PerformanceTestingPanel
-          persistentEndpoints={endpointChoices.persistent_endpoints}
-          result={performanceResult}
-          isRunning={isBusy(actionKey('llm-performance-test'))}
-          onRun={handleRunPerformanceTest}
+          persistentEndpoints={data.endpointChoices.persistent_endpoints}
+          result={performance.performanceResult}
+          isRunning={feedback.isBusy(actionKey('llm-performance-test'))}
+          onRun={performance.handleRunPerformanceTest}
         />
 
         <SectionCard
@@ -264,21 +184,21 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
           description="Toggle providers on/off, rotate keys, and review exposed endpoints."
         >
           <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
-            {providers.map((provider) => (
+            {data.providers.map((provider) => (
               <ProviderCard
                 key={provider.id}
                 provider={provider}
-                isBusy={isBusy}
-                testStatuses={endpointTestStatuses}
+                isBusy={feedback.isBusy}
+                testStatuses={providerState.endpointTestStatuses}
                 showModal={showModal}
                 closeModal={closeModal}
-                handlers={providerHandlers}
+                handlers={providerState.providerHandlers}
               />
             ))}
-            {providers.length === 0 && (
+            {data.providers.length === 0 && (
               <div className="col-span-2">
                 <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-500">
-                  {overviewQuery.isPending ? (
+                  {data.overviewQuery.isPending ? (
                     <div className="flex items-center justify-center gap-2">
                       <LoaderCircle className="size-5 animate-spin" /> Loading providers...
                     </div>
@@ -294,37 +214,37 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
           title="Token-based failover tiers"
           description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Manage token ranges, tier ordering, and weighted endpoints.'}
           actions={
-            <button type="button" className={button.primary} onClick={selectedProfile ? handleProfileRangeAdd : handleAddRange}>
+            <button type="button" className={button.primary} onClick={selectedProfile ? routing.handleProfileRangeAdd : routing.handleAddRange}>
               <PlusCircle className="size-4" /> Add range
             </button>
           }
         >
           <div className="space-y-6">
-            {persistentStructures.ranges.map((range) => (
+            {data.persistentStructures.ranges.map((range) => (
               <RangeSection
                 key={range.id}
                 range={range}
-                tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
-                intelligenceTiers={intelligenceTiers}
-                onAddTier={(tierKey) => selectedProfile ? handleProfileTierAdd(range.id, tierKey) : handleTierAdd(range.id, tierKey)}
-                onUpdate={(field, value) => selectedProfile ? handleProfileRangeUpdate(range.id, field, value) : handleRangeUpdate(range.id, field, value)}
-                onRemove={() => selectedProfile ? handleProfileRangeRemove(range) : handleRangeRemove(range)}
-                onMoveTier={(tierId, direction) => selectedProfile ? handleProfileTierMove(range.id, tierId, direction) : handleTierMove(range.id, tierId, direction)}
-                onRemoveTier={selectedProfile ? handleProfileTierRemove : handleTierRemove}
-                onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'persistent')}
-                onStageEndpointWeight={stageTierEndpointWeight}
-                onCommitEndpointWeights={(tier) => selectedProfile ? commitProfileTierEndpointWeights(tier, 'persistent') : commitTierEndpointWeights(tier, 'persistent')}
-                onRemoveEndpoint={(tier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(tier, endpoint, 'persistent') : handleTierEndpointRemove(tier, endpoint, 'persistent')}
-                onUpdateEndpointReasoning={handleTierEndpointReasoning}
-                pendingWeights={pendingWeights}
-                savingTierIds={savingTierIds}
-                dirtyTierIds={dirtyTierIds}
-                isActionBusy={isBusy}
+                tiers={data.persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
+                intelligenceTiers={data.intelligenceTiers}
+                onAddTier={(tierKey) => selectedProfile ? routing.handleProfileTierAdd(range.id, tierKey) : routing.handleTierAdd(range.id, tierKey)}
+                onUpdate={(field, value) => selectedProfile ? routing.handleProfileRangeUpdate(range.id, field, value) : routing.handleRangeUpdate(range.id, field, value)}
+                onRemove={() => selectedProfile ? routing.handleProfileRangeRemove(range) : routing.handleRangeRemove(range)}
+                onMoveTier={(tierId, direction) => selectedProfile ? routing.handleProfileTierMove(range.id, tierId, direction) : routing.handleTierMove(range.id, tierId, direction)}
+                onRemoveTier={selectedProfile ? routing.handleProfileTierRemove : routing.handleTierRemove}
+                onAddEndpoint={(tier) => routing.handleTierEndpointAdd(tier, 'persistent')}
+                onStageEndpointWeight={routing.stageTierEndpointWeight}
+                onCommitEndpointWeights={(tier) => selectedProfile ? routing.commitProfileTierEndpointWeights(tier, 'persistent') : routing.commitTierEndpointWeights(tier, 'persistent')}
+                onRemoveEndpoint={(tier, endpoint) => selectedProfile ? routing.handleProfileTierEndpointRemove(tier, endpoint, 'persistent') : routing.handleTierEndpointRemove(tier, endpoint, 'persistent')}
+                onUpdateEndpointReasoning={routing.handleTierEndpointReasoning}
+                pendingWeights={routing.pendingWeights}
+                savingTierIds={routing.savingTierIds}
+                dirtyTierIds={routing.dirtyTierIds}
+                isActionBusy={feedback.isBusy}
               />
             ))}
-            {persistentStructures.ranges.length === 0 && (
+            {data.persistentStructures.ranges.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-500">
-                {(overviewQuery.isPending || profileDetailQuery.isPending) ? (
+                {(data.overviewQuery.isPending || data.profileDetailQuery.isPending) ? (
                   <div className="flex items-center justify-center gap-2">
                     <LoaderCircle className="size-5 animate-spin" /> Loading ranges...
                   </div>
@@ -340,28 +260,28 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
           description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Dedicated tiers for browser automations.'}
         >
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {browserTierGroups.map((group) => (
+            {data.browserTierGroups.map((group) => (
               <TierGroupSection
                 key={`browser:${group.key}`}
                 group={group}
                 scope="browser"
-                pendingWeights={pendingWeights}
-                savingTierIds={savingTierIds}
-                dirtyTierIds={dirtyTierIds}
-                onAddTier={(tierKey) => selectedProfile ? handleProfileBrowserTierAdd(tierKey) : handleBrowserTierAdd(tierKey)}
-                onMoveTier={(tierId, direction) => selectedProfile ? handleProfileBrowserTierMove(tierId, direction) : handleBrowserTierMove(tierId, direction)}
-                onRemoveTier={selectedProfile ? handleProfileBrowserTierRemove : handleBrowserTierRemove}
-                onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'browser')}
-                onStageEndpointWeight={stageTierEndpointWeight}
-                onCommitEndpointWeights={(tier) => selectedProfile ? commitProfileTierEndpointWeights(tier, 'browser') : commitTierEndpointWeights(tier, 'browser')}
-                onRemoveEndpoint={(tier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(tier, endpoint, 'browser') : handleTierEndpointRemove(tier, endpoint, 'browser')}
+                pendingWeights={routing.pendingWeights}
+                savingTierIds={routing.savingTierIds}
+                dirtyTierIds={routing.dirtyTierIds}
+                onAddTier={(tierKey) => selectedProfile ? routing.handleProfileBrowserTierAdd(tierKey) : routing.handleBrowserTierAdd(tierKey)}
+                onMoveTier={(tierId, direction) => selectedProfile ? routing.handleProfileBrowserTierMove(tierId, direction) : routing.handleBrowserTierMove(tierId, direction)}
+                onRemoveTier={selectedProfile ? routing.handleProfileBrowserTierRemove : routing.handleBrowserTierRemove}
+                onAddEndpoint={(tier) => routing.handleTierEndpointAdd(tier, 'browser')}
+                onStageEndpointWeight={routing.stageTierEndpointWeight}
+                onCommitEndpointWeights={(tier) => selectedProfile ? routing.commitProfileTierEndpointWeights(tier, 'browser') : routing.commitTierEndpointWeights(tier, 'browser')}
+                onRemoveEndpoint={(tier, endpoint) => selectedProfile ? routing.handleProfileTierEndpointRemove(tier, endpoint, 'browser') : routing.handleTierEndpointRemove(tier, endpoint, 'browser')}
                 onUpdateExtraction={(tier, endpoint, extractionId) =>
                   selectedProfile
-                    ? handleProfileTierEndpointExtraction(tier, endpoint, extractionId, 'browser')
-                    : handleTierEndpointExtraction(tier, endpoint, extractionId, 'browser')
+                    ? routing.handleProfileTierEndpointExtraction(tier, endpoint, extractionId, 'browser')
+                    : routing.handleTierEndpointExtraction(tier, endpoint, extractionId, 'browser')
                 }
-                browserChoices={endpointChoices.browser_endpoints}
-                isActionBusy={isBusy}
+                browserChoices={data.endpointChoices.browser_endpoints}
+                isActionBusy={feedback.isBusy}
               />
             ))}
           </div>
@@ -385,11 +305,11 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                         <select
                           className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
                           value={selectedProfile.summarization_endpoint?.endpoint_id ?? ''}
-                          onChange={(e) => handleUpdateSummarizationEndpoint(e.target.value || null)}
-                          disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'summarization'))}
+                          onChange={(e) => routing.handleUpdateSummarizationEndpoint(e.target.value || null)}
+                          disabled={feedback.isBusy(actionKey('profile', selectedProfileId ?? '', 'summarization'))}
                         >
                           <option value="">— Use default tier fallback —</option>
-                          {endpointChoices.persistent_endpoints.map((ep) => (
+                          {data.endpointChoices.persistent_endpoints.map((ep) => (
                             <option key={ep.id} value={ep.id}>
                               {ep.label} ({ep.model})
                             </option>
@@ -399,13 +319,13 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                           <button
                             type="button"
                             className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60 disabled:opacity-50 disabled:cursor-not-allowed"
-                            onClick={() => handleUpdateSummarizationEndpoint(null)}
-                            disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'summarization'))}
+                            onClick={() => routing.handleUpdateSummarizationEndpoint(null)}
+                            disabled={feedback.isBusy(actionKey('profile', selectedProfileId ?? '', 'summarization'))}
                           >
                             <X className="size-4" />
                           </button>
                         )}
-                        {isBusy(actionKey('profile', selectedProfileId ?? '', 'summarization')) && (
+                        {feedback.isBusy(actionKey('profile', selectedProfileId ?? '', 'summarization')) && (
                           <Loader2 className="size-4 text-amber-600 animate-spin flex-shrink-0" />
                         )}
                       </div>
@@ -428,11 +348,11 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                         <select
                           className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
                           value={selectedProfile.agent_judge_endpoint?.endpoint_id ?? ''}
-                          onChange={(e) => handleUpdateAgentJudgeEndpoint(e.target.value || null)}
-                          disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'agent-judge'))}
+                          onChange={(e) => routing.handleUpdateAgentJudgeEndpoint(e.target.value || null)}
+                          disabled={feedback.isBusy(actionKey('profile', selectedProfileId ?? '', 'agent-judge'))}
                         >
                           <option value="">— No judge endpoint —</option>
-                          {endpointChoices.persistent_endpoints.map((ep) => (
+                          {data.endpointChoices.persistent_endpoints.map((ep) => (
                             <option key={ep.id} value={ep.id}>
                               {ep.label} ({ep.model})
                             </option>
@@ -442,13 +362,13 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                           <button
                             type="button"
                             className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60 disabled:opacity-50 disabled:cursor-not-allowed"
-                            onClick={() => handleUpdateAgentJudgeEndpoint(null)}
-                            disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'agent-judge'))}
+                            onClick={() => routing.handleUpdateAgentJudgeEndpoint(null)}
+                            disabled={feedback.isBusy(actionKey('profile', selectedProfileId ?? '', 'agent-judge'))}
                           >
                             <X className="size-4" />
                           </button>
                         )}
-                        {isBusy(actionKey('profile', selectedProfileId ?? '', 'agent-judge')) && (
+                        {feedback.isBusy(actionKey('profile', selectedProfileId ?? '', 'agent-judge')) && (
                           <Loader2 className="size-4 text-violet-600 animate-spin flex-shrink-0" />
                         )}
                       </div>
@@ -479,11 +399,11 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                       <select
                         className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
                         value={selectedProfile.eval_judge_endpoint?.endpoint_id ?? ''}
-                        onChange={(e) => handleUpdateEvalJudge(e.target.value || null)}
-                        disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge'))}
+                        onChange={(e) => routing.handleUpdateEvalJudge(e.target.value || null)}
+                        disabled={feedback.isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge'))}
                       >
                         <option value="">— Use default tier fallback —</option>
-                        {endpointChoices.persistent_endpoints.map((ep) => (
+                        {data.endpointChoices.persistent_endpoints.map((ep) => (
                           <option key={ep.id} value={ep.id}>
                             {ep.label} ({ep.model})
                           </option>
@@ -493,13 +413,13 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                         <button
                           type="button"
                           className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60 disabled:opacity-50 disabled:cursor-not-allowed"
-                          onClick={() => handleUpdateEvalJudge(null)}
-                          disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge'))}
+                          onClick={() => routing.handleUpdateEvalJudge(null)}
+                          disabled={feedback.isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge'))}
                         >
                           <X className="size-4" />
                         </button>
                       )}
-                      {isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge')) && (
+                      {feedback.isBusy(actionKey('profile', selectedProfileId ?? '', 'eval-judge')) && (
                         <Loader2 className="size-4 text-amber-600 animate-spin flex-shrink-0" />
                       )}
                     </div>
@@ -516,33 +436,33 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                     <p className="text-sm text-slate-600">Fallback order for generating embeddings.</p>
                   </div>
                 </div>
-                <button type="button" className={button.secondary} onClick={selectedProfile ? handleProfileEmbeddingTierAdd : handleEmbeddingTierAdd}>
+                <button type="button" className={button.secondary} onClick={selectedProfile ? routing.handleProfileEmbeddingTierAdd : routing.handleEmbeddingTierAdd}>
                   <PlusCircle className="size-4" /> Add tier
                 </button>
               </div>
-              {embeddingTiers.map((tier, index) => {
-                const lastIndex = embeddingTiers.length - 1
+              {data.embeddingTiers.map((tier, index) => {
+                const lastIndex = data.embeddingTiers.length - 1
                 return (
                 <TierCard
                   key={tier.id}
                   tier={tier}
-                  pendingWeights={pendingWeights}
+                  pendingWeights={routing.pendingWeights}
                   scope="embedding"
                   canMoveUp={index > 0}
                   canMoveDown={index < lastIndex}
-                  isDirty={dirtyTierIds.has(`embedding:${tier.id}`)}
-                  isSaving={savingTierIds.has(`embedding:${tier.id}`)}
-                  onMove={(direction) => selectedProfile ? handleProfileEmbeddingTierMove(tier.id, direction) : handleEmbeddingTierMove(tier.id, direction)}
-                  onRemove={selectedProfile ? handleProfileEmbeddingTierRemove : handleEmbeddingTierRemove}
-                  onAddEndpoint={() => handleTierEndpointAdd(tier, 'embedding')}
-                  onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
-                  onCommitEndpointWeights={(currentTier) => selectedProfile ? commitProfileTierEndpointWeights(currentTier, 'embedding') : commitTierEndpointWeights(currentTier, 'embedding')}
-                  onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(currentTier, endpoint, 'embedding') : handleTierEndpointRemove(currentTier, endpoint, 'embedding')}
-                  isActionBusy={isBusy}
+                  isDirty={routing.dirtyTierIds.has(`embedding:${tier.id}`)}
+                  isSaving={routing.savingTierIds.has(`embedding:${tier.id}`)}
+                  onMove={(direction) => selectedProfile ? routing.handleProfileEmbeddingTierMove(tier.id, direction) : routing.handleEmbeddingTierMove(tier.id, direction)}
+                  onRemove={selectedProfile ? routing.handleProfileEmbeddingTierRemove : routing.handleEmbeddingTierRemove}
+                  onAddEndpoint={() => routing.handleTierEndpointAdd(tier, 'embedding')}
+                  onStageEndpointWeight={(currentTier, tierEndpointId, weight) => routing.stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
+                  onCommitEndpointWeights={(currentTier) => selectedProfile ? routing.commitProfileTierEndpointWeights(currentTier, 'embedding') : routing.commitTierEndpointWeights(currentTier, 'embedding')}
+                  onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? routing.handleProfileTierEndpointRemove(currentTier, endpoint, 'embedding') : routing.handleTierEndpointRemove(currentTier, endpoint, 'embedding')}
+                  isActionBusy={feedback.isBusy}
                 />
                 )
               })}
-              {embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
+              {data.embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
             </div>
             <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -553,35 +473,35 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                     <p className="text-sm text-slate-600">Fallback order for file-to-markdown conversion.</p>
                   </div>
                 </div>
-                <button type="button" className={button.secondary} onClick={handleFileHandlerTierAdd}>
+                <button type="button" className={button.secondary} onClick={routing.handleFileHandlerTierAdd}>
                   <PlusCircle className="size-4" /> Add tier
                 </button>
               </div>
-              {fileHandlerTiers.map((tier, index) => {
-                const lastIndex = fileHandlerTiers.length - 1
+              {data.fileHandlerTiers.map((tier, index) => {
+                const lastIndex = data.fileHandlerTiers.length - 1
                 return (
                   <TierCard
                     key={tier.id}
                     tier={tier}
-                    pendingWeights={pendingWeights}
+                    pendingWeights={routing.pendingWeights}
                     scope="file_handler"
                     canMoveUp={index > 0}
                     canMoveDown={index < lastIndex}
-                    isDirty={dirtyTierIds.has(`file_handler:${tier.id}`)}
-                    isSaving={savingTierIds.has(`file_handler:${tier.id}`)}
-                    onMove={(direction) => handleFileHandlerTierMove(tier.id, direction)}
-                    onRemove={handleFileHandlerTierRemove}
-                    onAddEndpoint={() => handleTierEndpointAdd(tier, 'file_handler')}
-                    onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'file_handler')}
-                    onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'file_handler')}
-                    onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'file_handler')}
-                    isActionBusy={isBusy}
+                    isDirty={routing.dirtyTierIds.has(`file_handler:${tier.id}`)}
+                    isSaving={routing.savingTierIds.has(`file_handler:${tier.id}`)}
+                    onMove={(direction) => routing.handleFileHandlerTierMove(tier.id, direction)}
+                    onRemove={routing.handleFileHandlerTierRemove}
+                    onAddEndpoint={() => routing.handleTierEndpointAdd(tier, 'file_handler')}
+                    onStageEndpointWeight={(currentTier, tierEndpointId, weight) => routing.stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'file_handler')}
+                    onCommitEndpointWeights={(currentTier) => routing.commitTierEndpointWeights(currentTier, 'file_handler')}
+                    onRemoveEndpoint={(currentTier, endpoint) => routing.handleTierEndpointRemove(currentTier, endpoint, 'file_handler')}
+                    isActionBusy={feedback.isBusy}
                   />
                 )
               })}
-              {fileHandlerTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No file handler tiers configured.</p>}
+              {data.fileHandlerTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No file handler tiers configured.</p>}
             </div>
-            {imageGenerationSections.map((section) => (
+            {data.imageGenerationSections.map((section) => (
               <div key={section.useCase} className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-start gap-3">
@@ -591,7 +511,7 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                       <p className="text-sm text-slate-600">{section.description}</p>
                     </div>
                   </div>
-                  <button type="button" className={button.secondary} onClick={() => handleImageGenerationTierAdd(section.useCase)}>
+                  <button type="button" className={button.secondary} onClick={() => routing.handleImageGenerationTierAdd(section.useCase)}>
                     <PlusCircle className="size-4" /> Add tier
                   </button>
                 </div>
@@ -601,26 +521,26 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                     <TierCard
                       key={tier.id}
                       tier={tier}
-                      pendingWeights={pendingWeights}
+                      pendingWeights={routing.pendingWeights}
                       scope="image_generation"
                       canMoveUp={index > 0}
                       canMoveDown={index < lastIndex}
-                      isDirty={dirtyTierIds.has(`image_generation:${tier.id}`)}
-                      isSaving={savingTierIds.has(`image_generation:${tier.id}`)}
-                      onMove={(direction) => handleImageGenerationTierMove(section.useCase, tier.id, direction)}
-                      onRemove={(currentTier) => handleImageGenerationTierRemove(section.useCase, currentTier)}
-                      onAddEndpoint={() => handleTierEndpointAdd(tier, 'image_generation')}
-                      onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'image_generation')}
-                      onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'image_generation')}
-                      onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'image_generation')}
-                      isActionBusy={isBusy}
+                      isDirty={routing.dirtyTierIds.has(`image_generation:${tier.id}`)}
+                      isSaving={routing.savingTierIds.has(`image_generation:${tier.id}`)}
+                      onMove={(direction) => routing.handleImageGenerationTierMove(section.useCase, tier.id, direction)}
+                      onRemove={(currentTier) => routing.handleImageGenerationTierRemove(section.useCase, currentTier)}
+                      onAddEndpoint={() => routing.handleTierEndpointAdd(tier, 'image_generation')}
+                      onStageEndpointWeight={(currentTier, tierEndpointId, weight) => routing.stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'image_generation')}
+                      onCommitEndpointWeights={(currentTier) => routing.commitTierEndpointWeights(currentTier, 'image_generation')}
+                      onRemoveEndpoint={(currentTier, endpoint) => routing.handleTierEndpointRemove(currentTier, endpoint, 'image_generation')}
+                      isActionBusy={feedback.isBusy}
                     />
                   )
                 })}
                 {section.tiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">{section.emptyText}</p>}
               </div>
             ))}
-            {videoGenerationSections.map((section) => (
+            {data.videoGenerationSections.map((section) => (
               <div key={section.useCase} className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-start gap-3">
@@ -630,7 +550,7 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                       <p className="text-sm text-slate-600">{section.description}</p>
                     </div>
                   </div>
-                  <button type="button" className={button.secondary} onClick={() => handleVideoGenerationTierAdd(section.useCase)}>
+                  <button type="button" className={button.secondary} onClick={() => routing.handleVideoGenerationTierAdd(section.useCase)}>
                     <PlusCircle className="size-4" /> Add tier
                   </button>
                 </div>
@@ -640,19 +560,19 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                     <TierCard
                       key={tier.id}
                       tier={tier}
-                      pendingWeights={pendingWeights}
+                      pendingWeights={routing.pendingWeights}
                       scope="video_generation"
                       canMoveUp={index > 0}
                       canMoveDown={index < lastIndex}
-                      isDirty={dirtyTierIds.has(`video_generation:${tier.id}`)}
-                      isSaving={savingTierIds.has(`video_generation:${tier.id}`)}
-                      onMove={(direction) => handleVideoGenerationTierMove(section.useCase, tier.id, direction)}
-                      onRemove={(currentTier) => handleVideoGenerationTierRemove(section.useCase, currentTier)}
-                      onAddEndpoint={() => handleTierEndpointAdd(tier, 'video_generation')}
-                      onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'video_generation')}
-                      onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'video_generation')}
-                      onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'video_generation')}
-                      isActionBusy={isBusy}
+                      isDirty={routing.dirtyTierIds.has(`video_generation:${tier.id}`)}
+                      isSaving={routing.savingTierIds.has(`video_generation:${tier.id}`)}
+                      onMove={(direction) => routing.handleVideoGenerationTierMove(section.useCase, tier.id, direction)}
+                      onRemove={(currentTier) => routing.handleVideoGenerationTierRemove(section.useCase, currentTier)}
+                      onAddEndpoint={() => routing.handleTierEndpointAdd(tier, 'video_generation')}
+                      onStageEndpointWeight={(currentTier, tierEndpointId, weight) => routing.stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'video_generation')}
+                      onCommitEndpointWeights={(currentTier) => routing.commitTierEndpointWeights(currentTier, 'video_generation')}
+                      onRemoveEndpoint={(currentTier, endpoint) => routing.handleTierEndpointRemove(currentTier, endpoint, 'video_generation')}
+                      isActionBusy={feedback.isBusy}
                     />
                   )
                 })}
