@@ -3,7 +3,6 @@ export const USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE = 'agent.chat.roste
 export const USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = 'agent.chat.roster.favorite_agent_ids' as const
 export const USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED = 'agent.chat.insights_panel.expanded' as const
 export const USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED = 'agent.chat.notifications.enabled' as const
-export const USER_PREFERENCE_KEY_AGENT_CHAT_SIMPLIFIED_ENABLED = 'agent.chat.simplified.enabled' as const
 
 export type UserPreferencesMap = Record<string, unknown>
 
@@ -31,13 +30,6 @@ export async function updateUserPreferences(
     includeCsrf: true,
   })
 
-  return {
-    preferences: normalizePreferences(response.preferences),
-  }
-}
-
-export async function fetchUserPreferences(): Promise<{ preferences: UserPreferencesMap }> {
-  const response = await jsonRequest<UserPreferencesResponse>('/console/api/user/preferences/')
   return {
     preferences: normalizePreferences(response.preferences),
   }

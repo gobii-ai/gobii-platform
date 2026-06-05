@@ -178,19 +178,6 @@ function withCsrf(json?: unknown, method: string = 'POST') {
   } as const
 }
 
-export function createProvider(payload: {
-  display_name: string
-  key: string
-  env_var_name?: string
-  browser_backend?: string
-  supports_safety_identifier?: boolean
-  vertex_project?: string
-  vertex_location?: string
-  api_key?: string
-}): Promise<{ ok: boolean; provider_id: string }> {
-  return jsonRequest(`${base}/providers/`, withCsrf(payload))
-}
-
 export function updateProvider(providerId: string, payload: Record<string, unknown>) {
   return jsonRequest(`${base}/providers/${providerId}/`, withCsrf(payload, 'PATCH'))
 }

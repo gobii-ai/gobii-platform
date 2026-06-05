@@ -196,10 +196,3 @@ export async function createAgent(
     body: JSON.stringify(payload),
   })
 }
-
-export function leaveCollaboration(agentId: string): Promise<void> {
-  return jsonRequest(`/console/api/agents/${agentId}/collaboration/leave/`, {
-    method: 'POST',
-    includeCsrf: true,
-  })
-}
