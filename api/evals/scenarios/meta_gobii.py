@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -55,6 +56,22 @@ _RETRYABLE_LLM_ERRORS = (
     ServiceUnavailableError,
 )
 _LLM_RETRY_DELAYS_SECONDS = (2, 5, 10)
+_META_RESPONSE_PREAMBLE_RE = re.compile(
+    r"\A(?:\s*(?:"
+    r"i see the system recorded.*?(?:\n\s*\n|$)|"
+    r"let me re-read.*?(?:\n\s*\n|$)|"
+    r"the user asks:\s*[\"“].*?[\"”]\s*(?:\n\s*\n|$)|"
+    r"this is .*?(?:before making any mutations,?\s*)?here is my proposal:\s*(?:\n\s*\n|$)"
+    r"))+",
+    re.IGNORECASE | re.DOTALL,
+)
+_META_RESPONSE_USER_ASKS_LINE_RE = re.compile(
+    r"(?im)^\s*the user asks:\s*[\"“].*?[\"”]\s*$"
+)
+_META_RESPONSE_INITIAL_BRIEFING_RE = re.compile(
+    r"(?ims)\n{0,2}\s*\*{0,2}initial briefings?\s*(?:\([^)]*\))?:\*{0,2}.*?"
+    r"(?=\n\s*\n\s*(?:\*\*[^*\n]+?\*\*|shall\b|please\b|approved\b|i\b|$))"
+)
 
 META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS = "meta_gobii_implicit_research_team_real_harness"
 META_GOBII_REAL_HARNESS_SUITE_SLUG = "meta_gobii_real_harness"
@@ -99,6 +116,22 @@ def _tool_catalog_text() -> str:
 def _system_skill_prompt_text() -> str:
     definition = get_system_skill_definition(META_GOBII_SYSTEM_SKILL_KEY)
     return definition.prompt_instructions if definition else ""
+
+
+def _normalize_user_facing_meta_response_text(
+    response_text: Any,
+    *,
+    has_initial_briefings: bool,
+) -> str:
+    text = str(response_text or "").strip()
+    if not text:
+        return ""
+
+    text = _META_RESPONSE_PREAMBLE_RE.sub("", text).strip()
+    text = _META_RESPONSE_USER_ASKS_LINE_RE.sub("", text).strip()
+    if has_initial_briefings:
+        text = _META_RESPONSE_INITIAL_BRIEFING_RE.sub("\n\n", text).strip()
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _enable_system_skill_tool() -> dict[str, Any]:
@@ -200,7 +233,11 @@ def _record_plan_tool() -> dict[str, Any]:
                         "description": (
                             "Number of new or requested Gobiis in the plan, including prototype, temporary, "
                             "exploratory, audit, and capability-test teams. Team requests must be at least 2 "
-                            "Gobiis unless the user gives an exact count of 1."
+                            "Gobiis unless the user gives an exact count of 1. Singular requests such as "
+                            "'create a Gobii to ...' remain exactly 1 planned Gobii even when the Gobii will "
+                            "brief, update, or send findings to a human team. For team requests that name "
+                            "multiple distinct workstreams or stages, preserve those workstreams as separate "
+                            "planned Gobiis unless the user gives a smaller exact count."
                         ),
                     },
                     "planned_role_names": {
@@ -236,7 +273,11 @@ def _record_plan_tool() -> dict[str, Any]:
                                     "schedule row itself is new. Use create only for a newly created Gobii/team, "
                                     "update when modifying an existing named Gobii to add or change recurring work, "
                                     "and remove when the user asks to remove, disable, stop, or clear an existing "
-                                    "schedule, even though the implementation tool may be meta_gobii_update_agent."
+                                    "schedule, even though the implementation tool may be meta_gobii_update_agent. "
+                                    "Use clarify only for ambiguous ongoing/proactive work without a cadence. Use "
+                                    "none for demo, setup-only, one-time, one-off, temporary, trial, prototype, "
+                                    "historical-batch, file/contact/resource, role-ownership, general responsibility, "
+                                    "or explicitly no-recurring requests."
                                 ),
                             },
                             "cadence_or_schedule": {
@@ -277,7 +318,11 @@ def _record_plan_tool() -> dict[str, Any]:
                     },
                     "contact_output_policy": {
                         "type": "string",
-                        "description": "How user-facing output should handle contact email/phone values.",
+                        "description": (
+                            "How user-facing output should handle contact email/phone values. For contact approval "
+                            "or contact endpoint requests, explicitly say to redact, avoid, mask, or not echo full "
+                            "email addresses and phone numbers in user-facing summaries."
+                        ),
                     },
                     "rationale": {"type": "string"},
                 },
@@ -798,6 +843,12 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "meta_gobii_send_agent_message as the explicit briefing/handoff step. "
                     "Briefing an audience is not a second Gobii; a request for one Gobii to do work and brief or "
                     "send updates remains one planned agent unless the user asks for a team or multiple Gobiis. "
+                    "For singular wording such as 'create a Gobii to monitor X and brief the sales team', do not "
+                    "create a separate briefing, reporting, sales, or coordination Gobii; use one planned Gobii "
+                    "with meta_gobii_send_agent_message for the initial briefing/handoff. "
+                    "For a project-team request that names distinct workstreams or pipeline stages, plan one role "
+                    "per named workstream/stage unless the user gives a smaller exact count; do not collapse "
+                    "sourcing, screening, and coordinator/handoff into two roles when all three are requested. "
                     "If the user asks to restructure, reorganize, rewire, relink, add links, or fix a Gobii graph, "
                     "include meta_gobii_list_agent_links and meta_gobii_link_agents; include unlink only when "
                     "stale or weak links may need removal. "
@@ -809,17 +860,29 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "This initial briefing requirement applies even when the created Gobii's work is scheduled, "
                     "recurring, proactive, or outward-facing follow-up/reporting work; schedule configuration or "
                     "charter updates are not a substitute for meta_gobii_send_agent_message. "
-                    "Preserve the user's domain words in planned_role_names, such as competitor pricing, customer "
-                    "success, CRM notes, recruiting, sales, operations, or reporting. "
+                    "Preserve the user's domain words in planned_role_names, proposed role names, responsibilities, "
+                    "and initial briefings, such as competitor pricing, customer success, CRM notes, recruiting, "
+                    "sales, operations, or reporting. For singular requests like 'build a sales Gobii for lead "
+                    "monitoring', keep both the domain and job in the single role, e.g. Sales Lead Monitoring. "
+                    "Do not replace a user domain word with a loose synonym in role names; for example, "
+                    "'recruiting Gobii ... candidate responses' should keep both words in a role like "
+                    "'Recruiting Candidate Response Coordinator'. "
                     "For broad operations involving multiple Gobiis, require a higher-level confirmation summary "
                     "before planning mutations as executable. "
                     "Schedule policy: do not place schedules in scope for one-off, demo, setup-only, trial, "
                     "prototype, exploratory, backfill, cleanup, research, candidate-screening, sales-list, "
                     "project-team, reorganize, archive, link/unlink, resource, contact, file, or make-available "
                     "requests unless the user explicitly asks for scheduled, recurring, ongoing, proactive, digest, "
-                    "watch, check-in, or cadence-based behavior. Ambiguous words such as monitor, watch, keep tabs, "
-                    "research, or follow up should not invent a cadence; either keep schedule_in_scope=false or ask "
-                    "a clarifying schedule question with schedule_action=clarify. When a schedule is in scope, "
+                    "watch, check-in, or cadence-based behavior. For explicit no-schedule wording such as demo, "
+                    "setup-only, one-time, one-off, temporary, trial, prototype, historical batch, no recurring, "
+                    "only, leave everything else as-is, no other settings, or not a standing process, set "
+                    "schedule_in_scope=false, schedule_action=none, and asks_clarifying_question=false. Ambiguous "
+                    "words such as monitor, watch, keep tabs, research, or follow up should not invent a cadence; "
+                    "only in those ambiguous ongoing verb cases may you keep schedule_in_scope=false and ask a "
+                    "clarifying schedule question with schedule_action=clarify. Role-ownership and responsibility "
+                    "phrases such as own vendor renewals, own support intake, manage recruiting, handle operations, "
+                    "or be responsible for a domain are not enough to ask schedule clarification; use "
+                    "schedule_action=none unless the user asks for recurring/proactive/cadence behavior. When a schedule is in scope, "
                     "schedule_policy must include the explicit cadence/removal and included_in_approval_scope=true. "
                     "Do not add extra team members, domains, schedules, contacts, files, or scenarios the user did "
                     "not ask for; record any accidental extras in extra_scope_items and in schedule_policy. "
@@ -846,11 +909,12 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "schedule_action describes the target Gobii lifecycle, not whether the schedule row itself is "
                     "new. Use schedule_action=create only for a newly created Gobii/team, update for an existing "
                     "named Gobii even when adding a new cadence to that Gobii, remove for removing an existing "
-                    "schedule, and clarify only when cadence is ambiguous. "
+                    "schedule, and clarify only when a recurring/proactive cadence is ambiguous. General ownership "
+                    "phrases like own vendor renewals or manage a domain should use schedule_action=none. "
                     "If the user says remove the schedule, stop running automatically, disable a cadence, or clear "
                     "recurring work, schedule_action must be remove, not update. "
-                    "For contact scenarios, the contact_output_policy must say to avoid or redact full email or phone "
-                    "values in user-facing summaries unless needed.\n\n"
+                    "For contact scenarios, the contact_output_policy must explicitly say to redact, avoid, mask, "
+                    "or not echo full email or phone values in user-facing summaries unless needed.\n\n"
                     "Meta Gobii system skill instructions:\n"
                     f"{_system_skill_prompt_text()}"
                 ),
@@ -861,6 +925,12 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     f"User request: {case.prompt}\n\n"
                     "Available direct Meta Gobii tools after the system skill is enabled:\n"
                     f"{_tool_catalog_text()}\n"
+                    + (
+                        "\nThis is a contact-safety case: contact_output_policy must include a clear instruction "
+                        "to redact, avoid, mask, or not echo full email/phone values in user-facing summaries.\n"
+                        if case.contact_safety
+                        else ""
+                    )
                 ),
             },
         ]
@@ -919,6 +989,9 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "For initial team-management requests, thoughtfully propose the team first: role names, "
                     "responsibilities, graph links, and initial briefings. Ask for approval once before any "
                     "mutating tool calls. Do not repeat the same plan, table, or final answer twice. "
+                    "Do not mention internal recorded plans, initial assessments, re-reading the request, or "
+                    "the exact phrase 'the user asks' in response_text; response_text must be only the concise "
+                    "final user-facing proposal. "
                     "Use the recorded tool plan as binding structure. If needs_human_confirmation is true, "
                     "asks_for_approval must be true. If planned_agent_count is greater than zero, proposed_roles "
                     "must describe those roles. When there is more than one proposed role or the plan includes "
@@ -933,9 +1006,18 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "include explicit approval, asks_for_approval must be true. "
                     "After explicit approval, state the exact approved action and avoid extra roles, domains, "
                     "schedules, contacts, files, or invented scenarios. "
+                    "For team requests, preserve distinct named workstreams as distinct planned roles unless the "
+                    "user gives a smaller exact count; a recruiting project team with sourcing, screening, and "
+                    "coordinator/handoff workstreams should have three roles. "
+                    "For singular role requests, still preserve the user's domain words in the role name, "
+                    "responsibility, and briefing; for example, a recruiting Gobii for candidate responses should "
+                    "be named like 'Recruiting Candidate Response Coordinator', not just 'Candidate Response "
+                    "Coordinator'. "
                     "For schedules, do not include recurring work in the approval scope unless the user asked for a "
-                    "cadence or ongoing/proactive behavior. For ambiguous ongoing language without a cadence, either "
-                    "ask a clarifying schedule question or leave schedules out of the proposal. "
+                    "cadence or ongoing/proactive behavior. For explicit no-schedule, one-time, setup-only, demo, "
+                    "temporary, trial, prototype, role ownership, general responsibility, or no-recurring wording, "
+                    "leave schedules out and do not ask a schedule clarification. For ambiguous ongoing language without a cadence, either ask a "
+                    "clarifying schedule question or leave schedules out of the proposal. "
                     "Use the system skill instructions below as authoritative.\n\n"
                     "Meta Gobii system skill instructions:\n"
                     f"{_system_skill_prompt_text()}"
@@ -1191,6 +1273,13 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
 
         if not normalized.get("response_text"):
             normalized["response_text"] = derived_args["response_text"]
+        else:
+            normalized["response_text"] = _normalize_user_facing_meta_response_text(
+                normalized.get("response_text"),
+                has_initial_briefings=bool(
+                    normalized.get("initial_briefings") or derived_args.get("initial_briefings")
+                ),
+            )
         if not normalized.get("proposed_roles"):
             normalized["proposed_roles"] = derived_args["proposed_roles"]
         if "meta_gobii_link_agents" in ordered_tools and not normalized.get("proposed_links"):
@@ -1859,6 +1948,10 @@ def _simulated_role_names(case: MetaGobiiEvalCase) -> list[str]:
         return ["Recruiting Lead", "Sales Pipeline Gobii", "Customer Signal Gobii"]
     if case.slug == "team_management_capability_test":
         return ["Coordinator Role", "Briefing Role", "Graph Steward"]
+    if case.max_planned_agents == 1:
+        if case.required_role_terms:
+            return [f"{' '.join(case.required_role_terms).title()} Gobii"]
+        return ["Specialist Gobii"]
     if case.required_role_terms:
         role_names = [f"{term.title()} Gobii" for term in case.required_role_terms]
         fillers = ["Coordinator Gobii", "Operator Gobii", "Summary Gobii"]
@@ -1868,8 +1961,6 @@ def _simulated_role_names(case: MetaGobiiEvalCase) -> list[str]:
                 break
             role_names.append(filler)
         return role_names
-    if case.max_planned_agents == 1:
-        return ["Specialist Gobii"]
     return ["Coordinator Gobii", "Operator Gobii"]
 
 

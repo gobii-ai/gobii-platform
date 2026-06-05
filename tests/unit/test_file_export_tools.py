@@ -12,6 +12,12 @@ from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_file import execute_create_file
 from api.agent.tools.create_image import _download_image, execute_create_image, get_create_image_tool
 from api.agent.tools.create_pdf import execute_create_pdf
+from api.agent.tools.self_visual_identity import (
+    augment_prompt_with_self_visual_identity,
+    execute_get_self_visual_identity,
+    get_self_visual_identity_tool,
+    prompt_requests_self_visual_identity,
+)
 from api.models import (
     AgentFsNode,
     BrowserUseAgent,
@@ -230,6 +236,54 @@ class FileExportToolTests(TestCase):
         self.assertIn("/exports/", properties["file_path"]["description"])
         self.assertIn("$[/Inbox/photo.png]", properties["source_images"]["description"])
         self.assertIn("same person, product, logo", properties["source_images"]["description"])
+        self.assertIn("selfie, avatar, portrait", description)
+
+    def test_self_visual_identity_tool_returns_only_visual_identity(self):
+        self.agent.visual_description = (
+            "A warm operator with a silver bob haircut, copper glasses, and a teal jacket."
+        )
+        self.agent.charter = "Private charter details that should not be returned by this tool."
+        self.agent.save(update_fields=["visual_description", "charter"])
+
+        result = execute_get_self_visual_identity(
+            self.agent,
+            {"purpose": "generate and send a selfie"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["agent_name"], "Export Agent")
+        self.assertIn("silver bob haircut", result["visual_description"])
+        self.assertIn("silver bob haircut", result["image_prompt_fragment"])
+        self.assertNotIn("Private charter", str(result))
+
+    def test_self_visual_identity_detector_gates_to_self_visual_media(self):
+        self.assertTrue(prompt_requests_self_visual_identity("send me a selfie"))
+        self.assertTrue(prompt_requests_self_visual_identity("make a short video of yourself waving"))
+        self.assertFalse(prompt_requests_self_visual_identity("create an image of a red circle"))
+        self.assertFalse(prompt_requests_self_visual_identity("summarize today's agenda"))
+
+    def test_self_visual_identity_tool_schema_mentions_video_and_ordinary_text_gating(self):
+        tool = get_self_visual_identity_tool()
+        description = tool["function"]["description"]
+
+        self.assertIn("self-video", description)
+        self.assertIn("ordinary text tasks", description)
+
+    def test_self_visual_identity_augment_does_not_duplicate_existing_description(self):
+        self.agent.visual_description = (
+            "A warm operator with a silver bob haircut, copper glasses, and a teal jacket."
+        )
+        self.agent.save(update_fields=["visual_description"])
+        prompt = (
+            "Create a selfie of yourself. Visual description: "
+            "A warm operator with a silver bob haircut, copper glasses, and a teal jacket."
+        )
+
+        augmented, included = augment_prompt_with_self_visual_identity(self.agent, prompt)
+
+        self.assertTrue(included)
+        self.assertEqual(augmented, prompt)
+        self.assertEqual(augmented.count("silver bob haircut"), 1)
 
     @patch("api.agent.tools.create_image.run_completion")
     def test_create_image_writes_generated_file(self, mock_run_completion):
@@ -269,6 +323,53 @@ class FileExportToolTests(TestCase):
             completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
         )
         self.assertTrue((completion.llm_model or "").endswith("gemini-2.5-flash-image"))
+
+    @patch("api.agent.tools.create_image.run_completion")
+    def test_create_image_adds_visual_identity_only_for_self_image_prompts(self, mock_run_completion):
+        self._seed_image_generation_tier()
+        self.agent.visual_description = (
+            "A distinctive Gobii with violet curls, amber eyes, and a white denim jacket."
+        )
+        self.agent.save(update_fields=["visual_description"])
+        png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00"
+        data_uri = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+        mock_run_completion.return_value = {
+            "choices": [{"message": {"images": [{"image_url": {"url": data_uri}}]}}]
+        }
+
+        result = execute_create_image(
+            self.agent,
+            {"prompt": "Send a friendly selfie of yourself", "file_path": "/exports/selfie.png"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["self_visual_identity_included"])
+        prompt = mock_run_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("violet curls", prompt)
+        self.assertIn("self visual media request only", prompt)
+
+    @patch("api.agent.tools.create_image.run_completion")
+    def test_create_image_does_not_add_visual_identity_for_generic_image_prompts(self, mock_run_completion):
+        self._seed_image_generation_tier()
+        self.agent.visual_description = (
+            "A distinctive Gobii with violet curls, amber eyes, and a white denim jacket."
+        )
+        self.agent.save(update_fields=["visual_description"])
+        png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00"
+        data_uri = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+        mock_run_completion.return_value = {
+            "choices": [{"message": {"images": [{"image_url": {"url": data_uri}}]}}]
+        }
+
+        result = execute_create_image(
+            self.agent,
+            {"prompt": "A minimal red circle icon", "file_path": "/exports/icon-generic.png"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["self_visual_identity_included"])
+        prompt = mock_run_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertNotIn("violet curls", prompt)
 
     @patch("api.agent.tools.create_image.run_completion")
     def test_create_image_with_source_images_requires_supported_endpoint(self, mock_run_completion):

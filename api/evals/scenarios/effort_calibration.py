@@ -14,6 +14,7 @@ from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
 from api.evals.stop_policy import (
     split_sql_statements,
+    sqlite_batch_mutates_agent_config_field,
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_mutation,
     sqlite_batch_is_only_planning_state_read,
@@ -197,8 +198,10 @@ def _hierarchical_report_shape(
     heading_count = len(_HEADING_RE.findall(text))
     has_heading = heading_count > 0
     has_list_or_table = bool(_LIST_OR_TABLE_RE.search(text))
-    has_structured_detail = has_list_or_table or heading_count >= 2
-    has_sections = text.count("\n\n") >= 2 or heading_count >= 2
+    bold_label_count = len(re.findall("(?m)^\\s*\\*\\*[^*\\n]{2,80}\\*\\*\\s*[-:\u2014]", text))
+    section_break_count = text.count("\n\n")
+    has_structured_detail = has_list_or_table or heading_count >= 2 or bold_label_count >= 2
+    has_sections = section_break_count >= 2 or heading_count >= 2 or bold_label_count >= 2
     failures = []
     if len(text) < min_chars:
         failures.append(f"too short ({len(text)} chars < {min_chars})")
@@ -229,10 +232,12 @@ def _source_url_mentioned(text: str, url: str) -> bool:
     return bool(bare_url and bare_url in text)
 
 
-def _tool_calls_for_run(run_id: str, *, after=None, tool_names: Iterable[str] | None = None):
+def _tool_calls_for_run(run_id: str, *, after=None, until=None, tool_names: Iterable[str] | None = None):
     queryset = PersistentAgentToolCall.objects.filter(step__eval_run_id=run_id)
     if after is not None:
         queryset = queryset.filter(step__created_at__gte=after)
+    if until is not None:
+        queryset = queryset.filter(step__created_at__lte=until)
     if tool_names is not None:
         queryset = queryset.filter(tool_name__in=list(tool_names))
     return list(queryset.select_related("step").order_by("step__created_at", "step__id"))
@@ -242,11 +247,12 @@ def _relevant_tool_calls_for_run(
     run_id: str,
     *,
     after=None,
+    until=None,
     ignored_tool_names: Iterable[str] = (),
 ):
     ignored = set(ignored_tool_names)
     relevant = []
-    for call in _tool_calls_for_run(run_id, after=after):
+    for call in _tool_calls_for_run(run_id, after=after, until=until):
         if call.tool_name in ignored:
             continue
         if sqlite_batch_is_only_eval_bookkeeping_read(call):
@@ -259,20 +265,23 @@ def _relevant_tool_calls_for_run(
     return relevant
 
 
-def _outbound_messages_after(agent_id: str, after):
-    return list(
-        PersistentAgentMessage.objects.filter(
-            owner_agent_id=agent_id,
-            is_outbound=True,
-            timestamp__gt=after,
-        ).order_by("timestamp", "id")
+def _outbound_messages_after(agent_id: str, after, *, until=None):
+    queryset = PersistentAgentMessage.objects.filter(
+        owner_agent_id=agent_id,
+        is_outbound=True,
+        timestamp__gt=after,
     )
+    if until is not None:
+        queryset = queryset.filter(timestamp__lte=until)
+    return list(queryset.order_by("timestamp", "id"))
 
 
-def _human_input_requests_for_run(run_id: str, *, after=None):
+def _human_input_requests_for_run(run_id: str, *, after=None, until=None):
     queryset = PersistentAgentHumanInputRequest.objects.filter(originating_step__eval_run_id=run_id)
     if after is not None:
         queryset = queryset.filter(created_at__gte=after)
+    if until is not None:
+        queryset = queryset.filter(created_at__lte=until)
     return list(queryset.order_by("created_at", "id"))
 
 
@@ -282,20 +291,35 @@ def _question_count(text: str) -> int:
     return without_urls.count("?")
 
 
-def _orchestrator_completion_count(run_id: str) -> int:
-    return PersistentAgentCompletion.objects.filter(
+def _orchestrator_completion_count(run_id: str, *, until=None) -> int:
+    queryset = PersistentAgentCompletion.objects.filter(
         eval_run_id=run_id,
         completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
-    ).count()
+    )
+    if until is not None:
+        queryset = queryset.filter(created_at__lte=until)
+    return queryset.count()
 
 
-def _completion_token_summary(run_id: str) -> dict[str, int]:
-    totals = PersistentAgentCompletion.objects.filter(eval_run_id=run_id).aggregate(
+def _completion_token_summary(run_id: str, *, until=None) -> dict[str, int]:
+    queryset = PersistentAgentCompletion.objects.filter(eval_run_id=run_id)
+    if until is not None:
+        queryset = queryset.filter(created_at__lte=until)
+    totals = queryset.aggregate(
         prompt_tokens=Sum("prompt_tokens"),
         completion_tokens=Sum("completion_tokens"),
         total_tokens=Sum("total_tokens"),
     )
     return {key: int(value or 0) for key, value in totals.items()}
+
+
+def _first_outbound_with_snippets(agent_id: str, after, snippets: Iterable[str]):
+    required = [snippet.casefold() for snippet in snippets]
+    for message in _outbound_messages_after(agent_id, after):
+        body = (message.body or "").casefold()
+        if all(snippet in body for snippet in required):
+            return message
+    return None
 
 
 class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
@@ -396,12 +420,13 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         *,
         agent_id: str,
         after,
+        until=None,
         task_name: str,
         max_chars: int,
         required_snippets: Iterable[str] = (),
     ) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
-        outbound = _outbound_messages_after(agent_id, after)
+        outbound = _outbound_messages_after(agent_id, after, until=until)
         if len(outbound) != 1:
             self.record_task_result(
                 run_id,
@@ -451,6 +476,7 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         run_id: str,
         *,
         after,
+        until=None,
         task_name: str,
         forbidden_tool_names: Iterable[str] = EFFORT_OVERWORK_TOOL_NAMES,
     ) -> bool:
@@ -458,7 +484,7 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         forbidden = set(forbidden_tool_names)
         bad_calls = [
             call
-            for call in _relevant_tool_calls_for_run(run_id, after=after)
+            for call in _relevant_tool_calls_for_run(run_id, after=after, until=until)
             if call.tool_name in forbidden
         ]
         if bad_calls:
@@ -501,6 +527,25 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
                 task_name=task_name,
                 observed_summary=f"Unfinished durable work has resume schedule: {agent.schedule}.",
                 artifacts={"agent": agent},
+            )
+            return True
+
+        schedule_calls = [
+            call
+            for call in _tool_calls_for_run(run_id, after=after, tool_names=["sqlite_batch"])
+            if sqlite_batch_mutates_agent_config_field(call, "schedule")
+            and str(getattr(call, "status", "") or "").lower() == "complete"
+        ]
+        if schedule_calls:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary=(
+                    "Unfinished durable work has an explicit SQLite resume schedule mutation."
+                ),
+                artifacts={"step": schedule_calls[-1].step},
             )
             return True
 
@@ -593,12 +638,13 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         *,
         agent_id: str,
         after,
+        until=None,
         task_name: str,
         max_message_questions: int = 1,
     ) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
-        requests = _human_input_requests_for_run(run_id, after=after)
-        outbound = _outbound_messages_after(agent_id, after)
+        requests = _human_input_requests_for_run(run_id, after=after, until=until)
+        outbound = _outbound_messages_after(agent_id, after, until=until)
         question_marks = sum(_question_count(message.body or "") for message in outbound)
         progress_messages = [
             message for message in outbound if _looks_like_routine_progress_message(message.body or "")
@@ -670,10 +716,11 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         *,
         task_name: str,
         max_completions: int,
+        until=None,
     ) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
-        count = _orchestrator_completion_count(run_id)
-        token_summary = _completion_token_summary(run_id)
+        count = _orchestrator_completion_count(run_id, until=until)
+        token_summary = _completion_token_summary(run_id, until=until)
         if count <= max_completions:
             self.record_task_result(
                 run_id,
@@ -1876,8 +1923,9 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
                 "remaining_work": 12,
                 "next_cursor": "candidate-offset-3",
                 "next_action": (
-                    "Report the verified partial set with the source limitation, then continue bounded "
-                    "verification or set a resume schedule."
+                    "Report the verified partial set with the source limitation now, before update_plan, "
+                    "SQLite rereads, or another batch. After that report, continue bounded verification "
+                    "or set a resume schedule."
                 ),
             }
         }
@@ -1917,10 +1965,18 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
             artifacts={"message": inbound},
         )
 
+        partial_report = _first_outbound_with_snippets(
+            agent_id,
+            inbound.timestamp,
+            ("Kathleen", "Rogelio", "Chris"),
+        )
+        single_turn_until = partial_report.timestamp if partial_report else None
+
         self._record_single_concise_reply(
             run_id,
             agent_id=agent_id,
             after=inbound.timestamp,
+            until=single_turn_until,
             task_name="verify_partial_report",
             max_chars=2500,
             required_snippets=("Kathleen", "Rogelio", "Chris"),
@@ -1936,16 +1992,23 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
             run_id,
             agent_id=agent_id,
             after=inbound.timestamp,
+            until=single_turn_until,
             task_name="verify_no_question_or_progress_message",
             max_message_questions=0,
         )
         self._record_no_overwork_tools(
             run_id,
             after=inbound.timestamp,
+            until=single_turn_until,
             task_name="verify_no_overwork_tools",
             forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
         )
-        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=6)
+        self._record_orchestrator_budget(
+            run_id,
+            task_name="verify_turn_budget",
+            max_completions=6,
+            until=single_turn_until,
+        )
 
 
 @register_scenario
@@ -1981,8 +2044,14 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
                 "prepared_count": 25,
                 "remaining_work": 75,
                 "next_cursor": "lead-025",
-                "next_action": "Wait for next scheduled run; do not repeat manually.",
-                "verification": "Read prepared_batches before sending another batch.",
+                "next_action": (
+                    "If no resume schedule exists, set one now; otherwise wait for the next scheduled run "
+                    "and do not repeat manually."
+                ),
+                "verification": (
+                    "Do not inspect prepared_batches before setting a schedule. On the next scheduled run, "
+                    "verify prepared_batches before sending another batch."
+                ),
             }
         }
 
@@ -2011,7 +2080,7 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
                     "stop_on_human_input_request": True,
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": ["eval_prepare_next_batch", "sqlite_batch"],
-                    "max_relevant_tool_calls": 5,
+                    "max_relevant_tool_calls": 6,
                     "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
                 },
             )

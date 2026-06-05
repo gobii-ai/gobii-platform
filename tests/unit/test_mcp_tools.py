@@ -18,13 +18,16 @@ from django.utils import timezone
 
 from api.models import (
     AgentFsNode,
+    CommsChannel,
     PersistentAgent,
     BrowserUseAgent,
     ProxyServer,
     GlobalAgentSkill,
     GlobalAgentSkillCustomTool,
     PersistentAgentCustomTool,
+    PersistentAgentCommsEndpoint,
     PersistentAgentEnabledTool,
+    PersistentAgentMessage,
     PersistentAgentSkill,
     PersistentAgentSystemSkillState,
     MCPServerConfig,
@@ -37,6 +40,9 @@ from api.models import (
     ImageGenerationModelEndpoint,
     ImageGenerationLLMTier,
     ImageGenerationTierEndpoint,
+    VideoGenerationModelEndpoint,
+    VideoGenerationLLMTier,
+    VideoGenerationTierEndpoint,
 )
 from api.agent.core.llm_config import AgentLLMTier
 from tests.utils.llm_seed import get_intelligence_tier
@@ -1666,6 +1672,62 @@ class MCPToolFunctionsTests(TestCase):
             tier=tier,
             endpoint=endpoint,
             weight=1.0,
+        )
+
+    def _seed_create_video_tier(self) -> None:
+        provider = LLMProvider.objects.create(
+            key=f"video-provider-{uuid.uuid4().hex[:6]}",
+            display_name="Video Provider",
+            enabled=True,
+        )
+        endpoint = VideoGenerationModelEndpoint.objects.create(
+            key=f"video-endpoint-{uuid.uuid4().hex[:6]}",
+            provider=provider,
+            enabled=True,
+            litellm_model="ltx/ltx-2-3-fast",
+        )
+        tier = VideoGenerationLLMTier.objects.create(order=1, description="Video Tier 1")
+        VideoGenerationTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            weight=1.0,
+        )
+
+    @staticmethod
+    def _setup_empty_tool_search(mock_get_config, mock_get_manager, mock_run_completion) -> None:
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+    def _create_recent_inbound_web_message(self, body: str) -> None:
+        from_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=f"web://user/{self.user.id}/agent/{self.agent.id}/{uuid.uuid4().hex[:8]}",
+        )
+        to_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=f"web://agent/{self.agent.id}/{uuid.uuid4().hex[:8]}",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=from_endpoint,
+            to_endpoint=to_endpoint,
+            is_outbound=False,
+            body=body,
+            raw_payload={},
         )
         
     @patch('api.agent.tools.search_tools.enable_tools')
@@ -3424,6 +3486,151 @@ class MCPToolFunctionsTests(TestCase):
         user_message = kwargs["messages"][1]["content"]
         self.assertIn("create_image", user_message)
         mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_system_skills')
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_fallback_enables_self_image_system_skill(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+        mock_enable_system_skills,
+    ):
+        self._seed_create_image_tier()
+        self._setup_empty_tool_search(
+            mock_get_config,
+            mock_get_manager,
+            mock_run_completion,
+        )
+        mock_enable_system_skills.return_value = {
+            "status": "success",
+            "enabled": ["self_image_generation"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
+
+        result = search_tools(self.agent, "send me a selfie of yourself")
+
+        self.assertEqual(result["status"], "success")
+        mock_enable_tools.assert_not_called()
+        mock_enable_system_skills.assert_called_once()
+        self.assertEqual(
+            mock_enable_system_skills.call_args.args,
+            (self.agent, ["self_image_generation"]),
+        )
+        self.assertTrue(mock_enable_system_skills.call_args.kwargs["available_skills"])
+
+    @patch('api.agent.tools.search_tools.enable_system_skills')
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_fallback_enables_self_video_system_skill(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+        mock_enable_system_skills,
+    ):
+        self._seed_create_video_tier()
+        self._setup_empty_tool_search(
+            mock_get_config,
+            mock_get_manager,
+            mock_run_completion,
+        )
+        mock_enable_system_skills.return_value = {
+            "status": "success",
+            "enabled": ["self_video_generation"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
+
+        result = search_tools(self.agent, "make a short video of yourself waving")
+
+        self.assertEqual(result["status"], "success")
+        mock_enable_tools.assert_not_called()
+        mock_enable_system_skills.assert_called_once()
+        self.assertEqual(
+            mock_enable_system_skills.call_args.args,
+            (self.agent, ["self_video_generation"]),
+        )
+        self.assertTrue(mock_enable_system_skills.call_args.kwargs["available_skills"])
+
+    @patch('api.agent.tools.search_tools.enable_system_skills')
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_generic_video_query_uses_recent_self_video_hint(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+        mock_enable_system_skills,
+    ):
+        self._seed_create_video_tier()
+        self.agent.visual_description = "A distinctive visual identity that should not be in tool search."
+        self.agent.save(update_fields=["visual_description"])
+        self._create_recent_inbound_web_message("Text me a short video of yourself waving.")
+
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "Enable video generation."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_tools",
+                    "arguments": json.dumps({"tool_names": ["create_video"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+        mock_enable_tools.return_value = {
+            "status": "success",
+            "enabled": ["create_video"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
+        mock_enable_system_skills.return_value = {
+            "status": "success",
+            "enabled": ["self_video_generation"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
+
+        result = search_tools(self.agent, "video generation create video from text AI")
+
+        self.assertEqual(result["status"], "success")
+        mock_enable_tools.assert_called_once_with(self.agent, ["create_video"])
+        mock_enable_system_skills.assert_called_once()
+        self.assertEqual(
+            mock_enable_system_skills.call_args.args,
+            (self.agent, ["self_video_generation"]),
+        )
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Current task routing hint", user_message)
+        self.assertIn("self video/clip", user_message)
+        self.assertNotIn("distinctive visual identity", user_message)
 
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')

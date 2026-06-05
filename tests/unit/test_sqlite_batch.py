@@ -242,6 +242,44 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(preview.get("status"), "ok")
             self.assertNotIn("advisories", preview)
 
+    def test_single_result_json_blob_fetch_returns_efficiency_advisory(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_json) VALUES (?, ?)",
+                    [
+                        ("r1", json.dumps({"result": "alpha", "url": "https://a.example.test"})),
+                        ("r2", json.dumps({"result": "beta", "url": "https://b.example.test"})),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT json_extract(result_json,'$.result') AS md FROM __tool_results WHERE result_id='r1'",
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "single_tool_result_blob_fetch")
+            self.assertIn("full tool-result blob", out.get("message", ""))
+
+            preview = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT substr(json_extract(result_json,'$.result'),1,2) AS preview FROM __tool_results WHERE result_id='r1'",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(preview.get("status"), "ok")
+            self.assertNotIn("advisories", preview)
+
     def test_tool_result_quality_detects_smart_queries_and_advisories(self):
         sql = """
         CREATE TABLE candidate_sources(url TEXT);

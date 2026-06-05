@@ -1,11 +1,13 @@
 from django.test import SimpleTestCase, tag
 
+from api.agent.core.event_processing import _resolve_eval_mock_result
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
     COMMON_USE_CASE_EVAL_CASES,
     PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION,
+    PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES,
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
 )
@@ -48,6 +50,26 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
         self.assertTrue(policy["stop_on_human_input_request"])
         self.assertIn("send_chat_message", policy["ignored_tool_names"])
         self.assertIn("search_tools", mock_config)
+
+    def test_planning_guardrail_mock_allows_config_reads_but_rejects_mutations(self):
+        scenario = ScenarioRegistry.get(PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES)
+        mock_config = scenario._planning_guardrail_mocks()
+
+        read_result = _resolve_eval_mock_result(
+            mock_config,
+            "sqlite_batch",
+            {"sql": "SELECT charter, schedule FROM __agent_config WHERE id = 1;"},
+        )
+        update_result = _resolve_eval_mock_result(
+            mock_config,
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET schedule = '0 * * * *' WHERE id = 1;"},
+        )
+
+        self.assertEqual(read_result["status"], "success")
+        self.assertEqual(read_result["results"][0]["result"][0]["schedule"], None)
+        self.assertEqual(update_result["status"], "error")
+        self.assertIn("mutation disabled", update_result["message"].lower())
 
     def test_common_integration_discovery_cases_expect_tool_search_not_questions(self):
         cases = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}

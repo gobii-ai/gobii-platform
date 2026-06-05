@@ -83,3 +83,10 @@ from .hubspot_native import (
     HUBSPOT_NATIVE_SUITE_SLUG,
     HubSpotNativeScenario,
 )
+from .self_visual_media import (
+    SELF_VISUAL_MEDIA_SCENARIO_SLUGS,
+    SELF_VISUAL_MEDIA_SUITE_SLUG,
+    SelfImageSmsAttachmentScenario,
+    SelfVideoSmsAttachmentScenario,
+    SelfVisualDescriptionNotInOrdinaryPromptScenario,
+)

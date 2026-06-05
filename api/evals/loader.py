@@ -41,6 +41,10 @@ from api.evals.scenarios.meta_gobii import (
     META_GOBII_REAL_HARNESS_SCENARIO_SLUGS,
     META_GOBII_REAL_HARNESS_SUITE_SLUG,
 )
+from api.evals.scenarios.self_visual_media import (
+    SELF_VISUAL_MEDIA_SCENARIO_SLUGS,
+    SELF_VISUAL_MEDIA_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -126,6 +130,11 @@ register_builtin_suites(
             slug=HUBSPOT_NATIVE_SUITE_SLUG,
             description="Native HubSpot system-skill evals over mocked HubSpot REST APIs.",
             scenario_slugs=HUBSPOT_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=SELF_VISUAL_MEDIA_SUITE_SLUG,
+            description="Self image/video generation evals for dynamic visual identity retrieval and SMS attachments.",
+            scenario_slugs=SELF_VISUAL_MEDIA_SCENARIO_SLUGS,
         ),
     ]
 )

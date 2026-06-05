@@ -60,6 +60,20 @@ _MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE = (
     "Email body claims attachments are included, but send_email.attachments is empty. "
     "Pass the exact $[/path] values returned by recent file tools in send_email.attachments."
 )
+_OUTREACH_EMAIL_RE = re.compile(
+    r"\b(?:cold outreach|outreach|partner idea|open to|comparing notes|quick intro|quick question)\b",
+    re.IGNORECASE,
+)
+_REPORT_EMAIL_RE = re.compile(
+    r"\b(?:report|dashboard|digest|scorecard|metrics|status update|table|chart|invoice|receipt)\b",
+    re.IGNORECASE,
+)
+_LAYOUT_TAG_RE = re.compile(r"</?(?:table|tbody|thead|tfoot|tr|td|th)\b[^>]*>", re.IGNORECASE)
+_STYLE_ATTR_RE = re.compile(
+    r"\s(?:style|class|cellpadding|cellspacing|border|width|height|align|valign)="
+    r"('[^']*'|\"[^\"]*\"|[^\s>]+)",
+    re.IGNORECASE,
+)
 
 
 class _EmailDeliveryFailed(Exception):
@@ -134,6 +148,22 @@ def _email_claims_attachments(html: str) -> bool:
     return any(pattern.search(plain_text) for pattern in _ATTACHMENT_CLAIM_PATTERNS)
 
 
+def _should_restrain_outreach_email(subject: str, html: str) -> bool:
+    combined = f"{subject or ''}\n{_strip_html_to_text(html)}"
+    return (
+        bool(_OUTREACH_EMAIL_RE.search(combined))
+        and bool(re.search(r"<\s*table\b|style\s*=", html or "", re.IGNORECASE))
+        and not _REPORT_EMAIL_RE.search(combined)
+    )
+
+
+def _restrain_outreach_html(html: str) -> str:
+    stripped = _LAYOUT_TAG_RE.sub("\n", html or "")
+    stripped = _STYLE_ATTR_RE.sub("", stripped)
+    stripped = re.sub(r"\n{3,}", "\n\n", stripped)
+    return stripped.strip()
+
+
 def _resolve_reply_target(
     agent: PersistentAgent,
     reply_to_message_id: str,
@@ -178,7 +208,11 @@ def get_send_email_tool() -> Dict[str, Any]:
             "name": "send_email",
             "description": (
                 "Send rich body-only HTML email without <html>/<head>/<body>; avoid Markdown. "
-                "For reports/dashboards, avoid bare HTML: use inline style attrs on sections, tables/cells, and highlighted values. Do NOT leave report metrics in plain lists. Do NOT use Markdown pipe tables."
+                "For reports/dashboards, avoid bare HTML: use inline style attrs on sections, tables/cells, "
+                "and highlighted values; use at least one real accent color beyond grays plus visual "
+                "status/value encoding such as badges, chips, icons, or colored key numbers. "
+                "Light-gray-only tables are not rich report formatting. Do NOT leave report metrics in "
+                "plain lists. Do NOT use Markdown pipe tables. For simple outreach, stay restrained."
             ),
             "parameters": {
                 "type": "object",
@@ -203,7 +237,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
-                            "Reports/dashboards should style section headers, tables/cells, and spans for key numbers, statuses, and value changes with visible colors/badges/icons; use styled tables or metric blocks instead of plain lists for report data. "
+                            "Reports/dashboards should style section headers, tables/cells, and spans for key numbers, statuses, and value changes with visible accent colors, badges, chips, icons, or metric blocks instead of plain lists; avoid light-gray-only tables. "
                             "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),
                     },
@@ -238,6 +272,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     mobile_first_html = strip_control_chars(mobile_first_html)
     # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
+    if _should_restrain_outreach_email(str(subject or ""), mobile_first_html):
+        mobile_first_html = _restrain_outreach_html(mobile_first_html)
     cc_addresses = [normalize_email_address(addr) for addr in params.get("cc_addresses", [])]
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")

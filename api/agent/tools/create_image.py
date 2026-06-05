@@ -26,6 +26,7 @@ from api.agent.files.attachment_helpers import (
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.agent.tools.agent_variables import set_agent_variable
 from api.agent.tools.file_export_helpers import resolve_export_target
+from api.agent.tools.self_visual_identity import augment_prompt_with_self_visual_identity
 
 logger = logging.getLogger(__name__)
 
@@ -437,7 +438,10 @@ def get_create_image_tool() -> Dict[str, Any]:
                 "For style or art-direction changes where no subject, logo, or layout needs preservation, refine the "
                 "prompt instead of adding source images. "
                 "Returns `file`, `inline`, `inline_html`, and `attach` placeholders for reuse in messages and "
-                "documents; reuse those exact placeholders and do not invent image URLs or file paths."
+                "documents; reuse those exact placeholders and do not invent image URLs or file paths. "
+                "When creating a selfie, avatar, portrait, profile photo, or image of yourself/this Gobii, say so "
+                "clearly in the prompt; the tool retrieves this Gobii's visual identity only for that self-image "
+                "request and adds it to the image prompt."
             ),
             "parameters": {
                 "type": "object",
@@ -485,6 +489,10 @@ def execute_create_image(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     prompt = params.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         return {"status": "error", "message": "Missing required parameter: prompt"}
+    image_prompt, self_visual_identity_included = augment_prompt_with_self_visual_identity(
+        agent,
+        prompt.strip(),
+    )
 
     path, overwrite, error = resolve_export_target(params)
     if error:
@@ -516,7 +524,7 @@ def execute_create_image(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         try:
             generated = _generate_image_bytes(
                 config,
-                prompt=prompt.strip(),
+                prompt=image_prompt,
                 aspect_ratio=aspect_ratio,
                 source_image_data_uris=source_image_data_uris,
             )
@@ -572,4 +580,5 @@ def execute_create_image(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         "endpoint_key": selected_config.endpoint_key,
         "model": selected_config.model,
         "source_image_count": len(source_image_data_uris),
+        "self_visual_identity_included": self_visual_identity_included,
     }

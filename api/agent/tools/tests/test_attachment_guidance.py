@@ -86,6 +86,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("style section headers, tables/cells, and spans", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("instead of plain lists", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("emoji/status labels", chat_guidance)
+        self.assertIn("Avoid horizontal rules", chat_guidance)
+        self.assertIn("bullets and compact tables", chat_guidance)
         self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
 
     def test_create_file_tool_schema_requires_content_or_query(self):

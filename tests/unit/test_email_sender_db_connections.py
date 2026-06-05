@@ -110,6 +110,9 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
 
         self.assertIn("body-only HTML", description)
         self.assertIn("inline style attrs", description)
+        self.assertIn("real accent color beyond grays", description)
+        self.assertIn("status/value encoding", description)
+        self.assertIn("Light-gray-only tables are not rich report formatting", description)
         self.assertIn("tables/cells", description)
         self.assertIn("Do NOT leave report metrics in plain lists", description)
         self.assertIn("Do NOT use Markdown pipe tables", description)
@@ -304,6 +307,31 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         message = PersistentAgentMessage.objects.get(id=result["message_id"])
         self.assertIsNone(message.parent_id)
         self.assertEqual(message.conversation.address, self.user.email)
+
+    def test_execute_send_email_restrains_simple_outreach_table_html(self):
+        params = {
+            "to_address": self.user.email,
+            "subject": "Partner idea for your RevOps clients",
+            "mobile_first_html": (
+                "<table cellpadding='0' cellspacing='0' style='font-family:Arial;color:#333'>"
+                "<tr><td style='padding:12px'><p style='margin:0'>Hi Jordan,</p>"
+                "<p style='color:#1a5c8a'>Open to comparing notes for 20 minutes?</p>"
+                "<p><strong style='color:#333'>Priya</strong></p></td></tr></table>"
+            ),
+        }
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertNotIn("<table", message.body.lower())
+        self.assertNotIn("<td", message.body.lower())
+        self.assertNotIn("style=", message.body.lower())
+        self.assertIn("Open to comparing notes", message.body)
 
     def test_execute_send_email_rolls_back_message_when_delivery_fails(self):
         params = {

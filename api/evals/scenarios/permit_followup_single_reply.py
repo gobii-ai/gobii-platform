@@ -80,6 +80,8 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
             "6) Timeline & reminders: Maintain a pre-construction schedule with permit lead times and check-ins."
         ).format(name=agent_name)
         updates = {}
+        if agent.organization_id is not None:
+            updates["organization"] = None
         if agent.charter != charter:
             updates["charter"] = charter
         if agent.schedule != "29 15 * * 1":

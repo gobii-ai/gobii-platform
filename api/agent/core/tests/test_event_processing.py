@@ -483,6 +483,8 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
             "The last step was incomplete - the query results were fetched but never formatted. Let me fix that now",
             "All four sources are fetched. Now I'll run the clean aggregate query.",
             "All 4 JSON endpoints are fetched. Now I'll query the working table.",
+            "Now I have all four claims extracted. Let me query them all in one aggregate to confirm the deduplication.",
+            "From the scrapes, I have all the data I need. Let me extract it in one clean query.",
             "The data is in. Let me run the final analysis query and deliver the recommendation",
             "The `plan_candidates` table is populated with 8 rows. Now let me query it for the best plan.",
             "Hey! I'm Eval Agent. Let's dig up three current remote job listings from different sources right now.",

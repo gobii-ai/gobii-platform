@@ -707,6 +707,11 @@ class BehaviorMicroHelperTests(TestCase):
             self.assertIn(tool_name, EVAL_SYNTHETIC_TOOL_DEFINITIONS)
             self.assertIn("do not call search_tools first", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
 
+        by_id_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["google_sheets-get-spreadsheet-by-id"]["description"]
+        self.assertIn("only when asked to open/get the spreadsheet itself", by_id_description)
+        self.assertIn("Do not use for row/range reads or criteria lookups", by_id_description)
+        self.assertIn("google_sheets-find-row", by_id_description)
+
     def test_revenue_chart_eval_sqlite_mock_returns_revenue_rows(self):
         scenario = ScenarioRegistry.get("common_use_case_079_create_report_with_chart")
 
@@ -926,6 +931,7 @@ class BehaviorMicroHelperTests(TestCase):
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
         self.assertNotIn("google_sheets-list-spreadsheets", user_message)
         self.assertIn("google_sheets-read-rows", user_message)
+        self.assertNotIn("google_sheets_native", user_message)
         mock_search_apps.assert_not_called()
         mock_get_effective_pipedream_app_slugs_for_agent.assert_not_called()
         mock_enable_tools.assert_not_called()

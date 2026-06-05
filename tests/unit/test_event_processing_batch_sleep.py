@@ -505,6 +505,59 @@ class TestBatchToolCallsWithSleep(TestCase):
         mock_send_chat.assert_called_once()
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
+    @patch('api.agent.core.event_processing.execute_send_chat_message')
+    @patch('api.agent.core.event_processing.build_prompt_context')
+    @patch('api.agent.core.event_processing._completion_with_failover')
+    def test_stop_hint_message_forces_explicit_stop(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = (
+            [{"role": "system", "content": "sys"}, {"role": "user", "content": "stand by"}],
+            1000,
+            None,
+        )
+
+        def mk_tc(name, args):
+            tc = MagicMock()
+            tc.function = MagicMock()
+            tc.function.name = name
+            tc.function.arguments = args
+            return tc
+
+        tc_message = mk_tc(
+            'send_chat_message',
+            '{"body": "Got it — I will stand by and will not follow up unless you ask.", "will_continue_work": true}',
+        )
+
+        msg = MagicMock()
+        msg.tool_calls = [tc_message]
+        msg.content = None
+        choice = MagicMock(); choice.message = msg
+        resp = MagicMock(); resp.choices = [choice]
+        resp.model_extra = {"usage": MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15, prompt_tokens_details=MagicMock(cached_tokens=0))}
+        mock_completion.return_value = (
+            resp,
+            {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"},
+        )
+
+        def send_result(_agent, params):
+            return {"status": "ok", "auto_sleep_ok": not params.get("will_continue_work")}
+
+        mock_send_chat.side_effect = send_result
+
+        from api.agent.core import event_processing as ep
+        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 1)
+        sent_params = mock_send_chat.call_args[0][1]
+        self.assertFalse(sent_params["will_continue_work"])
+
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_update_plan', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_chat_message', return_value={"status": "ok", "auto_sleep_ok": False})

@@ -605,7 +605,26 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
             "create_csv": {"status": "error", "message": "CSV creation disabled during planning eval."},
             "create_pdf": {"status": "error", "message": "PDF creation disabled during planning eval."},
             "create_chart": {"status": "error", "message": "Chart creation disabled during planning eval."},
-            "sqlite_batch": {"status": "error", "message": "SQLite mutation disabled during planning eval."},
+            "sqlite_batch": {
+                "rules": [
+                    {
+                        "param_contains": {"sql": ["select", "__agent_config"]},
+                        "result": {
+                            "status": "success",
+                            "results": [
+                                {
+                                    "result": [{"charter": "", "schedule": None}],
+                                    "message": "Query 1 returned 1 rows.",
+                                }
+                            ],
+                        },
+                    },
+                ],
+                "default": {
+                    "status": "error",
+                    "message": "SQLite mutation disabled during planning eval.",
+                },
+            },
         }
 
     def _record_forbidden_before_end(self, run_id, after, task_name, forbidden_tool_names):

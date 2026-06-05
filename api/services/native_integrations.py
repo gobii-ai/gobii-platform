@@ -616,6 +616,9 @@ def format_native_integration_permission_prompt(
     lines = [
         "Native integration permissions:",
         f"- Status: {prompt_status}",
+        "- Runtime rule: treat this status as informational for explicit user API requests. Attempt the native "
+        "`http_request` once and use its result as the source of truth; give setup guidance only after the request "
+        "returns a native integration connection or scope error, unless the user only asked about connection status.",
     ]
     available_labels = [capability["label"] for capability in summary["available_capabilities"][:max_capabilities]]
     if available_labels:

@@ -57,7 +57,7 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         eq_count = len(RESULT_ID_EQ_RE.findall(statement))
         in_count = _result_id_in_count(statement)
         single_result_filter = mentions and eq_count == 1 and in_count == 0
-        direct_fetch = single_result_filter and _directly_selects_result_text(statement)
+        direct_fetch = single_result_filter and _directly_selects_tool_result_blob(statement)
         aggregate = mentions and not direct_fetch and (in_count > 1 or eq_count != 1)
         flags = {
             "uses_json_functions": bool(JSON_FUNCTION_RE.search(statement)),
@@ -119,11 +119,11 @@ def build_tool_result_query_advisories(
         )
     if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
         advisories.append(
-            _advisory("tool_result_blob_fetch_loop", "You are fetching full result_text blobs one result at a time. Combine prior tool outputs in one shaped query using WHERE result_id IN (...), CTEs, json_extract/json_each, joins, aggregation, or CREATE TABLE ... AS SELECT for a working table.")
+            _advisory("tool_result_blob_fetch_loop", "You are fetching full tool-result blobs one result at a time. Combine prior tool outputs in one shaped query using WHERE result_id IN (...), CTEs, json_extract/json_each, joins, aggregation, or CREATE TABLE ... AS SELECT for a working table.")
         )
     elif summary.direct_result_text_fetches:
         advisories.append(
-            _advisory("single_tool_result_blob_fetch", "This fetched one full result_text blob while multiple tool results are available. For multi-source synthesis, query the needed rows together; use substr(result_text,1,N) only for previews.")
+            _advisory("single_tool_result_blob_fetch", "This fetched one full tool-result blob while multiple tool results are available. For multi-source synthesis, query the needed rows together; use substr(result_text,1,N) or substr(json_extract(result_json,'$.result'),1,N) only for previews.")
         )
     return advisories
 
@@ -150,7 +150,7 @@ def _result_id_in_count(statement: str) -> int:
     return max(counts or [0])
 
 
-def _directly_selects_result_text(statement: str) -> bool:
+def _directly_selects_tool_result_blob(statement: str) -> bool:
     match = re.search(
         r'\bselect\b(?P<select>.*?)\bfrom\s+"?__tool_results"?\b',
         statement or "",
@@ -158,7 +158,10 @@ def _directly_selects_result_text(statement: str) -> bool:
     )
     if not match:
         return False
-    for field in match.group("select").split(","):
+    select_clause = match.group("select")
+    if _directly_selects_result_json_blob(select_clause):
+        return True
+    for field in select_clause.split(","):
         cleaned = re.sub(r"\s+as\s+\"?[a-z_]\w*\"?$", "", field.strip(), flags=re.I).strip('"')
         if (
             cleaned == "*"
@@ -167,6 +170,19 @@ def _directly_selects_result_text(statement: str) -> bool:
         ):
             return True
     return False
+
+
+def _directly_selects_result_json_blob(select_clause: str) -> bool:
+    path_pattern = r"(['\"])\$(?:\.(?:result|content))?\1"
+    direct_pattern = (
+        r"\bjson_extract\s*\(\s*(?:[a-z_]\w*\.)?result_json\s*,\s*"
+        f"{path_pattern}"
+        r"\s*\)"
+    )
+    preview_pattern = r"\bsubstr\s*\(\s*" + direct_pattern
+    return bool(re.search(direct_pattern, select_clause or "", re.I)) and not bool(
+        re.search(preview_pattern, select_clause or "", re.I)
+    )
 
 
 def _created_table_name(statement: str) -> str | None: return _matched_user_table(CREATE_TABLE_RE, statement)

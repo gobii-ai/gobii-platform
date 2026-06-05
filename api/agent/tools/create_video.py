@@ -22,6 +22,7 @@ from api.agent.files.attachment_helpers import build_signed_filespace_download_u
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.agent.tools.agent_variables import set_agent_variable
 from api.agent.tools.file_export_helpers import resolve_export_target
+from api.agent.tools.self_visual_identity import augment_prompt_with_self_visual_identity
 
 logger = logging.getLogger(__name__)
 
@@ -605,7 +606,9 @@ def get_create_video_tool() -> Dict[str, Any]:
                 "then save it to the agent filespace. "
                 "Use for short video clips, animations, and visual content. "
                 "For image-to-video, pass source_image to animate an existing image. "
-                "Returns `file` and `attach` placeholders for reuse in messages and documents."
+                "Returns `file` and `attach` placeholders for reuse in messages and documents. "
+                "When creating a video of yourself/this Gobii, say so clearly in the prompt; the tool retrieves "
+                "this Gobii's visual identity only for that self-video request and adds it to the video prompt."
             ),
             "parameters": {
                 "type": "object",
@@ -652,6 +655,10 @@ def execute_create_video(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     prompt = params.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         return {"status": "error", "message": "Missing required parameter: prompt"}
+    video_prompt, self_visual_identity_included = augment_prompt_with_self_visual_identity(
+        agent,
+        prompt.strip(),
+    )
 
     path, overwrite, error = resolve_export_target(params)
     if error:
@@ -689,7 +696,7 @@ def execute_create_video(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         try:
             generated = _generate_video(
                 config,
-                prompt=prompt.strip(),
+                prompt=video_prompt,
                 duration=duration,
                 size=size,
                 source_image=source_image,
@@ -742,4 +749,5 @@ def execute_create_video(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         "endpoint_key": selected_config.endpoint_key,
         "model": selected_config.model,
         "has_source_image": source_image is not None,
+        "self_visual_identity_included": self_visual_identity_included,
     }

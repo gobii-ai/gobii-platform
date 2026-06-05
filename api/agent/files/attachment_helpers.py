@@ -214,6 +214,8 @@ def normalize_attachment_paths(raw_paths: object) -> List[str]:
         # Strip $[...] wrapper if present
         if value.startswith("$[") and value.endswith("]"):
             value = value[2:-1].strip()
+        elif value.startswith("$/"):
+            value = value[1:].strip()
         if not value:
             raise AttachmentResolutionError("Attachment path cannot be empty.")
         if not value.startswith("/"):

@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
@@ -31,13 +32,13 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
     cost_class = "high"
     owner = "agent-platform"
     area = "global_skills"
-    tags = ("global_skill", "skill_enablement", "tool_choice", "llm_judge")
+    tags = ("global_skill", "skill_enablement", "tool_choice")
     required_secrets = ("selected_global_skill_secrets",)
     tasks = [
         ScenarioTask(name="inject_skill_task", assertion_type="manual"),
         ScenarioTask(name="verify_skill_enabled", assertion_type="manual"),
         ScenarioTask(name="verify_skill_tool_usage", assertion_type="manual"),
-        ScenarioTask(name="judge_skill_execution", assertion_type="llm_judge"),
+        ScenarioTask(name="judge_skill_execution", assertion_type="manual"),
     ]
 
     def _default_launch_config(self) -> dict:
@@ -307,7 +308,7 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
         ]
 
         required_secret_labels = [secret.get("label") or secret.get("name") or "" for secret in required_secret_status]
-        judge_context = {
+        execution_context = {
             "task_prompt": task_prompt,
             "skill_name": skill_name,
             "skill_description": skill.description if skill else "",
@@ -321,54 +322,60 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
             "other_non_skill_tool_calls": other_tool_calls,
             "final_response": final_response.body if final_response else "",
         }
-        judge_question = (
-            "Did the agent correctly execute the selected global skill for this task? "
-            "Pass only if the transcript shows the exact named global skill was enabled, "
-            "the agent used one of that skill's effective tools, and the final response completed the task using that skill. "
-            "search_tools for skill enablement, sqlite_batch for recalling the skill tool result, and send_chat_message "
-            "for delivery are allowed utility calls; they do not count against skill usage. "
-            "Fail if substantive task data came from other non-skill tools, or if the task was solved without enabling "
-            "or using the selected skill."
-        )
 
         self.record_task_result(
             run_id,
             None,
             EvalRunTask.Status.RUNNING,
             task_name="judge_skill_execution",
-            expected_summary="Judge confirms the agent used the selected skill correctly and completed the task.",
+            expected_summary="Deterministic scorer confirms the selected skill was enabled, used, and delivered an answer.",
         )
-        choice, reasoning = self.llm_judge(
-            question=judge_question,
-            context=_preview_json(judge_context, limit=12000),
-            options=("Pass", "Fail"),
+        passed, reasoning = _score_skill_execution(
+            enabled_skill_detected=enabled_skill is not None,
+            relevant_tool_call_detected=first_relevant_call is not None,
+            other_non_skill_tool_calls=other_tool_calls,
+            final_response=final_response.body if final_response else "",
         )
-        judge_passed = choice == "Pass"
-        hard_requirements_met = enabled_skill is not None and first_relevant_call is not None
 
-        if hard_requirements_met and judge_passed:
+        if passed:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="judge_skill_execution",
-                observed_summary=f"Judge passed skill execution. Reasoning: {reasoning}",
-                artifacts={"message": final_response} if final_response else {},
+                observed_summary=reasoning,
+                artifacts={"message": final_response, "execution_context": execution_context} if final_response else {"execution_context": execution_context},
             )
             return
 
-        failure_reasons: list[str] = []
-        if enabled_skill is None:
-            failure_reasons.append("skill was not enabled")
-        if first_relevant_call is None:
-            failure_reasons.append("no effective skill tool was used")
-        if not judge_passed:
-            failure_reasons.append(f"judge result={choice}: {reasoning}")
         self.record_task_result(
             run_id,
             None,
             EvalRunTask.Status.FAILED,
             task_name="judge_skill_execution",
-            observed_summary="; ".join(failure_reasons) or "Skill execution did not meet pass criteria.",
-            artifacts={"message": final_response} if final_response else {},
+            observed_summary=reasoning,
+            artifacts={"message": final_response, "execution_context": execution_context} if final_response else {"execution_context": execution_context},
         )
+
+
+def _score_skill_execution(
+    *,
+    enabled_skill_detected: bool,
+    relevant_tool_call_detected: bool,
+    other_non_skill_tool_calls: list[dict[str, Any]],
+    final_response: str,
+) -> tuple[bool, str]:
+    failure_reasons: list[str] = []
+    if not enabled_skill_detected:
+        failure_reasons.append("skill was not enabled")
+    if not relevant_tool_call_detected:
+        failure_reasons.append("no effective skill tool was used")
+    if other_non_skill_tool_calls:
+        tool_names = [str(call.get("tool_name") or "") for call in other_non_skill_tool_calls]
+        failure_reasons.append(f"substantive non-skill tools were used: {tool_names}")
+    if not str(final_response or "").strip():
+        failure_reasons.append("no final response was sent")
+
+    if failure_reasons:
+        return False, "; ".join(failure_reasons)
+    return True, "Selected global skill was enabled, a skill tool was used, and a final response was sent."

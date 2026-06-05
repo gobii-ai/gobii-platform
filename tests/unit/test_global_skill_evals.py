@@ -8,7 +8,7 @@ from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 
-from api.evals.scenarios.global_skill_eval import GlobalSkillEvalScenario
+from api.evals.scenarios.global_skill_eval import GlobalSkillEvalScenario, _score_skill_execution
 from api.evals.global_skill_evals import (
     GLOBAL_SKILL_EVAL_SCENARIO_SLUG,
     GLOBAL_SKILL_EVAL_SUITE_SLUG,
@@ -362,7 +362,7 @@ class GlobalSkillEvalScenarioTests(TestCase):
             patch.object(scenario, "get_run", return_value=SimpleNamespace(suite_run=SimpleNamespace(launch_config=launch_config))),
             patch.object(scenario, "wait_for_agent_idle", return_value=nullcontext()),
             patch.object(scenario, "inject_message", return_value=SimpleNamespace(timestamp=now)),
-            patch.object(scenario, "record_task_result", side_effect=lambda *args, **kwargs: recorded.append({"task_name": kwargs.get("task_name"), "status": args[2], "observed_summary": kwargs.get("observed_summary", "")})),
+            patch.object(scenario, "record_task_result", side_effect=lambda *args, **kwargs: recorded.append({"task_name": kwargs.get("task_name"), "status": args[2], "observed_summary": kwargs.get("observed_summary", ""), "artifacts": kwargs.get("artifacts", {})})),
             patch.object(scenario, "llm_judge", side_effect=fake_llm_judge),
             patch("api.evals.scenarios.global_skill_eval.GlobalAgentSkill.objects.filter") as mock_skill_filter,
             patch("api.evals.scenarios.global_skill_eval.PersistentAgentSkill.objects.filter") as mock_enabled_filter,
@@ -409,7 +409,7 @@ class GlobalSkillEvalScenarioTests(TestCase):
             },
         )
 
-    def test_judge_context_separates_allowed_utility_calls_from_skill_calls(self):
+    def test_execution_context_separates_allowed_utility_calls_from_skill_calls(self):
         now = timezone.now()
         weather_call = SimpleNamespace(
             tool_name="weather",
@@ -424,22 +424,31 @@ class GlobalSkillEvalScenarioTests(TestCase):
             SimpleNamespace(tool_name="send_chat_message", tool_params={"body": "It is sunny."}, status="complete", step=SimpleNamespace(created_at=now)),
         ]
 
-        self._run_scenario(
+        recorded = self._run_scenario(
             enabled_skill=SimpleNamespace(name="check-weather"),
             relevant_tool_calls=[weather_call],
             post_prompt_calls=post_prompt_calls,
             judge_result=("Pass", "Allowed utility calls did not replace the skill tool."),
         )
 
-        judge_call = self.last_judge_calls[-1]
-        context = json.loads(judge_call["context"])
+        context = recorded[-1]["artifacts"]["execution_context"]
         self.assertEqual([call["tool_name"] for call in context["skill_tool_calls"]], ["weather"])
         self.assertEqual(
             [call["tool_name"] for call in context["allowed_utility_tool_calls"]],
             ["search_tools", "sqlite_batch", "send_chat_message"],
         )
         self.assertEqual(context["other_non_skill_tool_calls"], [])
-        self.assertIn("allowed utility calls", judge_call["question"])
+        self.assertEqual(self.last_judge_calls, [])
+
+    def test_deterministic_skill_execution_ignores_judge_weather_plausibility(self):
+        passed, reasoning = _score_skill_execution(
+            enabled_skill_detected=True,
+            relevant_tool_call_detected=True,
+            other_non_skill_tool_calls=[],
+            final_response="72F and Sunny",
+        )
+
+        self.assertTrue(passed, reasoning)
 
     def test_scenario_uses_default_skill_fixture_for_canonical_suite_runs(self):
         now = timezone.now()

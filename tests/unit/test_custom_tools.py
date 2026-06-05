@@ -872,6 +872,47 @@ def run(params, ctx):
         )
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_allows_url_validator_with_optional_table_runtime_inputs(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "URL Table Classifier",
+                "description": "Normalize candidate URLs from a source_table into a dest_table.",
+                "source_path": "/tools/url_table_classifier.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    source_table = params.get('source_table')\n"
+                    "    dest_table = params.get('dest_table')\n"
+                    "    candidates = params.get('candidates', [])\n"
+                    "    accepted = [url for url in candidates if '/posts/' in url]\n"
+                    "    return {\n"
+                    "        'status': 'ok',\n"
+                    "        'summary': f'{len(accepted)} scrape-ready URLs for {dest_table or source_table}',\n"
+                    "        'scrape_ready_urls': accepted,\n"
+                    "        'remaining_work': 0,\n"
+                    "        'next_action': 'Use scrape_ready_urls only.',\n"
+                    "    }\n"
+                ),
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "source_table": {"type": "string"},
+                        "dest_table": {"type": "string"},
+                        "candidates": {"type": "array", "items": {"type": "string"}},
+                        "batch_limit": {"type": "integer"},
+                    },
+                    "required": [],
+                },
+                "enable": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(
+            PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_url_table_classifier").exists()
+        )
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     def test_create_custom_tool_rejects_batch_tool_without_actionable_result_signal(self, _mock_sandbox):
         result = execute_create_custom_tool(
             self.agent,
@@ -947,6 +988,38 @@ def run(params, ctx):
         self.assertEqual(result["status"], "ok")
         self.assertTrue(
             PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_batch_sync_valid").exists()
+        )
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_allows_resumable_sheet_sync_without_literal_replay_prevention(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Resumable Sheet Sync",
+                "description": "Simulate syncing worksheet rows with remaining work.",
+                "source_path": "/tools/resumable_sheet_sync.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    batch_size = params.get('batch_size')\n"
+                    "    next_cursor = 'signals:10'\n"
+                    "    return {\n"
+                    "        'status': 'success',\n"
+                    "        'summary': 'Wrote rows to the worksheet.',\n"
+                    "        'rows_written': 10,\n"
+                    "        'batch_size': batch_size,\n"
+                    "        'remaining_work': 0,\n"
+                    "        'next_cursor': next_cursor,\n"
+                    "        'next_action': 'Verify worksheet counts.',\n"
+                    "    }\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {"batch_size": {"type": "integer"}}},
+                "enable": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(
+            PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_resumable_sheet_sync").exists()
         )
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
@@ -1295,7 +1368,7 @@ def run(params, ctx):
         self.assertIn("entrypoint is no longer configurable", result["message"])
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
-    def test_create_custom_tool_rejects_source_without_main_run(self, _mock_sandbox):
+    def test_create_custom_tool_normalizes_source_without_main_run(self, _mock_sandbox):
         result = execute_create_custom_tool(
             self.agent,
             {
@@ -1307,13 +1380,15 @@ def run(params, ctx):
             },
         )
 
-        self.assertEqual(result["status"], "error")
-        self.assertIn("main(run)", result["message"])
-        self.assertIn("Patch all validation issues before retrying", result["message"])
-        self.assertIn("exact import", result["message"])
+        self.assertEqual(result["status"], "ok")
+        node = AgentFsNode.objects.get(path="/tools/greeter.py")
+        with node.content.open("rb") as handle:
+            source = handle.read().decode("utf-8")
+        self.assertTrue(source.rstrip().endswith("if __name__ == '__main__': main(run)"))
+        self.assertTrue(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_greeter").exists())
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
-    def test_create_custom_tool_rejects_source_without_main_import_with_retry_checklist(self, _mock_sandbox):
+    def test_create_custom_tool_normalizes_source_without_main_import(self, _mock_sandbox):
         result = execute_create_custom_tool(
             self.agent,
             {
@@ -1325,11 +1400,13 @@ def run(params, ctx):
             },
         )
 
-        self.assertEqual(result["status"], "error")
-        self.assertIn("from _gobii_ctx import main", result["message"])
-        self.assertIn("Patch all validation issues before retrying", result["message"])
-        self.assertIn("exact final line", result["message"])
-        self.assertIn("referenced imports", result["message"])
+        self.assertEqual(result["status"], "ok")
+        node = AgentFsNode.objects.get(path="/tools/greeter.py")
+        with node.content.open("rb") as handle:
+            source = handle.read().decode("utf-8")
+        self.assertIn("from _gobii_ctx import main", source)
+        self.assertTrue(source.rstrip().endswith("if __name__ == '__main__': main(run)"))
+        self.assertTrue(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_greeter").exists())
 
     @patch("api.agent.tools.tool_manager.get_enabled_tool_limit", return_value=2)
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
@@ -1465,6 +1542,128 @@ def run(params, ctx):
         )
         self.assertIn('export PATH="$UV_INSTALL_DIR:$PATH"', call.args[1])
         self.assertIn('uv run --no-project "$SOURCE_EXEC_PATH"', call.args[1])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    def test_execute_custom_tool_adds_replay_guard_for_completed_side_effect_result(
+        self,
+        mock_service_cls,
+        _mock_bridge_url,
+        _mock_sandbox,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    next_cursor = 'signals:10'\n"
+            "    return {\n"
+            "        'status': 'success',\n"
+            "        'summary': 'Wrote rows to the worksheet.',\n"
+            "        'rows_written': 10,\n"
+            "        'remaining_work': 0,\n"
+            "        'next_cursor': next_cursor,\n"
+            "        'next_action': 'Verify worksheet counts.',\n"
+            "    }\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/sheet_result_guard.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Sheet Result Guard",
+            tool_name="custom_sheet_result_guard",
+            description="Simulate syncing worksheet rows.",
+            source_path="/tools/sheet_result_guard.py",
+            parameters_schema={"type": "object", "properties": {}},
+            timeout_seconds=123,
+        )
+
+        mock_service = MagicMock()
+        mock_service._sync_workspace_push.return_value = {"status": "ok"}
+        mock_service.run_custom_tool_command.return_value = {
+            "status": "ok",
+            "stdout": (
+                f"{CUSTOM_TOOL_RESULT_MARKER}"
+                '{"result": {"status": "success", "summary": "Wrote rows to the worksheet.", '
+                '"rows_written": 10, "remaining_work": 0, "next_action": "Verify worksheet counts."}}\n'
+            ),
+            "stderr": "",
+        }
+        mock_service_cls.return_value = mock_service
+
+        result = execute_custom_tool(self.agent, tool, {})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["result"]["do_not_repeat_manually"])
+        self.assertIn("Do not repeat manually", result["result"]["next_action"])
+        self.assertIn("Verify worksheet counts", result["result"]["next_action"])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    def test_execute_custom_tool_replaces_false_replay_guard_for_partial_batch_write(
+        self,
+        mock_service_cls,
+        _mock_bridge_url,
+        _mock_sandbox,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    return {\n"
+            "        'status': 'success',\n"
+            "        'summary': 'Synced 5 rows to the worksheet; 5 remain.',\n"
+            "        'synced_count': 5,\n"
+            "        'remaining_work': True,\n"
+            "        'do_not_repeat_manually': False,\n"
+            "        'next_action': 'Re-run with the same params to sync the next batch.',\n"
+            "    }\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/partial_sheet_result_guard.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Partial Sheet Result Guard",
+            tool_name="custom_partial_sheet_result_guard",
+            description="Simulate syncing worksheet rows in batches.",
+            source_path="/tools/partial_sheet_result_guard.py",
+            parameters_schema={"type": "object", "properties": {}},
+            timeout_seconds=123,
+        )
+
+        mock_service = MagicMock()
+        mock_service._sync_workspace_push.return_value = {"status": "ok"}
+        mock_service.run_custom_tool_command.return_value = {
+            "status": "ok",
+            "stdout": (
+                f"{CUSTOM_TOOL_RESULT_MARKER}"
+                '{"result": {"status": "success", "summary": "Synced 5 rows to the worksheet; 5 remain.", '
+                '"synced_count": 5, "remaining_work": true, "do_not_repeat_manually": false, '
+                '"next_action": "Re-run with the same params to sync the next batch."}}\n'
+            ),
+            "stderr": "",
+        }
+        mock_service_cls.return_value = mock_service
+
+        result = execute_custom_tool(self.agent, tool, {})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["result"]["do_not_repeat_manually"])
+        self.assertIn("Do not repeat manually", result["result"]["next_action"])
+        self.assertIn("sync the next batch", result["result"]["next_action"])
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)

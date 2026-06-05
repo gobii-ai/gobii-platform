@@ -64,6 +64,7 @@ class GetCreateVideoToolTests(TestCase):
         self.assertEqual(tool["type"], "function")
         func = tool["function"]
         self.assertEqual(func["name"], "create_video")
+        self.assertIn("video of yourself", func["description"])
         params = func["parameters"]
         self.assertIn("prompt", params["properties"])
         self.assertIn("file_path", params["properties"])
@@ -627,6 +628,97 @@ class ExecuteCreateVideoTests(TestCase):
         self.assertEqual(result["file"], "$[/exports/test.mp4]")
         self.assertEqual(result["model"], "sora-2")
         mock_write.assert_called_once()
+
+    @patch("api.agent.tools.create_video.set_agent_variable")
+    @patch("api.agent.tools.create_video.build_signed_filespace_download_url", return_value="https://signed/url")
+    @patch("api.agent.tools.create_video.write_bytes_to_dir")
+    @patch("api.agent.tools.create_video._log_video_generation_completion")
+    @patch("api.agent.tools.create_video._generate_video")
+    @patch("api.agent.tools.create_video.get_create_video_generation_llm_configs")
+    @patch("api.agent.tools.create_video.resolve_export_target")
+    def test_self_video_prompt_adds_visual_identity(
+        self,
+        mock_resolve,
+        mock_configs,
+        mock_generate,
+        mock_log,
+        mock_write,
+        mock_signed_url,
+        mock_set_var,
+    ):
+        mock_resolve.return_value = ("/exports/self-video.mp4", False, None)
+        config = _make_config(model="ltx/ltx-2-3-fast")
+        mock_configs.return_value = [config]
+        mock_generate.return_value = GeneratedVideoResult(
+            video_bytes=b"video-data",
+            mime_type="video/mp4",
+            response=_make_video_obj(),
+        )
+        mock_write.return_value = {
+            "status": "ok",
+            "path": "/exports/self-video.mp4",
+            "node_id": "node-123",
+        }
+
+        agent = MagicMock()
+        agent.id = "agent-123"
+        agent.name = "Motion Gobii"
+        agent.visual_description = (
+            "A precise operator with moss-green eyes, a navy chore jacket, and a calm smile."
+        )
+        result = execute_create_video(
+            agent,
+            {"prompt": "make a short video of yourself waving", "file_path": "/exports/self-video.mp4"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["self_visual_identity_included"])
+        generate_kwargs = mock_generate.call_args.kwargs
+        self.assertIn("moss-green eyes", generate_kwargs["prompt"])
+        self.assertIn("self visual media request only", generate_kwargs["prompt"])
+
+    @patch("api.agent.tools.create_video.set_agent_variable")
+    @patch("api.agent.tools.create_video.build_signed_filespace_download_url", return_value="https://signed/url")
+    @patch("api.agent.tools.create_video.write_bytes_to_dir")
+    @patch("api.agent.tools.create_video._log_video_generation_completion")
+    @patch("api.agent.tools.create_video._generate_video")
+    @patch("api.agent.tools.create_video.get_create_video_generation_llm_configs")
+    @patch("api.agent.tools.create_video.resolve_export_target")
+    def test_generic_video_prompt_does_not_add_visual_identity(
+        self,
+        mock_resolve,
+        mock_configs,
+        mock_generate,
+        mock_log,
+        mock_write,
+        mock_signed_url,
+        mock_set_var,
+    ):
+        mock_resolve.return_value = ("/exports/launch.mp4", False, None)
+        config = _make_config(model="ltx/ltx-2-3-fast")
+        mock_configs.return_value = [config]
+        mock_generate.return_value = GeneratedVideoResult(
+            video_bytes=b"video-data",
+            mime_type="video/mp4",
+            response=_make_video_obj(),
+        )
+        mock_write.return_value = {"status": "ok", "path": "/exports/launch.mp4", "node_id": "node-123"}
+
+        agent = MagicMock()
+        agent.id = "agent-123"
+        agent.name = "Motion Gobii"
+        agent.visual_description = (
+            "A precise operator with moss-green eyes, a navy chore jacket, and a calm smile."
+        )
+        result = execute_create_video(
+            agent,
+            {"prompt": "a product-launch animation with clean typography", "file_path": "/exports/launch.mp4"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["self_visual_identity_included"])
+        generate_kwargs = mock_generate.call_args.kwargs
+        self.assertNotIn("moss-green eyes", generate_kwargs["prompt"])
 
     @patch("api.agent.tools.create_video._log_video_generation_completion")
     @patch("api.agent.tools.create_video._generate_video")

@@ -137,10 +137,34 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertTrue(ok, summary)
 
+    def test_hierarchical_report_shape_accepts_bold_labeled_sections(self):
+        ok, summary = _hierarchical_report_shape(
+            (
+                "## Northstar Robotics\n\n"
+                "**Series B Raised ($42M)** - Northstar closed a funding round to expand deployments. "
+                "[source](https://news.example.test/northstar-series-b)\n\n"
+                "**Atlas Routing System Launch** - Atlas coordinates warehouse robots across vendors. "
+                "[source](https://northstar.example.test/blog/atlas-launch)\n\n"
+                "**Bottom line:** Northstar has fresh funding and a concrete product proof point."
+            ),
+            source_urls=[
+                "https://news.example.test/northstar-series-b",
+                "https://northstar.example.test/blog/atlas-launch",
+            ],
+            min_source_count=2,
+            min_chars=150,
+            max_chars=1000,
+        )
+
+        self.assertTrue(ok, summary)
+
     def test_sqlite_tool_result_sourced_answer_rejects_progress_before_final(self):
         scenario, recorded = SqliteToolResultScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
-        messages = [SimpleNamespace(body="I have the results. Now I will query SQLite."), SimpleNamespace(body="Final: https://api.example.test/products/caremesh.json HIPAA")]
+        messages = [
+            SimpleNamespace(body="I have all four sources. Let me dedupe and rank the claims in one aggregate query."),
+            SimpleNamespace(body="Final: https://api.example.test/products/caremesh.json HIPAA"),
+        ]
         with patch("api.evals.scenarios.sqlite_tool_results._outbound_messages_after", return_value=messages):
             passed = scenario._record_sourced_answer("run", agent_id="agent", after=None, task_name="verify_sourced_answer", source_urls=["https://api.example.test/products/caremesh.json"], required_terms=["HIPAA"], min_sources=1)
         self.assertFalse(passed)
@@ -331,11 +355,17 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
     def test_batch_work_synthetic_tools_surface_remaining_work_guidance(self):
         outreach_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["eval_send_outreach_batch"]["description"]
+        candidate_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["eval_verify_candidate_batch"]["description"]
         schedule_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["eval_prepare_next_batch"]["description"]
 
         self.assertIn("remaining_work", outreach_description)
         self.assertIn("set a resume schedule", outreach_description)
+        self.assertIn("remaining_work", candidate_description)
+        self.assertIn("set a resume schedule", candidate_description)
+        self.assertIn("report verified partial records", candidate_description)
+        self.assertIn("before update_plan", candidate_description)
         self.assertIn("only makes sense when a schedule exists", schedule_description)
+        self.assertIn("set a resume schedule before verification reads", schedule_description)
 
     def test_fresh_full_tool_result_wrapper_discourages_redundant_sqlite_rereads(self):
         wrapped = _wrap_as_sqlite_result('{"answer": "ready"}', 19)
@@ -568,6 +598,108 @@ class EffortCalibrationHarnessTests(TestCase):
         task = run.tasks.get(name="verify_future_work_preserved")
         self.assertEqual(task.status, EvalRunTask.Status.FAILED)
         self.assertIn("schedule is empty", task.observed_summary)
+
+    def test_future_work_preserved_accepts_sqlite_schedule_mutation(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="future_work_sqlite_schedule_user")
+        browser_agent = BrowserUseAgent.objects.create(
+            user=user,
+            name="Future Work SQLite Schedule Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            name="Future Work SQLite Schedule Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+            schedule="",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug="future_work_sqlite_schedule_test",
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        EvalRunTask.objects.create(run=run, name="verify_future_work_preserved", sequence=1)
+        work_step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=work_step,
+            tool_name="eval_prepare_next_batch",
+            tool_params={},
+            result='{"status":"ok","remaining_work":75,"next_cursor":"lead-025"}',
+        )
+        schedule_step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=schedule_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": "UPDATE __agent_config SET schedule = '0 9 * * *' WHERE id = 1;"
+            },
+            status="complete",
+            result='{"status":"ok"}',
+        )
+
+        passed = EffortCalibrationScenario()._record_future_work_preserved(
+            str(run.id),
+            agent_id=str(agent.id),
+            after=agent.created_at,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_prepare_next_batch"},
+        )
+
+        self.assertTrue(passed)
+        task = run.tasks.get(name="verify_future_work_preserved")
+        self.assertEqual(task.status, EvalRunTask.Status.PASSED)
+        self.assertIn("SQLite resume schedule mutation", task.observed_summary)
+
+    def test_single_reply_check_can_bound_before_scheduled_continuation(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="partial_report_bound_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Partial Report Bound Browser")
+        agent = PersistentAgent.objects.create(
+            name="Partial Report Bound Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug=EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        EvalRunTask.objects.create(run=run, name="verify_partial_report", sequence=1)
+
+        first_result = execute_send_chat_message(
+            agent,
+            {
+                "body": "Kathleen, Rogelio, and Chris were verified. Remaining work is preserved.",
+                "will_continue_work": False,
+            },
+        )
+        execute_send_chat_message(
+            agent,
+            {
+                "body": "Scheduled continuation found the same source limitation.",
+                "will_continue_work": False,
+            },
+        )
+        first_message = PersistentAgentMessage.objects.get(id=first_result["message_id"])
+
+        passed = EffortCalibrationScenario()._record_single_concise_reply(
+            str(run.id),
+            agent_id=str(agent.id),
+            after=agent.created_at,
+            until=first_message.timestamp,
+            task_name="verify_partial_report",
+            max_chars=2500,
+            required_snippets=("Kathleen", "Rogelio", "Chris"),
+        )
+
+        self.assertTrue(passed)
+        task = run.tasks.get(name="verify_partial_report")
+        self.assertEqual(task.status, EvalRunTask.Status.PASSED)
 
     def test_send_chat_rejects_leaked_thinking_tag(self):
         User = get_user_model()
@@ -816,6 +948,8 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("pollution/air-quality monitors", system_prompt)
         self.assertIn("at least six-hour checks", system_prompt)
         self.assertIn("Do not use sqlite_batch to reread __tool_results", system_prompt)
+        self.assertIn("Do not convert preview snippets into hand-written CTE/VALUES/UNION rows", system_prompt)
+        self.assertIn("If the user's requested task is itself to ask, collect, confirm, or scope blocking details", system_prompt)
         self.assertIn("compact Sources section", system_prompt)
         self.assertIn("cite at least two distinct source URLs", system_prompt)
         self.assertIn("Use at most one web search query", system_prompt)

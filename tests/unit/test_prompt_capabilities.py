@@ -202,6 +202,25 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Avoid 2FA/MFA unless the user explicitly asks for it", contents)
         self.assertIn("those flows may hit system limitations", contents)
 
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_does_not_globally_include_visual_description(
+        self,
+        _mock_comms,
+        _mock_steps,
+    ):
+        self.agent.visual_description = (
+            "A rare visual identity with ruby glasses, silver braids, and a cobalt scarf."
+        )
+        self.agent.save(update_fields=["visual_description"])
+
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertNotIn("ruby glasses", contents)
+        self.assertNotIn("silver braids", contents)
+        self.assertNotIn("cobalt scarf", contents)
+
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
@@ -215,6 +234,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         contents = "\n".join(message["content"] for message in context)
 
         self.assertIn("Use enabled `create_custom_tool` directly", contents)
+        self.assertIn("explicit create-custom-tool request -> create_custom_tool first", contents)
         self.assertNotIn("System Skill: Custom Tool Development", contents)
         self.assertNotIn("Current custom-tool state:", contents)
         self.assertNotIn("PHILOSOPHY:", contents)
@@ -262,6 +282,26 @@ class AgentCapabilitiesPromptTests(TestCase):
             "Need to send the user your answer, summary, or final report → will_continue_work=true",
             contents,
         )
+
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_includes_bounded_fetch_and_partial_report_guidance(
+        self,
+        _mock_comms,
+        _mock_steps,
+    ):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn("scheduled exact feed/API briefing -> http_request then send concise sourced report next", contents)
+        self.assertIn("recurring digest/report setup without source/details -> sqlite_batch charter+schedule first", contents)
+        self.assertIn("send the briefing from the tool result immediately instead of querying __tool_results", contents)
+        self.assertIn("never with update_plan, SQLite staging, or plain text", contents)
+        self.assertIn("Do not copy a small exact scheduled feed/API payload into SQLite", contents)
+        self.assertIn("call the matching enabled eval tool directly and do not use search_tools", contents)
+        self.assertIn("send the verified partial records and limitation first", contents)
+        self.assertIn("Do not use update_plan for partial-result preservation or resume scheduling", contents)
+        self.assertIn("do not use search_tools, SQLite preflight reads, or prior __tool_results checks", contents)
 
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
@@ -313,6 +353,7 @@ class AgentCapabilitiesPromptTests(TestCase):
     def test_sandbox_summary_mentions_custom_tool_discovery_for_bulk_work(self, _mock_sandbox):
         summary = _get_sandbox_prompt_summary(self.agent)
 
+        self.assertIn("explicitly asks you to create a custom tool", summary)
         self.assertIn("Use enabled `create_custom_tool` directly", summary)
         self.assertIn("repetitive, paginated, bulk, deterministic", summary)
         self.assertIn("MCP/API fan-out", summary)

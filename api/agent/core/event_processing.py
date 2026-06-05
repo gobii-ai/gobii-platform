@@ -160,6 +160,7 @@ from ..tools.agent_variables import (
 from ..tools.file_export_helpers import resolve_export_target
 from ..files.filespace_service import _normalize_write_path
 from ..comms.human_input_requests import (
+    MAX_OPTION_COUNT,
     attach_originating_step_from_result,
 )
 from ...models import (
@@ -258,7 +259,24 @@ PLANNING_EXECUTE_NOW_RE = re.compile(
     r"\b(?:do not ask questions|don't ask questions|just execute(?: now)?|execute now|just run(?: it| this)?|run (?:it|this) now|start (?:it|this|the task) now|go ahead and (?:run|execute|start|do)|just do (?:it|this|the task)|do (?:it|this|the task) now)\b",
     re.IGNORECASE,
 )
+PLANNING_CLEAR_ONE_OFF_EXECUTION_RE = re.compile(
+    r"\b(?:check|research|look up|lookup|find|fetch|get|search)\b.{0,140}"
+    r"\b(?:send|give|tell)\s+me\b.{0,80}\b(?:answer|report|summary|result|results)\b|"
+    r"\b(?:send|give|tell)\s+me\s+the\s+(?:answer|report|summary|result|results)\b",
+    re.IGNORECASE,
+)
 PLANNING_READY_WITHOUT_GATE_RE = re.compile(r"\b(?:plan(?:'s| is) clear|scope(?:'s| is) clear|task(?:'s| is) clear|lock it in|get (?:this )?rolling)\b", re.IGNORECASE)
+SHEETS_DISCOVERY_USER_LIST_RE = re.compile(
+    r"\b(?:search|find|list|which|what|show|tell)\b.{0,120}\b(?:google\s+sheet|spreadsheet|sheet)s?\b"
+    r".{0,160}\b(?:access|matching|named|called|available)\b|"
+    r"\b(?:access|matching|available)\b.{0,120}\b(?:google\s+sheet|spreadsheet|sheet)s?\b",
+    re.IGNORECASE,
+)
+SHEETS_DISCOVERY_CLARIFICATION_RE = re.compile(
+    r"\b(?:would you like|do you want|should i)\b.{0,180}"
+    r"\b(?:read|open|inspect|take another action|another action|do anything else)\b",
+    re.IGNORECASE,
+)
 # Canonical phrase the agent should use to signal continuation.
 # Prompts tell the agent to include this exact phrase when it has more work.
 CANONICAL_CONTINUATION_PHRASE = "CONTINUE_WORK_SIGNAL"
@@ -321,6 +339,28 @@ def _looks_like_blocking_human_input_request(message_text: str) -> bool:
     return bool("?" in normalized and any(pattern.search(normalized) for pattern in BLOCKING_HUMAN_INPUT_PATTERNS))
 
 
+def _looks_like_planning_chat_question(message_text: str) -> bool:
+    tableless_text = "\n".join(
+        line
+        for line in (message_text or "").splitlines()
+        if not line.lstrip().startswith("|")
+    )
+    if "?" not in tableless_text:
+        return False
+    if len(message_text or "") > 800 and (
+        "##" in message_text
+        or "###" in message_text
+        or "Sources" in message_text
+        or "|" in message_text
+    ):
+        return False
+
+    normalized = " ".join(tableless_text.split())
+    if OPTIONAL_NON_BLOCKING_QUESTION_RE.search(normalized):
+        return False
+    return True
+
+
 def _extract_human_input_question(message_text: str) -> str:
     for raw_line in (message_text or "").splitlines():
         line = MARKDOWN_PUNCTUATION_RE.sub("", raw_line).strip(" -\t")
@@ -331,30 +371,70 @@ def _extract_human_input_question(message_text: str) -> str:
     return _truncate_text_bytes(fallback, 500).strip()
 
 
+def _extract_human_input_questions(message_text: str, *, max_questions: int = 3) -> list[str]:
+    questions: list[str] = []
+    for raw_line in (message_text or "").splitlines():
+        if "?" not in raw_line:
+            continue
+        line = MARKDOWN_PUNCTUATION_RE.sub("", raw_line).strip(" -\t")
+        line = re.sub(r"^\s*(?:[-*]\s*)?(?:\d+[\).\s]+)?", "", line).strip()
+        question_prefix = line.split("?", 1)[0].strip()
+        if not question_prefix:
+            continue
+        question = _truncate_text_bytes(f"{question_prefix}?", 500).strip()
+        if question and question not in questions:
+            questions.append(question)
+        if len(questions) >= max_questions:
+            break
+
+    if questions:
+        return questions
+    fallback = _extract_human_input_question(message_text)
+    return [fallback] if fallback else []
+
+
+def _default_planning_human_input_options() -> list[dict[str, str]]:
+    return [
+        {
+            "title": "I'll provide details",
+            "description": "Share the missing planning detail before the agent continues.",
+        },
+        {
+            "title": "Use a default",
+            "description": "Let the agent choose a reasonable default and continue.",
+        },
+        {
+            "title": "Other",
+            "description": "Explain a different preference or constraint.",
+        },
+    ]
+
+
 def _request_human_input_params_from_blocking_chat_question(
     agent: PersistentAgent,
     message_text: str,
     original_tool_params: Dict[str, Any],
 ) -> Dict[str, Any]:
     params = {
-        "question": _extract_human_input_question(message_text),
         "will_continue_work": _coerce_optional_bool(original_tool_params.get("will_continue_work")) is True,
     }
     if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
-        params["options"] = [
-            {
-                "label": "I'll provide details",
-                "description": "Share the missing planning detail before the agent continues.",
-            },
-            {
-                "label": "Use a default",
-                "description": "Let the agent choose a reasonable default and continue.",
-            },
-            {
-                "label": "Other",
-                "description": "Explain a different preference or constraint.",
-            },
-        ]
+        options = _default_planning_human_input_options()
+        questions = _extract_human_input_questions(message_text)
+        if len(questions) > 1:
+            params["requests"] = [
+                {
+                    "question": question,
+                    "options": options,
+                }
+                for question in questions
+            ]
+        else:
+            params["question"] = questions[0] if questions else _extract_human_input_question(message_text)
+            params["options"] = options
+        return params
+
+    params["question"] = _extract_human_input_question(message_text)
     return params
 
 
@@ -477,6 +557,55 @@ def _request_human_input_question_texts(tool_params: dict[str, Any]) -> list[str
         elif isinstance(raw_requests, dict):
             texts.append(str(raw_requests.get("question") or ""))
     return [text for text in texts if text.strip()]
+
+
+def _clamp_human_input_options(options: Any) -> Any:
+    if not isinstance(options, list) or len(options) <= MAX_OPTION_COUNT:
+        return options
+
+    trimmed = list(options[:MAX_OPTION_COUNT])
+    other_option = next(
+        (
+            option
+            for option in options
+            if isinstance(option, dict)
+            and "other" in str(option.get("title") or option.get("label") or "").lower()
+        ),
+        None,
+    )
+    if other_option and not any(
+        isinstance(option, dict)
+        and "other" in str(option.get("title") or option.get("label") or "").lower()
+        for option in trimmed
+    ):
+        trimmed[-1] = other_option
+    return trimmed
+
+
+def _clamp_planning_human_input_options(tool_params: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(tool_params)
+    updated["options"] = _clamp_human_input_options(updated.get("options"))
+    for key in ("requests", "questions"):
+        raw_requests = updated.get(key)
+        if isinstance(raw_requests, list):
+            clamped_requests = []
+            changed = False
+            for request in raw_requests:
+                if isinstance(request, dict):
+                    clamped_request = dict(request)
+                    clamped_request["options"] = _clamp_human_input_options(clamped_request.get("options"))
+                    changed = changed or clamped_request != request
+                    clamped_requests.append(clamped_request)
+                else:
+                    clamped_requests.append(request)
+            if changed:
+                updated[key] = clamped_requests
+        elif isinstance(raw_requests, dict):
+            clamped_request = dict(raw_requests)
+            clamped_request["options"] = _clamp_human_input_options(clamped_request.get("options"))
+            if clamped_request != raw_requests:
+                updated[key] = clamped_request
+    return updated
 
 
 def _should_reject_defaultable_setup_question(agent: PersistentAgent, question_text: str) -> bool:
@@ -774,10 +903,12 @@ STOP_HINT_PHRASES = (
     "don't follow up",
     "do not follow up",
     "won't follow up",
+    "will not follow up",
     "i won't follow up",
     "i will not follow up",
     "i'll wait",
     "i will wait",
+    "stand by",
     "standing by",
     "i'll be right here",
     "i will be right here",
@@ -2173,7 +2304,32 @@ def _should_skip_planning_execute_tool_search(agent: PersistentAgent, tool_name:
     if any(call.tool_name not in {"send_chat_message", "sleep_until_next_trigger"} for call in prepared_calls):
         return False
     latest_user_text = " ".join(_latest_inbound_message_text(agent).split())
-    return bool(latest_user_text and PLANNING_EXECUTE_NOW_RE.search(latest_user_text))
+    return bool(
+        latest_user_text
+        and (
+            PLANNING_EXECUTE_NOW_RE.search(latest_user_text)
+            or PLANNING_CLEAR_ONE_OFF_EXECUTION_RE.search(latest_user_text)
+        )
+    )
+
+
+def _prioritize_end_planning_tool_calls(agent: PersistentAgent, tool_calls: list[Any]) -> list[Any]:
+    if agent.planning_state != PersistentAgent.PlanningState.PLANNING:
+        return tool_calls
+
+    end_planning_calls = []
+    other_calls = []
+    for call in tool_calls:
+        if _get_tool_call_name(call) == "end_planning":
+            end_planning_calls.append(call)
+        else:
+            other_calls.append(call)
+
+    if not end_planning_calls:
+        return tool_calls
+
+    # `end_planning` is the boundary that makes later user-visible delivery or work legal.
+    return end_planning_calls + other_calls
 
 
 def _message_tool_body_from_params(tool_name: str, tool_params: Dict[str, Any]) -> str:
@@ -2183,6 +2339,8 @@ def _message_tool_body_from_params(tool_name: str, tool_params: Dict[str, Any]) 
 
 def _message_tool_has_progress_intent(tool_name: str, tool_params: Dict[str, Any]) -> bool:
     if tool_name not in MESSAGE_TOOL_NAMES:
+        return False
+    if _has_stop_hint_signal(_message_tool_body_from_params(tool_name, tool_params)):
         return False
     explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
     if explicit_continue is True:
@@ -2302,6 +2460,25 @@ def _current_task_boundary(agent: PersistentAgent) -> Optional[Any]:
     return max(candidates) if candidates else None
 
 
+def _current_task_is_scheduled_trigger(agent: PersistentAgent) -> bool:
+    latest_cron = (
+        PersistentAgentStep.objects.filter(agent=agent, cron_trigger__isnull=False)
+        .order_by("-created_at")
+        .values_list("created_at", flat=True)
+        .first()
+    )
+    if latest_cron is None:
+        return False
+
+    latest_inbound = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+        .order_by("-timestamp", "-seq")
+        .values_list("timestamp", flat=True)
+        .first()
+    )
+    return latest_inbound is None or latest_cron >= latest_inbound
+
+
 def _find_successful_duplicate_http_request(
     agent: PersistentAgent,
     tool_params: Dict[str, Any],
@@ -2332,6 +2509,152 @@ def _find_successful_duplicate_http_request(
         ):
             return prior_call
     return None
+
+
+def _http_result_has_drive_spreadsheet_files(result_text: str) -> bool:
+    try:
+        parsed = json.loads(result_text or "{}")
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(parsed, dict) or not _tool_result_is_success(parsed):
+        return False
+    content = parsed.get("content")
+    if not isinstance(content, dict):
+        return False
+    files = content.get("files")
+    if not isinstance(files, list) or not files:
+        return False
+    return any(
+        isinstance(item, dict)
+        and str(item.get("id") or "").strip()
+        and str(item.get("name") or "").strip()
+        and "spreadsheet" in str(item.get("mimeType") or "").lower()
+        for item in files
+    )
+
+
+def _has_recent_google_drive_spreadsheet_discovery(
+    agent: PersistentAgent,
+    *,
+    eval_run_id: Optional[str],
+) -> bool:
+    queryset = PersistentAgentToolCall.objects.filter(
+        step__agent=agent,
+        tool_name="http_request",
+    ).exclude(status="pending")
+    if eval_run_id:
+        queryset = queryset.filter(step__eval_run_id=eval_run_id)
+    boundary = _current_task_boundary(agent)
+    if boundary is not None:
+        queryset = queryset.filter(step__created_at__gte=boundary)
+    elif not eval_run_id:
+        return False
+
+    for call in queryset.order_by("-step__created_at")[:8]:
+        params = call.tool_params or {}
+        url = str(params.get("url") or "").lower()
+        if "www.googleapis.com/drive/v3/files" not in url:
+            continue
+        if _http_result_has_drive_spreadsheet_files(call.result):
+            return True
+    return False
+
+
+def _should_skip_sheets_discovery_followup_question(
+    agent: PersistentAgent,
+    tool_name: str,
+    tool_params: Dict[str, Any],
+    *,
+    eval_run_id: Optional[str],
+) -> bool:
+    if tool_name != "request_human_input":
+        return False
+    if not SHEETS_DISCOVERY_USER_LIST_RE.search(_latest_inbound_message_text(agent)):
+        return False
+    question_text = " ".join(_request_human_input_question_texts(tool_params))
+    if not SHEETS_DISCOVERY_CLARIFICATION_RE.search(question_text):
+        return False
+    return _has_recent_google_drive_spreadsheet_discovery(agent, eval_run_id=eval_run_id)
+
+
+def _record_sheets_discovery_followup_skip(
+    agent: PersistentAgent,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Skipped unnecessary Google Drive spreadsheet follow-up question. The user asked which matching "
+            "spreadsheets are accessible and Drive discovery already returned spreadsheet files; send the matching "
+            "spreadsheet names, IDs, and links from the prior http_request result instead of asking to read or act."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
+
+
+def _sqlite_batch_reads_tool_results(tool_params: Dict[str, Any]) -> bool:
+    if not isinstance(tool_params, dict):
+        return False
+    sql = str(tool_params.get("sql") or "")
+    return bool(re.search(r"\b__tool_results\b", sql, flags=re.IGNORECASE))
+
+
+def _small_successful_http_result_for_current_scheduled_task(
+    agent: PersistentAgent,
+    *,
+    eval_run_id: Optional[str],
+) -> Optional[PersistentAgentToolCall]:
+    if not _current_task_is_scheduled_trigger(agent):
+        return None
+
+    boundary = _current_task_boundary(agent)
+    if boundary is None:
+        return None
+
+    queryset = PersistentAgentToolCall.objects.filter(
+        step__agent=agent,
+        step__created_at__gte=boundary,
+        tool_name="http_request",
+    ).exclude(status="pending")
+    if eval_run_id:
+        queryset = queryset.filter(step__eval_run_id=eval_run_id)
+
+    successful_calls: list[PersistentAgentToolCall] = []
+    for call in queryset.order_by("step__created_at")[:4]:
+        result_text = call.result or ""
+        if not _tool_call_result_text_is_success(result_text):
+            continue
+        if len(result_text.encode("utf-8")) > 12000:
+            return None
+        successful_calls.append(call)
+
+    if len(successful_calls) != 1:
+        return None
+    return successful_calls[0]
+
+
+def _record_scheduled_tool_result_reread_skip(
+    agent: PersistentAgent,
+    prior_call: PersistentAgentToolCall,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Skipped sqlite_batch __tool_results reread: this scheduled exact feed/API result already succeeded "
+            f"in step {prior_call.step_id}. Use that small prior tool result directly and send the concise "
+            "scheduled briefing next; do not retry sqlite_batch, update_plan, files, or charts just to parse it."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
 
 
 def _record_duplicate_http_request_skip(
@@ -2535,6 +2858,7 @@ def _prepare_tool_batch(
     attach_completion: Any,
     attach_prompt_archive: Any,
 ) -> _PreparedToolBatch:
+    tool_calls = _prioritize_end_planning_tool_calls(agent, tool_calls)
     prepared_calls: list[_PreparedToolExecution] = []
     followup_required = False
     all_calls_sleep = not has_non_sleep_calls
@@ -2705,7 +3029,10 @@ def _prepare_tool_batch(
 
             if tool_name == "send_chat_message" and not batch_has_human_input_request:
                 message_body = str(tool_params.get("body") or "")
-                if _looks_like_blocking_human_input_request(message_body):
+                if _looks_like_blocking_human_input_request(message_body) or (
+                    agent.planning_state == PersistentAgent.PlanningState.PLANNING
+                    and _looks_like_planning_chat_question(message_body)
+                ):
                     tool_name = "request_human_input"
                     tool_params = _request_human_input_params_from_blocking_chat_question(
                         agent,
@@ -2736,6 +3063,25 @@ def _prepare_tool_batch(
                     break
 
             if tool_name == "request_human_input":
+                if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
+                    tool_params = _clamp_planning_human_input_options(tool_params)
+                if _should_skip_sheets_discovery_followup_question(
+                    agent,
+                    tool_name,
+                    tool_params,
+                    eval_run_id=eval_run_id,
+                ):
+                    _record_sheets_discovery_followup_skip(
+                        agent,
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
+                    logger.info(
+                        "Agent %s: skipped unnecessary Google Sheets discovery follow-up question.",
+                        agent.id,
+                    )
+                    followup_required = True
+                    continue
                 if any(
                     _should_reject_defaultable_setup_question(agent, question_text)
                     for question_text in _request_human_input_question_texts(tool_params)
@@ -2833,6 +3179,17 @@ def _prepare_tool_batch(
                     )
                     if found_phrase:
                         tool_params[body_key] = cleaned_body
+                    if _has_stop_hint_signal(cleaned_body) and (
+                        found_phrase or explicit_continue is True
+                    ):
+                        tool_params["will_continue_work"] = False
+                        found_phrase = False
+                        logger.info(
+                            "Agent %s: forced will_continue_work=false for %s because message body asks to wait/avoid follow-up.",
+                            agent.id,
+                            tool_name,
+                        )
+                    elif found_phrase:
                         tool_params["will_continue_work"] = True
                     elif (
                         explicit_continue is None
@@ -2891,6 +3248,26 @@ def _prepare_tool_batch(
                         "Agent %s: skipped duplicate http_request; prior_step_id=%s",
                         agent.id,
                         duplicate_call.step_id,
+                    )
+                    followup_required = True
+                    continue
+
+            if tool_name == "sqlite_batch" and _sqlite_batch_reads_tool_results(tool_params):
+                scheduled_http_result = _small_successful_http_result_for_current_scheduled_task(
+                    agent,
+                    eval_run_id=eval_run_id,
+                )
+                if scheduled_http_result is not None:
+                    _record_scheduled_tool_result_reread_skip(
+                        agent,
+                        scheduled_http_result,
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
+                    logger.info(
+                        "Agent %s: skipped scheduled sqlite_batch tool-result reread; prior_step_id=%s",
+                        agent.id,
+                        scheduled_http_result.step_id,
                     )
                     followup_required = True
                     continue
