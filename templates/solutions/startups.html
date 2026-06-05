@@ -12,7 +12,7 @@
     overflow: hidden;
     isolation: isolate;
     background:
-      linear-gradient(135deg, rgba(241, 245, 249, 0.95) 0%, rgba(255, 255, 255, 0.96) 42%, rgba(236, 253, 245, 0.76) 100%);
+      linear-gradient(135deg, rgba(236, 253, 245, 0.92) 0%, rgba(255, 255, 255, 0.98) 44%, rgba(238, 242, 255, 0.78) 100%);
   }
 
   .startups-panel::before {
@@ -21,8 +21,8 @@
     inset: 0;
     pointer-events: none;
     background-image:
-      linear-gradient(rgba(15, 23, 42, 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+      linear-gradient(rgba(16, 185, 129, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79, 70, 229, 0.07) 1px, transparent 1px);
     background-size: 48px 48px;
     mask-image: linear-gradient(180deg, rgba(0,0,0,0.75) 0%, transparent 72%);
     z-index: 1;
@@ -48,8 +48,8 @@
 
   .startup-function-grid {
     background-image:
-      linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+      linear-gradient(rgba(16, 185, 129, 0.12) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79, 70, 229, 0.08) 1px, transparent 1px);
     background-size: 32px 32px;
   }
 </style>
@@ -159,7 +159,7 @@
 </section>
 
 <!-- Agent Bench Section -->
-<section id="startup-agent-bench" class="startup-function-grid bg-slate-50 py-16 lg:py-20 scroll-mt-20">
+<section id="startup-agent-bench" class="startup-function-grid bg-emerald-50 py-16 lg:py-20 scroll-mt-20">
   <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
     <div class="max-w-3xl">
       <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Your first operating bench</p>
@@ -271,7 +271,7 @@
       </div>
 
       <div class="startup-agent-card rounded-2xl border border-slate-200 bg-white p-6">
-        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-fuchsia-100 text-fuchsia-700">
           <i aria-hidden="true" data-lucide="clipboard-list" class="h-6 w-6"></i>
         </div>
         <h3 class="mt-5 text-xl font-semibold text-slate-950">Founder Chief of Staff</h3>
@@ -349,7 +349,7 @@
       </div>
     </div>
 
-    <div class="rounded-3xl border border-slate-200 bg-slate-50 p-3 shadow-xl shadow-slate-200/70">
+    <div class="rounded-3xl border border-indigo-100 bg-indigo-50 p-3 shadow-xl shadow-slate-200/70">
       <img
         src="{% static 'images/blog/newsletters/newsletter-2026-03-17-one-click-integrations-for-your-agents-hero.png' %}"
         alt="Gobii integration picker showing startup tools including Brex, Slack, HubSpot, Apollo, and Google Sheets"
@@ -364,7 +364,7 @@
 </section>
 
 <!-- Workflow Spotlights Section -->
-<section class="bg-slate-50 py-16 lg:py-20">
+<section class="bg-indigo-50 py-16 lg:py-20">
   <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
     <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
       <div>
@@ -390,7 +390,7 @@
         <p class="mt-5 text-sm leading-6 text-slate-700">
           An agent watches revenue, failed payments, vendor spend, renewals, and card anomalies, then sends a weekly cash-impact brief to Slack.
         </p>
-        <div class="mt-5 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+        <div class="mt-5 rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm leading-6 text-slate-700">
           Output: flagged changes, owner notes, renewal dates, and the numbers founders should review before the next team check-in.
         </div>
       </div>
@@ -408,7 +408,7 @@
         <p class="mt-5 text-sm leading-6 text-slate-700">
           A growth agent researches accounts, adds fit notes to a sheet, drafts outreach, and asks the founder for approval before anything goes out.
         </p>
-        <div class="mt-5 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+        <div class="mt-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm leading-6 text-slate-700">
           Output: ranked prospects, contact context, suggested messaging, and a clean approval loop before founder-controlled outreach.
         </div>
       </div>
@@ -426,7 +426,7 @@
         <p class="mt-5 text-sm leading-6 text-slate-700">
           An agent monitors competitor launches, customer feedback, pricing pages, and hiring changes so founders get the signal without doing the rounds manually.
         </p>
-        <div class="mt-5 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+        <div class="mt-5 rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm leading-6 text-slate-700">
           Output: alerts, brief summaries, source links, and suggested follow-ups for product, sales, investor updates, or customer replies.
         </div>
       </div>
@@ -516,7 +516,7 @@
 </section>
 
 <!-- Benefits Section -->
-<section class="bg-slate-50 py-16 lg:py-20">
+<section class="bg-amber-50 py-16 lg:py-20">
   <div class="mx-auto grid max-w-7xl gap-12 px-6 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:px-12 lg:items-center">
     <div>
       <h2 class="text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Why early-stage teams choose Gobii</h2>
@@ -635,7 +635,7 @@
         <input type="hidden" name="source_page" value="startups_final_cta" />
         <input type="hidden" name="trial_onboarding" value="1" />
         <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-        <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-8 py-4 text-sm font-semibold text-slate-950 transition hover:bg-slate-100">
+        <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-8 py-4 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">
           {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
           <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
         </button>
