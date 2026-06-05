@@ -3232,7 +3232,7 @@ class ComparisonsIndexView(TemplateView):
         "agent operations, security, governance, and production readiness."
     )
     social_image_path = "images/gobii_fish_social_1280x640.png"
-    last_modified_date = "2026-06-03"
+    last_modified_date = "2026-06-04"
 
     def dispatch(self, request, *args, **kwargs):
         if not settings.GOBII_PROPRIETARY_MODE:
@@ -3335,6 +3335,12 @@ class ComparisonDetailView(TemplateView):
     template_name = "comparisons/detail.html"
     social_image_path = "images/gobii_fish_social_1280x640.png"
 
+    def get_template_names(self):
+        comparison = getattr(self, "comparison", None)
+        if comparison:
+            return [comparison.get("template_name", self.template_name)]
+        return [self.template_name]
+
     def dispatch(self, request, *args, **kwargs):
         if not settings.GOBII_PROPRIETARY_MODE:
             raise Http404()
@@ -3387,12 +3393,23 @@ class ComparisonDetailView(TemplateView):
                     "name": "Gobii",
                     "applicationCategory": "AI agent platform",
                     "url": home_url,
+                    "description": (
+                        "AI coworker platform for persistent browser-native business work."
+                    ),
                 },
                 {
                     "@type": "SoftwareApplication",
                     "name": comparison["competitor_name"],
-                    "applicationCategory": "AI agent platform",
+                    "applicationCategory": comparison.get(
+                        "competitor_application_category",
+                        "AI agent platform",
+                    ),
                     "url": comparison["competitor_url"],
+                    **(
+                        {"description": comparison["competitor_schema_description"]}
+                        if "competitor_schema_description" in comparison
+                        else {}
+                    ),
                 },
             ],
         }
@@ -3431,7 +3448,9 @@ class ComparisonDetailView(TemplateView):
                 "comparison_seo_title": comparison["seo_title"],
                 "comparison_seo_description": comparison["seo_description"],
                 "comparison_social_image_url": social_image_url,
-                "comparison_social_image_alt": "Gobii and OpenClaw AI agent platform comparison",
+                "comparison_social_image_alt": (
+                    f"Gobii and {comparison['competitor_name']} AI agent platform comparison"
+                ),
                 "comparison_structured_data_json": html_safe_json_dumps(structured_data),
                 "comparison_breadcrumb_json": html_safe_json_dumps(breadcrumb_data),
                 "canonical_url": canonical_url,
