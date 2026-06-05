@@ -351,7 +351,8 @@ def _record_response_tool() -> dict[str, Any]:
             "name": "record_meta_gobii_response",
             "description": (
                 "Record the user-facing Meta Gobii response for quality checks. "
-                "The response should be concise and should not duplicate the same plan twice."
+                "The response should be concise and should not duplicate the same plan, approval ask, "
+                "no-schedule note, or short line twice."
             ),
             "parameters": {
                 "type": "object",
@@ -866,7 +867,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "monitoring', keep both the domain and job in the single role, e.g. Sales Lead Monitoring. "
                     "Do not replace a user domain word with a loose synonym in role names; for example, "
                     "'recruiting Gobii ... candidate responses' should keep both words in a role like "
-                    "'Recruiting Candidate Response Coordinator'. "
+                    "'Recruiting Candidate Response Coordinator', and 'operations reporting Gobii ... monthly "
+                    "board packet' should keep both words in a role like 'Operations Board Reporting'. "
                     "For broad operations involving multiple Gobiis, require a higher-level confirmation summary "
                     "before planning mutations as executable. "
                     "Schedule policy: do not place schedules in scope for one-off, demo, setup-only, trial, "
@@ -989,6 +991,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "For initial team-management requests, thoughtfully propose the team first: role names, "
                     "responsibilities, graph links, and initial briefings. Ask for approval once before any "
                     "mutating tool calls. Do not repeat the same plan, table, or final answer twice. "
+                    "Use one consolidated closing section for approval and any no-schedule note; do not repeat "
+                    "the same approval ask or no-schedule sentence again as a trailing bullet or paragraph. "
                     "Do not mention internal recorded plans, initial assessments, re-reading the request, or "
                     "the exact phrase 'the user asks' in response_text; response_text must be only the concise "
                     "final user-facing proposal. "
@@ -1012,7 +1016,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "For singular role requests, still preserve the user's domain words in the role name, "
                     "responsibility, and briefing; for example, a recruiting Gobii for candidate responses should "
                     "be named like 'Recruiting Candidate Response Coordinator', not just 'Candidate Response "
-                    "Coordinator'. "
+                    "Coordinator', and an operations reporting Gobii for monthly board packets should be named "
+                    "like 'Operations Board Reporting', not just 'Board Packet Coordinator'. "
                     "For schedules, do not include recurring work in the approval scope unless the user asked for a "
                     "cadence or ongoing/proactive behavior. For explicit no-schedule, one-time, setup-only, demo, "
                     "temporary, trial, prototype, role ownership, general responsibility, or no-recurring wording, "
@@ -1036,6 +1041,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "role-to-role graph edges.\n"
                     "- If ordered_tools includes meta_gobii_send_agent_message, initial_briefings must contain "
                     "the actual post-approval briefing messages; do not leave it empty when planned_role_names exist.\n"
+                    "- response_text must not repeat the same no-schedule note, approval question, role list, "
+                    "or briefing summary twice. Say each once.\n"
                     "Record the response and structured design facts."
                 ),
             },

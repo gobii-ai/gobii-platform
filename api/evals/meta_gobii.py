@@ -1033,7 +1033,10 @@ def _score_minimal_action(
     schedule_policy = plan_args.get("schedule_policy") or {}
     if isinstance(schedule_policy, dict) and _schedule_policy_excludes_schedule_and_clarification(schedule_policy):
         extra_scope_items = [
-            item for item in extra_scope_items if not _scope_item_is_schedule_clarification_note(item)
+            item
+            for item in extra_scope_items
+            if not _scope_item_is_schedule_clarification_note(item)
+            and not _scope_item_is_excluded_schedule_scope_note(item)
         ]
     if isinstance(schedule_policy, dict) and _schedule_policy_has_explicit_user_schedule(schedule_policy):
         extra_scope_items = [
@@ -1042,6 +1045,10 @@ def _score_minimal_action(
     extra_scope_items = [
         item for item in extra_scope_items if not _scope_item_is_unplanned_tool_category_note(item, ordered_tools)
     ]
+    if _planned_agent_count_within_expected_bounds(case, plan_args):
+        extra_scope_items = [
+            item for item in extra_scope_items if not _scope_item_is_excluded_agent_count_note(item)
+        ]
     if extra_scope_items:
         return (False, f"Planned extra scope not requested by the user: {extra_scope_items}.")
 
@@ -1330,6 +1337,21 @@ def _schedule_policy_excludes_schedule_and_clarification(policy: dict[str, Any])
     )
 
 
+def _planned_agent_count_within_expected_bounds(
+    case: MetaGobiiEvalCase,
+    plan_args: dict[str, Any],
+) -> bool:
+    planned_agent_count = plan_args.get("planned_agent_count")
+    if not _is_int(planned_agent_count):
+        return False
+    count = int(planned_agent_count)
+    if case.min_planned_agents is not None and count < case.min_planned_agents:
+        return False
+    if case.max_planned_agents is not None and count > case.max_planned_agents:
+        return False
+    return case.min_planned_agents is not None or case.max_planned_agents is not None
+
+
 def _schedule_policy_has_explicit_user_schedule(policy: dict[str, Any]) -> bool:
     return bool(policy.get("schedule_in_scope")) and bool(policy.get("explicit_user_intent"))
 
@@ -1350,6 +1372,22 @@ def _scope_item_is_schedule_clarification_note(item: str) -> bool:
         "schedule" in normalized
         and ("clarif" in normalized or "question" in normalized)
         and "recurring" in normalized
+    )
+
+
+def _scope_item_is_excluded_schedule_scope_note(item: str) -> bool:
+    normalized = str(item or "").strip().lower()
+    return (
+        any(term in normalized for term in ("schedule", "cadence", "recurring"))
+        and any(term in normalized for term in ("invented", "additional", "extra", "beyond", "unrequested"))
+    )
+
+
+def _scope_item_is_excluded_agent_count_note(item: str) -> bool:
+    normalized = str(item or "").strip().lower()
+    return (
+        any(term in normalized for term in ("agent", "agents", "gobii", "gobiis"))
+        and any(term in normalized for term in ("additional", "extra", "beyond", "more than", "unrequested"))
     )
 
 
@@ -1491,7 +1529,10 @@ def _scope_item_is_negative_scope_note(normalized_item: str) -> bool:
 
 def _scope_item_was_explicitly_requested(normalized_item: str, user_prompt: str) -> bool:
     prompt = user_prompt.lower()
+    if _scope_item_matches_requested_team_configuration(normalized_item, prompt):
+        return True
     requested_action_stems = (
+        ("deploy", ("deploy", "deploying")),
         ("archive", ("archive", "archiv")),
         ("relink", ("relink", "re-link")),
         ("rewire", ("rewire", "rewiring")),
@@ -1510,6 +1551,29 @@ def _scope_item_was_explicitly_requested(normalized_item: str, user_prompt: str)
         if prompt_stem in prompt and any(item_stem in normalized_item for item_stem in item_stems):
             return True
     return False
+
+
+def _scope_item_matches_requested_team_configuration(normalized_item: str, prompt: str) -> bool:
+    if "team" not in prompt:
+        return False
+    if "team" not in normalized_item:
+        return False
+    if not any(term in normalized_item for term in ("configuration", "setup", "design")):
+        return False
+
+    team_action_terms = (
+        "build",
+        "configure",
+        "create",
+        "deploy",
+        "link",
+        "organize",
+        "reorganize",
+        "restructure",
+        "set up",
+        "setup",
+    )
+    return any(term in prompt for term in team_action_terms)
 
 
 def find_duplicate_output_sections(text: str) -> list[str]:

@@ -300,6 +300,7 @@ CONTINUATION_PHRASES = (
 BLOCKING_HUMAN_INPUT_PATTERNS = (
     re.compile(r"\bbefore\s+(?:i|we)\b", re.IGNORECASE),
     re.compile(r"\bi\s+need\s+to\s+know\b", re.IGNORECASE),
+    re.compile(r"\bi\s+need\b.*\b(?:details|specifics|recipient|email|client|project|status)\b", re.IGNORECASE),
     re.compile(r"\bi\s+need\b.*\b(?:first|before|from you)\b", re.IGNORECASE),
     re.compile(r"\b(?:please|can you|could you)\s+(?:clarify|provide|share|confirm|choose|tell|send|point|direct|link)\b", re.IGNORECASE),
     re.compile(r"\bwhich\b.*\bshould\s+(?:i|we)\b", re.IGNORECASE),
@@ -1371,6 +1372,13 @@ def _sanitize_tool_name(name: str) -> str:
             repeated_name = name[repeated_idx + 1 :].strip()
             if repeated_name.startswith("mcp_"):
                 return repeated_name
+
+    known_aliases = {
+        "end_plannig": "end_planning",
+        "end_planing": "end_planning",
+    }
+    if name in known_aliases:
+        return known_aliases[name]
 
     return name
 

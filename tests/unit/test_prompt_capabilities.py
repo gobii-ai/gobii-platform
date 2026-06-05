@@ -274,7 +274,7 @@ class AgentCapabilitiesPromptTests(TestCase):
             contents,
         )
         self.assertIn(
-            "After the final send and final plan update, stop with no extra message",
+            "After the final send and any required final plan update, stop with no extra message",
             contents,
         )
         self.assertIn("Plain text is invisible and update_plan is not delivery", contents)
@@ -282,6 +282,15 @@ class AgentCapabilitiesPromptTests(TestCase):
             "Need to send the user your answer, summary, or final report → will_continue_work=true",
             contents,
         )
+
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_treats_future_format_preferences_as_durable(self, _mock_comms, _mock_steps):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn("Future reporting or communication style preferences count as durable", contents)
+        self.assertIn("concise bullets", contents)
 
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
@@ -300,6 +309,8 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Do not copy a small exact scheduled feed/API payload into SQLite", contents)
         self.assertIn("call the matching enabled eval tool directly and do not use search_tools", contents)
         self.assertIn("send the verified partial records and limitation first", contents)
+        self.assertIn("the config update is not the report", contents)
+        self.assertIn("do not treat the new schedule as permission to resume the queued batch immediately", contents)
         self.assertIn("Do not use update_plan for partial-result preservation or resume scheduling", contents)
         self.assertIn("do not use search_tools, SQLite preflight reads, or prior __tool_results checks", contents)
 

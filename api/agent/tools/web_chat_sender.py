@@ -72,16 +72,17 @@ _RESULTS_STATUS_PROGRESS_RE = re.compile(
     r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)|"
     r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+claims?\s+extracted|"
     r"from\s+(?:the\s+)?(?:scrapes|sources|pages|results),?\s+(?:i|we)\s+(?:now\s+)?(?:have|got)\s+(?:all\s+)?(?:the\s+)?(?:data|source material|results?)|"
-    r"all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)\s+(?:are|were)\s+(?:fetched|scraped|loaded|processed|done)|the\s+data\s+is\s+in)\b",
+    r"all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)\s+(?:are|were)\s+(?:fetched|scraped|loaded|processed|done)|"
+    r"the\s+data\s+is\s+(?:already\s+)?in(?:\s+(?:the\s+)?[`\"']?[\w-]+[`\"']?(?:\s+table)?)?)\b",
     re.IGNORECASE,
 )
 _RETURNED_DATA_THEN_PROGRESS_RE = re.compile(
-    r"(?:\b(?:site|page|api|browser task|tool|source|result)\b.{0,100}"
+    r"(?:\b(?:site|page|api|browser task|tool|source|result|query|cte|sqlite)\b.{0,100}"
     r"\b(?:returned|found|provided|gave|has|pulled|retrieved|loaded|collected)\b.{0,80}\b(?:data|result|results)\b|"
     r"\bgot (?:the )?(?:data|result|results)\b|"
     r"\b(?:i|we)\s+(?:now\s+)?(?:have|found|got)\s+(?:the\s+)?(?:[\w-]+\s+){0,3}(?:data|result|results)\b).{0,160}"
     r"\b(?:let me|i(?:'ll| will| need to| am going to)|next|then)\s+"
-    r"(?:update|set up|configure|report|send|deliver|share|write|summari[sz]e)\b",
+    r"(?:update|set up|configure|report|send|deliver|share|write|summari[sz]e|extract|synthesi[sz]e|compile|process|parse)\b",
     re.IGNORECASE,
 )
 _FORWARD_PROGRESS_ACTION_RE = re.compile(
@@ -180,14 +181,19 @@ def _looks_like_routine_progress_message(body: str) -> bool:
         return True
     if _RETURNED_DATA_THEN_PROGRESS_RE.search(text):
         return True
+    answer_shape = bool(
+        re.search(r"\bhere(?:'s| is) (?:the )?(?:analysis|answer|recommendation|report)\b", text, re.I)
+        or re.search(r"\b(?:claims extracted|strongest unique claims|source urls?)\b.{0,180}(?:^|\s)\|[^|]+\|", text, re.I)
+        or re.search(r"(?:^|\s)\|[^|]+\|", text, re.I)
+    )
     result_status = bool(_RESULTS_STATUS_PROGRESS_RE.search(text))
-    if result_status and not re.search(r"\bhere(?:'s| is) (?:the )?(?:analysis|answer|recommendation|report)\b", text, re.I) and (
+    if result_status and not answer_shape and (
         _FORWARD_PROGRESS_ACTION_RE.search(text)
         or ("http://" not in lower and "https://" not in lower and len(text) <= 500)
     ):
         return True
     progress_signal = bool(_PROGRESS_PREFIX_RE.search(text) or _INTERNAL_PROGRESS_RE.search(text))
-    if progress_signal and re.search(r"\b(?:claims extracted|strongest unique claims|source urls?)\b|(?:^|\s)\|[^|]+\|", text, re.I):
+    if progress_signal and answer_shape:
         return False
     if "?" in text and _OPTIONAL_PROGRESS_QUESTION_RE.search(text):
         return progress_signal

@@ -87,6 +87,16 @@ class ImpliedSendTests(TestCase):
             body=body,
         )
 
+    def test_tool_name_sanitizer_corrects_end_planning_typos(self):
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+
+        tool_call.function.name = "end_plannig"
+        self.assertEqual(ep._get_tool_call_name(tool_call), "end_planning")
+
+        tool_call.function.name = "end_planing"
+        self.assertEqual(ep._get_tool_call_name(tool_call), "end_planning")
+
     def test_eval_mock_result_supports_url_rules(self):
         mock_config = {
             "http_request": {
@@ -140,6 +150,24 @@ class ImpliedSendTests(TestCase):
 
         self.assertEqual(matched_result["content"], "linkedin result")
         self.assertEqual(default_result["content"], "default result")
+
+    def test_send_chat_skips_query_result_progress_marked_done(self):
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "body": (
+                    "All 4 pages scraped, and the CTE query returned the data. "
+                    "Let me extract clean comparison rows and then deliver the recommendation."
+                ),
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).exists()
+        )
 
     def test_http_request_params_strip_linkified_url_artifacts(self):
         params = ep._normalize_tool_params(
@@ -871,6 +899,46 @@ class ImpliedSendTests(TestCase):
         routed = prepared.prepared_calls[0]
         self.assertEqual(routed.tool_name, "request_human_input")
         self.assertIn("project", routed.tool_params["question"])
+        self.assertFalse(routed.tool_params["will_continue_work"])
+
+    def test_missing_recipient_details_chat_routes_to_tracked_human_input(self):
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": (
+                                    "I'm happy to help, but I need a few details:\n\n"
+                                    "1. Who is the client? - Please provide the client's name and email address.\n"
+                                    "2. Which project? - What project is this status report for?\n"
+                                    "3. What's the latest status? - Share the status update I should use."
+                                ),
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        routed = prepared.prepared_calls[0]
+        self.assertEqual(routed.tool_name, "request_human_input")
+        self.assertIn("client", routed.tool_params["question"])
         self.assertFalse(routed.tool_params["will_continue_work"])
 
     def test_defaultable_schedule_setup_question_gets_runtime_correction(self):

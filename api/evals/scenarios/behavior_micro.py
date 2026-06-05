@@ -1375,8 +1375,8 @@ class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
                 mock_config=self._planning_guardrail_mocks(),
                 eval_stop_policy={
                     "ignore_sqlite_agent_config_mutations": False,
-                    "stop_on_tool_names": list(PLANNING_MUTATION_TOOL_NAMES),
-                    "stop_on_sqlite_agent_config_mutation": True,
+                    "stop_on_tool_names": list(PLANNING_MUTATION_TOOL_NAMES | {"end_planning"}),
+                    "stop_on_sqlite_agent_config_mutation_attempt": True,
                 },
             )
         self.record_task_result(

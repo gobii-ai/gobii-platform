@@ -360,9 +360,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertIn("remaining_work", outreach_description)
         self.assertIn("set a resume schedule", outreach_description)
+        self.assertIn("stop the current turn", outreach_description)
         self.assertIn("remaining_work", candidate_description)
         self.assertIn("set a resume schedule", candidate_description)
         self.assertIn("report verified partial records", candidate_description)
+        self.assertIn("Do not treat a newly set schedule as a same-turn trigger", candidate_description)
         self.assertIn("before update_plan", candidate_description)
         self.assertIn("only makes sense when a schedule exists", schedule_description)
         self.assertIn("set a resume schedule before verification reads", schedule_description)
@@ -453,6 +455,166 @@ class EvalStopPolicyBudgetTests(TestCase):
                     | RESEARCH_TOOL_NAMES
                 ),
                 "stop_on_unexpected_relevant_tool": True,
+                "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
+                "ignore_sqlite_agent_config_mutations": False,
+                "stop_when_all_seen": [
+                    {
+                        "tool_name": "sqlite_batch",
+                        "agent_config_field": "schedule",
+                        "after_execution": True,
+                    }
+                ],
+                "max_relevant_tool_calls": 6,
+            },
+        )
+
+        self.assertFalse(should_stop)
+        self.assertEqual(reason, "")
+
+    def test_partial_source_policy_stops_after_sqlite_schedule_mutation(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="partial_source_policy_schedule_user")
+        browser_agent = BrowserUseAgent.objects.create(
+            user=user,
+            name="Partial Source Policy Schedule Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            name="Partial Source Policy Schedule Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug=EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "UPDATE __agent_config SET schedule = '0 */6 * * *' WHERE id = 1;"},
+            result='{"status":"ok"}',
+            status="complete",
+        )
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(run.id),
+            {
+                "stop_on_tool_names": list(
+                    (EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"})
+                    | ARTIFACT_TOOL_NAMES
+                    | RESEARCH_TOOL_NAMES
+                ),
+                "stop_on_unexpected_relevant_tool": True,
+                "ignore_sqlite_agent_config_mutations": False,
+                "stop_when_all_seen": [
+                    {
+                        "tool_name": "sqlite_batch",
+                        "agent_config_field": "schedule",
+                        "after_execution": True,
+                    }
+                ],
+                "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
+                "max_relevant_tool_calls": 6,
+            },
+        )
+
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected tool calls observed", reason)
+
+    def test_partial_source_policy_waits_for_completed_sqlite_schedule_mutation(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="partial_source_policy_pending_schedule_user")
+        browser_agent = BrowserUseAgent.objects.create(
+            user=user,
+            name="Partial Source Policy Pending Schedule Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            name="Partial Source Policy Pending Schedule Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug=EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "UPDATE __agent_config SET schedule = '0 */6 * * *' WHERE id = 1;"},
+            result="",
+            status="pending",
+        )
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(run.id),
+            {
+                "stop_on_unexpected_relevant_tool": True,
+                "ignore_sqlite_agent_config_mutations": False,
+                "stop_when_all_seen": [
+                    {
+                        "tool_name": "sqlite_batch",
+                        "agent_config_field": "schedule",
+                        "after_execution": True,
+                    }
+                ],
+                "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
+                "max_relevant_tool_calls": 6,
+            },
+        )
+
+        self.assertFalse(should_stop)
+        self.assertEqual(reason, "")
+
+    def test_partial_source_policy_ignores_charter_only_mutation(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="partial_source_policy_charter_user")
+        browser_agent = BrowserUseAgent.objects.create(
+            user=user,
+            name="Partial Source Policy Charter Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            name="Partial Source Policy Charter Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug=EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "UPDATE __agent_config SET charter = 'Test agent.' WHERE id = 1;"},
+            result='{"status":"ok"}',
+            status="complete",
+        )
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(run.id),
+            {
+                "stop_on_unexpected_relevant_tool": True,
+                "ignore_sqlite_agent_config_mutations": False,
+                "stop_when_all_seen": [
+                    {
+                        "tool_name": "sqlite_batch",
+                        "agent_config_field": "schedule",
+                        "after_execution": True,
+                    }
+                ],
                 "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
                 "max_relevant_tool_calls": 6,
             },
