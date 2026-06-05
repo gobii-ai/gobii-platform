@@ -1208,7 +1208,7 @@ async def _run_agent(
                 "llm": llm,
                 "browser": browser_session,
                 "enable_memory": False,
-                "use_vision": bool(supports_vision),
+                "use_vision": "auto" if bool(supports_vision) else False,
             }
             normalized_detail_level = _normalize_vision_detail_level(vision_detail_level, bool(supports_vision))
             if normalized_detail_level:
