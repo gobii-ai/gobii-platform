@@ -2750,6 +2750,31 @@ class SolutionCtaCopyTests(TestCase):
             )
         self.assertEqual(len(soup.find_all("script", {"type": "application/ld+json"})), 3)
 
+    def test_engineering_solution_uses_webp_hero_with_optimized_jpeg_fallback(self):
+        response = self.client.get("/solutions/engineering/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        hero = soup.select_one(".hero-image-bg picture")
+        self.assertIsNotNone(hero)
+
+        webp_source = hero.find("source", {"type": "image/webp"})
+        self.assertIsNotNone(webp_source)
+        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
+        self.assertIn("engineering-hero-1920.webp", webp_source.get("srcset"))
+        self.assertNotIn("engineering-hero.jpg", webp_source.get("srcset"))
+
+        hero_image = hero.find("img")
+        self.assertIsNotNone(hero_image)
+        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        self.assertNotIn("engineering-hero.jpg", hero_image.get("src"))
+        self.assertIn("engineering-hero-1920.jpg", hero_image.get("srcset"))
+        self.assertNotIn("engineering-hero.jpg", hero_image.get("srcset"))
+        self.assertEqual(hero_image.get("loading"), "eager")
+        self.assertEqual(hero_image.get("fetchpriority"), "high")
+        self.assertEqual(hero_image.get("width"), "1280")
+        self.assertEqual(hero_image.get("height"), "543")
+
     def test_solution_pages_do_not_load_preline(self):
         for path in ("/solutions/", "/solutions/recruiting/"):
             with self.subTest(path=path):

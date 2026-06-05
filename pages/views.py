@@ -3829,6 +3829,7 @@ class SolutionView(TemplateView):
             'description': 'Automate code reviews, testing, and deployment pipelines to ship software faster.',
             'seo_title': "AI Agents for Developers - Build on Gobii's Platform | Gobii",
             'seo_description': "Build powerful AI agents with Gobii's API. Create, deploy, and control always-on agents programmatically. Self-hosted or cloud. Get started in minutes.",
+            'date_modified': '2026-06-05',
             'social_image': 'images/solutions/engineering-hero.jpg',
             'social_image_alt': 'Gobii developer platform for building AI browser agents',
             'related_link': {
