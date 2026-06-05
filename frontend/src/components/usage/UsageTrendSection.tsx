@@ -17,6 +17,7 @@ import type {
 import { fetchUsageTrends } from './api'
 import { getRangeLengthInDays } from './utils'
 import { useEchartsSizeSensor } from '../../hooks/useEchartsSizeSensor'
+import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 
 
 echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
@@ -280,7 +281,11 @@ export function UsageTrendSection({
     : 'Select a billing period to view task trends.'
 
   const sectionClassName = embedded
-    ? 'settings-card-surface settings-card-surface--embedded flex flex-col gap-4 rounded-xl border border-slate-200/20 p-6'
+    ? getSettingsSurfaceClassName({
+      variant: 'embedded',
+      roundedClassName: 'rounded-xl',
+      className: 'flex flex-col gap-4 p-6',
+    })
     : 'gobii-card-base flex flex-col gap-4 p-6'
   const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-slate-900'
   const subtitleClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-500'

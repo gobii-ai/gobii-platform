@@ -1,10 +1,6 @@
 import { Check, Info, XCircle } from 'lucide-react'
 
-import {
-  embeddedSettingsSurfaceClassName,
-  sharedSettingsGlassFrameClassName,
-  standaloneSettingsSurfaceClassName,
-} from '../agentSettings/settingsSurfaceClasses'
+import { getSettingsSurfaceClassName } from './SettingsSurface'
 
 type SaveBarVariant = 'standalone' | 'embedded'
 type SaveBarPlacement = 'fixed' | 'sticky'
@@ -53,8 +49,12 @@ export function SaveBar({
   const rootClassName = isFixed ? 'fixed inset-x-0 bottom-0 z-40 pointer-events-none' : 'sticky bottom-4 z-20'
   const frameClassName = isFixed ? 'pointer-events-auto mx-auto w-full max-w-5xl px-4 pb-4' : 'w-full'
   const surfaceClassName = isEmbedded
-    ? `${sharedSettingsGlassFrameClassName} px-4 py-3 ${embeddedSettingsSurfaceClassName}`
-    : `${sharedSettingsGlassFrameClassName} px-4 py-3 shadow-[0_18px_38px_rgba(15,23,42,0.18)] ${standaloneSettingsSurfaceClassName}`
+    ? getSettingsSurfaceClassName({ variant: 'embedded', className: 'px-4 py-3' })
+    : getSettingsSurfaceClassName({
+      variant: 'standalone',
+      className: 'px-4 py-3',
+      shadowClassName: 'shadow-[0_18px_38px_rgba(15,23,42,0.18)]',
+    })
   const copyClassName = isEmbedded ? 'text-sm text-slate-200' : 'text-sm text-gray-700'
   const helperClassName = isEmbedded ? 'mt-1 text-xs text-slate-300' : 'mt-1 text-xs text-gray-500'
   const errorClassName = isEmbedded ? 'mt-1 flex items-center gap-2 text-xs text-rose-300' : 'mt-1 flex items-center gap-2 text-xs text-red-600'

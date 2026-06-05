@@ -26,7 +26,8 @@ import {
 } from './agentEmailSettingsProviders'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
-import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
+import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
+import { getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 
 type AgentEmailSettingsScreenProps = {
   agentId: string
@@ -291,7 +292,7 @@ export function AgentEmailSettingsScreen({
   const oauthSecondaryButtonClassName = 'rounded-lg border border-slate-300/70 bg-transparent px-3 py-2 text-sm font-semibold text-slate-100'
   const primaryActionButtonClassName = 'rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60'
   const secondaryActionButtonClassName = 'rounded-lg border border-rose-300/40 bg-rose-950/20 px-4 py-2 text-sm font-semibold text-rose-100 disabled:opacity-60'
-  const settingsCardClassName = `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`
+  const settingsCardClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none' })
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['agent-email-settings', agentId, emailSettingsUrl], [agentId, emailSettingsUrl])
   const [draft, setDraft] = useState<DraftState | null>(null)
@@ -657,12 +658,11 @@ export function AgentEmailSettingsScreen({
         )}
       />
 
-      {banner && <div className="rounded-xl border border-emerald-300/30 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-100">{banner}</div>}
+      {banner && <InlineStatusBanner variant="success" surface="embedded">{banner}</InlineStatusBanner>}
       {errorBanner && (
-        <div className="inline-flex items-start gap-2 rounded-xl border border-amber-300/30 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
-          <AlertTriangle className="mt-0.5 h-4 w-4" aria-hidden="true" />
+        <InlineStatusBanner variant="warning" surface="embedded" icon={AlertTriangle}>
           <span>{errorBanner}</span>
-        </div>
+        </InlineStatusBanner>
       )}
 
       <div className={`${settingsCardClassName} p-5`}>

@@ -11,7 +11,7 @@ import { FileTable } from '../components/agentFiles/FileTable'
 import type { AgentFilesPageData, AgentFilesResponse, AgentFsNode } from '../components/agentFiles/types'
 import { useFileDragAndDrop } from '../components/agentFiles/useFileDragAndDrop'
 import { sortNodes } from '../components/agentFiles/utils'
-import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
+import { getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 
 export type AgentFilesScreenProps = {
   initialData: AgentFilesPageData
@@ -422,7 +422,7 @@ export function AgentFilesScreen({
         onRefresh={handleRefresh}
       />
 
-      <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`}>
+      <div className={getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none' })}>
         <div className="flex flex-col gap-3 px-5 py-4">
           {!canManage && (
             <div className="rounded-lg border border-sky-300/30 bg-sky-950/20 px-3 py-2 text-xs text-slate-200">

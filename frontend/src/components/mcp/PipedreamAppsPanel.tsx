@@ -4,6 +4,8 @@ import { CheckCircle2, Loader2, Plus, Sparkles } from 'lucide-react'
 
 import { fetchPipedreamAppSettings, type PipedreamAppSummary } from '../../api/mcp'
 import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
+import { InlineStatusBanner } from '../common/InlineStatusBanner'
+import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { useModal } from '../../hooks/useModal'
 import { NativeProviderIcon } from './NativeIntegrationShared'
 import { PipedreamAppsModal } from './PipedreamAppsModal'
@@ -81,7 +83,7 @@ export function PipedreamAppsPanel({
   ])
 
   const sectionClassName = embedded
-    ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
+    ? getSettingsSurfaceClassName({ variant: 'embedded', roundedClassName: 'rounded-xl' })
     : 'gobii-card-base overflow-hidden'
   const headerClassName = embedded
     ? 'flex flex-col gap-4 px-6 py-4 sm:flex-row sm:items-center sm:justify-between'
@@ -96,9 +98,6 @@ export function PipedreamAppsPanel({
   const loadingClassName = embedded
     ? 'flex items-center gap-2 px-6 py-8 text-sm text-slate-400'
     : 'flex items-center gap-2 px-6 py-8 text-sm text-slate-500'
-  const errorClassName = embedded
-    ? 'rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100'
-    : 'rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700'
 
   return (
     <>
@@ -131,9 +130,9 @@ export function PipedreamAppsPanel({
           </div>
         ) : (hasPipedreamApps && settingsQuery.isError) || nativeIntegrationsQuery.isError ? (
           <div className="px-6 py-5">
-            <div className={errorClassName}>
+            <InlineStatusBanner variant="error" surface={embedded ? 'embedded' : 'standalone'}>
               {resolvePipedreamAppsErrorMessage(settingsQuery.error ?? nativeIntegrationsQuery.error, 'Unable to load apps right now.')}
-            </div>
+            </InlineStatusBanner>
           </div>
         ) : (
           <div className={`grid gap-6 px-6 py-5 ${nativeIntegrationsUrl && hasPipedreamApps ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>

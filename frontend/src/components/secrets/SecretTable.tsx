@@ -1,7 +1,7 @@
 import { Globe, KeyRound, Pencil, Trash2, ArrowUpFromLine, Terminal } from 'lucide-react'
 
 import type { SecretDTO } from '../../api/secrets'
-import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../agentSettings/settingsSurfaceClasses'
+import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 
 type SecretTableProps = {
   secrets: SecretDTO[]
@@ -30,7 +30,7 @@ export function SecretTable({
   onPromote,
 }: SecretTableProps) {
   const containerClassName = embedded
-    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`
+    ? getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none' })
     : 'gobii-card-base'
   const headerClassName = embedded
     ? 'border-b border-slate-200/15 px-6 py-4'

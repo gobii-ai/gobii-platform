@@ -19,6 +19,7 @@ import type {
 } from './types'
 import { fetchUsageAgentLeaderboard } from './api'
 import { handleAppAnchorClick } from '../../util/appNavigation'
+import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 
 const API_AGENT_ID = 'api'
 const DEFAULT_VISIBLE_ROWS = 5
@@ -310,7 +311,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
   const visibleRows = showAllRows ? sortedRows : sortedRows.slice(0, DEFAULT_VISIBLE_ROWS)
 
   const sectionClassName = embedded
-    ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
+    ? getSettingsSurfaceClassName({ variant: 'embedded', roundedClassName: 'rounded-xl' })
     : 'gobii-card-base'
   const headerClassName = embedded ? 'px-6 py-4' : 'border-b border-white/50 px-6 py-4'
   const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-slate-900'

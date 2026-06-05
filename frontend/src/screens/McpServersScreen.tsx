@@ -14,6 +14,8 @@ import { McpServerTestModal } from '../components/mcp/McpServerTestModal'
 import { PipedreamAppsPanel } from '../components/mcp/PipedreamAppsPanel'
 import { useModal } from '../hooks/useModal'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
+import { SurfaceHeader, getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 
 type McpServersScreenProps = {
   listUrl: string
@@ -209,26 +211,14 @@ export function McpServersScreen({
   )
 
   const rootClassName = isEmbedded ? 'space-y-5' : 'space-y-4'
-  const successBannerClassName = isEmbedded
-    ? 'rounded-xl border border-emerald-300/25 bg-emerald-950/30 px-4 py-2 text-sm text-emerald-100'
-    : 'rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800'
-  const errorBannerClassName = isEmbedded
-    ? 'rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-2 text-sm text-rose-100'
-    : 'rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800'
   const tableShellClassName = isEmbedded
-    ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
+    ? getSettingsSurfaceClassName({ variant: 'embedded', roundedClassName: 'rounded-xl' })
     : 'gobii-card-base'
-  const headerClassName = isEmbedded
-    ? 'px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'
-    : 'px-6 py-4 border-b border-gray-200/70 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'
   const headingClassName = isEmbedded ? 'text-2xl font-semibold text-slate-50' : 'text-2xl font-semibold text-gray-800'
   const descriptionClassName = isEmbedded ? 'text-sm text-slate-400' : 'text-sm text-gray-600'
   const primaryButtonClassName = isEmbedded
     ? 'inline-flex items-center justify-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-4 py-2 text-sm font-semibold text-sky-50 transition hover:border-sky-200/40 hover:bg-sky-900/75'
     : 'inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700'
-  const listErrorClassName = isEmbedded
-    ? 'mx-6 mb-4 rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100'
-    : 'px-6 py-3 text-sm text-red-700 bg-red-50 border-b border-red-200'
   const tableClassName = isEmbedded ? 'w-full' : 'w-full divide-y divide-gray-200/70'
   const tableHeadClassName = isEmbedded ? 'bg-slate-950/40' : 'bg-gray-50/50'
   const tableBodyClassName = isEmbedded ? 'divide-y divide-slate-200/10' : 'divide-y divide-gray-200/70'
@@ -271,14 +261,14 @@ export function McpServersScreen({
         />
       ) : null}
       {banner && (
-        <div className={successBannerClassName}>
+        <InlineStatusBanner variant="success" surface={isEmbedded ? 'embedded' : 'standalone'} density="compact">
           {banner}
-        </div>
+        </InlineStatusBanner>
       )}
       {errorBanner && (
-        <div className={errorBannerClassName}>
+        <InlineStatusBanner variant="error" surface={isEmbedded ? 'embedded' : 'standalone'} density="compact">
           {errorBanner}
-        </div>
+        </InlineStatusBanner>
       )}
       {(pipedreamAppsUrl && pipedreamAppSearchUrl) || nativeIntegrationsUrl ? (
         <PipedreamAppsPanel
@@ -290,18 +280,14 @@ export function McpServersScreen({
         />
       ) : null}
       <div className={tableShellClassName}>
-        <div className={headerClassName}>
-          {!isEmbedded ? (
-            <div>
-              <h1 className={headingClassName}>MCP Servers</h1>
-              <p className={descriptionClassName}>Configure custom MCP servers available to {ownerLabelText}.</p>
-            </div>
-          ) : (
-            <div>
-              <h2 className={headingClassName}>MCP Servers</h2>
-              <p className={descriptionClassName}>Manage server connections and agent assignments.</p>
-            </div>
-          )}
+        <SurfaceHeader
+          variant={isEmbedded ? 'embedded' : 'standalone'}
+          headingLevel={isEmbedded ? 2 : 1}
+          title="MCP Servers"
+          subtitle={isEmbedded ? 'Manage server connections and agent assignments.' : `Configure custom MCP servers available to ${ownerLabelText}.`}
+          titleClassName={headingClassName}
+          subtitleClassName={descriptionClassName}
+          actions={(
           <button
             type="button"
             className={primaryButtonClassName}
@@ -311,9 +297,18 @@ export function McpServersScreen({
             Add MCP Server
             {isFetching && !isLoading && <span className="text-xs font-normal text-white/80">Refreshing…</span>}
           </button>
-        </div>
+          )}
+        />
         {listError && (
-          <div className={listErrorClassName}>Failed to load servers. {listError}</div>
+          isEmbedded ? (
+            <div className="mx-6 mb-4">
+              <InlineStatusBanner variant="error" surface="embedded">
+                Failed to load servers. {listError}
+              </InlineStatusBanner>
+            </div>
+          ) : (
+            <div className="border-b border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700">Failed to load servers. {listError}</div>
+          )
         )}
         <div className="overflow-x-auto">
           <table className={tableClassName}>

@@ -1,3 +1,4 @@
+import { ImmersivePageFrame } from '../../components/common/ImmersivePageFrame'
 import { ApiKeysScreen } from '../ApiKeysScreen'
 
 type ImmersiveApiKeysPageProps = {
@@ -10,8 +11,8 @@ export function ImmersiveApiKeysPage({
   layout = 'main',
 }: ImmersiveApiKeysPageProps) {
   return (
-    <div className={layout === 'sidebar-shell' ? 'w-full px-1 pb-4' : 'mx-auto w-full max-w-5xl px-4 pb-6'}>
+    <ImmersivePageFrame layout={layout}>
       <ApiKeysScreen key={refreshKey} />
-    </div>
+    </ImmersivePageFrame>
   )
 }

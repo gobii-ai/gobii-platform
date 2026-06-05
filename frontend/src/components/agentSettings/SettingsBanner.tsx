@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { embeddedSettingsSurfaceClassName, standaloneSettingsSurfaceClassName } from './settingsSurfaceClasses'
+import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 
 type SettingsBannerVariant = 'standalone' | 'embedded'
 
@@ -26,9 +26,10 @@ export function SettingsBanner({
   headingId,
 }: SettingsBannerProps) {
   const isEmbedded = variant === 'embedded'
-  const surfaceClassName = isEmbedded
-    ? embeddedSettingsSurfaceClassName
-    : standaloneSettingsSurfaceClassName
+  const surfaceClassName = getSettingsSurfaceClassName({
+    variant: isEmbedded ? 'embedded' : 'standalone',
+    className: 'settings-banner-surface',
+  })
   const contentLayoutClassName = isEmbedded
     ? 'flex min-w-0 flex-1 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between'
     : 'flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'
@@ -47,7 +48,7 @@ export function SettingsBanner({
 
   return (
     <header className="sticky top-0 z-20 py-1">
-      <div className={`settings-banner-surface overflow-hidden rounded-2xl border ${surfaceClassName}`}>
+      <div className={surfaceClassName}>
         <div className="px-6 py-4">
           <div className={`flex items-start gap-3 ${leading ? '' : 'justify-between'}`}>
             {leading ? <div className="shrink-0">{leading}</div> : null}

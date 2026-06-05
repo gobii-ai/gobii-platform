@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { parseDate } from '@internationalized/date'
 
+import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { InsightGauge } from '../common/InsightGauge'
 import { fetchUsageSummary } from './api'
 import { useUsageStore } from './store'
@@ -194,7 +195,11 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
   }, [activeAgentCount, agentsErrorMessage, agentsStatus, creditFormatter, embedded, isError, isPending, periodDayCount, resolvedSummary])
 
   const cardClassName = embedded
-    ? 'settings-card-surface settings-card-surface--embedded flex h-full flex-col justify-between gap-3 rounded-xl border border-slate-200/20 p-5'
+    ? getSettingsSurfaceClassName({
+      variant: 'embedded',
+      roundedClassName: 'rounded-xl',
+      className: 'flex h-full flex-col justify-between gap-3 p-5',
+    })
     : 'gobii-card-base flex h-full flex-col justify-between gap-3 p-5'
   const labelClassName = embedded
     ? 'text-xs font-semibold uppercase tracking-wide text-slate-400'

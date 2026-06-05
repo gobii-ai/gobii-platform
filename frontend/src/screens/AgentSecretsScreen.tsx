@@ -14,7 +14,7 @@ import { SecretTable } from '../components/secrets/SecretTable'
 import { SecretSecurityNotice } from '../components/secrets/SecretSecurityNotice'
 import { useSecretCrud } from '../components/secrets/useSecretCrud'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
-import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
+import { getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 
 type AgentSecretsScreenProps = {
@@ -174,7 +174,7 @@ export function AgentSecretsScreen({
 
           {/* Requested Secrets */}
           {requestedSecrets.length > 0 && (
-            <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`}>
+            <div className={getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none' })}>
               <div className="flex items-center justify-between border-b border-slate-200/15 px-6 py-4">
                 <div>
                   <h2 className="text-lg font-semibold text-slate-100">Requested Secrets</h2>

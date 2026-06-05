@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../agentSettings/settingsSurfaceClasses'
+import { SettingsSurface } from '../common/SettingsSurface'
 
 type SecretSecurityNoticeProps = {
   children: ReactNode
@@ -9,7 +9,7 @@ type SecretSecurityNoticeProps = {
 
 export function SecretSecurityNotice({ children }: SecretSecurityNoticeProps) {
   return (
-    <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`}>
+    <SettingsSurface variant="embedded" shadowClassName="shadow-none">
       <div className="p-4 sm:p-6">
         <div className="flex gap-x-4">
           <div className="flex-shrink-0">
@@ -21,6 +21,6 @@ export function SecretSecurityNotice({ children }: SecretSecurityNoticeProps) {
           </div>
         </div>
       </div>
-    </div>
+    </SettingsSurface>
   )
 }
