@@ -2929,6 +2929,30 @@ class SolutionCtaCopyTests(TestCase):
         for label in ("Criteria", "Search", "Export", "Review"):
             self.assertIn(label, page_text)
 
+    def test_sales_page_includes_human_review_faq_content(self):
+        response = self.client.get("/solutions/sales/")
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_text = soup.get_text(" ", strip=True)
+        expected_questions = [
+            "What are Gobii AI sales agents?",
+            "How do Gobii sales agents find prospects?",
+            "Which sales tasks can Gobii automate?",
+            "How is Gobii different from a lead database or sales engagement tool?",
+            "What outputs can sales teams export?",
+            "How should teams review AI-sourced leads?",
+            "What data and privacy controls matter for sales prospecting workflows?",
+        ]
+
+        self.assertIsNotNone(soup.find(id="sales-questions"))
+        self.assertIn("Sales automation, without losing the seller", page_text)
+        self.assertIn("Human-reviewed workflows", page_text)
+        self.assertIn("not by replacing human ownership of targeting", page_text)
+        for question in expected_questions:
+            self.assertIn(question, page_text)
+        for label in ("Criteria", "Research", "Export", "Review"):
+            self.assertIn(label, page_text)
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):
         unauth_recruiting = self.client.get("/solutions/recruiting/")
