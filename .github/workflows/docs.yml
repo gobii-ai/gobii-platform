@@ -142,6 +142,10 @@ jobs:
           test "$(redirect_for /getting-started/introduction)" = "301 http://127.0.0.1:8080/"
           test "$(redirect_for /getting-started/introduction.html)" = "301 http://127.0.0.1:8080/"
           test "$(redirect_for /getting-started/introduction/)" = "301 http://127.0.0.1:8080/"
+          test "$(code_for /definitely-not-a-real-docs-url)" = "404"
+          test "$(redirect_for /definitely-not-a-real-docs-url/)" = "301 http://127.0.0.1:8080/definitely-not-a-real-docs-url"
+          test "$(code_for /404)" = "404"
+          test "$(code_for /404.html)" = "404"
 
           header_for() {
             local path="$1"
