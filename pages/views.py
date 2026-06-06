@@ -1028,7 +1028,7 @@ class HomePage(TemplateView):
         context["suppress_stripe_js"] = not self._has_direct_checkout_cta()
         home_brand_name = settings.PUBLIC_BRAND_NAME or "Gobii"
         context["home_brand_name"] = home_brand_name
-        context["home_meta_title"] = f"{home_brand_name} — {HOMEPAGE_META_TITLE_SUFFIX}"
+        context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
         context["home_meta_description"] = (
             f"{home_brand_name} agents are virtual coworkers with their own identity, "
             "memory, and tools. Email them, text them — they browse the web, collect "
