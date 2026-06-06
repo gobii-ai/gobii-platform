@@ -111,7 +111,7 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        title = "Acme — AI Coworkers for Teams With Real Work to Do"
+        title = "Acme - AI Coworkers for Teams With Real Work to Do"
         description = (
             "Acme agents are virtual coworkers with their own identity, memory, "
             "and tools. Email them, text them — they browse the web, collect data, "
