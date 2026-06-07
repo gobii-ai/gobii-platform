@@ -1515,6 +1515,9 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "https://docs.gobii.ai/")
         self.assertContains(response, "### Sales")
         self.assertContains(response, "http://testserver/solutions/sales/")
+        self.assertContains(response, "http://testserver/solutions/recruiting/candidate-sourcing/")
+        self.assertContains(response, "http://testserver/library/recruiting/")
+        self.assertNotContains(response, "http://testserver/library/hr-recruiting/")
         self.assertContains(response, "### Sales facts")
         self.assertContains(response, "seller-provided ICP criteria")
         self.assertContains(response, "### Engineering")
@@ -1535,8 +1538,11 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "## Overview")
         self.assertContains(response, "http://testserver/library/")
+        self.assertContains(response, "http://testserver/library/recruiting/")
+        self.assertNotContains(response, "http://testserver/library/hr-recruiting/")
         self.assertContains(response, "### Sales")
         self.assertContains(response, "http://testserver/pretrained-workers/lead-hunter/")
+        self.assertContains(response, "http://testserver/solutions/recruiting/candidate-sourcing/")
         self.assertContains(response, "### Sales facts")
         self.assertContains(response, "configured CRM integrations")
         self.assertContains(response, "### Engineering")
@@ -1635,6 +1641,7 @@ class SitemapTests(TestCase):
         self.assertIn("<loc>http://example.com/solutions/</loc>", content)
         for slug in ("recruiting", "sales", "health-care", "defense", "engineering"):
             self.assertIn(f"<loc>http://example.com/solutions/{slug}/</loc>", content)
+        self.assertIn("<loc>http://example.com/solutions/recruiting/candidate-sourcing/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_proprietary_sitemap_excludes_redirects_and_checkout_start_urls(self):
@@ -2699,6 +2706,10 @@ class SolutionCtaCopyTests(TestCase):
         self.assertEqual(response.status_code, 200)
         return BeautifulSoup(response.content, "html.parser")
 
+    @staticmethod
+    def _solution_url(slug):
+        return page_views.SolutionView.reverse_solution(slug)
+
     def test_solution_header_uses_standard_logo_when_fish_upper_left_is_off(self):
         with override_flag("fish_upper_left", active=False):
             logo = self._mini_header_logo()
@@ -2795,7 +2806,7 @@ class SolutionCtaCopyTests(TestCase):
         self.assertEqual(hero_image.get("height"), "543")
 
     def test_solution_pages_do_not_load_preline(self):
-        for path in ("/solutions/", "/solutions/recruiting/"):
+        for path in ("/solutions/", "/solutions/recruiting/", "/solutions/recruiting/candidate-sourcing/"):
             with self.subTest(path=path):
                 response = self.client.get(path)
 
@@ -2817,7 +2828,7 @@ class SolutionCtaCopyTests(TestCase):
     def test_dedicated_solution_pages_include_social_metadata(self):
         for slug, data in page_views.SolutionView.SOLUTION_DATA.items():
             with self.subTest(slug=slug):
-                response = self.client.get(reverse("pages:solution", kwargs={"slug": slug}))
+                response = self.client.get(self._solution_url(slug))
 
                 self.assertEqual(response.status_code, 200)
                 soup = BeautifulSoup(response.content, "html.parser")
@@ -2908,33 +2919,41 @@ class SolutionCtaCopyTests(TestCase):
                 breadcrumb_data = json.loads(json_ld_scripts[1].string)
                 self.assertEqual(breadcrumb_data["@context"], "https://schema.org")
                 self.assertEqual(breadcrumb_data["@type"], "BreadcrumbList")
-                self.assertEqual(
-                    breadcrumb_data["itemListElement"],
-                    [
-                        {
-                            "@type": "ListItem",
-                            "position": 1,
-                            "name": "Home",
-                            "item": response.wsgi_request.build_absolute_uri(reverse("pages:home")),
-                        },
-                        {
-                            "@type": "ListItem",
-                            "position": 2,
-                            "name": "Solutions",
-                            "item": response.wsgi_request.build_absolute_uri(reverse("pages:solutions")),
-                        },
-                        {
-                            "@type": "ListItem",
-                            "position": 3,
-                            "name": data["title"],
-                            "item": expected_solution_url,
-                        },
-                    ],
-                )
+                expected_breadcrumbs = [
+                    {
+                        "@type": "ListItem",
+                        "position": 1,
+                        "name": "Home",
+                        "item": response.wsgi_request.build_absolute_uri(reverse("pages:home")),
+                    },
+                    {
+                        "@type": "ListItem",
+                        "position": 2,
+                        "name": "Solutions",
+                        "item": response.wsgi_request.build_absolute_uri(reverse("pages:solutions")),
+                    },
+                ]
+                for parent in data.get("breadcrumb_parents") or []:
+                    expected_breadcrumbs.append({
+                        "@type": "ListItem",
+                        "position": len(expected_breadcrumbs) + 1,
+                        "name": parent["name"],
+                        "item": response.wsgi_request.build_absolute_uri(
+                            self._solution_url(parent["solution_slug"])
+                        ),
+                    })
+                expected_breadcrumbs.append({
+                    "@type": "ListItem",
+                    "position": len(expected_breadcrumbs) + 1,
+                    "name": data["title"],
+                    "item": expected_solution_url,
+                })
+                self.assertEqual(breadcrumb_data["itemListElement"], expected_breadcrumbs)
 
     def test_dedicated_solution_pages_use_keyword_explicit_h1(self):
         expected_headings = {
             "recruiting": "AI recruiting agents for candidate sourcing",
+            "recruiting/candidate-sourcing": "AI candidate sourcing for recruiter-reviewed shortlists",
             "sales": "AI sales agents for outbound lead generation",
             "health-care": "Healthcare AI agents for care and admin automation",
             "defense": "Open source AI agents for defense",
@@ -2943,13 +2962,75 @@ class SolutionCtaCopyTests(TestCase):
 
         for slug, expected_heading in expected_headings.items():
             with self.subTest(slug=slug):
-                response = self.client.get(reverse("pages:solution", kwargs={"slug": slug}))
+                response = self.client.get(self._solution_url(slug))
 
                 self.assertEqual(response.status_code, 200)
                 soup = BeautifulSoup(response.content, "html.parser")
                 headings = soup.find_all("h1")
                 self.assertEqual(len(headings), 1)
                 self.assertEqual(headings[0].get_text(" ", strip=True), expected_heading)
+
+    def test_candidate_sourcing_page_includes_seo_workflow_content(self):
+        response = self.client.get("/solutions/recruiting/candidate-sourcing/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_text = soup.get_text(" ", strip=True)
+
+        self.assertIn("AI candidate sourcing", page_text)
+        self.assertIn("From role brief to candidate shortlist", page_text)
+        self.assertIn("Sourcing work that happens before your ATS can help", page_text)
+        self.assertIn("A shortlist your team can actually use", page_text)
+        self.assertIn("When automated candidate sourcing pays off", page_text)
+        self.assertIn("What is AI candidate sourcing?", page_text)
+        self.assertIn("Does Gobii replace sourcers or recruiters?", page_text)
+        self.assertIsNotNone(soup.find(id="candidate-sourcing-workflow"))
+        self.assertIsNotNone(soup.find(id="candidate-sourcing-faq"))
+        self.assertIsNotNone(soup.select_one(".candidate-sourcing-templates"))
+        self.assertIn("Start with Talent Scout, then add specialists", page_text)
+        self.assertNotIn("bg-emerald-950", response.content.decode())
+        self.assertIsNotNone(
+            soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "recruiting"})})
+        )
+        self.assertIsNotNone(
+            soup.find("a", {"href": reverse("pages:pretrained_worker_detail", kwargs={"slug": "talent-scout"})})
+        )
+        self.assertIsNotNone(
+            soup.find("a", {"href": reverse("pages:library_category", kwargs={"category_slug": "recruiting"})})
+        )
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    def test_candidate_sourcing_page_cta_launches_talent_scout(self):
+        response = self.client.get("/solutions/recruiting/candidate-sourcing/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        hero_source = soup.find("input", {"name": "source_page", "value": "candidate_sourcing_hero"})
+        self.assertIsNotNone(hero_source)
+        hero_form = hero_source.find_parent("form")
+        self.assertEqual(
+            hero_form.get("action"),
+            reverse("pages:pretrained_worker_hire", kwargs={"slug": "talent-scout"}),
+        )
+        self.assertEqual(hero_form.get("method"), "post")
+        self.assertEqual(
+            self._normalized_button_text(hero_form.find("button", {"type": "submit"})),
+            "Start Free Trial",
+        )
+
+        user = get_user_model().objects.create_user(
+            username="candidate_sourcing_cta@example.com",
+            email="candidate_sourcing_cta@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+        auth_response = self.client.get("/solutions/recruiting/candidate-sourcing/")
+        self.assertEqual(auth_response.status_code, 200)
+        auth_soup = BeautifulSoup(auth_response.content, "html.parser")
+        auth_source = auth_soup.find("input", {"name": "source_page", "value": "candidate_sourcing_hero"})
+        self.assertIsNotNone(auth_source)
+        auth_button = auth_source.find_parent("form").find("button", {"type": "submit"})
+        self.assertEqual(self._normalized_button_text(auth_button), "Spawn Talent Scout")
 
     def test_recruiting_page_includes_human_review_faq_content(self):
         soup = self._solution_recruiting_soup()
@@ -2968,6 +3049,9 @@ class SolutionCtaCopyTests(TestCase):
         self.assertIn("Recruiting automation, without losing the recruiter", page_text)
         self.assertIn("Human-reviewed workflows", page_text)
         self.assertIn("not by replacing human judgment in hiring decisions", page_text)
+        self.assertIsNotNone(
+            soup.find("a", {"href": reverse("pages:solution_recruiting_candidate_sourcing")})
+        )
         for question in expected_questions:
             self.assertIn(question, page_text)
         for label in ("Criteria", "Search", "Export", "Review"):
@@ -3191,7 +3275,7 @@ class SolutionCtaCopyTests(TestCase):
     def test_solution_pages_include_crawlable_related_links_when_flag_enabled(self):
         for solution_slug, link_data in self.SOLUTION_RELATED_LINKS.items():
             with self.subTest(solution_slug=solution_slug):
-                response = self.client.get(reverse("pages:solution", kwargs={"slug": solution_slug}))
+                response = self.client.get(self._solution_url(solution_slug))
 
                 self.assertEqual(response.status_code, 200)
                 soup = BeautifulSoup(response.content, "html.parser")
@@ -3221,7 +3305,7 @@ class SolutionCtaCopyTests(TestCase):
     def test_solution_pages_hide_crawlable_related_links_when_flag_disabled(self):
         for solution_slug, link_data in self.SOLUTION_RELATED_LINKS.items():
             with self.subTest(solution_slug=solution_slug):
-                response = self.client.get(reverse("pages:solution", kwargs={"slug": solution_slug}))
+                response = self.client.get(self._solution_url(solution_slug))
 
                 self.assertEqual(response.status_code, 200)
                 soup = BeautifulSoup(response.content, "html.parser")

@@ -3574,7 +3574,7 @@ class SolutionsSitemap(sitemaps.Sitemap):
             return []
 
     def location(self, slug):
-        return reverse('pages:solution', kwargs={'slug': slug})
+        return SolutionView.reverse_solution(slug)
 
 
 class SupportView(TemplateView):
@@ -3745,6 +3745,7 @@ class SolutionView(TemplateView):
     # Solutions with dedicated landing page templates
     DEDICATED_TEMPLATES = {
         'recruiting': 'solutions/recruiting.html',
+        'recruiting/candidate-sourcing': 'solutions/recruiting_candidate_sourcing.html',
         'sales': 'solutions/sales.html',
         'health-care': 'solutions/health-care.html',
         'defense': 'solutions/defense.html',
@@ -3770,6 +3771,30 @@ class SolutionView(TemplateView):
             'date_modified': '2026-06-04',
             'social_image': 'images/solutions/recruiting-hero.jpg',
             'social_image_alt': 'Gobii AI recruiting agents for candidate sourcing and screening',
+            'related_link': {
+                'intro': 'Want to inspect the agent first?',
+                'label': 'View the Talent Scout AI recruiting agent',
+                'route': 'pages:pretrained_worker_detail',
+                'kwargs': {'slug': 'talent-scout'},
+            },
+        },
+        'recruiting/candidate-sourcing': {
+            'title': 'Candidate Sourcing',
+            'tagline': 'Automate candidate sourcing before the ATS bottleneck.',
+            'description': 'Find, qualify, enrich, and export candidate shortlists with Gobii AI agents built for top-of-funnel recruiting work.',
+            'seo_title': 'AI Candidate Sourcing - Automate Recruiting Research | Gobii',
+            'seo_description': 'Use Gobii AI agents for candidate sourcing across approved sources. Find, qualify, enrich, and export recruiter-reviewed shortlists with Talent Scout.',
+            'date_modified': '2026-06-07',
+            'social_image': 'images/solutions/recruiting-hero.jpg',
+            'social_image_alt': 'Gobii AI candidate sourcing agent for recruiter-reviewed shortlists',
+            'url_name': 'pages:solution_recruiting_candidate_sourcing',
+            'url_kwargs': {},
+            'breadcrumb_parents': [
+                {
+                    'name': 'Recruiting',
+                    'solution_slug': 'recruiting',
+                },
+            ],
             'related_link': {
                 'intro': 'Want to inspect the agent first?',
                 'label': 'View the Talent Scout AI recruiting agent',
@@ -3841,6 +3866,15 @@ class SolutionView(TemplateView):
         },
     }
 
+    @classmethod
+    def reverse_solution(cls, slug):
+        data = cls.SOLUTION_DATA[slug]
+        route_name = data.get('url_name') or 'pages:solution'
+        route_kwargs = data.get('url_kwargs')
+        if route_kwargs is None:
+            route_kwargs = {'slug': slug}
+        return reverse(route_name, kwargs=route_kwargs)
+
     def dispatch(self, request, *args, **kwargs):
         if kwargs.get('slug', '') not in self.DEDICATED_TEMPLATES:
             raise Http404("Solution not found")
@@ -3854,7 +3888,7 @@ class SolutionView(TemplateView):
         context = super().get_context_data(**kwargs)
         slug = self.kwargs['slug']
         data = self.SOLUTION_DATA[slug]
-        solution_url = self.request.build_absolute_uri(reverse('pages:solution', kwargs={'slug': slug}))
+        solution_url = self.request.build_absolute_uri(self.reverse_solution(slug))
         solutions_url = self.request.build_absolute_uri(reverse('pages:solutions'))
         home_url = self.request.build_absolute_uri(reverse('pages:home'))
         social_image_url = self.request.build_absolute_uri(static(data['social_image']))
@@ -3904,29 +3938,38 @@ class SolutionView(TemplateView):
         }
         if data.get('date_modified'):
             structured_data["dateModified"] = data['date_modified']
+        breadcrumb_items = [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Home",
+                "item": home_url,
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Solutions",
+                "item": solutions_url,
+            },
+        ]
+        for parent in data.get('breadcrumb_parents') or []:
+            parent_url = self.request.build_absolute_uri(self.reverse_solution(parent['solution_slug']))
+            breadcrumb_items.append({
+                "@type": "ListItem",
+                "position": len(breadcrumb_items) + 1,
+                "name": parent['name'],
+                "item": parent_url,
+            })
+        breadcrumb_items.append({
+            "@type": "ListItem",
+            "position": len(breadcrumb_items) + 1,
+            "name": data['title'],
+            "item": solution_url,
+        })
         breadcrumb_data = {
             "@context": "https://schema.org",
             "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "Home",
-                    "item": home_url,
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "Solutions",
-                    "item": solutions_url,
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 3,
-                    "name": data['title'],
-                    "item": solution_url,
-                },
-            ],
+            "itemListElement": breadcrumb_items,
         }
 
         context.update({

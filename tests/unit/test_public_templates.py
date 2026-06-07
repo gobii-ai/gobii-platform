@@ -28,7 +28,12 @@ from config.socialaccount_adapter import (
     build_oauth_charter_stash_cache_key,
 )
 from pages.library_views import LIBRARY_CACHE_KEY
-from pages.public_template_urls import public_template_detail_path, public_template_hire_path, public_template_launch_path
+from pages.public_template_urls import (
+    public_template_category_slug,
+    public_template_detail_path,
+    public_template_hire_path,
+    public_template_launch_path,
+)
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
@@ -822,6 +827,57 @@ class LibraryViewsTests(TestCase):
         self.assertContains(response, 'data-library-initial-category="Sales"')
         self.assertContains(response, sales_template.display_name)
         self.assertNotContains(response, "Research Agent")
+
+    @tag("batch_public_templates")
+    def test_library_recruiting_category_preserves_indexed_slug_for_hr_recruiting(self):
+        user = get_user_model().objects.create_user(username="library-recruiting-owner", email="library-recruiting-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="library-recruiting-owner")
+        recruiting_template = PersistentAgentTemplate.objects.create(
+            code="lib-category-recruiting",
+            public_profile=profile,
+            slug="candidate-sourcer",
+            display_name="Candidate Sourcer",
+            tagline="Recruiting work",
+            description="Sources recruiting candidates.",
+            charter="Source recruiting candidates.",
+            category="HR & Recruiting",
+            is_active=True,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="lib-category-ops-for-recruiting-test",
+            public_profile=profile,
+            slug="ops-agent",
+            display_name="Ops Agent",
+            tagline="Ops work",
+            description="Handles ops work.",
+            charter="Handle ops work.",
+            category="Operations",
+            is_active=True,
+        )
+        cache.clear()
+
+        response = self.client.get("/library/recruiting/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertIn("HR & Recruiting AI Agent Templates | Gobii", soup.find("title").get_text())
+        app_mount = soup.select_one("[data-library-initial-category]")
+        self.assertIsNotNone(app_mount)
+        self.assertEqual(app_mount["data-library-initial-category"], "HR & Recruiting")
+        self.assertContains(response, recruiting_template.display_name)
+        self.assertNotContains(response, "Ops Agent")
+        self.assertEqual(public_template_category_slug(recruiting_template), "recruiting")
+        self.assertEqual(public_template_detail_path(recruiting_template), "/library/recruiting/candidate-sourcer/")
+
+        alias_response = self.client.get("/library/hr-recruiting/")
+
+        self.assertEqual(alias_response.status_code, 301)
+        self.assertEqual(alias_response.url, "/library/recruiting/")
+
+        sitemap_response = self.client.get("/sitemap.xml")
+
+        self.assertContains(sitemap_response, "http://example.com/library/recruiting/")
+        self.assertNotContains(sitemap_response, "http://example.com/library/hr-recruiting/")
 
     @tag("batch_public_templates")
     def test_library_category_route_preserves_legacy_library_handle_urls(self):

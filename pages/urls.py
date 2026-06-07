@@ -101,6 +101,12 @@ urlpatterns = [
     path("pretrained-workers/<slug:slug>/spawn/", PretrainedWorkerLaunchView.as_view(), name="pretrained_worker_launch"),
     path("solutions/", SolutionsIndexView.as_view(), name="solutions"),
     path("solutions/engineering/pro-signup/", EngineeringProSignupView.as_view(), name="engineering_pro_signup"),
+    path(
+        "solutions/recruiting/candidate-sourcing/",
+        SolutionView.as_view(),
+        {"slug": "recruiting/candidate-sourcing"},
+        name="solution_recruiting_candidate_sourcing",
+    ),
     path("special-access/", SpecialAccessView.as_view(), name="special_access"),
     path("special-access/start/", SpecialAccessStartView.as_view(), name="special_access_start"),
     path("contact/request/", MarketingContactRequestView.as_view(), name="marketing_contact_request"),

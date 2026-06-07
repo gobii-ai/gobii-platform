@@ -784,6 +784,7 @@ PAGE_META = {
     "/accounts/logout/":                ("Auth",       "Logout"),
     "/accounts/signup/":                ("Auth",       "Sign Up"),
     "/solutions/recruiting/":           ("Marketing",  "Solutions Recruiting"),
+    "/solutions/recruiting/candidate-sourcing/": ("Marketing",  "Solutions Recruiting Candidate Sourcing"),
     "/solutions/sales/":                ("Marketing",  "Solutions Sales"),
     "/solutions/health-care/":          ("Marketing",  "Solutions Health Care"),
     "/solutions/defense/":              ("Marketing",  "Solutions Defense"),
