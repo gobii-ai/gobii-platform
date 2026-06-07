@@ -49,7 +49,7 @@ function replaceOperationIntro(source, description) {
 
   return source.replace(
     /(<\/MethodEndpoint>)\n+[\s\S]*?\n+(<Heading\n  id=\{"request"\}|<ParamsDetails|<RequestSchema|<StatusCodes)/,
-    `$1\n\n${escapeMdxText(description)}\n\n$2`
+    (_, methodEndpoint, nextSection) => `${methodEndpoint}\n\n${escapeMdxText(description)}\n\n${nextSection}`
   );
 }
 
