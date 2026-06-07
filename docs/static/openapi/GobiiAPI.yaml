@@ -136,13 +136,13 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Agent - Update
-      summary: Update Agent
-      description: Update Agent with the Gobii REST API endpoint PUT /agents/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+          sidebarTitle: Agent - Replace
+      summary: Replace Persistent Agent
+      description: Replace Persistent Agent with the Gobii REST API endpoint PUT /agents/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
     patch:
       operationId: partialUpdatePersistentAgent
-      description: Update Agent with the Gobii REST API endpoint PATCH /agents/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
-      summary: Update Agent
+      description: Patch Persistent Agent with the Gobii REST API endpoint PATCH /agents/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      summary: Patch Persistent Agent
       parameters:
         - in: path
           name: id
@@ -177,7 +177,7 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Agent - Update (Partial)
+          sidebarTitle: Agent - Patch
     delete:
       operationId: deletePersistentAgent
       parameters:
@@ -456,8 +456,8 @@ paths:
   /agents/browser-use/:
     get:
       operationId: listAgents
-      description: List browser-use Profiles with the Gobii REST API endpoint GET /agents/browser-use/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
-      summary: List browser-use Profiles
+      description: List Legacy Browser-Use Agents with the Gobii REST API endpoint GET /agents/browser-use/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      summary: List Legacy Browser-Use Agents
       parameters:
         - name: page
           required: false
@@ -486,10 +486,10 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Profiles - List
+          sidebarTitle: Legacy Browser-Use Agents - List
     post:
       operationId: createAgent
-      description: Create browser-use Profile with the Gobii REST API endpoint POST /agents/browser-use/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Create Legacy Browser-Use Agent with the Gobii REST API endpoint POST /agents/browser-use/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       tags:
         - browser-use Tasks API
       requestBody:
@@ -517,12 +517,12 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Profile - Create
-      summary: Create browser-use Profile
+          sidebarTitle: Legacy Browser-Use Agent - Create
+      summary: Create Legacy Browser-Use Agent
   /agents/browser-use/{agentId}/tasks/:
     get:
       operationId: listTasks
-      description: List Tasks with the Gobii REST API endpoint GET /agents/browser-use/{agentId}/tasks/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: List Legacy Agent Tasks with the Gobii REST API endpoint GET /agents/browser-use/{agentId}/tasks/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -557,11 +557,11 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Tasks - List
-      summary: List Tasks
+          sidebarTitle: Legacy Agent Tasks - List
+      summary: List Legacy Agent Tasks
     post:
       operationId: assignTask
-      description: Create Task with the Gobii REST API endpoint POST /agents/browser-use/{agentId}/tasks/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Create Legacy Agent Task with the Gobii REST API endpoint POST /agents/browser-use/{agentId}/tasks/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -607,12 +607,12 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Create
-      summary: Create Task
+          sidebarTitle: Legacy Agent Task - Create
+      summary: Create Legacy Agent Task
   /agents/browser-use/{agentId}/tasks/{id}/:
     get:
       operationId: getTask
-      description: Get Task with the Gobii REST API endpoint GET /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Get Legacy Agent Task with the Gobii REST API endpoint GET /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -641,11 +641,11 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Get
-      summary: Get Task
+          sidebarTitle: Legacy Agent Task - Get
+      summary: Get Legacy Agent Task
     put:
       operationId: updateTask
-      description: Update Task with the Gobii REST API endpoint PUT /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Replace Legacy Agent Task with the Gobii REST API endpoint PUT /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -685,11 +685,11 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Update
-      summary: Update Task
+          sidebarTitle: Legacy Agent Task - Replace
+      summary: Replace Legacy Agent Task
     patch:
       operationId: updateTaskStatusPartial
-      description: Update Task with the Gobii REST API endpoint PATCH /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Patch Legacy Agent Task with the Gobii REST API endpoint PATCH /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -729,11 +729,11 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Update
-      summary: Update Task
+          sidebarTitle: Legacy Agent Task - Patch
+      summary: Patch Legacy Agent Task
     delete:
       operationId: deleteTask
-      description: Delete Task with the Gobii REST API endpoint DELETE /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Delete Legacy Agent Task with the Gobii REST API endpoint DELETE /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -758,12 +758,12 @@ paths:
           description: No response body
       x-mint:
         metadata:
-          sidebarTitle: Task - Delete
-      summary: Delete Task
+          sidebarTitle: Legacy Agent Task - Delete
+      summary: Delete Legacy Agent Task
   /agents/browser-use/{agentId}/tasks/{id}/cancel/:
     post:
       operationId: cancelTask
-      description: Cancel Task with the Gobii REST API endpoint POST /agents/browser-use/{agentId}/tasks/{id}/cancel/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Cancel Legacy Agent Task with the Gobii REST API endpoint POST /agents/browser-use/{agentId}/tasks/{id}/cancel/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -798,12 +798,12 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Cancel
-      summary: Cancel Task
+          sidebarTitle: Legacy Agent Task - Cancel
+      summary: Cancel Legacy Agent Task
   /agents/browser-use/{agentId}/tasks/{id}/result/:
     get:
       operationId: getTaskResult
-      description: Get Task Result with the Gobii REST API endpoint GET /agents/browser-use/{agentId}/tasks/{id}/result/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Get Legacy Agent Task Result with the Gobii REST API endpoint GET /agents/browser-use/{agentId}/tasks/{id}/result/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -832,13 +832,13 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task Result - Get
-      summary: Get Task Result
+          sidebarTitle: Legacy Agent Task Result - Get
+      summary: Get Legacy Agent Task Result
   /agents/browser-use/{id}/:
     get:
       operationId: getAgent
-      description: Get browser-use Profile with the Gobii REST API endpoint GET /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
-      summary: Get browser-use Profile
+      description: Get Legacy Browser-Use Agent with the Gobii REST API endpoint GET /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      summary: Get Legacy Browser-Use Agent
       parameters:
         - in: path
           name: id
@@ -862,10 +862,10 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Profile - Get
+          sidebarTitle: Legacy Browser-Use Agent - Get
     put:
       operationId: updateAgent
-      description: Update browser-use Profile with the Gobii REST API endpoint PUT /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Replace Legacy Browser-Use Agent with the Gobii REST API endpoint PUT /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -901,11 +901,11 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Profile - Update
-      summary: Update browser-use Profile
+          sidebarTitle: Legacy Browser-Use Agent - Replace
+      summary: Replace Legacy Browser-Use Agent
     patch:
       operationId: updateAgentStatusPartial
-      description: Update browser-use Profile with the Gobii REST API endpoint PATCH /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Patch Legacy Browser-Use Agent with the Gobii REST API endpoint PATCH /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -940,11 +940,11 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Profile - Update (Partial)
-      summary: Update browser-use Profile
+          sidebarTitle: Legacy Browser-Use Agent - Patch
+      summary: Patch Legacy Browser-Use Agent
     delete:
       operationId: deleteAgent
-      description: Delete browser-use Profile with the Gobii REST API endpoint DELETE /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Delete Legacy Browser-Use Agent with the Gobii REST API endpoint DELETE /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -964,8 +964,8 @@ paths:
           description: No response body
       x-mint:
         metadata:
-          sidebarTitle: Profile - Delete
-      summary: Delete browser-use Profile
+          sidebarTitle: Legacy Browser-Use Agent - Delete
+      summary: Delete Legacy Browser-Use Agent
   /ping/:
     get:
       operationId: ping
@@ -990,8 +990,8 @@ paths:
   /tasks/browser-use/:
     get:
       operationId: listAllTasks
-      description: List browser-use Tasks with the Gobii REST API endpoint GET /tasks/browser-use/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
-      summary: List browser-use Tasks
+      description: List Standalone Legacy Tasks with the Gobii REST API endpoint GET /tasks/browser-use/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      summary: List Standalone Legacy Tasks
       tags:
         - browser-use Tasks API
       security:
@@ -1007,10 +1007,10 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Tasks - List
+          sidebarTitle: Standalone Legacy Tasks - List
     post:
       operationId: assignTask2
-      description: Create Task with the Gobii REST API endpoint POST /tasks/browser-use/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Create Standalone Legacy Task with the Gobii REST API endpoint POST /tasks/browser-use/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       tags:
         - browser-use Tasks API
       requestBody:
@@ -1049,12 +1049,12 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Create
-      summary: Create Task
+          sidebarTitle: Standalone Legacy Task - Create
+      summary: Create Standalone Legacy Task
   /tasks/browser-use/{id}/:
     get:
       operationId: getTask2
-      description: Get Task with the Gobii REST API endpoint GET /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Get Standalone Legacy Task with the Gobii REST API endpoint GET /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1077,11 +1077,11 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Get
-      summary: Get Task
+          sidebarTitle: Standalone Legacy Task - Get
+      summary: Get Standalone Legacy Task
     put:
       operationId: updateTask2
-      description: Update Task with the Gobii REST API endpoint PUT /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Replace Standalone Legacy Task with the Gobii REST API endpoint PUT /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1115,11 +1115,11 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Update
-      summary: Update Task
+          sidebarTitle: Standalone Legacy Task - Replace
+      summary: Replace Standalone Legacy Task
     patch:
       operationId: updateTaskStatusPartial2
-      description: Update Task with the Gobii REST API endpoint PATCH /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Patch Standalone Legacy Task with the Gobii REST API endpoint PATCH /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1153,11 +1153,11 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Update
-      summary: Update Task
+          sidebarTitle: Standalone Legacy Task - Patch
+      summary: Patch Standalone Legacy Task
     delete:
       operationId: deleteTask2
-      description: Delete Task with the Gobii REST API endpoint DELETE /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Delete Standalone Legacy Task with the Gobii REST API endpoint DELETE /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1176,12 +1176,12 @@ paths:
           description: No response body
       x-mint:
         metadata:
-          sidebarTitle: Task - Delete
-      summary: Delete Task
+          sidebarTitle: Standalone Legacy Task - Delete
+      summary: Delete Standalone Legacy Task
   /tasks/browser-use/{id}/cancel/:
     post:
       operationId: cancelTask2
-      description: Cancel Task with the Gobii REST API endpoint POST /tasks/browser-use/{id}/cancel/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Cancel Standalone Legacy Task with the Gobii REST API endpoint POST /tasks/browser-use/{id}/cancel/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1210,12 +1210,12 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task - Cancel
-      summary: Cancel Task
+          sidebarTitle: Standalone Legacy Task - Cancel
+      summary: Cancel Standalone Legacy Task
   /tasks/browser-use/{id}/result/:
     get:
       operationId: getTaskResult2
-      description: Get Task Result with the Gobii REST API endpoint GET /tasks/browser-use/{id}/result/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
+      description: Get Standalone Legacy Task Result with the Gobii REST API endpoint GET /tasks/browser-use/{id}/result/. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1238,8 +1238,8 @@ paths:
           description: ""
       x-mint:
         metadata:
-          sidebarTitle: Task Result - Get
-      summary: Get Task Result
+          sidebarTitle: Standalone Legacy Task Result - Get
+      summary: Get Standalone Legacy Task Result
 components:
   schemas:
     AgentDetail:
@@ -2034,6 +2034,6 @@ tags:
   - name: Agents API
     description: Persistent Gobii agent endpoints for creating, scheduling, messaging, and managing Gobiis through the API.
   - name: browser-use Tasks API
-    description: Legacy browser-use profile and task endpoints for submitting browser automation jobs, polling status, and retrieving results.
+    description: Legacy browser-use agent and task endpoints for submitting browser automation jobs, polling status, and retrieving results.
   - name: Utilities
     description: Utility endpoints for health checks and simple Gobii API integration verification.
