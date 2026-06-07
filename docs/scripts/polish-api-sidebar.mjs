@@ -34,6 +34,25 @@ function removeDuplicateSummary(source) {
   );
 }
 
+function escapeFrontMatterValue(value) {
+  return value.replace(/"/g, '\\"');
+}
+
+function escapeMdxText(value) {
+  return value.replace(/[{}]/g, '\\$&');
+}
+
+function replaceOperationIntro(source, description) {
+  if (!description) {
+    return source;
+  }
+
+  return source.replace(
+    /(<\/MethodEndpoint>)\n+[\s\S]*?\n+(<Heading\n  id=\{"request"\}|<ParamsDetails|<RequestSchema|<StatusCodes)/,
+    (_, methodEndpoint, nextSection) => `${methodEndpoint}\n\n${escapeMdxText(description)}\n\n${nextSection}`
+  );
+}
+
 function displayTagLabel(label) {
   if (label === 'browser-use Tasks API') {
     return 'Legacy Browser Tasks API';
@@ -51,6 +70,7 @@ function normalizeGeneratedLanguage(source) {
 const spec = YAML.parse(fs.readFileSync(specPath, 'utf8'));
 const groups = new Map();
 const labelsById = new Map();
+const titlesById = new Map();
 const descriptionsById = new Map();
 const tagDescriptionsBySlug = new Map((spec.tags ?? []).map((tag) => [slugify(tag.name), tag.description]));
 const apiInfoDescription = spec.info?.description;
@@ -66,6 +86,7 @@ for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
     const label = sidebarTitle ?? operation.summary ?? operation.operationId;
     const id = kebabOperationId(operation.operationId);
     labelsById.set(id, label);
+    titlesById.set(id, operation.summary ?? operation.operationId);
     descriptionsById.set(id, operation.description);
     const item = {
       type: 'doc',
@@ -124,10 +145,20 @@ for (const [id, label] of labelsById) {
   }
 
   let doc = normalizeGeneratedLanguage(fs.readFileSync(docPath, 'utf8'));
-  doc = doc.replace(/^sidebar_label: ".*"$/m, `sidebar_label: "${label.replace(/"/g, '\\"')}"`);
+  const currentTitle = doc.match(/^title: "([^"]+)"$/m)?.[1];
+  const title = titlesById.get(id);
+  if (title) {
+    doc = doc.replace(/^title: ".*"$/m, () => `title: "${escapeFrontMatterValue(title)}"`);
+    if (currentTitle) {
+      doc = doc.replace(`children={"${currentTitle}"}`, () => `children={"${escapeFrontMatterValue(title)}"}`);
+    }
+  }
+
+  doc = doc.replace(/^sidebar_label: ".*"$/m, () => `sidebar_label: "${escapeFrontMatterValue(label)}"`);
   const description = descriptionsById.get(id);
   if (description) {
-    doc = doc.replace(/^description: ".*"$/m, `description: "${description.replace(/"/g, '\\"')}"`);
+    doc = doc.replace(/^description: ".*"$/m, () => `description: "${escapeFrontMatterValue(description)}"`);
+    doc = replaceOperationIntro(doc, description);
   }
   doc = removeDuplicateSummary(doc);
   fs.writeFileSync(docPath, doc);
@@ -137,7 +168,7 @@ if (apiInfoDescription) {
   const docPath = new URL('gobii-api.info.mdx', apiDocsDir);
   if (fs.existsSync(docPath)) {
     let doc = normalizeGeneratedLanguage(fs.readFileSync(docPath, 'utf8'));
-    doc = doc.replace(/^description: ".*"$/m, `description: "${apiInfoDescription.replace(/"/g, '\\"')}"`);
+    doc = doc.replace(/^description: ".*"$/m, () => `description: "${escapeFrontMatterValue(apiInfoDescription)}"`);
     fs.writeFileSync(docPath, doc);
   }
 }
@@ -151,12 +182,12 @@ for (const [slug, description] of tagDescriptionsBySlug) {
   let doc = normalizeGeneratedLanguage(fs.readFileSync(docPath, 'utf8'));
   const currentTitle = doc.match(/^title: "([^"]+)"$/m)?.[1];
   if (currentTitle) {
-    doc = doc.replace(/^title: ".*"$/m, `title: "${displayTagLabel(currentTitle).replace(/"/g, '\\"')}"`);
+    doc = doc.replace(/^title: ".*"$/m, () => `title: "${escapeFrontMatterValue(displayTagLabel(currentTitle))}"`);
   }
   if (/^description: /m.test(doc)) {
-    doc = doc.replace(/^description: ".*"$/m, `description: "${description.replace(/"/g, '\\"')}"`);
+    doc = doc.replace(/^description: ".*"$/m, () => `description: "${escapeFrontMatterValue(description)}"`);
   } else {
-    doc = doc.replace(/^title: .*\n/m, (match) => `${match}description: "${description.replace(/"/g, '\\"')}"\n`);
+    doc = doc.replace(/^title: .*\n/m, (match) => `${match}description: "${escapeFrontMatterValue(description)}"\n`);
   }
   fs.writeFileSync(docPath, doc);
 }

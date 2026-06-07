@@ -131,6 +131,10 @@ const legacyApiRedirects = {
 
 const legacyDocRedirects = {
   'getting-started/introduction': '',
+  'core-concepts': 'start-here/core-concepts',
+  'console-guides': 'using-gobii',
+  'console-guides/live-chat-guide': 'using-gobii/chat-and-timeline',
+  'console-guides/meta-gobii': 'using-gobii/meta-gobii',
 };
 
 function writeRedirect(fromRoute, toRoute) {
