@@ -36,6 +36,88 @@ class AgentCapabilitiesPromptTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
+    def _build_prompt_text_for_owner(
+        self,
+        *,
+        email: str = "owner@example.com",
+        first_name: str = "",
+        last_name: str = "",
+    ) -> str:
+        User = get_user_model()
+        suffix = User.objects.count()
+        user = User.objects.create_user(
+            username=f"identity-owner-{suffix}",
+            email=email,
+            password="pass1234",
+            first_name=first_name,
+            last_name=last_name,
+        )
+        browser_agent = BrowserUseAgent.objects.create(
+            user=user,
+            name=f"Identity Browser Agent {suffix}",
+        )
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name=f"Identity Agent {suffix}",
+            browser_use_agent=browser_agent,
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(agent)
+        return "\n".join(message["content"] for message in context)
+
+    def test_owner_identity_prompt_uses_profile_first_name(self):
+        contents = self._build_prompt_text_for_owner(
+            email="mattworkpro@example.com",
+            first_name="Ada",
+            last_name="Lovelace",
+        )
+
+        self.assertIn("The owner's name is Ada.", contents)
+        self.assertIn("Use their name occasionally to build rapport", contents)
+        self.assertNotIn("profile name is not set", contents)
+        self.assertNotIn("owner's name is unknown", contents)
+
+    def test_owner_identity_prompt_handles_braces_in_profile_first_name(self):
+        contents = self._build_prompt_text_for_owner(
+            email="braces@example.com",
+            first_name="{Ada}",
+        )
+
+        self.assertIn("The owner's name is {Ada}.", contents)
+        self.assertIn("Hey {Ada}, found it!", contents)
+        self.assertNotIn("owner's name is unknown", contents)
+
+    def test_owner_identity_prompt_marks_missing_profile_name_unknown(self):
+        for email in [
+            "jane@example.com",
+            "jane.doe@example.com",
+            "jane_doe@example.com",
+            "jane-doe@example.com",
+            "mattworkpro@example.com",
+            "jane123@example.com",
+            "support@example.com",
+            "hello+test@example.com",
+            "",
+        ]:
+            with self.subTest(email=email):
+                contents = self._build_prompt_text_for_owner(email=email)
+
+                self.assertIn("The owner's name is unknown.", contents)
+                self.assertIn("Do not infer a first name, last name, or preferred form of address", contents)
+
+    def test_owner_identity_prompt_does_not_use_last_name_as_call_name(self):
+        contents = self._build_prompt_text_for_owner(
+            email="jane.doe@example.com",
+            last_name="Lovelace",
+        )
+
+        self.assertIn("The owner's name is unknown.", contents)
+        self.assertIn("Do not infer a first name, last name, or preferred form of address", contents)
+        self.assertNotIn("The owner's name is Lovelace", contents)
+
     @override_settings(PUBLIC_SITE_URL="https://app.test")
     @patch("api.agent.core.prompt_context.DedicatedProxyService.allocated_count", return_value=2)
     @patch("api.agent.core.prompt_context.AddonEntitlementService.get_uplift")
