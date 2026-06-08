@@ -55,22 +55,6 @@ type AgentDiscordChannelsDTO = {
   channels: DiscordChannelDTO[]
 }
 
-type DiscordAgentConnectionDTO = {
-  agent_id: string
-  name: string
-  avatar_url: string
-  connected: boolean
-  subscribed: boolean
-  skill_enabled: boolean
-  guild_count: number
-  active_subscription_count: number
-}
-
-type DiscordAgentConnectionsDTO = {
-  provider_key: string
-  agents: DiscordAgentConnectionDTO[]
-}
-
 export type DiscordGuild = {
   guildId: string
   name: string
@@ -132,22 +116,6 @@ export type DiscordSubscriptionSelection = {
   channelName?: string
 }
 
-export type DiscordAgentConnection = {
-  agentId: string
-  name: string
-  avatarUrl: string
-  connected: boolean
-  subscribed: boolean
-  skillEnabled: boolean
-  guildCount: number
-  activeSubscriptionCount: number
-}
-
-export type DiscordAgentConnectionsResponse = {
-  providerKey: string
-  agents: DiscordAgentConnection[]
-}
-
 export function agentDiscordAppQueryKey(agentId: string) {
   return ['agent-discord-app', agentId] as const
 }
@@ -183,19 +151,6 @@ function mapChannel(channel: DiscordChannelDTO): DiscordChannel {
   }
 }
 
-function mapAgentConnection(agent: DiscordAgentConnectionDTO): DiscordAgentConnection {
-  return {
-    agentId: agent.agent_id,
-    name: agent.name,
-    avatarUrl: agent.avatar_url,
-    connected: Boolean(agent.connected),
-    subscribed: Boolean(agent.subscribed),
-    skillEnabled: Boolean(agent.skill_enabled),
-    guildCount: agent.guild_count ?? 0,
-    activeSubscriptionCount: agent.active_subscription_count ?? 0,
-  }
-}
-
 function mapApp(app: AgentDiscordAppDTO): AgentDiscordApp {
   return {
     providerKey: app.provider_key,
@@ -220,14 +175,6 @@ function agentDiscordAppUrl(agentId: string): string {
 
 export async function fetchAgentDiscordApp(agentId: string): Promise<AgentDiscordApp> {
   return mapApp(await jsonFetch<AgentDiscordAppDTO>(agentDiscordAppUrl(agentId)))
-}
-
-export async function fetchDiscordAgentConnections(): Promise<DiscordAgentConnectionsResponse> {
-  const payload = await jsonFetch<DiscordAgentConnectionsDTO>('/console/api/discord/agents/')
-  return {
-    providerKey: payload.provider_key,
-    agents: (payload.agents ?? []).map(mapAgentConnection),
-  }
 }
 
 export async function startAgentDiscordConnect(agentId: string): Promise<AgentDiscordConnectResponse> {

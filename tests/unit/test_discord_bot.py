@@ -1002,44 +1002,6 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("/console/api/discord/oauth/start/", payload["connect_url"])
 
     @tag("batch_agent_webhooks")
-    def test_discord_agent_connections_api_lists_owner_agents_with_status(self):
-        self._force_login_console_manager()
-        other_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Other Discord Browser")
-        other_agent = PersistentAgent.objects.create(
-            user=self.user,
-            name="Other Agent",
-            charter="Handle other messages.",
-            browser_use_agent=other_browser_agent,
-        )
-        guild = self._guild(name="Support")
-        PersistentAgentDiscordChannelSubscription.objects.create(
-            agent=self.agent,
-            guild=guild,
-            channel_id="10",
-            channel_name="triage",
-        )
-        PersistentAgentSystemSkillState.objects.create(
-            agent=self.agent,
-            skill_key="discord_native",
-            is_enabled=True,
-        )
-
-        response = self.client.get(reverse("console-discord-agent-connections"))
-
-        self.assertEqual(response.status_code, 200, response.content)
-        payload = response.json()
-        self.assertEqual(payload["provider_key"], "discord")
-        self.assertEqual([agent["agent_id"] for agent in payload["agents"]], [str(self.agent.id), str(other_agent.id)])
-        first = payload["agents"][0]
-        self.assertEqual(first["name"], self.agent.name)
-        self.assertTrue(first["connected"])
-        self.assertTrue(first["subscribed"])
-        self.assertTrue(first["skill_enabled"])
-        self.assertEqual(first["guild_count"], 1)
-        self.assertEqual(first["active_subscription_count"], 1)
-        self.assertFalse(payload["agents"][1]["skill_enabled"])
-
-    @tag("batch_agent_webhooks")
     def test_discord_connect_api_enables_native_skill(self):
         self._force_login_console_manager()
 

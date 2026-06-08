@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, CheckCircle2, FolderOpen, Loader2, Plug, Settings, Unplug, Users } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, FolderOpen, Loader2, Plug, Unplug, Users } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
   fetchAgentDiscordApp,
-  fetchDiscordAgentConnections,
   startAgentDiscordConnect,
   updateAgentDiscordSubscriptions,
-  type DiscordAgentConnection,
   type DiscordSubscriptionSelection,
 } from '../../api/discordNative'
+import { fetchAgentRoster } from '../../api/agents'
 import {
   disconnectAgentPipedreamApp,
   fetchPipedreamAppAgentConnections,
@@ -64,7 +63,12 @@ import {
   supportsNativeIntegrationPicker,
   useNativeIntegrationRefreshEffects,
 } from './NativeIntegrationShared'
-import { DiscordConfigurationScreen } from './AgentPipedreamAppsModal'
+import {
+  DiscordAgentConnectionsScreen,
+  DiscordConfigurationScreen,
+  type PendingDiscordAgentAction,
+} from './DiscordNativeAppModal'
+import type { AgentRosterEntry } from '../../types/agentRoster'
 
 type PipedreamAppsModalProps = {
   settingsUrl: string | null
@@ -97,11 +101,6 @@ type PendingNativeAction = {
 type PendingAgentAction = {
   agentId: string
   kind: 'connect' | 'disconnect'
-} | null
-
-type PendingDiscordAgentAction = {
-  agentId: string
-  kind: 'connect' | 'save'
 } | null
 
 export function PipedreamAppsModal({
@@ -143,14 +142,11 @@ export function PipedreamAppsModal({
     setStatusMessage(null)
   }, [settingsUrl])
 
-  const discordConnectionsQueryKey = useMemo(() => ['discord-agent-connections'] as const, [])
-
   useEffect(() => {
     const handleDiscordOAuthComplete = (event: MessageEvent<{ type?: unknown; status?: unknown; agent_id?: unknown }>) => {
       if (event.origin !== window.location.origin || event.data?.type !== 'gobii:discord_oauth_complete') {
         return
       }
-      void queryClient.invalidateQueries({ queryKey: discordConnectionsQueryKey })
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
       if (typeof event.data.agent_id === 'string') {
         void queryClient.invalidateQueries({ queryKey: agentDiscordAppQueryKey(event.data.agent_id) })
@@ -161,7 +157,7 @@ export function PipedreamAppsModal({
     }
     window.addEventListener('message', handleDiscordOAuthComplete)
     return () => window.removeEventListener('message', handleDiscordOAuthComplete)
-  }, [discordConnectionsQueryKey, queryClient])
+  }, [queryClient])
 
   const searchQuery = useQuery({
     queryKey: ['pipedream-app-search', searchUrl, debouncedSearchTerm],
@@ -186,12 +182,12 @@ export function PipedreamAppsModal({
     enabled: activeAppSlug.length > 0,
   })
   useWindowFocusRefetch(connectionsQuery.refetch, activeAppSlug.length > 0)
-  const discordConnectionsQuery = useQuery({
-    queryKey: discordConnectionsQueryKey,
-    queryFn: fetchDiscordAgentConnections,
+  const agentRosterQuery = useQuery({
+    queryKey: ['agent-roster'],
+    queryFn: () => fetchAgentRoster(),
     enabled: discordConnectionsOpen && activeDiscordAgentId === null,
   })
-  useWindowFocusRefetch(discordConnectionsQuery.refetch, discordConnectionsOpen && activeDiscordAgentId === null)
+  useWindowFocusRefetch(agentRosterQuery.refetch, discordConnectionsOpen && activeDiscordAgentId === null)
   const activeDiscordAppQueryKey = useMemo(
     () => activeDiscordAgentId ? agentDiscordAppQueryKey(activeDiscordAgentId) : ['agent-discord-app', null] as const,
     [activeDiscordAgentId],
@@ -399,14 +395,13 @@ export function PipedreamAppsModal({
   })
 
   const discordConnectMutation = useMutation({
-    mutationFn: (agent: DiscordAgentConnection) => startAgentDiscordConnect(agent.agentId),
+    mutationFn: (agent: AgentRosterEntry) => startAgentDiscordConnect(agent.id),
     onMutate: (agent) => {
-      setPendingDiscordAgentAction({ agentId: agent.agentId, kind: 'connect' })
+      setPendingDiscordAgentAction({ agentId: agent.id, kind: 'connect' })
       setStatusMessage(null)
     },
     onSuccess: (result, agent) => {
-      queryClient.setQueryData(agentDiscordAppQueryKey(agent.agentId), result.app)
-      void queryClient.invalidateQueries({ queryKey: discordConnectionsQueryKey })
+      queryClient.setQueryData(agentDiscordAppQueryKey(agent.id), result.app)
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
       window.open(result.connectUrl, '_blank', 'noopener,noreferrer')
     },
@@ -427,7 +422,6 @@ export function PipedreamAppsModal({
     },
     onSuccess: (app, { agentId }) => {
       queryClient.setQueryData(agentDiscordAppQueryKey(agentId), app)
-      void queryClient.invalidateQueries({ queryKey: discordConnectionsQueryKey })
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
     },
     onError: (error) => {
@@ -447,7 +441,7 @@ export function PipedreamAppsModal({
     || discordConnectMutation.isPending
     || discordSubscriptionsMutation.isPending
   const activeDiscordAgent = activeDiscordAgentId
-    ? (discordConnectionsQuery.data?.agents ?? []).find((agent) => agent.agentId === activeDiscordAgentId) ?? null
+    ? (agentRosterQuery.data?.agents ?? []).find((agent) => agent.id === activeDiscordAgentId) ?? null
     : null
   const body = activeDiscordAgentId ? (
     activeDiscordAppQuery.isError ? (
@@ -498,12 +492,12 @@ export function PipedreamAppsModal({
     )
   ) : discordConnectionsOpen ? (
     <DiscordAgentConnectionsScreen
-      agents={discordConnectionsQuery.data?.agents ?? []}
-      isLoading={discordConnectionsQuery.isLoading}
-      isFetching={discordConnectionsQuery.isFetching}
-      isError={discordConnectionsQuery.isError}
-      error={discordConnectionsQuery.error}
-      isBusy={isBusy || discordConnectionsQuery.isFetching}
+      agents={agentRosterQuery.data?.agents ?? []}
+      isLoading={agentRosterQuery.isLoading}
+      isFetching={agentRosterQuery.isFetching}
+      isError={agentRosterQuery.isError}
+      error={agentRosterQuery.error}
+      isBusy={isBusy || agentRosterQuery.isFetching}
       pendingDiscordAgentAction={pendingDiscordAgentAction}
       statusMessage={statusMessage}
       onBack={() => {
@@ -512,7 +506,7 @@ export function PipedreamAppsModal({
       }}
       onConnect={(agent) => discordConnectMutation.mutate(agent)}
       onConfigure={(agent) => {
-        setActiveDiscordAgentId(agent.agentId)
+        setActiveDiscordAgentId(agent.id)
         setStatusMessage(null)
       }}
     />
@@ -923,168 +917,6 @@ function AppConnectionsScreen({
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function DiscordAgentConnectionsScreen({
-  agents,
-  isLoading,
-  isFetching,
-  isError,
-  error,
-  isBusy,
-  pendingDiscordAgentAction,
-  statusMessage,
-  onBack,
-  onConnect,
-  onConfigure,
-}: {
-  agents: DiscordAgentConnection[]
-  isLoading: boolean
-  isFetching: boolean
-  isError: boolean
-  error: unknown
-  isBusy: boolean
-  pendingDiscordAgentAction: PendingDiscordAgentAction
-  statusMessage: PipedreamStatusMessage
-  onBack: () => void
-  onConnect: (agent: DiscordAgentConnection) => void
-  onConfigure: (agent: DiscordAgentConnection) => void
-}) {
-  return (
-    <div className="space-y-4 p-1">
-      <button
-        type="button"
-        className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-        onClick={onBack}
-        disabled={isBusy}
-      >
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        Back
-      </button>
-
-      <div className="flex items-center gap-3">
-        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700">
-          <img src="/static/images/integrations/native/discord.svg" alt="" className="h-6 w-6 object-contain" loading="lazy" />
-        </span>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-900">Discord</p>
-          <p className="text-sm text-slate-600">{isFetching ? 'Refreshing connections…' : 'Configure Discord channels per agent.'}</p>
-        </div>
-      </div>
-
-      <PipedreamStatusBanner statusMessage={statusMessage} />
-
-      {isError ? (
-        <PipedreamErrorState error={error} fallback="Unable to load Discord agent connections." />
-      ) : isLoading ? (
-        <PipedreamLoadingState label="Loading agents…" />
-      ) : agents.length === 0 ? (
-        <PipedreamEmptyState label="No agents found." />
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <div className="divide-y divide-slate-200">
-            {agents.map((agent) => (
-              <DiscordAgentConnectionRow
-                key={agent.agentId}
-                agent={agent}
-                pendingDiscordAgentAction={pendingDiscordAgentAction}
-                disabled={isBusy}
-                onConnect={() => onConnect(agent)}
-                onConfigure={() => onConfigure(agent)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function DiscordAgentConnectionRow({
-  agent,
-  pendingDiscordAgentAction,
-  disabled,
-  onConnect,
-  onConfigure,
-}: {
-  agent: DiscordAgentConnection
-  pendingDiscordAgentAction: PendingDiscordAgentAction
-  disabled: boolean
-  onConnect: () => void
-  onConfigure: () => void
-}) {
-  const isPending = pendingDiscordAgentAction?.agentId === agent.agentId
-  const pendingKind = isPending ? pendingDiscordAgentAction?.kind : null
-  const detail = agent.connected
-    ? `${agent.guildCount} ${agent.guildCount === 1 ? 'server' : 'servers'} connected; ${agent.activeSubscriptionCount} ${agent.activeSubscriptionCount === 1 ? 'channel' : 'channels'} subscribed.`
-    : 'Connect Discord before selecting channels.'
-
-  return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_8rem_9rem] md:items-center">
-      <div className="flex min-w-0 items-center gap-3">
-        {agent.avatarUrl ? (
-          <img
-            src={agent.avatarUrl}
-            alt=""
-            className="h-9 w-9 rounded-full border border-slate-200 bg-white object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-semibold uppercase text-slate-700">
-            {agent.name.slice(0, 2)}
-          </span>
-        )}
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-900">{agent.name}</p>
-          <p className="truncate text-sm text-slate-600">{detail}</p>
-        </div>
-      </div>
-      <div>
-        {agent.subscribed ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Subscribed
-          </span>
-        ) : agent.skillEnabled ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Enabled
-          </span>
-        ) : (
-          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-            Not enabled
-          </span>
-        )}
-      </div>
-      <div className="flex justify-start md:justify-end">
-        {agent.connected ? (
-          <button
-            type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-            onClick={onConfigure}
-            disabled={disabled}
-          >
-            <Settings className="h-4 w-4" aria-hidden="true" />
-            Configure
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-            onClick={onConnect}
-            disabled={disabled}
-          >
-            {pendingKind === 'connect' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Plug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Connect
-          </button>
-        )}
-      </div>
     </div>
   )
 }
