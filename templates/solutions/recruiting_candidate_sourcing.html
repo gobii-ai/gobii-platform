@@ -61,6 +61,33 @@
     background: linear-gradient(180deg, rgba(79, 70, 229, 0.28), rgba(16, 185, 129, 0.28));
   }
 
+  .candidate-workflow-grid {
+    display: grid;
+    gap: 2.5rem;
+    align-items: start;
+  }
+
+  .candidate-workflow-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 2.75rem;
+  }
+
+  .candidate-workflow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.5rem;
+  }
+
+  .candidate-workflow-dot {
+    flex: 0 0 2.5rem;
+  }
+
+  .candidate-workflow-step-body {
+    min-width: 0;
+    padding-top: 0.25rem;
+  }
+
   .candidate-sourcing-templates {
     background:
       linear-gradient(135deg, rgba(240, 253, 250, 0.95) 0%, rgba(255, 255, 255, 0.96) 48%, rgba(238, 242, 255, 0.9) 100%);
@@ -84,6 +111,13 @@
   .candidate-sourcing-primary-cta:hover {
     background: linear-gradient(100deg, #4338ca 0%, #5558dd 58%, #666ce6 100%);
     box-shadow: 0 16px 32px rgba(79, 70, 229, 0.24);
+  }
+
+  @media (min-width: 1024px) {
+    .candidate-workflow-grid {
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      gap: 3.5rem;
+    }
   }
 
   @media (max-width: 1023px) {
@@ -191,36 +225,36 @@
       </p>
     </div>
 
-    <div class="mt-14 grid lg:grid-cols-[0.8fr_1.2fr] gap-10 lg:gap-14 items-start">
+    <div class="candidate-workflow-grid mt-14">
       <div class="relative">
-        <div class="absolute left-5 top-7 bottom-7 w-px workflow-line" aria-hidden="true"></div>
-        <div class="space-y-7">
-          <div class="relative flex gap-5">
-            <div class="relative z-10 flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white text-sm font-semibold">1</div>
-            <div>
+        <div class="absolute left-5 top-8 bottom-8 w-px workflow-line" aria-hidden="true"></div>
+        <div class="candidate-workflow-steps">
+          <div class="candidate-workflow-step relative">
+            <div class="candidate-workflow-dot relative z-10 flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white text-sm font-semibold">1</div>
+            <div class="candidate-workflow-step-body">
               <h3 class="text-lg font-medium text-slate-950">Define the target profile</h3>
-              <p class="mt-2 text-slate-700 leading-relaxed">Role, seniority, location, must-have skills, target companies, disqualifiers, and the notes a sourcer would usually keep in their head.</p>
+              <p class="mt-3 text-slate-700 leading-7">Role, seniority, location, must-have skills, target companies, disqualifiers, and the notes a sourcer would usually keep in their head.</p>
             </div>
           </div>
-          <div class="relative flex gap-5">
-            <div class="relative z-10 flex h-10 w-10 items-center justify-center rounded-full bg-violet-600 text-white text-sm font-semibold">2</div>
-            <div>
+          <div class="candidate-workflow-step relative">
+            <div class="candidate-workflow-dot relative z-10 flex h-10 w-10 items-center justify-center rounded-full bg-violet-600 text-white text-sm font-semibold">2</div>
+            <div class="candidate-workflow-step-body">
               <h3 class="text-lg font-medium text-slate-950">Search approved sources</h3>
-              <p class="mt-2 text-slate-700 leading-relaxed">The agent searches the sources your team permits, such as professional profiles, GitHub, portfolios, job boards, company pages, or existing spreadsheets.</p>
+              <p class="mt-3 text-slate-700 leading-7">The agent searches the sources your team permits, such as professional profiles, GitHub, portfolios, job boards, company pages, or existing spreadsheets.</p>
             </div>
           </div>
-          <div class="relative flex gap-5">
-            <div class="relative z-10 flex h-10 w-10 items-center justify-center rounded-full bg-sky-600 text-white text-sm font-semibold">3</div>
-            <div>
+          <div class="candidate-workflow-step relative">
+            <div class="candidate-workflow-dot relative z-10 flex h-10 w-10 items-center justify-center rounded-full bg-sky-600 text-white text-sm font-semibold">3</div>
+            <div class="candidate-workflow-step-body">
               <h3 class="text-lg font-medium text-slate-950">Qualify with evidence</h3>
-              <p class="mt-2 text-slate-700 leading-relaxed">Each candidate is compared against the role criteria with source links, fit notes, gaps, and useful context for recruiter review.</p>
+              <p class="mt-3 text-slate-700 leading-7">Each candidate is compared against the role criteria with source links, fit notes, gaps, and useful context for recruiter review.</p>
             </div>
           </div>
-          <div class="relative flex gap-5">
-            <div class="relative z-10 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-white text-sm font-semibold">4</div>
-            <div>
+          <div class="candidate-workflow-step relative">
+            <div class="candidate-workflow-dot relative z-10 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-white text-sm font-semibold">4</div>
+            <div class="candidate-workflow-step-body">
               <h3 class="text-lg font-medium text-slate-950">Export the shortlist</h3>
-              <p class="mt-2 text-slate-700 leading-relaxed">Send results to Google Sheets, CSV, webhooks, email digests, or configured ATS workflows so recruiting operations stays clean.</p>
+              <p class="mt-3 text-slate-700 leading-7">Send results to Google Sheets, CSV, webhooks, email digests, or configured ATS workflows so recruiting operations stays clean.</p>
             </div>
           </div>
         </div>
