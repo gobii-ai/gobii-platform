@@ -26,8 +26,10 @@ from api.services.discord_bot import (
     list_subscriptions,
     start_discord_oauth,
 )
+from api.services.pipedream_apps import owner_agents_queryset
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
+from console.api_views import _resolve_mcp_owner
 
 
 def _discord_permission_denied_response() -> JsonResponse:
@@ -63,6 +65,20 @@ def _serialize_discord_app(agent) -> dict[str, Any]:
         "guild_count": len(guilds),
         "connect_url": build_discord_oauth_start_url(agent),
         "bot_invite_url": build_discord_bot_invite_url(),
+    }
+
+
+def _serialize_discord_agent_connection(agent) -> dict[str, Any]:
+    app = _serialize_discord_app(agent)
+    return {
+        "agent_id": str(agent.id),
+        "name": agent.name,
+        "avatar_url": agent.get_avatar_thumbnail_url() or "",
+        "connected": bool(app["connected"]),
+        "subscribed": bool(app["subscribed"]),
+        "skill_enabled": bool(app["skill_enabled"]),
+        "guild_count": int(app["guild_count"]),
+        "active_subscription_count": int(app["active_subscription_count"]),
     }
 
 
@@ -278,3 +294,25 @@ class AgentDiscordSubscriptionsView(ApiLoginRequiredMixin, View):
             return JsonResponse({"error": str(exc)}, status=400)
 
         return JsonResponse(_serialize_discord_app(agent))
+
+
+class DiscordAgentConnectionsView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        owner_scope, _owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
+        agents = list(
+            owner_agents_queryset(owner_scope, owner_user=owner_user, owner_org=owner_org)
+            .only("id", "name", "avatar", "updated_at")
+            .order_by("name", "id")
+        )
+        rows = [_serialize_discord_agent_connection(agent) for agent in agents]
+        rows.sort(
+            key=lambda row: (
+                not row["subscribed"],
+                not row["skill_enabled"],
+                str(row["name"]).lower(),
+                str(row["agent_id"]),
+            )
+        )
+        return JsonResponse({"provider_key": "discord", "agents": rows})

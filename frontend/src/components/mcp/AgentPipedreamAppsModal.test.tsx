@@ -127,6 +127,9 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
 
     renderModal()
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure' }))
+    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
+
     const generalChannel = await screen.findByRole('checkbox', { name: /general/i })
     fireEvent.click(generalChannel)
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))

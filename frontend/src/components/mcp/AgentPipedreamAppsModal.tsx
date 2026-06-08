@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, FolderOpen, Hash, Loader2, Plug, Save, Settings, Unplug } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, FolderOpen, Hash, Loader2, Plug, Save, Settings, Unplug } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
@@ -95,6 +95,7 @@ export function AgentPipedreamAppsModal({
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [pendingDiscordAction, setPendingDiscordAction] = useState<PendingDiscordAction>(null)
+  const [discordConfigureOpen, setDiscordConfigureOpen] = useState(false)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
@@ -268,7 +269,8 @@ export function AgentPipedreamAppsModal({
       setPendingDiscordAction('save')
       setStatusMessage(null)
     },
-    onSuccess: () => {
+    onSuccess: (app) => {
+      queryClient.setQueryData(discordQueryKey, app)
       void queryClient.invalidateQueries({ queryKey: discordQueryKey })
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
     },
@@ -307,14 +309,22 @@ export function AgentPipedreamAppsModal({
     || nativePickerMutation.isPending
     || discordConnectMutation.isPending
     || discordSubscriptionsMutation.isPending
+  const activeDiscordApp = discordConfigureOpen ? (discordAppQuery.data ?? discordRow) : null
 
-  return (
-    <PipedreamModalShell
-      title="Apps"
-      subtitle="Search, connect, and disconnect apps for this agent."
-      ariaLabel="Manage agent apps"
-      onClose={onClose}
-    >
+  const body = activeDiscordApp ? (
+    <DiscordConfigurationScreen
+      agentId={agentId}
+      app={activeDiscordApp}
+      disabled={isBusy}
+      pendingDiscordAction={pendingDiscordAction}
+      statusMessage={statusMessage}
+      onBack={() => {
+        setDiscordConfigureOpen(false)
+        setStatusMessage(null)
+      }}
+      onSave={(subscriptions) => discordSubscriptionsMutation.mutate(subscriptions)}
+    />
+  ) : (
       <div className="space-y-4 p-1">
         <PipedreamStatusBanner statusMessage={statusMessage} />
         <PipedreamSearchInput
@@ -345,12 +355,14 @@ export function AgentPipedreamAppsModal({
             ) : app.kind === 'discord' ? (
               <AgentDiscordAppRowItem
                 key="native-discord"
-                agentId={agentId}
                 app={app}
                 pendingDiscordAction={pendingDiscordAction}
                 disabled={isBusy}
                 onConnect={() => discordConnectMutation.mutate()}
-                onSave={(subscriptions) => discordSubscriptionsMutation.mutate(subscriptions)}
+                onConfigure={() => {
+                  setDiscordConfigureOpen(true)
+                  setStatusMessage(null)
+                }}
               />
             ) : (
               <AgentPipedreamAppRowItem
@@ -366,6 +378,16 @@ export function AgentPipedreamAppsModal({
           </PipedreamListFrame>
         )}
       </div>
+  )
+
+  return (
+    <PipedreamModalShell
+      title={activeDiscordApp ? 'Configure Discord' : 'Apps'}
+      subtitle={activeDiscordApp ? 'Choose the Discord server channels this agent should watch.' : 'Search, connect, and disconnect apps for this agent.'}
+      ariaLabel="Manage agent apps"
+      onClose={onClose}
+    >
+      {body}
     </PipedreamModalShell>
   )
 }
@@ -496,56 +518,19 @@ function activeDiscordSelections(app: AgentDiscordApp): Record<string, DiscordSu
 }
 
 function AgentDiscordAppRowItem({
-  agentId,
   app,
   pendingDiscordAction,
   disabled,
   onConnect,
-  onSave,
+  onConfigure,
 }: {
-  agentId: string
   app: AgentDiscordApp
   pendingDiscordAction: PendingDiscordAction
   disabled: boolean
   onConnect: () => void
-  onSave: (subscriptions: DiscordSubscriptionSelection[]) => void
+  onConfigure: () => void
 }) {
-  const [configureOpen, setConfigureOpen] = useState(app.connected)
-  const [selectedSubscriptions, setSelectedSubscriptions] = useState<Record<string, DiscordSubscriptionSelection>>(
-    () => activeDiscordSelections(app),
-  )
-  const initialSelections = useMemo(() => activeDiscordSelections(app), [app.subscriptions])
-
-  useEffect(() => {
-    setSelectedSubscriptions(initialSelections)
-  }, [initialSelections])
-
-  const selectedKeys = useMemo(() => Object.keys(selectedSubscriptions).sort(), [selectedSubscriptions])
-  const initialKeys = useMemo(() => Object.keys(initialSelections).sort(), [initialSelections])
-  const hasChanges = selectedKeys.join('|') !== initialKeys.join('|')
   const isPendingConnect = pendingDiscordAction === 'connect'
-  const isPendingSave = pendingDiscordAction === 'save'
-
-  const toggleChannel = (channel: DiscordChannel) => {
-    const key = discordSubscriptionKey(channel.guildId, channel.channelId)
-    setSelectedSubscriptions((current) => {
-      if (current[key]) {
-        const next = { ...current }
-        delete next[key]
-        return next
-      }
-      return {
-        ...current,
-        [key]: {
-          guildId: channel.guildId,
-          channelId: channel.channelId,
-          channelName: channel.channelName,
-        },
-      }
-    })
-  }
-
-  const saveDisabled = disabled || isPendingSave || !hasChanges
 
   return (
     <div className="px-4 py-3">
@@ -573,7 +558,7 @@ function AgentDiscordAppRowItem({
             <button
               type="button"
               className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-              onClick={() => setConfigureOpen((current) => !current)}
+              onClick={onConfigure}
               disabled={disabled}
             >
               <Settings className="h-4 w-4" aria-hidden="true" />
@@ -583,19 +568,7 @@ function AgentDiscordAppRowItem({
         </div>
         <div className="flex justify-start md:justify-end">
           {app.connected ? (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-              onClick={() => onSave(Object.values(selectedSubscriptions))}
-              disabled={saveDisabled}
-            >
-              {isPendingSave ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Save className="h-4 w-4" aria-hidden="true" />
-              )}
-              Save
-            </button>
+            null
           ) : (
             <button
               type="button"
@@ -613,8 +586,94 @@ function AgentDiscordAppRowItem({
           )}
         </div>
       </div>
-      {app.connected && configureOpen ? (
-        <div className="mt-4 space-y-3 pl-12">
+    </div>
+  )
+}
+
+export function DiscordConfigurationScreen({
+  agentId,
+  app,
+  disabled,
+  pendingDiscordAction,
+  statusMessage,
+  onBack,
+  onSave,
+}: {
+  agentId: string
+  app: AgentDiscordApp
+  disabled: boolean
+  pendingDiscordAction: PendingDiscordAction
+  statusMessage: PipedreamStatusMessage
+  onBack: () => void
+  onSave: (subscriptions: DiscordSubscriptionSelection[]) => void
+}) {
+  const [selectedSubscriptions, setSelectedSubscriptions] = useState<Record<string, DiscordSubscriptionSelection>>(
+    () => activeDiscordSelections(app),
+  )
+  const initialSelections = useMemo(() => activeDiscordSelections(app), [app.subscriptions])
+
+  useEffect(() => {
+    setSelectedSubscriptions(initialSelections)
+  }, [initialSelections])
+
+  const selectedKeys = useMemo(() => Object.keys(selectedSubscriptions).sort(), [selectedSubscriptions])
+  const initialKeys = useMemo(() => Object.keys(initialSelections).sort(), [initialSelections])
+  const hasChanges = selectedKeys.join('|') !== initialKeys.join('|')
+  const isPendingSave = pendingDiscordAction === 'save'
+
+  const toggleChannel = (channel: DiscordChannel) => {
+    const key = discordSubscriptionKey(channel.guildId, channel.channelId)
+    setSelectedSubscriptions((current) => {
+      if (current[key]) {
+        const next = { ...current }
+        delete next[key]
+        return next
+      }
+      return {
+        ...current,
+        [key]: {
+          guildId: channel.guildId,
+          channelId: channel.channelId,
+          channelName: channel.channelName,
+        },
+      }
+    })
+  }
+
+  const saveDisabled = disabled || isPendingSave || !hasChanges
+
+  return (
+    <div className="space-y-4 p-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <button
+          type="button"
+          className="inline-flex w-fit items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+          onClick={onBack}
+          disabled={disabled}
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Back
+        </button>
+        <button
+          type="button"
+          className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+          onClick={() => onSave(Object.values(selectedSubscriptions))}
+          disabled={saveDisabled}
+        >
+          {isPendingSave ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Save className="h-4 w-4" aria-hidden="true" />
+          )}
+          Save
+        </button>
+      </div>
+
+      <DiscordSummaryCell app={app} />
+      <PipedreamStatusBanner statusMessage={statusMessage} />
+
+      {app.guilds.length > 0 ? (
+        <div className="space-y-3">
           {app.guilds.map((guild) => (
             <DiscordGuildChannelSection
               key={guild.guildId}
@@ -627,7 +686,9 @@ function AgentDiscordAppRowItem({
             />
           ))}
         </div>
-      ) : null}
+      ) : (
+        <PipedreamEmptyState label="No Discord servers are connected yet." />
+      )}
     </div>
   )
 }
