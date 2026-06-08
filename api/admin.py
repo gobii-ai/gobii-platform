@@ -6561,11 +6561,12 @@ class PublicProfileAdmin(admin.ModelAdmin):
 @admin.register(PersistentAgentTemplate)
 class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     list_display = (
-        'display_name', 'category', 'recommended_contact_channel', 'base_schedule',
+        'display_name', 'category', 'is_official', 'recommended_contact_channel', 'base_schedule',
         'schedule_jitter_minutes', 'priority', 'is_active', 'updated_at'
     )
-    list_filter = ('category', 'recommended_contact_channel', 'is_active')
-    search_fields = ('display_name', 'tagline', 'description', 'code')
+    list_filter = ('category', 'is_official', 'recommended_contact_channel', 'is_active')
+    list_editable = ('is_official',)
+    search_fields = ('display_name', 'tagline', 'description', 'description_markdown', 'code')
     ordering = ('priority', 'display_name')
     readonly_fields = ('created_at', 'updated_at')
     prepopulated_fields = {"code": ("display_name",)}
@@ -6574,10 +6575,10 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
             'fields': ('code', 'display_name', 'tagline', 'category', 'priority', 'is_active')
         }),
         ('Public Template', {
-            'fields': ('public_profile', 'slug', 'source_agent', 'created_by')
+            'fields': ('public_profile', 'slug', 'is_official', 'source_agent', 'created_by')
         }),
         ('Narrative', {
-            'fields': ('description', 'charter')
+            'fields': ('description', 'description_markdown', 'charter')
         }),
         ('Cadence & Triggers', {
             'fields': ('base_schedule', 'schedule_jitter_minutes', 'event_triggers')

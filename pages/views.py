@@ -24,6 +24,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import redirect_to_login
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.text import Truncator
+from django.template.defaultfilters import linebreaksbr
 from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.db import DatabaseError
@@ -142,6 +143,7 @@ from marketing_events.custom_events import ConfiguredCustomEvent, emit_configure
 from middleware.utm_capture import UTMTrackingMiddleware
 from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import (
+    render_public_template_markdown,
     load_page,
     get_prev_next,
     get_all_doc_pages,
@@ -1968,8 +1970,23 @@ class PublicTemplateDetailView(TemplateView):
         seo_description = Truncator(
             (self.template.description or self.template.tagline or "").strip()
         ).chars(160)
+        if self.template.description_markdown and self.template.description_markdown.strip():
+            template_description_html = render_public_template_markdown(self.template.description_markdown)
+        else:
+            template_description_html = linebreaksbr(self.template.description or "")
         category_label = public_template_category_label(self.template)
         social_title = f"{self.template.display_name} AI Agent Template"
+        creator_data = (
+            {
+                "@type": "Organization",
+                "name": "Gobii",
+            }
+            if self.template.is_official
+            else {
+                "@type": "Person",
+                "name": self.template.public_profile.handle,
+            }
+        )
         structured_data = {
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
@@ -1980,10 +1997,7 @@ class PublicTemplateDetailView(TemplateView):
             "operatingSystem": "Web",
             "url": canonical_detail_url,
             "image": social_image_url,
-            "creator": {
-                "@type": "Person",
-                "name": self.template.public_profile.handle,
-            },
+            "creator": creator_data,
             "isPartOf": {
                 "@type": "CollectionPage",
                 "name": "Gobii Library",
@@ -2033,6 +2047,7 @@ class PublicTemplateDetailView(TemplateView):
         context["template_social_title"] = social_title
         context["template_seo_title"] = f"{social_title} | Gobii"
         context["template_seo_description"] = seo_description
+        context["template_description_html"] = template_description_html
         context["template_social_image_url"] = social_image_url
         context["template_structured_data_json"] = html_safe_json_dumps(structured_data)
         context["template_breadcrumb_json"] = html_safe_json_dumps(breadcrumb_data)

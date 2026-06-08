@@ -21,6 +21,7 @@ from pages.public_template_urls import (
 )
 
 LIBRARY_CACHE_KEY = "pages:library:payload:v1"
+LIBRARY_OFFICIAL_CACHE_KEY = "pages:library:payload:official:v1"
 LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY = "pages:library:category_slug_map:v1"
 LIBRARY_CACHE_TTL_SECONDS = 120
 LIBRARY_DEFAULT_PAGE_SIZE = 24
@@ -64,10 +65,16 @@ def _parse_query_int(
     return parsed
 
 
-def _build_top_categories() -> list[dict[str, Any]]:
+def _parse_query_bool(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _build_top_categories(*, official_only: bool = False) -> list[dict[str, Any]]:
+    queryset = _library_queryset()
+    if official_only:
+        queryset = queryset.filter(is_official=True)
     category_rows = (
-        _library_queryset()
-        .annotate(normalized_category=_normalized_category_expression())
+        queryset.annotate(normalized_category=_normalized_category_expression())
         .values("normalized_category")
         .annotate(count=Count("id"))
         .order_by("-count", Lower("normalized_category"))[:10]
@@ -78,8 +85,9 @@ def _build_top_categories() -> list[dict[str, Any]]:
     ]
 
 
-def _get_top_categories() -> list[dict[str, Any]]:
-    cached = cache.get(LIBRARY_CACHE_KEY)
+def _get_top_categories(*, official_only: bool = False) -> list[dict[str, Any]]:
+    cache_key = LIBRARY_OFFICIAL_CACHE_KEY if official_only else LIBRARY_CACHE_KEY
+    cached = cache.get(cache_key)
     if isinstance(cached, list):
         valid_items = all(
             isinstance(item, dict)
@@ -90,8 +98,8 @@ def _get_top_categories() -> list[dict[str, Any]]:
         if valid_items:
             return cached
 
-    top_categories = _build_top_categories()
-    cache.set(LIBRARY_CACHE_KEY, top_categories, timeout=LIBRARY_CACHE_TTL_SECONDS)
+    top_categories = _build_top_categories(official_only=official_only)
+    cache.set(cache_key, top_categories, timeout=LIBRARY_CACHE_TTL_SECONDS)
     return top_categories
 
 
@@ -173,11 +181,12 @@ def _build_library_payload(
     *,
     category: str = "",
     search_query: str = "",
+    official_only: bool = False,
     limit: int = LIBRARY_DEFAULT_PAGE_SIZE,
     offset: int = 0,
 ) -> dict[str, Any]:
     viewer_user_id = request.user.id if request.user.is_authenticated else None
-    top_categories = _get_top_categories()
+    top_categories = _get_top_categories(official_only=official_only)
 
     normalized_category = _normalize_category(category) if category else ""
     normalized_search_query = str(search_query or "").strip()
@@ -188,6 +197,7 @@ def _build_library_payload(
         normalized_category=_normalized_category_expression(),
     )
     library_total_agents = library_queryset.count()
+    official_total_agents = library_queryset.filter(is_official=True).count()
     library_total_likes = (
         PersistentAgentTemplateLike.objects.filter(
             template__public_profile__isnull=False,
@@ -196,8 +206,20 @@ def _build_library_payload(
         .exclude(template__slug="")
         .count()
     )
+    official_total_likes = (
+        PersistentAgentTemplateLike.objects.filter(
+            template__public_profile__isnull=False,
+            template__is_active=True,
+            template__is_official=True,
+        )
+        .exclude(template__slug="")
+        .count()
+    )
 
     filtered_queryset = library_queryset
+    if official_only:
+        filtered_queryset = filtered_queryset.filter(is_official=True)
+
     if normalized_category:
         filtered_queryset = filtered_queryset.filter(
             normalized_category__iexact=normalized_category
@@ -248,6 +270,7 @@ def _build_library_payload(
             "publicProfileHandle": template.public_profile.handle,
             "templateSlug": template.slug,
             "templateUrl": public_template_detail_path(template),
+            "isOfficial": template.is_official,
             "likeCount": template.like_count,
             "isLiked": template.is_liked,
         }
@@ -259,7 +282,10 @@ def _build_library_payload(
         "topCategories": top_categories,
         "totalAgents": total_agents,
         "libraryTotalAgents": library_total_agents,
+        "officialTotalAgents": official_total_agents,
         "libraryTotalLikes": library_total_likes,
+        "officialTotalLikes": official_total_likes,
+        "officialOnly": official_only,
         "offset": page_offset,
         "limit": page_limit,
         "hasMore": (page_offset + page_limit) < total_agents,
@@ -290,23 +316,34 @@ class LibraryView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         selected_category = self.selected_category
+        official_only = _parse_query_bool(self.request.GET.get("official"))
         page_title = (
-            f"{selected_category} AI Agent Templates | Gobii"
+            f"Official {selected_category} AI Agent Templates | Gobii"
+            if selected_category and official_only
+            else f"{selected_category} AI Agent Templates | Gobii"
             if selected_category
+            else "Official AI Agent Templates | Gobii"
+            if official_only
             else "AI Agent Templates & Workers | Gobii"
         )
         page_description = (
-            f"Explore Gobii's {selected_category} AI agent templates and workers. Start from a shared template and customize it for your workflow."
+            f"Explore official Gobii {selected_category} AI agent templates maintained by Gobii for trusted workflows."
+            if selected_category and official_only
+            else f"Explore Gobii's {selected_category} AI agent templates and workers. Start from a shared template and customize it for your workflow."
             if selected_category
+            else "Explore official Gobii AI agent templates maintained by Gobii for common workflows."
+            if official_only
             else "Explore Gobii's library of AI agents and workers for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own."
         )
         context["page_name"] = "Agent Discovery"
         context["library_initial_category"] = selected_category
+        context["library_initial_official_only"] = official_only
         context["library_page_title"] = page_title
         context["library_page_description"] = page_description
         context["library_initial_payload"] = _build_library_payload(
             self.request,
             category=selected_category,
+            official_only=context["library_initial_official_only"],
         )
         return context
 
@@ -317,6 +354,7 @@ class LibraryAgentsAPIView(View):
     def get(self, request, *args, **kwargs):
         category = _normalize_category(request.GET.get("category")) if request.GET.get("category") else ""
         search_query = str(request.GET.get("q") or "").strip()
+        official_only = _parse_query_bool(request.GET.get("official"))
         limit = _parse_query_int(
             request.GET.get("limit"),
             default=LIBRARY_DEFAULT_PAGE_SIZE,
@@ -334,6 +372,7 @@ class LibraryAgentsAPIView(View):
                 request,
                 category=category,
                 search_query=search_query,
+                official_only=official_only,
                 limit=limit,
                 offset=offset,
             )
