@@ -6304,6 +6304,10 @@ class PersistentAgentTemplate(models.Model):
         blank=True,
         help_text="Public-facing slug used in template URLs.",
     )
+    is_official = models.BooleanField(
+        default=False,
+        help_text="Whether this template is an official Gobii template.",
+    )
     source_agent = models.ForeignKey(
         "PersistentAgent",
         on_delete=models.SET_NULL,

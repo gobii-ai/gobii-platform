@@ -972,6 +972,7 @@ class LibraryViewsTests(TestCase):
             description="Tracks recurring operations work.",
             charter="Automate operations checks.",
             category="Operations",
+            is_official=True,
             is_active=True,
         )
         PersistentAgentTemplate.objects.create(
@@ -1039,6 +1040,7 @@ class LibraryViewsTests(TestCase):
             public_template_detail_path(operations_agent),
         )
         self.assertEqual(first_agent["categorySlug"], "operations")
+        self.assertTrue(first_agent["isOfficial"])
         self.assertEqual(first_agent["likeCount"], 0)
         self.assertFalse(first_agent["isLiked"])
 

@@ -248,6 +248,7 @@ def _build_library_payload(
             "publicProfileHandle": template.public_profile.handle,
             "templateSlug": template.slug,
             "templateUrl": public_template_detail_path(template),
+            "isOfficial": template.is_official,
             "likeCount": template.like_count,
             "isLiked": template.is_liked,
         }
