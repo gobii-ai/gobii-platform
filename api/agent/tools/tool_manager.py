@@ -87,7 +87,6 @@ from .discord_send_message import (
     get_discord_send_message_tool,
     execute_discord_send_message,
 )
-from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from .meta_gobii import (
     execute_meta_gobii_tool,
     get_meta_gobii_tool_definition,
@@ -286,13 +285,13 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_discord_channel_subscriptions_tool,
         "executor": execute_discord_channel_subscriptions,
         "search_hidden": True,
-        "system_skill_key": DISCORD_NATIVE_SYSTEM_SKILL_KEY,
+        "system_skill_key": "connected_app_channels",
     },
     DISCORD_SEND_MESSAGE_TOOL_NAME: {
         "definition": get_discord_send_message_tool,
         "executor": execute_discord_send_message,
         "search_hidden": True,
-        "system_skill_key": DISCORD_NATIVE_SYSTEM_SKILL_KEY,
+        "system_skill_key": "connected_app_channels",
     },
     **{
         tool_name: {
