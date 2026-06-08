@@ -1278,6 +1278,28 @@ def _build_agent_email_settings_section(agent: PersistentAgent) -> str:
     ]
     return "Agent email settings:\n- " + "\n- ".join(lines)
 
+
+def _build_owner_identity_prompt(user: Any) -> str:
+    first_name = (getattr(user, "first_name", "") or "").strip()
+    if first_name:
+        return (
+            f"The owner's name is {first_name}. "
+            "Use their name occasionally to build rapport—not every message, but naturally. "
+            "Good: 'Hey {name}, found it!' or 'Here's your update, {name}.' "
+            "Bad: Using their name in every sentence (forced, robotic). "
+            "Use it for: greetings, celebrating wins, checking in after a while, or when it feels warm and natural. "
+            "In shared chats, address the most recent inbound sender from unified history/recent contacts; "
+            "do not assume every inbound message came from the owner."
+        ).format(name=first_name)
+
+    return (
+        "The owner's name is unknown. Do not infer a first name, last name, or preferred form of address from "
+        "their email address, username, or other account identifiers. Use a generic greeting unless the user "
+        "provides a preferred name. In shared chats, address the most recent inbound sender from unified "
+        "history/recent contacts; do not assume every inbound message came from the owner."
+    )
+
+
 def _render_prompt_context_once(
     agent: PersistentAgent,
     current_iteration: int = 1,
@@ -1352,26 +1374,10 @@ def _render_prompt_context_once(
         non_shrinkable=True,
     )
 
-    # User's name for personalization
-    user_display_name = None
     if agent.user:
-        user_display_name = (
-            agent.user.first_name.strip()
-            if agent.user.first_name
-            else None
-        )
-    if user_display_name:
         important_group.section_text(
             "user_identity",
-            (
-                f"The owner's name is {user_display_name}. "
-                "Use their name occasionally to build rapport—not every message, but naturally. "
-                "Good: 'Hey {name}, found it!' or 'Here's your update, {name}.' "
-                "Bad: Using their name in every sentence (forced, robotic). "
-                "Use it for: greetings, celebrating wins, checking in after a while, or when it feels warm and natural. "
-                "In shared chats, address the most recent inbound sender from unified history/recent contacts; "
-                "do not assume every inbound message came from the owner."
-            ).format(name=user_display_name),
+            _build_owner_identity_prompt(agent.user),
             weight=2,
             non_shrinkable=True,
         )
