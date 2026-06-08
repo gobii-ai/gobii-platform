@@ -6566,7 +6566,7 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     )
     list_filter = ('category', 'is_official', 'recommended_contact_channel', 'is_active')
     list_editable = ('is_official',)
-    search_fields = ('display_name', 'tagline', 'description', 'code')
+    search_fields = ('display_name', 'tagline', 'description', 'description_markdown', 'code')
     ordering = ('priority', 'display_name')
     readonly_fields = ('created_at', 'updated_at')
     prepopulated_fields = {"code": ("display_name",)}
@@ -6578,7 +6578,7 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
             'fields': ('public_profile', 'slug', 'is_official', 'source_agent', 'created_by')
         }),
         ('Narrative', {
-            'fields': ('description', 'charter')
+            'fields': ('description', 'description_markdown', 'charter')
         }),
         ('Cadence & Triggers', {
             'fields': ('base_schedule', 'schedule_jitter_minutes', 'event_triggers')

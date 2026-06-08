@@ -3,10 +3,12 @@ from pathlib import Path
 from datetime import datetime, date
 from typing import Optional
 
+import bleach
 import frontmatter
 import markdown
 from django.conf import settings
 from django.utils import timezone
+from django.utils.safestring import mark_safe
 
 CONTENT_ROOT = Path(settings.BASE_DIR, "pages", "content")
 
@@ -15,6 +17,53 @@ md_converter = markdown.Markdown(
     extension_configs={"codehilite": {"guess_lang": False}},
     output_format="html5",
 )
+
+PUBLIC_TEMPLATE_MARKDOWN_TAGS = [
+    "a",
+    "blockquote",
+    "br",
+    "code",
+    "em",
+    "h2",
+    "h3",
+    "h4",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "strong",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+]
+PUBLIC_TEMPLATE_MARKDOWN_ATTRIBUTES = {
+    "a": ["href", "title"],
+}
+PUBLIC_TEMPLATE_MARKDOWN_PROTOCOLS = ["http", "https", "mailto"]
+
+
+def render_public_template_markdown(value: str):
+    raw_markdown = (value or "").strip()
+    if not raw_markdown:
+        return ""
+
+    html = markdown.markdown(
+        raw_markdown,
+        extensions=["extra", "sane_lists"],
+        output_format="html5",
+    )
+    clean_html = bleach.clean(
+        html,
+        tags=PUBLIC_TEMPLATE_MARKDOWN_TAGS,
+        attributes=PUBLIC_TEMPLATE_MARKDOWN_ATTRIBUTES,
+        protocols=PUBLIC_TEMPLATE_MARKDOWN_PROTOCOLS,
+        strip=True,
+    )
+    return mark_safe(clean_html)
 
 def _resolve_markdown_file(slug_or_path_part: str, root: Path = CONTENT_ROOT) -> Path:
     """

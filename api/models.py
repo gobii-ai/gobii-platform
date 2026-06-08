@@ -6327,6 +6327,11 @@ class PersistentAgentTemplate(models.Model):
     display_name = models.CharField(max_length=255)
     tagline = models.CharField(max_length=255)
     description = models.TextField()
+    description_markdown = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional rich Markdown body for the public template detail page.",
+    )
     charter = models.TextField(help_text="Pre-built charter the agent will start with.")
     base_schedule = models.CharField(
         max_length=128,

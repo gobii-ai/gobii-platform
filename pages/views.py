@@ -142,6 +142,7 @@ from marketing_events.custom_events import ConfiguredCustomEvent, emit_configure
 from middleware.utm_capture import UTMTrackingMiddleware
 from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import (
+    render_public_template_markdown,
     load_page,
     get_prev_next,
     get_all_doc_pages,
@@ -1968,6 +1969,7 @@ class PublicTemplateDetailView(TemplateView):
         seo_description = Truncator(
             (self.template.description or self.template.tagline or "").strip()
         ).chars(160)
+        detail_description_markdown = self.template.description_markdown or self.template.description
         category_label = public_template_category_label(self.template)
         social_title = f"{self.template.display_name} AI Agent Template"
         structured_data = {
@@ -2033,6 +2035,7 @@ class PublicTemplateDetailView(TemplateView):
         context["template_social_title"] = social_title
         context["template_seo_title"] = f"{social_title} | Gobii"
         context["template_seo_description"] = seo_description
+        context["template_description_html"] = render_public_template_markdown(detail_description_markdown)
         context["template_social_image_url"] = social_image_url
         context["template_structured_data_json"] = html_safe_json_dumps(structured_data)
         context["template_breadcrumb_json"] = html_safe_json_dumps(breadcrumb_data)

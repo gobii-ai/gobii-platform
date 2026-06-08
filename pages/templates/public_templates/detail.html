@@ -85,7 +85,9 @@
           <div class="lg:col-span-2 space-y-6">
             <section>
               <h2 class="text-xl font-semibold text-slate-900">What this template does</h2>
-              <p class="mt-3 text-base leading-relaxed text-slate-600">{{ template.description }}</p>
+              <div class="prose prose-slate mt-3 max-w-none text-slate-600">
+                {{ template_description_html }}
+              </div>
             </section>
 
             <section>

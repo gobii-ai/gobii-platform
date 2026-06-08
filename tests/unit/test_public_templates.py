@@ -156,6 +156,48 @@ class PublicTemplateViewsTests(TestCase):
         self.assertContains(response, '<script type="application/ld+json">')
         self.assertContains(response, '"@type": "SoftwareApplication"')
         self.assertContains(response, 'aria-label="Breadcrumb"')
+        soup = BeautifulSoup(response.content, "html.parser")
+        what_section = next(
+            section for section in soup.find_all("section")
+            if section.find("h2", string="What this template does")
+        )
+        self.assertIn("Summarizes key operational signals.", what_section.get_text(" ", strip=True))
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_renders_description_markdown_when_present(self):
+        user = get_user_model().objects.create_user(username="markdown-owner", email="markdown-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="markdown-owner")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-markdown",
+            public_profile=profile,
+            slug="markdown-template",
+            display_name="Markdown Template",
+            tagline="Markdown body",
+            description="Plain card summary.",
+            description_markdown=(
+                "### Best for\n\n"
+                "- **Ops teams** tracking weekly work\n"
+                "- [Playbook](https://example.com/playbook)\n\n"
+                "<script>alert('bad')</script>\n"
+                "<img src=x onerror=alert(1)>"
+            ),
+            charter="Summarize ops KPIs and alerts.",
+            category="Operations",
+        )
+
+        response = self.client.get(public_template_detail_path(template))
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        what_section = next(
+            section for section in soup.find_all("section")
+            if section.find("h2", string="What this template does")
+        )
+        self.assertIsNotNone(what_section.find("h3", string="Best for"))
+        self.assertEqual(what_section.find("strong").get_text(strip=True), "Ops teams")
+        self.assertEqual(what_section.find("a", string="Playbook")["href"], "https://example.com/playbook")
+        self.assertNotIn("Plain card summary.", what_section.get_text(" ", strip=True))
+        self.assertIsNone(what_section.find("script"))
+        self.assertIsNone(what_section.find("img"))
 
     @override_settings(
         PUBLIC_SITE_URL="https://www.gobii.ai",
