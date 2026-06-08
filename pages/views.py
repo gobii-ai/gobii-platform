@@ -1872,7 +1872,7 @@ def _build_related_public_template_cards(
         .annotate(
             same_category_rank=same_category_rank,
             official_preference_rank=official_preference_rank,
-            like_count=Count("template_likes"),
+            like_count=Count("template_likes", distinct=True),
         )
         .order_by(
             "same_category_rank",
