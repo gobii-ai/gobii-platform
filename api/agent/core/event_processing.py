@@ -2354,27 +2354,29 @@ def _record_duplicate_http_request_skip(
     attach_prompt_archive(step)
 
 
-_DIRECT_TOOL_EXECUTORS = {
-    "spawn_web_task": "execute_spawn_web_task",
-    "send_email": "execute_send_email",
-    "send_sms": "execute_send_sms",
-    "send_chat_message": "execute_send_chat_message",
-    "send_agent_message": "execute_send_agent_message",
-    "send_webhook_event": "execute_send_webhook_event",
-    "update_schedule": "execute_update_schedule",
-    "update_charter": "execute_update_charter",
-    "update_plan": "execute_update_plan",
-    "secure_credentials_request": "execute_secure_credentials_request",
-    "request_contact_permission": "execute_request_contact_permission",
-    "request_human_input": "execute_request_human_input",
-    "spawn_agent": "execute_spawn_agent",
-    "file_str_replace": "execute_file_str_replace",
+_ToolExecutor = Callable[[PersistentAgent, Dict[str, Any]], Any]
+
+_DIRECT_TOOL_EXECUTORS: Dict[str, _ToolExecutor] = {
+    "spawn_web_task": execute_spawn_web_task,
+    "send_email": execute_send_email,
+    "send_sms": execute_send_sms,
+    "send_chat_message": execute_send_chat_message,
+    "send_agent_message": execute_send_agent_message,
+    "send_webhook_event": execute_send_webhook_event,
+    "update_schedule": execute_update_schedule,
+    "update_charter": execute_update_charter,
+    "update_plan": execute_update_plan,
+    "secure_credentials_request": execute_secure_credentials_request,
+    "request_contact_permission": execute_request_contact_permission,
+    "request_human_input": execute_request_human_input,
+    "spawn_agent": execute_spawn_agent,
+    "file_str_replace": execute_file_str_replace,
 }
 
-_REFRESHING_TOOL_EXECUTORS = {
-    "search_tools": "execute_search_tools",
-    CREATE_CUSTOM_TOOL_NAME: "execute_create_custom_tool",
-    "end_planning": "execute_end_planning",
+_REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutor] = {
+    "search_tools": execute_search_tools,
+    CREATE_CUSTOM_TOOL_NAME: execute_create_custom_tool,
+    "end_planning": execute_end_planning,
 }
 
 
@@ -2413,12 +2415,12 @@ def _execute_tool_call_runtime(
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
         ), updated_tools
-    executor_name = _DIRECT_TOOL_EXECUTORS.get(tool_name)
-    if executor_name:
-        return globals()[executor_name](agent, exec_params), updated_tools
-    refreshing_executor_name = _REFRESHING_TOOL_EXECUTORS.get(tool_name)
-    if refreshing_executor_name:
-        result = globals()[refreshing_executor_name](agent, exec_params)
+    executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
+    if executor:
+        return executor(agent, exec_params), updated_tools
+    refreshing_executor = _REFRESHING_TOOL_EXECUTORS.get(tool_name)
+    if refreshing_executor:
+        result = refreshing_executor(agent, exec_params)
         updated_tools = get_agent_tools(agent)
         return result, updated_tools
     return execute_enabled_tool(

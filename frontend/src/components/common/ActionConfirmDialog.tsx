@@ -1,4 +1,4 @@
-import { isValidElement, type ElementType, type ReactNode } from 'react'
+import { cloneElement, isValidElement, type ElementType, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Check, Loader2, XCircle } from 'lucide-react'
 
@@ -31,7 +31,7 @@ function normalizeIcon(icon: ActionConfirmDialogProps['icon']): LucideIcon | nul
   }
 
   if (isValidElement(icon)) {
-    const IconElement = (() => icon) as ElementType as LucideIcon
+    const IconElement = ((props: Record<string, unknown>) => cloneElement(icon, props)) as ElementType as LucideIcon
     return IconElement
   }
 

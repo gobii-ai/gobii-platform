@@ -1,4 +1,4 @@
-import type { ElementType, ReactNode } from 'react'
+import type { ComponentPropsWithoutRef, ElementType, ReactNode } from 'react'
 
 export type SettingsSurfaceVariant = 'embedded' | 'standalone'
 export type SettingsSurfacePadding = 'none' | 'sm' | 'md' | 'lg'
@@ -67,7 +67,7 @@ type SettingsSurfaceProps = {
   borderClassName?: string
   shadowClassName?: string
   children: ReactNode
-}
+} & Omit<ComponentPropsWithoutRef<'div'>, 'className' | 'children'>
 
 export function SettingsSurface({
   variant = 'standalone',
@@ -79,6 +79,7 @@ export function SettingsSurface({
   borderClassName,
   shadowClassName,
   children,
+  ...rest
 }: SettingsSurfaceProps) {
   return (
     <Component className={getSettingsSurfaceClassName({
@@ -90,6 +91,7 @@ export function SettingsSurface({
       borderClassName,
       shadowClassName,
     })}
+    {...rest}
     >
       {children}
     </Component>

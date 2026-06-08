@@ -8,7 +8,7 @@ type ImmersivePageFrameProps = {
   children?: ReactNode
   loading?: boolean
   loadingLabel?: ReactNode
-  error?: ReactNode | boolean
+  error?: ReactNode | boolean | Error
   errorFallback?: ReactNode
   maxWidthClass?: string
   className?: string
@@ -63,7 +63,7 @@ export function ImmersivePageFrame({
           role="alert"
         >
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-          <div>{error === true ? errorFallback : error}</div>
+          <div>{error instanceof Error ? error.message : (error === true ? errorFallback : error)}</div>
         </section>
       </div>
     )
