@@ -80,6 +80,16 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertNotIn("profile name is not set", contents)
         self.assertNotIn("owner's name is unknown", contents)
 
+    def test_owner_identity_prompt_handles_braces_in_profile_first_name(self):
+        contents = self._build_prompt_text_for_owner(
+            email="braces@example.com",
+            first_name="{Ada}",
+        )
+
+        self.assertIn("The owner's name is {Ada}.", contents)
+        self.assertIn("Hey {Ada}, found it!", contents)
+        self.assertNotIn("owner's name is unknown", contents)
+
     def test_owner_identity_prompt_marks_missing_profile_name_unknown(self):
         for email in [
             "jane@example.com",

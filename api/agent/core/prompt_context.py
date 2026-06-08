@@ -1285,12 +1285,12 @@ def _build_owner_identity_prompt(user: Any) -> str:
         return (
             f"The owner's name is {first_name}. "
             "Use their name occasionally to build rapport—not every message, but naturally. "
-            "Good: 'Hey {name}, found it!' or 'Here's your update, {name}.' "
+            f"Good: 'Hey {first_name}, found it!' or 'Here's your update, {first_name}.' "
             "Bad: Using their name in every sentence (forced, robotic). "
             "Use it for: greetings, celebrating wins, checking in after a while, or when it feels warm and natural. "
             "In shared chats, address the most recent inbound sender from unified history/recent contacts; "
             "do not assume every inbound message came from the owner."
-        ).format(name=first_name)
+        )
 
     return (
         "The owner's name is unknown. Do not infer a first name, last name, or preferred form of address from "
