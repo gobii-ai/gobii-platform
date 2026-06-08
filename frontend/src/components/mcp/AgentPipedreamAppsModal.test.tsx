@@ -99,7 +99,6 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
     expect(window.open).toHaveBeenCalledWith(
       'https://discord.com/oauth2/authorize?state=oauth-state',
       '_blank',
-      'noopener,noreferrer',
     )
   })
 
