@@ -345,8 +345,8 @@ class NativeDiscordBotTests(TestCase):
             author=SimpleNamespace(id=300, display_name="Human", name="human", bot=False),
             content="please help <@123456789012345678>",
             clean_content="please help @Ada",
-            attachments=[],
-            embeds=[],
+            attachments=None,
+            embeds=None,
             webhook_id=None,
         )
 
@@ -354,6 +354,8 @@ class NativeDiscordBotTests(TestCase):
 
         self.assertEqual(gateway_message.content, "please help @Ada")
         self.assertEqual(gateway_message.raw_content, "please help <@123456789012345678>")
+        self.assertEqual(gateway_message.attachments, [])
+        self.assertEqual(gateway_message.embeds, [])
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
@@ -651,6 +653,61 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).count(), 0)
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=second_agent, is_outbound=False).count(), 1)
         schedule_mock.assert_called_once_with(str(second_agent.id), typing_channel_id="10")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_webhook_echo_matches_raw_discord_mentions(self, schedule_mock):
+        guild = self._guild()
+        subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        webhook = PersistentAgentDiscordWebhook.objects.create(
+            guild=guild,
+            channel_id="10",
+            webhook_id="wh",
+            name="Gobii",
+        )
+        raw_body = "please help <@123456789012345678>"
+        PersistentAgentDiscordWebhookEcho.objects.create(
+            agent=self.agent,
+            webhook=webhook,
+            channel_id="10",
+            discord_webhook_id="wh",
+            signature_hash=_webhook_echo_signature(
+                webhook_id="wh",
+                channel_id="10",
+                username="Discord Agent",
+                body=raw_body,
+                attachment_filenames=[],
+            ),
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
+        webhook_message = DiscordGatewayMessage(
+            message_id="503",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="webhook",
+            author_name="Discord Agent",
+            content="please help @Ada",
+            raw_content=raw_body,
+            attachments=[],
+            embeds=[],
+            author_is_bot=True,
+            webhook_id="wh",
+        )
+
+        result = ingest_gateway_message(webhook_message)
+
+        self.assertTrue(result["ignored"])
+        self.assertEqual(result["reason"], "own_webhook_echo")
+        self.assertEqual(result["skipped_subscription_ids"], [str(subscription.id)])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).exists())
+        schedule_mock.assert_not_called()
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)

@@ -709,7 +709,7 @@ def _gateway_webhook_echo_signature(message: DiscordGatewayMessage) -> str:
         webhook_id=message.webhook_id,
         channel_id=message.channel_id,
         username=message.author_name,
-        body=message.content,
+        body=message.raw_content or message.content,
         attachment_filenames=_webhook_attachment_filenames(message.attachments),
     )
 

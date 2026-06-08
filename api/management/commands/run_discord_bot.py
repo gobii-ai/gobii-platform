@@ -35,6 +35,8 @@ def build_gateway_message(message) -> DiscordGatewayMessage:
     guild = message.guild
     raw_content = str(getattr(message, "content", "") or "")
     clean_content = str(getattr(message, "clean_content", "") or "")
+    attachments = getattr(message, "attachments", None) or []
+    embeds = getattr(message, "embeds", None) or []
     author_name = str(
         getattr(message.author, "display_name", "")
         or getattr(message.author, "name", "")
@@ -50,8 +52,8 @@ def build_gateway_message(message) -> DiscordGatewayMessage:
         author_name=author_name,
         content=clean_content or raw_content,
         raw_content=raw_content,
-        attachments=[_attachment_payload(attachment) for attachment in getattr(message, "attachments", [])],
-        embeds=[payload for payload in (_embed_payload(embed) for embed in getattr(message, "embeds", [])) if payload],
+        attachments=[_attachment_payload(attachment) for attachment in attachments],
+        embeds=[payload for payload in (_embed_payload(embed) for embed in embeds) if payload],
         author_is_bot=bool(getattr(message.author, "bot", False)),
         webhook_id=str(getattr(message, "webhook_id", "") or ""),
     )

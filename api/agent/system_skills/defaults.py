@@ -12,6 +12,7 @@ from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillFiel
 GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
 APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
 HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
+DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
 
 
 def _custom_tool_development_prompt_available(agent) -> bool:
@@ -571,24 +572,24 @@ META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
 )
 
 
-CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
-    skill_key="connected_app_channels",
-    name="Connected App Channels",
-    search_summary="Provision inbound message subscriptions for connected apps like Discord.",
+DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=DISCORD_NATIVE_SYSTEM_SKILL_KEY,
+    name="Discord",
+    search_summary="Provision inbound Discord server/channel subscriptions through the native Gobii bot.",
     tool_names=("discord_channel_subscriptions", "discord_send_message"),
     enables=(
         "receive Discord channel messages through the native Gobii Discord bot",
         "discover Discord guild channels claimed by the agent owner",
         "send Discord replies through Gobii bot webhooks using the agent name and avatar",
-        "inspect and disable connected-app channel subscriptions",
-        "turn selected app channels into agent conversations",
+        "inspect and disable Discord channel subscriptions",
+        "turn selected Discord channels into agent conversations",
     ),
     use_when=(
         "the user wants the agent to receive Discord messages",
         "the user asks to monitor or listen to a Discord channel",
         "the user wants the agent to interact with a Discord server or channel over time",
-        "the user wants messages from a connected app to wake the agent",
-        "the user asks whether connected app channel subscriptions are active",
+        "the user wants Discord messages to wake the agent",
+        "the user asks whether Discord channel subscriptions are active",
     ),
     query_aliases=(
         "discord",
@@ -733,6 +734,6 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,
     HUBSPOT_NATIVE_SYSTEM_SKILL.skill_key: HUBSPOT_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
-    CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
+    DISCORD_NATIVE_SYSTEM_SKILL.skill_key: DISCORD_NATIVE_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,
 }
