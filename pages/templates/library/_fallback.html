@@ -15,7 +15,7 @@
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <div class="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800">
-          {% if official_only %}{{ payload.totalAgents }} official agents{% else %}{{ payload.libraryTotalAgents }} shared agents{% endif %}
+          {% if selected_category or official_only %}{{ payload.totalAgents }} {% if official_only %}official agents{% else %}shared agents{% endif %}{% else %}{{ payload.libraryTotalAgents }} shared agents{% endif %}
         </div>
         <div class="inline-flex items-center gap-2 rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700">
           {% if official_only %}{{ payload.officialTotalLikes }}{% else %}{{ payload.libraryTotalLikes }}{% endif %} likes

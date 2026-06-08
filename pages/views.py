@@ -24,6 +24,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import redirect_to_login
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.text import Truncator
+from django.template.defaultfilters import linebreaksbr
 from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.db import DatabaseError
@@ -1969,7 +1970,10 @@ class PublicTemplateDetailView(TemplateView):
         seo_description = Truncator(
             (self.template.description or self.template.tagline or "").strip()
         ).chars(160)
-        detail_description_markdown = self.template.description_markdown or self.template.description
+        if self.template.description_markdown and self.template.description_markdown.strip():
+            template_description_html = render_public_template_markdown(self.template.description_markdown)
+        else:
+            template_description_html = linebreaksbr(self.template.description or "")
         category_label = public_template_category_label(self.template)
         social_title = f"{self.template.display_name} AI Agent Template"
         creator_data = (
@@ -2043,7 +2047,7 @@ class PublicTemplateDetailView(TemplateView):
         context["template_social_title"] = social_title
         context["template_seo_title"] = f"{social_title} | Gobii"
         context["template_seo_description"] = seo_description
-        context["template_description_html"] = render_public_template_markdown(detail_description_markdown)
+        context["template_description_html"] = template_description_html
         context["template_social_image_url"] = social_image_url
         context["template_structured_data_json"] = html_safe_json_dumps(structured_data)
         context["template_breadcrumb_json"] = html_safe_json_dumps(breadcrumb_data)

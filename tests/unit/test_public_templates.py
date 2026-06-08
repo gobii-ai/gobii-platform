@@ -205,6 +205,35 @@ class PublicTemplateViewsTests(TestCase):
         self.assertIsNone(what_section.find("img"))
 
     @tag("batch_public_templates")
+    def test_public_template_detail_preserves_plain_description_placeholders(self):
+        user = get_user_model().objects.create_user(username="plain-owner", email="plain-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="plain-owner")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-plain-description",
+            public_profile=profile,
+            slug="plain-description-template",
+            display_name="Plain Description Template",
+            tagline="Plain body",
+            description="Use <client> data.\nReview <market> notes.",
+            description_markdown=" ",
+            charter="Summarize ops KPIs and alerts.",
+            category="Operations",
+        )
+
+        response = self.client.get(public_template_detail_path(template))
+
+        self.assertContains(response, "Use &lt;client&gt; data.")
+        self.assertContains(response, "Review &lt;market&gt; notes.")
+        soup = BeautifulSoup(response.content, "html.parser")
+        what_section = next(
+            section for section in soup.find_all("section")
+            if section.find("h2", string="What this template does")
+        )
+        self.assertIn("Use <client> data.", what_section.get_text(" ", strip=True))
+        self.assertIsNone(what_section.find("client"))
+        self.assertIsNone(what_section.find("market"))
+
+    @tag("batch_public_templates")
     def test_public_template_detail_marks_official_template_without_profile_handle(self):
         user = get_user_model().objects.create_user(username="will", email="will@example.com", password="pw")
         profile = PublicProfile.objects.create(user=user, handle="will")
@@ -953,6 +982,8 @@ class LibraryViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sales AI Agent Templates | Gobii")
         self.assertContains(response, 'data-library-initial-category="Sales"')
+        self.assertContains(response, "1 shared agents")
+        self.assertNotContains(response, "2 shared agents")
         self.assertContains(response, sales_template.display_name)
         self.assertNotContains(response, "Research Agent")
 
