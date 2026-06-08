@@ -265,6 +265,127 @@ class PublicTemplateViewsTests(TestCase):
         )
         self.assertEqual(application_schema["creator"], {"@type": "Organization", "name": "Gobii"})
 
+    @tag("batch_public_templates")
+    def test_public_template_detail_renders_optional_seo_sections_and_related_templates(self):
+        official_user = get_user_model().objects.create_user(username="official-owner", email="official-owner@example.com", password="pw")
+        official_profile = PublicProfile.objects.create(user=official_user, handle="official-owner")
+        community_user = get_user_model().objects.create_user(username="community-owner", email="community-owner@example.com", password="pw")
+        community_profile = PublicProfile.objects.create(user=community_user, handle="community-owner")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-rich-detail",
+            public_profile=official_profile,
+            slug="rich-detail-template",
+            display_name="Rich Detail Template",
+            tagline="Rich public detail",
+            seo_meta_description="A complete SEO summary for this official agent template.",
+            description="Plain card summary.",
+            best_for="- **Research teams** tracking public signals",
+            example_outputs="Weekly briefing with leadership changes.",
+            required_inputs="Provide the target company and market.",
+            how_it_works="Checks sources, summarizes findings, and sends an update.",
+            customization_notes="[Adjust the cadence](https://example.com/cadence) before launch.",
+            expected_tools_summary="Uses search and profile tools to gather context.",
+            charter="Summarize ops KPIs and alerts.",
+            category="Research",
+            priority=50,
+            is_official=True,
+        )
+        same_category_official = PersistentAgentTemplate.objects.create(
+            code="tpl-related-official",
+            public_profile=official_profile,
+            slug="related-official",
+            display_name="Related Official",
+            tagline="Official related template.",
+            description="Related official template.",
+            charter="Do official related work.",
+            category="Research",
+            priority=100,
+            is_official=True,
+        )
+        same_category_community = PersistentAgentTemplate.objects.create(
+            code="tpl-related-community",
+            public_profile=community_profile,
+            slug="related-community",
+            display_name="Related Community",
+            tagline="Community related template.",
+            description="Related community template.",
+            charter="Do community related work.",
+            category="Research",
+            priority=1,
+        )
+        other_category_official = PersistentAgentTemplate.objects.create(
+            code="tpl-related-ops",
+            public_profile=official_profile,
+            slug="related-ops",
+            display_name="Related Operations",
+            tagline="Other category related template.",
+            description="Related operations template.",
+            charter="Do operations work.",
+            category="Operations",
+            priority=1,
+            is_official=True,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="tpl-related-inactive",
+            public_profile=official_profile,
+            slug="related-inactive",
+            display_name="Inactive Related",
+            tagline="Should not render.",
+            description="Inactive related template.",
+            charter="Inactive work.",
+            category="Research",
+            is_active=False,
+            is_official=True,
+        )
+
+        response = self.client.get(public_template_detail_path(template))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'content="A complete SEO summary for this official agent template."')
+        self.assertContains(response, "Maintained by Gobii for trusted, reusable workflows.")
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(soup.find("meta", attrs={"name": "description"})["content"], "A complete SEO summary for this official agent template.")
+
+        for heading in [
+            "Best for",
+            "Example outputs",
+            "Inputs to provide",
+            "How it works",
+            "How to customize it",
+            "Tools it uses",
+        ]:
+            self.assertIsNotNone(soup.find("h2", string=heading))
+        self.assertEqual(soup.find("strong").get_text(strip=True), "Research teams")
+        self.assertEqual(soup.find("a", string="Adjust the cadence")["href"], "https://example.com/cadence")
+
+        related_section = soup.find("h2", string="Related templates").find_parent("section")
+        related_names = [
+            heading.get_text(strip=True)
+            for heading in related_section.find_all("h3")
+        ]
+        self.assertEqual(
+            related_names,
+            [
+                same_category_official.display_name,
+                same_category_community.display_name,
+                other_category_official.display_name,
+            ],
+        )
+        related_hrefs = [
+            link["href"]
+            for link in related_section.find_all("a", href=True)
+            if link.find("h3")
+        ]
+        self.assertEqual(
+            related_hrefs,
+            [
+                public_template_detail_path(same_category_official),
+                public_template_detail_path(same_category_community),
+                public_template_detail_path(other_category_official),
+            ],
+        )
+        self.assertNotIn("Inactive Related", related_section.get_text(" ", strip=True))
+
     @override_settings(
         PUBLIC_SITE_URL="https://www.gobii.ai",
         GOBII_RELEASE_ENV="prod",
@@ -280,6 +401,7 @@ class PublicTemplateViewsTests(TestCase):
             slug="market-radar",
             display_name="Market Radar",
             tagline="Track market movement",
+            seo_meta_description="Track market signals with an official Gobii agent template.",
             description="Tracks public market signals and sends a weekly summary.",
             charter="Track public market signals.",
             base_schedule="@weekly",
@@ -292,6 +414,10 @@ class PublicTemplateViewsTests(TestCase):
         detail_url = f"https://www.gobii.ai{public_template_detail_path(template)}"
         soup = BeautifulSoup(response.content, "html.parser")
         self.assertEqual(soup.find("link", rel="canonical")["href"], detail_url)
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            "Track market signals with an official Gobii agent template.",
+        )
         self.assertEqual(soup.find("meta", property="og:url")["content"], detail_url)
         self.assertEqual(soup.find("meta", property="og:image")["content"], "https://www.gobii.ai/static/images/gobii_fish_social_1280x640.png")
         self.assertEqual(soup.find("meta", attrs={"name": "twitter:card"})["content"], "summary_large_image")
@@ -306,15 +432,37 @@ class PublicTemplateViewsTests(TestCase):
         application_schema = next(
             item for item in structured_data if item.get("@type") == "SoftwareApplication"
         )
+        self.assertEqual(application_schema["@id"], f"{detail_url}#template")
         self.assertEqual(application_schema["url"], detail_url)
         self.assertEqual(application_schema["image"], "https://www.gobii.ai/static/images/gobii_fish_social_1280x640.png")
+        self.assertEqual(application_schema["description"], "Track market signals with an official Gobii agent template.")
         self.assertEqual(application_schema["applicationCategory"], "BusinessApplication")
         self.assertEqual(application_schema["applicationSubCategory"], "Research")
         self.assertEqual(application_schema["operatingSystem"], "Web")
+        self.assertEqual(application_schema["mainEntityOfPage"], {"@id": f"{detail_url}#webpage"})
+        self.assertEqual(application_schema["potentialAction"]["@type"], "UseAction")
+        self.assertEqual(application_schema["potentialAction"]["actionStatus"], "PotentialActionStatus")
+        self.assertEqual(
+            application_schema["potentialAction"]["target"],
+            {
+                "@type": "EntryPoint",
+                "urlTemplate": f"https://www.gobii.ai{public_template_launch_path(template)}",
+                "httpMethod": "GET",
+            },
+        )
+
+        webpage_schema = next(
+            item for item in structured_data if item.get("@type") == "WebPage"
+        )
+        self.assertEqual(webpage_schema["@id"], f"{detail_url}#webpage")
+        self.assertEqual(webpage_schema["url"], detail_url)
+        self.assertEqual(webpage_schema["mainEntity"], {"@id": f"{detail_url}#template"})
+        self.assertEqual(webpage_schema["breadcrumb"], {"@id": f"{detail_url}#breadcrumb"})
 
         breadcrumb_schema = next(
             item for item in structured_data if item.get("@type") == "BreadcrumbList"
         )
+        self.assertEqual(breadcrumb_schema["@id"], f"{detail_url}#breadcrumb")
         self.assertEqual(breadcrumb_schema["itemListElement"][-1]["item"], detail_url)
 
     @override_settings(PUBLIC_SITE_URL="https://www.gobii.ai")

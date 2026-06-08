@@ -28,6 +28,8 @@ from django.template.defaultfilters import linebreaksbr
 from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.db import DatabaseError
+from django.db.models import Case, Count, IntegerField, Value, When
+from django.db.models.functions import Lower
 from api.models import (
     MCPServerConfig,
     PaidPlanIntent,
@@ -1809,6 +1811,90 @@ def _active_public_template_queryset():
     )
 
 
+PUBLIC_TEMPLATE_DETAIL_SECTIONS = (
+    ("best_for", "Best for"),
+    ("example_outputs", "Example outputs"),
+    ("required_inputs", "Inputs to provide"),
+    ("how_it_works", "How it works"),
+    ("customization_notes", "How to customize it"),
+    ("expected_tools_summary", "Tools it uses"),
+)
+
+
+def _build_public_template_detail_sections(template: PersistentAgentTemplate) -> list[dict[str, str]]:
+    sections = []
+    for field_name, title in PUBLIC_TEMPLATE_DETAIL_SECTIONS:
+        raw_content = getattr(template, field_name, "") or ""
+        if not raw_content.strip():
+            continue
+        sections.append(
+            {
+                "key": field_name,
+                "title": title,
+                "html": render_public_template_markdown(raw_content),
+            }
+        )
+    return sections
+
+
+def _build_related_public_template_cards(
+    template: PersistentAgentTemplate,
+    *,
+    limit: int = 6,
+) -> list[dict[str, object]]:
+    current_category = (template.category or "").strip()
+    same_category_rank = (
+        Case(
+            When(category__iexact=current_category, then=Value(0)),
+            default=Value(1),
+            output_field=IntegerField(),
+        )
+        if current_category
+        else Case(
+            When(category="", then=Value(0)),
+            default=Value(1),
+            output_field=IntegerField(),
+        )
+    )
+    official_preference_rank = (
+        Case(
+            When(is_official=True, then=Value(0)),
+            default=Value(1),
+            output_field=IntegerField(),
+        )
+        if template.is_official
+        else Value(0, output_field=IntegerField())
+    )
+    related_templates = (
+        _active_public_template_queryset()
+        .exclude(id=template.id)
+        .exclude(slug="")
+        .annotate(
+            same_category_rank=same_category_rank,
+            official_preference_rank=official_preference_rank,
+            like_count=Count("template_likes"),
+        )
+        .order_by(
+            "same_category_rank",
+            "official_preference_rank",
+            "priority",
+            "-like_count",
+            Lower("display_name"),
+            "id",
+        )[:limit]
+    )
+    return [
+        {
+            "name": related_template.display_name,
+            "tagline": related_template.tagline,
+            "category": public_template_category_label(related_template),
+            "url": public_template_detail_path(related_template),
+            "is_official": related_template.is_official,
+        }
+        for related_template in related_templates
+    ]
+
+
 def _get_active_public_template_by_slug(template_slug: str | None):
     return _active_public_template_queryset().filter(slug=template_slug).first()
 
@@ -1967,7 +2053,7 @@ class PublicTemplateDetailView(TemplateView):
             else "images/gobii_fish_social_1280x640.png"
         )
         social_image_url = _public_site_absolute_url(static(social_image_path))
-        seo_description = Truncator(
+        seo_description = (self.template.seo_meta_description or "").strip() or Truncator(
             (self.template.description or self.template.tagline or "").strip()
         ).chars(160)
         if self.template.description_markdown and self.template.description_markdown.strip():
@@ -1976,6 +2062,10 @@ class PublicTemplateDetailView(TemplateView):
             template_description_html = linebreaksbr(self.template.description or "")
         category_label = public_template_category_label(self.template)
         social_title = f"{self.template.display_name} AI Agent Template"
+        template_schema_id = f"{canonical_detail_url}#template"
+        webpage_schema_id = f"{canonical_detail_url}#webpage"
+        breadcrumb_schema_id = f"{canonical_detail_url}#breadcrumb"
+        canonical_launch_url = _public_site_absolute_url(public_template_launch_path(self.template))
         creator_data = (
             {
                 "@type": "Organization",
@@ -1990,6 +2080,7 @@ class PublicTemplateDetailView(TemplateView):
         structured_data = {
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
+            "@id": template_schema_id,
             "name": self.template.display_name,
             "description": seo_description,
             "applicationCategory": "BusinessApplication",
@@ -1998,10 +2089,42 @@ class PublicTemplateDetailView(TemplateView):
             "url": canonical_detail_url,
             "image": social_image_url,
             "creator": creator_data,
+            "mainEntityOfPage": {
+                "@id": webpage_schema_id,
+            },
             "isPartOf": {
                 "@type": "CollectionPage",
                 "name": "Gobii Library",
                 "url": library_url,
+            },
+            "potentialAction": {
+                "@type": "UseAction",
+                "name": "Create an agent from this template",
+                "actionStatus": "PotentialActionStatus",
+                "target": {
+                    "@type": "EntryPoint",
+                    "urlTemplate": canonical_launch_url,
+                    "httpMethod": "GET",
+                },
+            },
+        }
+        webpage_data = {
+            "@context": "https://schema.org",
+            "@type": "WebPage",
+            "@id": webpage_schema_id,
+            "url": canonical_detail_url,
+            "name": social_title,
+            "description": seo_description,
+            "isPartOf": {
+                "@type": "WebSite",
+                "name": "Gobii",
+                "url": home_url,
+            },
+            "breadcrumb": {
+                "@id": breadcrumb_schema_id,
+            },
+            "mainEntity": {
+                "@id": template_schema_id,
             },
         }
         if self.template.created_at:
@@ -2011,6 +2134,7 @@ class PublicTemplateDetailView(TemplateView):
         breadcrumb_data = {
             "@context": "https://schema.org",
             "@type": "BreadcrumbList",
+            "@id": breadcrumb_schema_id,
             "itemListElement": [
                 {
                     "@type": "ListItem",
@@ -2048,8 +2172,11 @@ class PublicTemplateDetailView(TemplateView):
         context["template_seo_title"] = f"{social_title} | Gobii"
         context["template_seo_description"] = seo_description
         context["template_description_html"] = template_description_html
+        context["template_detail_sections"] = _build_public_template_detail_sections(self.template)
+        context["related_templates"] = _build_related_public_template_cards(self.template)
         context["template_social_image_url"] = social_image_url
         context["template_structured_data_json"] = html_safe_json_dumps(structured_data)
+        context["template_webpage_structured_data_json"] = html_safe_json_dumps(webpage_data)
         context["template_breadcrumb_json"] = html_safe_json_dumps(breadcrumb_data)
         context["template_url"] = detail_url
         context["template_canonical_url"] = canonical_detail_url
