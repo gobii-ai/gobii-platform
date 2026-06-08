@@ -12,6 +12,7 @@ def migrate_discord_native_skill_state(apps, schema_editor):
         SystemSkillState.objects.filter(skill_key=OLD_SKILL_KEY).only(
             "id",
             "agent_id",
+            "skill_key",
             "is_enabled",
             "last_used_at",
             "usage_count",

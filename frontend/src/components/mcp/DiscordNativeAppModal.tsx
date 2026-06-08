@@ -84,7 +84,7 @@ export function useDiscordNativeAgentActions({
     onSuccess: (result, agentId) => {
       queryClient.setQueryData(agentDiscordAppQueryKey(agentId), result.app)
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
-      window.open(result.connectUrl, '_blank', 'noopener,noreferrer')
+      window.open(result.connectUrl, '_blank')
     },
     onError: (error) => onError(safeErrorMessage(error)),
     onSettled: () => setPendingDiscordAgentAction(null),
@@ -153,14 +153,16 @@ export function DiscordConfigurationScreen({
 }) {
   const initialSelections = useMemo(() => activeDiscordSelections(app), [app.subscriptions])
   const [selectedSubscriptions, setSelectedSubscriptions] = useState<Record<string, DiscordSubscriptionSelection>>(initialSelections)
+  const savedKeys = useMemo(() => Object.keys(initialSelections).sort().join('|'), [initialSelections])
+  const [lastSavedKeys, setLastSavedKeys] = useState(savedKeys)
 
-  useEffect(() => {
+  if (savedKeys !== lastSavedKeys) {
+    setLastSavedKeys(savedKeys)
     setSelectedSubscriptions(initialSelections)
-  }, [initialSelections])
+  }
 
   const selectedKeys = useMemo(() => Object.keys(selectedSubscriptions).sort(), [selectedSubscriptions])
-  const initialKeys = useMemo(() => Object.keys(initialSelections).sort(), [initialSelections])
-  const hasChanges = selectedKeys.join('|') !== initialKeys.join('|')
+  const hasChanges = selectedKeys.join('|') !== savedKeys
   const isPendingSave = pendingDiscordAction === 'save'
 
   const toggleChannel = (channel: DiscordChannel) => {
