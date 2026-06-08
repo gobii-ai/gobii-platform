@@ -22,6 +22,7 @@ from django.db.models import Q
 from django.db.utils import DatabaseError
 from django.conf import settings
 
+from api.agent.core.endpoint_config_utils import resolve_provider_api_key
 from api.openrouter import get_attribution_headers
 from api.llm.utils import normalize_model_name
 from api.services.web_sessions import has_active_web_session
@@ -873,20 +874,11 @@ def _build_weighted_failover_configs(
         params: Dict[str, Any] = {}
         if supports_temperature:
             params["temperature"] = 0.1
-        try:
-            effective_key = None
-            if provider.api_key_encrypted:
-                from api.encryption import SecretsEncryption
-                effective_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
-            if not effective_key and provider.env_var_name:
-                effective_key = os.getenv(provider.env_var_name)
-            if effective_key:
-                params["api_key"] = effective_key
-            else:
-                if endpoint.litellm_model.startswith("openai/") and getattr(endpoint, "api_base", None):
-                    params["api_key"] = "sk-noauth"
-        except Exception:
-            logger.debug("Unable to determine API key for endpoint %s", endpoint.key, exc_info=True)
+        effective_key = resolve_provider_api_key(provider)
+        if effective_key:
+            params["api_key"] = effective_key
+        elif endpoint.litellm_model.startswith("openai/") and getattr(endpoint, "api_base", None):
+            params["api_key"] = "sk-noauth"
         if supports_temperature and endpoint.temperature_override is not None:
             params["temperature"] = float(endpoint.temperature_override)
         if "google" in provider.key:
