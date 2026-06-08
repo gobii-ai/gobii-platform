@@ -8,6 +8,8 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
+from cryptography.exceptions import InvalidTag
+
 from api.encryption import SecretsEncryption
 from api.llm.utils import normalize_model_name
 from api.openrouter import get_attribution_headers
@@ -25,13 +27,12 @@ def resolve_provider_api_key(provider) -> Optional[str]:
     if encrypted:
         try:
             api_key = SecretsEncryption.decrypt_value(encrypted)
-        except Exception as exc:
+        except (InvalidTag, TypeError, UnicodeDecodeError, ValueError) as exc:
             logger.warning(
-                "Failed to decrypt API key for provider %s: %s",
+                "Failed to decrypt API key for provider %s; falling back to env var if configured: %s",
                 getattr(provider, "key", "unknown"),
                 exc,
             )
-            return None
 
     if not api_key:
         env_var = getattr(provider, "env_var_name", None)

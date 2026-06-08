@@ -1542,7 +1542,7 @@ def _render_prompt_context_once(
 
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
-    _get_unified_history_prompt(agent, unified_history_group, config_authority)
+    fresh_tool_call_step_ids = _get_unified_history_prompt(agent, unified_history_group, config_authority)
 
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
@@ -1795,6 +1795,7 @@ def _render_prompt_context_once(
             "prompt_render_signature": _prompt_render_signature_from_failover_configs(
                 prompt_failover_configs
             ),
+            "fresh_tool_call_step_ids": sorted(fresh_tool_call_step_ids),
         },
     )
 
@@ -4202,7 +4203,7 @@ def _get_unified_history_prompt(
     agent: PersistentAgent,
     history_group,
     config_authority: _ConfigAuthorityResolver,
-) -> None:
+) -> Set[str]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
@@ -4686,6 +4687,8 @@ def _get_unified_history_prompt(
                     weight=component_weight,
                     shrinker=shrinker
                 )
+
+    return fresh_tool_call_step_ids
 
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:

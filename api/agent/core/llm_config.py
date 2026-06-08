@@ -22,6 +22,7 @@ from django.db.models import Q
 from django.db.utils import DatabaseError
 from django.conf import settings
 
+from api.agent.core.endpoint_config_utils import resolve_provider_api_key
 from api.openrouter import get_attribution_headers
 from api.llm.utils import normalize_model_name
 from api.services.web_sessions import has_active_web_session
@@ -873,20 +874,11 @@ def _build_weighted_failover_configs(
         params: Dict[str, Any] = {}
         if supports_temperature:
             params["temperature"] = 0.1
-        try:
-            effective_key = None
-            if provider.api_key_encrypted:
-                from api.encryption import SecretsEncryption
-                effective_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
-            if not effective_key and provider.env_var_name:
-                effective_key = os.getenv(provider.env_var_name)
-            if effective_key:
-                params["api_key"] = effective_key
-            else:
-                if endpoint.litellm_model.startswith("openai/") and getattr(endpoint, "api_base", None):
-                    params["api_key"] = "sk-noauth"
-        except Exception:
-            logger.debug("Unable to determine API key for endpoint %s", endpoint.key, exc_info=True)
+        effective_key = resolve_provider_api_key(provider)
+        if effective_key:
+            params["api_key"] = effective_key
+        elif endpoint.litellm_model.startswith("openai/") and getattr(endpoint, "api_base", None):
+            params["api_key"] = "sk-noauth"
         if supports_temperature and endpoint.temperature_override is not None:
             params["temperature"] = float(endpoint.temperature_override)
         if "google" in provider.key:
@@ -1040,6 +1032,7 @@ def get_llm_config_with_failover(
     is_first_loop: bool | None = None,
     routing_profile: Any | None = None,
     prefer_low_latency: Optional[bool] = None,
+    ignore_agent_tier_cap: bool = False,
 ) -> List[Tuple[str, str, dict]]:
     """
     Get LLM configurations for tiered failover with token-based tier selection.
@@ -1058,6 +1051,9 @@ def get_llm_config_with_failover(
             this profile's configuration instead of the active profile or legacy config.
         prefer_low_latency: When true, prioritize low-latency endpoints within a tier.
             When None, automatically prefers low latency for active web sessions.
+        ignore_agent_tier_cap: When true, include all configured intelligence tiers
+            for special-purpose routing that may need a capability absent from the
+            agent's normal tier.
 
     Returns:
         List of (provider_name, model_name, litellm_params) tuples in failover order
@@ -1075,6 +1071,7 @@ def get_llm_config_with_failover(
         is_first_loop=is_first_loop,
         routing_profile=routing_profile,
         prefer_low_latency=prefer_low_latency,
+        ignore_agent_tier_cap=ignore_agent_tier_cap,
     )
     if configs:
         _cache_bootstrap_status(False)
@@ -1087,6 +1084,7 @@ def get_llm_config_with_failover(
         agent=agent,
         is_first_loop=is_first_loop,
         prefer_low_latency=prefer_low_latency,
+        ignore_agent_tier_cap=ignore_agent_tier_cap,
     )
     if configs:
         _cache_bootstrap_status(False)
@@ -1110,6 +1108,7 @@ def _get_failover_configs_from_profile(
     is_first_loop: bool | None,
     routing_profile: Any | None,
     prefer_low_latency: bool,
+    ignore_agent_tier_cap: bool,
 ) -> List[Tuple[str, str, dict]]:
     """Get failover configs from an LLMRoutingProfile.
 
@@ -1186,13 +1185,11 @@ def _get_failover_configs_from_profile(
             )
 
         profile_name = getattr(profile, 'name', 'unknown')
-        allowed_rank = get_allowed_tier_rank(agent_tier)
-        tiers = (
-            ProfilePersistentTier.objects
-            .filter(token_range=token_range, intelligence_tier__rank__lte=allowed_rank)
-            .select_related("intelligence_tier")
-            .order_by("-intelligence_tier__rank", "order")
-        )
+        tiers = ProfilePersistentTier.objects.filter(token_range=token_range)
+        if not ignore_agent_tier_cap:
+            allowed_rank = get_allowed_tier_rank(agent_tier)
+            tiers = tiers.filter(intelligence_tier__rank__lte=allowed_rank)
+        tiers = tiers.select_related("intelligence_tier").order_by("-intelligence_tier__rank", "order")
         return _collect_failover_configs(
             tiers,
             token_range_name=f"{profile_name}:{token_range.name}",
@@ -1211,6 +1208,7 @@ def _get_failover_configs_from_legacy(
     agent: Any | None,
     is_first_loop: bool | None,
     prefer_low_latency: bool,
+    ignore_agent_tier_cap: bool,
 ) -> List[Tuple[str, str, dict]]:
     """Get failover configs from legacy PersistentTokenRange/PersistentLLMTier tables."""
     try:
@@ -1271,13 +1269,11 @@ def _get_failover_configs_from_legacy(
             is_first_loop=is_first_loop,
         )
 
-    allowed_rank = get_allowed_tier_rank(agent_tier)
-    tiers = (
-        PersistentLLMTier.objects
-        .filter(token_range=token_range, intelligence_tier__rank__lte=allowed_rank)
-        .select_related("intelligence_tier")
-        .order_by("-intelligence_tier__rank", "order")
-    )
+    tiers = PersistentLLMTier.objects.filter(token_range=token_range)
+    if not ignore_agent_tier_cap:
+        allowed_rank = get_allowed_tier_rank(agent_tier)
+        tiers = tiers.filter(intelligence_tier__rank__lte=allowed_rank)
+    tiers = tiers.select_related("intelligence_tier").order_by("-intelligence_tier__rank", "order")
     return _collect_failover_configs(
         tiers,
         token_range_name=token_range.name,
