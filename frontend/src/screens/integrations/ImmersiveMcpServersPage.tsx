@@ -1,3 +1,4 @@
+import { ImmersivePageFrame } from '../../components/common/ImmersivePageFrame'
 import { McpServersScreen } from '../McpServersScreen'
 
 const MCP_PLACEHOLDER_ID = '00000000-0000-0000-0000-000000000000'
@@ -18,7 +19,7 @@ export function ImmersiveMcpServersPage({
   pipedreamAppSearchUrl = null,
 }: ImmersiveMcpServersPageProps) {
   return (
-    <div className={layout === 'sidebar-shell' ? 'w-full px-1 pb-4' : 'mx-auto w-full max-w-5xl px-4 pb-6'}>
+    <ImmersivePageFrame layout={layout}>
       <McpServersScreen
         key={refreshKey}
         listUrl="/console/api/mcp/servers/"
@@ -34,6 +35,6 @@ export function ImmersiveMcpServersPage({
         oauthCallbackPath="/console/mcp/oauth/callback/"
         variant="embedded"
       />
-    </div>
+    </ImmersivePageFrame>
   )
 }

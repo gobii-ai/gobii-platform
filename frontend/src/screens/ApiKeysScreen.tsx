@@ -11,9 +11,10 @@ import {
 } from '../api/apiKeys'
 import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
-import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
+import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
 import { Modal } from '../components/common/Modal'
 import { ModalForm } from '../components/common/ModalForm'
+import { SettingsSurface } from '../components/common/SettingsSurface'
 import { useModal } from '../hooks/useModal'
 
 type CreatedKeyState = {
@@ -313,7 +314,6 @@ export function ApiKeysScreen() {
     ))
   }, [refresh, showModal])
 
-  const frameClassName = `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`
   const tableClassName = 'min-w-full divide-y divide-slate-200/15'
   const tableHeadClassName = 'bg-slate-900/40'
   const tableBodyClassName = 'divide-y divide-slate-200/15'
@@ -346,31 +346,30 @@ export function ApiKeysScreen() {
       />
 
       {!emailVerified ? (
-        <div className="rounded-lg border border-amber-300/30 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
+        <InlineStatusBanner variant="warning" surface="embedded">
           Please verify your email address to create API keys.
-        </div>
+        </InlineStatusBanner>
       ) : null}
 
       {data && !canManage ? (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-300/30 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
-          <ShieldAlert className="h-4 w-4 shrink-0" />
+        <InlineStatusBanner variant="warning" surface="embedded" icon={ShieldAlert}>
           <span>Read-only access. Contact an owner or admin to create or manage keys.</span>
-        </div>
+        </InlineStatusBanner>
       ) : null}
 
       {banner ? (
-        <div className="rounded-lg border border-green-300/30 bg-green-950/20 px-4 py-3 text-sm text-green-100">
+        <InlineStatusBanner variant="success" surface="embedded">
           {banner}
-        </div>
+        </InlineStatusBanner>
       ) : null}
 
       {listError ? (
-        <div className="rounded-lg border border-red-300/30 bg-red-950/20 px-4 py-3 text-sm text-red-100">
+        <InlineStatusBanner variant="error" surface="embedded">
           {listError}
-        </div>
+        </InlineStatusBanner>
       ) : null}
 
-      <div className={frameClassName}>
+      <SettingsSurface variant="embedded">
         {isLoading ? (
           <div className="flex justify-center py-12">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-300/30 border-t-blue-200" />
@@ -448,7 +447,7 @@ export function ApiKeysScreen() {
             </table>
           </div>
         )}
-      </div>
+      </SettingsSurface>
     </div>
   )
 }

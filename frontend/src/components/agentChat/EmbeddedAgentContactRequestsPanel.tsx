@@ -4,7 +4,8 @@ import { AlertTriangle, Check, Inbox, Loader2, Mail, Phone, X } from 'lucide-rea
 
 import { fetchContactRequests, resolveContactRequests } from '../../api/agentChat'
 import { SettingsBanner } from '../agentSettings/SettingsBanner'
-import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../agentSettings/settingsSurfaceClasses'
+import { InlineStatusBanner } from '../common/InlineStatusBanner'
+import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import type { PendingContactRequest } from '../../types/agentChat'
 import { EmbeddedAgentShellBackButton } from './EmbeddedAgentShellBackButton'
 import { EmbeddedAgentShellPanel } from './EmbeddedAgentShellPanel'
@@ -199,12 +200,9 @@ export function EmbeddedAgentContactRequestsPanel({
 
       <div className="mt-4 space-y-4 pb-8">
         {errorMessage ? (
-          <div className="rounded-xl border border-rose-300/25 bg-rose-950/35 px-4 py-3 text-sm text-rose-100">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-200" aria-hidden="true" />
-              <p>{errorMessage}</p>
-            </div>
-          </div>
+          <InlineStatusBanner variant="error" surface="embedded" icon={AlertTriangle}>
+            <p>{errorMessage}</p>
+          </InlineStatusBanner>
         ) : null}
 
         {isLoading ? (
@@ -215,12 +213,12 @@ export function EmbeddedAgentContactRequestsPanel({
             </div>
           </div>
         ) : error ? (
-          <div className="rounded-xl border border-rose-300/25 bg-rose-950/35 px-4 py-4 text-sm text-rose-100">
+          <InlineStatusBanner variant="error" surface="embedded">
             <p className="font-medium">Unable to load contact requests.</p>
             <p className="mt-1 text-rose-100/75">Try opening this agent again.</p>
-          </div>
+          </InlineStatusBanner>
         ) : requests.length === 0 ? (
-          <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} flex min-h-[18rem] items-center justify-center px-6 py-10 text-center shadow-none`}>
+          <div className={getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'flex min-h-[18rem] items-center justify-center px-6 py-10 text-center' })}>
             <div className="max-w-sm space-y-4">
               <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200/20 bg-slate-900/45 text-slate-200">
                 <Inbox className="h-5 w-5" aria-hidden="true" />
@@ -233,7 +231,7 @@ export function EmbeddedAgentContactRequestsPanel({
           </div>
         ) : (
           <>
-            <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} flex flex-col gap-3 px-4 py-4 text-slate-100 shadow-none sm:flex-row sm:items-center sm:justify-between`}>
+            <div className={getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'flex flex-col gap-3 px-4 py-4 text-slate-100 sm:flex-row sm:items-center sm:justify-between' })}>
               <div>
                 <p className="text-sm font-semibold text-slate-100">
                   {requests.length} pending contact request{requests.length === 1 ? '' : 's'}
@@ -284,7 +282,7 @@ export function EmbeddedAgentContactRequestsPanel({
                 return (
                   <article
                     key={request.id}
-                    className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} px-4 py-4 text-slate-100 shadow-none`}
+                    className={getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'px-4 py-4 text-slate-100' })}
                   >
                     <div className="flex items-start gap-3">
                       <input

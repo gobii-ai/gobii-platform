@@ -26,6 +26,7 @@ import {
   clampRangeToMax,
 } from '../components/usage/utils'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
 
 
 type SelectionMode = 'billing' | 'custom'
@@ -360,9 +361,9 @@ export function UsageScreen() {
       />
 
       {summaryStatus === 'error' && summaryErrorMessage ? (
-        <div className="rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100">
+        <InlineStatusBanner variant="error" surface="embedded">
           {summaryErrorMessage}
-        </div>
+        </InlineStatusBanner>
       ) : null}
     </div>
   )

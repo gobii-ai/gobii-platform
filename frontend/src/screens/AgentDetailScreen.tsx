@@ -34,7 +34,7 @@ import { Modal } from '../components/common/Modal'
 import { AddCollaboratorModal } from '../components/agentSettings/AddCollaboratorModal'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
-import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
+import { getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { SaveBar } from '../components/common/SaveBar'
 import { AddContactModal } from '../components/agentSettings/AddContactModal'
@@ -1751,7 +1751,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     [peerLinkCandidates, peerLinkDefaults, showModal, stagePeerLinkCreate, stagePeerLinkUpdate],
   )
 
-  const sectionClassName = `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} group shadow-none`
+  const sectionClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
   const sectionSummaryClassName = 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
   const sectionBodyClassName = 'border-t border-slate-200/15 px-5 py-5'
   const stackedSectionBodyClassName = 'border-t border-slate-200/15 px-5 py-5 space-y-6'
@@ -2753,7 +2753,7 @@ function IntegrationsSection({
 }: IntegrationsSectionProps) {
   const embedded = variant === 'embedded'
   const sectionClassName = embedded
-    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} group shadow-none`
+    ? getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
     : 'gobii-card-base group'
   const summaryClassName = embedded
     ? 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
@@ -2761,10 +2761,10 @@ function IntegrationsSection({
   const wrapperClassName = embedded ? 'divide-y divide-slate-200/15 border-t border-slate-200/15' : 'divide-y divide-gray-200/70'
   const sectionBodyClassName = embedded ? 'space-y-6 px-5 py-5' : 'p-6 sm:p-8 space-y-6'
   const cardClassName = embedded
-    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} p-4 space-y-4 shadow-none`
+    ? getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'p-4 space-y-4' })
     : 'border border-gray-200 rounded-xl bg-white p-4 space-y-4'
   const tableWrapperClassName = embedded
-    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} overflow-hidden shadow-none`
+    ? getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none' })
     : 'overflow-hidden border border-gray-200 rounded-xl'
   const tableHeadClassName = embedded ? 'bg-slate-950/45' : 'bg-gray-50'
   const tableBodyClassName = embedded ? 'bg-transparent divide-y divide-slate-200/15' : 'bg-white divide-y divide-gray-200'
@@ -3524,7 +3524,7 @@ function ActionsSection({
 }: ActionsSectionProps) {
   const embedded = variant === 'embedded'
   const sectionClassName = embedded
-    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} group shadow-none`
+    ? getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
     : 'gobii-card-base group'
   const summaryClassName = embedded
     ? 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'

@@ -7,7 +7,6 @@ from unittest.mock import Mock, patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
-from api.agent.core import event_processing as event_processing_module
 from api.agent.core.event_processing import (
     _completion_with_failover,
     _filter_preferred_config_for_low_latency,
@@ -35,7 +34,6 @@ class TestEventProcessingLLMSelection(TestCase):
             charter="Ensure LLM selection helper works.",
             browser_use_agent=self.browser_agent,
         )
-        event_processing_module._GEMINI_CACHE_BLOCKLIST.clear()
 
     @patch('api.agent.core.event_processing.get_llm_config_with_failover')
     @patch('api.agent.core.llm_utils.litellm.completion')
