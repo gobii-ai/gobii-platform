@@ -37,6 +37,7 @@ AGENT_CONFIG_TABLE = "__agent_config"
 LEGACY_PLAN_TABLE = "__kanban_cards"
 MESSAGES_TABLE = "__messages"
 FILES_TABLE = "__files"
+CONTACTS_TABLE = "__contacts"
 AGENT_SKILLS_TABLE = "__agent_skills"
 EPHEMERAL_TABLES = {
     TOOL_RESULTS_TABLE,
@@ -44,6 +45,7 @@ EPHEMERAL_TABLES = {
     LEGACY_PLAN_TABLE,
     MESSAGES_TABLE,
     FILES_TABLE,
+    CONTACTS_TABLE,
     AGENT_SKILLS_TABLE,
 }
 BUILTIN_TABLE_NOTES = {
@@ -51,6 +53,7 @@ BUILTIN_TABLE_NOTES = {
     AGENT_CONFIG_TABLE: "built-in, ephemeral (reset every LLM call; charter/schedule updates)",
     MESSAGES_TABLE: "built-in, ephemeral (recent messages snapshot for this cycle)",
     FILES_TABLE: "built-in, ephemeral (recent file index for this cycle; metadata only)",
+    CONTACTS_TABLE: "built-in, ephemeral (effective contacts and contact request state for this cycle)",
     AGENT_SKILLS_TABLE: "built-in, ephemeral (versioned skill mirror synced to persistent storage after tool execution)",
 }
 
