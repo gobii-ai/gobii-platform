@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type CSSProperties,
   type Dispatch,
   type FormEvent,
@@ -54,7 +55,7 @@ import { EmbeddedAgentSecretsPanel } from '../components/agentChat/EmbeddedAgent
 import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { PublicAgentShareDialog } from '../components/agentChat/PublicAgentShareDialog'
-import { Modal } from '../components/common/Modal'
+import { ModalForm } from '../components/common/ModalForm'
 import { HelpSupportDialog } from '../components/common/HelpSupportDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
@@ -689,6 +690,30 @@ function updateAgentRosterPreferenceInQueryData<K extends AgentRosterPreferenceF
 }
 
 type AgentChatPageStyle = CSSProperties & Record<'--agent-chat-grain-texture', string>
+type SelectionSidebarProps = ComponentProps<typeof ChatSidebar>
+type AppShellOpenHandler = (() => void) | undefined
+type AppShellDestinationKey = 'billing' | 'usage' | 'apiKeys' | 'profile' | 'organization' | 'secrets' | 'integrations'
+type AppShellDestinations = Record<AppShellDestinationKey, string | null>
+type AppShellOpenHandlers = Record<AppShellDestinationKey, () => void>
+
+const EMBEDDED_SETTINGS_TITLES: Record<Exclude<AgentChatShellSubview, 'chat'>, string> = {
+  settings: 'Agent Settings',
+  secrets: 'Agent Secrets',
+  'secret-requests': 'Secret Requests',
+  email: 'Email Settings',
+  files: 'Agent Files',
+  'contact-requests': 'Contact Requests',
+}
+
+function openAppShellDestination(onOpen: AppShellOpenHandler, url: string | null): void {
+  if (onOpen) {
+    onOpen()
+    return
+  }
+  if (url && typeof window !== 'undefined') {
+    window.location.assign(url)
+  }
+}
 
 function isAgentRosterQueryData(value: unknown): value is AgentRosterQueryData {
   if (!value || typeof value !== 'object') {
@@ -2749,7 +2774,7 @@ export function AgentChatPage({
     }
   }, [contextData, contextError, contextSwitching, showContextSwitcher, switchContext])
 
-  const handleCreateOrganizationSubmit = useCallback(async (event: FormEvent) => {
+  const handleCreateOrganizationSubmit = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const name = createOrganizationName.trim()
     if (!name) {
@@ -3922,77 +3947,41 @@ export function AgentChatPage({
     }
     return '/app/billing'
   }, [effectiveContext, isImmersiveShellPath])
-  const handleOpenBilling = useCallback(() => {
-    if (onOpenBilling) {
-      onOpenBilling()
-      return
-    }
-    if (typeof window !== 'undefined') {
-      window.location.assign(billingUrl)
-    }
-  }, [billingUrl, onOpenBilling])
   const usageUrl = '/app/usage'
-  const handleOpenUsage = useCallback(() => {
-    if (onOpenUsage) {
-      onOpenUsage()
-      return
-    }
-    if (typeof window !== 'undefined') {
-      window.location.assign(usageUrl)
-    }
-  }, [onOpenUsage, usageUrl])
   const apiKeysUrl = '/app/api-keys'
-  const handleOpenApiKeys = useCallback(() => {
-    if (onOpenApiKeys) {
-      onOpenApiKeys()
-      return
-    }
-    if (typeof window !== 'undefined') {
-      window.location.assign(apiKeysUrl)
-    }
-  }, [apiKeysUrl, onOpenApiKeys])
   const profileUrl = '/app/profile'
-  const handleOpenProfile = useCallback(() => {
-    if (onOpenProfile) {
-      onOpenProfile()
-      return
-    }
-    if (typeof window !== 'undefined') {
-      window.location.assign(profileUrl)
-    }
-  }, [onOpenProfile, profileUrl])
   const organizationUrl = effectiveContext?.type === 'organization'
     ? '/app/organization'
     : null
-  const handleOpenOrganization = useCallback(() => {
-    if (onOpenOrganization) {
-      onOpenOrganization()
-      return
-    }
-    if (organizationUrl && typeof window !== 'undefined') {
-      window.location.assign(organizationUrl)
-    }
-  }, [onOpenOrganization, organizationUrl])
   const secretsUrl = '/app/secrets'
-  const handleOpenSecrets = useCallback(() => {
-    if (onOpenSecrets) {
-      onOpenSecrets()
-      return
-    }
-    if (typeof window !== 'undefined') {
-      window.location.assign(secretsUrl)
-    }
-  }, [onOpenSecrets, secretsUrl])
   const integrationsUrl = '/app/integrations'
-  const handleOpenIntegrations = useCallback(() => {
-    if (onOpenIntegrations) {
-      onOpenIntegrations()
-      return
-    }
-    if (typeof window !== 'undefined') {
-      window.location.assign(integrationsUrl)
-    }
-  }, [integrationsUrl, onOpenIntegrations])
+  const appShellDestinations = useMemo<AppShellDestinations>(() => ({
+    billing: billingUrl,
+    usage: usageUrl,
+    apiKeys: apiKeysUrl,
+    profile: profileUrl,
+    organization: organizationUrl,
+    secrets: secretsUrl,
+    integrations: integrationsUrl,
+  }), [billingUrl, organizationUrl])
+  const appShellOpenHandlers = useMemo<AppShellOpenHandlers>(() => ({
+    billing: () => openAppShellDestination(onOpenBilling, appShellDestinations.billing),
+    usage: () => openAppShellDestination(onOpenUsage, appShellDestinations.usage),
+    apiKeys: () => openAppShellDestination(onOpenApiKeys, appShellDestinations.apiKeys),
+    profile: () => openAppShellDestination(onOpenProfile, appShellDestinations.profile),
+    organization: () => openAppShellDestination(onOpenOrganization, appShellDestinations.organization),
+    secrets: () => openAppShellDestination(onOpenSecrets, appShellDestinations.secrets),
+    integrations: () => openAppShellDestination(onOpenIntegrations, appShellDestinations.integrations),
+  }), [
+    appShellDestinations,
+    onOpenApiKeys,
+    onOpenBilling,
+    onOpenIntegrations,
+    onOpenOrganization,
+    onOpenProfile,
+    onOpenSecrets,
+    onOpenUsage,
+  ])
   const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
   const bannerAccountPause = selectedAgentAccountPause?.paused
     ? selectedAgentAccountPause
@@ -4036,56 +4025,50 @@ export function AgentChatPage({
     billingManageUrl,
   ])
   const selectionMainClassName = 'agent-chat-main'
-  const selectionSidebarSettings = useMemo(() => ({
-    context: effectiveContext,
-    viewerEmail: viewerEmail ?? null,
-    isProprietaryMode,
-    billingUrl,
-    usageUrl,
-    apiKeysUrl,
-    profileUrl,
-    organizationUrl,
-    secretsUrl,
-    integrationsUrl,
-    onOpenBilling: onOpenBilling ? handleOpenBilling : null,
-    onOpenUsage: isImmersiveShellPath ? handleOpenUsage : null,
-    onOpenApiKeys: isImmersiveShellPath ? handleOpenApiKeys : null,
-    onOpenProfile: isImmersiveShellPath ? handleOpenProfile : null,
-    onOpenOrganization: isImmersiveShellPath ? handleOpenOrganization : null,
-    onOpenSecrets: isImmersiveShellPath ? handleOpenSecrets : null,
-    onOpenIntegrations: isImmersiveShellPath ? handleOpenIntegrations : null,
-    onOpenHelp: handleOpenSupport,
-    taskCredits: taskQuota
+  const sidebarTaskCredits = useMemo(() => (
+    taskQuota
       ? {
           usedToday: usageSummary?.metrics.todayCredits?.total ?? null,
           remaining: taskQuota.available,
           resetOn: usageSummary?.period?.resetOn ?? null,
           unlimited: Boolean(taskQuota.total < 0 || taskQuota.available < 0),
         }
-      : null,
-  }), [
-    billingUrl,
-    effectiveContext,
-    handleOpenBilling,
-    handleOpenUsage,
-    handleOpenProfile,
-    handleOpenOrganization,
-    handleOpenSecrets,
-    handleOpenIntegrations,
-    handleOpenSupport,
-    isProprietaryMode,
-    isImmersiveShellPath,
-    onOpenBilling,
-    handleOpenApiKeys,
-    usageUrl,
-    apiKeysUrl,
-    profileUrl,
-    organizationUrl,
-    secretsUrl,
-    integrationsUrl,
+      : null
+  ), [
     taskQuota,
     usageSummary?.metrics.todayCredits?.total,
     usageSummary?.period?.resetOn,
+  ])
+  const immersiveShellOpenHandlers = isImmersiveShellPath ? appShellOpenHandlers : null
+  const selectionSidebarSettings = useMemo(() => ({
+    context: effectiveContext,
+    viewerEmail: viewerEmail ?? null,
+    isProprietaryMode,
+    billingUrl: appShellDestinations.billing,
+    usageUrl: appShellDestinations.usage,
+    apiKeysUrl: appShellDestinations.apiKeys,
+    profileUrl: appShellDestinations.profile,
+    organizationUrl: appShellDestinations.organization,
+    secretsUrl: appShellDestinations.secrets,
+    integrationsUrl: appShellDestinations.integrations,
+    onOpenBilling: onOpenBilling ? appShellOpenHandlers.billing : null,
+    onOpenUsage: immersiveShellOpenHandlers?.usage ?? null,
+    onOpenApiKeys: immersiveShellOpenHandlers?.apiKeys ?? null,
+    onOpenProfile: immersiveShellOpenHandlers?.profile ?? null,
+    onOpenOrganization: immersiveShellOpenHandlers?.organization ?? null,
+    onOpenSecrets: immersiveShellOpenHandlers?.secrets ?? null,
+    onOpenIntegrations: immersiveShellOpenHandlers?.integrations ?? null,
+    onOpenHelp: handleOpenSupport,
+    taskCredits: sidebarTaskCredits,
+  }), [
+    appShellDestinations,
+    appShellOpenHandlers,
+    effectiveContext,
+    handleOpenSupport,
+    immersiveShellOpenHandlers,
+    onOpenBilling,
+    isProprietaryMode,
+    sidebarTaskCredits,
     viewerEmail,
   ])
   const handleSelectionSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
@@ -4095,7 +4078,7 @@ export function AgentChatPage({
     }
     setSelectionSidebarMode(mode)
   }, [onSelectionPageChange, selectionPage])
-  const selectionSidebarProps = {
+  const selectionSidebarProps: SelectionSidebarProps = {
     agents: sidebarAgents,
     favoriteAgentIds,
     activeAgentId: null,
@@ -4120,7 +4103,8 @@ export function AgentChatPage({
     '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_DARK_TEXTURE_URL}")`,
   }), [])
   const createOrganizationModal = createOrganizationOpen ? (
-    <Modal
+    <ModalForm
+      id="create-organization-form"
       title="Add Organization"
       onClose={() => {
         if (!createOrganizationBusy) {
@@ -4132,49 +4116,28 @@ export function AgentChatPage({
       iconBgClass="bg-blue-100"
       iconColorClass="text-blue-600"
       dismissible={!createOrganizationBusy}
+      onSubmit={handleCreateOrganizationSubmit}
+      submitLabel="Create Organization"
+      submittingLabel="Creating..."
+      submitting={createOrganizationBusy}
+      errorMessages={createOrganizationErrors}
     >
-      <form id="create-organization-form" onSubmit={handleCreateOrganizationSubmit} className="space-y-4">
-        {createOrganizationErrors.length > 0 ? (
-          <div className="rounded-md border border-red-200 bg-red-50 p-3">
-            {createOrganizationErrors.map((message) => (
-              <p key={message} className="text-sm text-red-700">{message}</p>
-            ))}
-          </div>
-        ) : null}
-        <div>
-          <label htmlFor="organization-name" className="block text-sm font-medium text-slate-700">
-            Organization Name
-          </label>
-          <input
-            id="organization-name"
-            type="text"
-            required
-            value={createOrganizationName}
-            onChange={(event) => setCreateOrganizationName(event.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            placeholder="Acme Operations"
-            autoFocus
-          />
-        </div>
-        <div className="flex flex-col gap-3 pt-2 sm:flex-row-reverse">
-          <button
-            type="submit"
-            className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
-            disabled={createOrganizationBusy}
-          >
-            {createOrganizationBusy ? 'Creating...' : 'Create Organization'}
-          </button>
-          <button
-            type="button"
-            className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
-            onClick={() => setCreateOrganizationOpen(false)}
-            disabled={createOrganizationBusy}
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
-    </Modal>
+      <div>
+        <label htmlFor="organization-name" className="block text-sm font-medium text-slate-700">
+          Organization Name
+        </label>
+        <input
+          id="organization-name"
+          type="text"
+          required
+          value={createOrganizationName}
+          onChange={(event) => setCreateOrganizationName(event.target.value)}
+          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          placeholder="Acme Operations"
+          autoFocus
+        />
+      </div>
+    </ModalForm>
   ) : null
   const renderSelectionLayout = (content: ReactNode) => (
     <div
@@ -4605,23 +4568,9 @@ export function AgentChatPage({
     spawnFlow && isNewAgent && (spawnIntentStatus === 'loading' || spawnIntentStatus === 'ready'),
   )
   const showEmbeddedSettings = shellSubview !== 'chat' && Boolean(activeAgentId)
-  const embeddedSettingsTitle = useMemo(() => {
-    switch (shellSubview) {
-      case 'secrets':
-        return 'Agent Secrets'
-      case 'secret-requests':
-        return 'Secret Requests'
-      case 'email':
-        return 'Email Settings'
-      case 'files':
-        return 'Agent Files'
-      case 'contact-requests':
-        return 'Contact Requests'
-      case 'settings':
-      default:
-        return 'Agent Settings'
-    }
-  }, [shellSubview])
+  const embeddedSettingsTitle = shellSubview === 'chat'
+    ? 'Agent Settings'
+    : EMBEDDED_SETTINGS_TITLES[shellSubview]
   const embeddedSettingsPanel = showEmbeddedSettings && activeAgentId ? (
     shellSubview === 'settings' ? (
       <EmbeddedAgentSettingsPanel
@@ -4671,6 +4620,53 @@ export function AgentChatPage({
       />
     )
   ) : null
+  const chatLayoutSidebarProps = {
+    agentRoster: sidebarAgents,
+    favoriteAgentIds,
+    activeAgentId,
+    insightsPanelExpandedPreference,
+    switchingAgentId,
+    rosterLoading,
+    rosterError: rosterErrorMessage,
+    onSelectAgent: handleSelectAgent,
+    onConfigureAgent: handleConfigureAgent,
+    onToggleAgentFavorite: handleToggleAgentFavorite,
+    onCreateAgent: handleCreateAgent,
+    createAgentDisabledReason,
+    onBlockedCreateAgent: previewCreateAgentBlocked ? handleBlockedCreateAgent : undefined,
+    agentRosterSortMode,
+    onAgentRosterSortModeChange: handleAgentRosterSortModeChange,
+    onInsightsPanelExpandedPreferenceChange: handleInsightsPanelExpandedPreferenceChange,
+    contextSwitcher: contextSwitcher ?? undefined,
+    currentContext: effectiveContext,
+    sidebarBillingUrl: billingManageUrl,
+    onOpenBilling: immersiveShellOpenHandlers?.billing,
+    sidebarUsageUrl: appShellDestinations.usage,
+    onOpenUsage: immersiveShellOpenHandlers?.usage,
+    sidebarApiKeysUrl: appShellDestinations.apiKeys,
+    onOpenApiKeys: immersiveShellOpenHandlers?.apiKeys,
+    sidebarProfileUrl: appShellDestinations.profile,
+    onOpenProfile: immersiveShellOpenHandlers?.profile,
+    sidebarOrganizationUrl: appShellDestinations.organization,
+    onOpenOrganization: immersiveShellOpenHandlers?.organization,
+    sidebarSecretsUrl: appShellDestinations.secrets,
+    onOpenSecrets: immersiveShellOpenHandlers?.secrets,
+    sidebarIntegrationsUrl: appShellDestinations.integrations,
+    onOpenIntegrations: immersiveShellOpenHandlers?.integrations,
+    onOpenHelp: handleOpenSupport,
+    sidebarTodayCreditsUsed: sidebarTaskCredits?.usedToday ?? null,
+    sidebarCreditsResetOn: sidebarTaskCredits?.resetOn ?? null,
+    sidebarNotificationsEnabled: agentChatNotificationsEnabled,
+    sidebarNotificationStatus: notificationStatus,
+    onSidebarNotificationsEnabledChange: handleAgentChatNotificationsEnabledChange,
+    galleryShellPage: selectionPage,
+    galleryShellPanel: selectionPage !== 'agents' ? selectionShellPanel : null,
+    onGalleryShellPageChange: immersiveShellOpenHandlers ? onSelectionPageChange : undefined,
+    showEmbeddedSettings,
+    embeddedSettingsPanel,
+    embeddedSettingsTitle,
+    onBackFromEmbeddedSettings: handleExitEmbeddedSettings,
+  }
 
   const activeAuditUrl = useMemo(() => {
     if (!activeAgentId) {
@@ -4819,51 +4815,7 @@ export function AgentChatPage({
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
         planSnapshot={latestPlanSnapshot}
-        agentRoster={sidebarAgents}
-        favoriteAgentIds={favoriteAgentIds}
-        activeAgentId={activeAgentId}
-        insightsPanelExpandedPreference={insightsPanelExpandedPreference}
-        switchingAgentId={switchingAgentId}
-        rosterLoading={rosterLoading}
-        rosterError={rosterErrorMessage}
-        onSelectAgent={handleSelectAgent}
-        onConfigureAgent={handleConfigureAgent}
-        onToggleAgentFavorite={handleToggleAgentFavorite}
-        onCreateAgent={handleCreateAgent}
-        createAgentDisabledReason={createAgentDisabledReason}
-        onBlockedCreateAgent={previewCreateAgentBlocked ? handleBlockedCreateAgent : undefined}
-        agentRosterSortMode={agentRosterSortMode}
-        onAgentRosterSortModeChange={handleAgentRosterSortModeChange}
-        onInsightsPanelExpandedPreferenceChange={handleInsightsPanelExpandedPreferenceChange}
-        contextSwitcher={contextSwitcher ?? undefined}
-        currentContext={effectiveContext}
-        sidebarBillingUrl={billingManageUrl}
-        onOpenBilling={isImmersiveShellPath ? handleOpenBilling : undefined}
-        sidebarUsageUrl={usageUrl}
-        onOpenUsage={isImmersiveShellPath ? handleOpenUsage : undefined}
-        sidebarApiKeysUrl={apiKeysUrl}
-        onOpenApiKeys={isImmersiveShellPath ? handleOpenApiKeys : undefined}
-        sidebarProfileUrl={profileUrl}
-        onOpenProfile={isImmersiveShellPath ? handleOpenProfile : undefined}
-        sidebarOrganizationUrl={organizationUrl}
-        onOpenOrganization={isImmersiveShellPath ? handleOpenOrganization : undefined}
-        sidebarSecretsUrl={secretsUrl}
-        onOpenSecrets={isImmersiveShellPath ? handleOpenSecrets : undefined}
-        sidebarIntegrationsUrl={integrationsUrl}
-        onOpenIntegrations={isImmersiveShellPath ? handleOpenIntegrations : undefined}
-        onOpenHelp={handleOpenSupport}
-        sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
-        sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
-        sidebarNotificationsEnabled={agentChatNotificationsEnabled}
-        sidebarNotificationStatus={notificationStatus}
-        onSidebarNotificationsEnabledChange={handleAgentChatNotificationsEnabledChange}
-        galleryShellPage={selectionPage}
-        galleryShellPanel={selectionPage !== 'agents' ? selectionShellPanel : null}
-        onGalleryShellPageChange={isImmersiveShellPath ? onSelectionPageChange : undefined}
-        showEmbeddedSettings={showEmbeddedSettings}
-        embeddedSettingsPanel={embeddedSettingsPanel}
-        embeddedSettingsTitle={embeddedSettingsTitle}
-        onBackFromEmbeddedSettings={handleExitEmbeddedSettings}
+        {...chatLayoutSidebarProps}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}
