@@ -27,7 +27,7 @@ from config.socialaccount_adapter import (
     OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY,
     build_oauth_charter_stash_cache_key,
 )
-from pages.library_views import LIBRARY_CACHE_KEY
+from pages.library_views import LIBRARY_CACHE_KEY, LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY, LIBRARY_OFFICIAL_CACHE_KEY
 from pages.public_template_urls import (
     public_template_category_slug,
     public_template_detail_path,
@@ -203,6 +203,38 @@ class PublicTemplateViewsTests(TestCase):
         self.assertNotIn("Plain card summary.", what_section.get_text(" ", strip=True))
         self.assertIsNone(what_section.find("script"))
         self.assertIsNone(what_section.find("img"))
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_marks_official_template_without_profile_handle(self):
+        user = get_user_model().objects.create_user(username="will", email="will@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="will")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-official",
+            public_profile=profile,
+            slug="official-template",
+            display_name="Official Template",
+            tagline="Official body",
+            description="Official template summary.",
+            charter="Do official work.",
+            category="Operations",
+            is_official=True,
+        )
+
+        response = self.client.get(public_template_detail_path(template))
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        badge_row = soup.find("h1", string="Official Template").find_previous("div")
+        self.assertIn("Official template", badge_row.get_text(" ", strip=True))
+        self.assertNotIn("@will", badge_row.get_text(" ", strip=True))
+
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        application_schema = next(
+            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        )
+        self.assertEqual(application_schema["creator"], {"@type": "Organization", "name": "Gobii"})
 
     @override_settings(
         PUBLIC_SITE_URL="https://www.gobii.ai",
@@ -798,7 +830,7 @@ class TemplateServiceDbTests(TestCase):
 
 class LibraryViewsTests(TestCase):
     def setUp(self):
-        cache.delete(LIBRARY_CACHE_KEY)
+        cache.delete_many([LIBRARY_CACHE_KEY, LIBRARY_OFFICIAL_CACHE_KEY, LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY])
 
     @tag("batch_public_templates")
     def test_library_page_renders_react_mount(self):
@@ -839,6 +871,55 @@ class LibraryViewsTests(TestCase):
         self.assertContains(response, "Operations")
         self.assertContains(response, '"@type": "ItemList"')
         self.assertContains(response, '"agents":')
+
+    @tag("batch_public_templates")
+    def test_library_page_can_render_official_initial_payload(self):
+        official_user = get_user_model().objects.create_user(username="will", email="will-official@example.com", password="pw")
+        official_profile = PublicProfile.objects.create(user=official_user, handle="will")
+        community_user = get_user_model().objects.create_user(username="contributor", email="contributor@example.com", password="pw")
+        community_profile = PublicProfile.objects.create(user=community_user, handle="contributor")
+        official_template = PersistentAgentTemplate.objects.create(
+            code="lib-official-ssr",
+            public_profile=official_profile,
+            slug="official-ops",
+            display_name="Official Ops",
+            tagline="Official operations checks",
+            description="Tracks recurring operations work.",
+            charter="Automate operations checks.",
+            category="Operations",
+            is_official=True,
+            is_active=True,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="lib-community-ssr",
+            public_profile=community_profile,
+            slug="community-ops",
+            display_name="Community Ops",
+            tagline="Community operations checks",
+            description="Tracks community operations work.",
+            charter="Automate operations checks.",
+            category="Operations",
+            is_active=True,
+        )
+
+        response = self.client.get(reverse("pages:library"), data={"official": "true"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Official AI Agent Templates | Gobii")
+        self.assertContains(response, 'data-library-initial-official-only="true"')
+        self.assertContains(response, "Official Gobii agent templates")
+        self.assertContains(response, "Official template")
+        self.assertContains(response, "Official Ops")
+        self.assertNotContains(response, "Community Ops")
+        self.assertNotContains(response, "@will")
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        payload = json.loads(soup.find("script", {"id": "library-initial-payload"}).string)
+        self.assertTrue(payload["officialOnly"])
+        self.assertEqual(payload["totalAgents"], 1)
+        self.assertEqual(payload["officialTotalAgents"], 1)
+        self.assertEqual(payload["libraryTotalAgents"], 2)
+        self.assertEqual([agent["id"] for agent in payload["agents"]], [str(official_template.id)])
 
     @tag("batch_public_templates")
     def test_library_category_page_renders_filtered_initial_payload(self):
@@ -1073,6 +1154,8 @@ class LibraryViewsTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["totalAgents"], 3)
         self.assertEqual(payload["libraryTotalAgents"], 3)
+        self.assertEqual(payload["officialTotalAgents"], 1)
+        self.assertEqual(payload["officialTotalLikes"], 0)
         self.assertEqual(len(payload["agents"]), 3)
         self.assertEqual(payload["offset"], 0)
         self.assertEqual(payload["limit"], 24)
@@ -1090,6 +1173,17 @@ class LibraryViewsTests(TestCase):
         self.assertTrue(first_agent["isOfficial"])
         self.assertEqual(first_agent["likeCount"], 0)
         self.assertFalse(first_agent["isLiked"])
+
+        official_response = self.client.get(reverse("pages:library_agents_api"), data={"official": "true"})
+        self.assertEqual(official_response.status_code, 200)
+        official_payload = official_response.json()
+        self.assertTrue(official_payload["officialOnly"])
+        self.assertEqual(official_payload["totalAgents"], 1)
+        self.assertEqual(official_payload["libraryTotalAgents"], 3)
+        self.assertEqual(official_payload["officialTotalAgents"], 1)
+        self.assertEqual(official_payload["officialTotalLikes"], 0)
+        self.assertEqual(official_payload["topCategories"], [{"name": "Operations", "count": 1}])
+        self.assertEqual([agent["id"] for agent in official_payload["agents"]], [str(operations_agent.id)])
 
     @tag("batch_public_templates")
     def test_library_api_supports_pagination_and_category_filter(self):

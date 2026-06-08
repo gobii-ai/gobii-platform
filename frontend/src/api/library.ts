@@ -10,6 +10,7 @@ export type LibraryAgent = {
   publicProfileHandle: string
   templateSlug: string
   templateUrl: string
+  isOfficial: boolean
   likeCount: number
   isLiked: boolean
 }
@@ -24,7 +25,10 @@ export type LibraryAgentsPayload = {
   topCategories: LibraryCategory[]
   totalAgents: number
   libraryTotalAgents: number
+  officialTotalAgents: number
   libraryTotalLikes: number
+  officialTotalLikes: number
+  officialOnly: boolean
   offset: number
   limit: number
   hasMore: boolean
@@ -41,6 +45,7 @@ type FetchLibraryAgentsOptions = {
   limit?: number
   category?: string | null
   query?: string | null
+  officialOnly?: boolean
   signal?: AbortSignal
 }
 
@@ -53,6 +58,9 @@ export function fetchLibraryAgents(listUrl: string, options: FetchLibraryAgentsO
   }
   if (options.query?.trim()) {
     params.set('q', options.query.trim())
+  }
+  if (options.officialOnly) {
+    params.set('official', 'true')
   }
 
   const separator = listUrl.includes('?') ? '&' : '?'

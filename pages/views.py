@@ -1972,6 +1972,17 @@ class PublicTemplateDetailView(TemplateView):
         detail_description_markdown = self.template.description_markdown or self.template.description
         category_label = public_template_category_label(self.template)
         social_title = f"{self.template.display_name} AI Agent Template"
+        creator_data = (
+            {
+                "@type": "Organization",
+                "name": "Gobii",
+            }
+            if self.template.is_official
+            else {
+                "@type": "Person",
+                "name": self.template.public_profile.handle,
+            }
+        )
         structured_data = {
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
@@ -1982,10 +1993,7 @@ class PublicTemplateDetailView(TemplateView):
             "operatingSystem": "Web",
             "url": canonical_detail_url,
             "image": social_image_url,
-            "creator": {
-                "@type": "Person",
-                "name": self.template.public_profile.handle,
-            },
+            "creator": creator_data,
             "isPartOf": {
                 "@type": "CollectionPage",
                 "name": "Gobii Library",

@@ -45,8 +45,8 @@
                 "description": "{{ agent.description|default:agent.tagline|truncatechars:160|escapejs }}",
                 "applicationCategory": "{{ agent.category|escapejs }}",
                 "creator": {
-                  "@type": "Person",
-                  "name": "{{ agent.publicProfileHandle|escapejs }}"
+                  "@type": "{% if agent.isOfficial %}Organization{% else %}Person{% endif %}",
+                  "name": "{% if agent.isOfficial %}Gobii{% else %}{{ agent.publicProfileHandle|escapejs }}{% endif %}"
                 },
                 "url": "{{ request.scheme }}://{{ request.get_host }}{{ agent.templateUrl|escapejs }}"
               }
@@ -90,8 +90,9 @@
       data-library-like-url="{% url 'pages:library_agent_like_api' %}"
       data-library-can-like="{{ user.is_authenticated|yesno:'true,false' }}"
       data-library-initial-category="{{ library_initial_category|default:'' }}"
+      data-library-initial-official-only="{{ library_initial_official_only|yesno:'true,false' }}"
     >
-      {% include "library/_fallback.html" with payload=library_initial_payload selected_category=library_initial_category %}
+      {% include "library/_fallback.html" with payload=library_initial_payload selected_category=library_initial_category official_only=library_initial_official_only %}
     </div>
   </section>
 </div>

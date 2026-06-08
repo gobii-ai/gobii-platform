@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Heart, Library as LibraryIcon, Loader2, Search } from 'lucide-react'
+import { AlertTriangle, ArrowRight, BadgeCheck, Heart, Library as LibraryIcon, Loader2, Search } from 'lucide-react'
 
 import { fetchLibraryAgents, type LibraryAgentsPayload, toggleLibraryAgentLike } from '../api/library'
 
@@ -10,6 +10,7 @@ type LibraryScreenProps = {
   likeUrl: string
   canLike: boolean
   initialCategory?: string | null
+  initialOfficialOnly?: boolean
   initialData?: LibraryAgentsPayload
 }
 
@@ -17,6 +18,11 @@ type SearchInputProps = {
   value: string
   onChange: (value: string) => void
   inputClassName: string
+}
+
+type OfficialFilterProps = {
+  checked: boolean
+  onChange: (checked: boolean) => void
 }
 
 const MOST_POPULAR_LABEL = 'Most Popular'
@@ -50,6 +56,21 @@ function SearchInput({ value, onChange, inputClassName }: SearchInputProps) {
         autoComplete="off"
       />
     </div>
+  )
+}
+
+function OfficialFilter({ checked, onChange }: OfficialFilterProps) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+        className="size-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+      />
+      <BadgeCheck className="size-4 text-emerald-600" aria-hidden="true" />
+      <span>Official templates</span>
+    </label>
   )
 }
 
@@ -90,14 +111,16 @@ function updateLikeInCachedPayload(
   }
 }
 
-export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = null, initialData }: LibraryScreenProps) {
+export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = null, initialOfficialOnly = false, initialData }: LibraryScreenProps) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(initialCategory || null)
+  const [officialOnly, setOfficialOnly] = useState(initialOfficialOnly || Boolean(initialData?.officialOnly))
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const normalizedSearchQuery = debouncedSearchQuery.trim()
   const queryClient = useQueryClient()
   const initialSelectedCategory = initialCategory || null
-  const shouldUseInitialData = selectedCategory === initialSelectedCategory && normalizedSearchQuery.length === 0
+  const initialSelectedOfficialOnly = initialOfficialOnly || Boolean(initialData?.officialOnly)
+  const shouldUseInitialData = selectedCategory === initialSelectedCategory && officialOnly === initialSelectedOfficialOnly && normalizedSearchQuery.length === 0
   const initialLibraryData = useMemo<InfiniteData<LibraryAgentsPayload, number> | undefined>(() => {
     if (!initialData || !shouldUseInitialData) {
       return undefined
@@ -118,7 +141,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
     }
   }, [searchQuery])
 
-  const libraryQueryKey = ['library-agents', listUrl, selectedCategory ?? MOST_POPULAR_KEY, normalizedSearchQuery] as const
+  const libraryQueryKey = ['library-agents', listUrl, selectedCategory ?? MOST_POPULAR_KEY, normalizedSearchQuery, officialOnly ? 'official' : 'all'] as const
   const libraryQuery = useInfiniteQuery<
     LibraryAgentsPayload,
     Error,
@@ -134,6 +157,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
         limit: PAGE_SIZE,
         category: selectedCategory,
         query: normalizedSearchQuery || null,
+        officialOnly,
       }),
     initialPageParam: 0,
     getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.offset + lastPage.limit : undefined),
@@ -165,8 +189,13 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
   const topCategories = firstPage?.topCategories ?? []
   const totalAgents = firstPage?.totalAgents ?? 0
   const libraryTotalAgents = firstPage?.libraryTotalAgents ?? totalAgents
+  const officialTotalAgents = firstPage?.officialTotalAgents ?? (officialOnly ? totalAgents : 0)
   const libraryTotalLikes = firstPage?.libraryTotalLikes ?? 0
+  const officialTotalLikes = firstPage?.officialTotalLikes ?? 0
   const hasMore = Boolean(libraryQuery.hasNextPage)
+  const displayedAgentCount = selectedCategory || normalizedSearchQuery || officialOnly ? totalAgents : libraryTotalAgents
+  const displayedLikeCount = officialOnly ? officialTotalLikes : libraryTotalLikes
+  const mostPopularCount = officialOnly ? officialTotalAgents : libraryTotalAgents
 
   const categoryFilters = useMemo(() => {
     if (!selectedCategory || topCategories.some((category) => category.name === selectedCategory)) {
@@ -214,19 +243,33 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
   const isMostPopularSelected = selectedCategory === null
   const isSearchActive = normalizedSearchQuery.length > 0
   const emptyHeading = isSearchActive
-    ? `No shared agents match "${normalizedSearchQuery}".`
-    : selectedCategory
-      ? 'No shared agents found in this category.'
-      : 'No shared agents found right now.'
+    ? `No ${officialOnly ? 'official templates' : 'shared agents'} match "${normalizedSearchQuery}".`
+    : officialOnly && selectedCategory
+      ? 'No official templates found in this category.'
+      : officialOnly
+        ? 'No official templates found right now.'
+        : selectedCategory
+          ? 'No shared agents found in this category.'
+          : 'No shared agents found right now.'
   const emptyDescription = isSearchActive
     ? 'Try another keyword or clear search.'
-    : selectedCategory
-      ? 'Try another category.'
-      : 'Check back soon for newly shared agents.'
-  const pageHeading = selectedCategory ? `${selectedCategory} AI agent templates` : 'Most popular shared Gobii agents'
+    : officialOnly
+      ? 'Clear the official filter to browse community templates too.'
+      : selectedCategory
+        ? 'Try another category.'
+        : 'Check back soon for newly shared agents.'
+  const pageHeading = selectedCategory
+    ? `${officialOnly ? 'Official ' : ''}${selectedCategory} AI agent templates`
+    : officialOnly
+      ? 'Official Gobii agent templates'
+      : 'Most popular shared Gobii agents'
   const pageDescription = selectedCategory
-    ? `Browse publicly shared ${selectedCategory} agents from across Gobii.`
-    : 'Browse publicly shared agents from across Gobii.'
+    ? officialOnly
+      ? `Browse official ${selectedCategory} templates maintained by Gobii.`
+      : `Browse publicly shared ${selectedCategory} agents from across Gobii.`
+    : officialOnly
+      ? 'Browse templates maintained by Gobii for common workflows.'
+      : 'Browse publicly shared agents from across Gobii.'
 
   return (
     <div className="space-y-6 pb-10">
@@ -243,11 +286,11 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800">
               <LibraryIcon className="size-4" aria-hidden="true" />
-              {libraryTotalAgents} shared agents
+              {displayedAgentCount} {officialOnly ? 'official agents' : 'shared agents'}
             </div>
             <div className="inline-flex items-center gap-2 rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700">
               <Heart className="size-4 fill-rose-500 text-rose-500" aria-hidden="true" />
-              {libraryTotalLikes} likes
+              {displayedLikeCount} likes
             </div>
           </div>
         </div>
@@ -261,6 +304,10 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
             onChange={setSearchQuery}
             inputClassName="w-full rounded-lg border border-indigo-200 bg-white py-2.5 pl-9 pr-3 text-base text-slate-800 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
+        </div>
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Trust</p>
+          <OfficialFilter checked={officialOnly} onChange={setOfficialOnly} />
         </div>
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Most Popular</p>
@@ -305,6 +352,11 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
             </div>
 
             <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Trust</p>
+              <OfficialFilter checked={officialOnly} onChange={setOfficialOnly} />
+            </div>
+
+            <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Most Popular</p>
               <button
                 type="button"
@@ -313,7 +365,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
               >
                 <span>{MOST_POPULAR_LABEL}</span>
                 <span className={`rounded-full px-2 py-0.5 text-xs ${isMostPopularSelected ? 'bg-indigo-500 text-white' : 'bg-indigo-50 text-indigo-700'}`}>
-                  {libraryTotalAgents}
+                  {mostPopularCount}
                 </span>
               </button>
             </div>
@@ -371,7 +423,14 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
                               <span className="size-2 rounded-full bg-indigo-400" />
                               {agent.category}
                             </span>
-                            <span className="text-slate-500">@{agent.publicProfileHandle}</span>
+                            {agent.isOfficial ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700" title="Maintained by Gobii">
+                                <BadgeCheck className="size-3.5" aria-hidden="true" />
+                                Official template
+                              </span>
+                            ) : (
+                              <span className="text-slate-500">@{agent.publicProfileHandle}</span>
+                            )}
                           </div>
 
                           <div className="space-y-1">

@@ -4,10 +4,10 @@
       <div class="space-y-2">
         <p class="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">Discover</p>
         <h1 class="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-          {% if selected_category %}{{ selected_category }} AI agent templates{% else %}Most popular shared Gobii agents{% endif %}
+          {% if selected_category and official_only %}Official {{ selected_category }} AI agent templates{% elif selected_category %}{{ selected_category }} AI agent templates{% elif official_only %}Official Gobii agent templates{% else %}Most popular shared Gobii agents{% endif %}
         </h1>
         <p class="max-w-3xl text-sm text-slate-600 sm:text-base">
-          {% if selected_category %}Browse publicly shared {{ selected_category }} agents from across Gobii.{% else %}Browse publicly shared agents from across Gobii.{% endif %}
+          {% if selected_category and official_only %}Browse official {{ selected_category }} templates maintained by Gobii.{% elif selected_category %}Browse publicly shared {{ selected_category }} agents from across Gobii.{% elif official_only %}Browse templates maintained by Gobii for common workflows.{% else %}Browse publicly shared agents from across Gobii.{% endif %}
         </p>
         {% if not user.is_authenticated %}
           <p class="text-sm font-medium text-indigo-700">Sign in to like templates.</p>
@@ -15,10 +15,10 @@
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <div class="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800">
-          {{ payload.libraryTotalAgents }} shared agents
+          {% if official_only %}{{ payload.totalAgents }} official agents{% else %}{{ payload.libraryTotalAgents }} shared agents{% endif %}
         </div>
         <div class="inline-flex items-center gap-2 rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700">
-          {{ payload.libraryTotalLikes }} likes
+          {% if official_only %}{{ payload.officialTotalLikes }}{% else %}{{ payload.libraryTotalLikes }}{% endif %} likes
         </div>
       </div>
     </div>
@@ -31,8 +31,17 @@
           <p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Most Popular</p>
           <div class="flex w-full items-center justify-between rounded-lg border border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">
             <span>Most Popular</span>
-            <span class="rounded-full bg-indigo-500 px-2 py-0.5 text-xs text-white">{{ payload.libraryTotalAgents }}</span>
+            <span class="rounded-full bg-indigo-500 px-2 py-0.5 text-xs text-white">{% if official_only %}{{ payload.officialTotalAgents }}{% else %}{{ payload.libraryTotalAgents }}{% endif %}</span>
           </div>
+        </div>
+
+        <div>
+          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Trust</p>
+          <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <input type="checkbox" class="rounded border-slate-300 text-emerald-600" {% if official_only %}checked{% endif %} disabled>
+            <i aria-hidden="true" data-lucide="badge-check" class="size-4 text-emerald-600"></i>
+            <span>Official templates</span>
+          </label>
         </div>
 
         {% if payload.topCategories %}
@@ -63,7 +72,14 @@
                       <span class="size-2 rounded-full bg-indigo-400" aria-hidden="true"></span>
                       {{ agent.category }}
                     </span>
-                    <span class="text-slate-500">@{{ agent.publicProfileHandle }}</span>
+                    {% if agent.isOfficial %}
+                      <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700" title="Maintained by Gobii">
+                        <i aria-hidden="true" data-lucide="badge-check" class="size-3.5"></i>
+                        Official template
+                      </span>
+                    {% else %}
+                      <span class="text-slate-500">@{{ agent.publicProfileHandle }}</span>
+                    {% endif %}
                   </div>
 
                   <div class="space-y-1">
@@ -93,8 +109,8 @@
         </div>
       {% else %}
         <div class="gobii-card-base p-8 text-center">
-          <p class="text-sm font-semibold text-slate-800">No shared agents found right now.</p>
-          <p class="mt-1 text-sm text-slate-600">Check back soon for newly shared agents.</p>
+          <p class="text-sm font-semibold text-slate-800">{% if official_only and selected_category %}No official templates found in this category.{% elif official_only %}No official templates found right now.{% elif selected_category %}No shared agents found in this category.{% else %}No shared agents found right now.{% endif %}</p>
+          <p class="mt-1 text-sm text-slate-600">{% if official_only %}Clear the official filter to browse community templates too.{% elif selected_category %}Try another category.{% else %}Check back soon for newly shared agents.{% endif %}</p>
         </div>
       {% endif %}
     </div>
