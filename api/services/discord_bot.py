@@ -83,6 +83,7 @@ class DiscordGatewayMessage:
     content: str
     attachments: list[dict[str, Any]]
     embeds: list[dict[str, Any]]
+    raw_content: str = ""
     author_is_bot: bool = False
     webhook_id: str = ""
 
@@ -628,6 +629,8 @@ def _ingest_gateway_message_for_subscription(
         "source_kind": "discord",
         "subscription_id": str(subscription.id),
         "discord_message_id": message.message_id,
+        "discord_content": message.content,
+        "discord_raw_content": message.raw_content,
         "discord_channel_id": message.channel_id,
         "discord_channel_name": message.channel_name,
         "discord_guild_id": message.guild_id,

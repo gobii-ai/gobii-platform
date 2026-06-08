@@ -30,6 +30,33 @@ def _embed_payload(embed) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
+def build_gateway_message(message) -> DiscordGatewayMessage:
+    channel = message.channel
+    guild = message.guild
+    raw_content = str(getattr(message, "content", "") or "")
+    clean_content = str(getattr(message, "clean_content", "") or "")
+    author_name = str(
+        getattr(message.author, "display_name", "")
+        or getattr(message.author, "name", "")
+        or getattr(message.author, "id", "")
+    )
+    return DiscordGatewayMessage(
+        message_id=str(message.id),
+        channel_id=str(channel.id),
+        channel_name=str(getattr(channel, "name", "") or ""),
+        guild_id=str(guild.id),
+        guild_name=str(getattr(guild, "name", "") or ""),
+        author_id=str(message.author.id),
+        author_name=author_name,
+        content=clean_content or raw_content,
+        raw_content=raw_content,
+        attachments=[_attachment_payload(attachment) for attachment in getattr(message, "attachments", [])],
+        embeds=[payload for payload in (_embed_payload(embed) for embed in getattr(message, "embeds", [])) if payload],
+        author_is_bot=bool(getattr(message.author, "bot", False)),
+        webhook_id=str(getattr(message, "webhook_id", "") or ""),
+    )
+
+
 class Command(BaseCommand):
     help = "Run the native Gobii Discord bot gateway listener."
 
@@ -63,22 +90,7 @@ class Command(BaseCommand):
             if client.user is not None and message.author.id == client.user.id:
                 return
 
-            channel = message.channel
-            guild = message.guild
-            gateway_message = DiscordGatewayMessage(
-                message_id=str(message.id),
-                channel_id=str(channel.id),
-                channel_name=str(getattr(channel, "name", "") or ""),
-                guild_id=str(guild.id),
-                guild_name=str(getattr(guild, "name", "") or ""),
-                author_id=str(message.author.id),
-                author_name=str(getattr(message.author, "display_name", "") or message.author.name),
-                content=message.content or "",
-                attachments=[_attachment_payload(attachment) for attachment in message.attachments],
-                embeds=[payload for payload in (_embed_payload(embed) for embed in message.embeds) if payload],
-                author_is_bot=bool(getattr(message.author, "bot", False)),
-                webhook_id=str(getattr(message, "webhook_id", "") or ""),
-            )
+            gateway_message = build_gateway_message(message)
             result = await sync_to_async(ingest_gateway_message, thread_sensitive=True)(gateway_message)
             if not result.get("ignored"):
                 logger.info(
