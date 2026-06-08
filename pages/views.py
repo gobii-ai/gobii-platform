@@ -3868,7 +3868,9 @@ class SolutionView(TemplateView):
 
     @classmethod
     def reverse_solution(cls, slug):
-        data = cls.SOLUTION_DATA[slug]
+        data = cls.SOLUTION_DATA.get(slug)
+        if not data:
+            return reverse('pages:solution', kwargs={'slug': slug})
         route_name = data.get('url_name') or 'pages:solution'
         route_kwargs = data.get('url_kwargs')
         if route_kwargs is None:

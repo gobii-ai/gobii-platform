@@ -1643,6 +1643,19 @@ class SitemapTests(TestCase):
             self.assertIn(f"<loc>http://example.com/solutions/{slug}/</loc>", content)
         self.assertIn("<loc>http://example.com/solutions/recruiting/candidate-sourcing/</loc>", content)
 
+    def test_solution_sitemap_uses_default_route_when_metadata_is_missing(self):
+        with patch.dict(
+            page_views.SolutionView.DEDICATED_TEMPLATES,
+            {"missing-metadata": "solutions/recruiting.html"},
+        ):
+            response = self.client.get("/sitemap.xml")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "<loc>http://example.com/solutions/missing-metadata/</loc>",
+            response.content.decode(),
+        )
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_proprietary_sitemap_excludes_redirects_and_checkout_start_urls(self):
         response = self.client.get("/sitemap.xml")

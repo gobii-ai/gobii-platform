@@ -874,6 +874,11 @@ class LibraryViewsTests(TestCase):
         self.assertEqual(alias_response.status_code, 301)
         self.assertEqual(alias_response.url, "/library/recruiting/")
 
+        mixed_case_response = self.client.get("/library/Recruiting/")
+
+        self.assertEqual(mixed_case_response.status_code, 301)
+        self.assertEqual(mixed_case_response.url, "/library/recruiting/")
+
         sitemap_response = self.client.get("/sitemap.xml")
 
         self.assertContains(sitemap_response, "http://example.com/library/recruiting/")

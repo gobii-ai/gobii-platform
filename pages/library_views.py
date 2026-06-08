@@ -279,7 +279,7 @@ class LibraryView(TemplateView):
                 return redirect(public_template_detail_path(legacy_template), permanent=True)
             self.selected_category = _resolve_category_from_slug(category_slug)
             canonical_slug = public_template_category_slug_from_label(self.selected_category)
-            if str(category_slug or "").strip().lower() != canonical_slug:
+            if category_slug != canonical_slug:
                 return redirect(
                     "pages:library_category",
                     category_slug=canonical_slug,
