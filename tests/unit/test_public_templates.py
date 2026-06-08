@@ -162,6 +162,11 @@ class PublicTemplateViewsTests(TestCase):
             if section.find("h2", string="What this template does")
         )
         self.assertIn("Summarizes key operational signals.", what_section.get_text(" ", strip=True))
+        copy_button = soup.find("button", attrs={"data-template-copy-button": True})
+        self.assertIsNotNone(copy_button)
+        self.assertEqual(copy_button["data-template-url"], f"http://testserver{public_template_detail_path(template)}")
+        self.assertEqual(copy_button["aria-describedby"], "template-copy-status")
+        self.assertIsNotNone(soup.find(id="template-copy-status", attrs={"aria-live": "polite"}))
 
     @tag("batch_public_templates")
     def test_public_template_detail_renders_description_markdown_when_present(self):
