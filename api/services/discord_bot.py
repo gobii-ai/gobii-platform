@@ -418,16 +418,16 @@ def disconnect_discord_native_integration(*, owner_user=None, organization=None)
         raise ValueError("Exactly one Discord owner must be provided.")
 
     now = timezone.now()
-    guild_queryset = PersistentAgentDiscordGuild.objects.select_for_update()
-    agent_queryset = PersistentAgent.objects.non_eval().alive()
-    if organization is not None:
-        guild_queryset = guild_queryset.filter(organization=organization)
-        agent_queryset = agent_queryset.filter(organization=organization)
-    else:
-        guild_queryset = guild_queryset.filter(owner_user=owner_user)
-        agent_queryset = agent_queryset.filter(user=owner_user, organization_id__isnull=True)
-
     with transaction.atomic():
+        guild_queryset = PersistentAgentDiscordGuild.objects.select_for_update()
+        agent_queryset = PersistentAgent.objects.non_eval().alive()
+        if organization is not None:
+            guild_queryset = guild_queryset.filter(organization=organization)
+            agent_queryset = agent_queryset.filter(organization=organization)
+        else:
+            guild_queryset = guild_queryset.filter(owner_user=owner_user)
+            agent_queryset = agent_queryset.filter(user=owner_user, organization_id__isnull=True)
+
         guild_ids = list(guild_queryset.filter(is_active=True).values_list("id", flat=True))
         agent_ids = list(agent_queryset.values_list("id", flat=True))
         subscription_count = 0
@@ -437,7 +437,9 @@ def disconnect_discord_native_integration(*, owner_user=None, organization=None)
             subscription_count = PersistentAgentDiscordChannelSubscription.objects.filter(guild_id__in=guild_ids).exclude(
                 status=PersistentAgentDiscordChannelSubscription.Status.DISABLED
             ).update(status=PersistentAgentDiscordChannelSubscription.Status.DISABLED, updated_at=now)
-            webhook_count = PersistentAgentDiscordWebhook.objects.filter(guild_id__in=guild_ids).delete()[0]
+            webhook_queryset = PersistentAgentDiscordWebhook.objects.filter(guild_id__in=guild_ids)
+            webhook_count = webhook_queryset.count()
+            webhook_queryset.delete()
             guild_count = PersistentAgentDiscordGuild.objects.filter(id__in=guild_ids).update(
                 is_active=False,
                 last_synced_at=now,

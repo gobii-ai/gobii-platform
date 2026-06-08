@@ -32,8 +32,8 @@ from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
 from console.context_helpers import build_console_context
 
 
-def _discord_permission_denied_response() -> JsonResponse:
-    return JsonResponse({"error": "Not permitted to manage this agent."}, status=403)
+def _discord_permission_denied_response(message: str = "Not permitted to manage this agent.") -> JsonResponse:
+    return JsonResponse({"error": message}, status=403)
 
 
 def _discord_skill_enabled(agent) -> bool:
@@ -219,7 +219,7 @@ class DiscordDisconnectView(ApiLoginRequiredMixin, View):
         try:
             owner_user, owner_org = _resolve_discord_owner(request)
         except PermissionDenied:
-            return _discord_permission_denied_response()
+            return _discord_permission_denied_response("Not permitted to manage Discord integrations.")
         result = disconnect_discord_native_integration(owner_user=owner_user, organization=owner_org)
         return JsonResponse({"revoked": True, **result})
 

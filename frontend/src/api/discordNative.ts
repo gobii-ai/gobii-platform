@@ -1,12 +1,12 @@
 import { jsonFetch, jsonRequest } from './http'
 
-export type DiscordGuildDTO = {
+type DiscordGuildPayload = {
   guild_id: string
   name: string
   icon_hash: string
 }
 
-export type DiscordSubscriptionDTO = {
+type DiscordSubscriptionPayload = {
   id: string
   agent_id: string
   guild_id: string
@@ -17,7 +17,7 @@ export type DiscordSubscriptionDTO = {
   last_message_at: string
 }
 
-export type DiscordChannelDTO = {
+type DiscordChannelPayload = {
   guild_id: string
   guild_name: string
   channel_id: string
@@ -25,7 +25,7 @@ export type DiscordChannelDTO = {
   label: string
 }
 
-type AgentDiscordAppDTO = {
+type AgentDiscordAppPayload = {
   provider_key: string
   display_name: string
   description: string
@@ -33,26 +33,26 @@ type AgentDiscordAppDTO = {
   connected: boolean
   subscribed: boolean
   skill_enabled: boolean
-  guilds: DiscordGuildDTO[]
-  subscriptions: DiscordSubscriptionDTO[]
+  guilds: DiscordGuildPayload[]
+  subscriptions: DiscordSubscriptionPayload[]
   active_subscription_count: number
   guild_count: number
   connect_url: string
   bot_invite_url: string
 }
 
-type AgentDiscordConnectDTO = {
+type AgentDiscordConnectPayload = {
   connect_url: string
   skill_enabled: boolean
-  app: AgentDiscordAppDTO
+  app: AgentDiscordAppPayload
 }
 
-type AgentDiscordChannelsDTO = {
+type AgentDiscordChannelsPayload = {
   status: string
   message?: string
   error?: string
   bot_invite_url?: string
-  channels: DiscordChannelDTO[]
+  channels: DiscordChannelPayload[]
 }
 
 export type DiscordGuild = {
@@ -120,38 +120,7 @@ export function agentDiscordAppQueryKey(agentId: string) {
   return ['agent-discord-app', agentId] as const
 }
 
-function mapGuild(guild: DiscordGuildDTO): DiscordGuild {
-  return {
-    guildId: guild.guild_id,
-    name: guild.name,
-    iconHash: guild.icon_hash,
-  }
-}
-
-function mapSubscription(subscription: DiscordSubscriptionDTO): DiscordSubscription {
-  return {
-    id: subscription.id,
-    agentId: subscription.agent_id,
-    guildId: subscription.guild_id,
-    guildName: subscription.guild_name,
-    channelId: subscription.channel_id,
-    channelName: subscription.channel_name,
-    status: subscription.status,
-    lastMessageAt: subscription.last_message_at,
-  }
-}
-
-function mapChannel(channel: DiscordChannelDTO): DiscordChannel {
-  return {
-    guildId: channel.guild_id,
-    guildName: channel.guild_name,
-    channelId: channel.channel_id,
-    channelName: channel.channel_name,
-    label: channel.label,
-  }
-}
-
-function mapApp(app: AgentDiscordAppDTO): AgentDiscordApp {
+function mapApp(app: AgentDiscordAppPayload): AgentDiscordApp {
   return {
     providerKey: app.provider_key,
     displayName: app.display_name,
@@ -160,8 +129,21 @@ function mapApp(app: AgentDiscordAppDTO): AgentDiscordApp {
     connected: Boolean(app.connected),
     subscribed: Boolean(app.subscribed),
     skillEnabled: Boolean(app.skill_enabled),
-    guilds: (app.guilds ?? []).map(mapGuild),
-    subscriptions: (app.subscriptions ?? []).map(mapSubscription),
+    guilds: (app.guilds ?? []).map((guild) => ({
+      guildId: guild.guild_id,
+      name: guild.name,
+      iconHash: guild.icon_hash,
+    })),
+    subscriptions: (app.subscriptions ?? []).map((subscription) => ({
+      id: subscription.id,
+      agentId: subscription.agent_id,
+      guildId: subscription.guild_id,
+      guildName: subscription.guild_name,
+      channelId: subscription.channel_id,
+      channelName: subscription.channel_name,
+      status: subscription.status,
+      lastMessageAt: subscription.last_message_at,
+    })),
     activeSubscriptionCount: app.active_subscription_count ?? 0,
     guildCount: app.guild_count ?? 0,
     connectUrl: app.connect_url,
@@ -174,11 +156,11 @@ function agentDiscordAppUrl(agentId: string): string {
 }
 
 export async function fetchAgentDiscordApp(agentId: string): Promise<AgentDiscordApp> {
-  return mapApp(await jsonFetch<AgentDiscordAppDTO>(agentDiscordAppUrl(agentId)))
+  return mapApp(await jsonFetch<AgentDiscordAppPayload>(agentDiscordAppUrl(agentId)))
 }
 
 export async function startAgentDiscordConnect(agentId: string): Promise<AgentDiscordConnectResponse> {
-  const payload = await jsonRequest<AgentDiscordConnectDTO>(
+  const payload = await jsonRequest<AgentDiscordConnectPayload>(
     `/console/api/agents/${agentId}/discord/connect/`,
     {
       method: 'POST',
@@ -205,7 +187,7 @@ export async function fetchAgentDiscordGuildChannels(
   agentId: string,
   guildId: string,
 ): Promise<AgentDiscordChannelsResponse> {
-  const payload = await jsonFetch<AgentDiscordChannelsDTO>(
+  const payload = await jsonFetch<AgentDiscordChannelsPayload>(
     `/console/api/agents/${agentId}/discord/guilds/${encodeURIComponent(guildId)}/channels/`,
   )
   return {
@@ -213,7 +195,13 @@ export async function fetchAgentDiscordGuildChannels(
     message: payload.message ?? '',
     error: payload.error ?? '',
     botInviteUrl: payload.bot_invite_url ?? '',
-    channels: (payload.channels ?? []).map(mapChannel),
+    channels: (payload.channels ?? []).map((channel) => ({
+      guildId: channel.guild_id,
+      guildName: channel.guild_name,
+      channelId: channel.channel_id,
+      channelName: channel.channel_name,
+      label: channel.label,
+    })),
   }
 }
 
@@ -221,7 +209,7 @@ export async function updateAgentDiscordSubscriptions(
   agentId: string,
   subscriptions: DiscordSubscriptionSelection[],
 ): Promise<AgentDiscordApp> {
-  const payload = await jsonRequest<AgentDiscordAppDTO>(
+  const payload = await jsonRequest<AgentDiscordAppPayload>(
     `/console/api/agents/${agentId}/discord/subscriptions/`,
     {
       method: 'PATCH',

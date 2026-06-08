@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, Hash, Loader2, Plug, Save, Settings } from 'lucide-react'
 
 import {
+  agentDiscordAppQueryKey,
+  disconnectDiscordNative,
   fetchAgentDiscordGuildChannels,
+  startAgentDiscordConnect,
+  updateAgentDiscordSubscriptions,
   type AgentDiscordApp,
   type DiscordChannel,
   type DiscordGuild,
@@ -20,17 +24,114 @@ import {
   type PipedreamStatusMessage,
 } from './PipedreamAppsShared'
 
-export type PendingDiscordAction = 'connect' | 'disconnect' | 'save' | null
+export type PendingDiscordAction = 'connect' | 'save' | null
 
 export type PendingDiscordAgentAction = {
   agentId: string
-  kind: 'connect' | 'save'
+  kind: Exclude<PendingDiscordAction, null>
 } | null
 
 const DISCORD_NATIVE_SYSTEM_SKILL_KEY = 'discord_native'
 
 export function agentHasDiscordNative(agent: AgentRosterEntry): boolean {
   return Boolean(agent.enabledSystemSkills?.includes(DISCORD_NATIVE_SYSTEM_SKILL_KEY))
+}
+
+export function useDiscordOAuthCompleteRefetch({
+  agentId,
+  onError,
+}: {
+  agentId?: string | null
+  onError: (message: string) => void
+}) {
+  const queryClient = useQueryClient()
+
+  useEffect(() => {
+    const handleDiscordOAuthComplete = (event: MessageEvent<{ type?: unknown; status?: unknown; agent_id?: unknown }>) => {
+      if (event.origin !== window.location.origin || event.data?.type !== 'gobii:discord_oauth_complete') {
+        return
+      }
+      const completedAgentId = typeof event.data.agent_id === 'string' ? event.data.agent_id : agentId
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      if (completedAgentId) {
+        void queryClient.invalidateQueries({ queryKey: agentDiscordAppQueryKey(completedAgentId) })
+      }
+      if (event.data.status !== 'success') {
+        onError('Unable to complete the Discord connection.')
+      }
+    }
+    window.addEventListener('message', handleDiscordOAuthComplete)
+    return () => window.removeEventListener('message', handleDiscordOAuthComplete)
+  }, [agentId, onError, queryClient])
+}
+
+export function useDiscordNativeAgentActions({
+  onStart,
+  onError,
+}: {
+  onStart?: () => void
+  onError: (message: string) => void
+}) {
+  const queryClient = useQueryClient()
+  const [pendingDiscordAgentAction, setPendingDiscordAgentAction] = useState<PendingDiscordAgentAction>(null)
+
+  const connectMutation = useMutation({
+    mutationFn: (agentId: string) => startAgentDiscordConnect(agentId),
+    onMutate: (agentId) => {
+      onStart?.()
+      setPendingDiscordAgentAction({ agentId, kind: 'connect' })
+    },
+    onSuccess: (result, agentId) => {
+      queryClient.setQueryData(agentDiscordAppQueryKey(agentId), result.app)
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      window.open(result.connectUrl, '_blank', 'noopener,noreferrer')
+    },
+    onError: (error) => onError(safeErrorMessage(error)),
+    onSettled: () => setPendingDiscordAgentAction(null),
+  })
+
+  const subscriptionsMutation = useMutation({
+    mutationFn: ({ agentId, subscriptions }: { agentId: string; subscriptions: DiscordSubscriptionSelection[] }) =>
+      updateAgentDiscordSubscriptions(agentId, subscriptions),
+    onMutate: ({ agentId }) => {
+      onStart?.()
+      setPendingDiscordAgentAction({ agentId, kind: 'save' })
+    },
+    onSuccess: (app, { agentId }) => {
+      queryClient.setQueryData(agentDiscordAppQueryKey(agentId), app)
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+    },
+    onError: (error) => onError(safeErrorMessage(error)),
+    onSettled: () => setPendingDiscordAgentAction(null),
+  })
+
+  return {
+    connectDiscordAgent: (agentId: string) => connectMutation.mutate(agentId),
+    saveDiscordAgentSubscriptions: (agentId: string, subscriptions: DiscordSubscriptionSelection[]) =>
+      subscriptionsMutation.mutate({ agentId, subscriptions }),
+    pendingDiscordAgentAction,
+    isDiscordAgentActionPending: connectMutation.isPending || subscriptionsMutation.isPending,
+  }
+}
+
+export function useDiscordNativeDisconnect({
+  onMutate,
+  onSuccess,
+  onError,
+  onSettled,
+}: {
+  onMutate: () => void
+  onSuccess: () => void
+  onError: (message: string) => void
+  onSettled?: () => void
+}) {
+  return useMutation({
+    mutationFn: disconnectDiscordNative,
+    onMutate,
+    onSuccess,
+    onError: (error) => onError(safeErrorMessage(error)),
+    onSettled,
+  })
 }
 
 export function DiscordConfigurationScreen({

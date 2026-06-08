@@ -1,15 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, FolderOpen, Loader2, Plug, Settings, Unplug } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
-  disconnectDiscordNative,
   fetchAgentDiscordApp,
-  startAgentDiscordConnect,
-  updateAgentDiscordSubscriptions,
   type AgentDiscordApp,
-  type DiscordSubscriptionSelection,
 } from '../../api/discordNative'
 import {
   disconnectAgentPipedreamApp,
@@ -58,7 +54,8 @@ import {
 import {
   DiscordConfigurationScreen,
   DiscordSummaryCell,
-  type PendingDiscordAction,
+  useDiscordNativeAgentActions,
+  useDiscordOAuthCompleteRefetch,
 } from './DiscordNativeAppModal'
 
 type AgentPipedreamAppsModalProps = {
@@ -95,7 +92,6 @@ export function AgentPipedreamAppsModal({
   const debouncedSearchTerm = useDebouncedValue(searchTerm)
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
-  const [pendingDiscordAction, setPendingDiscordAction] = useState<PendingDiscordAction>(null)
   const [discordConfigureOpen, setDiscordConfigureOpen] = useState(false)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const nativeQueryKey = useMemo(
@@ -104,21 +100,19 @@ export function AgentPipedreamAppsModal({
   )
   const discordQueryKey = useMemo(() => agentDiscordAppQueryKey(agentId), [agentId])
   useNativeIntegrationRefreshEffects({ queryKey: nativeQueryKey, onError: (message) => setStatusMessage({ text: message, tone: 'error' }) })
-
-  useEffect(() => {
-    const handleDiscordOAuthComplete = (event: MessageEvent<{ type?: unknown; status?: unknown }>) => {
-      if (event.origin !== window.location.origin || event.data?.type !== 'gobii:discord_oauth_complete') {
-        return
-      }
-      void queryClient.invalidateQueries({ queryKey: discordQueryKey })
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
-      if (event.data.status !== 'success') {
-        setStatusMessage({ text: 'Unable to complete the Discord connection.', tone: 'error' })
-      }
-    }
-    window.addEventListener('message', handleDiscordOAuthComplete)
-    return () => window.removeEventListener('message', handleDiscordOAuthComplete)
-  }, [discordQueryKey, queryClient])
+  const handleDiscordError = useCallback((message: string) => {
+    setStatusMessage({ text: message, tone: 'error' })
+  }, [])
+  useDiscordOAuthCompleteRefetch({ agentId, onError: handleDiscordError })
+  const {
+    connectDiscordAgent,
+    saveDiscordAgentSubscriptions,
+    pendingDiscordAgentAction,
+    isDiscordAgentActionPending,
+  } = useDiscordNativeAgentActions({
+    onStart: () => setStatusMessage(null),
+    onError: handleDiscordError,
+  })
 
   const appsQuery = useQuery({
     queryKey: ['agent-pipedream-apps', agentId, debouncedSearchTerm],
@@ -228,24 +222,6 @@ export function AgentPipedreamAppsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
-  const discordDisconnectMutation = useMutation({
-    mutationFn: disconnectDiscordNative,
-    onMutate: () => {
-      setPendingDiscordAction('disconnect')
-      setStatusMessage(null)
-    },
-    onSuccess: () => {
-      setDiscordConfigureOpen(false)
-      void queryClient.invalidateQueries({ queryKey: discordQueryKey })
-      void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
-    },
-    onError: (error) => {
-      setStatusMessage({ text: safeErrorMessage(error), tone: 'error' })
-    },
-    onSettled: () => setPendingDiscordAction(null),
-  })
-
   const nativePickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
       const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
@@ -263,40 +239,6 @@ export function AgentPipedreamAppsModal({
       setStatusMessage({ text: safeErrorMessage(error), tone: 'error' })
     },
     onSettled: () => setPendingNativeAction(null),
-  })
-
-  const discordConnectMutation = useMutation({
-    mutationFn: () => startAgentDiscordConnect(agentId),
-    onMutate: () => {
-      setPendingDiscordAction('connect')
-      setStatusMessage(null)
-    },
-    onSuccess: (result) => {
-      void queryClient.invalidateQueries({ queryKey: discordQueryKey })
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
-      window.open(result.connectUrl, '_blank', 'noopener,noreferrer')
-    },
-    onError: (error) => {
-      setStatusMessage({ text: safeErrorMessage(error), tone: 'error' })
-    },
-    onSettled: () => setPendingDiscordAction(null),
-  })
-
-  const discordSubscriptionsMutation = useMutation({
-    mutationFn: (subscriptions: DiscordSubscriptionSelection[]) => updateAgentDiscordSubscriptions(agentId, subscriptions),
-    onMutate: () => {
-      setPendingDiscordAction('save')
-      setStatusMessage(null)
-    },
-    onSuccess: (app) => {
-      queryClient.setQueryData(discordQueryKey, app)
-      void queryClient.invalidateQueries({ queryKey: discordQueryKey })
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
-    },
-    onError: (error) => {
-      setStatusMessage({ text: safeErrorMessage(error), tone: 'error' })
-    },
-    onSettled: () => setPendingDiscordAction(null),
   })
 
   const normalizedSearch = debouncedSearchTerm.toLowerCase()
@@ -326,10 +268,9 @@ export function AgentPipedreamAppsModal({
     || nativeConnectMutation.isPending
     || nativeDisconnectMutation.isPending
     || nativePickerMutation.isPending
-    || discordConnectMutation.isPending
-    || discordDisconnectMutation.isPending
-    || discordSubscriptionsMutation.isPending
+    || isDiscordAgentActionPending
   const activeDiscordApp = discordConfigureOpen ? (discordAppQuery.data ?? discordRow) : null
+  const pendingDiscordAction = pendingDiscordAgentAction?.agentId === agentId ? pendingDiscordAgentAction.kind : null
 
   const body = activeDiscordApp ? (
     <DiscordConfigurationScreen
@@ -342,7 +283,7 @@ export function AgentPipedreamAppsModal({
         setDiscordConfigureOpen(false)
         setStatusMessage(null)
       }}
-      onSave={(subscriptions) => discordSubscriptionsMutation.mutate(subscriptions)}
+      onSave={(subscriptions) => saveDiscordAgentSubscriptions(agentId, subscriptions)}
     />
   ) : (
       <div className="space-y-4 p-1">
@@ -382,15 +323,10 @@ export function AgentPipedreamAppsModal({
                 app={app}
                 pendingDiscordAction={pendingDiscordAction}
                 disabled={isBusy}
-                onConnect={() => discordConnectMutation.mutate()}
+                onConnect={() => connectDiscordAgent(agentId)}
                 onConfigure={() => {
                   setDiscordConfigureOpen(true)
                   setStatusMessage(null)
-                }}
-                onDisconnect={() => {
-                  if (confirmNativeIntegrationDisconnect(app)) {
-                    discordDisconnectMutation.mutate()
-                  }
                 }}
               />
             ) : (
@@ -533,21 +469,18 @@ function AgentDiscordAppRowItem({
   disabled,
   onConnect,
   onConfigure,
-  onDisconnect,
 }: {
   app: AgentDiscordApp
-  pendingDiscordAction: PendingDiscordAction
+  pendingDiscordAction: 'connect' | 'save' | null
   disabled: boolean
   onConnect: () => void
   onConfigure: () => void
-  onDisconnect: () => void
 }) {
   const isPendingConnect = pendingDiscordAction === 'connect'
-  const isPendingDisconnect = pendingDiscordAction === 'disconnect'
 
   return (
     <div className="px-4 py-3">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] md:items-start">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem] md:items-start">
         <DiscordSummaryCell app={app} />
         <div>
           {app.subscribed ? (
@@ -576,23 +509,6 @@ function AgentDiscordAppRowItem({
             >
               <Settings className="h-4 w-4" aria-hidden="true" />
               Configure
-            </button>
-          ) : null}
-        </div>
-        <div className="flex justify-start md:justify-end">
-          {app.connected ? (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-              onClick={onDisconnect}
-              disabled={disabled}
-            >
-              {isPendingDisconnect ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Unplug className="h-4 w-4" aria-hidden="true" />
-              )}
-              Disconnect
             </button>
           ) : (
             <button
