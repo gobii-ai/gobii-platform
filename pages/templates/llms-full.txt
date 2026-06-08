@@ -84,12 +84,14 @@ Use the terms of service, privacy policy, and data deletion pages for current po
 ### Recruiting
 
 - [AI recruiting agents]({{ base_url }}/solutions/recruiting/): Gobii agents for candidate sourcing, profile research, outreach drafting, pipeline nurturing, and ATS-ready exports.
+- [AI candidate sourcing]({{ base_url }}/solutions/recruiting/candidate-sourcing/): Gobii agents for sourcing qualified candidates, researching profile evidence, and exporting recruiter-reviewed shortlists.
 - [Talent Scout]({{ base_url }}/pretrained-workers/talent-scout/): Pretrained recruiting agent for finding and qualifying candidates (agent template)
 - [Recruiting templates]({{ base_url }}/library/recruiting/): Public recruiting and sourcing agent templates.
 
 ### Recruiting facts
 
 - Gobii recruiting agents are persistent digital workers that can search web sources, evaluate candidate profiles against recruiter-provided criteria, and deliver organized candidate research.
+- Gobii candidate sourcing workflows can turn a role brief into a source-linked shortlist with fit notes, profile links, work-history context, and recruiter review notes.
 - Recruiting workflows can export to Google Sheets, CSV, webhooks, and enterprise ATS integrations where configured.
 - Gobii is best described as an AI agent platform for delegated recruiting workflows, not as a replacement for recruiter judgment or hiring compliance review.
 

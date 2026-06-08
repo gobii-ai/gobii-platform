@@ -15,6 +15,7 @@ from django.views.generic import TemplateView, View
 from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike, PersistentAgentTemplateUrlAlias
 from pages.public_template_urls import (
     public_template_category_slug,
+    public_template_category_slug_aliases_from_label,
     public_template_category_slug_from_label,
     public_template_detail_path,
 )
@@ -105,6 +106,8 @@ def _build_category_slug_map() -> dict[str, str]:
     for category in category_rows:
         label = _normalize_category(category)
         category_slug_map[public_template_category_slug_from_label(label)] = label
+        for alias_slug in public_template_category_slug_aliases_from_label(label):
+            category_slug_map.setdefault(alias_slug, label)
     return category_slug_map
 
 
@@ -275,6 +278,13 @@ class LibraryView(TemplateView):
             if legacy_template:
                 return redirect(public_template_detail_path(legacy_template), permanent=True)
             self.selected_category = _resolve_category_from_slug(category_slug)
+            canonical_slug = public_template_category_slug_from_label(self.selected_category)
+            if category_slug != canonical_slug:
+                return redirect(
+                    "pages:library_category",
+                    category_slug=canonical_slug,
+                    permanent=True,
+                )
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
