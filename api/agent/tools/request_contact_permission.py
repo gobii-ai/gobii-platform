@@ -25,14 +25,6 @@ from util.urls import (
 logger = logging.getLogger(__name__)
 
 
-def _sms_contact_purpose_guidance() -> str:
-    allowed_values = ", ".join(SmsContactPurpose.values)
-    return (
-        f"Use one of: {allowed_values}. "
-        f"For recruiting/candidate outreach, use {SmsContactPurpose.OTHER_OPERATIONAL}."
-    )
-
-
 def get_request_contact_permission_tool() -> dict:
     """Return the tool definition for requesting contact permission."""
     return {
@@ -151,16 +143,17 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
                 sms_purpose_details = None
             else:
                 address = address.strip()
+                allowed_values = ", ".join(SmsContactPurpose.values)
                 if sms_purpose and sms_purpose not in SmsContactPurpose.values:
                     errors.append(
                         f"Invalid SMS contact purpose '{sms_purpose}' for {address}. "
-                        f"{_sms_contact_purpose_guidance()}"
+                        f"Use one of: {allowed_values}."
                     )
                     continue
                 if sms_contact_purpose_required() and not sms_purpose:
                     errors.append(
                         f"SMS contact {address} requires sms_contact_purpose before it can be requested. "
-                        f"{_sms_contact_purpose_guidance()}"
+                        f"Use one of: {allowed_values}."
                     )
                     continue
             
