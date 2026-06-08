@@ -2355,28 +2355,29 @@ def _record_duplicate_http_request_skip(
 
 
 _ToolExecutor = Callable[[PersistentAgent, Dict[str, Any]], Any]
+_ToolExecutorResolver = Callable[[], _ToolExecutor]
 
-_DIRECT_TOOL_EXECUTORS: Dict[str, _ToolExecutor] = {
-    "spawn_web_task": execute_spawn_web_task,
-    "send_email": execute_send_email,
-    "send_sms": execute_send_sms,
-    "send_chat_message": execute_send_chat_message,
-    "send_agent_message": execute_send_agent_message,
-    "send_webhook_event": execute_send_webhook_event,
-    "update_schedule": execute_update_schedule,
-    "update_charter": execute_update_charter,
-    "update_plan": execute_update_plan,
-    "secure_credentials_request": execute_secure_credentials_request,
-    "request_contact_permission": execute_request_contact_permission,
-    "request_human_input": execute_request_human_input,
-    "spawn_agent": execute_spawn_agent,
-    "file_str_replace": execute_file_str_replace,
+_DIRECT_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
+    "spawn_web_task": lambda: execute_spawn_web_task,
+    "send_email": lambda: execute_send_email,
+    "send_sms": lambda: execute_send_sms,
+    "send_chat_message": lambda: execute_send_chat_message,
+    "send_agent_message": lambda: execute_send_agent_message,
+    "send_webhook_event": lambda: execute_send_webhook_event,
+    "update_schedule": lambda: execute_update_schedule,
+    "update_charter": lambda: execute_update_charter,
+    "update_plan": lambda: execute_update_plan,
+    "secure_credentials_request": lambda: execute_secure_credentials_request,
+    "request_contact_permission": lambda: execute_request_contact_permission,
+    "request_human_input": lambda: execute_request_human_input,
+    "spawn_agent": lambda: execute_spawn_agent,
+    "file_str_replace": lambda: execute_file_str_replace,
 }
 
-_REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutor] = {
-    "search_tools": execute_search_tools,
-    CREATE_CUSTOM_TOOL_NAME: execute_create_custom_tool,
-    "end_planning": execute_end_planning,
+_REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
+    "search_tools": lambda: execute_search_tools,
+    CREATE_CUSTOM_TOOL_NAME: lambda: execute_create_custom_tool,
+    "end_planning": lambda: execute_end_planning,
 }
 
 
@@ -2415,12 +2416,12 @@ def _execute_tool_call_runtime(
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
         ), updated_tools
-    executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
-    if executor:
-        return executor(agent, exec_params), updated_tools
-    refreshing_executor = _REFRESHING_TOOL_EXECUTORS.get(tool_name)
-    if refreshing_executor:
-        result = refreshing_executor(agent, exec_params)
+    resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
+    if resolve_executor:
+        return resolve_executor()(agent, exec_params), updated_tools
+    resolve_refreshing_executor = _REFRESHING_TOOL_EXECUTORS.get(tool_name)
+    if resolve_refreshing_executor:
+        result = resolve_refreshing_executor()(agent, exec_params)
         updated_tools = get_agent_tools(agent)
         return result, updated_tools
     return execute_enabled_tool(
