@@ -4,6 +4,7 @@ import { ArrowLeft, CheckCircle2, FolderOpen, Loader2, Plug, Unplug, Users } fro
 
 import {
   agentDiscordAppQueryKey,
+  disconnectDiscordNative,
   fetchAgentDiscordApp,
   startAgentDiscordConnect,
   updateAgentDiscordSubscriptions,
@@ -53,6 +54,7 @@ import {
   type PipedreamStatusMessage,
 } from './PipedreamAppsShared'
 import {
+  confirmNativeIntegrationDisconnect,
   NativeIntegrationFilesDisclosure,
   NativeProviderIconTile,
   nativeIntegrationFilesQueryKey,
@@ -64,6 +66,7 @@ import {
   useNativeIntegrationRefreshEffects,
 } from './NativeIntegrationShared'
 import {
+  agentHasDiscordNative,
   DiscordAgentConnectionsScreen,
   DiscordConfigurationScreen,
   type PendingDiscordAgentAction,
@@ -185,7 +188,7 @@ export function PipedreamAppsModal({
   const agentRosterQuery = useQuery({
     queryKey: ['agent-roster'],
     queryFn: () => fetchAgentRoster(),
-    enabled: discordConnectionsOpen && activeDiscordAgentId === null,
+    enabled: Boolean(nativeIntegrationsUrl) && activeApp === null,
   })
   useWindowFocusRefetch(agentRosterQuery.refetch, discordConnectionsOpen && activeDiscordAgentId === null)
   const activeDiscordAppQueryKey = useMemo(
@@ -206,6 +209,10 @@ export function PipedreamAppsModal({
     () => new Set(settings.selectedApps.map((app) => app.slug)),
     [settings.selectedApps],
   )
+  const discordConnected = useMemo(
+    () => (agentRosterQuery.data?.agents ?? []).some(agentHasDiscordNative),
+    [agentRosterQuery.data?.agents],
+  )
 
   const rows = useMemo<WorkspaceAppRow[]>(() => {
     const visibleApps = debouncedSearchTerm ? (searchQuery.data ?? []) : settings.effectiveApps
@@ -223,6 +230,7 @@ export function PipedreamAppsModal({
       })
       .map((provider) => ({
         ...provider,
+        connected: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY ? discordConnected : provider.connected,
         kind: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY ? 'discord' as const : 'native' as const,
       }))
     const pipedreamRows = visibleApps.map((app) => {
@@ -240,6 +248,7 @@ export function PipedreamAppsModal({
     return [...nativeRows, ...pipedreamRows]
   }, [
     debouncedSearchTerm,
+    discordConnected,
     nativeIntegrationsQuery.data?.providers,
     platformSlugSet,
     searchQuery.data,
@@ -373,6 +382,26 @@ export function PipedreamAppsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
+  const discordDisconnectMutation = useMutation({
+    mutationFn: disconnectDiscordNative,
+    onMutate: () => {
+      setPendingNativeAction({ providerKey: DISCORD_NATIVE_PROVIDER_KEY, kind: 'disconnect' })
+      setStatusMessage(null)
+    },
+    onSuccess: () => {
+      setDiscordConnectionsOpen(false)
+      setActiveDiscordAgentId(null)
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
+    },
+    onError: (error) => {
+      const message = safeErrorMessage(error)
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
+
   const nativePickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
       const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
@@ -438,6 +467,7 @@ export function PipedreamAppsModal({
     || nativeConnectMutation.isPending
     || nativeRevokeMutation.isPending
     || nativePickerMutation.isPending
+    || discordDisconnectMutation.isPending
     || discordConnectMutation.isPending
     || discordSubscriptionsMutation.isPending
   const activeDiscordAgent = activeDiscordAgentId
@@ -532,10 +562,10 @@ export function PipedreamAppsModal({
     <AppListScreen
       apps={rows}
       searchTerm={searchTerm}
-      isLoading={searchQuery.isLoading || nativeIntegrationsQuery.isLoading}
-      isFetching={searchQuery.isFetching || nativeIntegrationsQuery.isFetching}
-      isError={searchQuery.isError || nativeIntegrationsQuery.isError}
-      error={searchQuery.error ?? nativeIntegrationsQuery.error}
+      isLoading={searchQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading}
+      isFetching={searchQuery.isFetching || nativeIntegrationsQuery.isFetching || agentRosterQuery.isFetching}
+      isError={searchQuery.isError || nativeIntegrationsQuery.isError || agentRosterQuery.isError}
+      error={searchQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error}
       isBusy={isBusy}
       isMobile={isMobile}
       pendingAppAction={pendingAppAction}
@@ -552,7 +582,16 @@ export function PipedreamAppsModal({
       }}
       onRemove={(app) => removeMutation.mutate(app)}
       onNativeConnect={(provider) => nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })}
-      onNativeDisconnect={(provider) => nativeRevokeMutation.mutate(provider)}
+      onNativeDisconnect={(provider) => {
+        if (confirmNativeIntegrationDisconnect(provider)) {
+          nativeRevokeMutation.mutate(provider)
+        }
+      }}
+      onDiscordDisconnect={(provider) => {
+        if (confirmNativeIntegrationDisconnect(provider)) {
+          discordDisconnectMutation.mutate()
+        }
+      }}
       onNativePicker={(provider) => nativePickerMutation.mutate(provider)}
     />
   )
@@ -594,6 +633,7 @@ function AppListScreen({
   onRemove,
   onNativeConnect,
   onNativeDisconnect,
+  onDiscordDisconnect,
   onNativePicker,
 }: {
   apps: WorkspaceAppRow[]
@@ -613,6 +653,7 @@ function AppListScreen({
   onRemove: (app: WorkspacePipedreamAppRow) => void
   onNativeConnect: (provider: NativeIntegrationProvider) => void
   onNativeDisconnect: (provider: NativeIntegrationProvider) => void
+  onDiscordDisconnect: (provider: NativeIntegrationProvider) => void
   onNativePicker: (provider: NativeIntegrationProvider) => void
 }) {
   return (
@@ -647,8 +688,10 @@ function AppListScreen({
             <WorkspaceDiscordAppRowItem
               key="native-discord"
               provider={app}
+              pendingNativeAction={pendingNativeAction}
               disabled={isBusy}
               onManageConnections={onManageDiscordConnections}
+              onDisconnect={() => onDiscordDisconnect(app)}
             />
           ) : (
             <PipedreamAppRowItem
@@ -668,15 +711,21 @@ function AppListScreen({
 
 function WorkspaceDiscordAppRowItem({
   provider,
+  pendingNativeAction,
   disabled,
   onManageConnections,
+  onDisconnect,
 }: {
   provider: NativeIntegrationProvider
+  pendingNativeAction: PendingNativeAction
   disabled: boolean
   onManageConnections: () => void
+  onDisconnect: () => void
 }) {
+  const isPendingDisconnect = pendingNativeAction?.providerKey === provider.providerKey && pendingNativeAction.kind === 'disconnect'
+
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem] md:items-center">
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_8rem] md:items-center">
       <NativeIntegrationSummaryCell provider={provider} />
       <div className="flex justify-start md:justify-end">
         <button
@@ -688,6 +737,23 @@ function WorkspaceDiscordAppRowItem({
           <Users className="h-4 w-4" aria-hidden="true" />
           Manage Connections
         </button>
+      </div>
+      <div className="flex justify-start md:justify-end">
+        {provider.connected ? (
+          <button
+            type="button"
+            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+            onClick={onDisconnect}
+            disabled={disabled}
+          >
+            {isPendingDisconnect ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Unplug className="h-4 w-4" aria-hidden="true" />
+            )}
+            Disconnect
+          </button>
+        ) : null}
       </div>
     </div>
   )

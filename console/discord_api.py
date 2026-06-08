@@ -18,6 +18,7 @@ from api.services.discord_bot import (
     DiscordBotIntegrationError,
     build_discord_bot_invite_url,
     build_discord_oauth_start_url,
+    disconnect_discord_native_integration,
     disable_subscription,
     discover_channels,
     ensure_subscription,
@@ -28,6 +29,7 @@ from api.services.discord_bot import (
 )
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
+from console.context_helpers import build_console_context
 
 
 def _discord_permission_denied_response() -> JsonResponse:
@@ -72,6 +74,16 @@ def _resolve_discord_agent(request: HttpRequest, agent_id: str):
         agent_id,
         allow_delinquent_personal_chat=True,
     )
+
+
+def _resolve_discord_owner(request: HttpRequest):
+    context = build_console_context(request)
+    if context.current_context.type == "organization":
+        membership = context.current_membership
+        if membership is None or not context.can_manage_org_agents:
+            raise PermissionDenied("You do not have permission to manage organization integrations.")
+        return None, membership.org
+    return request.user, None
 
 
 def _enable_discord_native_skill(agent) -> dict[str, object]:
@@ -198,6 +210,18 @@ class AgentDiscordConnectView(ApiLoginRequiredMixin, View):
                 "app": _serialize_discord_app(agent),
             }
         )
+
+
+class DiscordDisconnectView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            owner_user, owner_org = _resolve_discord_owner(request)
+        except PermissionDenied:
+            return _discord_permission_denied_response()
+        result = disconnect_discord_native_integration(owner_user=owner_user, organization=owner_org)
+        return JsonResponse({"revoked": True, **result})
 
 
 class AgentDiscordChannelsView(ApiLoginRequiredMixin, View):

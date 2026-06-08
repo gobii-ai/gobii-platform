@@ -30,8 +30,10 @@ from api.models import (
     PersistentAgentDiscordWebhookEcho,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
 )
+from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
 from api.agent.files.filespace_service import broadcast_message_attachment_update
 from api.services.agent_avatar_public import build_public_agent_avatar_thumbnail_url
@@ -409,6 +411,50 @@ def serialize_guild(guild: PersistentAgentDiscordGuild) -> dict[str, str]:
 
 def list_claimed_guilds(agent: PersistentAgent) -> list[dict[str, str]]:
     return [serialize_guild(guild) for guild in _claimed_guild_queryset(agent).order_by("name", "guild_id")]
+
+
+def disconnect_discord_native_integration(*, owner_user=None, organization=None) -> dict[str, int]:
+    if (owner_user is None) == (organization is None):
+        raise ValueError("Exactly one Discord owner must be provided.")
+
+    now = timezone.now()
+    guild_queryset = PersistentAgentDiscordGuild.objects.select_for_update()
+    agent_queryset = PersistentAgent.objects.non_eval().alive()
+    if organization is not None:
+        guild_queryset = guild_queryset.filter(organization=organization)
+        agent_queryset = agent_queryset.filter(organization=organization)
+    else:
+        guild_queryset = guild_queryset.filter(owner_user=owner_user)
+        agent_queryset = agent_queryset.filter(user=owner_user, organization_id__isnull=True)
+
+    with transaction.atomic():
+        guild_ids = list(guild_queryset.filter(is_active=True).values_list("id", flat=True))
+        agent_ids = list(agent_queryset.values_list("id", flat=True))
+        subscription_count = 0
+        webhook_count = 0
+        guild_count = 0
+        if guild_ids:
+            subscription_count = PersistentAgentDiscordChannelSubscription.objects.filter(guild_id__in=guild_ids).exclude(
+                status=PersistentAgentDiscordChannelSubscription.Status.DISABLED
+            ).update(status=PersistentAgentDiscordChannelSubscription.Status.DISABLED, updated_at=now)
+            webhook_count = PersistentAgentDiscordWebhook.objects.filter(guild_id__in=guild_ids).delete()[0]
+            guild_count = PersistentAgentDiscordGuild.objects.filter(id__in=guild_ids).update(
+                is_active=False,
+                last_synced_at=now,
+                updated_at=now,
+            )
+        skill_count = PersistentAgentSystemSkillState.objects.filter(
+            agent_id__in=agent_ids,
+            skill_key=DISCORD_NATIVE_SYSTEM_SKILL_KEY,
+            is_enabled=True,
+        ).update(is_enabled=False)
+
+    return {
+        "guilds_disconnected": guild_count,
+        "subscriptions_disabled": subscription_count,
+        "webhooks_removed": webhook_count,
+        "agents_disabled": skill_count,
+    }
 
 
 def latest_selected_guild(agent: PersistentAgent) -> PersistentAgentDiscordGuild | None:

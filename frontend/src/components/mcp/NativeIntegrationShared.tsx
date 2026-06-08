@@ -209,6 +209,12 @@ export function supportsNativeIntegrationPicker(provider: NativeIntegrationProvi
   return provider.providerKey === 'google_drive' && Boolean(provider.pickerTokenUrl)
 }
 
+export function confirmNativeIntegrationDisconnect(provider: Pick<NativeIntegrationProvider, 'displayName'>): boolean {
+  return window.confirm(
+    `Disconnect ${provider.displayName}? This will remove it from every agent in this workspace. Agents will stop using it until you connect it again.`,
+  )
+}
+
 export function supportsNativeIntegrationFileList(provider: NativeIntegrationProvider): boolean {
   return provider.providerKey === 'google_drive' && provider.connected && Boolean(provider.filesUrl)
 }

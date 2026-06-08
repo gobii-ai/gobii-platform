@@ -18,6 +18,7 @@ import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
 import {
+  confirmNativeIntegrationDisconnect,
   NativeIntegrationFilesDisclosure,
   NativeProviderIconTile,
   nativeIntegrationFilesQueryKey,
@@ -356,7 +357,11 @@ export function HomepageIntegrationsModal({
                   }
                   nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
                 }}
-                onDisconnect={() => nativeDisconnectMutation.mutate(provider)}
+                onDisconnect={() => {
+                  if (confirmNativeIntegrationDisconnect(provider)) {
+                    nativeDisconnectMutation.mutate(provider)
+                  }
+                }}
                 onPicker={() => nativePickerMutation.mutate(provider)}
               />
             ))}

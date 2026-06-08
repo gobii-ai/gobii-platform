@@ -193,6 +193,14 @@ export async function startAgentDiscordConnect(agentId: string): Promise<AgentDi
   }
 }
 
+export async function disconnectDiscordNative(): Promise<{ revoked: boolean }> {
+  return jsonRequest<{ revoked: boolean }>('/console/api/discord/disconnect/', {
+    method: 'POST',
+    includeCsrf: true,
+    json: {},
+  })
+}
+
 export async function fetchAgentDiscordGuildChannels(
   agentId: string,
   guildId: string,

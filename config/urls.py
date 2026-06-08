@@ -217,6 +217,7 @@ from console.discord_api import (
     AgentDiscordChannelsView,
     AgentDiscordConnectView,
     AgentDiscordSubscriptionsView,
+    DiscordDisconnectView,
     DiscordOAuthCallbackView,
     DiscordOAuthStartView,
 )
@@ -595,6 +596,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/discord/connect/", AgentDiscordConnectView.as_view(), name="console-agent-discord-connect"),
     path("console/api/agents/<uuid:agent_id>/discord/guilds/<str:guild_id>/channels/", AgentDiscordChannelsView.as_view(), name="console-agent-discord-channels"),
     path("console/api/agents/<uuid:agent_id>/discord/subscriptions/", AgentDiscordSubscriptionsView.as_view(), name="console-agent-discord-subscriptions"),
+    path("console/api/discord/disconnect/", DiscordDisconnectView.as_view(), name="console-discord-disconnect"),
     path("console/api/session/", ConsoleSessionAPIView.as_view(), name="console_session"),
     path("console/api/support/request/", AppSupportRequestAPIView.as_view(), name="console_app_support_request"),
     path("console/api/billing/initial/", BillingInitialDataAPIView.as_view(), name="console_billing_initial_data"),

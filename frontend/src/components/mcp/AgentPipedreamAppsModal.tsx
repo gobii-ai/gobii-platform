@@ -4,6 +4,7 @@ import { CheckCircle2, FolderOpen, Loader2, Plug, Settings, Unplug } from 'lucid
 
 import {
   agentDiscordAppQueryKey,
+  disconnectDiscordNative,
   fetchAgentDiscordApp,
   startAgentDiscordConnect,
   updateAgentDiscordSubscriptions,
@@ -43,6 +44,7 @@ import {
   type PipedreamStatusMessage,
 } from './PipedreamAppsShared'
 import {
+  confirmNativeIntegrationDisconnect,
   NativeIntegrationFilesDisclosure,
   NativeProviderIconTile,
   nativeIntegrationFilesQueryKey,
@@ -226,6 +228,24 @@ export function AgentPipedreamAppsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
+  const discordDisconnectMutation = useMutation({
+    mutationFn: disconnectDiscordNative,
+    onMutate: () => {
+      setPendingDiscordAction('disconnect')
+      setStatusMessage(null)
+    },
+    onSuccess: () => {
+      setDiscordConfigureOpen(false)
+      void queryClient.invalidateQueries({ queryKey: discordQueryKey })
+      void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+    },
+    onError: (error) => {
+      setStatusMessage({ text: safeErrorMessage(error), tone: 'error' })
+    },
+    onSettled: () => setPendingDiscordAction(null),
+  })
+
   const nativePickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
       const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
@@ -307,6 +327,7 @@ export function AgentPipedreamAppsModal({
     || nativeDisconnectMutation.isPending
     || nativePickerMutation.isPending
     || discordConnectMutation.isPending
+    || discordDisconnectMutation.isPending
     || discordSubscriptionsMutation.isPending
   const activeDiscordApp = discordConfigureOpen ? (discordAppQuery.data ?? discordRow) : null
 
@@ -348,7 +369,11 @@ export function AgentPipedreamAppsModal({
                 pendingNativeAction={pendingNativeAction}
                 disabled={isBusy}
                 onConnect={() => nativeConnectMutation.mutate({ provider: app, popup: openNativeOAuthPopup(app) })}
-                onDisconnect={() => nativeDisconnectMutation.mutate(app)}
+                onDisconnect={() => {
+                  if (confirmNativeIntegrationDisconnect(app)) {
+                    nativeDisconnectMutation.mutate(app)
+                  }
+                }}
                 onPicker={() => nativePickerMutation.mutate(app)}
               />
             ) : app.kind === 'discord' ? (
@@ -361,6 +386,11 @@ export function AgentPipedreamAppsModal({
                 onConfigure={() => {
                   setDiscordConfigureOpen(true)
                   setStatusMessage(null)
+                }}
+                onDisconnect={() => {
+                  if (confirmNativeIntegrationDisconnect(app)) {
+                    discordDisconnectMutation.mutate()
+                  }
                 }}
               />
             ) : (
@@ -503,14 +533,17 @@ function AgentDiscordAppRowItem({
   disabled,
   onConnect,
   onConfigure,
+  onDisconnect,
 }: {
   app: AgentDiscordApp
   pendingDiscordAction: PendingDiscordAction
   disabled: boolean
   onConnect: () => void
   onConfigure: () => void
+  onDisconnect: () => void
 }) {
   const isPendingConnect = pendingDiscordAction === 'connect'
+  const isPendingDisconnect = pendingDiscordAction === 'disconnect'
 
   return (
     <div className="px-4 py-3">
@@ -548,7 +581,19 @@ function AgentDiscordAppRowItem({
         </div>
         <div className="flex justify-start md:justify-end">
           {app.connected ? (
-            null
+            <button
+              type="button"
+              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+              onClick={onDisconnect}
+              disabled={disabled}
+            >
+              {isPendingDisconnect ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Unplug className="h-4 w-4" aria-hidden="true" />
+              )}
+              Disconnect
+            </button>
           ) : (
             <button
               type="button"

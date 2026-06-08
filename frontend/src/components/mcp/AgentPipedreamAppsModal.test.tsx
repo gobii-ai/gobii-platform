@@ -13,6 +13,7 @@ import {
 
 vi.mock('../../api/discordNative', () => ({
   agentDiscordAppQueryKey: (agentId: string) => ['agent-discord-app', agentId],
+  disconnectDiscordNative: vi.fn(),
   fetchAgentDiscordApp: vi.fn(),
   fetchAgentDiscordGuildChannels: vi.fn(),
   startAgentDiscordConnect: vi.fn(),

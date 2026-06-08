@@ -20,7 +20,7 @@ import {
   type PipedreamStatusMessage,
 } from './PipedreamAppsShared'
 
-export type PendingDiscordAction = 'connect' | 'save' | null
+export type PendingDiscordAction = 'connect' | 'disconnect' | 'save' | null
 
 export type PendingDiscordAgentAction = {
   agentId: string
