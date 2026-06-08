@@ -326,7 +326,7 @@ class AllowlistDirectionTests(TestCase):
         })
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("requires an operational purpose", result["message"])
+        self.assertIn("requires sms_contact_purpose", result["message"])
         self.assertFalse(CommsAllowlistRequest.objects.exists())
 
     @override_switch(SMS_CONTACT_PURPOSE_REQUIRED, active=True)

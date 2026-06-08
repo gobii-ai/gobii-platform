@@ -143,14 +143,17 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
                 sms_purpose_details = None
             else:
                 address = address.strip()
+                allowed_values = ", ".join(SmsContactPurpose.values)
                 if sms_purpose and sms_purpose not in SmsContactPurpose.values:
                     errors.append(
-                        f"Invalid SMS contact purpose '{sms_purpose}' for {address}."
+                        f"Invalid SMS contact purpose '{sms_purpose}' for {address}. "
+                        f"Use one of: {allowed_values}."
                     )
                     continue
                 if sms_contact_purpose_required() and not sms_purpose:
                     errors.append(
-                        f"SMS contact {address} requires an operational purpose before it can be requested."
+                        f"SMS contact {address} requires sms_contact_purpose before it can be requested. "
+                        f"Use one of: {allowed_values}."
                     )
                     continue
             
