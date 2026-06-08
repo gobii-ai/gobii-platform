@@ -84,6 +84,12 @@ const NATIVE_PROVIDER_ICONS: Record<string, { className: string; framedClassName
     src: '/static/images/integrations/native/hubspot.svg',
     tileClassName: 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-orange-200 bg-orange-50 text-orange-700',
   },
+  discord: {
+    className: 'h-5 w-5 object-contain',
+    framedClassName: 'h-6 w-6 object-contain',
+    src: '/static/images/integrations/native/discord.svg',
+    tileClassName: 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700',
+  },
 }
 
 export function useNativeIntegrationRefreshEffects({

@@ -973,7 +973,7 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
                 "discord_send_message",
             },
         )
-        self.assertEqual([match.skill_key for match in matches], ["connected_app_channels"])
+        self.assertEqual([match.skill_key for match in matches], ["discord_native"])
         integration_matches = shortlist_system_skills(
             "discord integration, discord bot, discord webhook, pipedream discord",
             available_tool_names={
@@ -981,9 +981,9 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
                 "discord_send_message",
             },
         )
-        self.assertEqual([match.skill_key for match in integration_matches], ["connected_app_channels"])
+        self.assertEqual([match.skill_key for match in integration_matches], ["discord_native"])
 
-        result = enable_system_skills(agent, ["connected_app_channels"], available_skills=matches)
+        result = enable_system_skills(agent, ["discord_native"], available_skills=matches)
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["pipedream_apps"]["enabled"], [])
         self.assertTrue(
@@ -1006,8 +1006,8 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
         )
 
     @tag("batch_agent_tools")
-    def test_connected_app_channels_skill_does_not_request_discord_ids_as_secrets(self):
-        definition = get_system_skill_definition("connected_app_channels")
+    def test_discord_native_skill_does_not_request_discord_ids_as_secrets(self):
+        definition = get_system_skill_definition("discord_native")
         self.assertIsNotNone(definition)
         instructions = definition.prompt_instructions
         self.assertNotIn("secure_credentials_request", instructions)

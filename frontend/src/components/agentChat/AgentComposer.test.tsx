@@ -49,6 +49,12 @@ vi.mock('./insights/HubSpotInsightPanel', () => ({
   ),
 }))
 
+vi.mock('./insights/DiscordInsightPanel', () => ({
+  DiscordInsightPanel: () => (
+    <div data-testid="discord-panel">Discord panel</div>
+  ),
+}))
+
 vi.mock('./AgentIntelligenceSelector', () => ({
   AgentIntelligenceSelector: () => null,
 }))
@@ -434,6 +440,13 @@ describe('AgentComposer pending action insights panel', () => {
       panelTestId: 'hubspot-panel',
       enabledProps: { hubspotNativeTabEnabled: true },
       disabledProps: { hubspotNativeTabEnabled: false },
+    },
+    {
+      name: 'Discord',
+      ariaLabel: 'View Discord connection',
+      panelTestId: 'discord-panel',
+      enabledProps: { discordNativeTabEnabled: true },
+      disabledProps: { discordNativeTabEnabled: false },
     },
   ] as const
 

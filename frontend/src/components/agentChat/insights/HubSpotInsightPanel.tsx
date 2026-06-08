@@ -7,7 +7,9 @@ import {
 const HUBSPOT_PROVIDER_KEY = 'hubspot'
 
 type HubSpotInsightPanelProps = {
+  agentId?: string | null
   nativeIntegrationsUrl?: string | null
+  onOpenApps?: () => void
 }
 
 const HUBSPOT_FALLBACK_ICON = (

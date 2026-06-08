@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 
 import { useModal } from '../../hooks/useModal'
 import { AgentPipedreamAppsModal } from '../mcp/AgentPipedreamAppsModal'
@@ -15,6 +15,7 @@ type ComposerPipedreamAppsControlProps = {
   enablePipedreamApps?: boolean
   nativeIntegrationsUrl?: string | null
   disabled?: boolean
+  openRequestKey?: number
   children: (props: ComposerPipedreamAppsControlRenderProps) => ReactNode
 }
 
@@ -23,6 +24,7 @@ export function ComposerPipedreamAppsControl({
   enablePipedreamApps = true,
   nativeIntegrationsUrl = null,
   disabled = false,
+  openRequestKey = 0,
   children,
 }: ComposerPipedreamAppsControlProps) {
   const [modal, showModal] = useModal()
@@ -42,6 +44,12 @@ export function ComposerPipedreamAppsControl({
   }, [agentId, enablePipedreamApps, nativeIntegrationsUrl, disabled, showModal])
 
   const triggerDisabled = disabled
+
+  useEffect(() => {
+    if (openRequestKey > 0) {
+      openModal()
+    }
+  }, [openModal, openRequestKey])
 
   return (
     <>
