@@ -52,7 +52,7 @@ class PromptContextSqlitePlacementTests(TestCase):
         combined = "\n".join(message["content"] for message in context)
 
         self.assertIn("Preserve still-relevant guidance", combined)
-        self.assertIn("Merge new durable guidance into the existing charter", combined)
+        self.assertIn("Merge durable guidance into the existing charter", combined)
         self.assertIn("stable durable preferences", combined)
         self.assertIn("durable standing memory", combined)
         self.assertIn("named channels/tools", combined)
