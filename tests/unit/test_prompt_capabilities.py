@@ -202,6 +202,25 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Avoid 2FA/MFA unless the user explicitly asks for it", contents)
         self.assertIn("those flows may hit system limitations", contents)
 
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_does_not_globally_include_visual_description(
+        self,
+        _mock_comms,
+        _mock_steps,
+    ):
+        self.agent.visual_description = (
+            "A rare visual identity with ruby glasses, silver braids, and a cobalt scarf."
+        )
+        self.agent.save(update_fields=["visual_description"])
+
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertNotIn("ruby glasses", contents)
+        self.assertNotIn("silver braids", contents)
+        self.assertNotIn("cobalt scarf", contents)
+
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
@@ -215,6 +234,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         contents = "\n".join(message["content"] for message in context)
 
         self.assertIn("Use enabled `create_custom_tool` directly", contents)
+        self.assertIn("explicit create-custom-tool request -> create_custom_tool first", contents)
         self.assertNotIn("System Skill: Custom Tool Development", contents)
         self.assertNotIn("Current custom-tool state:", contents)
         self.assertNotIn("PHILOSOPHY:", contents)
@@ -254,7 +274,7 @@ class AgentCapabilitiesPromptTests(TestCase):
             contents,
         )
         self.assertIn(
-            "After the final send and final plan update, stop with no extra message",
+            "After the final send and any required final plan update, stop with no extra message",
             contents,
         )
         self.assertIn("Plain text is invisible and update_plan is not delivery", contents)
@@ -262,6 +282,39 @@ class AgentCapabilitiesPromptTests(TestCase):
             "Need to send the user your answer, summary, or final report → will_continue_work=true",
             contents,
         )
+
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_treats_future_format_preferences_as_durable(self, _mock_comms, _mock_steps):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn("ongoing report/status formats", contents)
+        self.assertIn("durable corrections/preferences", contents)
+
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_includes_bounded_fetch_and_partial_report_guidance(
+        self,
+        _mock_comms,
+        _mock_steps,
+    ):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn("scheduled exact feed/API briefing -> http_request then send", contents)
+        self.assertIn("fetch then send", contents)
+        self.assertIn("recurring digest/report setup without source/details -> sqlite_batch charter+schedule with assumptions", contents)
+        self.assertIn("Exact feeds: report latest result", contents)
+        self.assertIn("no plan/SQLite/prep", contents)
+        self.assertIn("Eval `eval_*`: call directly", contents)
+        self.assertIn("report partial+limits before queue", contents)
+        self.assertIn("config with continue=true, then current report with continue=false", contents)
+        self.assertIn("schedule only, stop", contents)
+        self.assertIn("Partial edits preserve named channels/tools", contents)
+        self.assertIn("do not rerun", contents)
+        self.assertIn("update_plan is not storage/queue", contents)
+        self.assertIn("Multi-result SQL: one query", contents)
 
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
@@ -284,9 +337,9 @@ class AgentCapabilitiesPromptTests(TestCase):
         will_continue_description = tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
 
         self.assertIn("context, config changes, findings, or finals.", description)
-        self.assertIn("Use request_human_input instead when the agent has been blocked repeatedly", description)
-        self.assertIn("needs a tracked answer", description)
-        self.assertIn("Do not narrate what you will do next", description)
+        self.assertIn("Use request_human_input for repeated blockers", description)
+        self.assertIn("needing a tracked answer", description)
+        self.assertIn("Do not narrate next steps", description)
         self.assertIn("Never send a message solely to justify continuing work", will_continue_description)
 
     def test_run_command_tool_description_distinguishes_shell_paths(self):

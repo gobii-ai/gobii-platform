@@ -20,6 +20,7 @@ from api.evals.scenarios.meta_gobii import (
     SKILL_SEARCH_TOOL_NAME,
     MetaGobiiImplicitResearchTeamRealHarnessScenario,
     MetaGobiiSystemSkillScenario,
+    _record_plan_tool,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -118,6 +119,63 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
         )
 
         self.assertEqual(extra_scope_items, ["Add a weekly market digest schedule"])
+
+    def test_extra_scope_filter_ignores_negative_scope_notes(self):
+        extra_scope_items = _planned_extra_scope_items(
+            [
+                "mention: no extra scope beyond this replacement",
+                "Nothing additional besides the requested agent update",
+                "The user did not ask for contacts, files, or schedules; do not add them.",
+                "The user did not request any schedule, contacts, files, extra agents, or extra actions.",
+                "The user asked for three workstreams (recruiting, sales, customer signal). No unrequested extras are added.",
+                "Schedule: no explicit recurring/cadence request - keep unscheduled by default.",
+                "The word 'watch' is ambiguous ongoing behavior, not a cadence request; schedule clarification can be asked as a follow-up.",
+                "Restructuring design is user-delegated to 'however you think is best' - scope must be confirmed before execution.",
+                "The user explicitly said not to change the Gobii's job, so no charter or schedule changes apply.",
+                "Add weekly renewal report",
+            ],
+            user_prompt="Replace the vendor renewals Gobii with one that owns vendor renewals.",
+        )
+
+        self.assertEqual(extra_scope_items, ["Add weekly renewal report"])
+
+    def test_plan_tool_schema_preserves_distinct_team_workstreams(self):
+        tool = _record_plan_tool()
+        planned_count_description = tool["function"]["parameters"]["properties"]["planned_agent_count"]["description"]
+
+        self.assertIn("distinct workstreams", planned_count_description)
+        self.assertIn("separate planned Gobiis", planned_count_description)
+
+    def test_simulated_single_gobii_case_uses_one_role_name(self):
+        case = next(
+            eval_case
+            for eval_case in META_GOBII_EVAL_CASES
+            if eval_case.slug == "ambiguous_monitor_competitor_pricing"
+        )
+        plan_args = MetaGobiiSystemSkillScenario._simulated_plan_args(case)
+
+        self.assertEqual(plan_args["planned_agent_count"], 1)
+        self.assertEqual(len(plan_args["planned_role_names"]), 1)
+        self.assertIn("Competitor Pricing", plan_args["planned_role_names"][0])
+
+    def test_positive_team_creation_fallback_rejects_schedule_clarification(self):
+        case = next(
+            eval_case
+            for eval_case in META_GOBII_EVAL_CASES
+            if eval_case.slug == "positive_team_creation"
+        )
+        plan_args = MetaGobiiSystemSkillScenario._simulated_plan_args(case)
+        plan_args["schedule_policy"] = {
+            "schedule_in_scope": "False",
+            "schedule_action": "clarify",
+            "cadence_or_schedule": "",
+            "explicit_user_intent": "False",
+            "included_in_approval_scope": "False",
+            "asks_clarifying_question": "True",
+            "rationale": "Ask whether this team should have scheduled reports.",
+        }
+
+        self.assertTrue(MetaGobiiSystemSkillScenario._plan_args_need_fallback(case, plan_args))
 
     def test_skill_discovery_uses_deterministic_fallback_for_retryable_llm_error(self):
         case = next(

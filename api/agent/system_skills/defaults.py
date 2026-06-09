@@ -5,6 +5,11 @@ from django.conf import settings
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
+from api.agent.tools.self_visual_identity import (
+    GET_SELF_VISUAL_IDENTITY_TOOL_NAME,
+    SELF_IMAGE_GENERATION_SYSTEM_SKILL_KEY,
+    SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY,
+)
 
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
 
@@ -77,12 +82,25 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
     return (
         "Use `http_request` for Google Sheets and Drive API calls. Native Google Drive OAuth is applied "
         "automatically for `https://sheets.googleapis.com/` and `https://www.googleapis.com/drive/` requests.\n"
+        "For explicit user requests to find, read, append, or update Sheets, do not answer from the permission "
+        "status block alone. Attempt the documented `http_request` once and use the native HTTP result as the "
+        "source of truth; only give setup guidance after `http_request` returns a native connection/scope error "
+        "or the requested spreadsheet is not accessible. If a non-auth error indicates an unexpected URL, 404, "
+        "or malformed endpoint, correct the documented endpoint once instead of reporting setup guidance.\n"
         "If the user supplies a concrete spreadsheet ID, use it directly with the Sheets API; do not search Drive "
         "for that ID first unless the Sheets API says the file is missing or inaccessible. List accessible spreadsheets "
         "when the user gives a sheet title/name instead of an ID, or when troubleshooting missing access. This integration "
         "uses Google `drive.file`, so missing spreadsheets may need to be selected in Google Picker first.\n"
+        "When the user names an A1 range such as `Leads!A1:D5`, call the Sheets values endpoint directly: "
+        "`/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}`. Do not call spreadsheet metadata first "
+        "unless the user asked for tabs/metadata or the range is ambiguous.\n"
         "When the user asks to find or search for one of their sheets by name, use Drive file discovery over "
         "connected files. Do not use web search or public `docs.google.com` results to choose a private sheet.\n"
+        "If Drive discovery returns one or more files for a name/title search, answer with the accessible matching "
+        "spreadsheet names and IDs/links from that result. Do not ask a clarification question just because a returned "
+        "match is not an exact title match, unless the user required an exact match or asks you to choose one before "
+        "a read/write action. If the user only asked which sheets you can access, send the list as the final answer; "
+        "do not ask whether to read the sheet or search again.\n"
         f"{setup_text}"
         "For Drive spreadsheet discovery, first build the complete `q` string in your reasoning, then URL-encode it "
         "and call `http_request`. The canonical base query is exactly "
@@ -92,6 +110,9 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
         "omit the name predicate and use the canonical base query instead. If Drive returns an error with "
         "`location: q`, repair the query once with the canonical base query plus any known name predicate; do not "
         "retry the same malformed URL.\n"
+        "Exact Drive discovery URL examples:\n"
+        "- List accessible spreadsheets: `https://www.googleapis.com/drive/v3/files?q=mimeType%20%3D%20%27application%2Fvnd.google-apps.spreadsheet%27%20and%20trashed%20%3D%20false&fields=files(id,name,mimeType,webViewLink)&pageSize=100`\n"
+        "- Search by known title text: `https://www.googleapis.com/drive/v3/files?q=mimeType%20%3D%20%27application%2Fvnd.google-apps.spreadsheet%27%20and%20trashed%20%3D%20false%20and%20name%20contains%20%27Q2%20Sales%20Tracker%27&fields=files(id,name,mimeType,webViewLink)&pageSize=100`\n"
         "Common calls:\n"
         "- Search/list accessible spreadsheets: GET https://www.googleapis.com/drive/v3/files with "
         "fields=files(id,name,mimeType,webViewLink), pageSize=100, and a complete `q` filter such as "
@@ -118,7 +139,11 @@ def _apollo_native_prompt_instructions(agent) -> str:
         "Use `http_request` for Apollo REST API calls. Native Apollo OAuth is applied automatically for "
         "`https://api.apollo.io/` requests and the Apollo profile endpoint "
         "`https://app.apollo.io/api/v1/users/api_profile`.\n"
-        f"{setup_text}Use "
+        "For explicit user requests to use Apollo, do not answer from the permission status block alone. Attempt "
+        "the documented Apollo `http_request` once and use the native HTTP result as the source of truth; only "
+        "give setup guidance after the request returns a native connection/scope error.\n"
+        f"{setup_text}"
+        "Use "
         "`https://api.apollo.io/api/v1/...` for Apollo API work unless a documented OAuth metadata endpoint "
         "specifically uses `https://app.apollo.io/api/v1/...`.\n"
         "Use bounded requests with explicit filters plus `page` and `per_page`; avoid broad unbounded exports or "
@@ -171,9 +196,21 @@ def _hubspot_native_prompt_instructions(agent) -> str:
     return (
         "Use `http_request` for HubSpot REST API calls. Native HubSpot OAuth is applied automatically for "
         "`https://api.hubapi.com/` requests.\n"
+        "For explicit user requests to use HubSpot, do not answer from the permission status block alone. Attempt "
+        "the documented HubSpot `http_request` once and use the native HTTP result as the source of truth; only "
+        "give setup guidance after the request returns a native connection/scope error.\n"
         f"{setup_text}"
         "Use HubSpot CRM v3 endpoints for core CRM work. Keep requests bounded with explicit filters, "
         "`limit`, and `after` pagination where applicable; report when more pages remain.\n"
+        "For HubSpot search requests, include every user-provided constraint in `filterGroups.filters` "
+        "using HubSpot's documented camelCase JSON keys (`filterGroups`, `propertyName`, `operator`, "
+        "`value`). For city/location company searches, add a `city` filter with operator `EQ` and the "
+        "requested city value in the search body; do not broaden to lifecycle stage alone. "
+        "For lifecycle stage, use propertyName `lifecyclestage`, operator `EQ`, and the requested value such "
+        "as `customer`; do not rely on post-filtering the first page.\n"
+        "After a successful HubSpot search/read response, summarize the returned JSON content directly and send "
+        "the answer. Do not call `read_file` for `$[/object/result_*]` placeholders or move a first-page search "
+        "result into SQLite unless the user asked for analysis that requires it.\n"
         "Representative calls:\n"
         "- Search contacts: POST `https://api.hubapi.com/crm/v3/objects/contacts/search`\n"
         "- Search companies: POST `https://api.hubapi.com/crm/v3/objects/companies/search`\n"
@@ -226,6 +263,10 @@ CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
         "Use `create_custom_tool` to create or update sandboxed Python tools when the work is repetitive, "
         "deterministic, structured-data oriented, or would otherwise require several similar tool calls. "
         "A short tool beats manually shuttling rows, JSON, or API responses through context.\n"
+        "When the user explicitly asks to create a custom tool, call `create_custom_tool` before manually doing "
+        "the requested API/MCP/pagination work; do not substitute direct `http_request`, MCP, or SQLite loops for "
+        "the requested custom-tool implementation. If `create_custom_tool` is already enabled, use it directly; "
+        "do not call `search_tools` or fetch sample pages first.\n"
         "Strong triggers: repeated MCP/API calls, pagination/cursors, scraping fan-out, sync/import jobs, "
         "bulk INSERT/UPDATE/UPSERT work, row-by-row transforms, validation/dedupe, retries/backoff, "
         "checkpoint/resume flows, exports, and reports derived from shared SQLite data.\n"
@@ -233,14 +274,20 @@ CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
         "`from _gobii_ctx import main`; exact final line `if __name__ == '__main__': main(run)`; "
         "imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`; "
         "`parameters_schema.required` requires real source inputs plus "
-        "destinations/filters/limits/dates; SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`; "
-        "batch/limit tools return `remaining_work`/`next_cursor`; side-effect "
+        "destinations/filters/limits/dates; SQLite/context APIs: use `with ctx.sqlite() as db:` and pass "
+        "`ctx` into helper functions that need it; never call `main.sqlite()` or `main.call_tool()` because "
+        "`main` is only the entrypoint wrapper; never use `db = ctx.sqlite()`; "
+        "batch/limit tools return `remaining_work`/`next_cursor`; if `parameters_schema` contains "
+        "`limit`, `batch_limit`, or `batch_size`, the source code must literally return `remaining_work` "
+        "(0 when done) or `next_cursor`; side-effect "
         "tools return `do_not_repeat_manually=true` plus next_action text exactly like 'Do not repeat manually; verify read-only; "
         "do not append/add/update again.'\n"
-        "Development loop: call `create_custom_tool(source_path='/tools/my_tool.py', source_code=...)` first. "
-        "If rejected, fix every listed issue and retry create_custom_tool, not create_file. Do not pass only `source_path` unless "
-        "that file already exists. Invoke `custom_*`, inspect result/error, patch the same file with "
-        "`file_str_replace`, then re-run. Start with a small sample or limit, verify, then widen scope.\n"
+        "First-call rule: the first `create_custom_tool` call should be complete and validator-clean. Pass both "
+        "`source_path='/tools/my_tool.py'` and full `source_code`. Do not pass only `source_path` unless that "
+        "file already exists. Retrying is a fallback after an unexpected rejection, not the normal workflow; do not send "
+        "progress chat about validator retries. If rejected, fix every listed issue and retry create_custom_tool, "
+        "not create_file. Invoke `custom_*`, inspect result/error, patch the same file with `file_str_replace`, "
+        "then re-run. Start with a small sample or limit, verify, then widen scope.\n"
         "Source format: scripts run via `uv run`; add PEP 723 third-party deps, never stdlib deps; "
         "define `def run(params, ctx): ...`.\n"
         "Expose useful runtime parameters instead of hardcoding sample data, ids, filters, table names, URLs, "
@@ -394,6 +441,88 @@ HUBSPOT_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     ),
     prompt_instructions_renderer=_hubspot_native_prompt_instructions,
     prompt_context_renderer=_hubspot_native_prompt_context,
+)
+
+
+SELF_IMAGE_GENERATION_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=SELF_IMAGE_GENERATION_SYSTEM_SKILL_KEY,
+    name="Self Image Generation",
+    search_summary="Generate and send images of this Gobii itself using its private visual identity.",
+    tool_names=(GET_SELF_VISUAL_IDENTITY_TOOL_NAME, "create_image"),
+    enables=(
+        "retrieve this Gobii's own stable visual description just in time",
+        "generate selfies, avatars, portraits, headshots, and profile photos of this Gobii",
+        "attach generated self-images to SMS, email, web chat, or peer messages",
+    ),
+    use_when=(
+        "the user asks this Gobii for a selfie",
+        "the user asks for an avatar, portrait, headshot, profile photo, or image of the Gobii itself",
+        "the user asks what this Gobii looks like and wants an image generated or sent",
+        "a generated image should depict this agent rather than a generic asset",
+    ),
+    query_aliases=(
+        "selfie",
+        "send me a selfie",
+        "self image",
+        "image of yourself",
+        "picture of yourself",
+        "photo of yourself",
+        "gobii avatar",
+        "agent avatar",
+        "agent portrait",
+        "profile photo",
+    ),
+    prompt_instructions=(
+        "For any request to create, show, or send a selfie, avatar, portrait, headshot, profile photo, or image "
+        "of yourself/this Gobii, first call `get_self_visual_identity`, then call `create_image` with a prompt "
+        "that includes the returned `visual_description` and the user's requested style/context. "
+        "After `create_image` succeeds, deliver the generated file by passing the exact `create_image.attach` value "
+        "to the requested send tool's `attachments` field, for example `send_sms.attachments`. Preserve the full "
+        "square-bracketed placeholder like `$[/exports/selfie.png]`; do not rewrite it as `$/exports/selfie.png`. "
+        "Body text alone does "
+        "not attach files. Do not paste the raw visual description to the user unless they explicitly ask for it, "
+        "and do not use this skill for ordinary non-image text tasks."
+    ),
+)
+
+
+SELF_VIDEO_GENERATION_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY,
+    name="Self Video Generation",
+    search_summary="Generate and send videos of this Gobii itself using its private visual identity.",
+    tool_names=(GET_SELF_VISUAL_IDENTITY_TOOL_NAME, "create_video"),
+    enables=(
+        "retrieve this Gobii's own stable visual description just in time",
+        "generate short videos, clips, and animations depicting this Gobii",
+        "attach generated self-videos to SMS, email, web chat, or peer messages",
+    ),
+    use_when=(
+        "the user asks this Gobii for a video of itself",
+        "the user asks for a short clip or animation of the Gobii itself",
+        "the user asks this Gobii to make a video of itself waving, speaking, moving, or doing an action",
+        "a generated video should depict this agent rather than a generic subject",
+    ),
+    query_aliases=(
+        "self video",
+        "video of yourself",
+        "send me a video of yourself",
+        "make a video of yourself",
+        "clip of yourself",
+        "gobii video",
+        "agent video",
+        "video avatar",
+    ),
+    prompt_instructions=(
+        "For any request to create, show, or send a video, clip, or animation of yourself/this Gobii, first call "
+        "`get_self_visual_identity`, then call `create_video` with a prompt that includes the returned "
+        "`visual_description` plus the requested action, motion, style, duration, and framing. "
+        "After `create_video` succeeds, deliver the generated file by passing the exact `create_video.attach` value "
+        "to the requested send tool's `attachments` field, for example `send_sms.attachments`. Preserve the full "
+        "square-bracketed placeholder like `$[/exports/self-video.mp4]`; do not rewrite it as `$/exports/self-video.mp4`. "
+        "Body text alone does "
+        "not attach files. Do not paste the raw visual description to the user unless they explicitly ask for it, "
+        "and do not use this skill for ordinary non-video text tasks."
+    ),
 )
 
 
@@ -764,6 +893,8 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,
     HUBSPOT_NATIVE_SYSTEM_SKILL.skill_key: HUBSPOT_NATIVE_SYSTEM_SKILL,
+    SELF_IMAGE_GENERATION_SYSTEM_SKILL.skill_key: SELF_IMAGE_GENERATION_SYSTEM_SKILL,
+    SELF_VIDEO_GENERATION_SYSTEM_SKILL.skill_key: SELF_VIDEO_GENERATION_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     DISCORD_NATIVE_SYSTEM_SKILL.skill_key: DISCORD_NATIVE_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,

@@ -131,7 +131,11 @@ _GOOGLE_SHEETS_TOOL_DESCRIPTIONS = {
     "google_sheets-get-spreadsheet-info": "Get Google Sheets spreadsheet metadata; use when the user asks for spreadsheet info.",
     "google_sheets-create-spreadsheet": "Create a Google Sheets spreadsheet.",
     "google_sheets-read-rows": "Read rows from a Google Sheets worksheet.",
-    "google_sheets-get-spreadsheet-by-id": "Open a Google Sheets spreadsheet by ID when asked to open/get by ID; for spreadsheet info metadata, use google_sheets-get-spreadsheet-info.",
+    "google_sheets-get-spreadsheet-by-id": (
+        "Open a Google Sheets spreadsheet by ID only when asked to open/get the spreadsheet itself. "
+        "Do not use for row/range reads or criteria lookups; use google_sheets-get-values-in-range, "
+        "google_sheets-read-rows, or google_sheets-find-row for those requests."
+    ),
     "google_sheets-get-current-user": "Return the connected Google Sheets account user.",
     "google_sheets-add-rows": "Append rows to a Google Sheets worksheet.",
 }
@@ -204,9 +208,12 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "eval_send_outreach_batch": {
         "description": (
             "Deterministic eval tool for sending the next bounded outreach batch from an already-approved queue. "
-            "Use this directly; do not call search_tools first. "
-            "The result may include remaining_work or next_cursor; if work remains and no schedule exists, continue "
-            "bounded work or set a resume schedule before stopping."
+            "Use this directly; do not call search_tools or sqlite_batch preflight reads first. "
+            "The result may include remaining_work or next_cursor; if work remains and no schedule exists, set a "
+            "resume schedule before stopping, especially for high burn or large queues. Set only the schedule "
+            "unless the user explicitly requested a charter change. After setting the schedule, stop the current "
+            "turn; do not immediately resume the queued batch. Do not rerun the same side-effect batch or reread "
+            "__tool_results before setting that schedule."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },
@@ -214,7 +221,11 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": (
             "Deterministic eval tool for verifying a bounded batch of sourcing candidates against location, company, "
             "and tenure constraints. Use this directly; do not call search_tools first. Partial results may include "
-            "remaining_work or next_cursor."
+            "verified records plus remaining_work or next_cursor; report verified partial records and source limits "
+            "from the visible result before update_plan, SQLite/message rereads, or another batch. If work remains "
+            "and no schedule exists after the partial report, set a resume schedule and stop the current turn, or "
+            "continue one bounded batch without creating a runtime plan. Set only the schedule unless the user "
+            "explicitly requested a charter change. Do not treat a newly set schedule as a same-turn trigger."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },
@@ -222,7 +233,9 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": (
             "Deterministic eval tool for preparing a bounded follow-up batch. Use this directly; do not call "
             "search_tools first. If it says to wait for the next scheduled run while returning remaining_work, "
-            "that guidance only makes sense when a schedule exists or is being set."
+            "that guidance only makes sense when a schedule exists or is being set. When no schedule exists, "
+            "set only a resume schedule before verification reads or stopping; do not rewrite charter unless the "
+            "user explicitly requested a charter change."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },
@@ -230,7 +243,9 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         tool_name: {
             "description": (
                 "Currently enabled Google Sheets tool. "
-                f"Use this directly; do not call search_tools first. {description}"
+                "Use this directly; do not call search_tools first. "
+                "Deterministic fixture spreadsheet IDs such as sheet-123 are valid spreadsheet_id values; "
+                f"use them directly instead of asking for a real Sheets URL. {description}"
             ),
             "parameters": _GENERIC_SPREADSHEET_SCHEMA,
         }

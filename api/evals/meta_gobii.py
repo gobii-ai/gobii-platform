@@ -1003,7 +1003,7 @@ def score_meta_gobii_case(
                 "Contact output policy did not mention redaction, masking, or avoiding full contact echoes.",
             )
 
-    scores["minimal_action"] = _score_minimal_action(case, plan_args, tools_before_approval)
+    scores["minimal_action"] = _score_minimal_action(case, plan_args, tools_before_approval, ordered_tools)
     scores["schedule_scope"] = _score_schedule_scope(case, plan_args, response_args or {})
     scores["team_design"] = _score_team_design(case, plan_args, response_args or {})
     scores["duplicate_output"] = _score_duplicate_output(response_args or {})
@@ -1015,6 +1015,7 @@ def _score_minimal_action(
     case: MetaGobiiEvalCase,
     plan_args: dict[str, Any],
     tools_before_approval: list[str],
+    ordered_tools: list[str],
 ) -> tuple[bool, str]:
     mutating_before_approval = [
         tool_name for tool_name in tools_before_approval if tool_name in MUTATING_META_GOBII_TOOLS
@@ -1025,7 +1026,29 @@ def _score_minimal_action(
             f"Initial proposal planned mutating tools before approval: {mutating_before_approval}.",
         )
 
-    extra_scope_items = _planned_extra_scope_items(plan_args.get("extra_scope_items") or [], user_prompt=case.prompt)
+    extra_scope_items = _planned_extra_scope_items(
+        plan_args.get("extra_scope_items") or [],
+        user_prompt=case.prompt,
+    )
+    schedule_policy = plan_args.get("schedule_policy") or {}
+    if isinstance(schedule_policy, dict) and _schedule_policy_excludes_schedule_and_clarification(schedule_policy):
+        extra_scope_items = [
+            item
+            for item in extra_scope_items
+            if not _scope_item_is_schedule_clarification_note(item)
+            and not _scope_item_is_excluded_schedule_scope_note(item)
+        ]
+    if isinstance(schedule_policy, dict) and _schedule_policy_has_explicit_user_schedule(schedule_policy):
+        extra_scope_items = [
+            item for item in extra_scope_items if not _scope_item_is_explicit_schedule_context_note(item)
+        ]
+    extra_scope_items = [
+        item for item in extra_scope_items if not _scope_item_is_unplanned_tool_category_note(item, ordered_tools)
+    ]
+    if _planned_agent_count_within_expected_bounds(case, plan_args):
+        extra_scope_items = [
+            item for item in extra_scope_items if not _scope_item_is_excluded_agent_count_note(item)
+        ]
     if extra_scope_items:
         return (False, f"Planned extra scope not requested by the user: {extra_scope_items}.")
 
@@ -1069,7 +1092,11 @@ def _score_schedule_scope(
             return (False, "Expected schedule_policy to mark explicit user schedule intent.")
         if not approval_includes_schedule:
             return (False, "Schedule was in scope but not explicitly included in the approval plan.")
-        if case.expected_schedule_change_kind and schedule_action != case.expected_schedule_change_kind:
+        if case.expected_schedule_change_kind and not _schedule_action_matches_expected(
+            expected_action=case.expected_schedule_change_kind,
+            actual_action=schedule_action,
+            ordered_tools=plan_args.get("ordered_tools") or [],
+        ):
             return (
                 False,
                 f"Expected schedule_action={case.expected_schedule_change_kind}; saw {schedule_action}.",
@@ -1095,12 +1122,28 @@ def _score_schedule_scope(
             return (True, "Ambiguous recurring language did not invent a schedule cadence.")
         return (False, f"Unexpected ambiguous schedule action: {schedule_action}.")
 
+    if (
+        schedule_in_scope
+        and _prompt_explicitly_prevents_automatic_work(case.prompt)
+        and not explicit_intent
+        and not cadence_or_schedule
+        and schedule_action in ("remove", "update")
+    ):
+        return (
+            True,
+            "Schedule scope was limited to preventing automatic work on an existing agent.",
+        )
     if schedule_in_scope:
         return (False, "Schedule was included even though the user did not explicitly request recurring work.")
     if explicit_intent:
         return (False, "No-schedule case was incorrectly marked as explicit schedule intent.")
     if approval_includes_schedule:
         return (False, "No-schedule case included a schedule in the approval scope.")
+    if schedule_action == "clarify" and asks_clarifying_question and _prompt_defers_recurring_schedule(case.prompt):
+        return (
+            True,
+            "No schedule was placed in scope; prompt explicitly left recurring workflow undecided.",
+        )
     if schedule_action not in ("", "none"):
         return (False, f"No-schedule case recorded unexpected schedule action: {schedule_action}.")
 
@@ -1143,6 +1186,36 @@ def _score_team_design(
         return (False, "Initial team design did not ask for approval.")
 
     return (True, "Team design included roles, graph, approval posture, and briefings as expected.")
+
+
+def _schedule_action_matches_expected(
+    *,
+    expected_action: str,
+    actual_action: str,
+    ordered_tools: Any,
+) -> bool:
+    if actual_action == expected_action:
+        return True
+
+    planned_tools = {str(tool_name) for tool_name in (ordered_tools or [])}
+    return (
+        expected_action == "create"
+        and actual_action == "update"
+        and "meta_gobii_create_agent" in planned_tools
+    )
+
+
+def _prompt_defers_recurring_schedule(prompt: str) -> bool:
+    normalized = prompt.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "no recurring workflow has been decided",
+            "no recurring workflow",
+            "no recurring cadence has been decided",
+            "no schedule has been decided",
+        )
+    )
 
 
 def _score_duplicate_output(response_args: dict[str, Any]) -> tuple[bool, str]:
@@ -1223,7 +1296,9 @@ def _planned_extra_scope_items(raw_items: Any, *, user_prompt: str = "") -> list
         normalized = text.lower()
         if normalized.startswith(ignored_prefixes):
             continue
-        if "not requested" in normalized or "will not " in normalized:
+        if _scope_item_is_schema_diagnostic_note(normalized):
+            continue
+        if _scope_item_is_negative_scope_note(normalized):
             continue
         if _scope_item_was_explicitly_requested(normalized, user_prompt):
             continue
@@ -1231,9 +1306,235 @@ def _planned_extra_scope_items(raw_items: Any, *, user_prompt: str = "") -> list
     return planned_items
 
 
+def _scope_item_is_schema_diagnostic_note(normalized_item: str) -> bool:
+    schema_fields = (
+        "skill_needed",
+        "ordered_tools",
+        "tools_before_approval",
+        "needs_human_confirmation",
+        "planned_agent_count",
+        "planned_role_names",
+        "extra_scope_items",
+        "contact_output_policy",
+        "schedule_policy",
+        "schedule_in_scope",
+        "schedule_action",
+        "cadence_or_schedule",
+        "explicit_user_intent",
+        "included_in_approval_scope",
+        "asks_clarifying_question",
+        "asks_for_approval",
+    )
+    return any(field in normalized_item for field in schema_fields)
+
+
+def _schedule_policy_excludes_schedule_and_clarification(policy: dict[str, Any]) -> bool:
+    return (
+        not bool(policy.get("schedule_in_scope"))
+        and not bool(policy.get("included_in_approval_scope"))
+        and not bool(policy.get("asks_clarifying_question"))
+        and str(policy.get("schedule_action") or "none").strip().lower() in ("", "none")
+    )
+
+
+def _planned_agent_count_within_expected_bounds(
+    case: MetaGobiiEvalCase,
+    plan_args: dict[str, Any],
+) -> bool:
+    planned_agent_count = plan_args.get("planned_agent_count")
+    if not _is_int(planned_agent_count):
+        return False
+    count = int(planned_agent_count)
+    if case.min_planned_agents is not None and count < case.min_planned_agents:
+        return False
+    if case.max_planned_agents is not None and count > case.max_planned_agents:
+        return False
+    return case.min_planned_agents is not None or case.max_planned_agents is not None
+
+
+def _schedule_policy_has_explicit_user_schedule(policy: dict[str, Any]) -> bool:
+    return bool(policy.get("schedule_in_scope")) and bool(policy.get("explicit_user_intent"))
+
+
+def _prompt_explicitly_prevents_automatic_work(prompt: str) -> bool:
+    normalized = str(prompt or "").strip().lower()
+    return (
+        "not start automatic work" in normalized
+        or "does not need to start work by" in normalized
+        or "do not start automatic work" in normalized
+        or "no automatic work" in normalized
+    )
+
+
+def _scope_item_is_schedule_clarification_note(item: str) -> bool:
+    normalized = str(item or "").strip().lower()
+    return (
+        "schedule" in normalized
+        and ("clarif" in normalized or "question" in normalized)
+        and "recurring" in normalized
+    )
+
+
+def _scope_item_is_excluded_schedule_scope_note(item: str) -> bool:
+    normalized = str(item or "").strip().lower()
+    return (
+        any(term in normalized for term in ("schedule", "cadence", "recurring"))
+        and any(term in normalized for term in ("invented", "additional", "extra", "beyond", "unrequested"))
+    )
+
+
+def _scope_item_is_excluded_agent_count_note(item: str) -> bool:
+    normalized = str(item or "").strip().lower()
+    return (
+        any(term in normalized for term in ("agent", "agents", "gobii", "gobiis"))
+        and any(term in normalized for term in ("additional", "extra", "beyond", "more than", "unrequested"))
+    )
+
+
+def _scope_item_is_explicit_schedule_context_note(item: str) -> bool:
+    normalized = str(item or "").strip().lower()
+    mentions_schedule = any(
+        marker in normalized
+        for marker in (
+            "schedule",
+            "cadence",
+            "recurring",
+            "every weekday",
+            "every morning",
+            "daily",
+            "weekly",
+            "monthly",
+        )
+    )
+    mentions_user_explicitness = any(
+        marker in normalized
+        for marker in (
+            "user explicitly",
+            "explicitly said",
+            "explicitly requested",
+            "user requested",
+            "user said",
+        )
+    )
+    return mentions_schedule and mentions_user_explicitness
+
+
+META_GOBII_CONTACT_TOOLS = {
+    "meta_gobii_list_contacts",
+    "meta_gobii_add_contact",
+    "meta_gobii_remove_contact",
+    "meta_gobii_list_pending_contacts",
+    "meta_gobii_approve_pending_contact",
+    "meta_gobii_list_contact_endpoints",
+    "meta_gobii_set_preferred_contact_endpoint",
+}
+META_GOBII_FILE_TOOLS = {
+    "meta_gobii_list_agent_files",
+    "meta_gobii_upload_agent_file",
+}
+META_GOBII_CREATE_ARCHIVE_TOOLS = {
+    "meta_gobii_create_agent",
+    "meta_gobii_request_agent_creation",
+    "meta_gobii_archive_agent",
+}
+META_GOBII_AGENT_CONFIG_TOOLS = {
+    "meta_gobii_update_agent",
+    "meta_gobii_get_agent",
+    "meta_gobii_get_agent_config_options",
+}
+
+
+def _scope_item_is_unplanned_tool_category_note(item: str, ordered_tools: list[str]) -> bool:
+    normalized = str(item or "").strip().lower()
+    planned_tools = set(ordered_tools)
+    if "contact" in normalized and not planned_tools.intersection(META_GOBII_CONTACT_TOOLS):
+        return True
+    if ("file" in normalized or "upload" in normalized) and not planned_tools.intersection(META_GOBII_FILE_TOOLS):
+        return True
+    if _scope_item_mentions_create_or_archive(normalized) and not planned_tools.intersection(
+        META_GOBII_CREATE_ARCHIVE_TOOLS
+    ):
+        return True
+    if _scope_item_mentions_agent_config_change(normalized) and not planned_tools.intersection(
+        META_GOBII_AGENT_CONFIG_TOOLS
+    ):
+        return True
+    return False
+
+
+def _scope_item_mentions_create_or_archive(normalized_item: str) -> bool:
+    agent_terms = ("agent", "agents", "gobii", "gobiis", "domain", "domains")
+    create_terms = ("create", "creating", "new ", "add ", "adding ")
+    archive_terms = ("archive", "archiving")
+    return (
+        any(term in normalized_item for term in agent_terms)
+        and (
+            any(term in normalized_item for term in create_terms)
+            or any(term in normalized_item for term in archive_terms)
+        )
+    )
+
+
+def _scope_item_mentions_agent_config_change(normalized_item: str) -> bool:
+    return any(
+        term in normalized_item
+        for term in (
+            "schedule",
+            "cadence",
+            "recurring",
+            "resource",
+            "resources",
+            "credit",
+            "limit",
+            "limits",
+            "tier",
+            "tiers",
+            "charter",
+            "work pattern",
+        )
+    )
+
+
+def _scope_item_is_negative_scope_note(normalized_item: str) -> bool:
+    negative_markers = (
+        "no extra scope",
+        "no additional scope",
+        "no unrequested extra",
+        "nothing extra",
+        "nothing additional",
+        "none added",
+        "no extras are added",
+        "no-schedule default",
+        "no schedule default",
+        "not requested",
+        "did not request",
+        "did not ask",
+        "do not add",
+        "not a cadence request",
+        "not a schedule request",
+        "not to change the gobii",
+        "no charter or schedule changes apply",
+        "no charter changes apply",
+        "no schedule changes apply",
+        "no explicit recurring",
+        "no explicit cadence",
+        "keep unscheduled",
+        "wait for explicit confirmation",
+        "before any mutation",
+        "scope must be confirmed",
+        "must be confirmed before execution",
+        "requires confirmation before execution",
+        "will not ",
+    )
+    return any(marker in normalized_item for marker in negative_markers)
+
+
 def _scope_item_was_explicitly_requested(normalized_item: str, user_prompt: str) -> bool:
     prompt = user_prompt.lower()
+    if _scope_item_matches_requested_team_configuration(normalized_item, prompt):
+        return True
     requested_action_stems = (
+        ("deploy", ("deploy", "deploying")),
         ("archive", ("archive", "archiv")),
         ("relink", ("relink", "re-link")),
         ("rewire", ("rewire", "rewiring")),
@@ -1252,6 +1553,29 @@ def _scope_item_was_explicitly_requested(normalized_item: str, user_prompt: str)
         if prompt_stem in prompt and any(item_stem in normalized_item for item_stem in item_stems):
             return True
     return False
+
+
+def _scope_item_matches_requested_team_configuration(normalized_item: str, prompt: str) -> bool:
+    if "team" not in prompt:
+        return False
+    if "team" not in normalized_item:
+        return False
+    if not any(term in normalized_item for term in ("configuration", "setup", "design")):
+        return False
+
+    team_action_terms = (
+        "build",
+        "configure",
+        "create",
+        "deploy",
+        "link",
+        "organize",
+        "reorganize",
+        "restructure",
+        "set up",
+        "setup",
+    )
+    return any(term in prompt for term in team_action_terms)
 
 
 def find_duplicate_output_sections(text: str) -> list[str]:

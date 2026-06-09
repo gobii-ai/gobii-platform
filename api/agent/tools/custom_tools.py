@@ -596,7 +596,6 @@ _BATCH_PROGRESS_TERMS = (
 )
 
 _REPLAY_PREVENTION_TERMS = (
-    "do_not_repeat_manually",
     "read-only",
     "read only",
     "do not repeat",
@@ -605,10 +604,13 @@ _REPLAY_PREVENTION_TERMS = (
     "not another append",
     "not replay",
 )
+_DO_NOT_REPEAT_TRUE_RE = re.compile(
+    r"['\"]?do_not_repeat_manually['\"]?\s*[:=]\s*(?:True|true|1)\b"
+)
 _SIDE_EFFECT_CONTEXT_TERMS = ("side_effect", "sheet", "worksheet", "external", "ctx.call_tool", "call_tool")
 _SIDE_EFFECT_ACTION_RE = re.compile(
     r"\b(?:append(?:ed|ing)?|sync(?:ed|ing)?|insert(?:ed|ing)?|update(?:d|ing)?|"
-    r"upsert(?:ed|ing)?|delete(?:d|ing)?|write|writes|written)\b"
+    r"upsert(?:ed|ing)?|delete(?:d|ing)?|write|writes|wrote|written)\b"
 )
 
 
@@ -676,14 +678,100 @@ def _has_batch_progress_signal(tree: ast.Module) -> bool:
 
 def _needs_replay_prevention_signal(source_text: str) -> bool:
     source_lower = source_text.lower()
-    return any(term in source_lower for term in _SIDE_EFFECT_CONTEXT_TERMS) and bool(
-        _SIDE_EFFECT_ACTION_RE.search(source_lower)
-    )
+    if not _SIDE_EFFECT_ACTION_RE.search(source_lower):
+        return False
+
+    if "remaining_work" in source_lower or "next_cursor" in source_lower:
+        return False
+
+    if any(term in source_lower for term in ("side_effect", "sheet", "worksheet", "external")):
+        return True
+
+    if "ctx.call_tool" in source_lower or "call_tool" in source_lower:
+        return not any(term in source_lower for term in ("remaining_work", "next_cursor"))
+
+    return False
 
 
 def _has_replay_prevention_signal(source_text: str) -> bool:
     source_lower = source_text.lower()
-    return any(term in source_lower for term in _REPLAY_PREVENTION_TERMS)
+    return bool(_DO_NOT_REPEAT_TRUE_RE.search(source_text)) or any(term in source_lower for term in _REPLAY_PREVENTION_TERMS)
+
+
+def _node_contains_url_sample_literal(node: ast.AST) -> bool:
+    for child in ast.walk(node):
+        if (
+            isinstance(child, ast.Constant)
+            and isinstance(child.value, str)
+            and ("http://" in child.value.lower() or "https://" in child.value.lower())
+        ):
+            return True
+    return False
+
+
+def _is_params_get_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "params"
+    )
+
+
+def _has_builtin_url_sample_default(tree: ast.Module) -> bool:
+    for node in ast.walk(tree):
+        if _is_params_get_call(node) and len(node.args) >= 2 and _node_contains_url_sample_literal(node.args[1]):
+            return True
+        if not isinstance(node, ast.BoolOp) or not isinstance(node.op, ast.Or):
+            continue
+        if not node.values or not _is_params_get_call(node.values[0]):
+            continue
+        if any(_node_contains_url_sample_literal(value) for value in node.values[1:]):
+            return True
+    return False
+
+
+def _result_has_replay_prevention(payload: Dict[str, Any]) -> bool:
+    if payload.get("do_not_repeat_manually") is True:
+        return True
+    text = json.dumps(payload, sort_keys=True, default=str).lower()
+    return any(term in text for term in _REPLAY_PREVENTION_TERMS)
+
+
+def _result_indicates_completed_side_effect(payload: Dict[str, Any]) -> bool:
+    if payload.get("dry_run") is True:
+        return False
+    status = str(payload.get("status") or "").lower()
+    if "dry_run" in status or "partial" in status:
+        return False
+    text = json.dumps(payload, sort_keys=True, default=str).lower()
+    if not _SIDE_EFFECT_ACTION_RE.search(text):
+        return False
+    if payload.get("remaining_work") in (False, 0, "0", "false", "False"):
+        return True
+    return "complete" in status or "success" in status or payload.get("side_effects_completed") is True
+
+
+def _guard_custom_tool_result_replay(source_text: str, parsed_result: Any) -> Any:
+    if not isinstance(parsed_result, dict) or _result_has_replay_prevention(parsed_result):
+        return parsed_result
+
+    source_lower = source_text.lower()
+    result_text = json.dumps(parsed_result, sort_keys=True, default=str).lower()
+    side_effect_context = any(term in source_lower or term in result_text for term in _SIDE_EFFECT_CONTEXT_TERMS)
+    if not side_effect_context or not _result_indicates_completed_side_effect(parsed_result):
+        return parsed_result
+
+    guarded_result = dict(parsed_result)
+    replay_guidance = "Do not repeat manually; verify read-only; do not append/add/update again."
+    guarded_result["do_not_repeat_manually"] = True
+    next_action = guarded_result.get("next_action")
+    if isinstance(next_action, str) and next_action.strip():
+        guarded_result["next_action"] = f"{replay_guidance} {next_action.strip()}"
+    else:
+        guarded_result["next_action"] = replay_guidance
+    return guarded_result
 
 
 def _invalid_datetime_timezone_refs(tree: ast.Module) -> list[str]:
@@ -795,6 +883,12 @@ def _validate_schema_runtime_params_for_source(
     required_names = {name for name in required if isinstance(name, str)} if isinstance(required, list) else set()
     if required_names & input_like_names:
         return None
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return None
+    if not _has_builtin_url_sample_default(tree):
+        return None
 
     return (
         "URL/list validator custom tools must require explicit runtime inputs instead of relying on built-in samples "
@@ -900,6 +994,59 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
 
 def _normalize_pep723_fences(source_text: str) -> str:
     return re.sub(r"(?m)^(# ///)[ \t]+$", r"\1", source_text)
+
+
+_MAIN_IMPORT_LINE = "from _gobii_ctx import main"
+_MAIN_GUARD_LINE = "if __name__ == '__main__': main(run)"
+_MAIN_IMPORT_RE = re.compile(r"(?m)^from[ \t]+_gobii_ctx[ \t]+import[ \t]+main[ \t]*(?:#.*)?$")
+_SQLITE_ROW_GET_RE = re.compile(r"\b((?:[A-Za-z_]\w*_)?row)\.get\(")
+_TRAILING_MAIN_GUARD_RE = re.compile(
+    r"\n*if[ \t]+__name__[ \t]*==[ \t]*[\"']__main__[\"']:[ \t]*"
+    r"(?:\n[ \t]+from[ \t]+_gobii_ctx[ \t]+import[ \t]+main[ \t]*)?"
+    r"(?:\n[ \t]*)*"
+    r"(?:\n[ \t]+main\([ \t]*run[ \t]*\)[ \t]*|main\([ \t]*run[ \t]*\)[ \t]*)\Z",
+    re.MULTILINE,
+)
+
+
+def _leading_insert_index_after_pep723(lines: list[str]) -> int:
+    if not lines or lines[0].strip() != "# /// script":
+        return 0
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "# ///":
+            return index + 1
+    return 0
+
+
+def _normalize_sqlite_row_get_calls(source_text: str) -> str:
+    if ".get(" not in source_text:
+        return source_text
+    if "sqlite3.Row" not in source_text and "row_factory" not in source_text:
+        return source_text
+    return _SQLITE_ROW_GET_RE.sub(lambda match: f"dict({match.group(1)}).get(", source_text)
+
+
+def _normalize_custom_tool_source_boilerplate(source_text: str) -> str:
+    normalized = _normalize_pep723_fences(source_text).replace("\r\n", "\n").replace("\r", "\n")
+
+    if not _MAIN_IMPORT_RE.search(normalized):
+        lines = normalized.splitlines()
+        insert_at = _leading_insert_index_after_pep723(lines)
+        while insert_at < len(lines) and not lines[insert_at].strip():
+            insert_at += 1
+        lines.insert(insert_at, _MAIN_IMPORT_LINE)
+        normalized = "\n".join(lines)
+
+    stripped = normalized.rstrip()
+    if _TRAILING_MAIN_GUARD_RE.search(stripped):
+        normalized = _TRAILING_MAIN_GUARD_RE.sub("\n\n" + _MAIN_GUARD_LINE, stripped)
+    elif "main(run)" not in stripped:
+        normalized = stripped + "\n\n" + _MAIN_GUARD_LINE
+    else:
+        normalized = stripped
+
+    normalized = _normalize_sqlite_row_get_calls(normalized)
+    return normalized.rstrip() + "\n"
 
 
 def validate_custom_tool_source_code(source_text: str, source_path: str) -> Optional[str]:
@@ -1018,9 +1165,10 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
             "description": (
                 "Create/update a sandboxed Python custom tool. "
                 "Use for 3+ repeated steps, API/MCP fan-out, pagination, sync/import, transforms, validation/dedupe, or bulk SQLite writes; err early. "
-                "Before the first call, verify: Exact import `from _gobii_ctx import main`; exact final line `if __name__ == '__main__': main(run)`; imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`; `parameters_schema.required` requires real source inputs plus destinations/filters/limits/dates; SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`; batch/limit tools return `remaining_work`/`next_cursor`; completed writes return do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
+                "If the user explicitly asks to create a custom tool, call create_custom_tool before manually doing the requested API/MCP/pagination work; do not substitute direct http_request/MCP/SQLite loops for the requested custom-tool implementation. "
+                "Before the first call, verify: Exact import `from _gobii_ctx import main`; exact final line `if __name__ == '__main__': main(run)`; imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`; `parameters_schema.required` requires real source inputs plus destinations/filters/limits/dates; SQLite/context APIs: use `with ctx.sqlite() as db:` and pass `ctx` into helper functions that need it; never call `main.sqlite()` or `main.call_tool()` because `main` is only the entrypoint wrapper; never use `db = ctx.sqlite()`; batch/limit tools return `remaining_work`/`next_cursor`; if parameters_schema contains `limit`, `batch_limit`, or `batch_size`, source_code must literally return `remaining_work` (0 when done) or `next_cursor`; every completed write batch returns do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' If more rows remain, say to re-run the custom tool for the next batch, not to manually append/update the completed batch. "
                 "Use PEP 723 for third-party deps such as `# dependencies = [\"requests[socks]\"]`; never list stdlib deps. "
-                "For one-shot creation call create_custom_tool with source_path='/tools/my_tool.py' + source_code; do not pass only `source_path` unless you already wrote that file; if rejected, fix every listed issue and retry create_custom_tool, not create_file. "
+                "First-call rule: the first create_custom_tool call should be complete and validator-clean. For one-shot creation pass source_path='/tools/my_tool.py' plus full source_code; do not pass only `source_path` unless you already wrote that file. Retrying is a fallback after an unexpected rejection, not the normal workflow; if rejected, fix every listed issue and retry create_custom_tool, not create_file. "
                 "For tool-to-tool calls use ctx.call_tool(name, params). Write durable data to the agent SQLite DB; do not ATTACH sandbox file paths. "
                 "Keep DB work inside the `with ctx.sqlite() as db:` block; after the block exits the DB is closed. Use cursor.rowcount/SELECT changes(); set db.row_factory = sqlite3.Row before SELECT/fetchall because later changes do not convert tuples and rows are not row.get(...). "
                 "For UTC timestamps use datetime.now(timezone.utc), not datetime.timezone. Expose runtime params for tables, filters, URLs, limits, cursors, or destinations; do not invoke custom_* with empty params unless it intentionally reads verified state. "
@@ -1137,7 +1285,7 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         return {"status": "error", "message": "source_code must be a string when provided."}
 
     if isinstance(source_code, str):
-        source_code = _normalize_pep723_fences(source_code)
+        source_code = _normalize_custom_tool_source_boilerplate(source_code)
         write_result = write_bytes_to_dir(
             agent=agent,
             content_bytes=source_code.encode("utf-8"),
@@ -1162,6 +1310,19 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         if source_error:
             return {"status": "error", "message": source_error}
         assert source_text is not None
+        normalized_source_text = _normalize_custom_tool_source_boilerplate(source_text)
+        if normalized_source_text != source_text:
+            write_result = write_bytes_to_dir(
+                agent=agent,
+                content_bytes=normalized_source_text.encode("utf-8"),
+                extension=".py",
+                mime_type="text/x-python",
+                path=source_path,
+                overwrite=True,
+            )
+            if write_result.get("status") != "ok":
+                return write_result
+            source_text = normalized_source_text
         validation_error = _validate_source_code(source_text, source_path)
         if validation_error:
             return {"status": "error", "message": validation_error, "source_path": source_path}
@@ -1317,6 +1478,7 @@ def execute_custom_tool(
             "stdout": cleaned_stdout,
             "stderr": result.get("stderr", ""),
         }
+    parsed_result = _guard_custom_tool_result_replay(source_text, parsed_result)
 
     response = {
         "status": "ok",

@@ -706,6 +706,13 @@ class BehaviorMicroHelperTests(TestCase):
         for tool_name in GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES:
             self.assertIn(tool_name, EVAL_SYNTHETIC_TOOL_DEFINITIONS)
             self.assertIn("do not call search_tools first", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+            self.assertIn("sheet-123", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+            self.assertIn("valid spreadsheet_id values", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+
+        by_id_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["google_sheets-get-spreadsheet-by-id"]["description"]
+        self.assertIn("only when asked to open/get the spreadsheet itself", by_id_description)
+        self.assertIn("Do not use for row/range reads or criteria lookups", by_id_description)
+        self.assertIn("google_sheets-find-row", by_id_description)
 
     def test_revenue_chart_eval_sqlite_mock_returns_revenue_rows(self):
         scenario = ScenarioRegistry.get("common_use_case_079_create_report_with_chart")
@@ -926,6 +933,7 @@ class BehaviorMicroHelperTests(TestCase):
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
         self.assertNotIn("google_sheets-list-spreadsheets", user_message)
         self.assertIn("google_sheets-read-rows", user_message)
+        self.assertNotIn("google_sheets_native", user_message)
         mock_search_apps.assert_not_called()
         mock_get_effective_pipedream_app_slugs_for_agent.assert_not_called()
         mock_enable_tools.assert_not_called()
@@ -1394,6 +1402,27 @@ class BehaviorMicroHelperTests(TestCase):
 
         self.assertTrue(should_stop)
         self.assertIn("config mutation", reason)
+
+    def test_eval_stop_policy_distinguishes_failed_sqlite_config_mutation_attempt(self):
+        self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET charter = 'Monitor competitors'"},
+            status="error",
+        )
+
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_sqlite_agent_config_mutation": True},
+        )
+        self.assertFalse(should_stop)
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_sqlite_agent_config_mutation_attempt": True},
+        )
+
+        self.assertTrue(should_stop)
+        self.assertIn("config mutation attempt", reason)
 
     def test_eval_stop_policy_stops_on_human_input_request(self):
         should_stop, _reason = should_stop_for_eval_policy(

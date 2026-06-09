@@ -161,7 +161,7 @@ HUBSPOT_NATIVE_CASES = (
                 body_terms=("amount", "25000"),
             ),
         ),
-        response_term_groups=(("deal_123",), ("25000",)),
+        response_term_groups=(("deal_123",), ("25000", "$25,000", "25,000")),
         tags=("deal_write",),
     ),
     HubSpotNativeCase(

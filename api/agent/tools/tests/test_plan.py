@@ -147,6 +147,51 @@ class UpdatePlanResearchSuppressionTests(TestCase):
 
         self.assertIsNone(result)
 
+    def test_research_status_transition_with_same_steps_is_skipped(self):
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Discovery search: Northstar Robotics + warehouse automation competitors",
+            status=PersistentAgentKanbanCard.Status.DOING,
+            priority=3,
+        )
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Scrape top source pages for Northstar and competitors",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=2,
+        )
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Synthesize investment memo with comparison table",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+
+        result = build_redundant_research_plan_skip_result(
+            self.agent,
+            {
+                "plan": [
+                    {
+                        "step": "Discovery search: Northstar Robotics + warehouse automation competitors",
+                        "status": "done",
+                    },
+                    {
+                        "step": "Scrape top source pages for Northstar and competitors",
+                        "status": "doing",
+                    },
+                    {
+                        "step": "Synthesize investment memo with comparison table",
+                        "status": "todo",
+                    },
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result["skipped"])
+        self.assertFalse(result["auto_sleep_ok"])
+
     def test_old_outbound_message_does_not_turn_redundant_plan_skip_into_sleep(self):
         agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,

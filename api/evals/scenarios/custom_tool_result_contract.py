@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from api.agent.tools.custom_tools import normalize_custom_tool_name
+from api.agent.tools.custom_tools import _read_source_text, normalize_custom_tool_name
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
@@ -254,6 +254,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             artifacts={"message": inbound},
         )
 
+        agent = PersistentAgent.objects.filter(id=agent_id).first()
         tool_calls = self._tool_calls_for_run(run_id, after=inbound.timestamp)
         create_calls = [call for call in tool_calls if call.tool_name == "create_custom_tool"]
         self.record_task_result(
@@ -326,7 +327,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             return
 
         create_call = create_calls[-1]
-        create_source_code = self._source_code_for_create_call(tool_calls, create_call)
+        create_source_code = self._source_code_for_create_call(tool_calls, create_call, agent=agent)
         local_pass, local_reason = self._local_create_tool_check(
             case,
             create_call,
@@ -334,7 +335,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             source_code_override=create_source_code,
         )
         for candidate_call in reversed(create_calls):
-            candidate_source_code = self._source_code_for_create_call(tool_calls, candidate_call)
+            candidate_source_code = self._source_code_for_create_call(tool_calls, candidate_call, agent=agent)
             candidate_pass, candidate_reason = self._local_create_tool_check(
                 case,
                 candidate_call,
@@ -537,24 +538,43 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
     @staticmethod
     def _source_code_origin(create_call: PersistentAgentToolCall, source_code: str | None) -> str:
         params = create_call.tool_params or {}
-        if str(params.get("source_code") or "").strip():
+        submitted_source = str(params.get("source_code") or "")
+        if source_code and submitted_source.strip() and source_code != submitted_source:
+            return "stored_filespace_source"
+        if submitted_source.strip():
             return "create_custom_tool.source_code"
         if source_code:
-            return "create_file.content"
+            return "stored_filespace_source"
         return "missing"
+
+    @staticmethod
+    def _create_call_completed(create_call: PersistentAgentToolCall) -> bool:
+        if str(getattr(create_call, "status", "") or "").lower() == "error":
+            return False
+        decoded_result = CustomToolResultContractScenario._decoded_tool_result(create_call.result)
+        if not isinstance(decoded_result, dict):
+            return False
+        return str(decoded_result.get("status") or "").lower() != "error"
 
     @classmethod
     def _source_code_for_create_call(
         cls,
         tool_calls: list[PersistentAgentToolCall],
         create_call: PersistentAgentToolCall,
+        *,
+        agent: PersistentAgent | None = None,
     ) -> str | None:
         params = create_call.tool_params or {}
+        source_path = params.get("source_path")
+        if agent is not None and isinstance(source_path, str) and source_path and cls._create_call_completed(create_call):
+            source_text, source_error = _read_source_text(agent, source_path)
+            if not source_error and isinstance(source_text, str) and source_text.strip():
+                return source_text
+
         source_code = str(params.get("source_code") or "")
         if source_code.strip():
             return source_code
 
-        source_path = params.get("source_path")
         if not isinstance(source_path, str) or not source_path:
             return None
 
@@ -621,6 +641,9 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
         source_code_override: str | None = None,
     ) -> tuple[bool, str]:
         params = create_call.tool_params or {}
+        if not cls._create_call_completed(create_call):
+            return False, "create_custom_tool did not complete successfully."
+
         raw_name = params.get("name") or expected_tool_name
         normalized = normalize_custom_tool_name(raw_name)
         if normalized is None or normalized[1] != expected_tool_name:
@@ -660,6 +683,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             "counts": (
                 "count",
                 "rows_",
+                "records_",
                 "items_",
                 "accepted",
                 "rejected",

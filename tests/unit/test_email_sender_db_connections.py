@@ -110,10 +110,22 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
 
         self.assertIn("body-only HTML", description)
         self.assertIn("inline style attrs", description)
+        self.assertIn("accent color", description)
+        self.assertIn("highlighted values", description)
         self.assertIn("tables/cells", description)
-        self.assertIn("Do NOT leave report metrics in plain lists", description)
-        self.assertIn("Do NOT use Markdown pipe tables", description)
+        self.assertIn("do NOT leave report metrics in plain lists", description)
+        self.assertIn("use Markdown pipe tables", description)
+        self.assertIn("Simple outreach/questions", description)
+        self.assertIn("no tables/styles/colors/headings/badges", description)
         self.assertIn("reply_to_message_id", properties)
+        self.assertIn(
+            "Outreach should use minimal paragraph HTML, no tables/styles/colors",
+            properties["mobile_first_html"]["description"],
+        )
+        self.assertIn(
+            "Reports should style section headers, tables/cells",
+            properties["mobile_first_html"]["description"],
+        )
 
     def test_execute_send_email_retries_on_operational_error(self):
         """
@@ -304,6 +316,31 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         message = PersistentAgentMessage.objects.get(id=result["message_id"])
         self.assertIsNone(message.parent_id)
         self.assertEqual(message.conversation.address, self.user.email)
+
+    def test_execute_send_email_restrains_simple_outreach_table_html(self):
+        params = {
+            "to_address": self.user.email,
+            "subject": "Partner idea for your RevOps clients",
+            "mobile_first_html": (
+                "<table cellpadding='0' cellspacing='0' style='font-family:Arial;color:#333'>"
+                "<tr><td style='padding:12px'><p style='margin:0'>Hi Jordan,</p>"
+                "<p style='color:#1a5c8a'>Open to comparing notes for 20 minutes?</p>"
+                "<p><strong style='color:#333'>Priya</strong></p></td></tr></table>"
+            ),
+        }
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertNotIn("<table", message.body.lower())
+        self.assertNotIn("<td", message.body.lower())
+        self.assertNotIn("style=", message.body.lower())
+        self.assertIn("Open to comparing notes", message.body)
 
     def test_execute_send_email_rolls_back_message_when_delivery_fails(self):
         params = {

@@ -275,8 +275,18 @@ def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] 
             .select_related("step")
             .order_by("step__created_at", "step__id")
         ):
-            if sqlite_batch_mutates_planning_state(call):
+            if _tool_call_has_succeeded(call) and sqlite_batch_mutates_planning_state(call):
                 return True, "SQLite agent config mutation observed"
+
+    if policy.get("stop_on_sqlite_agent_config_mutation_attempt"):
+        for call in (
+            PersistentAgentToolCall.objects
+            .filter(step__eval_run_id=eval_run_id, tool_name="sqlite_batch")
+            .select_related("step")
+            .order_by("step__created_at", "step__id")
+        ):
+            if _tool_call_has_finished(call) and sqlite_batch_mutates_planning_state(call):
+                return True, "SQLite agent config mutation attempt observed"
 
     if policy.get("stop_on_human_input_request"):
         if PersistentAgentHumanInputRequest.objects.filter(originating_step__eval_run_id=eval_run_id).exists():

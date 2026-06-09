@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
@@ -93,6 +95,39 @@ class MessageQualityScenarioTests(SimpleTestCase):
                 "The message has section headings, status labels, bullets, and enough spacing."
             )
         )
+
+    def test_judge_context_redacts_body_from_tool_params(self):
+        case = next(case for case in REPORT_MESSAGE_QUALITY_CASES if case.channel == "chat")
+        scenario = MessageQualityScenario()
+        body = "## Report\n\n| Metric | Value |\n|---|---|\n| Sources | 27 |"
+        contexts = []
+
+        def llm_judge(*, question, context, options):
+            contexts.append(context)
+            return (
+                "Pass",
+                "The message has headings, a table, clear spacing, and concrete report structure.",
+            )
+
+        records = []
+        scenario.llm_judge = llm_judge
+        scenario.record_task_result = lambda *args, **kwargs: records.append(kwargs)
+
+        scenario._record_quality_judgment(
+            "run-id",
+            case,
+            SimpleNamespace(
+                tool_params={"body": body, "will_continue_work": False},
+                result='{"status":"ok"}',
+                step=SimpleNamespace(id="step-id"),
+            ),
+            body,
+        )
+
+        self.assertEqual(len(contexts), 1)
+        self.assertIn(f"Message body:\n{body}", contexts[0])
+        self.assertIn('"body": "<redacted message body:', contexts[0])
+        self.assertNotIn(f'"body": "{body}"', contexts[0])
 
     def test_email_visual_formatting_quality_is_deferred_to_judge(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")

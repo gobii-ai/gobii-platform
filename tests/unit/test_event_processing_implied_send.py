@@ -87,6 +87,16 @@ class ImpliedSendTests(TestCase):
             body=body,
         )
 
+    def test_tool_name_sanitizer_corrects_end_planning_typos(self):
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+
+        tool_call.function.name = "end_plannig"
+        self.assertEqual(ep._get_tool_call_name(tool_call), "end_planning")
+
+        tool_call.function.name = "end_planing"
+        self.assertEqual(ep._get_tool_call_name(tool_call), "end_planning")
+
     def test_eval_mock_result_supports_url_rules(self):
         mock_config = {
             "http_request": {
@@ -140,6 +150,24 @@ class ImpliedSendTests(TestCase):
 
         self.assertEqual(matched_result["content"], "linkedin result")
         self.assertEqual(default_result["content"], "default result")
+
+    def test_send_chat_skips_query_result_progress_marked_done(self):
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "body": (
+                    "All 4 pages scraped, and the CTE query returned the data. "
+                    "Let me extract clean comparison rows and then deliver the recommendation."
+                ),
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).exists()
+        )
 
     def test_http_request_params_strip_linkified_url_artifacts(self):
         params = ep._normalize_tool_params(
@@ -240,6 +268,127 @@ class ImpliedSendTests(TestCase):
                             "name": "http_request",
                             "arguments": json.dumps(
                                 {"method": "GET", "url": "https://api.example.test/daily.json"}
+                            ),
+                        },
+                    }
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        self.assertFalse(prepared.followup_required)
+        mock_rate_limit.assert_called_once()
+        mock_credit.assert_called_once()
+
+    def test_prepare_tool_batch_skips_scheduled_small_result_sqlite_reread(self):
+        trigger_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Cron trigger: 0 9 * * *",
+        )
+        PersistentAgentCronTrigger.objects.create(step=trigger_step, cron_expression="0 9 * * *")
+        prior_step = PersistentAgentStep.objects.create(agent=self.agent, description="prior scheduled fetch")
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="http_request",
+            tool_params={
+                "method": "GET",
+                "url": "https://briefing.example.test/api/daily.json",
+                "will_continue_work": True,
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "status_code": 200,
+                    "content": {
+                        "items": [
+                            {
+                                "headline": "Central bank signals rate hold",
+                                "source_url": "https://news.example.test/central-bank",
+                            }
+                        ]
+                    },
+                }
+            ),
+            status="complete",
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_sqlite_reread",
+                        "function": {
+                            "name": "sqlite_batch",
+                            "arguments": json.dumps(
+                                {
+                                    "sql": (
+                                        "SELECT result_text FROM __tool_results "
+                                        "WHERE result_id = 'abc123'"
+                                    ),
+                                    "will_continue_work": True,
+                                }
+                            ),
+                        },
+                    }
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertFalse(PersistentAgentToolCall.objects.filter(tool_name="sqlite_batch").exists())
+        skip_step = PersistentAgentStep.objects.get(
+            agent=self.agent,
+            description__startswith="Skipped sqlite_batch __tool_results reread",
+        )
+        self.assertIn("send the concise scheduled briefing next", skip_step.description)
+
+    def test_prepare_tool_batch_keeps_user_requested_tool_result_sqlite_query(self):
+        self._add_inbound_web_message("Use __tool_results to summarize the prior scrape.")
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_sqlite_analysis",
+                        "function": {
+                            "name": "sqlite_batch",
+                            "arguments": json.dumps(
+                                {
+                                    "sql": (
+                                        "SELECT result_text FROM __tool_results "
+                                        "WHERE result_id = 'abc123'"
+                                    ),
+                                    "will_continue_work": False,
+                                }
                             ),
                         },
                     }
@@ -364,6 +513,39 @@ class ImpliedSendTests(TestCase):
     def test_send_chat_skips_got_result_progress_before_actual_report(self):
         start_web_session(self.agent, self.user)
 
+        planning_intro = execute_send_chat_message(
+            self.agent,
+            {
+                "body": (
+                    "Hey there! Great question — let's dig into what MikroTik has released "
+                    "(or is planning) to follow up the Cube 60 Pro."
+                ),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(planning_intro.get("status"), "ok")
+        self.assertTrue(planning_intro.get("skipped"))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
+        planning_jump = execute_send_chat_message(
+            self.agent,
+            {
+                "body": "This is a clear research question — let me jump straight into it",
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(planning_jump.get("status"), "ok")
+        self.assertTrue(planning_jump.get("skipped"))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
         result = execute_send_chat_message(
             self.agent,
             {
@@ -403,6 +585,39 @@ class ImpliedSendTests(TestCase):
             0,
         )
 
+        skipped_short = execute_send_chat_message(
+            self.agent,
+            {
+                "body": "Great, got the data! Let me update the charter and schedule, then report back.",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(skipped_short.get("status"), "ok")
+        self.assertTrue(skipped_short.get("skipped"))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
+        skipped_pulled = execute_send_chat_message(
+            self.agent,
+            {
+                "body": (
+                    "Great news \u2014 the browser task pulled the current pollution data from the SimWeather site. "
+                    "Let me update the config and report back."
+                ),
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(skipped_pulled.get("status"), "ok")
+        self.assertTrue(skipped_pulled.get("skipped"))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
         delivered = execute_send_chat_message(
             self.agent,
             {
@@ -413,6 +628,50 @@ class ImpliedSendTests(TestCase):
 
         self.assertEqual(delivered.get("status"), "ok")
         self.assertFalse(delivered.get("skipped", False))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            1,
+        )
+
+    def test_send_chat_rejects_unscheduled_remaining_work_claim(self):
+        start_web_session(self.agent, self.user)
+        self.agent.schedule = ""
+        self.agent.save(update_fields=["schedule"])
+
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "body": (
+                    "Kathleen, Rogelio, and Chris were verified. "
+                    "The 12 remaining candidates have been queued with cursor candidate-offset-3 "
+                    "for the next verification run, so they won't be lost."
+                ),
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("no schedule is configured", result.get("message", ""))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
+        self.agent.schedule = "0 9 * * *"
+        self.agent.save(update_fields=["schedule"])
+        delivered = execute_send_chat_message(
+            self.agent,
+            {
+                "body": (
+                    "Kathleen, Rogelio, and Chris were verified. "
+                    "The 12 remaining candidates have been queued with cursor candidate-offset-3 "
+                    "for the next verification run, so they won't be lost."
+                ),
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(delivered.get("status"), "ok")
         self.assertEqual(
             PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
             1,
@@ -502,6 +761,105 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(routed.tool_name, "request_human_input")
         self.assertIn("target company", routed.tool_params["question"])
         self.assertEqual(len(routed.tool_params["options"]), 3)
+        self.assertIn("title", routed.tool_params["options"][0])
+
+    def test_planning_numbered_chat_questions_route_to_batched_human_input(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": (
+                                    "A couple quick questions to scope things:\n\n"
+                                    "1. **What industry or market are you in?** This anchors everything.\n"
+                                    "2. **What kind of updates would be most valuable?** Product launches, "
+                                    "pricing changes, or funding news?"
+                                ),
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        routed = prepared.prepared_calls[0]
+        self.assertEqual(routed.tool_name, "request_human_input")
+        self.assertFalse(routed.tool_params["will_continue_work"])
+        self.assertEqual(
+            [request["question"] for request in routed.tool_params["requests"]],
+            [
+                "What industry or market are you in?",
+                "What kind of updates would be most valuable?",
+            ],
+        )
+        self.assertEqual(len(routed.tool_params["requests"][0]["options"]), 3)
+        self.assertIn("title", routed.tool_params["requests"][0]["options"][0])
+
+    def test_planning_human_input_options_are_clamped_before_execution(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        options = [
+            {"title": f"Option {index}", "description": "Choice"}
+            for index in range(1, 7)
+        ] + [{"title": "Other / I'll explain", "description": "Open-ended answer."}]
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_human_input",
+                    "function": {
+                        "name": "request_human_input",
+                        "arguments": json.dumps(
+                            {
+                                "will_continue_work": False,
+                                "requests": [
+                                    {
+                                        "question": "Which market should I monitor?",
+                                        "options": options,
+                                    }
+                                ],
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        routed_options = prepared.prepared_calls[0].tool_params["requests"][0]["options"]
+        self.assertEqual(len(routed_options), 6)
+        self.assertEqual(routed_options[-1]["title"], "Other / I'll explain")
 
     def test_clarify_chat_question_routes_to_tracked_human_input(self):
         prepared = ep._prepare_tool_batch(
@@ -541,6 +899,46 @@ class ImpliedSendTests(TestCase):
         routed = prepared.prepared_calls[0]
         self.assertEqual(routed.tool_name, "request_human_input")
         self.assertIn("project", routed.tool_params["question"])
+        self.assertFalse(routed.tool_params["will_continue_work"])
+
+    def test_missing_recipient_details_chat_routes_to_tracked_human_input(self):
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": (
+                                    "I'm happy to help, but I need a few details:\n\n"
+                                    "1. Who is the client? - Please provide the client's name and email address.\n"
+                                    "2. Which project? - What project is this status report for?\n"
+                                    "3. What's the latest status? - Share the status update I should use."
+                                ),
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        routed = prepared.prepared_calls[0]
+        self.assertEqual(routed.tool_name, "request_human_input")
+        self.assertIn("client", routed.tool_params["question"])
         self.assertFalse(routed.tool_params["will_continue_work"])
 
     def test_defaultable_schedule_setup_question_gets_runtime_correction(self):
@@ -1283,7 +1681,7 @@ class ImpliedSendTests(TestCase):
             ).exists()
         )
 
-    def test_planning_ready_chat_with_end_planning_is_allowed(self):
+    def test_planning_ready_chat_with_end_planning_runs_gate_first(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
         self._add_inbound_web_message(
@@ -1329,8 +1727,186 @@ class ImpliedSendTests(TestCase):
                 attach_prompt_archive=lambda step: None,
             )
 
-        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["send_chat_message", "end_planning"])
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["end_planning", "send_chat_message"])
         self.assertFalse(prepared.followup_required)
+
+    def test_planning_clear_research_search_tools_waits_for_end_planning(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message(
+            "Is there any successor to the Cube 60 Pro by MikroTik? Please check and send me the answer."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_search",
+                        "function": {
+                            "name": "search_tools",
+                            "arguments": json.dumps(
+                                {"query": "search the web for MikroTik Cube 60 Pro successor or replacement"}
+                            ),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Skipped search_tools before planning was completed",
+            ).exists()
+        )
+
+    def test_planning_progress_chat_before_end_planning_is_persisted_after_gate(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message("Research ExampleCo and give me a short report.")
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True),
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}),
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_chat",
+                        "function": {
+                            "name": "send_chat_message",
+                            "arguments": json.dumps(
+                                {
+                                    "body": "Hey there! Great, let me dig into the current source material.",
+                                    "will_continue_work": True,
+                                }
+                            ),
+                        },
+                    },
+                    {
+                        "id": "call_end",
+                        "function": {
+                            "name": "end_planning",
+                            "arguments": json.dumps({"full_plan": "Research ExampleCo and send a short sourced report."}),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=True,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["end_planning", "send_chat_message"])
+        self.assertEqual(
+            list(
+                PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+                .order_by("step__created_at", "step__id")
+                .values_list("tool_name", flat=True)
+            ),
+            ["end_planning", "send_chat_message"],
+        )
+
+    def test_sheets_discovery_followup_question_skips_to_answer(self):
+        self._add_inbound_web_message(
+            "Search for my Google Sheet named Test and tell me which matching spreadsheets you can access."
+        )
+        prior_step = PersistentAgentStep.objects.create(agent=self.agent, description="Drive discovery")
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="http_request",
+            tool_params={
+                "method": "GET",
+                "url": "https://www.googleapis.com/drive/v3/files?q=name%20contains%20%27Test%27",
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "status_code": 200,
+                    "content": {
+                        "files": [
+                            {
+                                "id": "sheet-test-2026",
+                                "name": "Gobii Google Sheets Integration Test 2026-06-02",
+                                "mimeType": "application/vnd.google-apps.spreadsheet",
+                                "webViewLink": "https://docs.google.com/spreadsheets/d/sheet-test-2026/edit",
+                            }
+                        ]
+                    },
+                }
+            ),
+            status="complete",
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_question",
+                        "function": {
+                            "name": "request_human_input",
+                            "arguments": json.dumps(
+                                {
+                                    "question": (
+                                        "This is the only spreadsheet I found matching the search. "
+                                        "Would you like me to read its contents or take another action?"
+                                    ),
+                                    "will_continue_work": False,
+                                }
+                            ),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Skipped unnecessary Google Drive spreadsheet follow-up question",
+            ).exists()
+        )
 
     def _mock_completion(self, content, *, reasoning_content=None):
         msg = MagicMock()
@@ -2281,6 +2857,59 @@ class DailyLimitMessageOnlyModeTests(TestCase):
 
         self.assertTrue(mock_send_chat.called)
         self.assertEqual(mock_completion.call_count, 2)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_progress_content_with_tool_call_is_not_implied_send(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        mock_enabled_tool,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        tool_call = MagicMock()
+        tool_call.id = "call_dummy"
+        tool_call.function = MagicMock()
+        tool_call.function.name = "dummy_tool"
+        tool_call.function.arguments = json.dumps({"will_continue_work": True})
+
+        msg = MagicMock()
+        msg.tool_calls = [tool_call]
+        msg.function_call = None
+        msg.content = (
+            "I need to fix the vendor/source_url NULL issue and then query for the recommendation. "
+            "Let me recreate the table properly and run the analysis"
+        )
+        msg.reasoning_content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        self.assertTrue(mock_enabled_tool.called)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})

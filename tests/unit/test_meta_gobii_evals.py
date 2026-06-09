@@ -35,6 +35,7 @@ from api.evals.scenarios.meta_gobii import (
     _enable_system_skill_tool,
     _is_retryable_llm_error,
     _record_plan_tool,
+    _record_response_tool,
 )
 from api.evals.suites import SuiteRegistry
 from api.models import (
@@ -161,6 +162,13 @@ class MetaGobiiEvalRegistrationTests(TestCase):
                     "verify_no_duplicate_output",
                 ],
             )
+
+    def test_response_tool_guides_single_approval_and_no_schedule_note(self):
+        description = _record_response_tool()["function"]["description"].lower()
+
+        self.assertIn("approval ask", description)
+        self.assertIn("no-schedule note", description)
+        self.assertIn("short line twice", description)
 
     def test_openrouter_structural_tag_grammar_error_is_retryable(self):
         error = APIError(
@@ -457,6 +465,7 @@ class MetaGobiiEvalScoringTests(TestCase):
                 "ordered_tools": [
                     "meta_gobii_get_agent_config_options",
                     "meta_gobii_create_agent",
+                    "meta_gobii_update_agent",
                     "meta_gobii_link_agents",
                     "meta_gobii_send_agent_message",
                 ],
@@ -598,7 +607,27 @@ class MetaGobiiEvalScoringTests(TestCase):
                     "Unrequested intelligence tier changes",
                     "Schedules not requested - will not add recurring cadences",
                     "Files not requested - will not upload files",
+                    "No-schedule default - none added",
                 ],
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+
+    def test_confirmation_wait_notes_do_not_count_as_planned_extra_scope(self):
+        case = _case("positive_restructure_graph")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_list_agent_links"],
+                "tools_before_approval": ["meta_gobii_list_agents"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": ["Wait for explicit confirmation before any mutation"],
                 "contact_output_policy": "",
             },
         )
@@ -621,6 +650,165 @@ class MetaGobiiEvalScoringTests(TestCase):
                     "Archiving redundant agents after inspection",
                     "Relinking agents after graph audit",
                 ],
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+
+    def test_requested_team_deploy_action_does_not_count_as_extra_scope(self):
+        case = _case("chaos_broad_management_requires_confirmation")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_create_agent"],
+                "tools_before_approval": ["meta_gobii_list_agents"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": ["Deploying a whole team"],
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+
+    def test_requested_team_configuration_does_not_count_as_extra_scope(self):
+        case = _case("schedule_weekday_ops_checkin_team")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_create_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": ["meta_gobii_get_agent_config_options"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 2,
+                "planned_role_names": ["Launch Blocker Gatherer", "Standup Update Drafter"],
+                "extra_scope_items": ["team configuration"],
+                "schedule_policy": _explicit_schedule_policy(action="create", cadence="every weekday morning"),
+                "contact_output_policy": "",
+            },
+        )
+        unrelated_scores = score_meta_gobii_case(
+            _case("schedule_change_existing"),
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_get_agent", "meta_gobii_update_agent"],
+                "tools_before_approval": ["meta_gobii_get_agent"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": ["team configuration"],
+                "schedule_policy": _explicit_schedule_policy(action="update", cadence="Tuesdays at 10am"),
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+        self.assertFalse(unrelated_scores["minimal_action"][0])
+
+    def test_category_notes_without_matching_tools_do_not_count_as_extra_scope(self):
+        case = _case("chaos_broad_management_requires_confirmation")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_list_agent_links"],
+                "tools_before_approval": ["meta_gobii_list_agents"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": [
+                    "pending contact approval requests",
+                    "contact endpoint changes",
+                    "file uploads",
+                    "Adding new agents or domains not in the original request.",
+                    "Any schedule, resource, or tier changes not explicitly requested.",
+                    "Creating or archiving agents.",
+                ],
+                "contact_output_policy": "",
+            },
+        )
+        bad_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_approve_pending_contact"],
+                "tools_before_approval": ["meta_gobii_list_agents"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": ["pending contact approval requests"],
+                "contact_output_policy": "",
+            },
+        )
+        reorganize_case = _case("no_schedule_reorganize_existing_team")
+        bad_create_scores = score_meta_gobii_case(
+            reorganize_case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_create_agent"],
+                "tools_before_approval": ["meta_gobii_list_agents"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": ["Creating or archiving agents."],
+                "contact_output_policy": "",
+            },
+        )
+        bad_config_scores = score_meta_gobii_case(
+            reorganize_case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_update_agent"],
+                "tools_before_approval": ["meta_gobii_list_agents"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": ["Any schedule, resource, or tier changes not explicitly requested."],
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+        self.assertFalse(bad_scores["minimal_action"][0])
+        self.assertFalse(bad_create_scores["minimal_action"][0])
+        self.assertFalse(bad_config_scores["minimal_action"][0])
+
+    def test_excluded_schedule_and_agent_count_notes_do_not_fail_exact_no_schedule_team(self):
+        case = _case("no_schedule_sales_team_setup_only")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_get_agent_config_options",
+                    "meta_gobii_create_agent",
+                    "meta_gobii_create_agent",
+                    "meta_gobii_create_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": ["meta_gobii_get_agent_config_options"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 3,
+                "planned_role_names": ["Account Research", "List Cleanup", "Drafting Handoffs"],
+                "extra_scope_items": [
+                    "invented schedule or cadence",
+                    "additional agents beyond the three requested",
+                ],
+                "schedule_policy": _no_schedule_policy(),
                 "contact_output_policy": "",
             },
         )
@@ -759,6 +947,7 @@ class MetaGobiiEvalScoringTests(TestCase):
             plan_args={
                 "ordered_tools": [
                     "meta_gobii_create_agent",
+                    "meta_gobii_update_agent",
                     "meta_gobii_link_agents",
                     "meta_gobii_send_agent_message",
                 ],
@@ -892,6 +1081,89 @@ class MetaGobiiEvalScoringTests(TestCase):
         self.assertFalse(invented_scores["schedule_scope"][0])
         self.assertTrue(clarify_scores["schedule_scope"][0])
 
+    def test_no_schedule_case_ignores_schedule_clarification_note_when_policy_excludes_it(self):
+        case = _case("no_schedule_recruiting_project_team")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_update_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 3,
+                "planned_role_names": ["Sourcing Gobii", "Screening Gobii", "Coordinator Gobii"],
+                "extra_scope_items": ["Schedule/clarifying question about recurring workflow"],
+                "schedule_policy": _no_schedule_policy(),
+                "contact_output_policy": "",
+            },
+            response_args={
+                "response_text": "Three recruiting project roles with links and briefings. Please approve.",
+                "proposed_roles": [
+                    {"name": "Sourcing Gobii", "responsibility": "Own sourcing."},
+                    {"name": "Screening Gobii", "responsibility": "Own screening."},
+                    {"name": "Coordinator Gobii", "responsibility": "Own coordinator handoff."},
+                ],
+                "proposed_links": ["Sourcing -> Screening", "Screening -> Coordinator"],
+                "initial_briefings": [
+                    "Sourcing Gobii: source candidates.",
+                    "Screening Gobii: screen candidates.",
+                    "Coordinator Gobii: coordinate handoff.",
+                ],
+                "asks_for_approval": True,
+                "extra_scope_items": [],
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+        self.assertTrue(scores["schedule_scope"][0])
+
+    def test_no_schedule_case_allows_clarification_when_prompt_defers_recurring_decision(self):
+        case = _case("no_schedule_recruiting_project_team")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_update_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 3,
+                "planned_role_names": ["Sourcing Gobii", "Screening Gobii", "Coordinator Gobii"],
+                "extra_scope_items": [],
+                "schedule_policy": _clarifying_schedule_policy(),
+                "contact_output_policy": "",
+            },
+        )
+        bad_case = _case("no_schedule_one_time_research")
+        bad_scores = score_meta_gobii_case(
+            bad_case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_send_agent_message"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 1,
+                "planned_role_names": ["Research Gobii"],
+                "extra_scope_items": [],
+                "schedule_policy": _clarifying_schedule_policy(),
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["schedule_scope"][0])
+        self.assertFalse(bad_scores["schedule_scope"][0])
+
     def test_existing_schedule_update_requires_explicit_schedule_action(self):
         case = _case("schedule_remove_existing")
 
@@ -927,6 +1199,88 @@ class MetaGobiiEvalScoringTests(TestCase):
         self.assertFalse(wrong_action_scores["schedule_scope"][0])
         self.assertTrue(good_scores["schedule_scope"][0])
 
+    def test_no_automatic_work_existing_agent_allows_schedule_disable_guardrail(self):
+        case = _case("no_schedule_activate_existing")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_get_agent", "meta_gobii_update_agent"],
+                "tools_before_approval": ["meta_gobii_list_agents", "meta_gobii_get_agent"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": [],
+                "schedule_policy": {
+                    "schedule_in_scope": True,
+                    "schedule_action": "update",
+                    "cadence_or_schedule": "",
+                    "explicit_user_intent": False,
+                    "included_in_approval_scope": True,
+                    "asks_clarifying_question": False,
+                    "rationale": "Ensure the existing Gobii is available but cannot run automatically.",
+                },
+                "contact_output_policy": "",
+            },
+        )
+        bad_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_update_agent"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": [],
+                "schedule_policy": _explicit_schedule_policy(action="create", cadence="daily"),
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["schedule_scope"][0])
+        self.assertFalse(bad_scores["schedule_scope"][0])
+
+    def test_new_gobii_schedule_create_accepts_update_step_when_create_is_planned(self):
+        case = _case("schedule_friday_customer_follow_up")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_update_agent",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 1,
+                "planned_role_names": ["Customer Success"],
+                "extra_scope_items": [],
+                "schedule_policy": _explicit_schedule_policy(action="update", cadence="weekly Friday afternoon"),
+                "contact_output_policy": "",
+            },
+        )
+        bad_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_update_agent"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 1,
+                "planned_role_names": ["Customer Success"],
+                "extra_scope_items": [],
+                "schedule_policy": _explicit_schedule_policy(action="update", cadence="weekly Friday afternoon"),
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["schedule_scope"][0])
+        self.assertFalse(bad_scores["schedule_scope"][0])
+
     def test_duplicate_output_helper_detects_repeated_sections(self):
         text = (
             "Team plan: Recruiting owns candidates, Sales owns pipeline, Customer Signal owns customer signals.\n\n"
@@ -934,6 +1288,97 @@ class MetaGobiiEvalScoringTests(TestCase):
         )
 
         self.assertTrue(find_duplicate_output_sections(text))
+
+    def test_duplicate_output_helper_detects_repeated_no_schedule_closing(self):
+        text = (
+            "No recurring schedule is set unless you'd like to add one later.\n\n"
+            "**Shall I proceed with creating, linking, and briefing this team?**\n\n"
+            "- No recurring schedule is set unless you'd like to add one later.\n"
+            "- **Shall I proceed with creating, linking, and briefing this team?**"
+        )
+
+        duplicates = find_duplicate_output_sections(text)
+
+        self.assertIn("No recurring schedule is set unless you'd like to add one later.", duplicates)
+        self.assertIn("**Shall I proceed with creating, linking, and briefing this team?**", duplicates)
+
+    def test_schema_diagnostic_extra_scope_note_does_not_fail_explicit_schedule(self):
+        case = _case("schedule_daily_inbox_check")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_get_agent", "meta_gobii_update_agent"],
+                "tools_before_approval": ["meta_gobii_get_agent"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": ["schedule_in_scope=false-user explicitly requested daily at 9am"],
+                "schedule_policy": _explicit_schedule_policy(action="update", cadence="daily at 9am"),
+                "contact_output_policy": "",
+            },
+            response_args={
+                "response_text": "Please approve the daily 9am Support Intake Gobii schedule update.",
+                "proposed_roles": [],
+                "proposed_links": [],
+                "initial_briefings": [],
+                "asks_for_approval": True,
+                "extra_scope_items": [],
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+        self.assertTrue(scores["schedule_scope"][0])
+
+    def test_explicit_schedule_context_note_does_not_fail_minimal_action(self):
+        case = _case("schedule_weekday_ops_checkin_team")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_update_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 2,
+                "planned_role_names": ["Ops Checkin", "Ops Summary"],
+                "extra_scope_items": [
+                    "Schedules: the user explicitly said 'every weekday morning', so this is a recurring schedule."
+                ],
+                "schedule_policy": _explicit_schedule_policy(action="create", cadence="every weekday morning"),
+                "contact_output_policy": "",
+            },
+        )
+        bad_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_update_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 2,
+                "planned_role_names": ["Ops Checkin", "Ops Summary"],
+                "extra_scope_items": [
+                    "Schedules: add a weekly executive summary that was not in the user's request."
+                ],
+                "schedule_policy": _explicit_schedule_policy(action="create", cadence="every weekday morning"),
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+        self.assertFalse(bad_scores["minimal_action"][0])
 
     def test_approved_scope_rejects_extra_agents(self):
         case = _case("approved_exact_scope")
@@ -1124,6 +1569,30 @@ class MetaGobiiEvalScenarioTests(TestCase):
         self.assertIn("setup-only", prompt_text)
         self.assertIn("does not make gobii creation content-only", prompt_text)
 
+    def test_plan_prompt_preserves_recruiting_domain_for_singular_roles(self):
+        scenario = ScenarioRegistry.get("meta_gobii_ambiguous_recruiting_follow_up")
+
+        with patch.object(scenario, "_run_tool_completion", return_value=[]) as mock_completion:
+            scenario._run_plan_intent(scenario.case, simulated=False)
+
+        messages = mock_completion.call_args.kwargs["messages"]
+        prompt_text = "\n".join(str(message.get("content") or "") for message in messages)
+
+        self.assertIn("Recruiting Candidate Response Coordinator", prompt_text)
+        self.assertIn("Do not replace a user domain word with a loose synonym", prompt_text)
+
+    def test_plan_prompt_preserves_reporting_domain_for_singular_roles(self):
+        scenario = ScenarioRegistry.get("meta_gobii_schedule_monthly_board_report")
+
+        with patch.object(scenario, "_run_tool_completion", return_value=[]) as mock_completion:
+            scenario._run_plan_intent(scenario.case, simulated=False)
+
+        messages = mock_completion.call_args.kwargs["messages"]
+        prompt_text = "\n".join(str(message.get("content") or "") for message in messages)
+
+        self.assertIn("Operations Board Reporting", prompt_text)
+        self.assertIn("operations reporting", prompt_text)
+
     def test_response_normalization_derives_missing_briefings_from_plan(self):
         scenario = ScenarioRegistry.get("meta_gobii_no_schedule_recruiting_project_team")
 
@@ -1151,6 +1620,68 @@ class MetaGobiiEvalScenarioTests(TestCase):
         self.assertTrue(response_args["asks_for_approval"])
         self.assertTrue(response_args["proposed_links"])
         self.assertEqual(len(response_args["initial_briefings"]), 3)
+
+    def test_response_normalization_strips_meta_preamble_and_quoted_briefing(self):
+        scenario = ScenarioRegistry.get("meta_gobii_schedule_monthly_board_report")
+        plan_args = {
+            "ordered_tools": [
+                "meta_gobii_get_agent_config_options",
+                "meta_gobii_create_agent",
+                "meta_gobii_send_agent_message",
+            ],
+            "needs_human_confirmation": True,
+            "planned_role_names": ["Operations Board Reporting"],
+            "planned_agent_count": 1,
+            "extra_scope_items": [],
+            "schedule_policy": _explicit_schedule_policy(action="create", cadence="monthly"),
+            "contact_output_policy": "",
+        }
+
+        response_args = scenario._normalize_response_args(
+            scenario.case,
+            plan_args,
+            {
+                "response_text": (
+                    "I see the system recorded a plan based on my initial assessment. "
+                    "Let me re-read the user request carefully.\n\n"
+                    "The user asks: \"Create an operations reporting Gobii that compiles a monthly board "
+                    "packet summary from our dashboards.\"\n\n"
+                    "This is a single-Gobii request with an explicit monthly cadence. Before making any "
+                    "mutations, here is my proposal:\n\n"
+                    "**Proposed Gobii**\n"
+                    "- **Role:** Operations Board Reporting\n"
+                    "- **Responsibility:** Produces a monthly board packet summary from dashboards.\n"
+                    "- **Schedule:** Monthly recurring\n\n"
+                    "**Initial Briefing (to be sent after approval):**\n"
+                    "\"You are the Operations Board Reporting Gobii. Compile a monthly board packet summary "
+                    "from our dashboards.\"\n\n"
+                    "Shall I go ahead and create this Gobii?"
+                ),
+                "proposed_roles": [
+                    {
+                        "name": "Operations Board Reporting",
+                        "responsibility": "Produces a monthly board packet summary from dashboards.",
+                    }
+                ],
+                "proposed_links": [],
+                "initial_briefings": [
+                    "Operations Board Reporting: compile a monthly board packet summary from dashboards."
+                ],
+                "asks_for_approval": True,
+                "extra_scope_items": [],
+            },
+        )
+
+        self.assertNotIn("system recorded", response_args["response_text"].lower())
+        self.assertNotIn("the user asks", response_args["response_text"].lower())
+        self.assertNotIn("initial briefing", response_args["response_text"].lower())
+        scores = score_meta_gobii_case(
+            scenario.case,
+            skill_selected=True,
+            plan_args=plan_args,
+            response_args=response_args,
+        )
+        self.assertTrue(scores["duplicate_output"][0])
 
     def test_response_fallback_preserves_requested_scope_terms(self):
         scenario = ScenarioRegistry.get("meta_gobii_ambiguous_support_escalation_watch")

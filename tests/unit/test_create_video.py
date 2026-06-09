@@ -4,10 +4,21 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import httpx
+from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from PIL import Image
 
-from api.models import PersistentAgentCompletion
+from api.models import (
+    BrowserUseAgent,
+    LLMProvider,
+    PersistentAgent,
+    PersistentAgentCompletion,
+    PersistentAgentEnabledTool,
+    PersistentAgentSystemSkillState,
+    VideoGenerationLLMTier,
+    VideoGenerationModelEndpoint,
+    VideoGenerationTierEndpoint,
+)
 from api.agent.tools.create_video import (
     GeneratedVideoResult,
     OpenAIVideoStatusError,
@@ -21,6 +32,11 @@ from api.agent.tools.create_video import (
     is_video_generation_available_for_agent,
 )
 from api.agent.core.video_generation_config import VideoGenerationLLMConfig
+from api.agent.tools.self_visual_identity import (
+    GET_SELF_VISUAL_IDENTITY_TOOL_NAME,
+    SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY,
+    auto_enable_self_visual_media_system_skill,
+)
 
 
 def _make_config(**overrides):
@@ -64,6 +80,7 @@ class GetCreateVideoToolTests(TestCase):
         self.assertEqual(tool["type"], "function")
         func = tool["function"]
         self.assertEqual(func["name"], "create_video")
+        self.assertIn("self-video prompts get private visual identity", func["description"])
         params = func["parameters"]
         self.assertIn("prompt", params["properties"])
         self.assertIn("file_path", params["properties"])
@@ -87,6 +104,81 @@ class IsVideoGenerationAvailableTests(TestCase):
     def test_returns_false_when_not_configured(self, mock_configured):
         agent = MagicMock()
         self.assertFalse(is_video_generation_available_for_agent(agent))
+
+
+@tag("batch_video_generation")
+class SelfVisualVideoAutoEnableTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        user = User.objects.create_user(username="self-video-auto-enable@example.com")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Self Video Auto Enable Browser")
+        cls.agent = PersistentAgent.objects.create(
+            user=user,
+            name="Self Video Auto Enable Agent",
+            browser_use_agent=browser_agent,
+            charter="Generate requested media.",
+            visual_description="A steady Gobii with copper glasses and a moss jacket.",
+        )
+
+    def _seed_video_generation_tier(self):
+        provider = LLMProvider.objects.create(
+            key="self-video-auto-enable-provider",
+            display_name="Self Video Auto Enable Provider",
+            enabled=True,
+        )
+        endpoint = VideoGenerationModelEndpoint.objects.create(
+            key="self-video-auto-enable-endpoint",
+            provider=provider,
+            enabled=True,
+            litellm_model="ltx/ltx-2-3-fast",
+        )
+        tier = VideoGenerationLLMTier.objects.create(
+            use_case=VideoGenerationLLMTier.UseCase.CREATE_VIDEO,
+            order=1,
+            description="Self video auto-enable tier",
+        )
+        VideoGenerationTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=1.0)
+
+    def test_self_video_request_auto_enables_self_video_skill_and_tools(self):
+        self._seed_video_generation_tier()
+
+        enabled = auto_enable_self_visual_media_system_skill(
+            self.agent,
+            "Text me a short video of yourself waving.",
+        )
+
+        self.assertEqual(enabled, [SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY])
+        self.assertTrue(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key=SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists()
+        )
+        enabled_tool_names = set(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent)
+            .values_list("tool_full_name", flat=True)
+        )
+        self.assertIn(GET_SELF_VISUAL_IDENTITY_TOOL_NAME, enabled_tool_names)
+        self.assertIn("create_video", enabled_tool_names)
+
+    def test_ordinary_text_does_not_auto_enable_self_video_skill(self):
+        self._seed_video_generation_tier()
+
+        enabled = auto_enable_self_visual_media_system_skill(
+            self.agent,
+            "Summarize tomorrow's calendar in one sentence.",
+        )
+
+        self.assertEqual(enabled, [])
+        self.assertFalse(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key=SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists()
+        )
 
 
 @tag("batch_video_generation")
@@ -627,6 +719,97 @@ class ExecuteCreateVideoTests(TestCase):
         self.assertEqual(result["file"], "$[/exports/test.mp4]")
         self.assertEqual(result["model"], "sora-2")
         mock_write.assert_called_once()
+
+    @patch("api.agent.tools.create_video.set_agent_variable")
+    @patch("api.agent.tools.create_video.build_signed_filespace_download_url", return_value="https://signed/url")
+    @patch("api.agent.tools.create_video.write_bytes_to_dir")
+    @patch("api.agent.tools.create_video._log_video_generation_completion")
+    @patch("api.agent.tools.create_video._generate_video")
+    @patch("api.agent.tools.create_video.get_create_video_generation_llm_configs")
+    @patch("api.agent.tools.create_video.resolve_export_target")
+    def test_self_video_prompt_adds_visual_identity(
+        self,
+        mock_resolve,
+        mock_configs,
+        mock_generate,
+        mock_log,
+        mock_write,
+        mock_signed_url,
+        mock_set_var,
+    ):
+        mock_resolve.return_value = ("/exports/self-video.mp4", False, None)
+        config = _make_config(model="ltx/ltx-2-3-fast")
+        mock_configs.return_value = [config]
+        mock_generate.return_value = GeneratedVideoResult(
+            video_bytes=b"video-data",
+            mime_type="video/mp4",
+            response=_make_video_obj(),
+        )
+        mock_write.return_value = {
+            "status": "ok",
+            "path": "/exports/self-video.mp4",
+            "node_id": "node-123",
+        }
+
+        agent = MagicMock()
+        agent.id = "agent-123"
+        agent.name = "Motion Gobii"
+        agent.visual_description = (
+            "A precise operator with moss-green eyes, a navy chore jacket, and a calm smile."
+        )
+        result = execute_create_video(
+            agent,
+            {"prompt": "make a short video of yourself waving", "file_path": "/exports/self-video.mp4"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["self_visual_identity_included"])
+        generate_kwargs = mock_generate.call_args.kwargs
+        self.assertIn("moss-green eyes", generate_kwargs["prompt"])
+        self.assertIn("self visual media request only", generate_kwargs["prompt"])
+
+    @patch("api.agent.tools.create_video.set_agent_variable")
+    @patch("api.agent.tools.create_video.build_signed_filespace_download_url", return_value="https://signed/url")
+    @patch("api.agent.tools.create_video.write_bytes_to_dir")
+    @patch("api.agent.tools.create_video._log_video_generation_completion")
+    @patch("api.agent.tools.create_video._generate_video")
+    @patch("api.agent.tools.create_video.get_create_video_generation_llm_configs")
+    @patch("api.agent.tools.create_video.resolve_export_target")
+    def test_generic_video_prompt_does_not_add_visual_identity(
+        self,
+        mock_resolve,
+        mock_configs,
+        mock_generate,
+        mock_log,
+        mock_write,
+        mock_signed_url,
+        mock_set_var,
+    ):
+        mock_resolve.return_value = ("/exports/launch.mp4", False, None)
+        config = _make_config(model="ltx/ltx-2-3-fast")
+        mock_configs.return_value = [config]
+        mock_generate.return_value = GeneratedVideoResult(
+            video_bytes=b"video-data",
+            mime_type="video/mp4",
+            response=_make_video_obj(),
+        )
+        mock_write.return_value = {"status": "ok", "path": "/exports/launch.mp4", "node_id": "node-123"}
+
+        agent = MagicMock()
+        agent.id = "agent-123"
+        agent.name = "Motion Gobii"
+        agent.visual_description = (
+            "A precise operator with moss-green eyes, a navy chore jacket, and a calm smile."
+        )
+        result = execute_create_video(
+            agent,
+            {"prompt": "a product-launch animation with clean typography", "file_path": "/exports/launch.mp4"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["self_visual_identity_included"])
+        generate_kwargs = mock_generate.call_args.kwargs
+        self.assertNotIn("moss-green eyes", generate_kwargs["prompt"])
 
     @patch("api.agent.tools.create_video._log_video_generation_completion")
     @patch("api.agent.tools.create_video._generate_video")

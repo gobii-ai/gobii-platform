@@ -57,6 +57,11 @@ from .create_image import (
     execute_create_image,
     is_image_generation_available_for_agent,
 )
+from .self_visual_identity import (
+    GET_SELF_VISUAL_IDENTITY_TOOL_NAME,
+    execute_get_self_visual_identity,
+    get_self_visual_identity_tool,
+)
 from .create_video import (
     get_create_video_tool,
     execute_create_video,
@@ -253,6 +258,11 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_create_image_tool,
         "executor": execute_create_image,
         "is_available": is_image_generation_available_for_agent,
+    },
+    GET_SELF_VISUAL_IDENTITY_TOOL_NAME: {
+        "definition": get_self_visual_identity_tool,
+        "executor": execute_get_self_visual_identity,
+        "search_hidden": True,
     },
     CREATE_VIDEO_TOOL_NAME: {
         "definition": get_create_video_tool,

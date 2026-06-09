@@ -21,7 +21,13 @@ from opentelemetry import trace
 
 from api.agent.eval_agents import is_eval_agent
 
-from ...models import MCPServerConfig, PersistentAgent, PersistentAgentCompletion, PersistentAgentSkill
+from ...models import (
+    MCPServerConfig,
+    PersistentAgent,
+    PersistentAgentCompletion,
+    PersistentAgentMessage,
+    PersistentAgentSkill,
+)
 from ...services.pipedream_apps import (
     PipedreamCatalogError,
     PipedreamCatalogService,
@@ -34,6 +40,7 @@ from ...services.tool_blacklist import get_agent_tool_blacklist
 from ...services.tool_settings import get_tool_settings_for_owner
 from ...evals.execution import get_current_eval_routing_profile
 from ..system_skills import shortlist_system_skills
+from ..system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
 from ..system_skills.service import enable_system_skills, get_available_system_skill_tool_names
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
@@ -46,6 +53,7 @@ from .sqlite_skills import get_latest_skill_versions
 from .tool_manager import (
     enable_tools,
     CREATE_IMAGE_TOOL_NAME,
+    CREATE_VIDEO_TOOL_NAME,
     HTTP_REQUEST_TOOL_NAME,
     PIPEDREAM_TOOL_SERVER_NAME,
     get_available_builtin_tool_entries,
@@ -53,6 +61,12 @@ from .tool_manager import (
     get_enabled_tool_limit,
 )
 from .autotool_heuristics import find_matching_tools
+from .self_visual_identity import (
+    GET_SELF_VISUAL_IDENTITY_TOOL_NAME,
+    SELF_IMAGE_GENERATION_SYSTEM_SKILL_KEY,
+    SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY,
+    prompt_requests_self_visual_identity,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -152,9 +166,19 @@ def _fallback_builtin_selection(
         if HTTP_REQUEST_TOOL_NAME not in candidates:
             candidates.append(HTTP_REQUEST_TOOL_NAME)
 
+    wants_self_visual_media = prompt_requests_self_visual_identity(text)
+    if wants_self_visual_media:
+        self_media_is_video = "video" in text or "clip" in text or "animation" in text
+        self_media_tool_names = [GET_SELF_VISUAL_IDENTITY_TOOL_NAME]
+        self_media_tool_names.append(CREATE_VIDEO_TOOL_NAME if self_media_is_video else CREATE_IMAGE_TOOL_NAME)
+        for tool_name in self_media_tool_names:
+            if tool_name and tool_name in available_names and tool_name not in candidates:
+                candidates.append(tool_name)
+
     wants_image = any(
         keyword in text
         for keyword in [
+            "selfie",
             "generate image",
             "generate an image",
             "image generation",
@@ -179,6 +203,25 @@ def _fallback_builtin_selection(
     if wants_image and CREATE_IMAGE_TOOL_NAME in available_names:
         if CREATE_IMAGE_TOOL_NAME not in candidates:
             candidates.append(CREATE_IMAGE_TOOL_NAME)
+
+    wants_video = any(
+        keyword in text
+        for keyword in [
+            "generate video",
+            "generate a video",
+            "video generation",
+            "create video",
+            "make video",
+            "make a video",
+            "short video",
+            "video clip",
+            "animate",
+            "animation",
+        ]
+    )
+    if wants_video and CREATE_VIDEO_TOOL_NAME in available_names:
+        if CREATE_VIDEO_TOOL_NAME not in candidates:
+            candidates.append(CREATE_VIDEO_TOOL_NAME)
 
     if candidates:
         logger.info(
@@ -215,6 +258,105 @@ def _fallback_named_selection(query: str, available_names: set[str]) -> list[str
         if query_key == name_key or f" {name_key} " in padded_query:
             selected.append(name)
     return selected
+
+
+def _direct_google_sheets_tools_available(catalog: Iterable[Any]) -> bool:
+    return any(
+        str(_tool_attr(tool, "full_name") or _tool_attr(tool, "name") or "").startswith("google_sheets-")
+        for tool in catalog
+    )
+
+
+def _query_explicitly_requests_native_google_sheets(query: str) -> bool:
+    text = str(query or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "native google sheets",
+            "native sheets",
+            "native integration",
+            "google drive",
+            "drive api",
+            "oauth",
+            "connected google sheets",
+            "find my google sheet",
+            "find my spreadsheet",
+            "search my google sheet",
+            "search my spreadsheet",
+        )
+    )
+
+
+def _filter_redundant_google_sheets_native_skill(
+    *,
+    query: str,
+    catalog: Iterable[Any],
+    system_skill_catalog: list[Any],
+) -> list[Any]:
+    if not _direct_google_sheets_tools_available(catalog):
+        return system_skill_catalog
+    if _query_explicitly_requests_native_google_sheets(query):
+        return system_skill_catalog
+    return [
+        skill
+        for skill in system_skill_catalog
+        if _tool_attr(skill, "skill_key") != GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
+    ]
+
+
+def _fallback_self_visual_system_skill_selection(
+    query: str,
+    content_text: str,
+    available_system_skill_keys: set[str],
+) -> list[str]:
+    text = f"{query} {content_text}".lower()
+    if not prompt_requests_self_visual_identity(text):
+        return []
+
+    skill_key = (
+        SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY
+        if "video" in text or "clip" in text or "animation" in text
+        else SELF_IMAGE_GENERATION_SYSTEM_SKILL_KEY
+    )
+    if skill_key not in available_system_skill_keys:
+        return []
+    return [skill_key]
+
+
+def _self_visual_media_kind(text: str) -> str:
+    lowered = str(text or "").lower()
+    if "video" in lowered or "clip" in lowered or "animation" in lowered:
+        return "video"
+    return "image"
+
+
+def _self_visual_request_hint(agent: PersistentAgent, query: str) -> str:
+    """
+    Return a short routing-only hint when the current user task asks for self visual media.
+
+    The hint intentionally avoids copying the user message or visual description into the
+    search-tools prompt; it only preserves enough task shape to select the right system skill.
+    """
+
+    if prompt_requests_self_visual_identity(query):
+        kind = _self_visual_media_kind(query)
+    else:
+        recent_bodies = list(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=agent,
+                is_outbound=False,
+            )
+            .order_by("-timestamp")
+            .values_list("body", flat=True)[:1]
+        )
+        recent_text = "\n".join(str(body or "") for body in recent_bodies)
+        if not prompt_requests_self_visual_identity(recent_text):
+            return ""
+        kind = _self_visual_media_kind(recent_text)
+
+    if kind == "video":
+        return "Latest user task asks for a self video/clip of this Gobii itself."
+    return "Latest user task asks for a selfie/self image of this Gobii itself."
 
 
 def _find_tool_by_suffix(
@@ -794,6 +936,7 @@ def _search_with_llm(
     pipedream_app_catalog: Optional[Iterable[Any]] = None,
     enabled_app_slugs: Optional[Iterable[str]] = None,
     auto_enable_apps: bool = True,
+    self_visual_request_hint: str = "",
 ) -> ToolSearchResult:
     tools = list(catalog)
     agent_skills = list(agent_skill_catalog or [])
@@ -931,6 +1074,11 @@ def _search_with_llm(
     else:
         system_prompt += selection_example
     user_prompt = f"Query: {query}\n\nAvailable tools:\n" + "\n".join(tool_lines)
+    if self_visual_request_hint:
+        user_prompt += (
+            "\n\nCurrent task routing hint: "
+            f"{self_visual_request_hint} Prefer the matching self visual media system skill when available."
+        )
     if agent_skill_lines:
         user_prompt += "\n\nAvailable agent skills:\n" + "\n".join(agent_skill_lines)
     if global_skill_lines:
@@ -1041,6 +1189,13 @@ def _search_with_llm(
                     provider_name=provider_name,
                     item_label="system skill keys",
                 )
+                for skill_key in _fallback_self_visual_system_skill_selection(
+                    query or "",
+                    f"{content_text or ''} {self_visual_request_hint or ''}",
+                    available_system_skill_keys,
+                ):
+                    if skill_key not in requested_system_skills:
+                        requested_system_skills.append(skill_key)
                 requested_apps = parsed_calls["apps"]
                 external_resources = parsed_calls["external_resources"]
                 enabled_apps_result = None
@@ -1167,6 +1322,13 @@ def _search_with_llm(
                             logger.error("search_tools.%s: fallback enable_agent_skills failed: %s", provider_name, err)
 
                     fallback_system_skills = _fallback_named_selection(query or "", available_system_skill_keys)
+                    for skill_key in _fallback_self_visual_system_skill_selection(
+                        query or "",
+                        content_text or "",
+                        available_system_skill_keys,
+                    ):
+                        if skill_key not in fallback_system_skills:
+                            fallback_system_skills.append(skill_key)
                     if fallback_system_skills:
                         named_fallback_selected = True
                         try:
@@ -1410,12 +1572,18 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         get_latest_skill_versions(agent),
         blacklisted_tools,
     )
+    combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog + eval_synthetic_catalog
+    self_visual_request_hint = _self_visual_request_hint(agent, query)
+    system_skill_query = f"{query}\n{self_visual_request_hint}" if self_visual_request_hint else query
     system_skill_catalog = shortlist_system_skills(
-        query,
+        system_skill_query,
         available_tool_names=get_available_system_skill_tool_names(agent),
     )
-
-    combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog + eval_synthetic_catalog
+    system_skill_catalog = _filter_redundant_google_sheets_native_skill(
+        query=system_skill_query,
+        catalog=combined_catalog,
+        system_skill_catalog=list(system_skill_catalog),
+    )
     pipedream_app_catalog: list[Any] = []
     enabled_app_slugs: list[str] = []
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
@@ -1457,6 +1625,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         pipedream_app_catalog=pipedream_app_catalog,
         enabled_app_slugs=enabled_app_slugs,
         auto_enable_apps=auto_enable_apps,
+        self_visual_request_hint=self_visual_request_hint,
     )
 
 

@@ -440,13 +440,14 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     ) -> None:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="judge_message_quality")
         params = self._tool_params(send_call)
+        judge_params = self._judge_tool_params(params)
         sent_message = self._sent_message_for_call(send_call)
         choice, reasoning = self.llm_judge(
             question=self._judge_question(case),
             context=(
                 f"Delivery channel: {case.channel}\n"
                 f"Source facts:\n{case.source_facts}\n\n"
-                f"Tool params:\n{json.dumps(params, indent=2, ensure_ascii=False, default=str)}\n\n"
+                f"Tool params:\n{json.dumps(judge_params, indent=2, ensure_ascii=False, default=str)}\n\n"
                 f"Message body:\n{body}"
             ),
             options=["Pass", "Fail"],
@@ -460,7 +461,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 context=(
                     f"Delivery channel: {case.channel}\n"
                     f"Source facts:\n{case.source_facts}\n\n"
-                    f"Tool params:\n{json.dumps(params, indent=2, ensure_ascii=False, default=str)}\n\n"
+                    f"Tool params:\n{json.dumps(judge_params, indent=2, ensure_ascii=False, default=str)}\n\n"
                     f"Message body:\n{body}"
                 ),
                 options=["Pass", "Fail"],
@@ -534,6 +535,17 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 return {}
             return parsed if isinstance(parsed, dict) else {}
         return {}
+
+    @staticmethod
+    def _judge_tool_params(params: dict[str, Any]) -> dict[str, Any]:
+        body_keys = {"body", "mobile_first_html", "html_body", "text_body", "plain_text", "message"}
+        redacted: dict[str, Any] = {}
+        for key, value in params.items():
+            if key in body_keys and isinstance(value, str):
+                redacted[key] = f"<redacted message body: {len(value)} chars>"
+            else:
+                redacted[key] = value
+        return redacted
 
     @staticmethod
     def _tool_result(send_call: PersistentAgentToolCall) -> dict[str, Any]:

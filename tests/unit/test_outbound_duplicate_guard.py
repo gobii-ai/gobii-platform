@@ -10,6 +10,7 @@ from api.agent.tools.email_sender import execute_send_email
 from api.agent.tools.sms_sender import execute_send_sms
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.agent.tools.outbound_duplicate_guard import detect_recent_duplicate_message
+from api.agent.files.filespace_service import write_bytes_to_dir
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -137,6 +138,52 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
         self.assertEqual(second.get("status"), "error")
         self.assertEqual(mock_deliver_sms.call_count, 0)
         self.assertTrue(second.get("duplicate_detected"))
+
+    @patch("api.agent.tools.sms_sender.broadcast_message_attachment_update")
+    @patch("api.agent.tools.sms_sender.deliver_agent_sms")
+    def test_sms_sends_generated_visual_media_attachments(
+        self,
+        mock_deliver_sms,
+        mock_broadcast,
+        mock_close_old_connections,
+    ):
+        image_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"\x89PNG\r\n\x1a\n",
+            extension=".png",
+            mime_type="image/png",
+            path="/exports/selfie.png",
+            overwrite=True,
+        )
+        video_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"video-bytes",
+            extension=".mp4",
+            mime_type="video/mp4",
+            path="/exports/self-video.mp4",
+            overwrite=True,
+        )
+        self.assertEqual(image_result["status"], "ok")
+        self.assertEqual(video_result["status"], "ok")
+
+        result = execute_send_sms(
+            self.agent,
+            {
+                "to_number": self.sms_number,
+                "body": "Here are the generated visuals.",
+                "attachments": ["$/exports/selfie.png", "$[/exports/self-video.mp4]"],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(message.attachments.count(), 2)
+        self.assertIn("Attachments:", message.body)
+        self.assertIn("selfie.png:", message.body)
+        self.assertIn("self-video.mp4:", message.body)
+        self.assertEqual(mock_deliver_sms.call_count, 1)
+        mock_broadcast.assert_called_once_with(str(message.id))
 
     def test_web_chat_duplicate_is_blocked(self, mock_close_old_connections):
         start_web_session(self.agent, self.user)

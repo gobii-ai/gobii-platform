@@ -575,6 +575,76 @@ AWS_S3_ADDRESSING_STYLE = env(
     "AWS_S3_ADDRESSING_STYLE", default="auto"
 )  # Recommended for MinIO path style
 
+# Optional non-prod media read fallback. This is intended for environments whose
+# DB was forked from prod but whose writable media storage was not.
+MEDIA_READ_FALLBACK_ENABLED = env.bool("MEDIA_READ_FALLBACK_ENABLED", default=False)
+MEDIA_READ_FALLBACK_STORAGE_BACKEND_TYPE = env(
+    "MEDIA_READ_FALLBACK_STORAGE_BACKEND_TYPE", default=""
+).upper()
+MEDIA_READ_FALLBACK_URL_ENABLED = env.bool(
+    "MEDIA_READ_FALLBACK_URL_ENABLED", default=False
+)
+MEDIA_READ_FALLBACK_ROOT = env("MEDIA_READ_FALLBACK_ROOT", default=None)
+MEDIA_READ_FALLBACK_URL = env("MEDIA_READ_FALLBACK_URL", default=MEDIA_URL)
+MEDIA_READ_FALLBACK_GS_BUCKET_NAME = env(
+    "MEDIA_READ_FALLBACK_GS_BUCKET_NAME", default=None
+)
+MEDIA_READ_FALLBACK_GS_PROJECT_ID = env(
+    "MEDIA_READ_FALLBACK_GS_PROJECT_ID", default=None
+)
+MEDIA_READ_FALLBACK_GS_LOCATION = env(
+    "MEDIA_READ_FALLBACK_GS_LOCATION", default="media"
+)
+MEDIA_READ_FALLBACK_GS_DEFAULT_ACL = env(
+    "MEDIA_READ_FALLBACK_GS_DEFAULT_ACL", default="projectPrivate"
+)
+MEDIA_READ_FALLBACK_GS_QUERYSTRING_AUTH = env.bool(
+    "MEDIA_READ_FALLBACK_GS_QUERYSTRING_AUTH", default=False
+)
+
+
+def _media_read_fallback_storage_config() -> dict[str, Any]:
+    if not MEDIA_READ_FALLBACK_STORAGE_BACKEND_TYPE:
+        raise ImproperlyConfigured(
+            "MEDIA_READ_FALLBACK_STORAGE_BACKEND_TYPE must be set when "
+            "MEDIA_READ_FALLBACK_ENABLED is true."
+        )
+
+    if MEDIA_READ_FALLBACK_STORAGE_BACKEND_TYPE == "LOCAL":
+        if not MEDIA_READ_FALLBACK_ROOT:
+            raise ImproperlyConfigured(
+                "MEDIA_READ_FALLBACK_ROOT must be set when using LOCAL media "
+                "read fallback storage."
+            )
+        return {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {
+                "location": MEDIA_READ_FALLBACK_ROOT,
+                "base_url": MEDIA_READ_FALLBACK_URL,
+            },
+        }
+
+    if MEDIA_READ_FALLBACK_STORAGE_BACKEND_TYPE == "GCS":
+        if not MEDIA_READ_FALLBACK_GS_BUCKET_NAME:
+            raise ImproperlyConfigured(
+                "MEDIA_READ_FALLBACK_GS_BUCKET_NAME must be set when using "
+                "GCS media read fallback storage."
+            )
+        return {
+            "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
+            "OPTIONS": {
+                "bucket_name": MEDIA_READ_FALLBACK_GS_BUCKET_NAME,
+                "project_id": MEDIA_READ_FALLBACK_GS_PROJECT_ID,
+                "location": MEDIA_READ_FALLBACK_GS_LOCATION,
+                "default_acl": MEDIA_READ_FALLBACK_GS_DEFAULT_ACL,
+                "querystring_auth": MEDIA_READ_FALLBACK_GS_QUERYSTRING_AUTH,
+            },
+        }
+
+    raise ImproperlyConfigured(
+        "MEDIA_READ_FALLBACK_STORAGE_BACKEND_TYPE must be LOCAL or GCS."
+    )
+
 # --- Conditional Cloud Storage Overrides ---
 if STORAGE_BACKEND_TYPE == "GCS":
     if not GS_BUCKET_NAME:
@@ -628,6 +698,16 @@ elif STORAGE_BACKEND_TYPE == "S3":
                 "addressing_style": AWS_S3_ADDRESSING_STYLE,
             },
         }
+
+if MEDIA_READ_FALLBACK_ENABLED:
+    STORAGES["default"] = {
+        "BACKEND": "config.storage.ReadThroughStorage",
+        "OPTIONS": {
+            "primary": STORAGES["default"],
+            "fallback": _media_read_fallback_storage_config(),
+            "fallback_url_enabled": MEDIA_READ_FALLBACK_URL_ENABLED,
+        },
+    }
 
 
 # ────────── Auth ──────────

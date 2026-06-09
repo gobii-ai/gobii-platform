@@ -88,6 +88,9 @@ def get_update_plan_tool() -> dict[str, Any]:
                 "Use only for real multi-step work where a persistent user-visible plan is useful. Do not use for "
                 "quick lookups, simple research answers, simple latest/current company/news/batch reports, "
                 "scheduled briefings, or one-shot chart requests.\n"
+                "Do not create or update a runtime plan just to preserve remaining batch work, record a resume "
+                "cursor, or set a schedule; use the relevant result, SQLite config/queue update, or final message "
+                "directly.\n"
                 "For deep work, use at most one initial plan update; do not call this again just to mark research done, "
                 "narrate progress, or prepare the final response.\n"
                 "Provide a list of plan items, each with a step and status.\n"
@@ -386,10 +389,7 @@ def build_redundant_research_plan_skip_result(agent, params: dict[str, Any]) -> 
         _normalize_step_key(step): status
         for step, status in zip(incoming_steps, incoming_statuses)
     }
-    if (
-        set(existing_statuses_by_key) != set(incoming_statuses_by_key)
-        or any(incoming_statuses_by_key[key] != existing_statuses_by_key[key] for key in incoming_statuses_by_key)
-    ):
+    if set(existing_statuses_by_key) != set(incoming_statuses_by_key):
         return None
 
     plan_text = " ".join(incoming_steps).casefold()
@@ -400,6 +400,29 @@ def build_redundant_research_plan_skip_result(agent, params: dict[str, Any]) -> 
         return None
 
     will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
+    status_only_update = any(
+        incoming_statuses_by_key[key] != existing_statuses_by_key[key]
+        for key in incoming_statuses_by_key
+    )
+    incoming_all_done = all(
+        status == PersistentAgentKanbanCard.Status.DONE
+        for status in incoming_statuses_by_key.values()
+    )
+    if status_only_update:
+        if incoming_all_done:
+            return None
+        if will_continue_work is False:
+            return None
+        return {
+            "status": "ok",
+            "message": (
+                "Skipped redundant research plan status transition. Continue with the remaining research, then "
+                "send the final answer directly."
+            ),
+            "skipped": True,
+            "auto_sleep_ok": False,
+        }
+
     if will_continue_work is False:
         return {
             "status": "ok",

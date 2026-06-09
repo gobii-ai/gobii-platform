@@ -38,14 +38,16 @@ _PROGRESS_PREFIX_RE = re.compile(
     r"(?:(?:actually|first|just|quickly|then|also)\s+)?"
     r"(?:(?:do\s+)?(?:start|begin|continue|check|fetch|find|grab|investigate|pull|look|search|research|extract|compile|process|analy[sz]e|verify)|"
     r"do\s+(?:proper\s+|additional\s+|more\s+|some\s+|a\s+few\s+|new\s+)?(?:search(?:es)?|queries|lookups?)|"
-    r"inspect|scrape|organize|build|create|prepare|generate|run|hit|parse|get|read|patch|rewrite|seed|register|format|summarize|structure|try)\b",
+    r"inspect|scrape|organize|build|create|prepare|generate|run|hit|parse|get|read|patch|rewrite|seed|register|format|summarize|structure|try|make\s+(?:the\s+)?call)\b",
     re.IGNORECASE,
 )
 _INTERNAL_PROGRESS_RE = re.compile(
     r"\b(?:the user|already greeted|actual research|tool|tools|parallel|compile the results|extract the data|"
     r"mark the plan complete|plan complete|delivered message|wrap up|left the last cycle mid-stream|"
     r"deliver the final report now|want to verify|actually scraping|scrape results|inspect the actual|"
-    r"real data is coming back|got what i need|let'?s (?:dig up|fetch|find|get|grab|look up|pull|research|search)|let me (?:also |now |actually |just |quickly |then )?(?:grab|fetch|find|investigate|check|pull|get|look|search|research|query|verify|analy[sz]e|compile|process|inspect|fix|patch|clean(?: up)?|seed|register|do (?:a |the |thorough |proper |additional |more |some |a few |new )?(?:search(?:es)?|queries|lookups?|cleanup|clean up))|let me send it over|let me end planning|"
+    r"real data is coming back|got what i need|let'?s (?:dig into|dig up|fetch|find|get|grab|look up|pull|research|search)|let me (?:also |now |actually |just |quickly |then )?(?:grab|fetch|find|investigate|check|pull|get|look|search|research|query|verify|analy[sz]e|compile|process|inspect|fix|patch|clean(?: up)?|seed|register|jump (?:straight )?into|do (?:a |the |thorough |proper |additional |more |some |a few |new )?(?:search(?:es)?|queries|lookups?|cleanup|clean up))|let me send it over|let me end planning|"
+    r"ready to send (?:you )?.{0,80}\blet me generate|let me generate (?:it|that|the image|the video) first|"
+    r"(?:custom )?tool is created.{0,80}\bnow let me run|"
     r"got (?:the )?(?:result|results|data|source material).{0,180}\blet me (?:report|send|share|set up|configure)|"
     r"i now have (?:detailed )?(?:data|source pages)|mark the research steps|deliver the synthesized|"
     r"good (?:initial )?data gathered|let me (?:now )?scrape|let me do (?:a couple|some) more|"
@@ -66,19 +68,42 @@ _OPTIONAL_PROGRESS_QUESTION_RE = re.compile(
 )
 _RESULTS_STATUS_PROGRESS_RE = re.compile(
     r"^(?:(?:good|great|okay|ok|alright|sure)[,! ]+)?"
-    r"(?:(?:i(?:'ve)?|we)\s+(?:now\s+)?(?:have|found|got)\s+(?:the\s+)?(?:search\s+)?(?:result|results|data|sources?)|all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)\s+(?:are|were)\s+(?:fetched|scraped|loaded|processed|done)|the\s+data\s+is\s+in)\b",
+    r"(?:(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|found|got)\s+(?:the\s+)?(?:search\s+)?(?:result|results|data|sources?)|"
+    r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)|"
+    r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+claim\s+texts?|"
+    r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+claims?\s+extracted|"
+    r"from\s+(?:the\s+)?(?:scrapes|sources|pages|results),?\s+(?:i|we)\s+(?:now\s+)?(?:have|got)\s+(?:all\s+)?(?:the\s+)?(?:data|source material|results?)|"
+    r"all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)\s+(?:(?:are|were)\s+)?(?:fetched|scraped|loaded|processed|done)(?:\s+and\s+claims?\s+extracted)?|"
+    r"the\s+data\s+is\s+(?:already\s+)?in(?:\s+(?:the\s+)?[`\"']?[\w-]+[`\"']?(?:\s+table)?)?)\b",
     re.IGNORECASE,
 )
 _RETURNED_DATA_THEN_PROGRESS_RE = re.compile(
-    r"\b(?:site|page|api|browser task|tool|source|result)\b.{0,100}"
-    r"\b(?:returned|found|provided|gave|has)\b.{0,80}\b(?:data|result|results)\b.{0,160}"
+    r"(?:\b(?:site|page|api|browser task|tool|source|result|query|cte|sqlite)\b.{0,100}"
+    r"\b(?:returned|found|provided|gave|has|pulled|retrieved|loaded|collected)\b.{0,80}\b(?:data|result|results)\b|"
+    r"\bgot (?:the )?(?:data|result|results)\b|"
+    r"\b(?:i|we)\s+(?:now\s+)?(?:have|found|got)\s+(?:the\s+)?(?:[\w-]+\s+){0,3}(?:data|result|results)\b).{0,160}"
     r"\b(?:let me|i(?:'ll| will| need to| am going to)|next|then)\s+"
-    r"(?:update|set up|configure|report|send|deliver|share|write|summari[sz]e)\b",
+    r"(?:update|set up|configure|report|send|deliver|share|write|summari[sz]e|extract|synthesi[sz]e|compile|process|parse)\b",
+    re.IGNORECASE,
+)
+_PENDING_WORK_THEN_PROGRESS_RE = re.compile(
+    r"\b(?:pending|still pending|not (?:done|complete|finished)|remaining|left)\b.{0,180}"
+    r"\b(?:let me|i(?:'ll| will| need to| am going to)|next|then)\s+"
+    r"(?:extract|query|try|inspect|use|build|create|run|rerun|report|send|deliver|share|write|summari[sz]e|"
+    r"synthesi[sz]e|compile|process|parse|structure|format|rank|dedupe)\b",
+    re.IGNORECASE,
+)
+_INTERNAL_FIX_THEN_PROGRESS_RE = re.compile(
+    r"\bi\s+need\s+to\s+"
+    r"(?:fix|correct|repair|resolve|check|inspect|recreate|rerun|query|extract|verify|use)\b"
+    r".{0,180}\b(?:let me|and then|then|i(?:'ll| will| need to| am going to))\s+"
+    r"(?:fix|correct|repair|resolve|recreate|run|rerun|query|extract|inspect|check|analy[sz]e|"
+    r"summari[sz]e|report|deliver)\b",
     re.IGNORECASE,
 )
 _FORWARD_PROGRESS_ACTION_RE = re.compile(
     r"\b(?:let me|i(?:'ll| will| need to| can| am going to)|next|then)\s+"
-    r"(?:open|scrape|fetch|query|read|review|use|analy[sz]e|synthesi[sz]e|compile|prepare|write|send|deliver|report|summari[sz]e|extract|check|update|configure|set up)\b",
+    r"(?:open|scrape|fetch|query|read|review|use|analy[sz]e|synthesi[sz]e|compile|prepare|write|send|deliver|report|summari[sz]e|extract|check|update|configure|set up|dedupe|rank)\b",
     re.IGNORECASE,
 )
 _TRAILING_OPTIONAL_FOLLOWUP_RE = re.compile(
@@ -122,6 +147,13 @@ _TOOL_FRUSTRATION_PROGRESS_RE = re.compile(
     r"stop verifying|let me deliver|all done)\b",
     re.IGNORECASE,
 )
+_UNSCHEDULED_REMAINING_WORK_CLAIM_RE = re.compile(
+    r"(?:"
+    r"\b(?:remaining|unfinished|left|more)\b.{0,180}\b(?:queued|queue|resume|resumable|continuation|continue|next verification run|pick up|won'?t be lost|will not be lost)\b|"
+    r"\b(?:queued|queue|resume|resumable|continuation|next verification run|pick up)\b.{0,180}\b(?:remaining|unfinished|cursor|won'?t be lost|will not be lost)\b"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def _should_continue_work(params: Dict[str, Any]) -> bool:
@@ -159,20 +191,31 @@ def _looks_like_routine_progress_message(body: str) -> bool:
     if not text:
         return False
     lower = text.lower()
+    if "/app/integrations" in lower:
+        return False
     if _TOOL_FRUSTRATION_PROGRESS_RE.search(text):
         return True
     if _RECOVERY_THEN_PROGRESS_RE.search(text):
         return True
     if _RETURNED_DATA_THEN_PROGRESS_RE.search(text):
         return True
+    if _PENDING_WORK_THEN_PROGRESS_RE.search(text):
+        return True
+    if _INTERNAL_FIX_THEN_PROGRESS_RE.search(text):
+        return True
+    answer_shape = bool(
+        re.search(r"\bhere(?:'s| is) (?:the )?(?:analysis|answer|recommendation|report)\b", text, re.I)
+        or re.search(r"\b(?:claims extracted|strongest unique claims|source urls?)\b.{0,180}(?:^|\s)\|[^|]+\|", text, re.I)
+        or re.search(r"(?:^|\s)\|[^|]+\|", text, re.I)
+    )
     result_status = bool(_RESULTS_STATUS_PROGRESS_RE.search(text))
-    if result_status and not re.search(r"\bhere(?:'s| is) (?:the )?(?:analysis|answer|recommendation|report)\b", text, re.I) and (
+    if result_status and not answer_shape and (
         _FORWARD_PROGRESS_ACTION_RE.search(text)
         or ("http://" not in lower and "https://" not in lower and len(text) <= 500)
     ):
         return True
     progress_signal = bool(_PROGRESS_PREFIX_RE.search(text) or _INTERNAL_PROGRESS_RE.search(text))
-    if progress_signal and re.search(r"\b(?:claims extracted|strongest unique claims|source urls?)\b|(?:^|\s)\|[^|]+\|", text, re.I):
+    if progress_signal and answer_shape:
         return False
     if "?" in text and _OPTIONAL_PROGRESS_QUESTION_RE.search(text):
         return progress_signal
@@ -190,6 +233,8 @@ def _looks_like_stop_marked_progress_message(body: str) -> bool:
         _TOOL_FRUSTRATION_PROGRESS_RE.search(text)
         or _RECOVERY_THEN_PROGRESS_RE.search(text)
         or _RETURNED_DATA_THEN_PROGRESS_RE.search(text)
+        or _PENDING_WORK_THEN_PROGRESS_RE.search(text)
+        or _INTERNAL_FIX_THEN_PROGRESS_RE.search(text)
     ):
         return True
     result_status = bool(_RESULTS_STATUS_PROGRESS_RE.search(text))
@@ -197,6 +242,12 @@ def _looks_like_stop_marked_progress_message(body: str) -> bool:
         _FORWARD_PROGRESS_ACTION_RE.search(text)
         or ("http://" not in lower and "https://" not in lower and len(text) <= 500)
     )
+
+
+def _claims_unscheduled_remaining_work_preserved(agent: PersistentAgent, body: str) -> bool:
+    if (agent.schedule or "").strip():
+        return False
+    return bool(_UNSCHEDULED_REMAINING_WORK_CLAIM_RE.search(" ".join((body or "").split())))
 
 
 def has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
@@ -228,8 +279,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "name": "send_chat_message",
             "description": (
                 "Send a user-facing web chat message for context, config changes, findings, or finals. "
-                "Use request_human_input instead when the agent has been blocked repeatedly or for a while and needs a tracked answer. "
-                "Do not narrate what you will do next or send progress-only notes about tool sequencing, plan mechanics, or internal reasoning."
+                "Use request_human_input for repeated blockers needing a tracked answer. "
+                "Do not narrate next steps or progress-only tool/plan/internal notes."
             ),
             "parameters": {
                 "type": "object",
@@ -237,8 +288,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "User-facing chat text. For reports, use Markdown sections, bullets/tables, status labels, "
-                            "and tasteful emoji labels. Do not pass placeholders or tool-call/XML syntax; it is sent literally."
+                            "User-facing chat text. Reports may use Markdown sections, bullets/tables, status/emoji labels. "
+                            "Tool-call/XML syntax is sent literally."
                         ),
                     },
                     "to_address": {
@@ -254,7 +305,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true=another immediate tool call follows in this turn; false=current turn is done, even if future scheduled work remains, and no current plan items remain unfinished. Never send a message solely to justify continuing work.",
+                        "description": "REQUIRED. true=immediate tool follows; false=done, no unfinished current plan. Never send a message solely to justify continuing work.",
                     },
                 },
                 "required": ["body", "will_continue_work"],
@@ -301,6 +352,16 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
             "message": "Skipped routine progress-only chat message.",
             "auto_sleep_ok": False,
             "skipped": True,
+        }
+    if not will_continue and _claims_unscheduled_remaining_work_preserved(agent, body):
+        return {
+            "status": "error",
+            "message": (
+                "This message claims unfinished work is queued or resumable, but no schedule is configured. "
+                "Set __agent_config.schedule with sqlite_batch or continue a bounded batch before sending that claim."
+            ),
+            "auto_sleep_ok": False,
+            "retryable": True,
         }
     attachment_paths = params.get("attachments")
     try:

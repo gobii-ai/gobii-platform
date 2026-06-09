@@ -968,8 +968,8 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("single setup link", skill.prompt_instructions)
         self.assertIn("fallback repair link", skill.prompt_instructions)
         self.assertIn("To upload files", skill.prompt_instructions)
-        self.assertIn("filespace paths or $[/path]", skill.prompt_instructions)
-        self.assertIn("Body text never attaches files", skill.prompt_instructions)
+        self.assertIn("filespace paths or exact $[/path]", skill.prompt_instructions)
+        self.assertIn("body text never attaches files", skill.prompt_instructions)
 
     @tag("batch_agent_webhooks")
     def test_discord_app_api_returns_agent_state(self):
