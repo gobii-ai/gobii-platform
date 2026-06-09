@@ -2386,6 +2386,10 @@
   .composer-working-tasks-badge {
     display: none;
   }
+
+  .composer-pending-action-nav__count {
+    display: none;
+  }
 }
 
 .composer-working-toggle {
@@ -2641,9 +2645,11 @@
 }
 
 .composer-insight-tab[data-priority="true"][data-active="true"] {
-  border-color: color-mix(in srgb, var(--tab-color, #0284c7) 88%, white);
-  background: var(--tab-color, #0284c7);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tab-color, #0284c7) 58%, white) inset;
+  border-color: color-mix(in srgb, var(--tab-color, #0284c7) 58%, white);
+  background: color-mix(in srgb, var(--tab-color, #0284c7) 22%, white);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--tab-color, #0284c7) 22%, white) inset,
+    0 0 0 2px color-mix(in srgb, var(--tab-color, #0284c7) 8%, transparent);
 }
 
 .composer-working-panel[data-expanded="false"] .composer-insight-tab[data-priority="true"] {
@@ -2706,6 +2712,17 @@
 .composer-insight-tab[data-active="true"] .composer-insight-tab-count {
   color: white;
   font-weight: 600;
+}
+
+.composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-label,
+.composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-icon,
+.composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-count {
+  color: var(--tab-color, #0284c7);
+  font-weight: 700;
+}
+
+.composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-count {
+  background: color-mix(in srgb, var(--tab-color, #0284c7) 16%, white);
 }
 
 .composer-insight-tab[data-active="true"] .composer-insight-tab-count {

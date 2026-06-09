@@ -352,7 +352,7 @@ describe('AgentComposer pending action insights panel', () => {
     })
   })
 
-  it('returns to the normal composer when paging from free text input to a non-human request', async () => {
+  it('shows the approval footer when paging from free text input to a credential request', () => {
     const handleSubmit = vi.fn(async () => undefined)
     const handleRespondHumanInput = vi.fn(async () => undefined)
 
@@ -369,25 +369,24 @@ describe('AgentComposer pending action insights panel', () => {
 
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
     expect(screen.queryByPlaceholderText(/^Type your answer/)).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/^Message/)).not.toBeInTheDocument()
+    expect(screen.getByText('Reviewing this request')).toBeInTheDocument()
+    expect(screen.getByText('Add this credential to let the agent continue.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
 
-    const messageComposer = screen.getByPlaceholderText(/^Message/)
-    expect(messageComposer).toHaveValue('')
-    fireEvent.change(messageComposer, { target: { value: 'normal message' } })
-    fireEvent.submit(messageComposer.closest('form') as HTMLFormElement)
-
-    await waitFor(() => {
-      expect(handleSubmit).toHaveBeenCalledWith('normal message', [])
-    })
+    expect(handleSubmit).not.toHaveBeenCalled()
     expect(handleRespondHumanInput).not.toHaveBeenCalled()
   })
 
-  it('keeps the normal message composer available for non-human pending actions', () => {
+  it('replaces the normal message composer for credential pending actions', () => {
     renderAgentComposer({
       pendingActionRequests: [makeRequestedSecretsAction()],
     })
 
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/^Message/)).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/^Message/)).not.toBeInTheDocument()
+    expect(screen.getByText('Reviewing this request')).toBeInTheDocument()
   })
 
   it('shows skip planning beside the active planning status instead of a planning strip', () => {

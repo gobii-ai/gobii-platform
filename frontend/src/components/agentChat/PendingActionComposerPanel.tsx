@@ -42,6 +42,8 @@ type PendingActionComposerPanelProps = {
     }>
   ) => Promise<void>
   onViewAllContactRequests?: () => void
+  approvalActionsContainer?: Element | null
+  suppressInlineApprovalActions?: boolean
 }
 
 function parseInlineError(error: unknown): string {
@@ -128,6 +130,8 @@ export function PendingActionComposerPanel({
   onRemoveRequestedSecrets,
   onResolveContactRequests,
   onViewAllContactRequests,
+  approvalActionsContainer = null,
+  suppressInlineApprovalActions = false,
 }: PendingActionComposerPanelProps) {
   const [busySpawnDecision, setBusySpawnDecision] = useState<'approve' | 'decline' | null>(null)
   const [spawnError, setSpawnError] = useState<string | null>(null)
@@ -293,95 +297,105 @@ export function PendingActionComposerPanel({
     || activeAction.kind === 'spawn_request'
     || activeAction.kind === 'requested_secrets'
     || activeAction.kind === 'contact_requests'
+  const useApprovalInfoCard = activeAction.kind === 'requested_secrets' || activeAction.kind === 'contact_requests'
 
   return (
-    <section className="bg-white px-3 py-3 text-slate-800" aria-label="Pending action request">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
-            <ActiveIcon className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <div className={`min-w-0 ${activeActionMeta ? '' : 'flex min-h-9 items-center'}`}>
-            <p className="min-w-0 text-[0.95rem] font-semibold leading-6 tracking-[-0.02em] text-slate-900">
-              {activeActionHeading}
-            </p>
-            {activeActionMeta ? (
-              <p className="text-xs text-slate-600">
-                {activeActionMeta}
+    <section
+      className={`${useApprovalInfoCard ? 'bg-transparent' : 'bg-white'} px-4 py-3 text-slate-800 sm:px-5`}
+      aria-label="Pending action request"
+    >
+      <div className={useApprovalInfoCard ? 'rounded-xl border border-slate-200/70 bg-white px-3 py-3' : undefined}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+              <ActiveIcon className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className={`min-w-0 ${activeActionMeta ? '' : 'flex min-h-8 items-center'}`}>
+              <p className="min-w-0 text-sm font-semibold leading-5 text-slate-900">
+                {activeActionHeading}
               </p>
+              {activeActionMeta ? (
+                <p className="mt-0.5 truncate text-xs text-slate-600">
+                  {activeActionMeta}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          {activeAction.kind === 'contact_requests' && onViewAllContactRequests ? (
+            <button
+              type="button"
+              onClick={onViewAllContactRequests}
+              className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-white/55 hover:text-slate-900"
+            >
+              View all
+            </button>
+          ) : null}
+        </div>
+
+        {hasActionBody ? (
+          <div className={`mt-3 ${activeAction.kind === 'requested_secrets' || activeAction.kind === 'contact_requests' ? 'sm:ml-10' : ''}`}>
+            {showHumanInputComposer && activeAction.kind === 'human_input' ? (
+              <HumanInputComposerPanel
+                requests={activeAction.requests}
+                agentName={agentName}
+                activeRequestId={activeHumanInputRequestId}
+                draftResponses={draftHumanInputResponses}
+                disabled={disabled}
+                busyRequestId={busyHumanInputRequestId}
+                onSelectOption={onSelectHumanInputOption}
+                onDraftFreeTextChange={onDraftHumanInputFreeTextChange}
+                onSubmitRequest={onSubmitHumanInputRequest}
+                onDismissRequest={onDismissHumanInputRequest}
+              />
+            ) : null}
+
+            {activeAction.kind === 'spawn_request' ? (
+              <PendingSpawnRequestPanel
+                action={activeAction}
+                disabled={disabled || !onResolveSpawnRequest}
+                busyDecision={busySpawnDecision}
+                error={spawnError}
+                onResolve={handleResolveSpawn}
+              />
+            ) : null}
+
+            {activeAction.kind === 'requested_secrets' ? (
+              <PendingRequestedSecretsPanel
+                action={activeAction}
+                disabled={disabled || (!onFulfillRequestedSecrets && !onRemoveRequestedSecrets)}
+                busyAction={busySecretsAction}
+                error={secretError}
+                secretValues={secretValues}
+                makeGlobal={makeGlobal}
+                onSecretValueChange={(secretId, value) => {
+                  setSecretValues((current) => ({ ...current, [secretId]: value }))
+                }}
+                onMakeGlobalChange={setMakeGlobal}
+                onSave={handleSaveSecrets}
+                onRemove={handleRemoveSecrets}
+                actionsContainer={approvalActionsContainer}
+                suppressInlineActions={suppressInlineApprovalActions}
+              />
+            ) : null}
+
+            {activeAction.kind === 'contact_requests' ? (
+              <PendingContactRequestsPanel
+                action={activeAction}
+                disabled={disabled || !onResolveContactRequests}
+                busy={busyContacts}
+                error={contactError}
+                contactDrafts={contactDrafts}
+                onContactDraftChange={(requestId, nextDraft) => {
+                  setContactDrafts((current) => ({ ...current, [requestId]: nextDraft }))
+                }}
+                onSubmit={handleResolveContacts}
+                actionsContainer={approvalActionsContainer}
+                suppressInlineActions={suppressInlineApprovalActions}
+              />
             ) : null}
           </div>
-        </div>
-        {activeAction.kind === 'contact_requests' && onViewAllContactRequests ? (
-          <button
-            type="button"
-            onClick={onViewAllContactRequests}
-            className="mt-1 shrink-0 text-sm font-semibold text-slate-600 transition hover:text-slate-900"
-          >
-            View all
-          </button>
         ) : null}
       </div>
-
-      {hasActionBody ? (
-        <div className="mt-3">
-          {showHumanInputComposer && activeAction.kind === 'human_input' ? (
-            <HumanInputComposerPanel
-              requests={activeAction.requests}
-              agentName={agentName}
-              activeRequestId={activeHumanInputRequestId}
-              draftResponses={draftHumanInputResponses}
-              disabled={disabled}
-              busyRequestId={busyHumanInputRequestId}
-              onSelectOption={onSelectHumanInputOption}
-              onDraftFreeTextChange={onDraftHumanInputFreeTextChange}
-              onSubmitRequest={onSubmitHumanInputRequest}
-              onDismissRequest={onDismissHumanInputRequest}
-            />
-          ) : null}
-
-          {activeAction.kind === 'spawn_request' ? (
-            <PendingSpawnRequestPanel
-              action={activeAction}
-              disabled={disabled || !onResolveSpawnRequest}
-              busyDecision={busySpawnDecision}
-              error={spawnError}
-              onResolve={handleResolveSpawn}
-            />
-          ) : null}
-
-          {activeAction.kind === 'requested_secrets' ? (
-            <PendingRequestedSecretsPanel
-              action={activeAction}
-              disabled={disabled || (!onFulfillRequestedSecrets && !onRemoveRequestedSecrets)}
-              busyAction={busySecretsAction}
-              error={secretError}
-              secretValues={secretValues}
-              makeGlobal={makeGlobal}
-              onSecretValueChange={(secretId, value) => {
-                setSecretValues((current) => ({ ...current, [secretId]: value }))
-              }}
-              onMakeGlobalChange={setMakeGlobal}
-              onSave={handleSaveSecrets}
-              onRemove={handleRemoveSecrets}
-            />
-          ) : null}
-
-          {activeAction.kind === 'contact_requests' ? (
-            <PendingContactRequestsPanel
-              action={activeAction}
-              disabled={disabled || !onResolveContactRequests}
-              busy={busyContacts}
-              error={contactError}
-              contactDrafts={contactDrafts}
-              onContactDraftChange={(requestId, nextDraft) => {
-                setContactDrafts((current) => ({ ...current, [requestId]: nextDraft }))
-              }}
-              onSubmit={handleResolveContacts}
-            />
-          ) : null}
-        </div>
-      ) : null}
     </section>
   )
 }
