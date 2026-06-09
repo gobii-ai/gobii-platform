@@ -62,6 +62,38 @@ COMPARISON_CATALOG = (
         "reviewed_by": "Gobii editorial team",
         "source_reviewed": "June 2026",
     },
+    {
+        "slug": "zapier-agents-vs-gobii",
+        "competitor_name": "Zapier Agents",
+        "title": "Zapier Agents vs Gobii",
+        "template_name": "comparisons/detail_zapier_agents.html",
+        "seo_title": "Zapier Agents vs Gobii: AI Coworker Comparison | Gobii",
+        "seo_description": (
+            "Comparing Zapier Agents vs Gobii? See when to choose Zapier's connected-app "
+            "AI agents and when to choose Gobii's persistent browser-native AI coworkers."
+        ),
+        "summary": (
+            "A practical comparison for teams deciding between Zapier Agents for connected-app "
+            "automation and Gobii for persistent browser-native AI coworker workflows."
+        ),
+        "status": COMPARISON_STATUS_PUBLISHED,
+        "target_keywords": (
+            "Zapier Agents vs Gobii",
+            "Gobii vs Zapier Agents",
+            "Zapier Agents alternative",
+            "AI agent automation comparison",
+        ),
+        "competitor_url": "https://zapier.com/agents",
+        "competitor_application_category": "AI agent automation platform",
+        "competitor_schema_description": (
+            "AI agents for automating work across Zapier's connected app ecosystem."
+        ),
+        "published_date": "2026-06-07",
+        "last_reviewed_date": "2026-06-07",
+        "last_reviewed_display": "June 7, 2026",
+        "reviewed_by": "Gobii editorial team",
+        "source_reviewed": "June 2026",
+    },
 )
 
 

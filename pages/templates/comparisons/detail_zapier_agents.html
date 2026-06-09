@@ -1,0 +1,417 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ comparison_seo_title }}{% endblock %}
+
+{% block canonical_link %}
+<link rel="canonical" href="{{ canonical_url }}">
+{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="{{ comparison_seo_description }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ comparison_seo_title }}">
+<meta property="og:description" content="{{ comparison_seo_description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="Gobii">
+<meta property="og:image" content="{{ comparison_social_image_url }}">
+<meta property="og:image:alt" content="{{ comparison_social_image_alt }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ comparison_seo_title }}">
+<meta name="twitter:description" content="{{ comparison_seo_description }}">
+<meta name="twitter:image" content="{{ comparison_social_image_url }}">
+<meta name="twitter:image:alt" content="{{ comparison_social_image_alt }}">
+<script type="application/ld+json">{{ comparison_structured_data_json }}</script>
+<script type="application/ld+json">{{ comparison_breadcrumb_json }}</script>
+{% endblock %}
+
+{% block content %}
+<main id="main-content" class="bg-white">
+  <section class="relative isolate overflow-hidden bg-slate-950 text-white">
+    <picture>
+      <source
+        type="image/webp"
+        srcset="{% static 'images/solutions/engineering-hero-640.webp' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.webp' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.webp' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.webp' %} 1920w"
+        sizes="100vw"
+      >
+      <img
+        src="{% static 'images/solutions/engineering-hero-1280.jpg' %}"
+        srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w"
+        sizes="100vw"
+        alt="AI agent platform evaluation workspace"
+        class="absolute inset-0 h-full w-full object-cover"
+        width="1280"
+        height="720"
+        loading="eager"
+        decoding="async"
+        fetchpriority="high"
+        style="opacity: 0.72;"
+      >
+    </picture>
+    <div class="absolute inset-0" style="background: linear-gradient(90deg, rgba(2, 6, 23, 0.84) 0%, rgba(15, 23, 42, 0.70) 48%, rgba(15, 23, 42, 0.34) 100%);"></div>
+    <div class="relative mx-auto max-w-7xl px-6 py-20 sm:px-8 sm:py-24 lg:px-12 lg:py-28">
+      <div class="max-w-4xl rounded-lg border border-white/15 p-6 sm:p-8 lg:p-10" style="background: rgba(2, 6, 23, 0.58); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+        <a href="{% url 'proprietary:comparisons' %}" class="inline-flex items-center text-sm font-semibold text-cyan-200 hover:text-white">
+          <i aria-hidden="true" data-lucide="arrow-left" class="mr-2 size-4"></i>
+          Comparisons
+        </a>
+        <p class="mt-8 text-sm font-semibold uppercase text-cyan-200">Zapier Agents vs Gobii</p>
+        <h1 class="mt-5 text-4xl font-light leading-[1.08] text-white sm:text-5xl lg:text-6xl">
+          Zapier Agents vs Gobii: connected-app automation or browser-native AI coworkers?
+        </h1>
+        <p class="mt-6 max-w-3xl text-lg leading-8 text-cyan-50">
+          Comparing Zapier Agents vs Gobii? Zapier Agents is a strong way to add AI teammates to Zapier's app automation ecosystem. Gobii is built for teams that need persistent AI coworkers with real browsers, direct email/SMS/chat identity, files, structured state, schedules, and finished deliverables.
+        </p>
+        <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+          <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center rounded-lg bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-50">
+            Create Your First Gobii Agent
+            <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg border border-white/50 bg-slate-950/35 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/15">
+            Review the Open Source Repo
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Executive summary</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">
+            The short version: Zapier Agents adds AI to app automation. Gobii gives browser work a dedicated coworker runtime.
+          </h2>
+        </div>
+        <div class="space-y-5 text-base leading-7 text-slate-700">
+          <p>
+            Zapier is excellent when the work is mostly app-to-app automation. Zapier Agents can use Zapier's large app library, app actions, triggers, knowledge sources, web search, web reading, Zaps, and Chrome extension workflows.
+          </p>
+          <p>
+            Gobii is strongest when the work looks like something a teammate would do in a browser: log into sites, navigate portals, collect information, download files, maintain context, and send a useful report, CSV, PDF, or update back to the team.
+          </p>
+          <p>
+            The honest comparison is not "Gobii replaces Zapier." The sharper question is whether you want AI inside a connected-app automation platform, or persistent AI coworkers built around the open web, files, communication channels, and long-running responsibilities.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-cyan-50 py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-cyan-800">Which should you choose?</p>
+        <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">Pick based on where the work happens.</h2>
+      </div>
+      <div class="mt-10 grid gap-5 lg:grid-cols-2">
+        <article class="rounded-lg border border-cyan-200 bg-white p-6">
+          <div class="flex items-center gap-3">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-cyan-700 text-white">
+              <i aria-hidden="true" data-lucide="workflow" class="size-5"></i>
+            </span>
+            <h3 class="text-xl font-semibold text-slate-950">Choose Zapier Agents if...</h3>
+          </div>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            You already use Zapier, your process mainly connects SaaS apps, and you want AI agents that can use Zapier actions, triggers, Zaps, app data, and the broader Zapier automation platform.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-indigo-200 bg-white p-6">
+          <div class="flex items-center gap-3">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-indigo-700 text-white">
+              <i aria-hidden="true" data-lucide="briefcase" class="size-5"></i>
+            </span>
+            <h3 class="text-xl font-semibold text-slate-950">Choose Gobii if...</h3>
+          </div>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            You want always-on AI coworkers that can browse websites independently, use logged-in sessions, work with files, keep structured state, receive email/SMS/chat instructions, and deliver completed work back to your team.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-indigo-700">At a glance</p>
+        <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">The practical comparison</h2>
+      </div>
+      <div class="mt-10 overflow-x-auto rounded-lg border border-indigo-200">
+        <table class="min-w-[1080px] divide-y divide-indigo-100 text-left text-sm">
+          <thead class="bg-indigo-950 text-white">
+            <tr>
+              <th scope="col" class="px-5 py-4 font-semibold">Dimension</th>
+              <th scope="col" class="px-5 py-4 font-semibold">Gobii</th>
+              <th scope="col" class="px-5 py-4 font-semibold">Zapier Agents</th>
+              <th scope="col" class="px-5 py-4 font-semibold">Why it matters</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-indigo-100 bg-white">
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Best fit</th>
+              <td class="px-5 py-5 text-slate-700">Persistent AI coworkers for recurring browser-native business work</td>
+              <td class="px-5 py-5 text-slate-700">AI agents inside Zapier's connected-app automation ecosystem</td>
+              <td class="px-5 py-5 text-slate-700">The right answer depends on whether your work is mostly app orchestration or web execution.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Primary abstraction</th>
+              <td class="px-5 py-5 text-slate-700">An addressable coworker with browser sessions, files, schedules, structured state, and work history</td>
+              <td class="px-5 py-5 text-slate-700">An AI assistant configured with instructions, triggers, knowledge sources, and app actions</td>
+              <td class="px-5 py-5 text-slate-700">Gobii is designed around delegation; Zapier Agents is designed around AI-powered automation.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">App ecosystem</th>
+              <td class="px-5 py-5 text-slate-700">Connects through webhooks, MCP servers, native integrations, and browser work</td>
+              <td class="px-5 py-5 text-slate-700">Major advantage: Zapier's 9,000+ app ecosystem, actions, Zaps, Tables, Forms, and MCP</td>
+              <td class="px-5 py-5 text-slate-700">If connector count is the main requirement, Zapier is the stronger platform.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Browser and web work</th>
+              <td class="px-5 py-5 text-slate-700">Real cloud browsers, persistent sessions, downloads, files, proxies, and structured outputs</td>
+              <td class="px-5 py-5 text-slate-700">Web search, public page reading, web browsing activity, and Chrome extension assistance</td>
+              <td class="px-5 py-5 text-slate-700">Research and portal workflows need more than public search results when the real task happens in websites.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Logged-in portal workflows</th>
+              <td class="px-5 py-5 text-slate-700">Built for agents that can log in, click, fill forms, extract data, and preserve session state</td>
+              <td class="px-5 py-5 text-slate-700">Strong for connected apps; documented Web Reader and Web Search are public-web oriented</td>
+              <td class="px-5 py-5 text-slate-700">Many business systems still require using a website because the API or connector is incomplete.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Communication model</th>
+              <td class="px-5 py-5 text-slate-700">Agents can be contacted like coworkers through chat, email, SMS, webhooks, and API calls</td>
+              <td class="px-5 py-5 text-slate-700">Agents are managed through Zapier, triggers, actions, Zaps, chat, and the Chrome extension</td>
+              <td class="px-5 py-5 text-slate-700">Direct agent identity helps teams delegate, forward attachments, follow up, and route work naturally.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">State and deliverables</th>
+              <td class="px-5 py-5 text-slate-700">Per-agent filespace, structured data, reports, charts, PDFs, CSV exports, screenshots, and webhook outputs</td>
+              <td class="px-5 py-5 text-slate-700">Knowledge sources, app data, activity history, versions, and outputs through connected workflows</td>
+              <td class="px-5 py-5 text-slate-700">Recurring work often ends in maintained records and useful artifacts, not only an automation run.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Pricing unit</th>
+              <td class="px-5 py-5 text-slate-700">Task-based plans aligned to submitted agent jobs and always-on workers</td>
+              <td class="px-5 py-5 text-slate-700">Agents usage is activity-based; actions, searches, browsing, triggers, and some messages can count separately</td>
+              <td class="px-5 py-5 text-slate-700">Neither model is universally cheaper. Compare based on how many steps your real workflows consume.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Self-hosting and control</th>
+              <td class="px-5 py-5 text-slate-700">Self-hosted source code is MIT-licensed; cloud and enterprise deployments are available</td>
+              <td class="px-5 py-5 text-slate-700">Managed SaaS automation platform with mature enterprise governance on the broader Zapier platform</td>
+              <td class="px-5 py-5 text-slate-700">Teams with data residency, inspection, or customization needs may prefer Gobii's self-hostable path.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-indigo-950 py-16 text-white sm:py-20">
+    <div class="mx-auto grid max-w-7xl gap-12 px-6 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:px-12">
+      <div>
+        <p class="text-sm font-semibold uppercase text-cyan-200">Key finding</p>
+        <h2 class="mt-4 text-3xl font-light sm:text-4xl">Zapier Agents is strongest across connected apps. Gobii is strongest across the open web.</h2>
+      </div>
+      <div class="space-y-5 text-base leading-7 text-indigo-50">
+        <p>
+          Zapier Agents should be taken seriously. Zapier has a massive integration network, mature no-code automation patterns, and a clear path from triggers to app actions to AI-assisted work.
+        </p>
+        <p>
+          Gobii starts from a different center of gravity: an AI coworker with its own browser environment, files, state, contact channels, and recurring responsibilities. That is the better fit when the work crosses websites, portals, documents, and messy business processes that do not fit neatly into an app connector.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-8 lg:grid-cols-2">
+        <article class="rounded-lg border border-cyan-200 bg-cyan-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">Zapier's genuine strength: app automation</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            If your process is mostly "when this happens in App A, update App B, notify App C," Zapier is hard to beat. Zapier Agents can use actions from Zapier's app library and can run inside the broader Zapier workflow model.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii should not pretend to win on connector count. Its advantage is the work surface that exists outside clean integrations: browser sessions, websites, portals, files, and human-style research.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-emerald-200 bg-emerald-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">Gobii's browser-native edge</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            Zapier has useful web capabilities, including search, page reading, browsing activity, and a Chrome extension. That makes it a real contender for public-web and app-connected workflows.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii is built around independent cloud browsers that can persist sessions, download files, fill forms, extract data, and continue work over time. That matters when the process depends on authenticated web apps or sites without reliable APIs.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-amber-200 bg-amber-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">Contactable AI coworkers</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            Zapier Agents are configured and operated through the Zapier product, Zap triggers, actions, chat, and the Chrome extension. That is natural for automation builders.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii agents can be assigned a more concrete identity. Your team can chat with them, email them, text them, forward attachments, and let them respond with context-aware follow-through.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-rose-200 bg-rose-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">Finished work, not just runs</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            Zapier Agents has activity history, knowledge sources, versions, and connected workflow outputs. That is valuable when the automation graph is the thing you want to manage.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii is optimized for durable work products: a researched lead list, a recurring competitor report, a downloaded portal file, a structured database update, a screenshot, a CSV, or a PDF that can be sent back to the team.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-cyan-50 py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr]">
+        <div>
+          <p class="text-sm font-semibold uppercase text-cyan-800">Where Zapier Agents fits</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">A strong choice for AI-assisted app workflows.</h2>
+        </div>
+        <div class="space-y-5 text-base leading-7 text-slate-700">
+          <p>
+            Zapier Agents deserves serious consideration when your team already uses Zapier or wants AI to operate across common SaaS systems through triggers, actions, knowledge sources, app data, Zaps, Tables, Forms, and MCP.
+          </p>
+          <p>
+            It is especially strong when the desired workflow has good connectors: enrich a CRM record, draft an email, route a support ticket, update a spreadsheet, summarize app data, or trigger a follow-up process across tools your team already runs through Zapier.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-2">
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Where Gobii fits</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">A stronger fit for persistent browser-agent work.</h2>
+          <p class="mt-5 text-base leading-7 text-slate-700">
+            Gobii is purpose-built for work that happens across websites, authenticated portals, files, and repeated research loops. It is less about wiring an automation graph and more about giving a persistent agent responsibility.
+          </p>
+          <p class="mt-4 text-base leading-7 text-slate-700">
+            A Gobii agent can keep context, reuse files, preserve browser state, wake from schedules or messages, and return work in formats your team can inspect, share, or route downstream.
+          </p>
+          <p class="mt-4 text-base leading-7 text-slate-700">
+            For teams searching for a Gobii vs Zapier Agents comparison or a Zapier Agents alternative for browser-native AI work, the practical distinction is whether you want app automation with AI, or AI coworkers that can operate the web.
+          </p>
+        </div>
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Common Gobii workloads</p>
+          <ul class="mt-6 grid gap-3 text-sm leading-6 text-slate-700 sm:grid-cols-2">
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Lead research and enrichment</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Competitor and pricing monitoring</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Recruiting and candidate sourcing</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Vendor and supplier checks</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Portal workflows and report downloads</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Compliance and public-record monitoring</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Recurring research reports</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>File, CSV, PDF, and webhook outputs</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-indigo-950 py-16 text-white sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-cyan-200">Bottom line</p>
+        <h2 class="mt-4 text-3xl font-light sm:text-4xl">Zapier Agents is excellent for connected-app automation. Gobii is built for browser-native delegation.</h2>
+        <p class="mt-6 text-base leading-7 text-indigo-50">
+          If your team wants AI woven into Zapier's app ecosystem, Zapier Agents is worth evaluating. If your team wants persistent AI coworkers that can use real browser sessions, communicate directly, keep files and state, wake from events, and deliver business-ready outputs, Gobii is the stronger fit.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-[1fr_0.8fr] lg:items-start">
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Deploy AI coworkers built for real web work</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">Start with one recurring responsibility. Scale into an AI workforce your team can contact directly.</h2>
+          <p class="mt-6 max-w-3xl text-base leading-7 text-slate-700">
+            Gobii gives teams always-on agents with browser automation, persistent state, secure credentials, files, direct communication endpoints, and cloud or self-hosted deployment options.
+          </p>
+          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+            <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center rounded-lg bg-indigo-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-800">
+              Create Your First Gobii Agent
+              <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-white px-6 py-3 text-sm font-semibold text-indigo-800 transition hover:border-indigo-300 hover:bg-indigo-50">
+              Review the Open Source Repo
+            </a>
+          </div>
+        </div>
+        <aside class="rounded-lg border border-indigo-200 bg-indigo-50 p-6">
+          <h2 class="text-lg font-semibold text-slate-950">Source note</h2>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            This comparison is based on public Gobii and Zapier documentation, pricing pages, product pages, and public repository information reviewed in {{ comparison.source_reviewed }}.
+          </p>
+          <p class="mt-3 text-sm leading-6 text-slate-700">
+            Last reviewed {{ comparison.last_reviewed_display }} by {{ comparison.reviewed_by }}.
+          </p>
+          <div class="mt-5 flex flex-col gap-3 text-sm font-semibold">
+            <a href="https://zapier.com/agents" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Zapier Agents overview
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://help.zapier.com/hc/en-us/articles/26028298697485-Use-actions-on-Zapier-Agents" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Zapier Agents actions
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://help.zapier.com/hc/en-us/articles/26559132765325-How-is-Zapier-Agents-usage-measured" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Zapier Agents usage
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://help.zapier.com/hc/en-us/articles/44452375167885-Read-web-pages-in-your-workflows" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Zapier Web Reader
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://help.zapier.com/hc/en-us/articles/44452375267853-Search-the-web-in-your-workflows" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Zapier Web Search
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://zapier.com/pricing" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Zapier pricing
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://gobii.ai/pricing/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Gobii pricing
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://gobii.ai/solutions/engineering/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Gobii developer platform
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Gobii open source repo
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

@@ -3374,7 +3374,7 @@ class ComparisonsIndexView(TemplateView):
         "agent operations, security, governance, and production readiness."
     )
     social_image_path = "images/gobii_fish_social_1280x640.png"
-    last_modified_date = "2026-06-04"
+    last_modified_date = "2026-06-07"
 
     def dispatch(self, request, *args, **kwargs):
         if not settings.GOBII_PROPRIETARY_MODE:

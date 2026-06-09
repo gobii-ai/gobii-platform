@@ -1679,6 +1679,7 @@ class SitemapTests(TestCase):
 class ComparisonPageTests(TestCase):
     comparison_slug = "openclaw-vs-gobii"
     n8n_comparison_slug = "n8n-vs-gobii"
+    zapier_agents_comparison_slug = "zapier-agents-vs-gobii"
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_comparisons_page_renders_with_metadata_and_published_links(self):
@@ -1832,6 +1833,10 @@ class ComparisonPageTests(TestCase):
         self.assertIsNotNone(n8n_card)
         self.assertIn("n8n vs Gobii", n8n_card.get_text(" ", strip=True))
         self.assertIn("Published", n8n_card.get_text(" ", strip=True))
+        zapier_agents_card = soup.find("article", {"id": "zapier-agents"})
+        self.assertIsNotNone(zapier_agents_card)
+        self.assertIn("Zapier Agents vs Gobii", zapier_agents_card.get_text(" ", strip=True))
+        self.assertIn("Published", zapier_agents_card.get_text(" ", strip=True))
         self.assertIsNotNone(
             soup.find(
                 "a",
@@ -1842,6 +1847,12 @@ class ComparisonPageTests(TestCase):
             soup.find(
                 "a",
                 {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.n8n_comparison_slug})},
+            )
+        )
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.zapier_agents_comparison_slug})},
             )
         )
 
@@ -2067,6 +2078,115 @@ class ComparisonPageTests(TestCase):
         self.assertIsNone(main.find("a", {"href": "https://github.com/gobii-ai"}))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_zapier_agents_comparison_page_renders_with_metadata_and_decision_copy(self):
+        response = self.client.get(
+            reverse("proprietary:comparison_detail", kwargs={"slug": self.zapier_agents_comparison_slug})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        comparison = page_views.get_comparison(self.zapier_agents_comparison_slug)
+        expected_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
+        expected_image_url = response.wsgi_request.build_absolute_uri(
+            static(page_views.ComparisonDetailView.social_image_path)
+        )
+
+        self.assertEqual(soup.title.get_text(strip=True), comparison["seo_title"])
+        self.assertEqual(len(soup.find_all("meta", {"name": "description"})), 1)
+        self.assertEqual(
+            soup.find("meta", {"name": "description"}).get("content"),
+            comparison["seo_description"],
+        )
+        self.assertEqual(soup.find("link", {"rel": "canonical"}).get("href"), expected_url)
+        self.assertEqual(soup.find("meta", {"property": "og:type"}).get("content"), "website")
+        self.assertEqual(soup.find("meta", {"property": "og:title"}).get("content"), comparison["seo_title"])
+        self.assertEqual(soup.find("meta", {"property": "og:url"}).get("content"), expected_url)
+        self.assertEqual(soup.find("meta", {"property": "og:image"}).get("content"), expected_image_url)
+        self.assertEqual(
+            soup.find("meta", {"property": "og:image:alt"}).get("content"),
+            "Gobii and Zapier Agents AI agent platform comparison",
+        )
+        self.assertEqual(soup.find("meta", {"name": "twitter:card"}).get("content"), "summary_large_image")
+
+        json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
+        self.assertEqual(len(json_ld_scripts), 2)
+        structured_data = json.loads(json_ld_scripts[0].string)
+        self.assertEqual(structured_data["@type"], "WebPage")
+        self.assertEqual(structured_data["@id"], f"{expected_url}#webpage")
+        self.assertEqual(structured_data["name"], comparison["seo_title"])
+        self.assertEqual(structured_data["url"], expected_url)
+        self.assertEqual(structured_data["datePublished"], comparison["published_date"])
+        self.assertEqual(structured_data["dateModified"], comparison["last_reviewed_date"])
+        self.assertEqual(
+            [item["name"] for item in structured_data["about"]],
+            ["Gobii", "Zapier Agents"],
+        )
+        self.assertEqual(
+            structured_data["about"][0]["description"],
+            "AI coworker platform for persistent browser-native business work.",
+        )
+        self.assertEqual(
+            structured_data["about"][1]["applicationCategory"],
+            "AI agent automation platform",
+        )
+        self.assertEqual(
+            structured_data["about"][1]["description"],
+            "AI agents for automating work across Zapier's connected app ecosystem.",
+        )
+        self.assertEqual(structured_data["about"][1]["url"], comparison["competitor_url"])
+
+        breadcrumb_data = json.loads(json_ld_scripts[1].string)
+        self.assertEqual(breadcrumb_data["@type"], "BreadcrumbList")
+        self.assertEqual(
+            [item["name"] for item in breadcrumb_data["itemListElement"]],
+            ["Home", "Comparisons", "Zapier Agents vs Gobii"],
+        )
+
+        content = soup.get_text(" ", strip=True)
+        self.assertIn("Zapier Agents vs Gobii", content)
+        self.assertIn("Zapier Agents vs Gobii: connected-app automation or browser-native AI coworkers?", content)
+        self.assertIn("Choose Zapier Agents if", content)
+        self.assertIn("Choose Gobii if", content)
+        self.assertIn("Zapier Agents adds AI to app automation. Gobii gives browser work a dedicated coworker runtime.", content)
+        self.assertIn("Zapier Agents is strongest across connected apps. Gobii is strongest across the open web.", content)
+        self.assertIn("Gobii vs Zapier Agents comparison", content)
+        self.assertIn("Zapier Agents alternative", content)
+        self.assertIn("Source note", content)
+        self.assertIn("Last reviewed June 7, 2026 by Gobii editorial team.", content)
+        webp_source = soup.find("source", {"type": "image/webp"})
+        self.assertIsNotNone(webp_source)
+        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
+        hero_image = soup.find("img", {"alt": "AI agent platform evaluation workspace"})
+        self.assertIsNotNone(hero_image)
+        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        self.assertNotContains(response, "https://js.stripe.com")
+        self.assertNotContains(response, "js/account_auth_forms.js")
+        self.assertNotContains(response, "js/cta_signup_modal.js")
+        self.assertNotContains(response, "libphonenumber-js")
+        self.assertNotContains(response, "js/phone_format.js")
+        main = soup.find("main")
+        self.assertIsNotNone(main)
+        self.assertGreaterEqual(
+            len(main.find_all("a", {"href": "https://github.com/gobii-ai/gobii-platform"})),
+            2,
+        )
+        self.assertIsNotNone(main.find("a", {"href": "https://zapier.com/agents"}))
+        self.assertIsNotNone(
+            main.find(
+                "a",
+                {"href": "https://help.zapier.com/hc/en-us/articles/26559132765325-How-is-Zapier-Agents-usage-measured"},
+            )
+        )
+        self.assertIsNotNone(
+            main.find(
+                "a",
+                {"href": "https://help.zapier.com/hc/en-us/articles/44452375167885-Read-web-pages-in-your-workflows"},
+            )
+        )
+        self.assertIsNotNone(main.find("a", {"href": "https://zapier.com/pricing"}))
+        self.assertIsNone(main.find("a", {"href": "https://github.com/gobii-ai"}))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_footer_includes_comparisons_hub_link_in_proprietary_mode(self):
         response = self.client.get(reverse("proprietary:comparisons"))
 
@@ -2091,6 +2211,12 @@ class ComparisonPageTests(TestCase):
         )
         self.assertIsNotNone(n8n_link)
         self.assertEqual(n8n_link.get_text(strip=True), "n8n vs Gobii")
+        zapier_agents_link = footer.find(
+            "a",
+            {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.zapier_agents_comparison_slug})},
+        )
+        self.assertIsNotNone(zapier_agents_link)
+        self.assertEqual(zapier_agents_link.get_text(strip=True), "Zapier Agents vs Gobii")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_comparison_pages_and_footer_column_are_absent_in_community_mode(self):
@@ -2104,6 +2230,10 @@ class ComparisonPageTests(TestCase):
             reverse("proprietary:comparison_detail", kwargs={"slug": self.n8n_comparison_slug})
         )
         self.assertEqual(n8n_detail_response.status_code, 404)
+        zapier_agents_detail_response = self.client.get(
+            reverse("proprietary:comparison_detail", kwargs={"slug": self.zapier_agents_comparison_slug})
+        )
+        self.assertEqual(zapier_agents_detail_response.status_code, 404)
 
         home_response = self.client.get(reverse("pages:home"))
         self.assertEqual(home_response.status_code, 200)
@@ -2127,6 +2257,7 @@ class ComparisonPageTests(TestCase):
         self.assertIn("<loc>http://example.com/comparisons/</loc>", content)
         self.assertIn(f"<loc>http://example.com/comparisons/{self.comparison_slug}/</loc>", content)
         self.assertIn(f"<loc>http://example.com/comparisons/{self.n8n_comparison_slug}/</loc>", content)
+        self.assertIn(f"<loc>http://example.com/comparisons/{self.zapier_agents_comparison_slug}/</loc>", content)
         self.assertNotIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -2138,6 +2269,7 @@ class ComparisonPageTests(TestCase):
         self.assertNotIn("<loc>http://example.com/comparisons/</loc>", content)
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.comparison_slug}/</loc>", content)
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.n8n_comparison_slug}/</loc>", content)
+        self.assertNotIn(f"<loc>http://example.com/comparisons/{self.zapier_agents_comparison_slug}/</loc>", content)
 
 
 @tag("batch_pages")
