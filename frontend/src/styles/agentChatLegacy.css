@@ -2383,6 +2383,10 @@
 }
 
 @container (max-width: 767px) {
+  .composer-working-panel[data-has-pending-actions="true"] .composer-working-status {
+    display: none;
+  }
+
   .composer-working-tasks-badge {
     display: none;
   }
