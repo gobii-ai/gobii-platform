@@ -212,7 +212,15 @@ from console.email_settings.views import (
     AgentEmailSettingsEnsureAccountAPIView,
     AgentEmailSettingsTestAPIView,
 )
-from console.discord_api import DiscordOAuthCallbackView, DiscordOAuthStartView
+from console.discord_api import (
+    AgentDiscordAppView,
+    AgentDiscordChannelsView,
+    AgentDiscordConnectView,
+    AgentDiscordSubscriptionsView,
+    DiscordDisconnectView,
+    DiscordOAuthCallbackView,
+    DiscordOAuthStartView,
+)
 from console.usage_views import (
     UsageSummaryAPIView,
     UsageBurnRateSnapshotAPIView,
@@ -584,6 +592,11 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/pipedream/apps/<slug:app_slug>/", AgentPipedreamAppAPIView.as_view(), name="console-agent-pipedream-app"),
     path("console/api/agents/<uuid:agent_id>/pipedream/apps/<slug:app_slug>/connect/", AgentPipedreamAppConnectAPIView.as_view(), name="console-agent-pipedream-app-connect"),
     path("console/api/agents/<uuid:agent_id>/pipedream/apps/<slug:app_slug>/connection/", AgentPipedreamAppConnectionAPIView.as_view(), name="console-agent-pipedream-app-connection"),
+    path("console/api/agents/<uuid:agent_id>/discord/app/", AgentDiscordAppView.as_view(), name="console-agent-discord-app"),
+    path("console/api/agents/<uuid:agent_id>/discord/connect/", AgentDiscordConnectView.as_view(), name="console-agent-discord-connect"),
+    path("console/api/agents/<uuid:agent_id>/discord/guilds/<str:guild_id>/channels/", AgentDiscordChannelsView.as_view(), name="console-agent-discord-channels"),
+    path("console/api/agents/<uuid:agent_id>/discord/subscriptions/", AgentDiscordSubscriptionsView.as_view(), name="console-agent-discord-subscriptions"),
+    path("console/api/discord/disconnect/", DiscordDisconnectView.as_view(), name="console-discord-disconnect"),
     path("console/api/session/", ConsoleSessionAPIView.as_view(), name="console_session"),
     path("console/api/support/request/", AppSupportRequestAPIView.as_view(), name="console_app_support_request"),
     path("console/api/billing/initial/", BillingInitialDataAPIView.as_view(), name="console_billing_initial_data"),

@@ -1,5 +1,6 @@
 import json
 import os
+import importlib
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -28,6 +29,7 @@ from api.models import (
     PersistentAgentDiscordWebhookEcho,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
+    PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
 )
 from api.services.discord_bot import (
@@ -85,6 +87,11 @@ class NativeDiscordBotTests(TestCase):
             owner_user=self.user,
             claimed_by=self.user,
         )
+
+    def _force_login_console_manager(self):
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_login(self.user)
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
@@ -948,8 +955,8 @@ class NativeDiscordBotTests(TestCase):
         self.assertTrue(result["auto_sleep_ok"])
 
     @tag("batch_agent_webhooks")
-    def test_connected_app_system_skill_prefers_native_discord_tools(self):
-        skill = get_system_skill_definition("connected_app_channels")
+    def test_discord_native_system_skill_prefers_native_discord_tools(self):
+        skill = get_system_skill_definition("discord_native")
 
         self.assertIn("discord_channel_subscriptions", skill.tool_names)
         self.assertIn("discord_send_message", skill.tool_names)
@@ -963,6 +970,230 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("To upload files", skill.prompt_instructions)
         self.assertIn("filespace paths or $[/path]", skill.prompt_instructions)
         self.assertIn("Body text never attaches files", skill.prompt_instructions)
+
+    @tag("batch_agent_webhooks")
+    def test_discord_app_api_returns_agent_state(self):
+        self._force_login_console_manager()
+        guild = self._guild(name="Support")
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="triage",
+        )
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key="discord_native",
+            is_enabled=True,
+        )
+
+        response = self.client.get(reverse("console-agent-discord-app", args=[self.agent.id]))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["provider_key"], "discord")
+        self.assertTrue(payload["connected"])
+        self.assertTrue(payload["subscribed"])
+        self.assertTrue(payload["skill_enabled"])
+        self.assertEqual(payload["guild_count"], 1)
+        self.assertEqual(payload["active_subscription_count"], 1)
+        self.assertEqual(payload["guilds"][0]["name"], "Support")
+        self.assertEqual(payload["subscriptions"][0]["channel_name"], "triage")
+        self.assertIn("/console/api/discord/oauth/start/", payload["connect_url"])
+
+    @tag("batch_agent_webhooks")
+    def test_discord_connect_api_enables_native_skill(self):
+        self._force_login_console_manager()
+
+        response = self.client.post(reverse("console-agent-discord-connect", args=[self.agent.id]))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload["skill_enabled"])
+        self.assertIn("/console/api/discord/oauth/start/", payload["connect_url"])
+        self.assertTrue(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key="discord_native",
+                is_enabled=True,
+            ).exists()
+        )
+
+    @tag("batch_agent_webhooks")
+    def test_discord_disconnect_api_removes_owner_connections_and_subscriptions(self):
+        self._force_login_console_manager()
+        guild = self._guild(guild_id="100", name="Support")
+        other_user = get_user_model().objects.create_user(
+            username="other-discord-owner",
+            email="other-discord-owner@example.test",
+            password="pw",
+        )
+        other_browser = BrowserUseAgent.objects.create(user=other_user, name="Other Discord Browser")
+        other_agent = PersistentAgent.objects.create(
+            user=other_user,
+            name="Other Discord Agent",
+            charter="Handle other Discord messages.",
+            browser_use_agent=other_browser,
+        )
+        other_guild = PersistentAgentDiscordGuild.objects.create(
+            guild_id="200",
+            name="Other Guild",
+            owner_user=other_user,
+            claimed_by=other_user,
+        )
+        subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="triage",
+        )
+        other_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=other_agent,
+            guild=other_guild,
+            channel_id="20",
+            channel_name="other",
+        )
+        webhook = PersistentAgentDiscordWebhook.objects.create(
+            guild=guild,
+            channel_id="10",
+            webhook_id="webhook-1",
+            name="Gobii",
+        )
+        PersistentAgentDiscordWebhookEcho.objects.create(
+            agent=self.agent,
+            webhook=webhook,
+            channel_id="10",
+            discord_webhook_id="webhook-1",
+            signature_hash="signature",
+            expires_at=timezone.now() + timedelta(minutes=1),
+        )
+        skill_state = PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key="discord_native",
+            is_enabled=True,
+        )
+        other_skill_state = PersistentAgentSystemSkillState.objects.create(
+            agent=other_agent,
+            skill_key="discord_native",
+            is_enabled=True,
+        )
+
+        response = self.client.post(reverse("console-discord-disconnect"))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload["revoked"])
+        self.assertEqual(payload["guilds_disconnected"], 1)
+        self.assertEqual(payload["subscriptions_disabled"], 1)
+        guild.refresh_from_db()
+        subscription.refresh_from_db()
+        skill_state.refresh_from_db()
+        other_guild.refresh_from_db()
+        other_subscription.refresh_from_db()
+        other_skill_state.refresh_from_db()
+        self.assertFalse(guild.is_active)
+        self.assertEqual(subscription.status, PersistentAgentDiscordChannelSubscription.Status.DISABLED)
+        self.assertFalse(skill_state.is_enabled)
+        self.assertFalse(PersistentAgentDiscordWebhook.objects.filter(id=webhook.id).exists())
+        self.assertTrue(other_guild.is_active)
+        self.assertEqual(other_subscription.status, PersistentAgentDiscordChannelSubscription.Status.ACTIVE)
+        self.assertTrue(other_skill_state.is_enabled)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.get")
+    def test_discord_channels_api_discovers_channels(self, get_mock):
+        self._force_login_console_manager()
+        self._guild(guild_id="100", name="Support")
+        get_mock.return_value = _response(
+            [
+                {"id": "10", "name": "triage", "type": 0},
+                {"id": "11", "name": "announcements", "type": 5},
+                {"id": "12", "name": "voice", "type": 2},
+            ]
+        )
+
+        response = self.client.get(reverse("console-agent-discord-channels", args=[self.agent.id, "100"]))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual([channel["channel_name"] for channel in payload["channels"]], ["triage", "announcements"])
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.get")
+    def test_discord_subscriptions_api_replaces_active_selection_and_enables_skill(self, get_mock):
+        self._force_login_console_manager()
+        guild = self._guild(guild_id="100", name="Support")
+        old_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="9",
+            channel_name="old",
+        )
+        get_mock.return_value = _response(
+            [
+                {"id": "10", "name": "triage", "type": 0},
+                {"id": "9", "name": "old", "type": 0},
+            ]
+        )
+
+        response = self.client.patch(
+            reverse("console-agent-discord-subscriptions", args=[self.agent.id]),
+            data=json.dumps({"subscriptions": [{"guild_id": "100", "channel_id": "10", "channel_name": "triage"}]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        old_subscription.refresh_from_db()
+        self.assertEqual(old_subscription.status, PersistentAgentDiscordChannelSubscription.Status.DISABLED)
+        self.assertTrue(
+            PersistentAgentDiscordChannelSubscription.objects.filter(
+                agent=self.agent,
+                guild=guild,
+                channel_id="10",
+                status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+            ).exists()
+        )
+        self.assertTrue(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key="discord_native",
+                is_enabled=True,
+            ).exists()
+        )
+
+    @tag("batch_agent_webhooks")
+    def test_discord_native_migration_merges_legacy_skill_rows(self):
+        migration = importlib.import_module("api.migrations.0390_rename_connected_app_channels_to_discord_native")
+        old_state = PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key="connected_app_channels",
+            is_enabled=True,
+            usage_count=2,
+            last_used_at=timezone.now() - timedelta(hours=1),
+        )
+        new_state = PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key="discord_native",
+            is_enabled=False,
+            usage_count=3,
+            last_used_at=timezone.now() - timedelta(hours=2),
+        )
+
+        class Apps:
+            @staticmethod
+            def get_model(app_label, model_name):
+                self.assertEqual(app_label, "api")
+                self.assertEqual(model_name, "PersistentAgentSystemSkillState")
+                return PersistentAgentSystemSkillState
+
+        migration.migrate_discord_native_skill_state(Apps(), None)
+
+        self.assertFalse(PersistentAgentSystemSkillState.objects.filter(id=old_state.id).exists())
+        new_state.refresh_from_db()
+        self.assertTrue(new_state.is_enabled)
+        self.assertEqual(new_state.usage_count, 5)
+        self.assertGreaterEqual(new_state.last_used_at, old_state.last_used_at)
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.requests.get")

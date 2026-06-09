@@ -2,11 +2,14 @@ import { useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, Loader2, Plus, Sparkles } from 'lucide-react'
 
+import { fetchAgentRoster } from '../../api/agents'
 import { fetchPipedreamAppSettings, type PipedreamAppSummary } from '../../api/mcp'
 import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import { InlineStatusBanner } from '../common/InlineStatusBanner'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { useModal } from '../../hooks/useModal'
+import { agentHasDiscordNative } from './DiscordNativeAppModal'
+import { withDiscordNativeProviderConnection } from './DiscordNativeShared'
 import { NativeProviderIcon } from './NativeIntegrationShared'
 import { PipedreamAppsModal } from './PipedreamAppsModal'
 import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from './PipedreamAppsShared'
@@ -42,6 +45,11 @@ export function PipedreamAppsPanel({
     queryFn: () => fetchNativeIntegrations(nativeIntegrationsUrl as string),
     enabled: Boolean(nativeIntegrationsUrl),
   })
+  const agentRosterQuery = useQuery({
+    queryKey: ['agent-roster'],
+    queryFn: () => fetchAgentRoster(),
+    enabled: Boolean(nativeIntegrationsUrl),
+  })
 
   const emptySettings = useMemo(() => ({
     ownerScope: '',
@@ -51,6 +59,13 @@ export function PipedreamAppsPanel({
     effectiveApps: [],
   }), [])
   const effectiveSettings = settingsQuery.data ?? emptySettings
+  const discordConnected = useMemo(
+    () => (agentRosterQuery.data?.agents ?? []).some(agentHasDiscordNative),
+    [agentRosterQuery.data?.agents],
+  )
+  const nativeProviders = useMemo(() => {
+    return withDiscordNativeProviderConnection(nativeIntegrationsQuery.data?.providers ?? [], discordConnected)
+  }, [discordConnected, nativeIntegrationsQuery.data?.providers])
   const hasPipedreamApps = Boolean(settingsUrl && searchUrl)
   const canOpenModal = hasPipedreamApps ? Boolean(settingsQuery.data) : Boolean(nativeIntegrationsUrl)
 
@@ -116,22 +131,22 @@ export function PipedreamAppsPanel({
             type="button"
             className={buttonClassName}
             onClick={openModal}
-            disabled={!canOpenModal || settingsQuery.isLoading || nativeIntegrationsQuery.isLoading}
+            disabled={!canOpenModal || settingsQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading}
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             Add Apps
           </button>
         </div>
 
-        {(hasPipedreamApps && settingsQuery.isLoading) || nativeIntegrationsQuery.isLoading ? (
+        {(hasPipedreamApps && settingsQuery.isLoading) || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading ? (
           <div className={loadingClassName}>
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading apps…
           </div>
-        ) : (hasPipedreamApps && settingsQuery.isError) || nativeIntegrationsQuery.isError ? (
+        ) : (hasPipedreamApps && settingsQuery.isError) || nativeIntegrationsQuery.isError || agentRosterQuery.isError ? (
           <div className="px-6 py-5">
             <InlineStatusBanner variant="error" surface={embedded ? 'embedded' : 'standalone'}>
-              {resolvePipedreamAppsErrorMessage(settingsQuery.error ?? nativeIntegrationsQuery.error, 'Unable to load apps right now.')}
+              {resolvePipedreamAppsErrorMessage(settingsQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error, 'Unable to load apps right now.')}
             </InlineStatusBanner>
           </div>
         ) : (
@@ -140,7 +155,7 @@ export function PipedreamAppsPanel({
               <NativeAppColumn
                 title="Native apps"
                 caption="Connected at the workspace level."
-                providers={nativeIntegrationsQuery.data?.providers ?? []}
+                providers={nativeProviders}
                 embedded={embedded}
               />
             ) : null}

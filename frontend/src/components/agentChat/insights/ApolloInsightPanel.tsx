@@ -7,7 +7,9 @@ import {
 const APOLLO_PROVIDER_KEY = 'apollo'
 
 type ApolloInsightPanelProps = {
+  agentId?: string | null
   nativeIntegrationsUrl?: string | null
+  onOpenApps?: () => void
 }
 
 const APOLLO_FALLBACK_ICON = (

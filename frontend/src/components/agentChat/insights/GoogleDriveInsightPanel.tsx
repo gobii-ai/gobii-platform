@@ -19,7 +19,9 @@ import {
 const GOOGLE_DRIVE_PROVIDER_KEY = 'google_drive'
 
 type GoogleDriveInsightPanelProps = {
+  agentId?: string | null
   nativeIntegrationsUrl?: string | null
+  onOpenApps?: () => void
 }
 
 const GOOGLE_DRIVE_FALLBACK_ICON = (

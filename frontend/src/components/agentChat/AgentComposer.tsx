@@ -5,6 +5,7 @@ import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, Load
 
 import { InsightEventCard } from './insights'
 import { ApolloInsightPanel } from './insights/ApolloInsightPanel'
+import { DiscordInsightPanel } from './insights/DiscordInsightPanel'
 import { GoogleDriveInsightPanel } from './insights/GoogleDriveInsightPanel'
 import { HubSpotInsightPanel } from './insights/HubSpotInsightPanel'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
@@ -144,7 +145,7 @@ type WorkingPanelTab =
   | { id: string; kind: 'insight'; insight: InsightEvent; insightIndex: number }
   | { id: NativeWorkingTabKind; kind: NativeWorkingTabKind }
 
-type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot'
+type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord'
 
 const NATIVE_WORKING_TAB_CONFIG = {
   google_drive: {
@@ -171,6 +172,13 @@ const NATIVE_WORKING_TAB_CONFIG = {
     ariaLabel: 'View HubSpot connection',
     panel: HubSpotInsightPanel,
     icon: <img src="/static/images/integrations/native/hubspot.svg" alt="" className="composer-insight-tab-image" />,
+  },
+  discord: {
+    label: 'Discord',
+    title: 'Discord',
+    ariaLabel: 'View Discord connection',
+    panel: DiscordInsightPanel,
+    icon: <img src="/static/images/integrations/native/discord.svg" alt="" className="composer-insight-tab-image" />,
   },
 } as const
 
@@ -392,6 +400,7 @@ type AgentComposerProps = {
   googleSheetsDriveTabEnabled?: boolean
   apolloNativeTabEnabled?: boolean
   hubspotNativeTabEnabled?: boolean
+  discordNativeTabEnabled?: boolean
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -450,6 +459,7 @@ export const AgentComposer = memo(function AgentComposer({
   googleSheetsDriveTabEnabled = false,
   apolloNativeTabEnabled = false,
   hubspotNativeTabEnabled = false,
+  discordNativeTabEnabled = false,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -462,6 +472,7 @@ export const AgentComposer = memo(function AgentComposer({
   const [draftHumanInputResponses, setDraftHumanInputResponses] = useState<Record<string, HumanInputComposerResponse>>({})
   const draftHumanInputResponsesRef = useRef<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
+  const [appsModalOpenRequestKey, setAppsModalOpenRequestKey] = useState(0)
   const [pendingActionsForceExpanded, setPendingActionsForceExpanded] = useState(() => pendingActionRequests.length > 0)
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -561,13 +572,15 @@ export const AgentComposer = memo(function AgentComposer({
   const googleDriveTabAvailable = Boolean(googleSheetsDriveTabEnabled && canManageAgent)
   const apolloTabAvailable = Boolean(apolloNativeTabEnabled && canManageAgent)
   const hubspotTabAvailable = Boolean(hubspotNativeTabEnabled && canManageAgent)
+  const discordTabAvailable = Boolean(discordNativeTabEnabled && canManageAgent)
   const nativeTabAvailability = useMemo(
     () => [
       { kind: 'google_drive', available: googleDriveTabAvailable },
       { kind: 'apollo', available: apolloTabAvailable },
       { kind: 'hubspot', available: hubspotTabAvailable },
+      { kind: 'discord', available: discordTabAvailable },
     ] as const,
-    [apolloTabAvailable, googleDriveTabAvailable, hubspotTabAvailable],
+    [apolloTabAvailable, discordTabAvailable, googleDriveTabAvailable, hubspotTabAvailable],
   )
   const currentInsightTabId = currentInsight ? `insight:${currentInsight.insightId}` : null
   const workingTabs = useMemo<WorkingPanelTab[]>(() => {
@@ -1804,7 +1817,11 @@ export const AgentComposer = memo(function AgentComposer({
                     key={activeWorkingTab?.id ?? 'insights-loading'}
                   >
                     {ActiveNativePanel ? (
-                      <ActiveNativePanel nativeIntegrationsUrl={nativeIntegrationsUrl} />
+                      <ActiveNativePanel
+                        agentId={agentId}
+                        nativeIntegrationsUrl={nativeIntegrationsUrl}
+                        onOpenApps={() => setAppsModalOpenRequestKey((current) => current + 1)}
+                      />
                     ) : visibleInsight ? (
                       <InsightEventCard
                         insight={visibleInsight}
@@ -1880,6 +1897,7 @@ export const AgentComposer = memo(function AgentComposer({
                   enablePipedreamApps={hasPipedreamApps}
                   nativeIntegrationsUrl={nativeIntegrationsUrl}
                   disabled={composerActionsDisabled}
+                  openRequestKey={appsModalOpenRequestKey}
                 >
                   {(appsAction) => renderComposerUtilityRow(appsAction)}
                 </ComposerPipedreamAppsControl>
