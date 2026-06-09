@@ -149,6 +149,39 @@ function makeSecondRequestedSecretsAction(): PendingActionRequest {
   }
 }
 
+function makeContactRequestsAction(): PendingActionRequest {
+  return {
+    id: 'contact-action',
+    kind: 'contact_requests',
+    count: 1,
+    requests: [
+      {
+        id: 'contact-1',
+        channel: 'email',
+        address: 'customer@example.com',
+        name: 'Customer',
+        reason: 'Needs a status update.',
+        purpose: 'Support',
+        allowInbound: true,
+        allowOutbound: true,
+        canConfigure: false,
+      },
+    ],
+  }
+}
+
+function makeSpawnRequestAction(): PendingActionRequest {
+  return {
+    id: 'spawn-action',
+    kind: 'spawn_request',
+    requestId: 'spawn-request-1',
+    requestedCharter: 'Handle follow-up research.',
+    handoffMessage: 'Continue from the current task.',
+    requestReason: 'Parallel research would help.',
+    decisionApiUrl: '/console/api/spawn-request/1/',
+  }
+}
+
 function makeInsight(): InsightEvent {
   return {
     insightId: 'insight-1',
@@ -202,6 +235,7 @@ describe('AgentComposer pending action insights panel', () => {
 
     expect(screen.getByText('Needs your input')).toBeInTheDocument()
     expect(screen.getByText('1 request')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View 1 pending credentials request' })).toBeInTheDocument()
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
   })
 
@@ -233,7 +267,7 @@ describe('AgentComposer pending action insights panel', () => {
     })
   })
 
-  it('renders pending requests before regular insight content', () => {
+  it('renders pending request tabs alongside regular insight tabs', () => {
     renderAgentComposer({
       pendingActionRequests: [makeRequestedSecretsAction()],
       insights: [makeInsight()],
@@ -243,6 +277,18 @@ describe('AgentComposer pending action insights panel', () => {
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
     expect(screen.queryByTestId('insight-card')).not.toBeInTheDocument()
     expect(screen.queryByTestId('google-drive-panel')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'View burn rate insight' }))
+
+    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
+
+    fireEvent.click(screen.getByRole('button', { name: 'View Google Drive files' }))
+
+    expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'View 1 pending credentials request' }))
+
+    expect(screen.getByText('Stripe API key')).toBeInTheDocument()
   })
 
   it('keeps the normal message composer hidden for human input requests', () => {
@@ -254,20 +300,36 @@ describe('AgentComposer pending action insights panel', () => {
     expect(screen.queryByPlaceholderText(/^Message/)).not.toBeInTheDocument()
   })
 
-  it('uses the regular composer for free text human input and keeps it visible when collapsed', () => {
+  it('uses the regular composer for free text human input only while expanded', () => {
     renderAgentComposer({
       pendingActionRequests: [makeFreeTextHumanInputAction()],
     })
 
     expect(screen.getByText('Could you provide a quick final word?')).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/^Type your answer/)).toBeInTheDocument()
+    expect(screen.getByText('Dismiss')).toBeInTheDocument()
     expect(screen.queryByPlaceholderText(/^Message/)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByText('Needs your input').closest('.composer-working-header-row') as HTMLElement)
 
     expect(screen.queryByText('Could you provide a quick final word?')).not.toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/^Type your answer/)).toBeInTheDocument()
-    expect(screen.queryByPlaceholderText(/^Message/)).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/^Type your answer/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Dismiss')).not.toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/^Message/)).toBeInTheDocument()
+  })
+
+  it('hides pending request navigation when the panel is collapsed', () => {
+    renderAgentComposer({
+      pendingActionRequests: [makeHumanInputAction()],
+    })
+
+    expect(screen.getByRole('button', { name: 'Next pending request' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Needs your input').closest('.composer-working-header-row') as HTMLElement)
+
+    expect(screen.queryByRole('button', { name: 'Next pending request' })).not.toBeInTheDocument()
+    expect(screen.queryByText('1 of 2')).not.toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/^Message/)).toBeInTheDocument()
   })
 
   it('submits free text human input from the regular composer', async () => {
@@ -303,7 +365,7 @@ describe('AgentComposer pending action insights panel', () => {
     const freeTextComposer = screen.getByPlaceholderText(/^Type your answer/)
     fireEvent.change(freeTextComposer, { target: { value: 'human input draft' } })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next pending request' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View 1 pending credentials request' }))
 
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
     expect(screen.queryByPlaceholderText(/^Type your answer/)).not.toBeInTheDocument()
@@ -386,7 +448,7 @@ describe('AgentComposer pending action insights panel', () => {
     expect(handleSkipPlanning).toHaveBeenCalledTimes(1)
   })
 
-  it('pages through all pending requests, not only the active human input batch', () => {
+  it('pages through pending requests within the active tab category', () => {
     renderAgentComposer({
       pendingActionRequests: [
         makeHumanInputAction(),
@@ -396,23 +458,113 @@ describe('AgentComposer pending action insights panel', () => {
     })
 
     expect(screen.getByRole('button', { name: 'Next pending request' }).closest('.composer-working-header-row')).not.toBeNull()
-    expect(screen.getByText('1 of 4')).toBeInTheDocument()
+    expect(screen.getByText('1 of 2')).toBeInTheDocument()
     expect(screen.getByText('Which account should I use?')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Next pending request' }))
 
-    expect(screen.getByText('2 of 4')).toBeInTheDocument()
+    expect(screen.getByText('2 of 2')).toBeInTheDocument()
     expect(screen.getByText('Which region should I use?')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next pending request' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View 2 pending credentials requests' }))
 
-    expect(screen.getByText('3 of 4')).toBeInTheDocument()
+    expect(screen.getByText('1 of 2')).toBeInTheDocument()
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Next pending request' }))
 
-    expect(screen.getByText('4 of 4')).toBeInTheDocument()
+    expect(screen.getByText('2 of 2')).toBeInTheDocument()
     expect(screen.getByText('Database password')).toBeInTheDocument()
+  })
+
+  it('auto-selects a new pending tab from a regular insight tab', async () => {
+    const { rerender } = renderAgentComposer({
+      insights: [makeInsight()],
+    })
+
+    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
+
+    rerender(
+      <AgentComposer
+        agentId="agent-1"
+        agentName="Test Agent"
+        agentFirstName="Test"
+        onSubmit={vi.fn(async () => undefined)}
+        currentInsightIndex={0}
+        pendingActionRequests={[makeContactRequestsAction()]}
+        insights={[makeInsight()]}
+        insightsLoading={false}
+        isProcessing={false}
+        processingTasks={[]}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Customer')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('insight-card')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    {
+      name: 'Questions',
+      initialActions: [makeHumanInputAction()],
+      nextActions: [makeHumanInputAction(), makeRequestedSecretsAction()],
+      expectedText: 'Which account should I use?',
+      unexpectedText: 'Stripe API key',
+    },
+    {
+      name: 'Credentials',
+      initialActions: [makeRequestedSecretsAction()],
+      nextActions: [makeRequestedSecretsAction(), makeContactRequestsAction()],
+      expectedText: 'Stripe API key',
+      unexpectedText: 'Customer',
+    },
+    {
+      name: 'Contacts',
+      initialActions: [makeContactRequestsAction()],
+      nextActions: [makeContactRequestsAction(), makeRequestedSecretsAction()],
+      expectedText: 'Customer',
+      unexpectedText: 'Stripe API key',
+    },
+    {
+      name: 'Agents',
+      initialActions: [makeSpawnRequestAction()],
+      nextActions: [makeSpawnRequestAction(), makeContactRequestsAction()],
+      expectedText: 'Handle follow-up research.',
+      unexpectedText: 'Customer',
+    },
+  ])('does not auto-switch away from the active $name pending tab', async ({
+    initialActions,
+    nextActions,
+    expectedText,
+    unexpectedText,
+  }) => {
+    const { rerender } = renderAgentComposer({
+      pendingActionRequests: initialActions,
+    })
+
+    expect(screen.getByText(expectedText)).toBeInTheDocument()
+
+    rerender(
+      <AgentComposer
+        agentId="agent-1"
+        agentName="Test Agent"
+        agentFirstName="Test"
+        onSubmit={vi.fn(async () => undefined)}
+        currentInsightIndex={0}
+        pendingActionRequests={nextActions}
+        insights={[]}
+        insightsLoading={false}
+        isProcessing={false}
+        processingTasks={[]}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(expectedText)).toBeInTheDocument()
+    })
+    expect(screen.queryByText(unexpectedText)).not.toBeInTheDocument()
   })
 
   const nativeTabCases = [

@@ -86,7 +86,7 @@ class SpawnAgentToolTests(TestCase):
         self.assertNotIn("specialist peer", prompt)
         self.assertNotIn("team of Gobiis", prompt)
 
-    def test_stale_spawn_agent_runtime_call_requires_meta_gobii_without_creating_request(self):
+    def test_stale_spawn_agent_runtime_call_is_unavailable_without_creating_request(self):
         params = {
             "charter": "Own contract review and summarize legal risk.",
             "handoff_message": "Review attached SOW and return redlines.",
@@ -102,7 +102,7 @@ class SpawnAgentToolTests(TestCase):
 
         self.assertIsNone(updated_tools)
         self.assertEqual(result.get("status"), "error")
-        self.assertIn("Meta Gobii", result.get("message", ""))
+        self.assertIn("not available", result.get("message", ""))
         self.assertFalse(AgentSpawnRequest.objects.filter(agent=self.personal_agent).exists())
 
     def test_meta_gobii_request_agent_creation_creates_pending_request_with_org_context_urls(self):

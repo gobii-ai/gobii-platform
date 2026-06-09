@@ -1,7 +1,7 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
-import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, Loader2, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, KeyRound, Loader2, Mail, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { ApolloInsightPanel } from './insights/ApolloInsightPanel'
@@ -127,6 +127,52 @@ function getPendingActionRequestCount(action: PendingActionRequest): number {
   }
 }
 
+function getPendingWorkingTabKind(action: PendingActionRequest): PendingWorkingTabKind {
+  switch (action.kind) {
+    case 'human_input':
+      return 'questions'
+    case 'requested_secrets':
+      return 'credentials'
+    case 'contact_requests':
+      return 'contacts'
+    case 'spawn_request':
+      return 'agents'
+    default:
+      return 'questions'
+  }
+}
+
+function getPendingActionSignature(action: PendingActionRequest): string {
+  switch (action.kind) {
+    case 'human_input':
+      return `${action.id}:${action.requests.map((request) => request.id).join(',')}`
+    case 'requested_secrets':
+      return `${action.id}:${action.secrets.map((secret) => secret.id).join(',')}`
+    case 'contact_requests':
+      return `${action.id}:${action.requests.map((request) => request.id).join(',')}`
+    case 'spawn_request':
+      return `${action.id}:${action.requestId}`
+    default:
+      return ''
+  }
+}
+
+function getPendingWorkingTabLabel(tab: Extract<WorkingPanelTab, { kind: 'pending_action' }>): string {
+  if (tab.pendingKind === 'questions') {
+    return `${tab.count} ${tab.count === 1 ? 'Question' : 'Questions'}`
+  }
+  return PENDING_WORKING_TAB_CONFIG[tab.pendingKind].title
+}
+
+function getPendingWorkingTabAriaLabel(tab: Extract<WorkingPanelTab, { kind: 'pending_action' }>): string {
+  const label = PENDING_WORKING_TAB_CONFIG[tab.pendingKind].title.toLowerCase()
+  return `View ${tab.count} pending ${label} ${tab.count === 1 ? 'request' : 'requests'}`
+}
+
+function isPendingWorkingTabId(tabId: string | null): boolean {
+  return Boolean(tabId?.startsWith('pending:'))
+}
+
 type PendingActionNavigationItem =
   | { actionId: string; kind: 'human_input'; requestId: string }
   | { actionId: string; kind: 'action' }
@@ -144,9 +190,36 @@ type HumanInputComposerBatchResponse = {
 
 type WorkingPanelTab =
   | { id: string; kind: 'insight'; insight: InsightEvent; insightIndex: number }
+  | { id: string; kind: 'pending_action'; pendingKind: PendingWorkingTabKind; actions: PendingActionRequest[]; count: number }
   | { id: NativeWorkingTabKind; kind: NativeWorkingTabKind }
 
 type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord'
+type PendingWorkingTabKind = 'questions' | 'credentials' | 'contacts' | 'agents'
+
+const PENDING_WORKING_TAB_ORDER: PendingWorkingTabKind[] = ['questions', 'credentials', 'contacts', 'agents']
+
+const PENDING_WORKING_TAB_CONFIG = {
+  questions: {
+    title: 'Questions',
+    color: '#0284c7',
+    icon: <MessageSquareQuote size={11} strokeWidth={2.2} />,
+  },
+  credentials: {
+    title: 'Credentials',
+    color: '#7c3aed',
+    icon: <KeyRound size={11} strokeWidth={2.2} />,
+  },
+  contacts: {
+    title: 'Contacts',
+    color: '#d97706',
+    icon: <Mail size={11} strokeWidth={2.2} />,
+  },
+  agents: {
+    title: 'Agents',
+    color: '#ea580c',
+    icon: <Zap size={11} strokeWidth={2.2} />,
+  },
+} as const
 
 const NATIVE_WORKING_TAB_CONFIG = {
   google_drive: {
@@ -486,6 +559,10 @@ export const AgentComposer = memo(function AgentComposer({
     key: string
     previousEnabled: boolean
   }>>>({})
+  const pendingActionAutoSwitchStateRef = useRef<{
+    key: string
+    signature: string
+  }>({ key: '', signature: '' })
 
   // Countdown timer state for auto-rotation indicator
   const [countdownProgress, setCountdownProgress] = useState(0)
@@ -583,6 +660,39 @@ export const AgentComposer = memo(function AgentComposer({
     ] as const,
     [apolloTabAvailable, discordTabAvailable, googleDriveTabAvailable, hubspotTabAvailable],
   )
+  const pendingActionTabs = useMemo(() => {
+    const actionsByTabKind = new Map<PendingWorkingTabKind, PendingActionRequest[]>()
+    pendingActionRequests.forEach((action) => {
+      const tabKind = getPendingWorkingTabKind(action)
+      actionsByTabKind.set(tabKind, [...(actionsByTabKind.get(tabKind) ?? []), action])
+    })
+    return PENDING_WORKING_TAB_ORDER
+      .map((pendingKind): WorkingPanelTab | null => {
+        const actions = actionsByTabKind.get(pendingKind) ?? []
+        if (!actions.length) {
+          return null
+        }
+        return {
+          id: `pending:${pendingKind}`,
+          kind: 'pending_action',
+          pendingKind,
+          actions,
+          count: actions.reduce((total, action) => total + getPendingActionRequestCount(action), 0),
+        }
+      })
+      .filter((tab): tab is WorkingPanelTab => Boolean(tab))
+  }, [pendingActionRequests])
+  const pendingActionTabSignature = useMemo(() => (
+    pendingActionTabs
+      .map((tab) => {
+        if (tab.kind !== 'pending_action') {
+          return ''
+        }
+        return `${tab.id}=${tab.actions.map(getPendingActionSignature).join('|')}`
+      })
+      .filter(Boolean)
+      .join(';')
+  ), [pendingActionTabs])
   const currentInsightTabId = currentInsight ? `insight:${currentInsight.insightId}` : null
   const workingTabs = useMemo<WorkingPanelTab[]>(() => {
     const insightTabs = insights.map((insight, index): WorkingPanelTab => ({
@@ -595,21 +705,25 @@ export const AgentComposer = memo(function AgentComposer({
       .filter(({ available }) => available)
       .map(({ kind }): WorkingPanelTab => ({ id: kind, kind }))
     return [
+      ...pendingActionTabs,
       ...insightTabs,
       ...nativeTabs,
     ]
-  }, [insights, nativeTabAvailability])
+  }, [insights, nativeTabAvailability, pendingActionTabs])
   const workingTabIds = useMemo(() => new Set(workingTabs.map((tab) => tab.id)), [workingTabs])
   const effectiveWorkingTabId = (
     activeWorkingTabId && workingTabIds.has(activeWorkingTabId)
       ? activeWorkingTabId
-      : currentInsightTabId && workingTabIds.has(currentInsightTabId)
-        ? currentInsightTabId
-        : workingTabs[0]?.id ?? null
+      : pendingActionTabs[0]?.id && workingTabIds.has(pendingActionTabs[0].id)
+        ? pendingActionTabs[0].id
+        : currentInsightTabId && workingTabIds.has(currentInsightTabId)
+          ? currentInsightTabId
+          : workingTabs[0]?.id ?? null
   )
   const activeWorkingTab = workingTabs.find((tab) => tab.id === effectiveWorkingTabId) ?? null
   const activeInsightTab = activeWorkingTab?.kind === 'insight' ? activeWorkingTab : null
-  const ActiveNativePanel = activeWorkingTab && activeWorkingTab.kind !== 'insight'
+  const activePendingActionTab = activeWorkingTab?.kind === 'pending_action' ? activeWorkingTab : null
+  const ActiveNativePanel = activeWorkingTab && activeWorkingTab.kind !== 'insight' && activeWorkingTab.kind !== 'pending_action'
     ? NATIVE_WORKING_TAB_CONFIG[activeWorkingTab.kind].panel
     : null
   const visibleInsight = activeInsightTab?.insight ?? null
@@ -647,6 +761,64 @@ export const AgentComposer = memo(function AgentComposer({
 
   useEffect(() => {
     const key = agentId ?? focusKey ?? 'new-agent'
+    const previousState = pendingActionAutoSwitchStateRef.current
+    const previousSignature = previousState.key === key ? previousState.signature : ''
+    const previousSignaturesByTab = new Map(
+      previousSignature
+        .split(';')
+        .filter(Boolean)
+        .map((entry) => {
+          const separatorIndex = entry.indexOf('=')
+          return separatorIndex >= 0
+            ? [entry.slice(0, separatorIndex), entry.slice(separatorIndex + 1)] as const
+            : [entry, ''] as const
+        }),
+    )
+    const changedPendingTab = pendingActionTabs.find((tab) => (
+      tab.kind === 'pending_action'
+      && previousSignaturesByTab.get(tab.id) !== tab.actions.map(getPendingActionSignature).join('|')
+    ))
+    const hasPendingSignatureChanged = previousState.key !== key || previousSignature !== pendingActionTabSignature
+
+    pendingActionAutoSwitchStateRef.current = {
+      key,
+      signature: pendingActionTabSignature,
+    }
+
+    if (!pendingActionTabs.length || !hasPendingSignatureChanged) {
+      return
+    }
+
+    setPendingActionsForceExpanded(true)
+
+    const activePendingTabStillOpen = Boolean(
+      activeWorkingTabId
+      && workingTabIds.has(activeWorkingTabId)
+      && isPendingWorkingTabId(activeWorkingTabId),
+    )
+    if (activePendingTabStillOpen) {
+      return
+    }
+
+    const nextPendingTabId = changedPendingTab?.id ?? pendingActionTabs[0]?.id
+    if (nextPendingTabId) {
+      selectWorkingTab(nextPendingTabId)
+    }
+  }, [
+    activeWorkingTabId,
+    agentId,
+    focusKey,
+    pendingActionTabSignature,
+    pendingActionTabs,
+    selectWorkingTab,
+    workingTabIds,
+  ])
+
+  useEffect(() => {
+    if (pendingActionTabs.length > 0 || isPendingWorkingTabId(activeWorkingTabId)) {
+      return
+    }
+    const key = agentId ?? focusKey ?? 'new-agent'
     let nextAutoSelectedTab: NativeWorkingTabKind | null = null
     for (const { kind, available } of nativeTabAvailability) {
       const previousState = nativeAutoSwitchStateRef.current[kind]
@@ -661,7 +833,7 @@ export const AgentComposer = memo(function AgentComposer({
     if (nextAutoSelectedTab) {
       selectWorkingTab(nextAutoSelectedTab)
     }
-  }, [agentId, focusKey, nativeTabAvailability, selectWorkingTab])
+  }, [activeWorkingTabId, agentId, focusKey, nativeTabAvailability, pendingActionTabs.length, selectWorkingTab])
 
   // Handle tab click - select that insight, expand panel if collapsed, and pause auto-rotation
   const handleTabClick = useCallback((tab: WorkingPanelTab) => {
@@ -678,6 +850,16 @@ export const AgentComposer = memo(function AgentComposer({
         title: tab.insight.title,
         tabIndex: tab.insightIndex,
         totalInsights: insights.length,
+      })
+    } else if (tab.kind === 'pending_action') {
+      const title = PENDING_WORKING_TAB_CONFIG[tab.pendingKind].title
+      track(AnalyticsEvent.INSIGHT_TAB_CLICKED + " - " + title, {
+        insightType: tab.pendingKind,
+        insightId: tab.id,
+        title,
+        tabIndex: workingTabs.findIndex((candidate) => candidate.id === tab.id),
+        totalInsights: insights.length,
+        pendingRequestCount: tab.count,
       })
     } else {
       const title = NATIVE_WORKING_TAB_CONFIG[tab.kind].title
@@ -937,19 +1119,22 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [])
 
+  const activePendingActions = activePendingActionTab?.actions ?? []
   const activePendingAction =
-    pendingActionRequests.find((request) => request.id === activePendingActionId)
-    ?? pendingActionRequests[0]
+    activePendingActions.find((request) => request.id === activePendingActionId)
+    ?? activePendingActions[0]
     ?? null
   const activeHumanInputRequest =
     activePendingAction?.kind === 'human_input'
       ? (
-        pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
-        ?? activePendingAction.requests[0]
+        orderHumanInputRequests(activePendingAction.requests).find((request) => request.id === activeHumanInputRequestId)
+        ?? orderHumanInputRequests(activePendingAction.requests)[0]
         ?? null
       )
       : null
   const activeHumanInputUsesMainComposer = Boolean(
+    resolvedWorkingExpanded
+    &&
     activeHumanInputRequest
     && (
       activeHumanInputRequest.inputMode === 'free_text_only'
@@ -964,6 +1149,15 @@ export const AgentComposer = memo(function AgentComposer({
     activeHumanInputUsesMainComposer ? 'Type your answer' : 'Message',
     submitShortcutHint,
   ].filter(Boolean).join(' · ')
+
+  const wasUsingMainComposerHumanInputRef = useRef(false)
+  useEffect(() => {
+    if (wasUsingMainComposerHumanInputRef.current && !activeHumanInputUsesMainComposer) {
+      setBody('')
+      requestAnimationFrame(() => adjustTextareaHeight(true))
+    }
+    wasUsingMainComposerHumanInputRef.current = activeHumanInputUsesMainComposer
+  }, [activeHumanInputUsesMainComposer, adjustTextareaHeight])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1449,7 +1643,7 @@ export const AgentComposer = memo(function AgentComposer({
 
   const pendingActionCount = pendingActionRequests.reduce((total, action) => total + getPendingActionRequestCount(action), 0)
   const pendingActionNavigationItems = useMemo<PendingActionNavigationItem[]>(() => (
-    pendingActionRequests.reduce<PendingActionNavigationItem[]>((items, action) => {
+    activePendingActions.reduce<PendingActionNavigationItem[]>((items, action) => {
       if (action.kind !== 'human_input') {
         items.push({ actionId: action.id, kind: 'action' })
         return items
@@ -1461,7 +1655,7 @@ export const AgentComposer = memo(function AgentComposer({
       }))
       return items
     }, [])
-  ), [pendingActionRequests])
+  ), [activePendingActions])
   const activePendingActionItemIndex = Math.max(0, pendingActionNavigationItems.findIndex((item) => (
     activePendingAction?.kind === 'human_input'
       ? item.kind === 'human_input'
@@ -1679,42 +1873,6 @@ export const AgentComposer = memo(function AgentComposer({
                     {pendingActionCount} {pendingActionCount === 1 ? 'request' : 'requests'}
                   </span>
                   {isPlanningMode ? renderSkipPlanningButton() : null}
-                  {pendingActionNavigationItems.length > 1 ? (
-                    <div
-                      className="composer-pending-action-nav"
-                      onClick={(event) => event.stopPropagation()}
-                      onKeyDown={(event) => event.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        className="composer-pending-action-nav__button"
-                        onClick={() => handlePendingActionNavigationItemChange(
-                          pendingActionNavigationItems[Math.max(0, activePendingActionItemIndex - 1)],
-                        )}
-                        disabled={disabled || activePendingActionItemIndex === 0}
-                        aria-label="Previous pending request"
-                      >
-                        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                      </button>
-                      <span className="composer-pending-action-nav__count">
-                        {activePendingActionItemIndex + 1} of {pendingActionNavigationItems.length}
-                      </span>
-                      <button
-                        type="button"
-                        className="composer-pending-action-nav__button"
-                        onClick={() => handlePendingActionNavigationItemChange(
-                          pendingActionNavigationItems[Math.min(
-                            pendingActionNavigationItems.length - 1,
-                            activePendingActionItemIndex + 1,
-                          )],
-                        )}
-                        disabled={disabled || activePendingActionItemIndex >= pendingActionNavigationItems.length - 1}
-                        aria-label="Next pending request"
-                      >
-                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                      </button>
-                    </div>
-                  ) : null}
                 </>
               ) : isProcessing || isPlanningMode ? (
                 <>
@@ -1741,7 +1899,7 @@ export const AgentComposer = memo(function AgentComposer({
               )}
 
               {/* Colored pill tabs in header */}
-              {!hasPendingActions && hasWorkingTabs ? (
+              {hasWorkingTabs ? (
                 <div
                   className="composer-insight-tabs"
                   onClick={(e) => e.stopPropagation()}
@@ -1750,17 +1908,27 @@ export const AgentComposer = memo(function AgentComposer({
                   <div className="composer-insight-tabs-scroll">
                     {workingTabs.map((tab) => {
                       const isActive = tab.id === effectiveWorkingTabId
-                      const nativeTabConfig = tab.kind === 'insight' ? null : NATIVE_WORKING_TAB_CONFIG[tab.kind]
-                      const color = tab.kind === 'insight' ? getInsightTabColor(tab.insight) : DEFAULT_INSIGHT_TAB_COLOR
-                      const label = nativeTabConfig?.label ?? (tab.kind === 'insight' ? getInsightTabLabel(tab.insight) : '')
-                      const ariaLabel = nativeTabConfig?.ariaLabel
-                        ?? (tab.kind === 'insight' ? `View ${tab.insight.insightType.replace('_', ' ')} insight` : undefined)
+                      const nativeTabConfig = tab.kind !== 'insight' && tab.kind !== 'pending_action'
+                        ? NATIVE_WORKING_TAB_CONFIG[tab.kind]
+                        : null
+                      const pendingTabConfig = tab.kind === 'pending_action' ? PENDING_WORKING_TAB_CONFIG[tab.pendingKind] : null
+                      const color = tab.kind === 'insight'
+                        ? getInsightTabColor(tab.insight)
+                        : pendingTabConfig?.color ?? DEFAULT_INSIGHT_TAB_COLOR
+                      const label = tab.kind === 'pending_action'
+                        ? getPendingWorkingTabLabel(tab)
+                        : nativeTabConfig?.label ?? (tab.kind === 'insight' ? getInsightTabLabel(tab.insight) : '')
+                      const ariaLabel = tab.kind === 'pending_action'
+                        ? getPendingWorkingTabAriaLabel(tab)
+                        : nativeTabConfig?.ariaLabel
+                          ?? (tab.kind === 'insight' ? `View ${tab.insight.insightType.replace('_', ' ')} insight` : undefined)
                       return (
                         <button
                           key={tab.id}
                           type="button"
                           className="composer-insight-tab"
                           data-active={isActive ? 'true' : 'false'}
+                          data-priority={tab.kind === 'pending_action' ? 'true' : 'false'}
                           onClick={() => handleTabClick(tab)}
                           aria-label={ariaLabel}
                           style={{
@@ -1770,9 +1938,12 @@ export const AgentComposer = memo(function AgentComposer({
                         >
                           <span className="composer-insight-tab-inner" />
                           <span className="composer-insight-tab-icon" aria-hidden="true">
-                            {nativeTabConfig?.icon ?? (tab.kind === 'insight' ? getInsightTabIcon(tab.insight) : null)}
+                            {pendingTabConfig?.icon ?? nativeTabConfig?.icon ?? (tab.kind === 'insight' ? getInsightTabIcon(tab.insight) : null)}
                           </span>
                           <span className="composer-insight-tab-label">{label}</span>
+                          {tab.kind === 'pending_action' && tab.pendingKind !== 'questions' ? (
+                            <span className="composer-insight-tab-count">{tab.count}</span>
+                          ) : null}
                           {tab.kind === 'insight' && isActive && !isInsightsPaused && isProcessing && (
                             <span className="composer-insight-tab-progress" />
                           )}
@@ -1781,13 +1952,50 @@ export const AgentComposer = memo(function AgentComposer({
                     })}
                   </div>
                 </div>
-              ) : !hasPendingActions && insightsLoading ? (
+              ) : insightsLoading ? (
                 <div className="composer-insight-tabs composer-insight-tabs--loading" aria-hidden="true">
                   <div className="composer-insight-tabs-scroll">
                     <span className="composer-insight-tab-placeholder composer-insight-tab-placeholder--active" />
                     <span className="composer-insight-tab-placeholder" />
                     <span className="composer-insight-tab-placeholder composer-insight-tab-placeholder--short" />
                   </div>
+                </div>
+              ) : null}
+
+              {resolvedWorkingExpanded && activePendingActionTab && pendingActionNavigationItems.length > 1 ? (
+                <div
+                  className="composer-pending-action-nav"
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    className="composer-pending-action-nav__button"
+                    onClick={() => handlePendingActionNavigationItemChange(
+                      pendingActionNavigationItems[Math.max(0, activePendingActionItemIndex - 1)],
+                    )}
+                    disabled={disabled || activePendingActionItemIndex === 0}
+                    aria-label="Previous pending request"
+                  >
+                    <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  <span className="composer-pending-action-nav__count">
+                    {activePendingActionItemIndex + 1} of {pendingActionNavigationItems.length}
+                  </span>
+                  <button
+                    type="button"
+                    className="composer-pending-action-nav__button"
+                    onClick={() => handlePendingActionNavigationItemChange(
+                      pendingActionNavigationItems[Math.min(
+                        pendingActionNavigationItems.length - 1,
+                        activePendingActionItemIndex + 1,
+                      )],
+                    )}
+                    disabled={disabled || activePendingActionItemIndex >= pendingActionNavigationItems.length - 1}
+                    aria-label="Next pending request"
+                  >
+                    <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                  </button>
                 </div>
               ) : null}
 
@@ -1801,16 +2009,16 @@ export const AgentComposer = memo(function AgentComposer({
             </div>
 
             {/* Expanded content */}
-            {resolvedWorkingExpanded && (hasPendingActions || hasWorkingTabs || insightsLoading) ? (
+            {resolvedWorkingExpanded && (hasWorkingTabs || insightsLoading) ? (
               <div
                 className="composer-working-content"
                 onMouseEnter={handleInsightMouseEnter}
                 onMouseLeave={handleInsightMouseLeave}
               >
-                {hasPendingActions ? (
+                {activePendingActionTab ? (
                   <div className="composer-working-pending-actions">
                     <PendingActionComposerPanel
-                      actions={pendingActionRequests}
+                      actions={activePendingActionTab.actions}
                       agentName={agentName ?? agentFirstName}
                       activeActionId={activePendingActionId}
                       disabled={disabled || isSending}
