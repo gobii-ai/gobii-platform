@@ -103,6 +103,25 @@ GENERAL_META_GOBII_EVAL_CASES = (
         require_briefings=True,
     ),
     MetaGobiiEvalCase(
+        slug="implicit_research_team_creation",
+        prompt="Create an entire research team to help me figure out something cool to do in NYC this summer/fall.",
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=(
+            "meta_gobii_create_agent",
+            "meta_gobii_link_agents",
+            "meta_gobii_send_agent_message",
+        ),
+        expected_any_tools=("meta_gobii_get_agent_config_options", "meta_gobii_list_agents"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        min_planned_agents=2,
+        max_planned_agents=4,
+        required_role_terms=("research", "nyc", "summer", "fall"),
+        require_graph=True,
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
         slug="positive_restructure_graph",
         prompt=(
             "This existing Gobii should manage and restructure my Gobii graph: audit the current team, "

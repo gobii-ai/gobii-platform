@@ -3,12 +3,88 @@ from django.test import SimpleTestCase, tag
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError
 from api.evals.meta_gobii import _planned_extra_scope_items
 from api.evals.meta_gobii import META_GOBII_EVAL_CASES
+from api.evals.meta_gobii import score_meta_gobii_case
+from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.meta_gobii import (
     ENABLE_SYSTEM_SKILLS_TOOL_NAME,
     META_GOBII_SYSTEM_SKILL_KEY,
     SKILL_SEARCH_TOOL_NAME,
     MetaGobiiSystemSkillScenario,
 )
+
+
+def _implicit_research_team_case():
+    return next(
+        eval_case
+        for eval_case in META_GOBII_EVAL_CASES
+        if eval_case.slug == "implicit_research_team_creation"
+    )
+
+
+def _implicit_research_team_plan_args(schedule_policy=None):
+    return {
+        "skill_needed": True,
+        "ordered_tools": [
+            "meta_gobii_get_agent_config_options",
+            "meta_gobii_create_agent",
+            "meta_gobii_link_agents",
+            "meta_gobii_send_agent_message",
+        ],
+        "tools_before_approval": ["meta_gobii_get_agent_config_options"],
+        "needs_human_confirmation": True,
+        "planned_agent_count": 3,
+        "planned_role_names": [
+            "NYC Summer Research Lead",
+            "Fall Culture Scout",
+            "Experience Synthesizer",
+        ],
+        "extra_scope_items": [],
+        "schedule_policy": schedule_policy or {
+            "schedule_in_scope": False,
+            "schedule_action": "none",
+            "cadence_or_schedule": "",
+            "explicit_user_intent": False,
+            "included_in_approval_scope": False,
+            "asks_clarifying_question": False,
+            "rationale": "Summer/fall describes the research window, not a recurring cadence.",
+        },
+        "contact_output_policy": "No contact output involved.",
+        "rationale": "Create and link a research team, then send initial briefings after approval.",
+    }
+
+
+def _implicit_research_team_response_args():
+    return {
+        "response_text": (
+            "Please approve this Meta Gobii plan before I create, link, or message the NYC summer/fall "
+            "research team."
+        ),
+        "proposed_roles": [
+            {
+                "name": "NYC Summer Research Lead",
+                "responsibility": "Coordinate research into cool NYC summer options.",
+            },
+            {
+                "name": "Fall Culture Scout",
+                "responsibility": "Find fall events, culture, and seasonal ideas in NYC.",
+            },
+            {
+                "name": "Experience Synthesizer",
+                "responsibility": "Compare the research and turn it into recommendations.",
+            },
+        ],
+        "proposed_links": [
+            "NYC Summer Research Lead <-> Fall Culture Scout",
+            "Fall Culture Scout <-> Experience Synthesizer",
+        ],
+        "initial_briefings": [
+            "NYC Summer Research Lead: research cool NYC summer options and coordinate with linked Gobiis.",
+            "Fall Culture Scout: research fall NYC events and coordinate with linked Gobiis.",
+            "Experience Synthesizer: synthesize summer and fall research into recommendations.",
+        ],
+        "asks_for_approval": True,
+        "extra_scope_items": [],
+    }
 
 
 @tag("eval_sim")
@@ -49,6 +125,81 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
             [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME],
         )
         self.assertEqual(calls[1]["arguments"]["skill_keys"], [META_GOBII_SYSTEM_SKILL_KEY])
+
+    def test_implicit_research_team_case_is_registered(self):
+        case = _implicit_research_team_case()
+
+        self.assertIn(case, META_GOBII_EVAL_CASES)
+        self.assertIsNotNone(ScenarioRegistry.get(case.scenario_slug))
+
+    def test_implicit_research_team_fails_without_skill_discovery(self):
+        case = _implicit_research_team_case()
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=False,
+            discovery_calls=[],
+            plan_args={},
+        )
+
+        self.assertFalse(scores["skill_search"][0])
+        self.assertFalse(scores["skill_selection"][0])
+
+    def test_implicit_research_team_passes_with_meta_gobii_team_plan(self):
+        case = _implicit_research_team_case()
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            discovery_calls=[
+                {"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "research team management"}},
+                {
+                    "name": ENABLE_SYSTEM_SKILLS_TOOL_NAME,
+                    "arguments": {"skill_keys": [META_GOBII_SYSTEM_SKILL_KEY]},
+                },
+            ],
+            plan_args=_implicit_research_team_plan_args(),
+            response_args=_implicit_research_team_response_args(),
+        )
+
+        for key in (
+            "skill_search",
+            "skill_selection",
+            "tool_plan",
+            "confirmation_policy",
+            "minimal_action",
+            "schedule_scope",
+            "team_design",
+        ):
+            self.assertTrue(scores[key][0], f"{key}: {scores[key][1]}")
+
+    def test_implicit_research_team_fails_when_schedule_is_invented(self):
+        case = _implicit_research_team_case()
+        schedule_policy = {
+            "schedule_in_scope": True,
+            "schedule_action": "create",
+            "cadence_or_schedule": "weekly Friday digest",
+            "explicit_user_intent": True,
+            "included_in_approval_scope": True,
+            "asks_clarifying_question": False,
+            "rationale": "Invented a recurring schedule for summer/fall research.",
+        }
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            discovery_calls=[
+                {"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "research team management"}},
+                {
+                    "name": ENABLE_SYSTEM_SKILLS_TOOL_NAME,
+                    "arguments": {"skill_keys": [META_GOBII_SYSTEM_SKILL_KEY]},
+                },
+            ],
+            plan_args=_implicit_research_team_plan_args(schedule_policy=schedule_policy),
+            response_args=_implicit_research_team_response_args(),
+        )
+
+        self.assertFalse(scores["schedule_scope"][0])
 
     def test_skill_discovery_uses_deterministic_fallback_after_missing_expected_search(self):
         case = next(
