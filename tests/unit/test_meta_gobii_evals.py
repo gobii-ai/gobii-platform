@@ -120,7 +120,14 @@ class MetaGobiiEvalRegistrationTests(TestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(suite.scenario_slugs, META_GOBII_EVAL_SCENARIO_SLUGS)
-        self.assertEqual(len(META_GOBII_EVAL_SCENARIO_SLUGS), 52)
+        self.assertEqual(
+            len(META_GOBII_EVAL_SCENARIO_SLUGS),
+            len(META_GOBII_EVAL_CASES),
+        )
+        self.assertEqual(
+            len(META_GOBII_EVAL_SCENARIO_SLUGS),
+            len(set(META_GOBII_EVAL_SCENARIO_SLUGS)),
+        )
         self.assertEqual(len(META_GOBII_SCHEDULE_EVAL_CASES), 41)
         self.assertTrue(
             {
