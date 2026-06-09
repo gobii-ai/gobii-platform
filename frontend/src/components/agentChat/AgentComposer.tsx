@@ -1483,7 +1483,7 @@ export const AgentComposer = memo(function AgentComposer({
   }`
   const composerActionsDisabled = disabled || isSending
   const handleOpenAppsModal = useCallback(() => {
-    if (!showAppsControl || !agentId || composerActionsDisabled) {
+    if (!showAppsControl || !agentId) {
       return
     }
     showAppsModal((onClose) => (
@@ -1494,7 +1494,7 @@ export const AgentComposer = memo(function AgentComposer({
         onClose={onClose}
       />
     ))
-  }, [agentId, composerActionsDisabled, hasPipedreamApps, nativeIntegrationsUrl, showAppsControl, showAppsModal])
+  }, [agentId, hasPipedreamApps, nativeIntegrationsUrl, showAppsControl, showAppsModal])
   const composerAppsAction = showAppsControl ? {
     openModal: handleOpenAppsModal,
     disabled: composerActionsDisabled,
