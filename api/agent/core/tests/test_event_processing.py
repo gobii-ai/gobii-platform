@@ -476,6 +476,17 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
             )
         )
 
+    def test_suppresses_api_call_progress(self):
+        self.assertTrue(_looks_like_routine_progress_message("Let me make the call."))
+
+    def test_keeps_integration_setup_guidance(self):
+        self.assertFalse(
+            _looks_like_routine_progress_message(
+                "Apollo is not connected yet. Go to /app/integrations, connect Apollo, "
+                "and then I'll search for RevOps directors in Texas."
+            )
+        )
+
     def test_suppresses_acknowledged_search_result_status(self):
         progress_only = (
             "Good, I have the search results identifying YC Winter 2026 as the latest batch.",
@@ -485,6 +496,7 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
             "All four sources fetched and claims extracted. Let me dedupe with one aggregate query and rank the strongest unique claims.",
             "All 4 JSON endpoints are fetched. Now I'll query the working table.",
             "Now I have all four claims extracted. Let me query them all in one aggregate to confirm the deduplication.",
+            "Now I have all four claim texts. Let me dedupe and rank them in one aggregate query",
             "From the scrapes, I have all the data I need. Let me extract it in one clean query.",
             "I need to fix the vendor/source_url NULL issue and then query for the recommendation. Let me recreate the table properly and run the analysis",
             "The data is in. Let me run the final analysis query and deliver the recommendation",

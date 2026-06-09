@@ -1952,13 +1952,6 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
                     "stop_on_human_input_request": True,
                     "stop_on_unexpected_relevant_tool": True,
                     "ignore_sqlite_agent_config_mutations": False,
-                    "stop_when_all_seen": [
-                        {
-                            "tool_name": "sqlite_batch",
-                            "agent_config_field": "schedule",
-                            "after_execution": True,
-                        }
-                    ],
                     "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
                     "max_relevant_tool_calls": 6,
                     "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),

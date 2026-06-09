@@ -1139,6 +1139,8 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("/crm/v3/objects/companies/search", block)
         self.assertIn("/crm/v3/objects/deals/search", block)
         self.assertIn("include every user-provided constraint", block)
+        self.assertIn("propertyName`, `operator`", block)
+        self.assertIn("city` filter", block)
         self.assertIn("propertyName `lifecyclestage`", block)
         self.assertIn("/crm/v3/owners/", block)
         self.assertIn("properties", block)

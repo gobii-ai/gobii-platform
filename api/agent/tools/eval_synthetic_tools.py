@@ -210,9 +210,10 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "Deterministic eval tool for sending the next bounded outreach batch from an already-approved queue. "
             "Use this directly; do not call search_tools or sqlite_batch preflight reads first. "
             "The result may include remaining_work or next_cursor; if work remains and no schedule exists, set a "
-            "resume schedule before stopping, especially for high burn or large queues. After setting the schedule, "
-            "stop the current turn; do not immediately resume the queued batch. Do not rerun the same side-effect "
-            "batch or reread __tool_results before setting that schedule."
+            "resume schedule before stopping, especially for high burn or large queues. Set only the schedule "
+            "unless the user explicitly requested a charter change. After setting the schedule, stop the current "
+            "turn; do not immediately resume the queued batch. Do not rerun the same side-effect batch or reread "
+            "__tool_results before setting that schedule."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },
@@ -223,8 +224,8 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "verified records plus remaining_work or next_cursor; report verified partial records and source limits "
             "from the visible result before update_plan, SQLite/message rereads, or another batch. If work remains "
             "and no schedule exists after the partial report, set a resume schedule and stop the current turn, or "
-            "continue one bounded batch without creating a runtime plan. Do not treat a newly set schedule as a "
-            "same-turn trigger."
+            "continue one bounded batch without creating a runtime plan. Set only the schedule unless the user "
+            "explicitly requested a charter change. Do not treat a newly set schedule as a same-turn trigger."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },
@@ -233,7 +234,8 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "Deterministic eval tool for preparing a bounded follow-up batch. Use this directly; do not call "
             "search_tools first. If it says to wait for the next scheduled run while returning remaining_work, "
             "that guidance only makes sense when a schedule exists or is being set. When no schedule exists, "
-            "set a resume schedule before verification reads or stopping."
+            "set only a resume schedule before verification reads or stopping; do not rewrite charter unless the "
+            "user explicitly requested a charter change."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },

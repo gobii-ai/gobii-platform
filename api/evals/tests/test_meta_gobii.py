@@ -127,6 +127,7 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
                 "Nothing additional besides the requested agent update",
                 "The user did not ask for contacts, files, or schedules; do not add them.",
                 "The user did not request any schedule, contacts, files, extra agents, or extra actions.",
+                "The user asked for three workstreams (recruiting, sales, customer signal). No unrequested extras are added.",
                 "Schedule: no explicit recurring/cadence request - keep unscheduled by default.",
                 "The word 'watch' is ambiguous ongoing behavior, not a cadence request; schedule clarification can be asked as a follow-up.",
                 "Restructuring design is user-delegated to 'however you think is best' - scope must be confirmed before execution.",
@@ -156,6 +157,25 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
         self.assertEqual(plan_args["planned_agent_count"], 1)
         self.assertEqual(len(plan_args["planned_role_names"]), 1)
         self.assertIn("Competitor Pricing", plan_args["planned_role_names"][0])
+
+    def test_positive_team_creation_fallback_rejects_schedule_clarification(self):
+        case = next(
+            eval_case
+            for eval_case in META_GOBII_EVAL_CASES
+            if eval_case.slug == "positive_team_creation"
+        )
+        plan_args = MetaGobiiSystemSkillScenario._simulated_plan_args(case)
+        plan_args["schedule_policy"] = {
+            "schedule_in_scope": "False",
+            "schedule_action": "clarify",
+            "cadence_or_schedule": "",
+            "explicit_user_intent": "False",
+            "included_in_approval_scope": "False",
+            "asks_clarifying_question": "True",
+            "rationale": "Ask whether this team should have scheduled reports.",
+        }
+
+        self.assertTrue(MetaGobiiSystemSkillScenario._plan_args_need_fallback(case, plan_args))
 
     def test_skill_discovery_uses_deterministic_fallback_for_retryable_llm_error(self):
         case = next(

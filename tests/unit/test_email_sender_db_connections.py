@@ -116,7 +116,18 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertIn("tables/cells", description)
         self.assertIn("Do NOT leave report metrics in plain lists", description)
         self.assertIn("Do NOT use Markdown pipe tables", description)
+        self.assertIn("Price monitor logs are report emails", description)
+        self.assertIn("Only for simple outreach", description)
+        self.assertIn("no tables, inline styles, colors, headings, badges, or metric blocks", description)
         self.assertIn("reply_to_message_id", properties)
+        self.assertIn(
+            "Simple outreach/intros/follow-ups should use only minimal paragraph HTML",
+            properties["mobile_first_html"]["description"],
+        )
+        self.assertIn(
+            "Report/digest/dashboard/status/monitor/log emails should style",
+            properties["mobile_first_html"]["description"],
+        )
 
     def test_execute_send_email_retries_on_operational_error(self):
         """

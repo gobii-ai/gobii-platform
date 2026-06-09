@@ -277,7 +277,7 @@ def _record_plan_tool() -> dict[str, Any]:
                                     "Use clarify only for ambiguous ongoing/proactive work without a cadence. Use "
                                     "none for demo, setup-only, one-time, one-off, temporary, trial, prototype, "
                                     "historical-batch, file/contact/resource, role-ownership, general responsibility, "
-                                    "or explicitly no-recurring requests."
+                                    "team creation/link/brief requests, or explicitly no-recurring requests."
                                 ),
                             },
                             "cadence_or_schedule": {
@@ -476,6 +476,14 @@ def _tool_argument_is_missing(value: Any, property_schema: dict[str, Any]) -> bo
             return len(value) < min_length if isinstance(value, str) else True
         return not isinstance(value, str) or value == ""
     return False
+
+
+def _truthy_tool_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return bool(value)
 
 
 class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
@@ -873,7 +881,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "before planning mutations as executable. "
                     "Schedule policy: do not place schedules in scope for one-off, demo, setup-only, trial, "
                     "prototype, exploratory, backfill, cleanup, research, candidate-screening, sales-list, "
-                    "project-team, reorganize, archive, link/unlink, resource, contact, file, or make-available "
+                    "project-team, team-of-Gobiis, create/link/brief, reorganize, archive, link/unlink, resource, contact, file, or make-available "
                     "requests unless the user explicitly asks for scheduled, recurring, ongoing, proactive, digest, "
                     "watch, check-in, or cadence-based behavior. For explicit no-schedule wording such as demo, "
                     "setup-only, one-time, one-off, temporary, trial, prototype, historical batch, no recurring, "
@@ -883,8 +891,9 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "only in those ambiguous ongoing verb cases may you keep schedule_in_scope=false and ask a "
                     "clarifying schedule question with schedule_action=clarify. Role-ownership and responsibility "
                     "phrases such as own vendor renewals, own support intake, manage recruiting, handle operations, "
-                    "or be responsible for a domain are not enough to ask schedule clarification; use "
-                    "schedule_action=none unless the user asks for recurring/proactive/cadence behavior. When a schedule is in scope, "
+                    "or be responsible for a domain are not enough to ask schedule clarification; team creation, linking, and briefing "
+                    "are also not enough to ask a schedule clarification. Use schedule_action=none unless the user asks for "
+                    "recurring/proactive/cadence behavior. When a schedule is in scope, "
                     "schedule_policy must include the explicit cadence/removal and included_in_approval_scope=true. "
                     "Do not add extra team members, domains, schedules, contacts, files, or scenarios the user did "
                     "not ask for; record any accidental extras in extra_scope_items and in schedule_policy. "
@@ -1259,6 +1268,22 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             return True
         if case.expect_confirmation is not None and bool(plan_args.get("needs_human_confirmation")) != case.expect_confirmation:
             return True
+        if case.schedule_expectation == SCHEDULE_EXPECTATION_NONE:
+            policy = plan_args.get("schedule_policy") or {}
+            if isinstance(policy, dict):
+                schedule_action = str(policy.get("schedule_action") or "none").strip().lower()
+                if schedule_action not in ("", "none"):
+                    return True
+                if any(
+                    _truthy_tool_bool(policy.get(field))
+                    for field in (
+                        "schedule_in_scope",
+                        "explicit_user_intent",
+                        "included_in_approval_scope",
+                        "asks_clarifying_question",
+                    )
+                ):
+                    return True
         return False
 
     @staticmethod

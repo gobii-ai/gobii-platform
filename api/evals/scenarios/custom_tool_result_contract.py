@@ -683,6 +683,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             "counts": (
                 "count",
                 "rows_",
+                "records_",
                 "items_",
                 "accepted",
                 "rejected",

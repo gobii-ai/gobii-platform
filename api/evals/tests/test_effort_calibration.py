@@ -360,14 +360,17 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertIn("remaining_work", outreach_description)
         self.assertIn("set a resume schedule", outreach_description)
+        self.assertIn("Set only the schedule", outreach_description)
         self.assertIn("stop the current turn", outreach_description)
         self.assertIn("remaining_work", candidate_description)
         self.assertIn("set a resume schedule", candidate_description)
+        self.assertIn("Set only the schedule", candidate_description)
         self.assertIn("report verified partial records", candidate_description)
         self.assertIn("Do not treat a newly set schedule as a same-turn trigger", candidate_description)
         self.assertIn("before update_plan", candidate_description)
         self.assertIn("only makes sense when a schedule exists", schedule_description)
-        self.assertIn("set a resume schedule before verification reads", schedule_description)
+        self.assertIn("set only a resume schedule before verification reads", schedule_description)
+        self.assertIn("do not rewrite charter", schedule_description)
 
     def test_fresh_full_tool_result_wrapper_discourages_redundant_sqlite_rereads(self):
         wrapped = _wrap_as_sqlite_result('{"answer": "ready"}', 19)

@@ -329,6 +329,45 @@ def run(params, ctx):
         with node.content.open("rb") as handle:
             self.assertIn(b"Appended 10 rows", handle.read())
 
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_normalizes_sqlite_row_get_calls(self, _mock_sandbox):
+        source = self._build_runnable_tool_source(
+            """
+import sqlite3
+
+
+def run(params, ctx):
+    with ctx.sqlite() as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT 'CareFlow' AS company_name").fetchone()
+        return {
+            "status": "ok",
+            "summary": dict(row).get("company_name"),
+            "source": "sqlite",
+            "verification": "Read-only SQLite lookup.",
+            "next_action": row.get("company_name", "Verify read-only."),
+        }
+"""
+        )
+
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "SQLite Row Getter",
+                "description": "Read rows from SQLite.",
+                "source_path": "/tools/sqlite_row_getter.py",
+                "source_code": source,
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        node = AgentFsNode.objects.get(path="/tools/sqlite_row_getter.py")
+        with node.content.open("rb") as handle:
+            stored_source = handle.read().decode("utf-8")
+        self.assertIn('dict(row).get("company_name", "Verify read-only.")', stored_source)
+        self.assertNotIn('row.get("company_name", "Verify read-only.")', stored_source)
+
     def test_normalize_custom_tool_parameters_schema_synthesizes_missing_required_fields(self):
         schema = normalize_custom_tool_parameters_schema(
             {
@@ -1131,6 +1170,61 @@ def run(params, ctx):
         mock_service._ensure_session.assert_called_once_with(self.agent, source="custom_tool_source_sync")
         mock_service._sync_workspace_push.assert_called_once()
 
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    @patch("api.agent.tools.tool_manager.enable_tools")
+    def test_create_custom_tool_normalizes_file_backed_wrapper_import(
+        self,
+        mock_enable_tools,
+        mock_service_cls,
+        _mock_sandbox,
+    ):
+        source = (
+            "# reminder: from _gobii_ctx import main\n\n"
+            "def run(params, ctx):\n"
+            "    return {'status': 'ok', 'summary': 'hi', 'next_action': 'Done.'}\n\n"
+            "if __name__ == '__main__': main(run)\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/file_backed_wrapper.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        mock_enable_tools.return_value = {
+            "status": "success",
+            "enabled": ["custom_file_backed_wrapper"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
+        mock_service = MagicMock()
+        mock_service._backend = object()
+        mock_service._sync_workspace_push.return_value = {"status": "ok"}
+        mock_service_cls.return_value = mock_service
+
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "File Backed Wrapper",
+                "description": "Loads source from a workspace path.",
+                "source_path": "/tools/file_backed_wrapper.py",
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        node = AgentFsNode.objects.get(path="/tools/file_backed_wrapper.py")
+        with node.content.open("rb") as handle:
+            stored_source = handle.read().decode("utf-8")
+        self.assertIn("from _gobii_ctx import main", stored_source)
+        self.assertIn("# reminder: from _gobii_ctx import main", stored_source)
+        self.assertTrue(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_file_backed_wrapper").exists())
+
     def test_file_str_replace_updates_source_and_touches_custom_tool(self):
         write_result = write_bytes_to_dir(
             agent=self.agent,
@@ -1416,6 +1510,39 @@ def run(params, ctx):
         self.assertIn("from _gobii_ctx import main", source)
         self.assertTrue(source.rstrip().endswith("if __name__ == '__main__': main(run)"))
         self.assertTrue(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_greeter").exists())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_hoists_nested_main_import(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Nested Main Import",
+                "description": "Return a greeting.",
+                "source_path": "/tools/nested_main_import.py",
+                "source_code": (
+                    "def run(params, ctx):\n"
+                    "    return {'message': 'hi'}\n\n"
+                    "if __name__ == \"__main__\":\n"
+                    "    from _gobii_ctx import main\n\n"
+                    "    main(run)\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        node = AgentFsNode.objects.get(path="/tools/nested_main_import.py")
+        with node.content.open("rb") as handle:
+            source = handle.read().decode("utf-8")
+        self.assertIn("from _gobii_ctx import main\n", source)
+        self.assertTrue(source.rstrip().endswith("if __name__ == '__main__': main(run)"))
+        self.assertNotIn("    from _gobii_ctx import main", source)
+        self.assertTrue(
+            PersistentAgentCustomTool.objects.filter(
+                agent=self.agent,
+                tool_name="custom_nested_main_import",
+            ).exists()
+        )
 
     @patch("api.agent.tools.tool_manager.get_enabled_tool_limit", return_value=2)
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)

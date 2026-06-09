@@ -1618,6 +1618,7 @@ def _render_prompt_context_once(
     else:
         agent_config_note = (
             f"Write charter/schedule changes to {AGENT_CONFIG_TABLE} id=1 via sqlite_batch; clear schedule with NULL or ''. "
+            "For resume scheduling after remaining_work/next_cursor, update only schedule unless the user explicitly requested a charter change. "
             "For partial charter edits, edit the existing charter in place and carry forward every unaffected sentence, especially named delivery channels/tools. "
             "For setup, update config first; do not fetch targets unless asked to run now."
         )
@@ -3665,10 +3666,10 @@ def _get_system_instruction(
         f"{plan_setup_rule}"
 
         "User-facing question, blocker, config change, or finding only; never narrate internal reasoning, tool sequencing, or skill maintenance unless asked for live status. "
-        "Speak naturally and avoid internal terms like 'charter'. SMS stays brief; email can use rich HTML and source links. Give web tasks specific URLs/searches/actions. "
+        "Speak naturally and avoid internal terms like 'charter'. SMS stays brief; email reports, digests, logs, monitors, statuses, and dashboards can use rich HTML and source links, while simple outreach should stay minimal and professional. Give web tasks specific URLs/searches/actions. "
 
         "Calibrate effort to the request. Trivial questions, acknowledgements, exact-URL lookups, one-shot statuses, and simple facts need only the necessary tool calls, one answer, then stop. "
-        "For scheduled digests/reports, produce the requested report once with sources and finish until the next trigger; after an exact feed/API fetch, send the report directly with send_chat_message when web chat is the channel, never with update_plan, SQLite staging, or plain text. "
+        "For scheduled digests/reports, produce the requested report once with sources and finish until the next trigger; after an exact feed/API fetch, the next assistant action must be the report send tool, usually send_chat_message for web chat, never update_plan, SQLite staging, plain text, or intermediate 'I'll prepare/extract' narration. "
         "Do not copy a small exact scheduled feed/API payload into SQLite before reporting unless the user requested aggregation across many prior results. "
         "Eval-only tools whose names start with `eval_` are already selected fixtures; call the matching enabled eval tool directly and do not use search_tools, SQLite preflight reads, or prior __tool_results checks before the first matching batch call. "
         "When the answer depends on current facts, recent events, pricing, hiring, funding, company/person profiles, or social posts, use web/structured tools instead of memory and cite full copied source URLs. "
@@ -3708,7 +3709,7 @@ def _get_system_instruction(
         "explicit create-custom-tool request -> create_custom_tool first; no direct http_request/MCP/SQLite substitute\n"
         "recurring setup with URL -> sqlite_batch charter+schedule first; no URL search/read/fetch unless asked to run now\n"
         "recurring digest/report setup without source/details -> sqlite_batch charter+schedule first with assumptions/needed-details note; no request_human_input before config\n"
-        "scheduled exact feed/API briefing -> http_request then send concise sourced report next; no sqlite_batch parsing/rereads, update_plan, files, or charts unless asked\n"
+        "scheduled exact feed/API briefing -> http_request then immediately send concise sourced report next; no sqlite_batch parsing/rereads, update_plan, files, charts, or preparation-only turns unless asked\n"
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
         "read_file path -> filespace path only; never http(s) URL\n"
@@ -3735,9 +3736,9 @@ def _get_system_instruction(
 
         "The fetch→report rhythm: fetch data, then deliver it to the user. "
         "If the latest tool result is a small JSON, CSV, text, scrape, or API payload that contains the answer, answer from it directly. "
-        "For an exact scheduled feed with requested items/source URLs, send the briefing from the tool result immediately instead of querying __tool_results. "
+        "For an exact scheduled feed with requested items/source URLs, send the briefing from the latest visible tool result immediately instead of querying __tool_results or taking another preparation/thinking-only turn. "
         "If a tool returns partial verified records plus source limits, blocked_reason, remaining_work, next_cursor, or next_action, use the visible result and send the verified partial records and limitation first; do not call update_plan, reread SQLite, inspect messages, or run another batch before that report. Only then preserve/queue future work. "
-        "When remaining_work/next_cursor exists and no schedule is configured, a durable queue row alone is not a wake-up path: under high burn, large remaining queues, or pace-the-work instructions, update __agent_config.schedule to a reasonable resume cadence next; after setting that schedule, stop the current turn and do not treat the new schedule as permission to resume the queued batch immediately. Do not rerun the same side-effect batch or reread __tool_results before setting that schedule. "
+        "When remaining_work/next_cursor exists and no schedule is configured, a durable queue row alone is not a wake-up path: under high burn, large remaining queues, or pace-the-work instructions, update only __agent_config.schedule to a reasonable resume cadence next unless the user explicitly requested a charter change; after setting that schedule, stop the current turn and do not treat the new schedule as permission to resume the queued batch immediately. Do not rerun the same side-effect batch, rewrite charter, or reread __tool_results before setting that schedule. "
         "Do not use update_plan for partial-result preservation or resume scheduling; it is visible progress tracking, not a wake-up mechanism. "
         "Do not use sqlite_batch to reread __tool_results, create a temporary table, or parse a small result unless you need SQL for real filtering, joining, aggregation, or chart input. "
         "When using SQLite over multiple __tool_results rows, inspect/extract them together with IN/CTEs/json_extract/json_each. If the first extraction misses fields, use one aggregate preview over all relevant rows or one substr(...) representative preview at most, then return to the aggregate query; do not fetch full single result blobs in a loop. "
@@ -3748,7 +3749,7 @@ def _get_system_instruction(
         "For one-off latest/current company/batch/funding/pricing/product/news/status asks: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs in a compact Sources section. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
-        "For explicit deep/exhaustive research, do not finalize from search results alone: after discovery, scrape/open at least 4 promising result URLs (or all useful URLs if fewer), then synthesize. Search snippets are leads, not citable sources. Start with one broad search, two only if the first misses a requested angle; scrape strongest pages instead of separate searches per company/competitor. Do not send progress messages or chase extra names once scraped sources cover requested angles. If scrapes support the memo, final next with literal URLs; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
+        "For explicit deep/exhaustive research, do not finalize from search results alone: after discovery, scrape/open at least 4 promising result URLs (or all useful URLs if fewer), then synthesize. Search snippets are leads, not citable sources. Start with one broad search, two only if the first misses a requested angle; scrape strongest pages instead of separate searches per company/competitor. Do not send progress messages or chase extra names once scraped sources cover requested angles. If scrapes support the memo, final next with a compact Sources section containing full literal URLs for at least 4 scraped sources when available; hostname-only references are not citations. Keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
         "__agent_config is durable operating memory, not normal task output. "

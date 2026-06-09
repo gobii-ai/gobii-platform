@@ -65,6 +65,43 @@ def prompt_requests_self_visual_identity(prompt: str) -> bool:
     )
 
 
+def self_visual_system_skill_key_for_prompt(prompt: str) -> str:
+    if not prompt_requests_self_visual_identity(prompt):
+        return ""
+
+    normalized = _normalize_prompt_text(prompt)
+    if any(term in normalized for term in (" video ", " clip ", " animation ", " self video ")):
+        return SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY
+    return SELF_IMAGE_GENERATION_SYSTEM_SKILL_KEY
+
+
+def auto_enable_self_visual_media_system_skill(agent: PersistentAgent, prompt: str) -> list[str]:
+    """
+    Enable the matching self-media skill when the latest task explicitly asks for it.
+
+    This only makes the JIT retrieval/media tools available; it does not add the visual
+    description to ordinary prompt context.
+    """
+
+    skill_key = self_visual_system_skill_key_for_prompt(prompt)
+    if not skill_key:
+        return []
+
+    from api.agent.system_skills.registry import get_system_skill_definition
+    from api.agent.system_skills.service import enable_system_skills
+
+    definition = get_system_skill_definition(skill_key)
+    if definition is None:
+        return []
+
+    result = enable_system_skills(agent, [skill_key], available_skills=[definition])
+    if result.get("status") != "success" or result.get("invalid"):
+        return []
+    enabled_keys = list(result.get("enabled") or [])
+    already_enabled_keys = list(result.get("already_enabled") or [])
+    return [key for key in (enabled_keys + already_enabled_keys) if key == skill_key]
+
+
 def build_self_visual_identity_prompt_fragment(agent: PersistentAgent) -> str:
     """Build a bounded prompt fragment containing only self-image visual identity."""
 

@@ -998,9 +998,12 @@ def _normalize_pep723_fences(source_text: str) -> str:
 
 _MAIN_IMPORT_LINE = "from _gobii_ctx import main"
 _MAIN_GUARD_LINE = "if __name__ == '__main__': main(run)"
+_MAIN_IMPORT_RE = re.compile(r"(?m)^from[ \t]+_gobii_ctx[ \t]+import[ \t]+main[ \t]*(?:#.*)?$")
+_SQLITE_ROW_GET_RE = re.compile(r"\b((?:[A-Za-z_]\w*_)?row)\.get\(")
 _TRAILING_MAIN_GUARD_RE = re.compile(
     r"\n*if[ \t]+__name__[ \t]*==[ \t]*[\"']__main__[\"']:[ \t]*"
     r"(?:\n[ \t]+from[ \t]+_gobii_ctx[ \t]+import[ \t]+main[ \t]*)?"
+    r"(?:\n[ \t]*)*"
     r"(?:\n[ \t]+main\([ \t]*run[ \t]*\)[ \t]*|main\([ \t]*run[ \t]*\)[ \t]*)\Z",
     re.MULTILINE,
 )
@@ -1015,10 +1018,18 @@ def _leading_insert_index_after_pep723(lines: list[str]) -> int:
     return 0
 
 
+def _normalize_sqlite_row_get_calls(source_text: str) -> str:
+    if ".get(" not in source_text:
+        return source_text
+    if "sqlite3.Row" not in source_text and "row_factory" not in source_text:
+        return source_text
+    return _SQLITE_ROW_GET_RE.sub(lambda match: f"dict({match.group(1)}).get(", source_text)
+
+
 def _normalize_custom_tool_source_boilerplate(source_text: str) -> str:
     normalized = _normalize_pep723_fences(source_text).replace("\r\n", "\n").replace("\r", "\n")
 
-    if _MAIN_IMPORT_LINE not in normalized:
+    if not _MAIN_IMPORT_RE.search(normalized):
         lines = normalized.splitlines()
         insert_at = _leading_insert_index_after_pep723(lines)
         while insert_at < len(lines) and not lines[insert_at].strip():
@@ -1034,6 +1045,7 @@ def _normalize_custom_tool_source_boilerplate(source_text: str) -> str:
     else:
         normalized = stripped
 
+    normalized = _normalize_sqlite_row_get_calls(normalized)
     return normalized.rstrip() + "\n"
 
 
@@ -1298,6 +1310,19 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         if source_error:
             return {"status": "error", "message": source_error}
         assert source_text is not None
+        normalized_source_text = _normalize_custom_tool_source_boilerplate(source_text)
+        if normalized_source_text != source_text:
+            write_result = write_bytes_to_dir(
+                agent=agent,
+                content_bytes=normalized_source_text.encode("utf-8"),
+                extension=".py",
+                mime_type="text/x-python",
+                path=source_path,
+                overwrite=True,
+            )
+            if write_result.get("status") != "ok":
+                return write_result
+            source_text = normalized_source_text
         validation_error = _validate_source_code(source_text, source_path)
         if validation_error:
             return {"status": "error", "message": validation_error, "source_path": source_path}

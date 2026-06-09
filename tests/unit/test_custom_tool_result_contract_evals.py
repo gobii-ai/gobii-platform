@@ -201,6 +201,35 @@ class CustomToolResultContractEvalTests(TestCase):
 
         self.assertTrue(ok, reason)
 
+    def test_local_create_tool_check_accepts_record_count_fields(self):
+        case = _case("sheets_final_sync")
+        source = """
+from _gobii_ctx import main
+
+
+def run(params, ctx):
+    return {
+        "status": "ok",
+        "summary": "Synced records to Sheets.",
+        "records_read": 7,
+        "records_synced": 7,
+        "source": {"table": params.get("source_table"), "worksheet": params.get("worksheet")},
+        "verification": "Read sync_tracking before retrying.",
+        "next_action": "Do not manually replay the append.",
+    }
+
+
+if __name__ == "__main__":
+    main(run)
+"""
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, source_code=source),
+            "custom_sheets_final_sync",
+        )
+
+        self.assertTrue(ok, reason)
+
     def test_param_checks_accept_semantic_aliases_from_minimal_prompts(self):
         case = _case("sheets_final_sync")
         schema = {

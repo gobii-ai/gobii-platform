@@ -38,7 +38,7 @@ _PROGRESS_PREFIX_RE = re.compile(
     r"(?:(?:actually|first|just|quickly|then|also)\s+)?"
     r"(?:(?:do\s+)?(?:start|begin|continue|check|fetch|find|grab|investigate|pull|look|search|research|extract|compile|process|analy[sz]e|verify)|"
     r"do\s+(?:proper\s+|additional\s+|more\s+|some\s+|a\s+few\s+|new\s+)?(?:search(?:es)?|queries|lookups?)|"
-    r"inspect|scrape|organize|build|create|prepare|generate|run|hit|parse|get|read|patch|rewrite|seed|register|format|summarize|structure|try)\b",
+    r"inspect|scrape|organize|build|create|prepare|generate|run|hit|parse|get|read|patch|rewrite|seed|register|format|summarize|structure|try|make\s+(?:the\s+)?call)\b",
     re.IGNORECASE,
 )
 _INTERNAL_PROGRESS_RE = re.compile(
@@ -70,6 +70,7 @@ _RESULTS_STATUS_PROGRESS_RE = re.compile(
     r"^(?:(?:good|great|okay|ok|alright|sure)[,! ]+)?"
     r"(?:(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|found|got)\s+(?:the\s+)?(?:search\s+)?(?:result|results|data|sources?)|"
     r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)|"
+    r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+claim\s+texts?|"
     r"(?:(?:now\s+)?i(?:'ve)?|we)\s+(?:now\s+)?(?:have|got)\s+all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+claims?\s+extracted|"
     r"from\s+(?:the\s+)?(?:scrapes|sources|pages|results),?\s+(?:i|we)\s+(?:now\s+)?(?:have|got)\s+(?:all\s+)?(?:the\s+)?(?:data|source material|results?)|"
     r"all\s+(?:\w+|\d+)(?:\s+[\w-]+){0,2}\s+(?:sources?|pages?|results?|endpoints?|urls?)\s+(?:(?:are|were)\s+)?(?:fetched|scraped|loaded|processed|done)(?:\s+and\s+claims?\s+extracted)?|"
@@ -190,6 +191,8 @@ def _looks_like_routine_progress_message(body: str) -> bool:
     if not text:
         return False
     lower = text.lower()
+    if "/app/integrations" in lower:
+        return False
     if _TOOL_FRUSTRATION_PROGRESS_RE.search(text):
         return True
     if _RECOVERY_THEN_PROGRESS_RE.search(text):

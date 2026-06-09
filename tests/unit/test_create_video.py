@@ -4,10 +4,21 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import httpx
+from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from PIL import Image
 
-from api.models import PersistentAgentCompletion
+from api.models import (
+    BrowserUseAgent,
+    LLMProvider,
+    PersistentAgent,
+    PersistentAgentCompletion,
+    PersistentAgentEnabledTool,
+    PersistentAgentSystemSkillState,
+    VideoGenerationLLMTier,
+    VideoGenerationModelEndpoint,
+    VideoGenerationTierEndpoint,
+)
 from api.agent.tools.create_video import (
     GeneratedVideoResult,
     OpenAIVideoStatusError,
@@ -21,6 +32,11 @@ from api.agent.tools.create_video import (
     is_video_generation_available_for_agent,
 )
 from api.agent.core.video_generation_config import VideoGenerationLLMConfig
+from api.agent.tools.self_visual_identity import (
+    GET_SELF_VISUAL_IDENTITY_TOOL_NAME,
+    SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY,
+    auto_enable_self_visual_media_system_skill,
+)
 
 
 def _make_config(**overrides):
@@ -88,6 +104,81 @@ class IsVideoGenerationAvailableTests(TestCase):
     def test_returns_false_when_not_configured(self, mock_configured):
         agent = MagicMock()
         self.assertFalse(is_video_generation_available_for_agent(agent))
+
+
+@tag("batch_video_generation")
+class SelfVisualVideoAutoEnableTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        user = User.objects.create_user(username="self-video-auto-enable@example.com")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Self Video Auto Enable Browser")
+        cls.agent = PersistentAgent.objects.create(
+            user=user,
+            name="Self Video Auto Enable Agent",
+            browser_use_agent=browser_agent,
+            charter="Generate requested media.",
+            visual_description="A steady Gobii with copper glasses and a moss jacket.",
+        )
+
+    def _seed_video_generation_tier(self):
+        provider = LLMProvider.objects.create(
+            key="self-video-auto-enable-provider",
+            display_name="Self Video Auto Enable Provider",
+            enabled=True,
+        )
+        endpoint = VideoGenerationModelEndpoint.objects.create(
+            key="self-video-auto-enable-endpoint",
+            provider=provider,
+            enabled=True,
+            litellm_model="ltx/ltx-2-3-fast",
+        )
+        tier = VideoGenerationLLMTier.objects.create(
+            use_case=VideoGenerationLLMTier.UseCase.CREATE_VIDEO,
+            order=1,
+            description="Self video auto-enable tier",
+        )
+        VideoGenerationTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=1.0)
+
+    def test_self_video_request_auto_enables_self_video_skill_and_tools(self):
+        self._seed_video_generation_tier()
+
+        enabled = auto_enable_self_visual_media_system_skill(
+            self.agent,
+            "Text me a short video of yourself waving.",
+        )
+
+        self.assertEqual(enabled, [SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY])
+        self.assertTrue(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key=SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists()
+        )
+        enabled_tool_names = set(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent)
+            .values_list("tool_full_name", flat=True)
+        )
+        self.assertIn(GET_SELF_VISUAL_IDENTITY_TOOL_NAME, enabled_tool_names)
+        self.assertIn("create_video", enabled_tool_names)
+
+    def test_ordinary_text_does_not_auto_enable_self_video_skill(self):
+        self._seed_video_generation_tier()
+
+        enabled = auto_enable_self_visual_media_system_skill(
+            self.agent,
+            "Summarize tomorrow's calendar in one sentence.",
+        )
+
+        self.assertEqual(enabled, [])
+        self.assertFalse(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key=SELF_VIDEO_GENERATION_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists()
+        )
 
 
 @tag("batch_video_generation")

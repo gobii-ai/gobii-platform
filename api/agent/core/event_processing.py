@@ -139,6 +139,7 @@ from ..tools.request_contact_permission import execute_request_contact_permissio
 from ..tools.request_human_input import execute_request_human_input
 from ..tools.spawn_agent import execute_spawn_agent
 from ..tools.search_tools import execute_search_tools
+from ..tools.self_visual_identity import auto_enable_self_visual_media_system_skill
 from ..tools.static_tools import planning_mode_disallows_tool
 from ..tools.tool_manager import (
     execute_enabled_tool,
@@ -5951,6 +5952,12 @@ def _run_agent_loop(
             if auto_enabled:
                 span.set_attribute("autotool.enabled_count", len(auto_enabled))
                 span.set_attribute("autotool.enabled_tools", ",".join(auto_enabled))
+            auto_enabled_self_media_skills = auto_enable_self_visual_media_system_skill(agent, combined_text)
+            if auto_enabled_self_media_skills:
+                span.set_attribute(
+                    "autotool.enabled_self_visual_system_skills",
+                    ",".join(auto_enabled_self_media_skills),
+                )
     except Exception:
         logger.debug("Autotool heuristic check failed", exc_info=True)
 

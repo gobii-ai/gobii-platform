@@ -1499,9 +1499,11 @@ def _scope_item_is_negative_scope_note(normalized_item: str) -> bool:
     negative_markers = (
         "no extra scope",
         "no additional scope",
+        "no unrequested extra",
         "nothing extra",
         "nothing additional",
         "none added",
+        "no extras are added",
         "no-schedule default",
         "no schedule default",
         "not requested",
