@@ -14,7 +14,12 @@ from django.db import DatabaseError, IntegrityError, transaction
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
-from api.agent.core.llm_config import INPUT_TOKEN_HEADROOM, LLMNotConfiguredError, get_agent_judge_llm_config, get_agent_llm_tier
+from api.agent.core.llm_config import (
+    INPUT_TOKEN_HEADROOM,
+    LLMNotConfiguredError,
+    get_agent_judge_llm_config,
+    get_agent_llm_tier,
+)
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.prompt_context import _create_token_estimator
 from api.agent.core.promptree import Prompt
@@ -128,13 +133,19 @@ def maybe_run_agent_judge(
     *,
     tools: list[dict[str, Any]] | None = None,
     extra_trigger_reasons: list[str] | None = None,
+    trigger_context: dict[str, Any] | None = None,
 ) -> None:
     """Run the internal judge when heuristics indicate the agent may need guidance."""
 
     try:
         if not is_agent_judge_enabled_for_agent(agent):
             return
-        trigger = build_judge_trigger(agent, tools=tools, extra_trigger_reasons=extra_trigger_reasons)
+        trigger = build_judge_trigger(
+            agent,
+            tools=tools,
+            extra_trigger_reasons=extra_trigger_reasons,
+            trigger_context=trigger_context,
+        )
         if trigger is None:
             return
         _run_judge(agent, trigger)
@@ -251,6 +262,7 @@ def build_judge_trigger(
     *,
     tools: list[dict[str, Any]] | None = None,
     extra_trigger_reasons: list[str] | None = None,
+    trigger_context: dict[str, Any] | None = None,
 ) -> JudgeTrigger | None:
     if not is_agent_judge_enabled_for_agent(agent):
         return None
@@ -291,12 +303,14 @@ def build_judge_trigger(
         trigger_reasons=reasons,
         non_judge_step_count=non_judge_step_count,
         prompt_limits=prompt_limits,
+        trigger_context=trigger_context,
     )
     evidence_hash = _hash_payload(
         {
             "agent_id": str(agent.id),
             "step_count": non_judge_step_count,
             "reasons": reasons,
+            "trigger_context": trigger_context or {},
             "message_ids": [str(message.id) for message in recent_messages],
             "tool_step_ids": [str(call.step_id) for call in recent_tool_calls],
         }
@@ -792,6 +806,7 @@ def _build_trajectory_packet(
     non_judge_step_count: int,
     prompt_limits: JudgePromptLimits,
     report_context: dict[str, Any] | None = None,
+    trigger_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     tier = get_agent_llm_tier(agent)
     recent_steps = list(
@@ -828,8 +843,13 @@ def _build_trajectory_packet(
                 "solely because ordinary tool calls appear near or after a custom_* tool call; require direct "
                 "evidence from timing, parameters, results, messages, or steps."
             ),
+            (
+                "When trigger_context.custom_tool_sources is present, inspect that source as direct evidence "
+                "for the custom tool behavior involved in the trigger."
+            ),
         ],
         "trigger_reasons": trigger_reasons,
+        "trigger_context": trigger_context or {},
         "user_report": report_context or {},
         "non_judge_step_count": non_judge_step_count,
         "policy_excerpts": [
@@ -1134,16 +1154,54 @@ def _build_judge_user_prompt(
 
     high_priority = prompt.group("high_priority", weight=8)
     if trajectory.get("user_report"):
-        high_priority.section_text("user_report", _json_section(trajectory.get("user_report") or {}), weight=9)
-    high_priority.section_text("messages", _json_section(recent_trajectory.get("messages") or []), weight=8)
-    high_priority.section_text("system_directives", _json_section(recent_trajectory.get("system_directives") or []), weight=5)
-    high_priority.section_text("plan_snapshot", _json_section(recent_trajectory.get("plan_snapshot") or {}), weight=4)
-    high_priority.section_text("steps", _json_section(recent_trajectory.get("steps") or []), weight=4)
+        high_priority.section_text(
+            "user_report",
+            _json_section(trajectory.get("user_report") or {}),
+            weight=9,
+        )
+    if trajectory.get("trigger_context"):
+        high_priority.section_text(
+            "trigger_context",
+            _json_section(trajectory.get("trigger_context") or {}),
+            weight=9,
+        )
+    high_priority.section_text(
+        "messages",
+        _json_section(recent_trajectory.get("messages") or []),
+        weight=8,
+    )
+    high_priority.section_text(
+        "system_directives",
+        _json_section(recent_trajectory.get("system_directives") or []),
+        weight=5,
+    )
+    high_priority.section_text(
+        "plan_snapshot",
+        _json_section(recent_trajectory.get("plan_snapshot") or {}),
+        weight=4,
+    )
+    high_priority.section_text(
+        "steps",
+        _json_section(recent_trajectory.get("steps") or []),
+        weight=4,
+    )
 
     medium_priority = prompt.group("medium_priority", weight=5)
-    medium_priority.section_text("tool_calls", _json_section(recent_trajectory.get("tool_calls") or []), weight=6)
-    medium_priority.section_text("skills", _json_section((current_context.get("skills") or {})), weight=3)
-    medium_priority.section_text("capability_manifest", _json_section(trajectory.get("capability_manifest") or []), weight=2)
+    medium_priority.section_text(
+        "tool_calls",
+        _json_section(recent_trajectory.get("tool_calls") or []),
+        weight=6,
+    )
+    medium_priority.section_text(
+        "skills",
+        _json_section((current_context.get("skills") or {})),
+        weight=3,
+    )
+    medium_priority.section_text(
+        "capability_manifest",
+        _json_section(trajectory.get("capability_manifest") or []),
+        weight=2,
+    )
 
     low_priority = prompt.group("low_priority", weight=2)
     low_priority.section_text("sqlite", _json_section(current_context.get("sqlite") or {}), weight=2)

@@ -192,6 +192,7 @@ MCP_STDIO_REQUEST_TIMEOUT_SECONDS = env.float(
 )
 # Maximum number of safe tool calls executed concurrently in one batch.
 MAX_PARALLEL_TOOL_CALLS = env.int("MAX_PARALLEL_TOOL_CALLS", default=4)
+CUSTOM_TOOL_CHILD_FAILURE_LIMIT = env.int("CUSTOM_TOOL_CHILD_FAILURE_LIMIT", default=3)
 # Retry configuration for transient LiteLLM failures
 LITELLM_MAX_RETRIES = env.int("LITELLM_MAX_RETRIES", default=2)
 LITELLM_RETRY_BACKOFF_SECONDS = env.float("LITELLM_RETRY_BACKOFF_SECONDS", default=1.0)

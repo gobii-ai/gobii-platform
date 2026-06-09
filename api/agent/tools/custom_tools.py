@@ -165,9 +165,12 @@ _GOBII_CTX_MODULE = textwrap.dedent(
             body = json.dumps(payload).encode("utf-8")
             raw = self._call_tool_via_curl(body)
             try:
-                return json.loads(raw or "{{}}")
+                result = json.loads(raw or "{{}}")
             except json.JSONDecodeError as exc:
                 raise RuntimeError(f"Tool bridge returned invalid JSON: {{raw[:500]}}") from exc
+            if isinstance(result, dict) and result.get("custom_tool_abort") is True:
+                raise RuntimeError(result.get("message") or "Custom tool stopped by bridge.")
+            return result
 
         @contextlib.contextmanager
         def sqlite(self):
@@ -385,6 +388,10 @@ def _read_source_text(agent: PersistentAgent, source_path: str) -> tuple[Optiona
         return raw.decode("utf-8"), None
     except UnicodeDecodeError:
         return None, "Custom tool source must be UTF-8 text."
+
+
+def read_custom_tool_source_text(agent: PersistentAgent, source_path: str) -> tuple[Optional[str], Optional[str]]:
+    return _read_source_text(agent, source_path)
 
 
 def _sync_workspace_source(agent: PersistentAgent, source_path: str) -> Optional[Dict[str, Any]]:
