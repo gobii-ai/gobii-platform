@@ -2195,6 +2195,17 @@
   box-shadow: 0 -4px 22px -10px rgba(14, 165, 233, 0.22);
 }
 
+.composer-working-panel[data-has-pending-actions="true"]::before {
+  background:
+    radial-gradient(ellipse 76% 112% at 10% 0%, rgba(14, 165, 233, 0.18) 0%, rgba(14, 165, 233, 0.1) 45%, transparent 76%),
+    radial-gradient(ellipse 82% 116% at 92% 36%, rgba(251, 191, 36, 0.18) 0%, rgba(251, 191, 36, 0.1) 46%, transparent 78%),
+    linear-gradient(135deg, rgba(240, 249, 255, 0.88) 0%, rgba(255, 251, 235, 0.74) 100%);
+}
+
+.composer-working-panel[data-has-pending-actions="true"]::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.46) 0%, rgba(255, 255, 255, 0.26) 42%, rgba(255, 255, 255, 0.18) 100%);
+}
+
 .composer-working-panel[data-has-pending-actions="true"] .composer-working-header-row {
   background: rgba(255, 255, 255, 0.42);
 }
@@ -2442,6 +2453,7 @@
   height: auto;
   max-height: min(70vh, 32rem);
   overflow-y: auto;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(240, 249, 255, 0.18) 48%, rgba(255, 251, 235, 0.2) 100%);
 }
 
 .composer-working-pending-actions {
