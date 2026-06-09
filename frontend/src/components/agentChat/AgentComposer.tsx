@@ -157,14 +157,14 @@ function getPendingActionSignature(action: PendingActionRequest): string {
   }
 }
 
-function getPendingWorkingTabLabel(tab: Extract<WorkingPanelTab, { kind: 'pending_action' }>): string {
+function getPendingWorkingTabLabel(tab: PendingWorkingPanelTab): string {
   if (tab.pendingKind === 'questions') {
     return `${tab.count} ${tab.count === 1 ? 'Question' : 'Questions'}`
   }
   return PENDING_WORKING_TAB_CONFIG[tab.pendingKind].title
 }
 
-function getPendingWorkingTabAriaLabel(tab: Extract<WorkingPanelTab, { kind: 'pending_action' }>): string {
+function getPendingWorkingTabAriaLabel(tab: PendingWorkingPanelTab): string {
   const label = PENDING_WORKING_TAB_CONFIG[tab.pendingKind].title.toLowerCase()
   return `View ${tab.count} pending ${label} ${tab.count === 1 ? 'request' : 'requests'}`
 }
@@ -188,13 +188,19 @@ type HumanInputComposerBatchResponse = {
   responses: HumanInputComposerResponse[]
 }
 
-type WorkingPanelTab =
-  | { id: string; kind: 'insight'; insight: InsightEvent; insightIndex: number }
-  | { id: string; kind: 'pending_action'; pendingKind: PendingWorkingTabKind; actions: PendingActionRequest[]; count: number }
-  | { id: NativeWorkingTabKind; kind: NativeWorkingTabKind }
-
 type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord'
 type PendingWorkingTabKind = 'questions' | 'credentials' | 'contacts' | 'agents'
+type PendingWorkingPanelTab = {
+  id: `pending:${PendingWorkingTabKind}`
+  kind: 'pending_action'
+  pendingKind: PendingWorkingTabKind
+  actions: PendingActionRequest[]
+  count: number
+}
+type WorkingPanelTab =
+  | { id: string; kind: 'insight'; insight: InsightEvent; insightIndex: number }
+  | PendingWorkingPanelTab
+  | { id: NativeWorkingTabKind; kind: NativeWorkingTabKind }
 
 const PENDING_WORKING_TAB_ORDER: PendingWorkingTabKind[] = ['questions', 'credentials', 'contacts', 'agents']
 
@@ -662,14 +668,14 @@ export const AgentComposer = memo(function AgentComposer({
     ] as const,
     [apolloTabAvailable, discordTabAvailable, googleDriveTabAvailable, hubspotTabAvailable],
   )
-  const pendingActionTabs = useMemo(() => {
+  const pendingActionTabs = useMemo<PendingWorkingPanelTab[]>(() => {
     const actionsByTabKind = new Map<PendingWorkingTabKind, PendingActionRequest[]>()
     pendingActionRequests.forEach((action) => {
       const tabKind = getPendingWorkingTabKind(action)
       actionsByTabKind.set(tabKind, [...(actionsByTabKind.get(tabKind) ?? []), action])
     })
     return PENDING_WORKING_TAB_ORDER
-      .map((pendingKind): WorkingPanelTab | null => {
+      .map((pendingKind): PendingWorkingPanelTab | null => {
         const actions = actionsByTabKind.get(pendingKind) ?? []
         if (!actions.length) {
           return null
@@ -682,17 +688,11 @@ export const AgentComposer = memo(function AgentComposer({
           count: actions.reduce((total, action) => total + getPendingActionRequestCount(action), 0),
         }
       })
-      .filter((tab): tab is WorkingPanelTab => Boolean(tab))
+      .filter((tab): tab is PendingWorkingPanelTab => Boolean(tab))
   }, [pendingActionRequests])
   const pendingActionTabSignature = useMemo(() => (
     pendingActionTabs
-      .map((tab) => {
-        if (tab.kind !== 'pending_action') {
-          return ''
-        }
-        return `${tab.id}=${tab.actions.map(getPendingActionSignature).join('|')}`
-      })
-      .filter(Boolean)
+      .map((tab) => `${tab.id}=${tab.actions.map(getPendingActionSignature).join('|')}`)
       .join(';')
   ), [pendingActionTabs])
   const currentInsightTabId = currentInsight ? `insight:${currentInsight.insightId}` : null
@@ -777,8 +777,7 @@ export const AgentComposer = memo(function AgentComposer({
         }),
     )
     const changedPendingTab = pendingActionTabs.find((tab) => (
-      tab.kind === 'pending_action'
-      && previousSignaturesByTab.get(tab.id) !== tab.actions.map(getPendingActionSignature).join('|')
+      previousSignaturesByTab.get(tab.id) !== tab.actions.map(getPendingActionSignature).join('|')
     ))
     const hasPendingSignatureChanged = previousState.key !== key || previousSignature !== pendingActionTabSignature
 
