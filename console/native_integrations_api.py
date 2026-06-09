@@ -228,6 +228,8 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
             payload = json.loads(body or "{}")
         except json.JSONDecodeError:
             return HttpResponseBadRequest("Invalid JSON body")
+        if not isinstance(payload, dict):
+            return HttpResponseBadRequest("Invalid JSON payload: expected an object")
 
         code = str(payload.get("authorization_code") or "").strip()
         state = str(payload.get("state") or "").strip()
@@ -243,7 +245,8 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
             owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
             _validate_oauth_state(request, provider.key, state, owner_scope, owner_user, owner_org)
         except ValidationError as exc:
-            return JsonResponse({"errors": exc.message_dict}, status=400)
+            errors = exc.message_dict if hasattr(exc, "message_dict") else {"non_field_errors": exc.messages}
+            return JsonResponse({"errors": errors}, status=400)
         except PermissionDenied as exc:
             return _permission_denied_response(exc)
 
@@ -418,6 +421,8 @@ class NativeIntegrationAgentEventAPIView(LoginRequiredMixin, View):
             payload = json.loads(body or "{}")
         except json.JSONDecodeError:
             return HttpResponseBadRequest("Invalid JSON body")
+        if not isinstance(payload, dict):
+            return HttpResponseBadRequest("Invalid JSON payload: expected an object")
 
         try:
             provider = get_native_integration_provider(provider_key)

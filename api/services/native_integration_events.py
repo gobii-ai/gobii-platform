@@ -1,4 +1,5 @@
 import json
+import uuid
 from typing import Any
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -16,6 +17,10 @@ def resolve_native_integration_event_agent(agent_id: str, *, owner_user, owner_o
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         raise ValidationError({"agent_id": "agent_id is required."})
+    try:
+        uuid.UUID(normalized_agent_id)
+    except ValueError as exc:
+        raise ValidationError({"agent_id": "Invalid agent_id format."}) from exc
 
     queryset = PersistentAgent.objects.non_eval().alive()
     if owner_org is not None:
@@ -98,11 +103,13 @@ def record_native_integration_agent_event(
         "files": normalized_files,
     }
 
-    step = PersistentAgentStep.objects.create(agent=agent, description=description)
-    PersistentAgentSystemStep.objects.create(
-        step=step,
-        code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
-        notes=json.dumps(notes_payload, separators=(",", ":"), sort_keys=True),
-    )
-    transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.id)))
+    with transaction.atomic():
+        step = PersistentAgentStep.objects.create(agent=agent, description=description)
+        PersistentAgentSystemStep.objects.create(
+            step=step,
+            code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
+            notes=json.dumps(notes_payload, separators=(",", ":"), sort_keys=True),
+        )
+        agent_id_str = str(agent.id)
+        transaction.on_commit(lambda: process_agent_events_task.delay(agent_id_str))
     return step

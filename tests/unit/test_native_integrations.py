@@ -472,6 +472,32 @@ class NativeIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_agent_event_rejects_malformed_agent_id(self):
+        response = self.client.post(
+            reverse("console-native-integration-agent-events", args=["google_drive"]),
+            data=json.dumps(
+                {
+                    "agent_id": "not-a-uuid",
+                    "event_type": "connected",
+                    "files": [],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["errors"]["agent_id"], ["Invalid agent_id format."])
+
+    def test_agent_event_rejects_non_object_json_payload(self):
+        response = self.client.post(
+            reverse("console-native-integration-agent-events", args=["google_drive"]),
+            data=json.dumps([]),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.content, b"Invalid JSON payload: expected an object")
+
     def test_list_reports_connected_state_for_apollo(self):
         cases = (
             (APOLLO_PROVIDER, "Apollo", "apollo"),
