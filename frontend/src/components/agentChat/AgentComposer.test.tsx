@@ -59,10 +59,6 @@ vi.mock('./AgentIntelligenceSelector', () => ({
   AgentIntelligenceSelector: () => null,
 }))
 
-vi.mock('./ComposerPipedreamAppsControl', () => ({
-  ComposerPipedreamAppsControl: () => null,
-}))
-
 function makeHumanInputAction(): PendingActionRequest {
   return {
     id: 'human-action',
