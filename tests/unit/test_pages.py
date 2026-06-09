@@ -2125,9 +2125,23 @@ class ComparisonPageTests(TestCase):
             structured_data["about"][0]["description"],
             "AI coworker platform for persistent browser-native business work.",
         )
+        self.assertEqual(structured_data["about"][0]["operatingSystem"], "Web")
+        self.assertEqual(
+            structured_data["about"][0]["sameAs"],
+            [
+                "https://gobii.ai/",
+                "https://github.com/gobii-ai",
+                "https://docs.gobii.ai/",
+            ],
+        )
         self.assertEqual(
             structured_data["about"][1]["applicationCategory"],
             "AI agent automation platform",
+        )
+        self.assertEqual(structured_data["about"][1]["operatingSystem"], "Web")
+        self.assertEqual(
+            structured_data["about"][1]["sameAs"],
+            list(comparison["competitor_same_as"]),
         )
         self.assertEqual(
             structured_data["about"][1]["description"],
@@ -2859,6 +2873,7 @@ class SolutionCtaCopyTests(TestCase):
         with override_flag("fish_upper_left", active=False):
             logo = self._mini_header_logo()
             self.assertIsNotNone(logo)
+            self.assertEqual(logo.parent.get("aria-label"), "Gobii home")
             self.assertEqual(logo.get("src"), static("images/noBgIndigo600.png"))
             self.assertIsNone(logo.get("srcset"))
             self.assertEqual(logo.get("fetchpriority"), "high")
@@ -2867,6 +2882,7 @@ class SolutionCtaCopyTests(TestCase):
         with override_flag("fish_upper_left", active=True):
             logo = self._mini_header_logo()
             self.assertIsNotNone(logo)
+            self.assertEqual(logo.parent.get("aria-label"), "Gobii home")
             self.assertEqual(logo.get("src"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
             self.assertEqual(
                 logo.get("srcset"),
@@ -2883,6 +2899,7 @@ class SolutionCtaCopyTests(TestCase):
             logo = soup.select_one('header.hs-header a[href="/"] img')
             self.assertIsNotNone(preload)
             self.assertIsNotNone(logo)
+            self.assertEqual(logo.parent.get("aria-label"), "Gobii home")
             self.assertEqual(preload.get("href"), static("images/noBgIndigo600.png"))
             self.assertEqual(logo.get("src"), static("images/noBgIndigo600.png"))
             self.assertIsNone(preload.get("imagesrcset"))
@@ -2894,6 +2911,7 @@ class SolutionCtaCopyTests(TestCase):
             logo = soup.select_one('header.hs-header a[href="/"] img')
             self.assertIsNotNone(preload)
             self.assertIsNotNone(logo)
+            self.assertEqual(logo.parent.get("aria-label"), "Gobii home")
             self.assertEqual(preload.get("href"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
             self.assertEqual(preload.get("imagesrcset"), self._fish_header_logo_srcset())
             self.assertEqual(preload.get("type"), "image/webp")

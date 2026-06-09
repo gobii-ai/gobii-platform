@@ -85,6 +85,10 @@ COMPARISON_CATALOG = (
         ),
         "competitor_url": "https://zapier.com/agents",
         "competitor_application_category": "AI agent automation platform",
+        "competitor_operating_system": "Web",
+        "competitor_same_as": (
+            "https://zapier.com/agents",
+        ),
         "competitor_schema_description": (
             "AI agents for automating work across Zapier's connected app ecosystem."
         ),
