@@ -1893,6 +1893,7 @@ export function AgentChatLayout({
               apolloNativeTabEnabled={apolloNativeTabEnabled}
               hubspotNativeTabEnabled={hubspotNativeTabEnabled}
               discordNativeTabEnabled={discordNativeTabEnabled}
+              compact={sidebarMode === 'gallery'}
             />
           )}
           </div>

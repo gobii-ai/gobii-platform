@@ -42,8 +42,7 @@ type PendingActionComposerPanelProps = {
     }>
   ) => Promise<void>
   onViewAllContactRequests?: () => void
-  approvalActionsContainer?: Element | null
-  suppressInlineApprovalActions?: boolean
+  compact?: boolean
 }
 
 function parseInlineError(error: unknown): string {
@@ -130,8 +129,7 @@ export function PendingActionComposerPanel({
   onRemoveRequestedSecrets,
   onResolveContactRequests,
   onViewAllContactRequests,
-  approvalActionsContainer = null,
-  suppressInlineApprovalActions = false,
+  compact = false,
 }: PendingActionComposerPanelProps) {
   const [busySpawnDecision, setBusySpawnDecision] = useState<'approve' | 'decline' | null>(null)
   const [spawnError, setSpawnError] = useState<string | null>(null)
@@ -367,14 +365,13 @@ export function PendingActionComposerPanel({
                 error={secretError}
                 secretValues={secretValues}
                 makeGlobal={makeGlobal}
+                showReviewSummary={!compact}
                 onSecretValueChange={(secretId, value) => {
                   setSecretValues((current) => ({ ...current, [secretId]: value }))
                 }}
                 onMakeGlobalChange={setMakeGlobal}
                 onSave={handleSaveSecrets}
                 onRemove={handleRemoveSecrets}
-                actionsContainer={approvalActionsContainer}
-                suppressInlineActions={suppressInlineApprovalActions}
               />
             ) : null}
 
@@ -385,12 +382,11 @@ export function PendingActionComposerPanel({
                 busy={busyContacts}
                 error={contactError}
                 contactDrafts={contactDrafts}
+                showReviewSummary={!compact}
                 onContactDraftChange={(requestId, nextDraft) => {
                   setContactDrafts((current) => ({ ...current, [requestId]: nextDraft }))
                 }}
                 onSubmit={handleResolveContacts}
-                actionsContainer={approvalActionsContainer}
-                suppressInlineActions={suppressInlineApprovalActions}
               />
             ) : null}
           </div>

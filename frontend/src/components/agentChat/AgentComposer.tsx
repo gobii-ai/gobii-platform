@@ -1,7 +1,7 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
-import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, KeyRound, Loader2, Mail, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, ShieldCheck, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, KeyRound, Loader2, Mail, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { ApolloInsightPanel } from './insights/ApolloInsightPanel'
@@ -475,6 +475,7 @@ type AgentComposerProps = {
   apolloNativeTabEnabled?: boolean
   hubspotNativeTabEnabled?: boolean
   discordNativeTabEnabled?: boolean
+  compact?: boolean
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -534,6 +535,7 @@ export const AgentComposer = memo(function AgentComposer({
   apolloNativeTabEnabled = false,
   hubspotNativeTabEnabled = false,
   discordNativeTabEnabled = false,
+  compact = false,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -551,7 +553,6 @@ export const AgentComposer = memo(function AgentComposer({
   const [appsModal, showAppsModal] = useModal()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
-  const [approvalActionsElement, setApprovalActionsElement] = useState<HTMLDivElement | null>(null)
   const focusScrollTimeoutRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragCounter = useRef(0)
@@ -1669,17 +1670,8 @@ export const AgentComposer = memo(function AgentComposer({
   const taskCount = processingTasks.length
   const skipPlanningDisabled = !canManageAgent || !onSkipPlanning || skipPlanningBusy
   const showHumanInputActionPanel = activePendingAction?.kind === 'human_input' && resolvedWorkingExpanded && !activeHumanInputUsesMainComposer
-  const showApprovalComposerReplacement = Boolean(
-    resolvedWorkingExpanded
-    && activePendingActionTab
-    && (activePendingAction?.kind === 'requested_secrets' || activePendingAction?.kind === 'contact_requests'),
-  )
-  const approvalComposerCopy = activePendingAction?.kind === 'contact_requests'
-    ? "You're reviewing whether this contact can message your organization."
-    : 'Add this credential to let the agent continue.'
-  const hasComposerReplacement = showHumanInputActionPanel || showApprovalComposerReplacement
   const composerSurfaceClassName = `composer-surface${
-    hasComposerReplacement
+    showHumanInputActionPanel
       ? showWorkingPanel
         ? ' overflow-hidden rounded-b-[1.25rem]'
         : ' overflow-hidden rounded-[1.25rem]'
@@ -1876,9 +1868,11 @@ export const AgentComposer = memo(function AgentComposer({
                   ) : (
                     <MessageSquareQuote className="composer-working-indicator" aria-hidden="true" />
                   )}
-                  <span className="composer-working-status">
-                    <strong>Needs your input</strong>
-                  </span>
+                  {!compact ? (
+                    <span className="composer-working-status">
+                      <strong>Needs your input</strong>
+                    </span>
+                  ) : null}
                   <span className="composer-working-tasks-badge">
                     {pendingActionCount} {pendingActionCount === 1 ? 'request' : 'requests'}
                   </span>
@@ -2044,8 +2038,7 @@ export const AgentComposer = memo(function AgentComposer({
                       onRemoveRequestedSecrets={onRemoveRequestedSecrets}
                       onResolveContactRequests={onResolveContactRequests}
                       onViewAllContactRequests={onViewAllContactRequests}
-                      approvalActionsContainer={showApprovalComposerReplacement ? approvalActionsElement : null}
-                      suppressInlineApprovalActions={showApprovalComposerReplacement}
+                      compact={compact}
                     />
                   </div>
                 ) : (
@@ -2084,26 +2077,8 @@ export const AgentComposer = memo(function AgentComposer({
           </div>
         ) : null}
 
-        {showApprovalComposerReplacement ? (
-          <div className="flex flex-col gap-3 rounded-b-[1.25rem] border-x border-b border-t border-slate-200/60 bg-white px-4 py-3 transition sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
-                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-900">Reviewing this request</p>
-                <p className="text-sm text-slate-600">{approvalComposerCopy}</p>
-              </div>
-            </div>
-            <div
-              ref={setApprovalActionsElement}
-              className="shrink-0 sm:min-w-[16.5rem]"
-            />
-          </div>
-        ) : null}
-
         {/* Main input form */}
-        {!showHumanInputActionPanel && !showApprovalComposerReplacement ? (
+        {!showHumanInputActionPanel ? (
           <form className="flex flex-col" onSubmit={handleSubmit}>
             {isDragActive ? (
               <div className="agent-chat-drop-overlay" aria-hidden="true">

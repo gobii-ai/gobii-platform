@@ -352,7 +352,7 @@ describe('AgentComposer pending action insights panel', () => {
     })
   })
 
-  it('shows the approval footer when paging from free text input to a credential request', () => {
+  it('returns to the normal composer when paging from free text input to a credential request', async () => {
     const handleSubmit = vi.fn(async () => undefined)
     const handleRespondHumanInput = vi.fn(async () => undefined)
 
@@ -369,24 +369,27 @@ describe('AgentComposer pending action insights panel', () => {
 
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
     expect(screen.queryByPlaceholderText(/^Type your answer/)).not.toBeInTheDocument()
-    expect(screen.queryByPlaceholderText(/^Message/)).not.toBeInTheDocument()
-    expect(screen.getByText('Reviewing this request')).toBeInTheDocument()
-    expect(screen.getByText('Add this credential to let the agent continue.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
 
-    expect(handleSubmit).not.toHaveBeenCalled()
+    const messageComposer = screen.getByPlaceholderText(/^Message/)
+    expect(messageComposer).toHaveValue('')
+    fireEvent.change(messageComposer, { target: { value: 'normal message' } })
+    fireEvent.submit(messageComposer.closest('form') as HTMLFormElement)
+
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledWith('normal message', [])
+    })
     expect(handleRespondHumanInput).not.toHaveBeenCalled()
   })
 
-  it('replaces the normal message composer for credential pending actions', () => {
+  it('keeps the normal message composer available for credential pending actions', () => {
     renderAgentComposer({
       pendingActionRequests: [makeRequestedSecretsAction()],
     })
 
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
-    expect(screen.queryByPlaceholderText(/^Message/)).not.toBeInTheDocument()
-    expect(screen.getByText('Reviewing this request')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/^Message/)).toBeInTheDocument()
   })
 
   it('shows skip planning beside the active planning status instead of a planning strip', () => {

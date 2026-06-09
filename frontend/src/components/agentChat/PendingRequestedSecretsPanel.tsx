@@ -1,5 +1,4 @@
-import { createPortal } from 'react-dom'
-import { Globe } from 'lucide-react'
+import { Globe, ShieldCheck } from 'lucide-react'
 
 import type { PendingRequestedSecretsAction } from '../../types/agentChat'
 import { InlineInfoTooltipButton } from './InlineInfoTooltipButton'
@@ -11,12 +10,11 @@ type PendingRequestedSecretsPanelProps = {
   error?: string | null
   secretValues: Record<string, string>
   makeGlobal: boolean
+  showReviewSummary?: boolean
   onSecretValueChange: (secretId: string, value: string) => void
   onMakeGlobalChange: (checked: boolean) => void
   onSave: () => Promise<void> | void
   onRemove: () => Promise<void> | void
-  actionsContainer?: Element | null
-  suppressInlineActions?: boolean
 }
 
 export function PendingRequestedSecretsPanel({
@@ -26,12 +24,11 @@ export function PendingRequestedSecretsPanel({
   error = null,
   secretValues,
   makeGlobal,
+  showReviewSummary = true,
   onSecretValueChange,
   onMakeGlobalChange,
   onSave,
   onRemove,
-  actionsContainer = null,
-  suppressInlineActions = false,
 }: PendingRequestedSecretsPanelProps) {
   const secret = action.secrets[0]
 
@@ -41,30 +38,43 @@ export function PendingRequestedSecretsPanel({
 
   const actionRow = (
     <div className="space-y-2">
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-start">
-        <button
-          type="button"
-          disabled={disabled || busyAction !== null}
-          className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
-          onClick={() => void onRemove()}
-        >
-          {busyAction === 'remove' ? 'Removing...' : 'Remove'}
-        </button>
-        <button
-          type="button"
-          disabled={disabled || busyAction !== null}
-          className="inline-flex w-full items-center justify-center rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
-          onClick={() => void onSave()}
-        >
-          {busyAction === 'save' ? 'Saving...' : 'Save'}
-        </button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {showReviewSummary ? (
+          <div className="hidden min-w-0 items-center gap-3 sm:flex">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900">Reviewing this request</p>
+              <p className="text-sm text-slate-600">You're allowing this agent to use this credential.</p>
+            </div>
+          </div>
+        ) : null}
+        <div className="flex flex-col-reverse gap-2 sm:ml-auto sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            disabled={disabled || busyAction !== null}
+            className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
+            onClick={() => void onRemove()}
+          >
+            {busyAction === 'remove' ? 'Removing...' : 'Remove'}
+          </button>
+          <button
+            type="button"
+            disabled={disabled || busyAction !== null}
+            className="inline-flex w-full items-center justify-center rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
+            onClick={() => void onSave()}
+          >
+            {busyAction === 'save' ? 'Saving...' : 'Save'}
+          </button>
+        </div>
       </div>
       {error ? <p className="text-sm text-rose-600 sm:text-right">{error}</p> : null}
     </div>
   )
 
   return (
-    <div className="max-w-2xl space-y-3">
+    <div className="w-full space-y-3">
       <div className="space-y-3">
         {secret.description ? (
           <div>
@@ -110,7 +120,7 @@ export function PendingRequestedSecretsPanel({
         </div>
       </div>
 
-      {actionsContainer ? createPortal(actionRow, actionsContainer) : suppressInlineActions ? null : actionRow}
+      {actionRow}
     </div>
   )
 }
