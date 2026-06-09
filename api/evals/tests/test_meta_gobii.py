@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
@@ -15,6 +18,7 @@ from api.evals.scenarios.meta_gobii import (
     META_GOBII_REAL_HARNESS_SUITE_SLUG,
     META_GOBII_SYSTEM_SKILL_KEY,
     SKILL_SEARCH_TOOL_NAME,
+    MetaGobiiImplicitResearchTeamRealHarnessScenario,
     MetaGobiiSystemSkillScenario,
 )
 from api.evals.suites import SuiteRegistry
@@ -29,6 +33,17 @@ def _implicit_research_team_case():
 
 
 def _implicit_research_team_plan_args(schedule_policy=None):
+    if schedule_policy is None:
+        schedule_policy = {
+            "schedule_in_scope": False,
+            "schedule_action": "none",
+            "cadence_or_schedule": "",
+            "explicit_user_intent": False,
+            "included_in_approval_scope": False,
+            "asks_clarifying_question": False,
+            "rationale": "Summer/fall describes the research window, not a recurring cadence.",
+        }
+
     return {
         "skill_needed": True,
         "ordered_tools": [
@@ -46,15 +61,7 @@ def _implicit_research_team_plan_args(schedule_policy=None):
             "Experience Synthesizer",
         ],
         "extra_scope_items": [],
-        "schedule_policy": schedule_policy or {
-            "schedule_in_scope": False,
-            "schedule_action": "none",
-            "cadence_or_schedule": "",
-            "explicit_user_intent": False,
-            "included_in_approval_scope": False,
-            "asks_clarifying_question": False,
-            "rationale": "Summer/fall describes the research window, not a recurring cadence.",
-        },
+        "schedule_policy": schedule_policy,
         "contact_output_policy": "No contact output involved.",
         "rationale": "Create and link a research team, then send initial briefings after approval.",
     }
@@ -156,6 +163,46 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
         )
 
         self.assertEqual(matches[0].skill_key, META_GOBII_SYSTEM_SKILL_KEY)
+
+    def test_real_harness_evidence_uses_tool_call_primary_key(self):
+        class EmptyCompletionQuery:
+            def filter(self, **_kwargs):
+                return self
+
+            def order_by(self, *_args):
+                return []
+
+        step = SimpleNamespace(pk="step-1")
+        call = SimpleNamespace(
+            pk="step-1",
+            step=step,
+            step_id="step-1",
+            tool_name="meta_gobii_list_agents",
+            status="complete",
+        )
+
+        with patch(
+            "api.evals.scenarios.meta_gobii.PersistentAgentCompletion.objects.filter",
+            return_value=EmptyCompletionQuery(),
+        ):
+            artifacts = MetaGobiiImplicitResearchTeamRealHarnessScenario._evidence_artifacts(
+                "run-1",
+                "agent-1",
+                calls=[call],
+            )
+
+        self.assertEqual(artifacts["step"], step)
+        self.assertEqual(
+            artifacts["tool_calls"],
+            [
+                {
+                    "id": "step-1",
+                    "tool_name": "meta_gobii_list_agents",
+                    "step_id": "step-1",
+                    "status": "complete",
+                }
+            ],
+        )
 
     def test_implicit_research_team_case_is_registered(self):
         case = _implicit_research_team_case()

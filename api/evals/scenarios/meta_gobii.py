@@ -631,10 +631,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "Any request phrased as 'Create a ... Gobii', 'Make a ... Gobii', or 'Deploy a ... Gobii' "
                     "must call the search tool, even when the Gobii's domain is recruiting, candidates, sales, "
                     "support, reporting, research, or another business workflow. "
-                    "A request to create, deploy, build, set up, or prototype an entire research team, specialist "
-                    "team, analyst team, scout team, or agent-like team for the current Gobii to manage must also "
-                    "call the search tool, even when the user omits the word Gobii. Ordinary research or content "
-                    "requests that do not ask to create a team are not control-plane work. "
+                    "Ordinary research or content requests that do not ask to create or manage persistent agents "
+                    "are not control-plane work. "
                     "Scheduled or recurring Gobii setup requests that ask a Gobii to check, monitor, report, "
                     "send a digest, follow up, or send a check-in also require this search. "
                     "Demo, trial, prototype, exploratory, setup-only, one-off, or temporary Gobii creation "
@@ -654,9 +652,6 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "design, links, or briefings before creation. Demo/setup-only language does not make Gobii "
                     "creation content-only. A scheduled Gobii that checks, monitors, reports, sends digests, "
                     "or sends check-ins is still Gobii creation/configuration and must be searched first. "
-                    "If the user asks to create an entire research team, analyst team, scout team, specialist "
-                    "team, or similar agent-like team, treat that as Meta Gobii team creation even if the word "
-                    "Gobii is absent. "
                     "Otherwise return no tool call."
                 ),
             },
