@@ -50,6 +50,11 @@ def _permission_denied_response(exc: PermissionDenied) -> JsonResponse:
     return JsonResponse({"error": message}, status=403)
 
 
+def _validation_error_response(exc: ValidationError, *, status: int = 400) -> JsonResponse:
+    errors = exc.message_dict if hasattr(exc, "message_dict") else {"non_field_errors": exc.messages}
+    return JsonResponse({"errors": errors}, status=status)
+
+
 def _resolve_native_integration_owner(request: HttpRequest):
     context = build_console_context(request)
     if context.current_context.type == "organization":
@@ -245,8 +250,7 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
             owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
             _validate_oauth_state(request, provider.key, state, owner_scope, owner_user, owner_org)
         except ValidationError as exc:
-            errors = exc.message_dict if hasattr(exc, "message_dict") else {"non_field_errors": exc.messages}
-            return JsonResponse({"errors": errors}, status=400)
+            return _validation_error_response(exc)
         except PermissionDenied as exc:
             return _permission_denied_response(exc)
 
@@ -293,7 +297,7 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
                 existing_credentials=existing_credentials,
             )
         except ValidationError as exc:
-            return JsonResponse({"errors": exc.message_dict}, status=502)
+            return _validation_error_response(exc, status=502)
 
         with transaction.atomic():
             secret = save_native_integration_credentials(provider, owner_user, owner_org, credentials)
@@ -445,7 +449,7 @@ class NativeIntegrationAgentEventAPIView(LoginRequiredMixin, View):
                 source="console.native_integrations_api.NativeIntegrationAgentEventAPIView",
             )
         except ValidationError as exc:
-            return JsonResponse({"errors": exc.message_dict}, status=400)
+            return _validation_error_response(exc)
         except PermissionDenied as exc:
             return _permission_denied_response(exc)
 

@@ -5,6 +5,7 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -497,6 +498,27 @@ class NativeIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.content, b"Invalid JSON payload: expected an object")
+
+    @patch(
+        "console.native_integrations_api.normalize_native_integration_event_files",
+        side_effect=ValidationError(["List-style validation error."]),
+    )
+    def test_agent_event_serializes_list_style_validation_error(self, mock_normalize):
+        response = self.client.post(
+            reverse("console-native-integration-agent-events", args=["google_drive"]),
+            data=json.dumps(
+                {
+                    "agent_id": str(self.agent.id),
+                    "event_type": "connected",
+                    "files": [],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["errors"], {"non_field_errors": ["List-style validation error."]})
+        mock_normalize.assert_called_once_with([])
 
     def test_list_reports_connected_state_for_apollo(self):
         cases = (
