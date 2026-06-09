@@ -42,6 +42,7 @@ const apolloProvider = {
   connectUrl: '/console/api/native-integrations/apollo/connect/',
   filesUrl: '',
   pickerTokenUrl: '',
+  agentEventUrl: '/console/api/native-integrations/apollo/agent-events/',
   revokeUrl: '/console/api/native-integrations/apollo/revoke/',
 }
 

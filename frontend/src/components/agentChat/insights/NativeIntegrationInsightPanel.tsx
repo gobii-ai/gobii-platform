@@ -32,10 +32,12 @@ type NativeIntegrationPanelState = {
 }
 
 export function useNativeIntegrationPanelState({
+  agentId = null,
   nativeIntegrationsUrl,
   providerKey,
   providerDisplayName,
 }: {
+  agentId?: string | null
   nativeIntegrationsUrl?: string | null
   providerKey: string
   providerDisplayName: string
@@ -69,8 +71,8 @@ export function useNativeIntegrationPanelState({
       setPendingAction('connect')
       setStatusMessage(null)
     },
-    onSuccess: (payload, { popup }) => {
-      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(payload.providerKey, payload.state, popup))
+    onSuccess: (payload, { provider, popup }) => {
+      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(provider, payload.state, popup, agentId))
       if (popup && !popup.closed) {
         popup.location.href = payload.authorizationUrl
         popup.focus()

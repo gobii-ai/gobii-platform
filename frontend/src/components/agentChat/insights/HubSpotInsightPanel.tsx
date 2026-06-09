@@ -16,8 +16,9 @@ const HUBSPOT_FALLBACK_ICON = (
   <img src="/static/images/integrations/native/hubspot.svg" alt="" className="h-5 w-5 object-contain" />
 )
 
-export function HubSpotInsightPanel({ nativeIntegrationsUrl = null }: HubSpotInsightPanelProps) {
+export function HubSpotInsightPanel({ agentId = null, nativeIntegrationsUrl = null }: HubSpotInsightPanelProps) {
   const panel = useNativeIntegrationPanelState({
+    agentId,
     nativeIntegrationsUrl,
     providerKey: HUBSPOT_PROVIDER_KEY,
     providerDisplayName: 'HubSpot',

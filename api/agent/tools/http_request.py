@@ -24,6 +24,7 @@ from ...services.native_integrations import (
     NativeIntegrationAuthError,
     NativeIntegrationConfigurationError,
     apply_native_integration_auth,
+    find_provider_for_url,
 )
 from ...services.persistent_agent_secrets import global_secrets_queryset_for_agent
 from ..files.attachment_helpers import build_signed_filespace_download_url
@@ -43,6 +44,33 @@ _JSON_PREFIXES = (
     "for(;;);",
     "/*-secure-*/",
 )
+
+
+def _native_http_error_guidance(provider_key: str, status_code: int, content: Any) -> str:
+    if provider_key != "google_drive":
+        return "Check the native integration connection, requested scopes, endpoint, and request body before retrying."
+
+    content_text = json.dumps(content) if isinstance(content, (dict, list)) else str(content or "")
+    content_lower = content_text.lower()
+    if "addbanding" in content_lower or "banding" in content_lower:
+        return (
+            "For Google Sheets formatting, use batchUpdate addBanding.bandedRange and inspect existing bandedRanges "
+            "before adding another alternating-color range."
+        )
+    if "chart" in content_lower or "series" in content_lower:
+        return (
+            "For Google Sheets charts, send a full chart spec with valid domain and series ranges. Do not include "
+            "fields on updateChartSpec, and set hiddenDimensionStrategy to SHOW_ALL when helper data is hidden."
+        )
+    if status_code in {401, 403, 404}:
+        return (
+            "Confirm Google Drive is connected and that the user selected the target spreadsheet or document in "
+            "Google Picker before retrying."
+        )
+    return (
+        "Check the Google Sheets or Drive API request shape, especially batchUpdate request names, ranges, and "
+        "selected-file access."
+    )
 
 
 def _strip_json_prefixes(text: str) -> str:
@@ -428,6 +456,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     headers = {k: _replace_placeholders(v) for k, v in headers.items()}
     body = _replace_placeholders(body)
 
+    native_provider = find_provider_for_url(url)
     try:
         headers = apply_native_integration_auth(agent, url, headers, method=method)
     except NativeIntegrationConfigurationError as exc:
@@ -503,11 +532,23 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     if download_requested and (resp.status_code < 200 or resp.status_code >= 300):
         resp.close()
-        return {
+        result = {
             "status": "error",
             "message": f"Download failed with status {resp.status_code}.",
             "status_code": resp.status_code,
         }
+        if native_provider is not None:
+            result.update(
+                {
+                    "provider_key": native_provider.key,
+                    "provider_name": native_provider.display_name,
+                    "method": method,
+                    "url": url,
+                    "retryable": resp.status_code >= 500 or resp.status_code == 429,
+                    "guidance": _native_http_error_guidance(native_provider.key, resp.status_code, ""),
+                }
+            )
+        return result
 
     content_length = resp.headers.get("Content-Length")
     try:
@@ -625,6 +666,19 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         "headers": dict(resp.headers),
         "content": content_str,
     }
+    if native_provider is not None and (resp.status_code < 200 or resp.status_code >= 300):
+        response.update(
+            {
+                "status": "error",
+                "message": f"{native_provider.display_name} API request failed with status {resp.status_code}.",
+                "provider_key": native_provider.key,
+                "provider_name": native_provider.display_name,
+                "method": method,
+                "url": url,
+                "retryable": resp.status_code >= 500 or resp.status_code == 429,
+                "guidance": _native_http_error_guidance(native_provider.key, resp.status_code, content_str),
+            }
+        )
     if download_requested:
         content_type_header = resp.headers.get("Content-Type") or ""
         mime_type = content_type_header.split(";", 1)[0].strip().lower() or "application/octet-stream"

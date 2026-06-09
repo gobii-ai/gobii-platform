@@ -164,9 +164,16 @@ export function storePendingNativeOAuth(state: string, payload: Record<string, u
   }
 }
 
-export function nativeOAuthContextPayload(providerKey: string, state: string, popup: Window | null) {
+export function nativeOAuthContextPayload(
+  provider: NativeIntegrationProvider,
+  state: string,
+  popup: Window | null,
+  agentId?: string | null,
+) {
   return {
-    providerKey,
+    providerKey: provider.providerKey,
+    agentEventUrl: provider.agentEventUrl,
+    agentId: agentId || null,
     returnUrl: window.location.href,
     createdAt: Date.now(),
     context: readStoredConsoleContext(),
@@ -378,7 +385,7 @@ async function loadGooglePickerApi(): Promise<void> {
   return googlePickerApiPromise
 }
 
-export async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse): Promise<number> {
+export async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse): Promise<NativeIntegrationAccessibleFile[]> {
   await loadGooglePickerApi()
   const picker = window.google?.picker
   if (!picker) {
@@ -387,15 +394,15 @@ export async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenR
 
   return new Promise((resolve) => {
     let settled = false
-    const finish = (selectedCount: number) => {
+    const finish = (selectedFiles: NativeIntegrationAccessibleFile[]) => {
       if (settled) {
         return
       }
       settled = true
       window.clearTimeout(timeoutId)
-      resolve(selectedCount)
+      resolve(selectedFiles)
     }
-    const timeoutId = window.setTimeout(() => finish(0), 5 * 60 * 1000)
+    const timeoutId = window.setTimeout(() => finish([]), 5 * 60 * 1000)
     const view = new picker.DocsView(picker.ViewId.DOCS).setMimeTypes(
       `${GOOGLE_SHEETS_MIME_TYPE},${GOOGLE_DOCS_MIME_TYPE}`,
     )
@@ -409,11 +416,11 @@ export async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenR
         const action = data[picker.Response.ACTION]
         if (action === picker.Action.PICKED) {
           const docs = data[picker.Response.DOCUMENTS]
-          finish(countSelectedPickerDocs(docs, picker))
+          finish(normalizeSelectedPickerDocs(docs, picker))
         } else if (picker.Action.CANCEL && action === picker.Action.CANCEL) {
-          finish(0)
+          finish([])
         } else if (typeof action === 'string' && action) {
-          finish(0)
+          finish([])
         }
       })
       .build()
@@ -422,18 +429,30 @@ export async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenR
   })
 }
 
-function countSelectedPickerDocs(docs: unknown, picker: GooglePickerNamespace): number {
+function normalizeSelectedPickerDocs(
+  docs: unknown,
+  picker: GooglePickerNamespace,
+): NativeIntegrationAccessibleFile[] {
   if (!Array.isArray(docs)) {
-    return 0
+    return []
   }
-  return docs.reduce((count, doc) => {
+  return docs.reduce<NativeIntegrationAccessibleFile[]>((files, doc) => {
     if (!doc || typeof doc !== 'object') {
-      return count
+      return files
     }
     const rawDoc = doc as Record<string, unknown>
     const externalFileId = String(rawDoc[picker.Document.ID] ?? '').trim()
     const name = String(rawDoc[picker.Document.NAME] ?? '').trim()
     const mimeType = String(rawDoc[picker.Document.MIME_TYPE] ?? '').trim()
-    return externalFileId && name && mimeType ? count + 1 : count
-  }, 0)
+    const webUrl = String(rawDoc[picker.Document.URL] ?? '').trim()
+    if (externalFileId && name && mimeType) {
+      files.push({
+        externalId: externalFileId,
+        name,
+        mimeType,
+        webUrl,
+      })
+    }
+    return files
+  }, [])
 }

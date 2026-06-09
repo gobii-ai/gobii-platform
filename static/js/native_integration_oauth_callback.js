@@ -147,6 +147,25 @@ async function callbackErrorMessage(response) {
   return text;
 }
 
+async function recordConnectedAgentEvent(sessionData, csrfToken) {
+  if (!sessionData || !sessionData.agentId || !sessionData.agentEventUrl) {
+    return;
+  }
+  const response = await fetch(sessionData.agentEventUrl, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: buildCallbackHeaders(sessionData, csrfToken),
+    body: JSON.stringify({
+      agent_id: sessionData.agentId,
+      event_type: "connected",
+      files: [],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await callbackErrorMessage(response));
+  }
+}
+
 async function completeOAuth() {
   const params = new URLSearchParams(window.location.search);
   const error = params.get("error");
@@ -191,6 +210,12 @@ async function completeOAuth() {
     }
 
     localStorage.removeItem(`gobii:native_oauth_state:${state}`);
+    try {
+      setStatus("Notifying agent...");
+      await recordConnectedAgentEvent(sessionData, csrfToken);
+    } catch (eventError) {
+      console.warn("Native integration agent event failed", eventError);
+    }
     const isPopupFlow = Boolean(sessionData.popup);
     const notified = notifyOpener({ ok: true, providerKey: sessionData.providerKey });
     if (notified || isPopupFlow) {

@@ -18,8 +18,9 @@ const APOLLO_FALLBACK_ICON = (
   </span>
 )
 
-export function ApolloInsightPanel({ nativeIntegrationsUrl = null }: ApolloInsightPanelProps) {
+export function ApolloInsightPanel({ agentId = null, nativeIntegrationsUrl = null }: ApolloInsightPanelProps) {
   const panel = useNativeIntegrationPanelState({
+    agentId,
     nativeIntegrationsUrl,
     providerKey: APOLLO_PROVIDER_KEY,
     providerDisplayName: 'Apollo',

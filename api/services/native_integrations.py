@@ -261,12 +261,45 @@ NATIVE_INTEGRATION_CAPABILITIES: dict[str, tuple[NativeIntegrationCapability, ..
             provider_key=GOOGLE_DRIVE_PROVIDER.key,
             resource="google_sheets",
             operation="write",
-            label="Update or append rows in selected Google Sheets",
+            label="Update, append, and edit values in selected Google Sheets",
             required_scopes=("https://www.googleapis.com/auth/drive.file",),
             endpoint_hints=(
                 "PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{range}",
                 "POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{range}:append",
             ),
+            write_risk="write",
+            setup_guidance="Connect Google Drive and choose the spreadsheet in Google Picker.",
+        ),
+        NativeIntegrationCapability(
+            key="google_sheets_create",
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            resource="google_sheets",
+            operation="create",
+            label="Create new Google Sheets spreadsheets",
+            required_scopes=("https://www.googleapis.com/auth/drive.file",),
+            endpoint_hints=("POST https://sheets.googleapis.com/v4/spreadsheets",),
+            write_risk="write",
+            setup_guidance="Connect Google Drive before creating spreadsheets.",
+        ),
+        NativeIntegrationCapability(
+            key="google_sheets_format",
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            resource="google_sheets",
+            operation="format",
+            label="Format selected Google Sheets with styles, banding, frozen rows, and column sizing",
+            required_scopes=("https://www.googleapis.com/auth/drive.file",),
+            endpoint_hints=("POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}:batchUpdate",),
+            write_risk="write",
+            setup_guidance="Connect Google Drive and choose the spreadsheet in Google Picker.",
+        ),
+        NativeIntegrationCapability(
+            key="google_sheets_chart",
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            resource="google_sheets",
+            operation="chart",
+            label="Create and update charts in selected Google Sheets",
+            required_scopes=("https://www.googleapis.com/auth/drive.file",),
+            endpoint_hints=("POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}:batchUpdate",),
             write_risk="write",
             setup_guidance="Connect Google Drive and choose the spreadsheet in Google Picker.",
         ),
@@ -890,7 +923,11 @@ def native_integration_capability_for_request(
     capability_key = ""
     if provider.key == GOOGLE_DRIVE_PROVIDER.key:
         if host == "sheets.googleapis.com":
-            if normalized_method in {"POST", "PUT", "PATCH", "DELETE"}:
+            if normalized_method == "POST" and path.rstrip("/") == "/v4/spreadsheets":
+                capability_key = "google_sheets_create"
+            elif normalized_method == "POST" and path.endswith(":batchupdate"):
+                capability_key = "google_sheets_format"
+            elif normalized_method in {"POST", "PUT", "PATCH", "DELETE"}:
                 capability_key = "google_sheets_write"
             else:
                 capability_key = "google_sheets_read"

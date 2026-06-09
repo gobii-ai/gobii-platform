@@ -185,8 +185,8 @@ export function AgentPipedreamAppsModal({
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
       setStatusMessage(null)
     },
-    onSuccess: (payload, { popup }) => {
-      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(payload.providerKey, payload.state, popup))
+    onSuccess: (payload, { provider, popup }) => {
+      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(provider, payload.state, popup))
       if (popup && !popup.closed) {
         popup.location.href = payload.authorizationUrl
         popup.focus()
@@ -225,8 +225,8 @@ export function AgentPipedreamAppsModal({
   const nativePickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
       const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-      const selectedCount = await openGoogleDrivePicker(token)
-      return { provider, selectedCount }
+      const selectedFiles = await openGoogleDrivePicker(token)
+      return { provider, selectedCount: selectedFiles.length }
     },
     onMutate: (provider) => {
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'picker' })

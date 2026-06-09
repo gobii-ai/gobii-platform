@@ -33,6 +33,11 @@ from api.services.native_integrations import (
     request_oauth_token,
     save_native_integration_credentials,
 )
+from api.services.native_integration_events import (
+    normalize_native_integration_event_files,
+    record_native_integration_agent_event,
+    resolve_native_integration_event_agent,
+)
 from console.context_helpers import build_console_context
 
 NATIVE_INTEGRATION_STATE_SALT = "gobii.native_integrations.oauth_state"
@@ -96,6 +101,7 @@ def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
         "connect_url": reverse("console-native-integration-connect", args=[provider.key]),
         "files_url": reverse("console-native-integration-files", args=[provider.key]),
         "picker_token_url": reverse("console-native-integration-picker-token", args=[provider.key]),
+        "agent_event_url": reverse("console-native-integration-agent-events", args=[provider.key]),
         "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
     }
 
@@ -397,3 +403,53 @@ class NativeIntegrationFilesAPIView(LoginRequiredMixin, View):
         response = JsonResponse({"provider_key": provider.key, "files": [file.to_dict() for file in files]})
         response["Cache-Control"] = "no-store"
         return response
+
+
+class NativeIntegrationAgentEventAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, provider_key: str, *args: Any, **kwargs: Any):
+        try:
+            body = request.body.decode("utf-8")
+        except UnicodeDecodeError:
+            return HttpResponseBadRequest("Invalid request body")
+
+        try:
+            payload = json.loads(body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        try:
+            provider = get_native_integration_provider(provider_key)
+        except KeyError:
+            return JsonResponse({"error": "Unknown native integration provider."}, status=404)
+
+        try:
+            _, owner_user, owner_org = _resolve_native_integration_owner(request)
+            agent = resolve_native_integration_event_agent(
+                str(payload.get("agent_id") or "").strip(),
+                owner_user=owner_user,
+                owner_org=owner_org,
+            )
+            files = normalize_native_integration_event_files(payload.get("files"))
+            step = record_native_integration_agent_event(
+                agent=agent,
+                provider=provider,
+                event_type=str(payload.get("event_type") or "").strip(),
+                files=files,
+                source="console.native_integrations_api.NativeIntegrationAgentEventAPIView",
+            )
+        except ValidationError as exc:
+            return JsonResponse({"errors": exc.message_dict}, status=400)
+        except PermissionDenied as exc:
+            return _permission_denied_response(exc)
+
+        return JsonResponse(
+            {
+                "recorded": True,
+                "provider_key": provider.key,
+                "agent_id": str(agent.id),
+                "step_id": str(step.id),
+            },
+            status=201,
+        )
