@@ -37,6 +37,10 @@ from api.evals.scenarios.hubspot_native import (
     HUBSPOT_NATIVE_SCENARIO_SLUGS,
     HUBSPOT_NATIVE_SUITE_SLUG,
 )
+from api.evals.scenarios.meta_gobii import (
+    META_GOBII_REAL_HARNESS_SCENARIO_SLUGS,
+    META_GOBII_REAL_HARNESS_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -82,6 +86,11 @@ register_builtin_suites(
             slug=META_GOBII_EVAL_SUITE_SLUG,
             description="Meta Gobii system-skill selection, direct-tool planning, and approval-policy evals.",
             scenario_slugs=META_GOBII_EVAL_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=META_GOBII_REAL_HARNESS_SUITE_SLUG,
+            description="Real agent-processing Meta Gobii regressions for system-skill discovery and tool use.",
+            scenario_slugs=META_GOBII_REAL_HARNESS_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG,

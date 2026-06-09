@@ -1,16 +1,23 @@
 from django.test import SimpleTestCase, tag
 
+import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError
+from api.agent.system_skills import shortlist_system_skills
+from api.agent.tools.meta_gobii_names import META_GOBII_TOOL_NAMES
+from api.agent.tools.search_tools import get_search_tools_tool
 from api.evals.meta_gobii import _planned_extra_scope_items
 from api.evals.meta_gobii import META_GOBII_EVAL_CASES
 from api.evals.meta_gobii import score_meta_gobii_case
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.meta_gobii import (
     ENABLE_SYSTEM_SKILLS_TOOL_NAME,
+    META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS,
+    META_GOBII_REAL_HARNESS_SUITE_SLUG,
     META_GOBII_SYSTEM_SKILL_KEY,
     SKILL_SEARCH_TOOL_NAME,
     MetaGobiiSystemSkillScenario,
 )
+from api.evals.suites import SuiteRegistry
 
 
 def _implicit_research_team_case():
@@ -125,6 +132,30 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
             [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME],
         )
         self.assertEqual(calls[1]["arguments"]["skill_keys"], [META_GOBII_SYSTEM_SKILL_KEY])
+
+    def test_implicit_research_team_real_harness_scenario_is_registered(self):
+        scenario = ScenarioRegistry.get(META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS)
+        suite = SuiteRegistry.get(META_GOBII_REAL_HARNESS_SUITE_SLUG)
+
+        self.assertIsNotNone(scenario)
+        self.assertFalse(scenario.supports_simulation)
+        self.assertIn("real_harness", scenario.tags)
+        self.assertIsNotNone(suite)
+        self.assertIn(META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS, suite.scenario_slugs)
+
+    def test_search_tools_surface_mentions_hidden_system_skills_for_agent_teams(self):
+        description = get_search_tools_tool()["function"]["description"].lower()
+
+        self.assertIn("hidden system skills", description)
+        self.assertIn("agent/team-management", description)
+
+    def test_implicit_research_team_shortlists_meta_gobii_system_skill(self):
+        matches = shortlist_system_skills(
+            "Create an entire research team to help me figure out something cool to do in NYC this summer/fall.",
+            available_tool_names=set(META_GOBII_TOOL_NAMES),
+        )
+
+        self.assertEqual(matches[0].skill_key, META_GOBII_SYSTEM_SKILL_KEY)
 
     def test_implicit_research_team_case_is_registered(self):
         case = _implicit_research_team_case()

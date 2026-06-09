@@ -665,6 +665,10 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
     ),
     use_when=(
         "the user asks to create a team of Gobiis",
+        (
+            "the user asks to create an entire research team, analyst team, scout team, specialist team, "
+            "or agent-like team for the current Gobii to manage, even without saying Gobii"
+        ),
         "the user asks to deploy Gobiis or request a specialist Gobii",
         "the user asks to make, create, deploy, prototype, or set up any Gobii, even for one batch or one-off work",
         "the user asks to create, manage, configure, supervise, or restructure Gobiis",
@@ -684,6 +688,11 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "team of gobiis",
         "gobii team",
         "agent team",
+        "research team",
+        "analyst team",
+        "specialist team",
+        "scout team",
+        "create research team",
         "agent graph",
         "gobii graph",
         "gobii control plane",
