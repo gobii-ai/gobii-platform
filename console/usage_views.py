@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Case, Count, DecimalField, F, Q, Sum, Value, When
+from django.db.models import Case, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Coalesce, TruncDay, TruncHour
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
@@ -21,7 +21,6 @@ from api.models import (
     BrowserUseAgentTask,
     Organization,
     PersistentAgentStep,
-    PersistentAgentToolCall,
     UserPreference,
 )
 from api.agent.core.llm_config import get_credit_multiplier_for_tier
@@ -809,174 +808,6 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 for agent in active_agents
             ],
             "buckets": buckets,
-        }
-
-        return JsonResponse(payload)
-
-
-class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
-    http_method_names = ["get"]
-
-    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        resolved = build_console_context(request)
-
-        organization = None
-
-        if resolved.current_context.type == "organization" and resolved.current_membership:
-            organization = resolved.current_membership.org
-
-        requested_start = _parse_query_date(request.GET.get("from"))
-        requested_end = _parse_query_date(request.GET.get("to"))
-        agent_filters_raw = request.GET.getlist("agent")
-
-        owner = organization if organization is not None else request.user
-
-        if requested_start and requested_end and requested_start <= requested_end:
-            period_start, period_end = requested_start, requested_end
-        else:
-            period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
-
-        tz = timezone.get_current_timezone()
-        tz_name = timezone.get_current_timezone_name()
-        start_dt = timezone.make_aware(datetime.combine(period_start, time.min), tz)
-        end_dt = timezone.make_aware(datetime.combine(period_end, time.max), tz)
-
-        accessible_agents = _get_accessible_agents(request, organization)
-        accessible_agent_ids = {agent.id for agent in accessible_agents}
-        filtered_agent_ids = _filter_agent_ids(agent_filters_raw, accessible_agent_ids)
-        actual_agent_ids, include_api = _split_agent_filter_values(filtered_agent_ids)
-        agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
-
-        filters = {
-            "step__created_at__gte": start_dt,
-            "step__created_at__lte": end_dt,
-        }
-
-        if organization is not None:
-            filters["step__agent__organization"] = organization
-        else:
-            filters["step__agent__user"] = request.user
-            filters["step__agent__organization__isnull"] = True
-
-        zero_decimal = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
-
-        persistent_qs = _exclude_eval_tool_calls(PersistentAgentToolCall.objects.filter(**filters))
-        if filtered_agent_ids:
-            if actual_agent_ids:
-                persistent_q_filter = Q(step__agent__browser_use_agent_id__in=actual_agent_ids)
-                persistent_qs = persistent_qs.filter(persistent_q_filter)
-            else:
-                # Only API usage was requested; no persistent agent tool calls should be returned.
-                persistent_qs = persistent_qs.none()
-
-        tool_rows_query = (
-            persistent_qs
-            .values("tool_name")
-            .annotate(
-                invocations=Count("tool_name"),
-                credits=Coalesce(Sum("step__credits_cost"), zero_decimal),
-            )
-            .order_by("-credits", "-invocations")
-        )
-        tool_rows: list[dict[str, object]] = []
-        for row in tool_rows_query:
-            tool_rows.append(
-                {
-                    "tool_name": row.get("tool_name") or "",
-                    "invocations": int(row.get("invocations", 0) or 0),
-                    "credits": row.get("credits") or DECIMAL_ZERO,
-                }
-            )
-
-        # Compute total persistent step credits so non-tool work can be surfaced.
-        step_filters = {
-            "created_at__gte": start_dt,
-            "created_at__lte": end_dt,
-        }
-        if organization is not None:
-            step_filters["agent__organization"] = organization
-        else:
-            step_filters["agent__user"] = request.user
-            step_filters["agent__organization__isnull"] = True
-
-        steps_qs = _exclude_eval_persistent_steps(PersistentAgentStep.objects.filter(**step_filters))
-        if filtered_agent_ids:
-            if actual_agent_ids:
-                steps_qs = steps_qs.filter(agent__browser_use_agent_id__in=actual_agent_ids)
-            else:
-                steps_qs = steps_qs.none()
-
-        persistent_step_totals = steps_qs.aggregate(
-            total=Coalesce(Sum("credits_cost"), zero_decimal),
-        )
-        persistent_step_credits = persistent_step_totals.get("total") or DECIMAL_ZERO
-
-        # Include API-originated browser tasks (agentless) as their own category.
-        api_task_filters = {
-            "is_deleted": False,
-            "created_at__gte": start_dt,
-            "created_at__lte": end_dt,
-        }
-
-        if organization is not None:
-            api_task_filters["organization"] = organization
-        else:
-            api_task_filters["user"] = request.user
-            api_task_filters["organization__isnull"] = True
-
-        api_tasks_qs = BrowserUseAgentTask.objects.filter(**api_task_filters)
-        if agent_filter_q is not None:
-            api_tasks_qs = api_tasks_qs.filter(agent_filter_q)
-        api_tasks_qs = api_tasks_qs.filter(agent_id__isnull=True)
-
-        api_task_stats = api_tasks_qs.aggregate(
-            invocations=Count("id"),
-            credits=Coalesce(Sum(_per_task_credit_expression()), zero_decimal),
-        )
-
-        api_task_invocations = api_task_stats.get("invocations", 0) or 0
-        api_task_credits = api_task_stats.get("credits") or DECIMAL_ZERO
-
-        if api_task_credits > DECIMAL_ZERO:
-            tool_rows.append(
-                {
-                    "tool_name": "api_task",
-                    "invocations": int(api_task_invocations),
-                    "credits": api_task_credits,
-                }
-            )
-
-        total_tool_credits = sum((row["credits"] or DECIMAL_ZERO) for row in tool_rows)
-        total_invocations = sum(int(row.get("invocations", 0) or 0) for row in tool_rows)
-
-        residual_credits = persistent_step_credits - total_tool_credits
-        if residual_credits > DECIMAL_ZERO:
-            tool_rows.append(
-                {
-                    "tool_name": "agent_runtime",
-                    "invocations": 0,
-                    "credits": residual_credits,
-                }
-            )
-            total_tool_credits += residual_credits  # keep totals in sync
-
-        payload = {
-            "range": {
-                "start": start_dt.isoformat(),
-                "end": end_dt.isoformat(),
-            },
-            "timezone": tz_name,
-            "total_count": float(total_tool_credits),
-            "total_credits": float(total_tool_credits),
-            "total_invocations": total_invocations,
-            "tools": [
-                {
-                    "name": (row["tool_name"] or ""),
-                    "invocations": int(row["invocations"]),
-                    "credits": float(row["credits"] or DECIMAL_ZERO),
-                }
-                for row in tool_rows
-            ],
         }
 
         return JsonResponse(payload)

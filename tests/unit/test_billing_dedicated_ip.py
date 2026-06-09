@@ -25,7 +25,7 @@ class DedicatedIpBillingTests(TestCase):
     def _common_patches(self, *, allocated_count=0):
         return [
             patch("console.views._assign_stripe_api_key"),
-            patch("console.views.get_or_create_stripe_customer", return_value=SimpleNamespace(id="cus_123")),
+            patch("console.billing_update_service.get_or_create_stripe_customer", return_value=SimpleNamespace(id="cus_123")),
             patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123")),
             patch("console.views.get_stripe_settings", return_value=SimpleNamespace(
                 startup_dedicated_ip_price_id="price_dedicated",
