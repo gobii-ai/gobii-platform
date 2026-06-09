@@ -2025,7 +2025,10 @@ class ComparisonPageTests(TestCase):
         )
         self.assertEqual(
             structured_data["about"][0]["description"],
-            "AI coworker platform for persistent browser-native business work.",
+            (
+                "Always-on AI coworker platform for recurring business work across "
+                "integrations, browsers, files, and communication channels."
+            ),
         )
         self.assertEqual(
             structured_data["about"][1]["applicationCategory"],
@@ -2123,7 +2126,10 @@ class ComparisonPageTests(TestCase):
         )
         self.assertEqual(
             structured_data["about"][0]["description"],
-            "AI coworker platform for persistent browser-native business work.",
+            (
+                "Always-on AI coworker platform for recurring business work across "
+                "integrations, browsers, files, and communication channels."
+            ),
         )
         self.assertEqual(structured_data["about"][0]["operatingSystem"], "Web")
         self.assertEqual(
@@ -2158,11 +2164,11 @@ class ComparisonPageTests(TestCase):
 
         content = soup.get_text(" ", strip=True)
         self.assertIn("Zapier Agents vs Gobii", content)
-        self.assertIn("Zapier Agents vs Gobii: connected-app automation or browser-native AI coworkers?", content)
+        self.assertIn("Zapier Agents vs Gobii: connected-app automation or always-on AI coworkers?", content)
         self.assertIn("Choose Zapier Agents if", content)
         self.assertIn("Choose Gobii if", content)
-        self.assertIn("Zapier Agents adds AI to app automation. Gobii gives browser work a dedicated coworker runtime.", content)
-        self.assertIn("Zapier Agents is strongest across connected apps. Gobii is strongest across the open web.", content)
+        self.assertIn("Zapier Agents adds AI to app automation. Gobii gives recurring business work an always-on coworker runtime.", content)
+        self.assertIn("Zapier Agents is strongest across connected apps. Gobii is strongest for delegated work that spans tools, web apps, and files.", content)
         self.assertIn("Gobii vs Zapier Agents comparison", content)
         self.assertIn("Zapier Agents alternative", content)
         self.assertIn("Source note", content)

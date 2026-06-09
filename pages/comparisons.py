@@ -70,11 +70,11 @@ COMPARISON_CATALOG = (
         "seo_title": "Zapier Agents vs Gobii: AI Coworker Comparison | Gobii",
         "seo_description": (
             "Comparing Zapier Agents vs Gobii? See when to choose Zapier's connected-app "
-            "AI agents and when to choose Gobii's persistent browser-native AI coworkers."
+            "AI agents and when to choose Gobii's always-on AI coworkers for recurring work."
         ),
         "summary": (
             "A practical comparison for teams deciding between Zapier Agents for connected-app "
-            "automation and Gobii for persistent browser-native AI coworker workflows."
+            "automation and Gobii for always-on AI coworker workflows."
         ),
         "status": COMPARISON_STATUS_PUBLISHED,
         "target_keywords": (

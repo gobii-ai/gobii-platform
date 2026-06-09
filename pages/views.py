@@ -3511,7 +3511,8 @@ class ComparisonDetailView(TemplateView):
                 "https://docs.gobii.ai/",
             ],
             "description": (
-                "AI coworker platform for persistent browser-native business work."
+                "Always-on AI coworker platform for recurring business work across "
+                "integrations, browsers, files, and communication channels."
             ),
         }
         competitor_application = {
