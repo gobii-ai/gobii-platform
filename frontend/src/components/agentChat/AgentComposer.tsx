@@ -9,10 +9,10 @@ import { DiscordInsightPanel } from './insights/DiscordInsightPanel'
 import { GoogleDriveInsightPanel } from './insights/GoogleDriveInsightPanel'
 import { HubSpotInsightPanel } from './insights/HubSpotInsightPanel'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
-import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
 import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
+import { AgentPipedreamAppsModal } from '../mcp/AgentPipedreamAppsModal'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
@@ -22,6 +22,7 @@ import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { PlanningState } from '../../types/agentRoster'
+import { useModal } from '../../hooks/useModal'
 
 // Detect if user is on macOS
 function isMacOS(): boolean {
@@ -472,9 +473,9 @@ export const AgentComposer = memo(function AgentComposer({
   const [draftHumanInputResponses, setDraftHumanInputResponses] = useState<Record<string, HumanInputComposerResponse>>({})
   const draftHumanInputResponsesRef = useRef<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
-  const [appsModalOpenRequestKey, setAppsModalOpenRequestKey] = useState(0)
   const [pendingActionsForceExpanded, setPendingActionsForceExpanded] = useState(() => pendingActionRequests.length > 0)
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
+  const [appsModal, showAppsModal] = useModal()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
   const focusScrollTimeoutRef = useRef<number | null>(null)
@@ -1481,6 +1482,24 @@ export const AgentComposer = memo(function AgentComposer({
       : ''
   }`
   const composerActionsDisabled = disabled || isSending
+  const handleOpenAppsModal = useCallback(() => {
+    if (!showAppsControl || !agentId || composerActionsDisabled) {
+      return
+    }
+    showAppsModal((onClose) => (
+      <AgentPipedreamAppsModal
+        agentId={agentId}
+        enablePipedreamApps={hasPipedreamApps}
+        nativeIntegrationsUrl={nativeIntegrationsUrl}
+        onClose={onClose}
+      />
+    ))
+  }, [agentId, composerActionsDisabled, hasPipedreamApps, nativeIntegrationsUrl, showAppsControl, showAppsModal])
+  const composerAppsAction = showAppsControl ? {
+    openModal: handleOpenAppsModal,
+    disabled: composerActionsDisabled,
+    loading: false,
+  } : null
   const isSubmittingMainComposerHumanInput = activeHumanInputUsesMainComposer && Boolean(busyHumanInputRequestId)
   const sendButtonBusy = isSending || isSubmittingMainComposerHumanInput
   const sendDisabled = composerActionsDisabled
@@ -1820,7 +1839,7 @@ export const AgentComposer = memo(function AgentComposer({
                       <ActiveNativePanel
                         agentId={agentId}
                         nativeIntegrationsUrl={nativeIntegrationsUrl}
-                        onOpenApps={() => setAppsModalOpenRequestKey((current) => current + 1)}
+                        onOpenApps={handleOpenAppsModal}
                       />
                     ) : visibleInsight ? (
                       <InsightEventCard
@@ -1891,19 +1910,7 @@ export const AgentComposer = memo(function AgentComposer({
                   ref={textareaRef}
                 />
               </div>
-              {showAppsControl ? (
-                <ComposerPipedreamAppsControl
-                  agentId={agentId as string}
-                  enablePipedreamApps={hasPipedreamApps}
-                  nativeIntegrationsUrl={nativeIntegrationsUrl}
-                  disabled={composerActionsDisabled}
-                  openRequestKey={appsModalOpenRequestKey}
-                >
-                  {(appsAction) => renderComposerUtilityRow(appsAction)}
-                </ComposerPipedreamAppsControl>
-              ) : (
-                renderComposerUtilityRow()
-              )}
+              {renderComposerUtilityRow(composerAppsAction)}
               {attachments.length > 0 ? (
                 <div className="flex flex-wrap gap-2 pt-0.5 text-xs">
                   {attachments.map((file, index) => (
@@ -1949,6 +1956,7 @@ export const AgentComposer = memo(function AgentComposer({
           </form>
         ) : null}
       </div>
+      {appsModal}
     </div>
   )
 })
