@@ -6187,14 +6187,7 @@ def _run_agent_loop(
                             agent.id,
                             implied_error or "unknown error",
                         )
-                        if not implied_send_allowed:
-                            logger.info(
-                                "Agent %s: skipping implied-send correction step because implied send is disabled by configuration.",
-                                agent.id,
-                            )
-                            implied_error = None
-                            # Treat config-level opt-out as a normal choice rather than a delivery failure.
-                        else:
+                        if implied_error:
                             try:
                                 step_kwargs = {
                                     "agent": agent,
