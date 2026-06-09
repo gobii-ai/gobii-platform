@@ -232,11 +232,11 @@ class FileExportToolTests(TestCase):
 
         self.assertIn("do not use it for image analysis, OCR", description)
         self.assertIn("pass `source_images` to preserve subject", description)
-        self.assertIn("do not invent image URLs or file paths", description)
+        self.assertIn("reuse exactly", description)
         self.assertIn("/exports/", properties["file_path"]["description"])
         self.assertIn("$[/Inbox/photo.png]", properties["source_images"]["description"])
-        self.assertIn("same person, product, logo", properties["source_images"]["description"])
-        self.assertIn("selfie, avatar, portrait", description)
+        self.assertIn("for fidelity", properties["source_images"]["description"])
+        self.assertIn("Self-image prompts get private visual identity", description)
 
     def test_self_visual_identity_tool_returns_only_visual_identity(self):
         self.agent.visual_description = (

@@ -110,22 +110,20 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
 
         self.assertIn("body-only HTML", description)
         self.assertIn("inline style attrs", description)
-        self.assertIn("real accent color beyond grays", description)
-        self.assertIn("status/value encoding", description)
-        self.assertIn("Light-gray-only tables are not rich report formatting", description)
+        self.assertIn("accent color", description)
+        self.assertIn("highlighted values", description)
         self.assertIn("tables/cells", description)
-        self.assertIn("Do NOT leave report metrics in plain lists", description)
-        self.assertIn("Do NOT use Markdown pipe tables", description)
-        self.assertIn("Price monitor logs are report emails", description)
-        self.assertIn("Only for simple outreach", description)
-        self.assertIn("no tables, inline styles, colors, headings, badges, or metric blocks", description)
+        self.assertIn("do NOT leave report metrics in plain lists", description)
+        self.assertIn("use Markdown pipe tables", description)
+        self.assertIn("Simple outreach/questions", description)
+        self.assertIn("no tables/styles/colors/headings/badges", description)
         self.assertIn("reply_to_message_id", properties)
         self.assertIn(
-            "Simple outreach/intros/follow-ups should use only minimal paragraph HTML",
+            "Outreach should use minimal paragraph HTML, no tables/styles/colors",
             properties["mobile_first_html"]["description"],
         )
         self.assertIn(
-            "Report/digest/dashboard/status/monitor/log emails should style",
+            "Reports should style section headers, tables/cells",
             properties["mobile_first_html"]["description"],
         )
 

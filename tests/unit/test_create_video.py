@@ -80,7 +80,7 @@ class GetCreateVideoToolTests(TestCase):
         self.assertEqual(tool["type"], "function")
         func = tool["function"]
         self.assertEqual(func["name"], "create_video")
-        self.assertIn("video of yourself", func["description"])
+        self.assertIn("self-video prompts get private visual identity", func["description"])
         params = func["parameters"]
         self.assertIn("prompt", params["properties"])
         self.assertIn("file_path", params["properties"])

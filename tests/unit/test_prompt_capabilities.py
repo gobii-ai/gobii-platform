@@ -289,8 +289,8 @@ class AgentCapabilitiesPromptTests(TestCase):
         context, _, _ = build_prompt_context(self.agent)
         contents = "\n".join(message["content"] for message in context)
 
-        self.assertIn("Future reporting or communication style preferences count as durable", contents)
-        self.assertIn("concise bullets", contents)
+        self.assertIn("ongoing report/status formats", contents)
+        self.assertIn("durable corrections/preferences", contents)
 
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
@@ -302,24 +302,19 @@ class AgentCapabilitiesPromptTests(TestCase):
         context, _, _ = build_prompt_context(self.agent)
         contents = "\n".join(message["content"] for message in context)
 
-        self.assertIn("scheduled exact feed/API briefing -> http_request then immediately send concise sourced report next", contents)
-        self.assertIn("the next assistant action must be the report send tool", contents)
-        self.assertIn("recurring digest/report setup without source/details -> sqlite_batch charter+schedule first", contents)
-        self.assertIn("send the briefing from the latest visible tool result immediately", contents)
-        self.assertIn("never update_plan, SQLite staging, plain text, or intermediate", contents)
-        self.assertIn("preparation-only turns", contents)
-        self.assertIn("Do not copy a small exact scheduled feed/API payload into SQLite", contents)
-        self.assertIn("call the matching enabled eval tool directly and do not use search_tools", contents)
-        self.assertIn("send the verified partial records and limitation first", contents)
-        self.assertIn("the config update is not the report", contents)
-        self.assertIn("update only __agent_config.schedule to a reasonable resume cadence", contents)
-        self.assertIn("rewrite charter, or reread __tool_results before setting that schedule", contents)
-        self.assertIn("For resume scheduling after remaining_work/next_cursor, update only schedule", contents)
-        self.assertIn("do not treat the new schedule as permission to resume the queued batch immediately", contents)
-        self.assertIn("Do not use update_plan for partial-result preservation or resume scheduling", contents)
-        self.assertIn("do not use search_tools, SQLite preflight reads, or prior __tool_results checks", contents)
-        self.assertIn("Keep a source_url column from json_extract(result_json,'$.content.source_url')", contents)
-        self.assertIn("HTTP/API result_json often wraps response payload under $.content", contents)
+        self.assertIn("scheduled exact feed/API briefing -> http_request then send", contents)
+        self.assertIn("fetch then send", contents)
+        self.assertIn("recurring digest/report setup without source/details -> sqlite_batch charter+schedule with assumptions", contents)
+        self.assertIn("Exact feeds: report latest result", contents)
+        self.assertIn("no plan/SQLite/prep", contents)
+        self.assertIn("Eval `eval_*`: call directly", contents)
+        self.assertIn("report partial+limits before queue", contents)
+        self.assertIn("config with continue=true, then current report with continue=false", contents)
+        self.assertIn("schedule only, stop", contents)
+        self.assertIn("Partial edits preserve named channels/tools", contents)
+        self.assertIn("do not rerun", contents)
+        self.assertIn("update_plan is not storage/queue", contents)
+        self.assertIn("Multi-result SQL: one query", contents)
 
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
@@ -342,9 +337,9 @@ class AgentCapabilitiesPromptTests(TestCase):
         will_continue_description = tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
 
         self.assertIn("context, config changes, findings, or finals.", description)
-        self.assertIn("Use request_human_input instead when the agent has been blocked repeatedly", description)
-        self.assertIn("needs a tracked answer", description)
-        self.assertIn("Do not narrate what you will do next", description)
+        self.assertIn("Use request_human_input for repeated blockers", description)
+        self.assertIn("needing a tracked answer", description)
+        self.assertIn("Do not narrate next steps", description)
         self.assertIn("Never send a message solely to justify continuing work", will_continue_description)
 
     def test_run_command_tool_description_distinguishes_shell_paths(self):
@@ -371,7 +366,6 @@ class AgentCapabilitiesPromptTests(TestCase):
     def test_sandbox_summary_mentions_custom_tool_discovery_for_bulk_work(self, _mock_sandbox):
         summary = _get_sandbox_prompt_summary(self.agent)
 
-        self.assertIn("explicitly asks you to create a custom tool", summary)
         self.assertIn("Use enabled `create_custom_tool` directly", summary)
         self.assertIn("repetitive, paginated, bulk, deterministic", summary)
         self.assertIn("MCP/API fan-out", summary)

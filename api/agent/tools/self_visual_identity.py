@@ -145,18 +145,14 @@ def get_self_visual_identity_tool() -> Dict[str, Any]:
         "function": {
             "name": GET_SELF_VISUAL_IDENTITY_TOOL_NAME,
             "description": (
-                "Retrieve this Gobii's own stable visual description for selfie, avatar, portrait, "
-                "profile-photo, self-video, or other self visual media generation. Use only when an image "
-                "or video should depict this Gobii itself; do not use for ordinary text tasks."
+                "Retrieve this Gobii's stable visual description for self-image/self-video generation only; not ordinary text tasks."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "purpose": {
                         "type": "string",
-                        "description": (
-                            "Brief reason for retrieval, for example 'generate and send a selfie'."
-                        ),
+                        "description": "Brief reason, e.g. 'generate and send a selfie'.",
                     },
                 },
             },

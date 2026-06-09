@@ -437,11 +437,8 @@ def get_create_image_tool() -> Dict[str, Any]:
                 "person, logo, text, or brand elements; prompt-only generation is not enough when fidelity matters. "
                 "For style or art-direction changes where no subject, logo, or layout needs preservation, refine the "
                 "prompt instead of adding source images. "
-                "Returns `file`, `inline`, `inline_html`, and `attach` placeholders for reuse in messages and "
-                "documents; reuse those exact placeholders and do not invent image URLs or file paths. "
-                "When creating a selfie, avatar, portrait, profile photo, or image of yourself/this Gobii, say so "
-                "clearly in the prompt; the tool retrieves this Gobii's visual identity only for that self-image "
-                "request and adds it to the image prompt."
+                "Returns `file`, `inline`, `inline_html`, and `attach`; reuse exactly. "
+                "Self-image prompts get private visual identity."
             ),
             "parameters": {
                 "type": "object",
@@ -449,15 +446,13 @@ def get_create_image_tool() -> Dict[str, Any]:
                     "prompt": {
                         "type": "string",
                         "description": (
-                            "Natural-language image prompt describing the desired output. Include enough concrete "
-                            "visual detail for a new asset, edit, style transfer, or art direction."
+                            "Image prompt with concrete visual detail."
                         ),
                     },
                     "file_path": {
                         "type": "string",
                         "description": (
-                            "Required filespace path for the generated image. Use a concrete filespace path, usually "
-                            "under /exports/, such as /exports/your-image.png."
+                            "Output path, usually under /exports/."
                         ),
                     },
                     "aspect_ratio": {
@@ -468,10 +463,7 @@ def get_create_image_tool() -> Dict[str, Any]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "Optional filespace image paths to use as references or edit inputs, such as "
-                            "$[/Inbox/photo.png] or /exports/logo.png. Use this for image-to-image edits, style "
-                            "transfer, or any request where the same person, product, logo, layout, text, or brand "
-                            "element must be preserved."
+                            "Optional reference/edit image paths, e.g. $[/Inbox/photo.png], for fidelity."
                         ),
                     },
                     "overwrite": {

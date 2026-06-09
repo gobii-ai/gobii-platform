@@ -602,47 +602,39 @@ def get_create_video_tool() -> Dict[str, Any]:
         "function": {
             "name": "create_video",
             "description": (
-                "Generate a video from a text prompt using configured video-generation endpoints, "
-                "then save it to the agent filespace. "
-                "Use for short video clips, animations, and visual content. "
-                "For image-to-video, pass source_image to animate an existing image. "
-                "Returns `file` and `attach` placeholders for reuse in messages and documents. "
-                "When creating a video of yourself/this Gobii, say so clearly in the prompt; the tool retrieves "
-                "this Gobii's visual identity only for that self-video request and adds it to the video prompt."
+                "Generate a short video/animation and save it. `source_image` starts image-to-video. "
+                "Returns `file` and `attach`; self-video prompts get private visual identity."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "prompt": {
                         "type": "string",
-                        "description": "Natural-language prompt describing the desired video content.",
+                        "description": "Video prompt.",
                     },
                     "file_path": {
                         "type": "string",
                         "description": (
-                            "Required filespace path for the generated video "
-                            "(recommended: /exports/your-video.mp4)."
+                            "Output path, e.g. /exports/video.mp4."
                         ),
                     },
                     "duration": {
                         "type": "string",
-                        "description": "Optional video duration in seconds (e.g., '5', '10').",
+                        "description": "Optional seconds.",
                     },
                     "size": {
                         "type": "string",
-                        "description": "Optional resolution like '1920x1080', '1080x1920', '1280x720'.",
+                        "description": "Optional resolution.",
                     },
                     "source_image": {
                         "type": "string",
                         "description": (
-                            "Optional filespace image path to use as the starting frame "
-                            "(e.g. $[/Inbox/photo.png], /exports/logo.png). "
-                            "Use this for image-to-video generation."
+                            "Optional image-to-video source path."
                         ),
                     },
                     "overwrite": {
                         "type": "boolean",
-                        "description": "When true, overwrites an existing file at file_path.",
+                        "description": "Overwrite file_path.",
                     },
                 },
                 "required": ["prompt", "file_path"],

@@ -207,16 +207,10 @@ def get_send_email_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_email",
             "description": (
-                "Send body-only HTML email without <html>/<head>/<body>; avoid Markdown. "
-                "For report, digest, dashboard, status, monitor, or log emails, avoid bare HTML: "
-                "use inline style attrs on sections, tables/cells, "
-                "and highlighted values; use at least one real accent color beyond grays plus visual "
-                "status/value encoding such as badges, chips, icons, or colored key numbers. "
-                "Light-gray-only tables are not rich report formatting. Do NOT leave report metrics in "
-                "plain lists. Do NOT use Markdown pipe tables. Price monitor logs are report emails. "
-                "Only for simple outreach, intros, follow-ups, "
-                "scheduling, or quick questions, keep the HTML minimal: short <p> blocks, optional <br>, "
-                "<strong>/<em>/<a>, and no tables, inline styles, colors, headings, badges, or metric blocks."
+                "Send body-only HTML email without wrappers; avoid Markdown. "
+                "Reports/digests/status/logs need inline style attrs on sections/tables/cells, highlighted values, "
+                "and an accent color; do NOT leave report metrics in plain lists or use Markdown pipe tables. "
+                "Simple outreach/questions stay minimal paragraph HTML with no tables/styles/colors/headings/badges."
             ),
             "parameters": {
                 "type": "object",
@@ -241,8 +235,8 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
-                            "Report/digest/dashboard/status/monitor/log emails should style section headers, tables/cells, and spans for key numbers, statuses, and value changes with visible accent colors, badges, chips, icons, or metric blocks instead of plain lists; avoid light-gray-only tables. "
-                            "Simple outreach/intros/follow-ups should use only minimal paragraph HTML with no tables, inline styles, colors, headings, badges, or metric blocks. "
+                            "Reports should style section headers, tables/cells, and spans for key numbers/statuses/value changes instead of plain lists; avoid light-gray-only tables. "
+                            "Outreach should use minimal paragraph HTML, no tables/styles/colors. "
                             "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),
                     },

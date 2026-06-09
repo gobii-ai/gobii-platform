@@ -279,8 +279,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "name": "send_chat_message",
             "description": (
                 "Send a user-facing web chat message for context, config changes, findings, or finals. "
-                "Use request_human_input instead when the agent has been blocked repeatedly or for a while and needs a tracked answer. "
-                "Do not narrate what you will do next or send progress-only notes about tool sequencing, plan mechanics, or internal reasoning."
+                "Use request_human_input for repeated blockers needing a tracked answer. "
+                "Do not narrate next steps or progress-only tool/plan/internal notes."
             ),
             "parameters": {
                 "type": "object",
@@ -288,8 +288,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "User-facing chat text. For reports, use Markdown sections, bullets/tables, status labels, "
-                            "and tasteful emoji labels. Do not pass placeholders or tool-call/XML syntax; it is sent literally."
+                            "User-facing chat text. Reports may use Markdown sections, bullets/tables, status/emoji labels. "
+                            "Tool-call/XML syntax is sent literally."
                         ),
                     },
                     "to_address": {
@@ -305,7 +305,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true=another immediate tool call follows in this turn; false=current turn is done, even if future scheduled work remains, and no current plan items remain unfinished. Never send a message solely to justify continuing work.",
+                        "description": "REQUIRED. true=immediate tool follows; false=done, no unfinished current plan. Never send a message solely to justify continuing work.",
                     },
                 },
                 "required": ["body", "will_continue_work"],
