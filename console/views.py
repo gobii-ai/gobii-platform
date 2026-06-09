@@ -10,13 +10,10 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import UploadedFile
 from django.core.mail import send_mail
-from django.utils.html import strip_tags
-from django.utils.html import format_html
-from django.views.generic import TemplateView, ListView, View, DetailView
-from django.views.generic.edit import FormMixin
+from django.views.generic import TemplateView, View, DetailView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
-from django.urls import NoReverseMatch, reverse, reverse_lazy
+from django.urls import NoReverseMatch, reverse
 from django.contrib import messages
 from django.db import transaction, models, IntegrityError, DatabaseError
 from django.db.models import Q
@@ -32,14 +29,12 @@ from django.http import (
 from django.core.exceptions import ValidationError, PermissionDenied, ImproperlyConfigured
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
-from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.formats import date_format
-from django.utils.text import slugify
 from django.middleware.csrf import get_token
 from datetime import timedelta, datetime, timezone as dt_timezone
-from functools import cached_property, wraps
+from functools import wraps
 import uuid
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -55,16 +50,13 @@ from billing.checkout_metadata import (
 )
 from billing.checkout_sessions import create_stripe_checkout_session
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
-from billing.churnkey import build_churnkey_cancel_flow_config
 from billing.services import BillingService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
 from api.services.signup_preview import user_can_access_signup_preview_agent
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
-    DedicatedProxyUnavailableError,
     is_multi_assign_enabled,
 )
-from api.services.system_settings import get_max_file_size
 from api.services.persistent_agents import maybe_sync_agent_email_display_name
 from api.agent.core.llm_config import (
     AgentLLMTier,
@@ -109,7 +101,6 @@ from console.daily_credit import (
     parse_daily_credit_limit,
     serialize_daily_credit_payload,
 )
-from console.email_settings.constants import EMAIL_OAUTH_PROVIDER_DEFAULTS
 from console.home_metrics import get_console_home_metrics
 from console.role_constants import BILLING_MANAGE_ROLES
 from api.models import (
@@ -119,17 +110,10 @@ from api.models import (
     BrowserUseAgentTask,
     ProxyServer,
     PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentEmailEndpoint,
     PersistentAgentInboundWebhook,
     PersistentAgentWebhook,
-    PersistentAgentMessage,
     IntelligenceTier,
-    AgentEmailAccount,
     AgentPeerLink,
-    PersistentAgentConversationParticipant,
-    PersistentAgentSmsEndpoint,
-    PersistentAgentStep,
     CommsChannel,
     UserPhoneNumber,
     Organization,
@@ -144,12 +128,8 @@ from api.models import (
 from console.mixins import AgentOwnerContextOverrideMixin, ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
 from observability import traced
 from pages.account_info_cache import invalidate_account_info_cache
-from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
 
-from .agent_context import resolve_context_override_for_agent
-from .agent_addons import build_account_pause_payload
 from .context_helpers import build_console_context
-from .org_billing_helpers import build_org_billing_overview
 from tasks.services import TaskCreditService
 from billing.addons import AddonEntitlementService
 from util.payments_helper import PaymentsHelper
@@ -160,7 +140,6 @@ from util.integrations import (
 )
 from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
-    clear_trial_onboarding_intent,
     set_trial_onboarding_intent,
     set_trial_onboarding_requires_plan_selection,
 )
@@ -174,12 +153,8 @@ from util.subscription_helper import (
     calculate_extra_tasks_used_during_subscription_period,
     get_user_extra_task_limit,
     get_stripe_customer,
-    get_or_create_stripe_customer,
     get_organization_plan,
-    is_community_unlimited_mode,
     get_user_max_contacts_per_agent,
-    get_subscription_base_price,
-    ensure_single_individual_subscription,
     sync_subscription_after_direct_update as _sync_subscription_after_direct_update,
 )
 from util.trial_enforcement import (
@@ -204,9 +179,8 @@ from console.agent_chat.access import (
 )
 from config import settings
 from config.stripe_config import get_stripe_settings
-from config.plans import PLAN_CONFIG, get_plan_config
+from config.plans import PLAN_CONFIG
 from waffle import flag_is_active
-from api.services.email_verification import has_verified_email
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
 
 def _normalize_agent_color_hex(hex_color: str) -> str | None:
@@ -388,18 +362,12 @@ def _resolve_dedicated_ip_pricing(plan):
 
 
 from .forms import (
-    MCPServerConfigForm,
-    UserProfileForm,
-    PhoneVerifyForm,
-    PhoneAddForm,
-    OrganizationSeatPurchaseForm,
-    OrganizationSeatReductionForm,
     DedicatedIpAddForm,
     AddonQuantityForm,
 )
 from django.http import JsonResponse
-from django.views.decorators.http import require_POST, require_http_methods
-from util.analytics import Analytics, AnalyticsCTAs, AnalyticsEvent, AnalyticsSource
+from django.views.decorators.http import require_POST
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.services.sms_contact_purpose import track_sms_contact_approval
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
@@ -414,7 +382,7 @@ from constants.feature_flags import (
     PRICING_MODAL_ALMOST_FULL_SCREEN,
 )
 from constants.grant_types import GrantTypeChoices
-from constants.plans import EXTRA_TASKS_DEFAULT_MAX_TASKS, PlanNames, PlanNamesChoices
+from constants.plans import PlanNames, PlanNamesChoices
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
@@ -426,17 +394,13 @@ from util.trial_eligibility import (
     is_user_trial_eligibility_enforcement_enabled,
     is_user_trial_eligibility_enforcement_one_per_user_enabled,
 )
-from opentelemetry import trace, baggage, context
-from api.agent.tools.mcp_manager import get_mcp_manager
-from api.agent.tasks import process_agent_events_task
+from opentelemetry import trace
 from api.services import mcp_servers as mcp_server_service
 from console.agent_creation import create_persistent_agent_from_charter
 from console.agent_reassignment import reassign_agent_organization
 from console.extra_tasks_settings import derive_extra_tasks_settings
 import logging
-from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
-from api.models import CommsAllowlistEntry, AgentAllowlistInvite, AgentTransferInvite, OrganizationMembership, MCPServerConfig
-from console.forms import AgentEmailAccountConsoleForm
+from api.models import AgentAllowlistInvite, AgentTransferInvite, OrganizationMembership, MCPServerConfig
 from django.apps import apps
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -1609,7 +1573,7 @@ def task_detail_view(request, task_id):
 @login_required
 def task_cancel_view(request, task_id):
     if request.method == 'POST':
-        with traced("CONSOLE Task Cancel", user_id=request.user.id) as span:
+        with traced("CONSOLE Task Cancel", user_id=request.user.id):
             # Get the task
             task = get_object_or_404(
                 BrowserUseAgentTask.objects.alive(),
@@ -1703,7 +1667,6 @@ def task_result_view(request, task_id):
     span.set_attribute('task.result_format', 'html')
 
     # For regular HTML rendering
-    import json
     context = {
         'task': task,
         'result_step': result_step,
@@ -4382,13 +4345,6 @@ class AgentSettingsController(AgentOwnerContextOverrideMixin, ConsoleViewMixin, 
             return _error_response(f'Peer link operation failed: {exc}', status=500)
 
 
-class ConsoleDiagnosticsView(ConsoleViewMixin, TemplateView):
-    template_name = "console/diagnostics.html"
-
-    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
-        return HttpResponseNotAllowed(['GET'])
-
-
 class ConsoleStatusView(SystemAdminRequiredMixin, TemplateView):
     template_name = "console/system_status.html"
 
@@ -5256,613 +5212,6 @@ class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlag
     @transaction.atomic
     def get(self, request, token: str):
         return self._reject(request, token)
-
-
-class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
-    """Kick off Stripe Checkout to purchase seats for an organization."""
-
-    waffle_flag = ORGANIZATIONS
-
-    @tracer.start_as_current_span("CONSOLE Organization Seat Checkout")
-    @transaction.atomic
-    def post(self, request, org_id: str):
-        org = get_object_or_404(Organization.objects.select_related("billing"), id=org_id)
-
-        membership = OrganizationMembership.objects.filter(
-            org=org,
-            user=request.user,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-            role__in=BILLING_MANAGE_ROLES,
-        ).first()
-
-        if membership is None:
-            return HttpResponseForbidden()
-
-        form = OrganizationSeatPurchaseForm(request.POST, org=org)
-        if not form.is_valid():
-            for error in form.errors.get("seats", []):
-                messages.error(request, error)
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-        billing = getattr(org, "billing", None)
-        seat_count = form.cleaned_data["seats"]
-        if seat_count <= 0:
-            messages.error(request, "Please select at least one seat to purchase.")
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-        stripe_settings = get_stripe_settings()
-        seat_price_id = stripe_settings.org_team_price_id
-
-        if billing and getattr(billing, "stripe_subscription_id", None):
-            # Organization already has an active subscription; push the user through
-            # Stripe Checkout so they explicitly confirm the updated quantity.
-            try:
-                _assign_stripe_api_key()
-                subscription = stripe.Subscription.retrieve(
-                    billing.stripe_subscription_id,
-                    expand=["items.data.price"],
-                )
-
-                subscription_items = subscription.get("items", {}).get("data", []) or []
-                licensed_item = None
-                for item in subscription_items:
-                    price = item.get("price", {}) or {}
-                    price_usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
-                    price_id = price.get("id")
-                    if price_usage_type == "licensed" or (seat_price_id and price_id == seat_price_id):
-                        licensed_item = item
-                        break
-
-                if not licensed_item:
-                    messages.error(
-                        request,
-                        "We couldn't find a seat item on the active subscription. Please contact support.",
-                    )
-                    return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-                current_quantity = int(licensed_item.get("quantity") or 0)
-                if current_quantity < 0:
-                    current_quantity = 0
-                new_quantity = current_quantity + seat_count
-
-                request.session["org_seat_portal_target"] = {
-                    "org_id": str(org.id),
-                    "current": current_quantity,
-                    "requested": new_quantity,
-                }
-
-                return_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing") + "?seats_success=1"
-                cancel_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing") + "?seats_cancelled=1"
-
-                overage_detach_performed = _detach_org_overage_item(
-                    subscription,
-                    stripe_settings.org_team_additional_task_price_id,
-                    str(org.id),
-                    request,
-                )
-
-                try:
-                    session = stripe.billing_portal.Session.create(
-                        api_key=stripe.api_key,
-                        customer=subscription.get("customer"),
-                        flow_data={
-                            "type": "subscription_update_confirm",
-                            "subscription_update_confirm": {
-                                "subscription": subscription.get("id"),
-                                "items": [
-                                    {
-                                        "id": licensed_item.get("id"),
-                                        "quantity": new_quantity,
-                                    }
-                                ],
-                            },
-                        },
-                        return_url=return_url,
-                    )
-
-                    _track_org_event_for_console(
-                        request,
-                        AnalyticsEvent.ORGANIZATION_SEAT_ADDED,
-                        {
-                            'actor_id': str(request.user.id),
-                            'seats_requested': seat_count,
-                            'current_quantity': current_quantity,
-                            'target_quantity': new_quantity,
-                            'method': 'portal',
-                        },
-                        organization=org,
-                    )
-                    _track_org_event_for_console(
-                        request,
-                        AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
-                        {
-                            'actor_id': str(request.user.id),
-                            'update_type': 'seats_portal_increase',
-                            'seats_requested': seat_count,
-                        },
-                        organization=org,
-                    )
-                    return redirect(session.url)
-                except stripe.error.InvalidRequestError as portal_exc:
-                    logger.warning(
-                        "Stripe portal seat update unavailable for subscription %s on org %s. Falling back to direct seat update: %s",
-                        getattr(billing, "stripe_subscription_id", None),
-                        org.id,
-                        portal_exc,
-                    )
-
-                    request.session.pop("org_seat_portal_target", None)
-
-                    try:
-                        stripe.Subscription.modify(
-                            subscription.get("id"),
-                            items=[
-                                {
-                                    "id": licensed_item.get("id"),
-                                    "quantity": new_quantity,
-                                }
-                            ],
-                            metadata={
-                                **(subscription.get("metadata") or {}),
-                                "seat_requestor_id": str(request.user.id),
-                            },
-                            proration_behavior="create_prorations",
-                        )
-
-                        if overage_detach_performed:
-                            reattached = _reattach_overage_from_session(request, str(org.id))
-                            if not reattached:
-                                logger.warning(
-                                    "Failed to reattach overage SKU after direct seat update for org %s",
-                                    org.id,
-                                )
-
-                        messages.warning(
-                            request,
-                            "Stripe portal seat updates are disabled, so we applied the seat change immediately. Additional seats will activate once Stripe processes the change.",
-                        )
-                        _track_org_event_for_console(
-                            request,
-                            AnalyticsEvent.ORGANIZATION_SEAT_ADDED,
-                            {
-                                'actor_id': str(request.user.id),
-                                'seats_requested': seat_count,
-                                'current_quantity': current_quantity,
-                                'target_quantity': new_quantity,
-                                'method': 'direct_update',
-                            },
-                            organization=org,
-                        )
-                        _track_org_event_for_console(
-                            request,
-                            AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
-                            {
-                                'actor_id': str(request.user.id),
-                                'update_type': 'seats_direct_increase',
-                                'seats_requested': seat_count,
-                            },
-                            organization=org,
-                        )
-                    except Exception as modify_exc:
-                        logger.exception(
-                            "Failed to update Stripe subscription %s for org %s after portal fallback: %s",
-                            getattr(billing, "stripe_subscription_id", None),
-                            org.id,
-                            modify_exc,
-                        )
-                        if overage_detach_performed:
-                            reattached = _reattach_overage_from_session(request, str(org.id))
-                            if not reattached:
-                                logger.warning(
-                                    "Failed to reattach overage SKU after modify error for org %s",
-                                    org.id,
-                                )
-                        messages.error(
-                            request,
-                            "We weren't able to update the seat count. Please try again or contact support.",
-                        )
-
-                    return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-                except Exception as portal_exc:
-                    if overage_detach_performed:
-                        reattached = _reattach_overage_from_session(request, str(org.id))
-                        if not reattached:
-                            logger.warning(
-                                "Failed to reattach overage SKU after portal error for org %s",
-                                org.id,
-                            )
-                    raise portal_exc
-            except Exception as exc:
-                logger.exception(
-                    "Failed to start Stripe portal update for subscription %s on org %s: %s",
-                    getattr(billing, "stripe_subscription_id", None),
-                    org.id,
-                    exc,
-                )
-                request.session.pop("org_seat_portal_target", None)
-                messages.error(
-                    request,
-                    "We weren't able to start the checkout flow. Please try again or contact support.",
-                )
-
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-        price_id = seat_price_id
-        if not price_id:
-            messages.error(request, "Stripe price not configured. Please contact support.")
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-        try:
-            _assign_stripe_api_key()
-            customer = get_or_create_stripe_customer(org)
-
-            success_url = request.build_absolute_uri(
-                f"{IMMERSIVE_APP_BASE_PATH}/billing"
-            ) + "?seats_success=1"
-            cancel_url = request.build_absolute_uri(
-                f"{IMMERSIVE_APP_BASE_PATH}/billing"
-            ) + "?seats_cancelled=1"
-
-            line_items = [
-                {
-                    "price": price_id,
-                    "quantity": seat_count,
-                }
-            ]
-
-            checkout_metadata = build_checkout_flow_metadata(
-                {
-                    "org_id": str(org.id),
-                    "seat_requestor_id": str(request.user.id),
-                },
-                flow_type=STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
-            )
-            session = create_stripe_checkout_session(
-                stripe,
-                customer=customer.id,
-                api_key=stripe.api_key,
-                mode="subscription",
-                success_url=success_url,
-                cancel_url=cancel_url,
-                excluded_payment_method_types=EXCLUDED_PAYMENT_METHOD_TYPES,
-                allow_promotion_codes=True,
-                line_items=line_items,
-                metadata=checkout_metadata,
-                subscription_data={"metadata": checkout_metadata},
-            )
-
-            _track_org_event_for_console(
-                request,
-                AnalyticsEvent.ORGANIZATION_SEAT_ADDED,
-                {
-                    'actor_id': str(request.user.id),
-                    'seats_requested': seat_count,
-                    'method': 'checkout',
-                },
-                organization=org,
-            )
-            _track_org_event_for_console(
-                request,
-                AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
-                {
-                    'actor_id': str(request.user.id),
-                    'update_type': 'seats_checkout_initiated',
-                    'seats_requested': seat_count,
-                },
-                organization=org,
-            )
-            return redirect(session.url)
-        except stripe.error.StripeError:
-            logger.exception("Failed to create Stripe checkout session for org %s", org.id)
-            messages.error(
-                request,
-                "We weren’t able to start the checkout flow. Please try again or contact support.",
-            )
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-
-class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
-    """Schedule a reduction in organization seats effective next billing cycle."""
-
-    waffle_flag = ORGANIZATIONS
-
-    @tracer.start_as_current_span("CONSOLE Organization Seat Schedule")
-    @transaction.atomic
-    def post(self, request, org_id: str):
-        org = get_object_or_404(Organization.objects.select_related("billing"), id=org_id)
-
-        membership = OrganizationMembership.objects.filter(
-            org=org,
-            user=request.user,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-            role__in=BILLING_MANAGE_ROLES,
-        ).first()
-
-        if membership is None:
-            return HttpResponseForbidden()
-
-        form = OrganizationSeatReductionForm(request.POST, org=org)
-        if not form.is_valid():
-            for error in form.errors.get("future_seats", []):
-                messages.error(request, error)
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-        billing = getattr(org, "billing", None)
-        if not billing or not getattr(billing, "stripe_subscription_id", None):
-            messages.error(request, "This organization does not have an active Stripe subscription yet.")
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-        target_quantity = form.cleaned_data["future_seats"]
-
-        stripe_settings = get_stripe_settings()
-        seat_price_id = stripe_settings.org_team_price_id
-
-        if not seat_price_id:
-            messages.error(request, "Stripe seat price not configured. Please contact support.")
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-        try:
-            _assign_stripe_api_key()
-            subscription = stripe.Subscription.retrieve(
-                billing.stripe_subscription_id,
-                expand=["items.data.price"],
-            )
-
-            licensed_item = None
-            subscription_items = subscription.get("items", {}).get("data", []) or []
-            for item in subscription_items:
-                price = item.get("price", {}) or {}
-                usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
-                price_id = price.get("id")
-                if usage_type == "licensed" or (price_id and price_id == seat_price_id):
-                    licensed_item = item
-                    break
-
-            if not licensed_item:
-                messages.error(
-                    request,
-                    "We couldn't find a seat item on the active subscription. Please contact support.",
-                )
-                return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-            try:
-                current_quantity = int(licensed_item.get("quantity") or 0)
-            except (TypeError, ValueError):
-                current_quantity = 0
-
-            if current_quantity <= 0:
-                messages.error(request, "No seats are currently active to reduce.")
-                return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-            if target_quantity >= current_quantity:
-                messages.error(
-                    request,
-                    "Enter a number smaller than your current seat total to schedule a reduction.",
-                )
-                return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-            existing_schedule_id = subscription.get("schedule") or getattr(billing, "pending_seat_schedule_id", "")
-            if existing_schedule_id:
-                try:
-                    stripe.SubscriptionSchedule.release(existing_schedule_id)
-                except Exception as exc:  # pragma: no cover - unexpected Stripe error
-                    logger.exception(
-                        "Failed to release existing Stripe schedule %s for org %s: %s",
-                        existing_schedule_id,
-                        org.id,
-                        exc,
-                    )
-                    messages.error(
-                        request,
-                        "We weren't able to update the seat schedule. Please try again or contact support.",
-                    )
-                    return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-                billing.pending_seat_quantity = None
-                billing.pending_seat_effective_at = None
-                billing.pending_seat_schedule_id = ""
-                billing.save(
-                    update_fields=[
-                        "pending_seat_quantity",
-                        "pending_seat_effective_at",
-                        "pending_seat_schedule_id",
-                    ]
-                )
-
-            current_phase_items: list[dict[str, object]] = []
-            next_phase_items: list[dict[str, object]] = []
-
-            for item in subscription_items:
-                price = item.get("price", {}) or {}
-                price_id = price.get("id")
-                if not price_id:
-                    continue
-
-                usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
-                is_seat_item = (
-                    item is licensed_item or usage_type == "licensed" or (price_id and price_id == seat_price_id)
-                )
-
-                try:
-                    quantity = int(item.get("quantity") or 0)
-                except (TypeError, ValueError):
-                    quantity = 0
-
-                current_payload: dict[str, object] = {"price": price_id}
-                next_payload: dict[str, object] = {"price": price_id}
-
-                if is_seat_item:
-                    current_payload["quantity"] = current_quantity
-                    next_payload["quantity"] = target_quantity
-                elif usage_type != "metered" and quantity > 0:
-                    current_payload["quantity"] = quantity
-                    next_payload["quantity"] = quantity
-
-                current_phase_items.append(current_payload)
-                next_phase_items.append(next_payload)
-
-            current_period_start_ts = subscription.get("current_period_start")
-            current_period_end_ts = subscription.get("current_period_end")
-
-            phases: list[dict[str, object]] = [
-                {
-                    "items": current_phase_items,
-                    "proration_behavior": "none",
-                },
-                {
-                    "items": next_phase_items,
-                    "proration_behavior": "none",
-                },
-            ]
-
-            if current_period_start_ts:
-                phases[0]["start_date"] = int(current_period_start_ts)
-            if current_period_end_ts:
-                periods_end_int = int(current_period_end_ts)
-                phases[0]["end_date"] = periods_end_int
-                phases[1]["start_date"] = periods_end_int
-
-            metadata = {
-                "org_id": str(org.id),
-                "seat_requestor_id": str(request.user.id),
-                "seat_target_quantity": str(target_quantity),
-            }
-
-            schedule = stripe.SubscriptionSchedule.create(
-                from_subscription=subscription.get("id"),
-            )
-
-            stripe.SubscriptionSchedule.modify(
-                getattr(schedule, "id", ""),
-                phases=phases,
-                end_behavior="release",
-                metadata=metadata,
-            )
-
-            period_end_ts = current_period_end_ts
-            effective_at = None
-            if period_end_ts:
-                try:
-                    effective_at = datetime.fromtimestamp(int(period_end_ts), tz=dt_timezone.utc)
-                except (TypeError, ValueError, OSError):
-                    effective_at = None
-
-            billing.pending_seat_quantity = target_quantity
-            billing.pending_seat_effective_at = effective_at
-            billing.pending_seat_schedule_id = getattr(schedule, "id", "") or ""
-            billing.save(
-                update_fields=[
-                    "pending_seat_quantity",
-                    "pending_seat_effective_at",
-                    "pending_seat_schedule_id",
-                ]
-            )
-
-            messages.success(
-                request,
-                "Seat reduction scheduled. The new total will apply at the start of the next billing period.",
-            )
-            _track_org_event_for_console(
-                request,
-                AnalyticsEvent.ORGANIZATION_SEAT_REMOVED,
-                {
-                    'actor_id': str(request.user.id),
-                    'target_quantity': target_quantity,
-                    'current_quantity': current_quantity,
-                    'method': 'schedule',
-                },
-                organization=org,
-            )
-            _track_org_event_for_console(
-                request,
-                AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
-                {
-                    'actor_id': str(request.user.id),
-                    'update_type': 'seats_schedule_reduction',
-                    'target_quantity': target_quantity,
-                },
-                organization=org,
-            )
-        except Exception as exc:  # pragma: no cover - unexpected Stripe error
-            logger.exception(
-                "Failed to create Stripe seat schedule for org %s (sub %s): %s",
-                org.id,
-                getattr(billing, "stripe_subscription_id", None),
-                exc,
-            )
-            messages.error(
-                request,
-                "We weren't able to schedule the seat reduction. Please try again or contact support.",
-            )
-
-        return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-
-class OrganizationSeatScheduleCancelView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
-    """Cancel any pending seat reductions for an organization."""
-
-    waffle_flag = ORGANIZATIONS
-
-    @tracer.start_as_current_span("CONSOLE Organization Seat Schedule Cancel")
-    @transaction.atomic
-    def post(self, request, org_id: str):
-        org = get_object_or_404(Organization.objects.select_related("billing"), id=org_id)
-
-        membership = OrganizationMembership.objects.filter(
-            org=org,
-            user=request.user,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-            role__in=BILLING_MANAGE_ROLES,
-        ).first()
-
-        if membership is None:
-            return HttpResponseForbidden()
-
-        billing = getattr(org, "billing", None)
-        schedule_id = getattr(billing, "pending_seat_schedule_id", "") if billing else ""
-
-        if not billing or not schedule_id:
-            messages.info(request, "No scheduled seat changes to cancel.")
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-        try:
-            _assign_stripe_api_key()
-            stripe.SubscriptionSchedule.release(schedule_id)
-        except Exception as exc:  # pragma: no cover - unexpected Stripe error
-            logger.exception(
-                "Failed to release Stripe schedule %s for org %s: %s",
-                schedule_id,
-                org.id,
-                exc,
-            )
-            messages.error(
-                request,
-                "We weren't able to cancel the scheduled seat change. Please try again or contact support.",
-            )
-            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
-
-        billing.pending_seat_quantity = None
-        billing.pending_seat_effective_at = None
-        billing.pending_seat_schedule_id = ""
-        billing.save(
-            update_fields=[
-                "pending_seat_quantity",
-                "pending_seat_effective_at",
-                "pending_seat_schedule_id",
-            ]
-        )
-
-        _track_org_event_for_console(
-            request,
-            AnalyticsEvent.ORGANIZATION_BILLING_UPDATED,
-            {
-                'actor_id': str(request.user.id),
-                'update_type': 'seats_schedule_cancelled',
-            },
-            organization=org,
-        )
-        messages.success(request, "Scheduled seat changes were cancelled.")
-        return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
 
 class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
@@ -7039,7 +6388,7 @@ def _update_addon_quantity(
     except stripe.error.StripeError as exc:
         logger.warning("Stripe API error while updating addon quantity: %s", exc)
         messages.error(request, f"A billing error occurred: {exc}")
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to update %s quantity for %s", addon_kind, getattr(owner, "id", None) or owner)
         messages.error(request, f"An unexpected error occurred while updating {failure_noun}.")
 
@@ -7196,7 +6545,7 @@ def add_dedicated_ip_quantity(request, owner, owner_type):
         messages.success(request, "Dedicated IP quantity updated.")
     except BillingUpdateError as exc:
         messages.error(request, exc.detail or SUPPORT_DETAIL)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to update dedicated IP quantity", exc_info=True)
         messages.error(request, SUPPORT_DETAIL)
 
@@ -7237,7 +6586,7 @@ def remove_dedicated_ip(request, owner, owner_type):
         messages.success(request, "Dedicated IP removed.")
     except BillingUpdateError as exc:
         messages.error(request, exc.detail or SUPPORT_DETAIL)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to remove dedicated IP", exc_info=True)
         messages.error(request, SUPPORT_DETAIL)
 
@@ -7279,7 +6628,7 @@ def remove_all_dedicated_ip(request, owner, owner_type):
         messages.success(request, "All dedicated IPs removed.")
     except BillingUpdateError as exc:
         messages.error(request, exc.detail or SUPPORT_DETAIL)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to remove all dedicated IPs", exc_info=True)
         messages.error(request, SUPPORT_DETAIL)
 

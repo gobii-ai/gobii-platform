@@ -2,7 +2,6 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
-from django.urls.conf import re_path
 from django.shortcuts import redirect
 from django.views.generic.base import RedirectView
 from drf_spectacular.views import (
@@ -39,15 +38,12 @@ from console.api_views import (
     AgentChatRosterAPIView,
     AgentQuickCreateAPIView,
     AgentSpawnIntentAPIView,
-    AgentCollaboratorLeaveAPIView,
     AgentSuggestionsAPIView,
     AgentProcessingStatusAPIView,
     AgentStopAPIView,
-    AgentDailyCreditsAPIView,
     AgentAddonsAPIView,
     AgentSettingsAPIView,
     AgentQuickSettingsAPIView,
-    AgentReassignAPIView,
     AgentTemplateCloneAPIView,
     AgentSmsEnableAPIView,
     AgentTimelineAPIView,
@@ -156,7 +152,6 @@ from console.api_views import (
     StaffAgentAuditAPIView,
     StaffAgentAuditExportAPIView,
     StaffAgentAuditTimelineAPIView,
-    StaffAgentAuditDayDebugAPIView,
     StaffAgentJudgeSuggestionDecisionAPIView,
     StaffAgentProcessEventsAPIView,
     StaffAgentRunJudgeAPIView,
@@ -225,7 +220,6 @@ from console.usage_views import (
     UsageSummaryAPIView,
     UsageBurnRateSnapshotAPIView,
     UsageTrendAPIView,
-    UsageToolBreakdownAPIView,
     UsageAgentLeaderboardAPIView,
     UsageAgentsAPIView,
 )
@@ -234,7 +228,6 @@ from console.legacy_redirects import LegacyConsoleRedirectView
 from console.views import (
     ConsoleHome,
     BillingPortalView,
-    ConsoleDiagnosticsView,
     ConsoleStatusView,
     LegacyConsoleStatusRedirectView,
     SystemSettingsView,
@@ -271,9 +264,6 @@ from console.views import (
     OrganizationMemberRemoveOrgView,
     OrganizationLeaveOrgView,
     OrganizationMemberRoleUpdateOrgView,
-    OrganizationSeatCheckoutView,
-    OrganizationSeatScheduleView,
-    OrganizationSeatScheduleCancelView,
     OrganizationSeatPortalView,
     update_task_pack_quantity,
     update_contact_pack_quantity,
@@ -358,7 +348,6 @@ urlpatterns = [
 
     # console
     path("console/", ConsoleHome.as_view(), name="console-home"),
-    path("console/diagnostics/", ConsoleDiagnosticsView.as_view(), name="console_diagnostics"),
     path("staff/status/", ConsoleStatusView.as_view(), name="console-status"),
     path("console/status/", LegacyConsoleStatusRedirectView.as_view(), name="console-status-legacy"),
     path("staff/mcp/", PlatformMCPServerManagementView.as_view(), name="staff-platform-mcp"),
@@ -402,7 +391,6 @@ urlpatterns = [
     path("console/api/agents/roster/", AgentChatRosterAPIView.as_view(), name="console_agent_roster"),
     path("console/api/agents/create/", AgentQuickCreateAPIView.as_view(), name="console_agent_quick_create"),
     path("console/api/agents/spawn-intent/", AgentSpawnIntentAPIView.as_view(), name="console_agent_spawn_intent"),
-    path("console/api/agents/<uuid:agent_id>/collaboration/leave/", AgentCollaboratorLeaveAPIView.as_view(), name="console_agent_collaborator_leave"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
     path("console/api/agents/<uuid:agent_id>/planning/skip/", AgentPlanningSkipAPIView.as_view(), name="console_agent_planning_skip"),
     path("console/api/agents/<uuid:agent_id>/suggestions/", AgentSuggestionsAPIView.as_view(), name="console_agent_suggestions"),
@@ -466,7 +454,6 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/files/move/", AgentFsNodeMoveAPIView.as_view(), name="console_agent_fs_move"),
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),
     path("console/api/agents/<uuid:agent_id>/stop/", AgentStopAPIView.as_view(), name="console_agent_stop"),
-    path("console/api/agents/<uuid:agent_id>/daily-credits/", AgentDailyCreditsAPIView.as_view(), name="console_agent_daily_credits"),
     path("console/api/agents/<uuid:agent_id>/email-settings/", AgentEmailSettingsAPIView.as_view(), name="console_agent_email_settings"),
     path(
         "console/api/agents/<uuid:agent_id>/email-settings/ensure-account/",
@@ -483,7 +470,6 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/settings/", AgentSettingsAPIView.as_view(), name="console_agent_settings"),
     path("console/api/agents/<uuid:agent_id>/insights/", AgentInsightsAPIView.as_view(), name="console_agent_insights"),
     path("console/api/agents/<uuid:agent_id>/sms/enable/", AgentSmsEnableAPIView.as_view(), name="console_agent_sms_enable"),
-    path("console/api/agents/<uuid:agent_id>/reassign/", AgentReassignAPIView.as_view(), name="console_agent_reassign"),
     path("console/api/agents/<uuid:agent_id>/templates/clone/", AgentTemplateCloneAPIView.as_view(), name="console_agent_template_clone"),
     path("console/api/user/preferences/", UserPreferencesAPIView.as_view(), name="console_user_preferences"),
     path("console/api/user/profile/", UserProfileAPIView.as_view(), name="console_user_profile"),
@@ -496,7 +482,6 @@ urlpatterns = [
     path("console/api/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditAPIView.as_view(), name="console_agent_audit"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/export/", StaffAgentAuditExportAPIView.as_view(), name="console_agent_audit_export"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/timeline/", StaffAgentAuditTimelineAPIView.as_view(), name="console_agent_audit_timeline"),
-    path("console/api/staff/agents/<uuid:agent_id>/audit/day/", StaffAgentAuditDayDebugAPIView.as_view(), name="console_agent_audit_day_debug"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/process/", StaffAgentProcessEventsAPIView.as_view(), name="console_agent_audit_process"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/judge/", StaffAgentRunJudgeAPIView.as_view(), name="console_agent_audit_judge"),
     path(
@@ -603,7 +588,6 @@ urlpatterns = [
     path("console/api/usage/summary/", UsageSummaryAPIView.as_view(), name="console_usage_summary"),
     path("console/api/usage/burn-rate/", UsageBurnRateSnapshotAPIView.as_view(), name="console_usage_burn_rate"),
     path("console/api/usage/trends/", UsageTrendAPIView.as_view(), name="console_usage_trends"),
-    path("console/api/usage/tools/", UsageToolBreakdownAPIView.as_view(), name="console_usage_tools"),
     path("console/api/usage/agents/leaderboard/", UsageAgentLeaderboardAPIView.as_view(), name="console_usage_agents_leaderboard"),
     path("console/api/evals/suites/", EvalSuiteListAPIView.as_view(), name="console_evals_suites"),
     path("console/api/evals/global-skill-launcher/", GlobalSkillEvalLauncherAPIView.as_view(), name="console_evals_global_skill_launcher"),
@@ -721,9 +705,6 @@ urlpatterns = [
     path("console/organizations/<uuid:org_id>/members/<int:user_id>/remove/", OrganizationMemberRemoveOrgView.as_view(), name="org_member_remove_org"),
     path("console/organizations/<uuid:org_id>/members/<int:user_id>/role/", OrganizationMemberRoleUpdateOrgView.as_view(), name="org_member_role_update_org"),
     path("console/organizations/<uuid:org_id>/leave/", OrganizationLeaveOrgView.as_view(), name="org_leave_org"),
-    path("console/organizations/<uuid:org_id>/seats/checkout/", OrganizationSeatCheckoutView.as_view(), name="organization_seat_checkout"),
-    path("console/organizations/<uuid:org_id>/seats/schedule/", OrganizationSeatScheduleView.as_view(), name="organization_seat_schedule"),
-    path("console/organizations/<uuid:org_id>/seats/schedule/cancel/", OrganizationSeatScheduleCancelView.as_view(), name="organization_seat_schedule_cancel"),
     path("console/organizations/<uuid:org_id>/seats/portal/", OrganizationSeatPortalView.as_view(), name="organization_seat_portal"),
 
     # Task management views

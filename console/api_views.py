@@ -129,7 +129,6 @@ from api.models import (
     AgentFsNode,
     Organization,
     OrganizationMembership,
-    AgentCollaborator,
     UserPreference,
     UserEmail,
     AddonEntitlement,
@@ -141,7 +140,7 @@ from api.public_profiles import generate_handle_suggestion
 from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
 from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, restore_oauth_session_state
-from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
+from console.agent_audit.events import fetch_audit_events
 from console.agent_audit.export import (
     InvalidAuditExportRange,
     build_audit_export_range,
@@ -244,17 +243,13 @@ from console.agent_addons import (
     update_task_pack_quantities,
 )
 from console.daily_credit import (
-    build_agent_daily_credit_context,
-    build_daily_credit_status,
     parse_daily_credit_limit,
-    serialize_daily_credit_payload,
 )
 from console.agent_creation import (
     AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
     AGENT_TEMPLATE_SOURCE_SESSION_KEY,
     enable_agent_sms_contact,
 )
-from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG, SandboxComputeService, SandboxComputeUnavailable
@@ -2685,37 +2680,6 @@ class StaffAgentAuditTimelineAPIView(SystemAdminAPIView):
         return JsonResponse(payload)
 
 
-class StaffAgentAuditDayDebugAPIView(SystemAdminAPIView):
-    """Temporary debug: return all audit events for a specific day."""
-
-    http_method_names = ["get"]
-
-    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = get_object_or_404(PersistentAgent, pk=agent_id)
-        day_str = request.GET.get("day")
-        if not day_str:
-            return HttpResponseBadRequest("day is required (YYYY-MM-DD)")
-        try:
-            target_date = datetime.fromisoformat(day_str).date()
-        except ValueError:
-            return HttpResponseBadRequest("day must be YYYY-MM-DD")
-
-        tz_offset_raw = request.GET.get("tz_offset_minutes")
-        tz_offset = 0
-        try:
-            if tz_offset_raw is not None:
-                tz_offset = int(tz_offset_raw)
-        except ValueError:
-            return HttpResponseBadRequest("tz_offset_minutes must be an integer")
-        tzinfo = dt_timezone(timedelta(minutes=tz_offset))
-
-        start = datetime.combine(target_date, datetime.min.time(), tzinfo=tzinfo)
-        end = datetime.combine(target_date + timedelta(days=1), datetime.min.time(), tzinfo=tzinfo)
-
-        events = fetch_audit_events_between(agent, start=start, end=end)
-        return JsonResponse({"count": len(events), "events": events}, safe=False)
-
-
 class StaffAgentProcessEventsAPIView(SystemAdminAPIView):
     """Staff-only hook to enqueue a PROCESS_EVENTS run for an agent."""
 
@@ -3480,46 +3444,6 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
         })
 
 
-class AgentCollaboratorLeaveAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = PersistentAgent.objects.non_eval().alive().filter(pk=agent_id).first()
-        if not agent:
-            return JsonResponse({"error": "Agent not found"}, status=404)
-
-        if not user_is_collaborator(request.user, agent):
-            return JsonResponse({"error": "Not a collaborator"}, status=403)
-
-        collaborator = (
-            AgentCollaborator.objects
-            .filter(agent=agent, user=request.user)
-            .select_related("user")
-            .first()
-        )
-        if collaborator:
-            collaborator_props = Analytics.with_org_properties(
-                {
-                    "agent_id": str(agent.id),
-                    "agent_name": agent.name,
-                    "collaborator_id": str(collaborator.id),
-                    "collaborator_user_id": str(request.user.id),
-                    "collaborator_email": request.user.email or "",
-                    "invited_by_id": str(collaborator.invited_by_id) if collaborator.invited_by_id else "",
-                    "actor_id": str(request.user.id),
-                },
-                organization=getattr(agent, "organization", None),
-            )
-            collaborator.delete()
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.AGENT_COLLABORATOR_LEFT,
-                source=AnalyticsSource.WEB,
-                properties=collaborator_props.copy(),
-            ))
-        return JsonResponse({"success": True})
-
-
 def _extract_phone_form_error(form: PhoneAddForm) -> str:
     error_msg = "Enter a valid phone number."
     try:
@@ -3715,35 +3639,6 @@ class AgentSmsEnableAPIView(ApiLoginRequiredMixin, View):
             "agentSms": {"number": agent_sms_endpoint.address},
             "userPhone": serialize_phone(phone),
             "preferredContactMethod": "sms",
-        })
-
-
-class AgentReassignAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
-        try:
-            body = json.loads(request.body or "{}")
-        except json.JSONDecodeError:
-            return HttpResponseBadRequest("Invalid JSON body")
-
-        target_org_id = (body.get("target_org_id") or body.get("targetOrgId") or "").strip() or None
-
-        try:
-            result = reassign_agent_organization(request, agent, target_org_id)
-        except PermissionDenied as exc:
-            return JsonResponse({"success": False, "error": str(exc)}, status=403)
-        except ValidationError as exc:
-            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to reassign agent."
-            return JsonResponse({"success": False, "error": message_text}, status=400)
-        except Exception:
-            logger.exception("Failed to reassign agent %s", agent.id)
-            return JsonResponse({"success": False, "error": "An unexpected error occurred."}, status=500)
-
-        return JsonResponse({
-            "success": True,
-            **result,
         })
 
 
@@ -7416,58 +7311,6 @@ class AgentSuggestionsAPIView(LoginRequiredMixin, View):
 
         payload = build_agent_timeline_suggestions(agent, prompt_count=prompt_count)
         return JsonResponse(payload)
-
-
-class AgentDailyCreditsAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["get", "post"]
-
-    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
-        context = build_agent_daily_credit_context(agent)
-        return JsonResponse(
-            {
-                "dailyCredits": serialize_daily_credit_payload(context),
-                "status": build_daily_credit_status(context),
-            }
-        )
-
-    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
-        owner = agent.organization or agent.user
-        credit_settings = get_daily_credit_settings_for_owner(owner)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-
-        new_daily_limit, error = parse_daily_credit_limit(
-            payload,
-            credit_settings,
-            tier_multiplier=get_agent_credit_multiplier(agent),
-        )
-        if error:
-            return JsonResponse({"error": error}, status=400)
-
-        previous_daily_limit = agent.daily_credit_limit
-        daily_limit_changed = previous_daily_limit != new_daily_limit
-        if agent.daily_credit_limit != new_daily_limit:
-            agent.daily_credit_limit = new_daily_limit
-            agent.save(update_fields=["daily_credit_limit"])
-        if daily_limit_changed:
-            queue_settings_change_resume(
-                agent,
-                daily_credit_limit_changed=True,
-                previous_daily_credit_limit=previous_daily_limit,
-                source="agent_daily_credits_api",
-            )
-
-        context = build_agent_daily_credit_context(agent, owner)
-        return JsonResponse(
-            {
-                "dailyCredits": serialize_daily_credit_payload(context),
-                "status": build_daily_credit_status(context),
-            }
-        )
 
 
 class AgentSettingsAPIView(ApiLoginRequiredMixin, View):
