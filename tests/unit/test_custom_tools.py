@@ -1,9 +1,13 @@
 import base64
+import contextlib
 import hashlib
+import io
 import json
 import os
 import sqlite3
+import sys
 import tempfile
+import types
 import uuid
 import zipfile
 from decimal import Decimal
@@ -13,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -22,6 +27,7 @@ from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.system_skills.defaults import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL
 from api.agent.tools.custom_tools import (
     CUSTOM_TOOL_RESULT_MARKER,
+    _GOBII_CTX_MODULE,
     _sync_workspace_source,
     build_custom_tool_bridge_token,
     execute_create_custom_tool,
@@ -59,6 +65,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     PersistentAgentSecret,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentSystemSkillState,
     SystemSkillProfile,
     TaskCredit,
@@ -136,6 +143,23 @@ class CustomToolsTests(TestCase):
         sections.append("    main(run)")
         sections.append("")
         return "\n".join(sections)
+
+    @staticmethod
+    def _run_bootstrap_snippet(source: str) -> str:
+        module = types.ModuleType("_gobii_ctx")
+        exec(_GOBII_CTX_MODULE, module.__dict__)
+        prior_module = sys.modules.get("_gobii_ctx")
+        sys.modules["_gobii_ctx"] = module
+        stdout = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout):
+                exec(source, {})
+        finally:
+            if prior_module is None:
+                sys.modules.pop("_gobii_ctx", None)
+            else:
+                sys.modules["_gobii_ctx"] = prior_module
+        return stdout.getvalue()
 
     @staticmethod
     def _write_local_wheel(wheel_path: str) -> None:
@@ -2058,6 +2082,225 @@ def run(params, ctx):
             exec_params={"value": 1},
             parent_step=None,
         )
+
+    def _create_bridge_custom_tool(
+        self,
+        *,
+        tool_name: str = "custom_wrapper",
+    ) -> PersistentAgentCustomTool:
+        return PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Wrapper",
+            tool_name=tool_name,
+            description="Calls nested tools.",
+            source_path="/tools/wrapper.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+
+    def _post_bridge_tool_call(
+        self,
+        token: str,
+        *,
+        tool_name: str = "send_email",
+        params: dict | None = None,
+    ):
+        return self.client.post(
+            reverse("api:custom-tool-bridge-execute"),
+            data=json.dumps({"tool_name": tool_name, "params": params or {"value": 1}}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+    @override_settings(CUSTOM_TOOL_CHILD_FAILURE_LIMIT=3)
+    @patch("api.custom_tool_bridge.maybe_run_agent_judge")
+    @patch("api.custom_tool_bridge.execute_tracked_runtime_tool_call")
+    def test_custom_tool_bridge_aborts_after_three_child_failures(
+        self,
+        mock_execute_tracked_runtime,
+        mock_maybe_run_agent_judge,
+    ):
+        cache.clear()
+        custom_tool = self._create_bridge_custom_tool()
+        source_code = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    return ctx.call_tool('send_email', params)\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source_code.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path=custom_tool.source_path,
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        parent_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Outer custom tool step",
+        )
+        token = build_custom_tool_bridge_token(
+            self.agent,
+            custom_tool,
+            parent_step_id=str(parent_step.id),
+        )
+        child_error = {"status": "error", "message": "Child failed.", "retryable": True}
+        mock_execute_tracked_runtime.return_value = (child_error, None)
+
+        first = self._post_bridge_tool_call(token)
+        second = self._post_bridge_tool_call(token)
+        third = self._post_bridge_tool_call(token)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(third.status_code, 200)
+        self.assertEqual(first.json(), child_error)
+        self.assertEqual(second.json(), child_error)
+        third_payload = third.json()
+        self.assertEqual(third_payload["status"], "error")
+        self.assertTrue(third_payload["custom_tool_abort"])
+        self.assertEqual(third_payload["failure_count"], 3)
+        self.assertEqual(third_payload["threshold"], 3)
+        self.assertEqual(
+            third_payload["message"],
+            "Custom tool stopped after 3 failed child tool calls.",
+        )
+
+        system_step = PersistentAgentSystemStep.objects.get(
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes="custom_tool_child_failure_budget_exceeded",
+        )
+        self.assertEqual(system_step.step.agent_id, self.agent.id)
+        mock_maybe_run_agent_judge.assert_called_once_with(
+            self.agent,
+            extra_trigger_reasons=["custom_tool_child_failure_budget_exceeded"],
+            trigger_context={
+                "custom_tool_sources": [
+                    {
+                        "source_type": "custom_tool_source",
+                        "tool_name": custom_tool.tool_name,
+                        "name": custom_tool.name,
+                        "source_path": custom_tool.source_path,
+                        "source_code": source_code,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(mock_execute_tracked_runtime.call_count, 3)
+
+        fourth = self._post_bridge_tool_call(token)
+        self.assertEqual(fourth.status_code, 200)
+        self.assertTrue(fourth.json()["custom_tool_abort"])
+        self.assertEqual(mock_execute_tracked_runtime.call_count, 3)
+
+    @override_settings(CUSTOM_TOOL_CHILD_FAILURE_LIMIT=3)
+    @patch("api.custom_tool_bridge.maybe_run_agent_judge")
+    @patch("api.custom_tool_bridge.execute_tracked_runtime_tool_call")
+    def test_custom_tool_bridge_successes_do_not_increment_failure_budget(
+        self,
+        mock_execute_tracked_runtime,
+        mock_maybe_run_agent_judge,
+    ):
+        cache.clear()
+        custom_tool = self._create_bridge_custom_tool()
+        token = build_custom_tool_bridge_token(self.agent, custom_tool)
+        mock_execute_tracked_runtime.side_effect = [
+            ({"status": "error", "message": "first"}, None),
+            ({"status": "ok", "result": {"sent": 1}}, None),
+            ({"status": "error", "message": "second"}, None),
+        ]
+
+        first = self._post_bridge_tool_call(token)
+        second = self._post_bridge_tool_call(token)
+        third = self._post_bridge_tool_call(token)
+
+        self.assertFalse(first.json().get("custom_tool_abort", False))
+        self.assertEqual(second.json()["status"], "ok")
+        self.assertFalse(third.json().get("custom_tool_abort", False))
+        mock_maybe_run_agent_judge.assert_not_called()
+        self.assertFalse(
+            PersistentAgentSystemStep.objects.filter(
+                notes="custom_tool_child_failure_budget_exceeded",
+            ).exists()
+        )
+
+    @override_settings(CUSTOM_TOOL_CHILD_FAILURE_LIMIT=3)
+    @patch("api.custom_tool_bridge.maybe_run_agent_judge")
+    @patch("api.custom_tool_bridge.execute_tracked_runtime_tool_call")
+    def test_custom_tool_bridge_failure_budget_is_scoped_to_parent_step(
+        self,
+        mock_execute_tracked_runtime,
+        mock_maybe_run_agent_judge,
+    ):
+        cache.clear()
+        custom_tool = self._create_bridge_custom_tool()
+        parent_one = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Parent one",
+        )
+        parent_two = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Parent two",
+        )
+        token_one = build_custom_tool_bridge_token(
+            self.agent,
+            custom_tool,
+            parent_step_id=str(parent_one.id),
+        )
+        token_two = build_custom_tool_bridge_token(
+            self.agent,
+            custom_tool,
+            parent_step_id=str(parent_two.id),
+        )
+        mock_execute_tracked_runtime.return_value = ({"status": "error", "message": "failed"}, None)
+
+        self._post_bridge_tool_call(token_one)
+        self._post_bridge_tool_call(token_one)
+        response = self._post_bridge_tool_call(token_two)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json().get("custom_tool_abort", False))
+        mock_maybe_run_agent_judge.assert_not_called()
+        self.assertEqual(mock_execute_tracked_runtime.call_count, 3)
+
+    @override_settings(CUSTOM_TOOL_CHILD_FAILURE_LIMIT=3)
+    @patch("api.custom_tool_bridge.maybe_run_agent_judge")
+    def test_custom_tool_bridge_counts_recursive_child_denials(
+        self,
+        mock_maybe_run_agent_judge,
+    ):
+        cache.clear()
+        custom_tool = self._create_bridge_custom_tool()
+        token = build_custom_tool_bridge_token(self.agent, custom_tool)
+
+        first = self._post_bridge_tool_call(token, tool_name=custom_tool.tool_name)
+        second = self._post_bridge_tool_call(token, tool_name=custom_tool.tool_name)
+        third = self._post_bridge_tool_call(token, tool_name=custom_tool.tool_name)
+
+        self.assertEqual(
+            first.json()["message"],
+            "Custom tools cannot call themselves recursively.",
+        )
+        self.assertEqual(
+            second.json()["message"],
+            "Custom tools cannot call themselves recursively.",
+        )
+        self.assertTrue(third.json()["custom_tool_abort"])
+        mock_maybe_run_agent_judge.assert_called_once()
+
+    def test_custom_tool_context_raises_on_bridge_abort_response(self):
+        source = (
+            "import _gobii_ctx\n"
+            "ctx = _gobii_ctx.ToolContext()\n"
+            "ctx._call_tool_via_curl = lambda body: "
+            "'{\"status\":\"error\",\"custom_tool_abort\":true,\"message\":\"stopped\"}'\n"
+            "try:\n"
+            "    ctx.call_tool('send_email', {})\n"
+            "except RuntimeError as exc:\n"
+            "    print(str(exc))\n"
+        )
+
+        result = self._run_bootstrap_snippet(source)
+        self.assertIn("stopped", result)
 
     @patch("api.agent.tools.meta_ads.requests.get")
     @patch("api.agent.core.event_processing._ensure_credit_for_tool")

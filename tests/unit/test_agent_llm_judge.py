@@ -288,6 +288,54 @@ class AgentJudgeTests(TestCase):
         self.assertIsNotNone(trigger)
         self.assertEqual(trigger.reasons, ["burn_rate_throttled"])
 
+    def test_custom_tool_failure_trigger_context_reaches_judge_prompt(self):
+        self._add_steps(1)
+        source_code = (
+            "from _gobii_ctx import main\n\n"
+            "def run(params, ctx):\n"
+            "    return ctx.call_tool('send_email', params)\n\n"
+            "if __name__ == '__main__': main(run)\n"
+        )
+
+        trigger = build_judge_trigger(
+            self.agent,
+            tools=[],
+            extra_trigger_reasons=["custom_tool_child_failure_budget_exceeded"],
+            trigger_context={
+                "custom_tool_sources": [
+                    {
+                        "source_type": "custom_tool_source",
+                        "tool_name": "custom_outreach_sender",
+                        "name": "Outreach Sender",
+                        "source_path": "/tools/outreach_sender.py",
+                        "source_code": source_code,
+                    }
+                ],
+            },
+        )
+
+        self.assertIsNotNone(trigger)
+        self.assertEqual(
+            trigger.trajectory["trigger_context"]["custom_tool_sources"][0]["source_code"],
+            source_code,
+        )
+
+        limits = JudgePromptLimits(
+            prompt_token_budget=2000,
+            message_history_limit=2,
+            tool_call_history_limit=2,
+            skill_prompt_limit=1,
+            enabled_tool_limit=1,
+        )
+        with patch("api.agent.core.agent_judge._create_token_estimator", return_value=lambda text: len(text.split())):
+            messages = _build_judge_messages(trigger.trajectory, model="test-model", prompt_limits=limits)
+
+        user_content = messages[1]["content"]
+        self.assertIn("<trigger_context>", user_content)
+        self.assertIn("custom_tool_sources", user_content)
+        self.assertIn("/tools/outreach_sender.py", user_content)
+        self.assertIn("ctx.call_tool('send_email', params)", user_content)
+
     def test_judge_tool_does_not_offer_request_human_input_suggestion(self):
         tool = _judge_tool_definition()
 
