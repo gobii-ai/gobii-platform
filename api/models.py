@@ -6326,11 +6326,47 @@ class PersistentAgentTemplate(models.Model):
     )
     display_name = models.CharField(max_length=255)
     tagline = models.CharField(max_length=255)
+    seo_meta_description = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text="Optional complete meta description for the public template detail page.",
+    )
     description = models.TextField()
     description_markdown = models.TextField(
         blank=True,
         default="",
         help_text="Optional rich Markdown body for the public template detail page.",
+    )
+    best_for = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional Markdown section describing ideal users, teams, or workflows.",
+    )
+    example_outputs = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional Markdown section describing outputs this template can produce.",
+    )
+    required_inputs = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional Markdown section describing inputs users should provide.",
+    )
+    how_it_works = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional Markdown section explaining the workflow this template follows.",
+    )
+    customization_notes = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional Markdown section with setup or customization guidance.",
+    )
+    expected_tools_summary = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional Markdown section summarizing how the enabled tools are used.",
     )
     charter = models.TextField(help_text="Pre-built charter the agent will start with.")
     base_schedule = models.CharField(

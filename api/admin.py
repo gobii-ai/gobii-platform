@@ -6566,7 +6566,11 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     )
     list_filter = ('category', 'is_official', 'recommended_contact_channel', 'is_active')
     list_editable = ('is_official',)
-    search_fields = ('display_name', 'tagline', 'description', 'description_markdown', 'code')
+    search_fields = (
+        'display_name', 'tagline', 'seo_meta_description', 'description',
+        'description_markdown', 'best_for', 'example_outputs', 'required_inputs',
+        'how_it_works', 'customization_notes', 'expected_tools_summary', 'code'
+    )
     ordering = ('priority', 'display_name')
     readonly_fields = ('created_at', 'updated_at')
     prepopulated_fields = {"code": ("display_name",)}
@@ -6579,6 +6583,15 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
         }),
         ('Narrative', {
             'fields': ('description', 'description_markdown', 'charter')
+        }),
+        ('SEO', {
+            'fields': ('seo_meta_description',)
+        }),
+        ('Detail Page Sections', {
+            'fields': (
+                'best_for', 'example_outputs', 'required_inputs',
+                'how_it_works', 'customization_notes', 'expected_tools_summary',
+            )
         }),
         ('Cadence & Triggers', {
             'fields': ('base_schedule', 'schedule_jitter_minutes', 'event_triggers')
