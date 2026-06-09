@@ -6981,6 +6981,32 @@
   color: rgba(255, 255, 255, 0.74);
 }
 
+.agent-roster-pending-pill {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  height: 0.875rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  background: rgba(224, 242, 254, 0.5);
+  padding: 0 0.36rem;
+  color: #0369a1;
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-sidebar-agent .agent-roster-pending-pill {
+  border-color: rgba(125, 211, 252, 0.16);
+  background: rgba(125, 211, 252, 0.1);
+  color: rgba(186, 230, 253, 0.86);
+}
+
 .chat-sidebar-agent-state {
   font-size: 0.625rem;
   font-weight: 500;

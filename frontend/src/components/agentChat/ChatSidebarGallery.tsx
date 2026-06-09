@@ -104,6 +104,7 @@ function GalleryCard({
   const showEmailAction = Boolean(agent.email) && !isSignupPreviewAgent
   const showConfigureAction = Boolean(agent.canManageAgent && (onConfigureAgent || agent.detailUrl)) && !isSignupPreviewAgent
   const miniDescription = (agent.miniDescription || '').trim()
+  const pendingRequestCount = Math.max(0, agent.pendingActionRequestCount ?? 0)
   const showChatAction = Boolean(onSelectAgent)
 
   return (
@@ -145,7 +146,11 @@ function GalleryCard({
           />
           <div className={styles.heroMetaClass}>
             <span className={styles.nameClass}>{agent.name || 'Agent'}</span>
-            {miniDescription ? (
+            {pendingRequestCount > 0 ? (
+              <span className="agent-roster-pending-pill">
+                {pendingRequestCount} {pendingRequestCount === 1 ? 'request' : 'requests'}
+              </span>
+            ) : miniDescription ? (
               <span className={styles.miniClass}>{miniDescription}</span>
             ) : null}
           </div>

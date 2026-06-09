@@ -1,3 +1,4 @@
+from django.db.models import Count, Q
 from django.urls import reverse
 from django.utils import timezone
 
@@ -9,6 +10,7 @@ from api.models import (
     AgentSpawnRequest,
     CommsAllowlistRequest,
     PersistentAgent,
+    PersistentAgentHumanInputRequest,
     PersistentAgentSecret,
 )
 
@@ -75,6 +77,64 @@ def _serialize_contact_request(request_obj: CommsAllowlistRequest) -> dict:
 
 def serialize_contact_request(request_obj: CommsAllowlistRequest) -> dict:
     return _serialize_contact_request(request_obj)
+
+
+def _add_pending_counts(counts: dict[str, int], queryset) -> None:
+    for row in queryset.values("agent_id").annotate(total=Count("id")):
+        counts[str(row["agent_id"])] = counts.get(str(row["agent_id"]), 0) + int(row["total"] or 0)
+
+
+def count_pending_action_requests_for_agents(agents: list[PersistentAgent], viewer_user) -> dict[str, int]:
+    agent_ids = [agent.id for agent in agents]
+    counts = {str(agent_id): 0 for agent_id in agent_ids}
+    if not agent_ids:
+        return counts
+
+    now = timezone.now()
+    active_expiry_filter = Q(expires_at__isnull=True) | Q(expires_at__gt=now)
+    _add_pending_counts(
+        counts,
+        PersistentAgentHumanInputRequest.objects.filter(
+            agent_id__in=agent_ids,
+            status=PersistentAgentHumanInputRequest.Status.PENDING,
+        ).filter(active_expiry_filter),
+    )
+
+    manageable_agent_ids = [
+        agent.id
+        for agent in agents
+        if viewer_user is not None and user_can_manage_agent_settings(
+            viewer_user,
+            agent,
+            allow_delinquent_personal_chat=True,
+        )
+    ]
+    if not manageable_agent_ids:
+        return counts
+
+    _add_pending_counts(
+        counts,
+        AgentSpawnRequest.objects.filter(
+            agent_id__in=manageable_agent_ids,
+            status=AgentSpawnRequest.RequestStatus.PENDING,
+        ).filter(active_expiry_filter),
+    )
+    _add_pending_counts(
+        counts,
+        PersistentAgentSecret.objects.filter(
+            agent_id__in=manageable_agent_ids,
+            requested=True,
+        ),
+    )
+    _add_pending_counts(
+        counts,
+        CommsAllowlistRequest.objects.filter(
+            agent_id__in=manageable_agent_ids,
+            status=CommsAllowlistRequest.RequestStatus.PENDING,
+        ).filter(active_expiry_filter),
+    )
+
+    return counts
 
 
 def _serialize_spawn_request(agent: PersistentAgent, spawn_request: AgentSpawnRequest) -> dict:

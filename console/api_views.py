@@ -198,6 +198,7 @@ from console.agent_chat.access import (
     user_is_collaborator,
 )
 from console.agent_chat.pending_actions import (
+    count_pending_action_requests_for_agents,
     expire_pending_action_requests,
     get_legacy_pending_human_input_requests,
     list_pending_action_requests,
@@ -3198,12 +3199,13 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         collaborators_by_agent_id = {agent.id for agent in shared_agents}
         agents += shared_agents
         enrich_agents_for_card_surface(agents, owner)
+        user = request.user
         processing_activity_by_agent_id = build_processing_activity_map(agents)
+        pending_action_counts_by_agent_id = count_pending_action_requests_for_agents(agents, user)
         message_read_state_by_agent_id = build_latest_agent_message_read_state(
             (agent.id for agent in agents),
             request.user,
         )
-        user = request.user
         org_memberships = OrganizationMembership.objects.filter(
             user=user,
             status=OrganizationMembership.OrgStatus.ACTIVE,
@@ -3291,6 +3293,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
                     "signup_preview_state": agent.signup_preview_state,
                     "planning_state": agent.planning_state,
+                    "pending_action_request_count": pending_action_counts_by_agent_id.get(str(agent.id), 0),
                     "enabled_system_skills": [
                         state.skill_key
                         for state in getattr(agent, "enabled_system_skill_states_for_roster", [])
