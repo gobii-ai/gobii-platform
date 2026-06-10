@@ -159,12 +159,44 @@ class TestParallelToolCallsExecution(TestCase):
         self._run_single_iteration(
             [
                 _tool_call("read_file", '{"path": "/exports/a.txt"}'),
-                _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
+                _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/data.json"}'),
             ]
         )
 
         self.assertEqual(mock_execute_enabled.call_count, 2)
         self.assertGreaterEqual(max_active, 2)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    def test_brightdata_tool_batch_falls_back_to_serial(self, mock_execute_enabled, _mock_credit):
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
+            nonlocal active, max_active
+            self.assertFalse(isolated_mcp)
+            self.assertIsNone(current_sqlite_db_path)
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            return {"status": "ok", "auto_sleep_ok": True}
+
+        mock_execute_enabled.side_effect = side_effect
+
+        self._run_single_iteration(
+            [
+                _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
+                _tool_call("mcp_brightdata_scrape_as_markdown", '{"url": "https://example.com"}'),
+                _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+            ]
+        )
+
+        self.assertEqual(mock_execute_enabled.call_count, 3)
+        self.assertEqual(max_active, 1)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
@@ -191,7 +223,7 @@ class TestParallelToolCallsExecution(TestCase):
             self._run_single_iteration(
                 [
                     _tool_call("read_file", '{"path": "/exports/a.txt"}'),
-                    _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/zero.json"}'),
                     _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/one.json"}'),
                     _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/two.json"}'),
                     _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/three.json"}'),
@@ -388,7 +420,7 @@ class TestParallelToolCallsExecution(TestCase):
         self._run_single_iteration(
             [
                 _tool_call("read_file", '{"path": "/exports/a.txt"}'),
-                _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
+                _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/data.json"}'),
             ]
         )
 
@@ -396,4 +428,4 @@ class TestParallelToolCallsExecution(TestCase):
             captured_paths,
             ["/tmp/parallel-safe.sqlite", "/tmp/parallel-safe.sqlite"],
         )
-        self.assertEqual(get_agent_variable("/shared"), "mcp_brightdata_search_engine")
+        self.assertEqual(get_agent_variable("/shared"), "http_request")

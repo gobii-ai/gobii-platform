@@ -1552,7 +1552,7 @@ def execute_enabled_tool(
 def is_parallel_safe_tool_name(tool_name: str) -> bool:
     """Return whether the tool name is on the explicit parallel-safe allowlist."""
     if isinstance(tool_name, str) and tool_name.startswith("mcp_brightdata_"):
-        return True
+        return False
     entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
     return bool(entry and entry.get("parallel_safe"))
 
