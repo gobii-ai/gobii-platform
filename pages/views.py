@@ -3374,7 +3374,7 @@ class ComparisonsIndexView(TemplateView):
         "agent operations, security, governance, and production readiness."
     )
     social_image_path = "images/gobii_fish_social_1280x640.png"
-    last_modified_date = "2026-06-04"
+    last_modified_date = "2026-06-07"
 
     def dispatch(self, request, *args, **kwargs):
         if not settings.GOBII_PROPRIETARY_MODE:
@@ -3499,6 +3499,39 @@ class ComparisonDetailView(TemplateView):
         home_url = self.request.build_absolute_uri(reverse("pages:home"))
         comparisons_url = self.request.build_absolute_uri(reverse("proprietary:comparisons"))
         social_image_url = self.request.build_absolute_uri(static(self.social_image_path))
+        gobii_application = {
+            "@type": "SoftwareApplication",
+            "name": "Gobii",
+            "applicationCategory": "AI agent platform",
+            "operatingSystem": "Web",
+            "url": home_url,
+            "sameAs": [
+                "https://gobii.ai/",
+                "https://github.com/gobii-ai",
+                "https://docs.gobii.ai/",
+            ],
+            "description": (
+                "Always-on AI coworker platform for recurring business work across "
+                "integrations, browsers, files, and communication channels."
+            ),
+        }
+        competitor_application = {
+            "@type": "SoftwareApplication",
+            "name": comparison["competitor_name"],
+            "applicationCategory": comparison.get(
+                "competitor_application_category",
+                "AI agent platform",
+            ),
+            "url": comparison["competitor_url"],
+        }
+        if "competitor_operating_system" in comparison:
+            competitor_application["operatingSystem"] = comparison[
+                "competitor_operating_system"
+            ]
+        if "competitor_same_as" in comparison:
+            competitor_application["sameAs"] = list(comparison["competitor_same_as"])
+        if "competitor_schema_description" in comparison:
+            competitor_application["description"] = comparison["competitor_schema_description"]
 
         structured_data = {
             "@context": "https://schema.org",
@@ -3530,29 +3563,8 @@ class ComparisonDetailView(TemplateView):
                 "url": home_url,
             },
             "about": [
-                {
-                    "@type": "SoftwareApplication",
-                    "name": "Gobii",
-                    "applicationCategory": "AI agent platform",
-                    "url": home_url,
-                    "description": (
-                        "AI coworker platform for persistent browser-native business work."
-                    ),
-                },
-                {
-                    "@type": "SoftwareApplication",
-                    "name": comparison["competitor_name"],
-                    "applicationCategory": comparison.get(
-                        "competitor_application_category",
-                        "AI agent platform",
-                    ),
-                    "url": comparison["competitor_url"],
-                    **(
-                        {"description": comparison["competitor_schema_description"]}
-                        if "competitor_schema_description" in comparison
-                        else {}
-                    ),
-                },
+                gobii_application,
+                competitor_application,
             ],
         }
         breadcrumb_data = {
