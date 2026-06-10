@@ -1140,6 +1140,7 @@ class ImpliedSendTests(TestCase):
             "Update your process: verify source links before reporting.",
             "Can we just make that a rule?",
             "Do I have to request that you add links each time?",
+            "I shouldnt have to ask for source links in every report.",
             "Feedback: I prefer comparison tables for reports.",
         ]
 
@@ -1148,6 +1149,20 @@ class ImpliedSendTests(TestCase):
                 self.assertTrue(ep._user_text_has_durable_config_intent(text))
                 self.assertFalse(ep._looks_like_one_off_user_task(text))
 
+        one_off_feedback_tasks = [
+            "Summarize customer feedback from Slack today.",
+            "Give me feedback on this memo.",
+            "Any feedback on this draft?",
+            "Thanks for the feedback.",
+        ]
+
+        for text in one_off_feedback_tasks:
+            with self.subTest(text=text):
+                self.assertFalse(ep._user_text_has_durable_config_intent(text))
+
+        self.assertTrue(
+            ep._looks_like_one_off_user_task("Summarize customer feedback from Slack today.")
+        )
         self.assertFalse(ep._user_text_has_durable_config_intent("For this answer, prefer bullets."))
         self.assertTrue(ep._looks_like_one_off_user_task("Tell me the latest funding news for Acme."))
 
