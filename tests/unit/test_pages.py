@@ -9,9 +9,11 @@ from bs4 import BeautifulSoup
 from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
 from django.contrib.sites.models import Site
 from django.core import signing
+from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.test import Client, RequestFactory, TestCase, modify_settings, override_settings, tag
 from django.urls import reverse
@@ -34,6 +36,7 @@ from config.socialaccount_adapter import (
     build_oauth_charter_stash_cache_key,
 )
 from constants.feature_flags import (
+    SOLUTION_CRAWLABLE_LINKS,
     STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED,
 )
 from pages import views as page_views
@@ -1789,6 +1792,12 @@ class SitemapTests(TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 301)
                 self.assertEqual(response["Location"], "/")
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("<loc>http://example.com/solutions/</loc>", content)
+        for slug in ("recruiting", "sales", "small-business", "health-care", "defense", "engineering"):
+            self.assertIn(f"<loc>http://example.com/solutions/{slug}/</loc>", content)
+        self.assertIn("<loc>http://example.com/solutions/recruiting/candidate-sourcing/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_solution_urls_render_again(self):
@@ -2619,6 +2628,651 @@ class RemovedPretrainedWorkerSurfaceTests(TestCase):
     def test_pretrained_worker_urls_redirect_home(self):
         for path in (
             "/pretrained-workers/",
+            {"q": "ops", "category": "Team Ops", "foo": "bar"},
+        )
+        self.assertEqual(response.status_code, 302)
+        location = response["Location"]
+        self.assertIn("pretrained_search=ops", location)
+        self.assertIn("pretrained_category=Team+Ops", location)
+        self.assertIn("foo=bar", location)
+        self.assertTrue(location.endswith("#pretrained-workers"))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_pretrained_worker_detail_omits_trial_onboarding_fields_in_community_mode(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="trial_onboarding" value="1"')
+        self.assertNotContains(
+            response,
+            f'name="trial_onboarding_target" value="{TRIAL_ONBOARDING_TARGET_AGENT_UI}"',
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_pretrained_worker_detail_includes_trial_onboarding_fields_in_proprietary_mode(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="trial_onboarding" value="1"')
+        self.assertContains(
+            response,
+            f'name="trial_onboarding_target" value="{TRIAL_ONBOARDING_TARGET_AGENT_UI}"',
+        )
+
+    def test_pretrained_worker_detail_uses_create_agent_cta_copy(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        detail_source = soup.find(
+            "input",
+            {"name": "source_page", "value": "pretrained_worker_detail"},
+        )
+        self.assertIsNotNone(detail_source)
+        detail_form = detail_source.find_parent("form")
+        self.assertIsNotNone(detail_form)
+        self.assertFalse(detail_form.has_attr("data-lazy-csrf"))
+        self.assertIsNotNone(detail_form.find("input", {"name": "csrfmiddlewaretoken"}))
+        detail_button = detail_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(detail_button)
+        detail_button_text = " ".join(
+            segment for segment in detail_button.stripped_strings if segment and segment != "→"
+        ).strip()
+        self.assertEqual(detail_button_text, "Create Agent")
+
+    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
+    def test_pretrained_worker_detail_includes_search_metadata(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        detail_url = f"http://testserver/pretrained-workers/{template.code}/"
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<link rel="canonical" href="{detail_url}">')
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(
+            soup.title.string.strip(),
+            f"{template.display_name} AI Agent Template | Gobii",
+        )
+        description = soup.find("meta", attrs={"name": "description"})
+        self.assertIsNotNone(description)
+        self.assertIn(template.description[:80], description["content"])
+        og_url = soup.find("meta", property="og:url")
+        self.assertIsNotNone(og_url)
+        self.assertEqual(og_url["content"], detail_url)
+        og_image = soup.find("meta", property="og:image")
+        self.assertIsNotNone(og_image)
+        self.assertIn("/static/images/", og_image["content"])
+
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        webpage_schema = next(
+            item for item in structured_data if item.get("@type") == "WebPage"
+        )
+        self.assertEqual(webpage_schema["name"], f"{template.display_name} AI Agent Template")
+        self.assertEqual(webpage_schema["url"], detail_url)
+        self.assertEqual(webpage_schema["publisher"]["name"], "Gobii")
+        self.assertEqual(webpage_schema["mainEntity"]["@type"], "Service")
+        self.assertEqual(webpage_schema["mainEntity"]["name"], template.display_name)
+        self.assertEqual(webpage_schema["mainEntity"]["url"], detail_url)
+        self.assertEqual(webpage_schema["mainEntity"]["provider"]["name"], "Gobii")
+
+        breadcrumb_schema = next(
+            item for item in structured_data if item.get("@type") == "BreadcrumbList"
+        )
+        self.assertEqual(
+            breadcrumb_schema["itemListElement"][-1]["item"],
+            detail_url,
+        )
+        breadcrumb = soup.find("nav", attrs={"aria-label": "Breadcrumb"})
+        self.assertIsNotNone(breadcrumb)
+        self.assertIn(template.display_name, breadcrumb.get_text(" ", strip=True))
+        related_heading = soup.find("h2", string="Related pretrained workers")
+        self.assertIsNotNone(related_heading)
+        related_links = [link["href"] for link in related_heading.find_parent("section").find_all("a")]
+        self.assertNotIn(reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code}), related_links)
+
+    @patch("pages.views.PretrainedWorkerTemplateService.get_template_by_code")
+    def test_pretrained_worker_detail_escapes_json_ld_script_closing_sequence(self, mock_get_template_by_code):
+        display_name = 'Bad </script><script>alert("x")</script>'
+        description = "Description </script><img src=x onerror=alert(1)>"
+        mock_get_template_by_code.return_value = SimpleNamespace(
+            code="unsafe-template",
+            display_name=display_name,
+            tagline="Unsafe tagline",
+            description=description,
+            category="Operations",
+            charter="Do useful work.",
+            base_schedule="0 9 * * *",
+            schedule_jitter_minutes=0,
+            event_triggers=[],
+            default_tools=[],
+            recommended_contact_channel="email",
+        )
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": "unsafe-template"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("\\u003C/script\\u003E\\u003Cscript\\u003Ealert", content)
+        self.assertNotIn('</script><script>alert("x")</script>', content)
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        webpage_schema = next(
+            item for item in structured_data if item.get("@type") == "WebPage"
+        )
+        self.assertEqual(webpage_schema["name"], f"{display_name} AI Agent Template")
+        self.assertEqual(webpage_schema["description"], description)
+        self.assertEqual(webpage_schema["mainEntity"]["name"], display_name)
+        self.assertEqual(webpage_schema["mainEntity"]["description"], description)
+        breadcrumb_schema = next(
+            item for item in structured_data if item.get("@type") == "BreadcrumbList"
+        )
+        self.assertEqual(breadcrumb_schema["itemListElement"][-1]["name"], display_name)
+
+
+@tag("batch_pages")
+class PretrainedWorkerHireRedirectTests(TestCase):
+    def test_launch_redirects_authenticated_user_into_app_spawn(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        user = get_user_model().objects.create_user(
+            email="pretrained-launch@test.com",
+            password="pw",
+            username="pretrained_launch_user",
+        )
+        self.client.force_login(user)
+        session = self.client.session
+        session["agent_charter"] = "Old draft"
+        session.save()
+
+        with patch("pages.views.Analytics.track_event"):
+            response = self.client.get(
+                reverse("pages:pretrained_worker_launch", kwargs={"slug": template.code}),
+                {
+                    "utm_source": "shared-link",
+                    "return_to": reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code}),
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_source"), ["shared-link"])
+        self.assertEqual(
+            params.get("return_to"),
+            [reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})],
+        )
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), template.charter)
+        self.assertEqual(session.get("agent_charter_source"), "template")
+        self.assertEqual(
+            session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertEqual(
+            session.get(page_views.AGENT_TEMPLATE_SOURCE_SESSION_KEY),
+            page_views.AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+        )
+
+    def test_launch_redirects_anon_to_login_and_stashes_template(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        with patch("pages.views.Analytics.track_event_anonymous"):
+            response = self.client.get(
+                reverse("pages:pretrained_worker_launch", kwargs={"slug": template.code}),
+                {"utm_source": "shared-link"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(next_params.get("utm_source"), ["shared-link"])
+
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        stash_token_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
+        stash_token = stash_token_payload.get(OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY)
+        self.assertIsNotNone(stash_token)
+        cached_charter_payload = signing.loads(
+            get_redis_client().get(build_oauth_charter_stash_cache_key(stash_token))
+        )
+        self.assertEqual(cached_charter_payload.get("agent_charter"), template.charter)
+        self.assertEqual(cached_charter_payload.get("agent_charter_source"), "template")
+        self.assertEqual(
+            cached_charter_payload.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertEqual(
+            cached_charter_payload.get(page_views.AGENT_TEMPLATE_SOURCE_SESSION_KEY),
+            page_views.AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.views.can_user_use_personal_agents_and_api", return_value=False)
+    def test_launch_marks_required_trial_selection_for_blocked_authenticated_user(self, _mock_can_use):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        user = get_user_model().objects.create_user(
+            email="pretrained-trial@test.com",
+            password="pw",
+            username="pretrained_trial_user",
+        )
+        self.client.force_login(user)
+
+        with patch("pages.views.Analytics.track_event"):
+            response = self.client.get(
+                reverse("pages:pretrained_worker_launch", kwargs={"slug": template.code})
+            )
+
+        self.assertEqual(response.status_code, 302)
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
+
+    def test_hire_redirects_to_login(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session["utm_first_touch"] = {"utm_source": "meta", "utm_medium": "paid_social"}
+        session["utm_last_touch"] = {"utm_source": "meta", "utm_campaign": "retargeting"}
+        session["click_ids_first"] = {"gclid": "first-gclid"}
+        session["click_ids_last"] = {"gclid": "last-gclid"}
+        session["fbclid_first"] = "first-fbclid"
+        session["fbclid_last"] = "last-fbclid"
+        session.save()
+
+        response = self.client.post(
+            reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code})
+        )
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+
+        charter_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
+        self.assertEqual(charter_payload.get("agent_charter"), template.charter)
+        self.assertNotIn("utm_first_touch", charter_payload)
+        self.assertNotIn("utm_last_touch", charter_payload)
+
+        attribution_payload = signing.loads(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, max_age=7200)
+        self.assertEqual(
+            attribution_payload.get("utm_first_touch"),
+            {"utm_source": "meta", "utm_medium": "paid_social"},
+        )
+        self.assertEqual(
+            attribution_payload.get("utm_last_touch"),
+            {"utm_source": "meta", "utm_campaign": "retargeting"},
+        )
+        self.assertEqual(attribution_payload.get("click_ids_first"), {"gclid": "first-gclid"})
+        self.assertEqual(attribution_payload.get("click_ids_last"), {"gclid": "last-gclid"})
+        self.assertEqual(attribution_payload.get("fbclid_first"), "first-fbclid")
+        self.assertEqual(attribution_payload.get("fbclid_last"), "last-fbclid")
+        self.assertEqual(attribution_payload.get("utm_querystring"), "utm_medium=ads")
+
+    def test_hire_redirects_to_signup_when_cta_signup_first_enabled(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session["utm_first_touch"] = {"utm_source": "meta", "utm_medium": "paid_social"}
+        session["utm_last_touch"] = {"utm_source": "meta", "utm_campaign": "retargeting"}
+        session["click_ids_first"] = {"gclid": "first-gclid"}
+        session["click_ids_last"] = {"gclid": "last-gclid"}
+        session["fbclid_first"] = "first-fbclid"
+        session["fbclid_last"] = "last-fbclid"
+        session.save()
+
+        with override_flag("cta_signup_first", active=True):
+            response = self.client.post(
+                reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code})
+            )
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
+
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+
+    def test_hire_redirects_to_login_for_pro_flow(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        response = self.client.post(
+            reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code}),
+            {"flow": "pro"},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("next"), [reverse("proprietary:pro_checkout")])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        session = self.client.session
+        self.assertEqual(
+            session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY),
+            reverse("agent_quick_spawn"),
+        )
+
+    def test_hire_redirects_to_signup_for_pro_flow_when_cta_signup_first_enabled(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        with override_flag("cta_signup_first", active=True):
+            response = self.client.post(
+                reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code}),
+                {"flow": "pro"},
+            )
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
+
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("next"), [reverse("proprietary:pro_checkout")])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        session = self.client.session
+        self.assertEqual(
+            session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY),
+            reverse("agent_quick_spawn"),
+        )
+
+    def test_hire_trial_onboarding_sets_session_intent(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        response = self.client.post(
+            reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code}),
+            {
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+        self.assertEqual(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, "")
+        self.assertEqual(int(response.cookies[OAUTH_ATTRIBUTION_COOKIE]["max-age"]), 0)
+
+        cookie_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
+        self.assertTrue(cookie_payload.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            cookie_payload.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertFalse(cookie_payload.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
+
+    def test_hire_modal_prep_returns_modal_signup_url_and_preserves_state(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.post(
+                reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code}),
+                {
+                    "trial_onboarding": "1",
+                    "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                    "auth_modal": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        parsed = urlparse(payload["auth_url"])
+        self.assertEqual(parsed.path, reverse("account_signup_modal"))
+        next_url = parse_qs(parsed.query).get("next", [None])[0]
+        self.assertIsNotNone(next_url)
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        self.assertEqual(parse_qs(next_parts.query).get("spawn"), ["1"])
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), template.charter)
+        self.assertEqual(
+            session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+
+
+@tag("batch_pages")
+class SolutionCtaCopyTests(TestCase):
+    SOLUTION_RELATED_LINKS = {
+        "recruiting": {
+            "slug": "talent-scout",
+            "label": "Talent Scout AI recruiting agent",
+        },
+        "sales": {
+            "slug": "lead-hunter",
+            "label": "Lead Hunter AI sales agent",
+        },
+        "health-care": {
+            "slug": "compliance-audit-sentinel",
+            "label": "Compliance Sentinel AI agent",
+        },
+        "defense": {
+            "slug": "public-safety-scout",
+            "label": "Public Safety Scout AI agent",
+        },
+        "engineering": {
+            "slug": "team-standup-coordinator",
+            "label": "Standup Coordinator AI agent",
+        },
+    }
+
+    def setUp(self):
+        self.request_factory = RequestFactory()
+
+    @staticmethod
+    def _normalized_button_text(button) -> str:
+        return " ".join(
+            segment for segment in button.stripped_strings if segment and segment != "→"
+        ).strip()
+
+    def _mini_header_logo(self):
+        request = self.request_factory.get("/solutions/recruiting/")
+        request.user = AnonymousUser()
+        rendered = render_to_string("includes/_unified_header_nav_mini.html", {"request": request})
+        soup = BeautifulSoup(rendered, "html.parser")
+        return soup.select_one('header.hs-header a[href="/"] img')
+
+    @staticmethod
+    def _fish_header_logo_srcset() -> str:
+        return (
+            f"{static('images/gobii_fish_with_text_purple_nav_1x.webp')} 1x, "
+            f"{static('images/gobii_fish_with_text_purple_nav_2x.webp')} 2x, "
+            f"{static('images/gobii_fish_with_text_purple_nav_3x.webp')} 3x"
+        )
+
+    def _solution_recruiting_soup(self):
+        response = self.client.get("/solutions/recruiting/")
+        self.assertEqual(response.status_code, 200)
+        return BeautifulSoup(response.content, "html.parser")
+
+    @staticmethod
+    def _solution_url(slug):
+        return page_views.SolutionView.reverse_solution(slug)
+
+    def test_solution_header_uses_standard_logo_when_fish_upper_left_is_off(self):
+        with override_flag("fish_upper_left", active=False):
+            logo = self._mini_header_logo()
+            self.assertIsNotNone(logo)
+            self.assertEqual(logo.parent.get("aria-label"), "Gobii home")
+            self.assertEqual(logo.get("src"), static("images/noBgIndigo600.png"))
+            self.assertIsNone(logo.get("srcset"))
+            self.assertEqual(logo.get("fetchpriority"), "high")
+
+    def test_solution_header_uses_fish_logo_when_fish_upper_left_is_on(self):
+        with override_flag("fish_upper_left", active=True):
+            logo = self._mini_header_logo()
+            self.assertIsNotNone(logo)
+            self.assertEqual(logo.parent.get("aria-label"), "Gobii home")
+            self.assertEqual(logo.get("src"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
+            self.assertEqual(
+                logo.get("srcset"),
+                self._fish_header_logo_srcset(),
+            )
+            self.assertEqual(logo.get("width"), "108")
+            self.assertEqual(logo.get("height"), "40")
+            self.assertEqual(logo.get("fetchpriority"), "high")
+
+    def test_solution_page_preloads_standard_logo_when_fish_upper_left_is_off(self):
+        with override_flag("fish_upper_left", active=False):
+            soup = self._solution_recruiting_soup()
+            preload = soup.select_one('link[rel="preload"][as="image"]')
+            logo = soup.select_one('header.hs-header a[href="/"] img')
+            self.assertIsNotNone(preload)
+            self.assertIsNotNone(logo)
+            self.assertEqual(logo.parent.get("aria-label"), "Gobii home")
+            self.assertEqual(preload.get("href"), static("images/noBgIndigo600.png"))
+            self.assertEqual(logo.get("src"), static("images/noBgIndigo600.png"))
+            self.assertIsNone(preload.get("imagesrcset"))
+
+    def test_solution_page_preloads_fish_logo_when_fish_upper_left_is_on(self):
+        with override_flag("fish_upper_left", active=True):
+            soup = self._solution_recruiting_soup()
+            preload = soup.select_one('link[rel="preload"][as="image"]')
+            logo = soup.select_one('header.hs-header a[href="/"] img')
+            self.assertIsNotNone(preload)
+            self.assertIsNotNone(logo)
+            self.assertEqual(logo.parent.get("aria-label"), "Gobii home")
+            self.assertEqual(preload.get("href"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
+            self.assertEqual(preload.get("imagesrcset"), self._fish_header_logo_srcset())
+            self.assertEqual(preload.get("type"), "image/webp")
+            self.assertEqual(logo.get("src"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
+            self.assertEqual(logo.get("srcset"), self._fish_header_logo_srcset())
+
+    def test_solutions_index_links_to_dedicated_solution_pages(self):
+        response = self.client.get("/solutions/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(soup.title.get_text(strip=True), "AI Agent Solutions for Teams | Gobii")
+        self.assertIsNotNone(
+            soup.find(
+                "meta",
+                {
+                    "name": "description",
+                    "content": (
+                        "Explore Gobii AI agent solutions for small business, recruiting, sales, healthcare, "
+                        "defense, and developers. Deploy browser agents that research, monitor, and automate work 24/7."
+                    ),
+                },
+            )
+        )
+        for slug in ("small-business", "recruiting", "sales", "health-care", "defense", "engineering"):
+            self.assertIsNotNone(
+                soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": slug})}),
+                f"Missing link to {slug} solution page",
+            )
+        self.assertEqual(len(soup.find_all("script", {"type": "application/ld+json"})), 3)
+
+    def test_engineering_solution_uses_webp_hero_with_optimized_jpeg_fallback(self):
+        response = self.client.get("/solutions/engineering/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        hero = soup.select_one(".hero-image-bg picture")
+        self.assertIsNotNone(hero)
+
+        webp_source = hero.find("source", {"type": "image/webp"})
+        self.assertIsNotNone(webp_source)
+        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
+        self.assertIn("engineering-hero-1920.webp", webp_source.get("srcset"))
+        self.assertNotIn("engineering-hero.jpg", webp_source.get("srcset"))
+
+        hero_image = hero.find("img")
+        self.assertIsNotNone(hero_image)
+        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        self.assertNotIn("engineering-hero.jpg", hero_image.get("src"))
+        self.assertIn("engineering-hero-1920.jpg", hero_image.get("srcset"))
+        self.assertNotIn("engineering-hero.jpg", hero_image.get("srcset"))
+        self.assertEqual(hero_image.get("loading"), "eager")
+        self.assertEqual(hero_image.get("fetchpriority"), "high")
+        self.assertEqual(hero_image.get("width"), "1280")
+        self.assertEqual(hero_image.get("height"), "543")
+
+    def test_solution_pages_do_not_load_preline(self):
+        for path in (
+            "/solutions/",
+            "/solutions/small-business/",
+            "/solutions/recruiting/",
+            "/solutions/recruiting/candidate-sourcing/",
+        ):
             "/pretrained-workers/talent-scout/",
             "/pretrained-workers/talent-scout/hire/",
             "/pretrained-workers/talent-scout/spawn/",
@@ -2639,6 +3293,176 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
         self.assertIsNotNone(soup.find("a", {"href": reverse("pages:solutions")}))
+        hub_links = soup.find_all("a", {"href": reverse("pages:solutions")})
+        self.assertTrue(
+            any("All Solutions" in link.get_text(" ", strip=True) for link in hub_links)
+        )
+
+    def test_dedicated_solution_pages_include_social_metadata(self):
+        for slug, data in page_views.SolutionView.SOLUTION_DATA.items():
+            with self.subTest(slug=slug):
+                response = self.client.get(self._solution_url(slug))
+
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                expected_image_url = response.wsgi_request.build_absolute_uri(static(data["social_image"]))
+
+                self.assertEqual(soup.title.get_text(strip=True), data["seo_title"])
+                self.assertEqual(len(soup.find_all("meta", {"name": "description"})), 1)
+                self.assertEqual(
+                    soup.find("meta", {"name": "description"}).get("content"),
+                    data["seo_description"],
+                )
+                self.assertEqual(soup.find("meta", {"property": "og:type"}).get("content"), "website")
+                self.assertEqual(soup.find("meta", {"property": "og:title"}).get("content"), data["seo_title"])
+                self.assertEqual(
+                    soup.find("meta", {"property": "og:description"}).get("content"),
+                    data["seo_description"],
+                )
+                self.assertEqual(
+                    soup.find("meta", {"property": "og:url"}).get("content"),
+                    response.wsgi_request.build_absolute_uri(response.wsgi_request.path),
+                )
+                self.assertEqual(soup.find("meta", {"property": "og:image"}).get("content"), expected_image_url)
+                self.assertEqual(
+                    soup.find("meta", {"property": "og:image:alt"}).get("content"),
+                    data["social_image_alt"],
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:card"}).get("content"),
+                    "summary_large_image",
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:title"}).get("content"),
+                    data["seo_title"],
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:description"}).get("content"),
+                    data["seo_description"],
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:image"}).get("content"),
+                    expected_image_url,
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:image:alt"}).get("content"),
+                    data["social_image_alt"],
+                )
+                json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
+                self.assertEqual(len(json_ld_scripts), 2)
+
+                structured_data = json.loads(json_ld_scripts[0].string)
+                expected_solution_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
+                self.assertEqual(structured_data["@context"], "https://schema.org")
+                self.assertEqual(structured_data["@type"], "WebPage")
+                self.assertEqual(structured_data["name"], data["seo_title"])
+                self.assertEqual(structured_data["description"], data["seo_description"])
+                self.assertEqual(structured_data["url"], expected_solution_url)
+                self.assertEqual(structured_data["image"], expected_image_url)
+                if data.get("date_modified"):
+                    self.assertEqual(structured_data["dateModified"], data["date_modified"])
+                else:
+                    self.assertNotIn("dateModified", structured_data)
+                self.assertEqual(structured_data["publisher"]["name"], "Gobii")
+                self.assertEqual(
+                    structured_data["publisher"]["url"],
+                    response.wsgi_request.build_absolute_uri(reverse("pages:home")),
+                )
+                self.assertEqual(
+                    structured_data["publisher"]["logo"],
+                    response.wsgi_request.build_absolute_uri(
+                        static(page_views.SolutionView.ORGANIZATION_LOGO_PATH)
+                    ),
+                )
+                self.assertEqual(
+                    structured_data["publisher"]["sameAs"],
+                    list(page_views.SolutionView.ORGANIZATION_SAME_AS),
+                )
+                self.assertEqual(structured_data["isPartOf"]["@type"], "WebSite")
+                self.assertEqual(structured_data["isPartOf"]["name"], "Gobii")
+                self.assertEqual(structured_data["mainEntity"]["@type"], "Service")
+                self.assertEqual(
+                    structured_data["mainEntity"]["name"],
+                    f"Gobii {data['title']} AI agents",
+                )
+                self.assertEqual(structured_data["mainEntity"]["serviceType"], "AI agent solution")
+                self.assertEqual(structured_data["mainEntity"]["category"], data["title"])
+                self.assertEqual(structured_data["mainEntity"]["provider"], structured_data["publisher"])
+
+                breadcrumb_data = json.loads(json_ld_scripts[1].string)
+                self.assertEqual(breadcrumb_data["@context"], "https://schema.org")
+                self.assertEqual(breadcrumb_data["@type"], "BreadcrumbList")
+                expected_breadcrumbs = [
+                    {
+                        "@type": "ListItem",
+                        "position": 1,
+                        "name": "Home",
+                        "item": response.wsgi_request.build_absolute_uri(reverse("pages:home")),
+                    },
+                    {
+                        "@type": "ListItem",
+                        "position": 2,
+                        "name": "Solutions",
+                        "item": response.wsgi_request.build_absolute_uri(reverse("pages:solutions")),
+                    },
+                ]
+                for parent in data.get("breadcrumb_parents") or []:
+                    expected_breadcrumbs.append({
+                        "@type": "ListItem",
+                        "position": len(expected_breadcrumbs) + 1,
+                        "name": parent["name"],
+                        "item": response.wsgi_request.build_absolute_uri(
+                            self._solution_url(parent["solution_slug"])
+                        ),
+                    })
+                expected_breadcrumbs.append({
+                    "@type": "ListItem",
+                    "position": len(expected_breadcrumbs) + 1,
+                    "name": data["title"],
+                    "item": expected_solution_url,
+                })
+                self.assertEqual(breadcrumb_data["itemListElement"], expected_breadcrumbs)
+
+    def test_dedicated_solution_pages_use_keyword_explicit_h1(self):
+        expected_headings = {
+            "recruiting": "AI recruiting agents for candidate sourcing",
+            "recruiting/candidate-sourcing": "AI candidate sourcing for recruiter-reviewed shortlists",
+            "sales": "AI sales agents for outbound lead generation",
+            "small-business": "AI coworkers for the work your small business keeps doing after hours",
+            "health-care": "Healthcare AI agents for care and admin automation",
+            "defense": "Open source AI agents for defense",
+            "engineering": "Agentic AI API for automation",
+        }
+
+        for slug, expected_heading in expected_headings.items():
+            with self.subTest(slug=slug):
+                response = self.client.get(self._solution_url(slug))
+
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                headings = soup.find_all("h1")
+                self.assertEqual(len(headings), 1)
+                self.assertEqual(headings[0].get_text(" ", strip=True), expected_heading)
+
+    def test_candidate_sourcing_page_includes_seo_workflow_content(self):
+        response = self.client.get("/solutions/recruiting/candidate-sourcing/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_text = soup.get_text(" ", strip=True)
+
+        self.assertIn("AI candidate sourcing", page_text)
+        self.assertIn("From role brief to candidate shortlist", page_text)
+        self.assertIn("Sourcing work that happens before your ATS can help", page_text)
+        self.assertIn("A shortlist your team can actually use", page_text)
+        self.assertIn("When automated candidate sourcing pays off", page_text)
+        self.assertIn("What is AI candidate sourcing?", page_text)
+        self.assertIn("Does Gobii replace sourcers or recruiters?", page_text)
+        self.assertIsNotNone(soup.find(id="candidate-sourcing-workflow"))
+        self.assertIsNotNone(soup.find(id="candidate-sourcing-faq"))
+        self.assertIsNotNone(soup.select_one(".candidate-sourcing-templates"))
+        self.assertIn("Start with Talent Scout, then add specialists", page_text)
+        self.assertNotIn("bg-emerald-950", response.content.decode())
         self.assertIsNotNone(
             soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "recruiting"})})
         )
@@ -2680,6 +3504,83 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             with self.subTest(path=path):
                 response = self.client.get(path)
 
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    def test_small_business_page_includes_hub_content_and_ctas(self):
+        response = self.client.get("/solutions/small-business/")
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_text = soup.get_text(" ", strip=True)
+        expected_questions = [
+            "What can AI agents do for a small business?",
+            "How is Gobii different from ChatGPT?",
+            "How is Gobii different from Zapier or n8n?",
+            "How is Gobii different from hiring a virtual assistant?",
+            "Do I need to know how to code?",
+            "Can Gobii work with my CRM, spreadsheets, website, inbox, or project tools?",
+            "Can Gobii contact customers?",
+            "How do approvals work?",
+            "What should I automate first?",
+            "Is Gobii safe for sensitive business data?",
+            "Can I use Gobii if I only have one or two employees?",
+        ]
+
+        self.assertIn("Small-business AI coworkers", page_text)
+        self.assertIn("Pick the work you want off your plate", page_text)
+        self.assertIn("Small-business work rarely fits inside one app", page_text)
+        self.assertIn("Start where the work is already piling up", page_text)
+        self.assertIn("Your back office can start before you open", page_text)
+        self.assertIn("More capacity, without handing over judgment", page_text)
+        self.assertIn("Small Business Starter Pack", page_text)
+        self.assertIn("Put one recurring task on Gobii this week", page_text)
+        self.assertIn("not replace your judgment", page_text)
+        for section_id in ("small-business-agents", "how-it-works", "starter-pack", "small-business-questions"):
+            self.assertIsNotNone(soup.find(id=section_id))
+        for question in expected_questions:
+            self.assertIn(question, page_text)
+
+        hero_source = soup.find("input", {"name": "source_page", "value": "small_business_hero"})
+        self.assertIsNotNone(hero_source)
+        hero_form = hero_source.find_parent("form")
+        self.assertEqual(hero_form.get("method"), "post")
+        self.assertEqual(
+            hero_form.get("action"),
+            reverse("pages:pretrained_worker_hire", kwargs={"slug": "lead-hunter"}),
+        )
+        self.assertEqual(
+            self._normalized_button_text(hero_form.find("button", {"type": "submit"})),
+            "Start Free Trial",
+        )
+        self.assertIsNotNone(
+            soup.find("a", {"href": "#starter-pack", "data-analytics-cta-id": "small_business_hero_browse_agents"})
+        )
+        self.assertIsNotNone(soup.find("img", {"src": static("images/solutions/sales-hero.jpg")}))
+        self.assertIsNotNone(
+            soup.find(
+                "img",
+                {
+                    "src": static(
+                        "images/blog/newsletters/newsletter-2026-03-10-your-agents-can-show-their-work-now-hero.png"
+                    )
+                },
+            )
+        )
+
+        user = get_user_model().objects.create_user(
+            username="small_business_cta@example.com",
+            email="small_business_cta@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+        auth_response = self.client.get("/solutions/small-business/")
+        self.assertEqual(auth_response.status_code, 200)
+        auth_soup = BeautifulSoup(auth_response.content, "html.parser")
+        auth_source = auth_soup.find("input", {"name": "source_page", "value": "small_business_hero"})
+        self.assertIsNotNone(auth_source)
+        auth_button = auth_source.find_parent("form").find("button", {"type": "submit"})
+        self.assertEqual(self._normalized_button_text(auth_button), "Spawn Lead Hunter")
+
+    def test_engineering_page_includes_developer_agent_questions(self):
+        response = self.client.get("/solutions/engineering/")
                 self.assertEqual(response.status_code, 200)
 
         response = self.client.get("/solutions/operations/")

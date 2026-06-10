@@ -1,0 +1,592 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ solution_seo_title }}{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+{% include "solutions/_seo_meta.html" %}
+<style>
+  .small-business-hero {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background: #ffffff;
+  }
+
+  .small-business-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0.96) 34%, rgba(255, 255, 255, 0.74) 58%, rgba(255, 255, 255, 0.12) 100%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.42) 48%, #ffffff 100%);
+  }
+
+  .small-business-hero-image {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  .small-business-hero-image img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 72% 48%;
+  }
+
+  .small-business-hero-content {
+    position: relative;
+    z-index: 10;
+  }
+
+  .sb-card {
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+
+  .sb-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(5, 150, 105, 0.45);
+  }
+
+  .sb-dark-pattern {
+    background:
+      linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(6, 78, 59, 0.98)),
+      #0f172a;
+  }
+
+  @media (max-width: 767px) {
+    .small-business-hero::before {
+      background:
+        linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0.94) 58%, rgba(255, 255, 255, 0.36) 100%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.68) 52%, #ffffff 100%);
+    }
+
+    .small-business-hero-image img {
+      object-position: 68% 50%;
+      opacity: 0.5;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="small-business-hero -mt-16">
+  <div class="small-business-hero-image" aria-hidden="true">
+    <img
+      src="{% static 'images/solutions/sales-hero.jpg' %}"
+      srcset="{% static 'images/solutions/sales-hero-640.jpg' %} 640w,
+              {% static 'images/solutions/sales-hero-960.jpg' %} 960w,
+              {% static 'images/solutions/sales-hero-1280.jpg' %} 1280w,
+              {% static 'images/solutions/sales-hero-1920.jpg' %} 1920w,
+              {% static 'images/solutions/sales-hero.jpg' %} 2816w"
+      sizes="100vw"
+      alt=""
+      width="2816"
+      height="1536"
+      loading="eager"
+      fetchpriority="high"
+      decoding="async"
+    >
+  </div>
+
+  <section class="small-business-hero-content">
+    <div class="mx-auto max-w-7xl px-6 pb-20 pt-24 sm:px-8 sm:pt-28 lg:px-12 lg:pb-24 lg:pt-32">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-emerald-800">Small-business AI coworkers</p>
+        <h1 class="mt-5 max-w-3xl text-4xl font-light leading-[1.08] text-slate-950 sm:text-5xl lg:text-6xl">
+          AI coworkers for the work your small business keeps doing after hours
+        </h1>
+        <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
+          Gobii gives your small business always-on agents for lead research, customer follow-up, vendor checks, data cleanup, market research, admin work, and the browser tasks that fall between your apps. Email them, text them, or chat with them. They keep working until there is a report, spreadsheet, draft, or next step ready for review.
+        </p>
+
+        <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="small_business_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+            {% csrf_token %}
+            <input type="hidden" name="source_page" value="small_business_hero" />
+            <input type="hidden" name="trial_onboarding" value="1" />
+            <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+            <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-7 py-3.5 text-sm font-semibold text-white transition hover:bg-emerald-800 sm:w-auto">
+              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Lead Hunter{% endif %}
+              <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+            </button>
+          </form>
+          <a href="#starter-pack" class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-white px-7 py-3.5 text-sm font-semibold text-emerald-900 transition hover:border-emerald-400 hover:bg-emerald-50 sm:w-auto" data-analytics-cta-id="small_business_hero_browse_agents" data-analytics-placement="hero" data-analytics-intent="browse_agents">
+            Browse Small-Business Agents
+            <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
+          </a>
+        </div>
+
+        <div class="mt-12 grid max-w-3xl grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+          <div class="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white/90 px-3 py-2 text-slate-800">
+            <i aria-hidden="true" data-lucide="clock-3" class="h-4 w-4 text-emerald-700"></i>
+            Works 24/7
+          </div>
+          <div class="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white/90 px-3 py-2 text-slate-800">
+            <i aria-hidden="true" data-lucide="messages-square" class="h-4 w-4 text-cyan-700"></i>
+            Email, SMS, chat
+          </div>
+          <div class="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white/90 px-3 py-2 text-slate-800">
+            <i aria-hidden="true" data-lucide="monitor" class="h-4 w-4 text-indigo-700"></i>
+            Uses real browsers
+          </div>
+          <div class="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white/90 px-3 py-2 text-slate-800">
+            <i aria-hidden="true" data-lucide="file-spreadsheet" class="h-4 w-4 text-amber-700"></i>
+            CSVs and reports
+          </div>
+          <div class="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white/90 px-3 py-2 text-slate-800">
+            <i aria-hidden="true" data-lucide="user-check" class="h-4 w-4 text-rose-700"></i>
+            Human review
+          </div>
+          <div class="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white/90 px-3 py-2 text-slate-800">
+            <i aria-hidden="true" data-lucide="square-terminal" class="h-4 w-4 text-slate-700"></i>
+            No code required
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<section class="bg-white py-16 lg:py-20" id="small-business-agents">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="max-w-3xl">
+      <p class="text-sm font-semibold uppercase text-emerald-800">Pick the work you want off your plate</p>
+      <h2 class="mt-3 text-3xl font-light leading-tight text-slate-950 sm:text-4xl">
+        Start with one job you already know needs doing
+      </h2>
+      <p class="mt-4 text-base leading-7 text-slate-700">
+        Gobii can run the workflow once, repeat it on a schedule, or wake up when a customer, form, file, or webhook needs attention.
+      </p>
+    </div>
+
+    <div class="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+      <article class="sb-card rounded-lg border border-emerald-100 bg-white p-6">
+        <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-emerald-100 text-emerald-800">
+          <i aria-hidden="true" data-lucide="target" class="h-5 w-5"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Lead Hunter</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Finds prospects, researches companies, collects source links, and prepares outreach notes so your next sales push does not start from a blank spreadsheet.</p>
+      </article>
+
+      <article class="sb-card rounded-lg border border-cyan-100 bg-white p-6">
+        <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-cyan-100 text-cyan-800">
+          <i aria-hidden="true" data-lucide="reply" class="h-5 w-5"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Customer Follow-Up Agent</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Tracks new inquiries, drafts replies, prepares reminders, and keeps leads from going cold while you are with customers.</p>
+      </article>
+
+      <article class="sb-card rounded-lg border border-amber-100 bg-white p-6">
+        <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-amber-100 text-amber-800">
+          <i aria-hidden="true" data-lucide="receipt-text" class="h-5 w-5"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Vendor Price Analyst</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Checks supplier pricing, invoices, public catalogs, and competing vendors for changes that could affect margins.</p>
+      </article>
+
+      <article class="sb-card rounded-lg border border-indigo-100 bg-white p-6">
+        <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-indigo-100 text-indigo-800">
+          <i aria-hidden="true" data-lucide="map-pin" class="h-5 w-5"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Local Visibility Agent</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Reviews your Google Business Profile, directories, reviews, competitor listings, and local SEO gaps so customers can actually find you.</p>
+      </article>
+
+      <article class="sb-card rounded-lg border border-rose-100 bg-white p-6">
+        <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-rose-100 text-rose-800">
+          <i aria-hidden="true" data-lucide="file-spreadsheet" class="h-5 w-5"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Data Cleanup Clerk</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Cleans spreadsheets, deduplicates records, normalizes fields, and prepares CSVs for import into the tools you already use.</p>
+      </article>
+
+      <article class="sb-card rounded-lg border border-teal-100 bg-white p-6">
+        <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-teal-100 text-teal-800">
+          <i aria-hidden="true" data-lucide="clipboard-list" class="h-5 w-5"></i>
+        </div>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">Owner's Briefing Agent</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Sends a daily or weekly summary of leads, open issues, vendor changes, customer reviews, stalled tasks, and recommended next steps.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="sb-dark-pattern py-16 text-white lg:py-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
+      <div>
+        <p class="text-sm font-semibold uppercase text-emerald-200">Built for the work between tools</p>
+        <h2 class="mt-3 text-3xl font-light leading-tight sm:text-4xl">
+          Small-business work rarely fits inside one app
+        </h2>
+        <p class="mt-5 text-base leading-7 text-emerald-50">
+          Most automation tools are great when every step is predictable. Small-business work usually is not. A customer asks a strange question. A lead arrives with missing information. A vendor changes pricing. A competitor updates a page. A spreadsheet needs judgment before it can be imported.
+        </p>
+        <p class="mt-4 text-base leading-7 text-emerald-50">
+          Gobii is for that messy middle: browser work, research, comparison, follow-up, cleanup, and structured handoff.
+        </p>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="rounded-lg border border-white/15 bg-white/10 p-5">
+          <h3 class="text-base font-semibold">Chatbots answer questions</h3>
+          <p class="mt-2 text-sm leading-6 text-emerald-50">Gobii can keep working until there is an output to review.</p>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-5">
+          <h3 class="text-base font-semibold">App automations need clean steps</h3>
+          <p class="mt-2 text-sm leading-6 text-emerald-50">Gobii can handle open-ended browser work and messy inputs.</p>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-5">
+          <h3 class="text-base font-semibold">Virtual assistants can be hard to scale</h3>
+          <p class="mt-2 text-sm leading-6 text-emerald-50">Gobii gives repeatable help for recurring research and admin work.</p>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-5">
+          <h3 class="text-base font-semibold">Dashboards show what happened</h3>
+          <p class="mt-2 text-sm leading-6 text-emerald-50">Gobii can collect the data, organize it, and send the next step.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how-it-works" class="bg-white py-16 lg:py-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-12 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
+      <div>
+        <p class="text-sm font-semibold uppercase text-emerald-800">How it works</p>
+        <h2 class="mt-3 text-3xl font-light leading-tight text-slate-950 sm:text-4xl">
+          Brief your Gobii like a new hire
+        </h2>
+        <p class="mt-4 text-base leading-7 text-slate-700">
+          You do not need to build an automation. Describe the job, the sources it can use, the output you want, and when a human should review the result.
+        </p>
+
+        <div class="mt-9 space-y-7">
+          <div class="flex gap-4">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-700 text-sm font-semibold text-white">1</div>
+            <div>
+              <h3 class="text-lg font-semibold text-slate-950">Give it the job</h3>
+              <p class="mt-2 text-sm leading-6 text-slate-700">Tell your Gobii what good looks like: target customers, approved websites, spreadsheet columns, tone, deadlines, and review rules.</p>
+            </div>
+          </div>
+
+          <div class="flex gap-4">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyan-700 text-sm font-semibold text-white">2</div>
+            <div>
+              <h3 class="text-lg font-semibold text-slate-950">Let it work through the browser</h3>
+              <p class="mt-2 text-sm leading-6 text-slate-700">It searches, clicks, compares, extracts, fills forms, checks pages, updates records, and organizes evidence.</p>
+            </div>
+          </div>
+
+          <div class="flex gap-4">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-700 text-sm font-semibold text-white">3</div>
+            <div>
+              <h3 class="text-lg font-semibold text-slate-950">Get real deliverables</h3>
+              <p class="mt-2 text-sm leading-6 text-slate-700">Receive reports, CSVs, PDFs, spreadsheet updates, draft emails, source links, and recommended next steps.</p>
+            </div>
+          </div>
+
+          <div class="flex gap-4">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-700 text-sm font-semibold text-white">4</div>
+            <div>
+              <h3 class="text-lg font-semibold text-slate-950">Review and refine</h3>
+              <p class="mt-2 text-sm leading-6 text-slate-700">Approve sensitive actions, correct the instructions, and make the next run better.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <figure class="overflow-hidden rounded-lg border border-emerald-100 bg-white">
+        <img
+          src="{% static 'images/blog/newsletters/newsletter-2026-03-10-your-agents-can-show-their-work-now-hero.png' %}"
+          alt="Gobii agent activity showing a planning step and generated chart"
+          width="1794"
+          height="988"
+          loading="lazy"
+          decoding="async"
+          class="w-full"
+        >
+        <figcaption class="px-5 py-4 text-sm leading-6 text-slate-700">
+          Gobii agents can return files, reports, charts, and source-linked work for review.
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="bg-cyan-50 py-16 lg:py-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="max-w-3xl">
+      <p class="text-sm font-semibold uppercase text-cyan-900">First jobs to delegate</p>
+      <h2 class="mt-3 text-3xl font-light leading-tight text-slate-950 sm:text-4xl">
+        Start where the work is already piling up
+      </h2>
+    </div>
+
+    <div class="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Find 50 local B2B prospects every Monday.</div>
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Draft follow-ups for new website form submissions.</div>
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Check competitor prices every Friday.</div>
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Audit online listings and missing directory profiles.</div>
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Clean a messy customer spreadsheet before import.</div>
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Research vendors before a renewal.</div>
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Monitor RFPs, bids, grants, or local opportunities.</div>
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Prepare a weekly owner briefing.</div>
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Research candidates before interviews.</div>
+      <div class="rounded-lg bg-white p-4 text-sm leading-6 text-slate-800">Turn customer reviews into response drafts and improvement themes.</div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16 lg:py-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:items-start">
+      <div>
+        <p class="text-sm font-semibold uppercase text-emerald-800">A day with Gobiis</p>
+        <h2 class="mt-3 text-3xl font-light leading-tight text-slate-950 sm:text-4xl">
+          Your back office can start before you open
+        </h2>
+        <p class="mt-5 text-base leading-7 text-slate-700">
+          You still make the calls. Gobii makes sure the work is ready when you have time to look.
+        </p>
+      </div>
+
+      <div class="grid gap-4">
+        <div class="grid gap-3 rounded-lg border border-emerald-100 bg-white p-5 sm:grid-cols-[7rem_1fr]">
+          <span class="text-sm font-semibold text-emerald-800">8:00 AM</span>
+          <p class="text-sm leading-6 text-slate-700">Lead Hunter delivers 25 qualified local prospects with source links.</p>
+        </div>
+        <div class="grid gap-3 rounded-lg border border-cyan-100 bg-white p-5 sm:grid-cols-[7rem_1fr]">
+          <span class="text-sm font-semibold text-cyan-800">10:30 AM</span>
+          <p class="text-sm leading-6 text-slate-700">Customer Follow-Up Agent drafts replies to yesterday's inquiries.</p>
+        </div>
+        <div class="grid gap-3 rounded-lg border border-amber-100 bg-white p-5 sm:grid-cols-[7rem_1fr]">
+          <span class="text-sm font-semibold text-amber-800">1:00 PM</span>
+          <p class="text-sm leading-6 text-slate-700">Vendor Price Analyst flags a supplier price change before the next order.</p>
+        </div>
+        <div class="grid gap-3 rounded-lg border border-indigo-100 bg-white p-5 sm:grid-cols-[7rem_1fr]">
+          <span class="text-sm font-semibold text-indigo-800">3:00 PM</span>
+          <p class="text-sm leading-6 text-slate-700">Local Visibility Agent summarizes new reviews and directory gaps.</p>
+        </div>
+        <div class="grid gap-3 rounded-lg border border-rose-100 bg-white p-5 sm:grid-cols-[7rem_1fr]">
+          <span class="text-sm font-semibold text-rose-800">5:00 PM</span>
+          <p class="text-sm leading-6 text-slate-700">Owner's Briefing Agent sends the day's report with what needs your decision.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-indigo-950 py-16 text-white lg:py-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
+      <div>
+        <p class="text-sm font-semibold uppercase text-cyan-200">Human-reviewed automation</p>
+        <h2 class="mt-3 text-3xl font-light leading-tight sm:text-4xl">
+          More capacity, without handing over judgment
+        </h2>
+        <p class="mt-5 text-base leading-7 text-indigo-50">
+          Gobii is designed to expand your capacity, not replace your judgment. Your team decides the instructions, approved sources, credentials, contacts, review steps, and outputs. Agents can prepare the work, organize the evidence, and draft the next action while humans approve anything that affects customers, money, hiring, compliance, or brand reputation.
+        </p>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="rounded-lg border border-white/15 bg-white/10 p-5">
+          <span class="block text-xs font-semibold uppercase text-cyan-200">Input</span>
+          <p class="mt-2 text-base font-semibold">Plain-language brief</p>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-5">
+          <span class="block text-xs font-semibold uppercase text-cyan-200">Agent work</span>
+          <p class="mt-2 text-base font-semibold">Browse, collect, compare</p>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-5">
+          <span class="block text-xs font-semibold uppercase text-cyan-200">Output</span>
+          <p class="mt-2 text-base font-semibold">Report, CSV, draft, update</p>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-5">
+          <span class="block text-xs font-semibold uppercase text-cyan-200">Control</span>
+          <p class="mt-2 text-base font-semibold">Human review</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="starter-pack" class="bg-white py-16 lg:py-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-8 lg:grid-cols-[0.75fr_1.25fr] lg:items-start">
+      <div>
+        <p class="text-sm font-semibold uppercase text-emerald-800">Small Business Starter Pack</p>
+        <h2 class="mt-3 text-3xl font-light leading-tight text-slate-950 sm:text-4xl">
+          Start with a worker, not a blank page
+        </h2>
+        <p class="mt-4 text-base leading-7 text-slate-700">
+          Choose a starter agent, give it a business-specific brief, and refine from there.
+        </p>
+      </div>
+
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="rounded-lg border border-emerald-100 bg-white p-4 text-sm font-semibold text-slate-900">Lead Hunter</div>
+        <div class="rounded-lg border border-cyan-100 bg-white p-4 text-sm font-semibold text-slate-900">Project Manager</div>
+        <div class="rounded-lg border border-amber-100 bg-white p-4 text-sm font-semibold text-slate-900">Vendor Price Analyst</div>
+        <div class="rounded-lg border border-indigo-100 bg-white p-4 text-sm font-semibold text-slate-900">Pipeline Whisperer</div>
+        <div class="rounded-lg border border-rose-100 bg-white p-4 text-sm font-semibold text-slate-900">Customer Health Monitor</div>
+        <div class="rounded-lg border border-teal-100 bg-white p-4 text-sm font-semibold text-slate-900">Competitor Intelligence Analyst</div>
+        <div class="rounded-lg border border-emerald-100 bg-white p-4 text-sm font-semibold text-slate-900">Local Visibility Agent</div>
+        <div class="rounded-lg border border-cyan-100 bg-white p-4 text-sm font-semibold text-slate-900">Data Cleanup Clerk</div>
+        <div class="rounded-lg border border-amber-100 bg-white p-4 text-sm font-semibold text-slate-900">Review Wrangler</div>
+        <div class="rounded-lg border border-indigo-100 bg-white p-4 text-sm font-semibold text-slate-900">Owner's Briefing Agent</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="small-business-questions" class="bg-white py-16 lg:py-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+      <div class="lg:sticky lg:top-24">
+        <p class="text-sm font-semibold uppercase text-emerald-800">Questions</p>
+        <h2 class="mt-3 text-3xl font-light leading-tight text-slate-950 sm:text-4xl">
+          Small-business AI, with the owner still in control
+        </h2>
+        <p class="mt-5 text-base leading-7 text-slate-700">
+          Gobii is best for recurring work that should be prepared, organized, and reviewed before it affects customers, vendors, money, or reputation.
+        </p>
+      </div>
+
+      <div class="grid gap-4">
+        <details class="group rounded-lg border border-emerald-100 bg-white p-6" open>
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            What can AI agents do for a small business?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-emerald-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">Gobii agents can help with recurring work that normally takes browser research, spreadsheets, comparison, follow-up, or record updates. Common workflows include lead research, customer follow-up, vendor monitoring, competitor tracking, directory audits, review summaries, spreadsheet cleanup, candidate research, weekly reporting, and draft communications for review.</p>
+        </details>
+
+        <details class="group rounded-lg border border-cyan-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            How is Gobii different from ChatGPT?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-cyan-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">ChatGPT is usually a place you go to ask a question. Gobii is built around persistent AI coworkers that can be given a job, contacted through email, SMS, or chat, and run work through browsers, files, schedules, and connected tools. The useful difference is follow-through: Gobii can keep working until there is a source-linked output, file, draft, or next step to review.</p>
+        </details>
+
+        <details class="group rounded-lg border border-amber-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            How is Gobii different from Zapier or n8n?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-amber-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">Zapier and n8n are strongest when the process is predictable: when this happens, do that. Small-business work often starts with incomplete data, changing websites, and judgment calls. Gobii is better suited for the messy steps around apps: browsing websites, comparing pages, researching context, cleaning spreadsheets, and preparing work for a person to approve.</p>
+        </details>
+
+        <details class="group rounded-lg border border-indigo-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            How is Gobii different from hiring a virtual assistant?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-indigo-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">A virtual assistant is flexible, human, and often valuable for relationship-heavy work. Gobii is better for repeatable research, monitoring, cleanup, and reporting that should happen the same way every day or week. Many teams will use both: Gobii prepares the evidence and drafts, while people handle judgment, relationships, and sensitive decisions.</p>
+        </details>
+
+        <details class="group rounded-lg border border-rose-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            Do I need to know how to code?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-rose-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">No. You can brief a Gobii in plain language. Tell it the job, approved sources, output format, schedule, and review rules. Technical teams can go deeper with APIs and integrations, but small businesses can start with a worker and a clear task.</p>
+        </details>
+
+        <details class="group rounded-lg border border-teal-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            Can Gobii work with my CRM, spreadsheets, website, inbox, or project tools?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-teal-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">Gobii is designed to work around the tools you already use. Depending on your setup, agents can use browsers, files, spreadsheets, webhooks, email, SMS, and connected business systems. The small-business pattern is simple: define what the agent may access, where results should go, and who reviews the output.</p>
+        </details>
+
+        <details class="group rounded-lg border border-emerald-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            Can Gobii contact customers?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-emerald-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">Gobii can draft customer-facing messages and help with follow-up workflows, but sensitive outreach should be reviewed by a human. For most small businesses, the safest first step is to let Gobii prepare replies, reminders, notes, and source context, then have a person approve what gets sent.</p>
+        </details>
+
+        <details class="group rounded-lg border border-cyan-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            How do approvals work?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-cyan-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">You decide where approval is required. A Gobii can gather data, update non-sensitive records, draft a message, or prepare a report on its own, then pause for review before anything important goes to a customer, vendor, applicant, financial system, or public channel.</p>
+        </details>
+
+        <details class="group rounded-lg border border-amber-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            What should I automate first?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-amber-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">Start with a task that is repetitive, easy to judge, and annoying enough that it keeps getting delayed. Good first workflows include weekly lead research, review monitoring, vendor price checks, spreadsheet cleanup, local directory audits, and owner briefings.</p>
+        </details>
+
+        <details class="group rounded-lg border border-indigo-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            Is Gobii safe for sensitive business data?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-indigo-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">Gobii workflows should be set up with approved sources, scoped credentials, clear review steps, and careful handling of customer or business data. Agents should only access what they need for the job, and humans should review outputs before decisions that affect money, customers, hiring, compliance, or reputation.</p>
+        </details>
+
+        <details class="group rounded-lg border border-rose-100 bg-white p-6">
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-5 text-lg font-semibold text-slate-950">
+            Can I use Gobii if I only have one or two employees?
+            <i aria-hidden="true" data-lucide="plus" class="mt-1 h-5 w-5 shrink-0 text-rose-700 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">Yes. Gobii is useful when the same person is selling, serving customers, chasing vendors, checking spreadsheets, and doing admin after hours. You can start with one recurring job and add more as you learn where it helps.</p>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sb-dark-pattern py-16 text-white lg:py-20">
+  <div class="mx-auto max-w-4xl px-6 text-center sm:px-8 lg:px-12">
+    <p class="text-sm font-semibold uppercase text-emerald-200">Ready to delegate the first job?</p>
+    <h2 class="mt-4 text-3xl font-light leading-tight sm:text-4xl">
+      Put one recurring task on Gobii this week
+    </h2>
+    <p class="mx-auto mt-5 max-w-2xl text-base leading-7 text-emerald-50">
+      Start with lead research, follow-up, vendor monitoring, spreadsheet cleanup, or a weekly owner briefing. Give Gobii the job, review the first output, and refine from there.
+    </p>
+
+    <div class="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
+      <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="small_business_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
+        {% csrf_token %}
+        <input type="hidden" name="source_page" value="small_business_final_cta" />
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+        <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-7 py-3.5 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-50 sm:w-auto">
+          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Lead Hunter{% endif %}
+          <i aria-hidden="true" data-lucide="arrow-right" class="h-4 w-4"></i>
+        </button>
+      </form>
+      <a href="#starter-pack" class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/25 px-7 py-3.5 text-sm font-semibold text-white transition hover:bg-white/10 sm:w-auto" data-analytics-cta-id="small_business_final_browse_agents" data-analytics-placement="final_cta" data-analytics-intent="browse_agents">
+        Browse Small-Business Agents
+        <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
+      </a>
+    </div>
+
+    <div class="mt-10 flex flex-wrap justify-center gap-x-6 gap-y-3 text-sm text-emerald-50">
+      <span class="inline-flex items-center gap-2"><i aria-hidden="true" data-lucide="check" class="h-4 w-4"></i> Launch in minutes</span>
+      <span class="inline-flex items-center gap-2"><i aria-hidden="true" data-lucide="check" class="h-4 w-4"></i> Cancel anytime</span>
+      <span class="inline-flex items-center gap-2"><i aria-hidden="true" data-lucide="check" class="h-4 w-4"></i> Human review built in</span>
+    </div>
+  </div>
+</section>
+{% endblock %}

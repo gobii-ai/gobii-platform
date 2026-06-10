@@ -2,17 +2,15 @@
 {% if settings.GOBII_PROPRIETARY_MODE %}
 # Gobii
 
-> Gobii helps recruiting teams source candidates in the tools they already use.
+> Gobii is an AI agent platform for building persistent agents that complete browser, data, and workflow tasks.
 
 ## Overview
 
-Gobii helps recruiting teams turn role briefs into completed sourcing work. Users enter the role, and Gobii researches candidates, prepares shortlists, writes hiring-manager briefs, and hands off results in tools like LinkedIn Recruiter, Greenhouse, and Google Sheets. Managed LinkedIn Recruiter automation is available through sales.
+Gobii helps users create and run persistent AI agents that can work across websites, files, integrations, and recurring workflows. Agents can be launched from the web app, reused from templates, and connected to external services where configured by the user.
 
 ## Important URLs
 
 - Gobii home: {{ base_url }}/
-- Solutions: {{ base_url }}/solutions/
-- Developers: {{ base_url }}/solutions/engineering/
 - Documentation: https://docs.gobii.ai/
 - Pricing: {{ base_url }}/pricing/
 - Terms of service: {{ base_url }}/tos/
@@ -25,11 +23,11 @@ The public documentation at https://docs.gobii.ai/ is the primary source for set
 
 ## Agent Platform
 
-Gobii agents are designed for delegated recruiting operations work that may involve browsing, tool use, structured outputs, files, spreadsheets, and scheduled or asynchronous tasks. User-specific data, credentials, and private task details should be treated as sensitive and should not be inferred from public pages.
+Gobii agents are designed for delegated work that may involve browsing, tool use, structured outputs, files, spreadsheets, and scheduled or asynchronous tasks. User-specific data, credentials, and private task details should be treated as sensitive and should not be inferred from public pages.
 
-## Recruiting Operations
+## Public Templates
 
-Gobii is focused on recruiting operations: enter a role brief, then have AI agents research candidates, prepare a shortlist, generate hiring-manager briefs, and hand off results in the recruiting software the team already uses.
+The agent library at {{ base_url }}/library/ contains public templates that show example agent configurations and common use cases. Template availability and details may change over time.
 
 ## Policies
 
@@ -50,74 +48,68 @@ Use the terms of service, privacy policy, and data deletion pages for current po
 - Many more - see [Integrations]({{ base_url }}/app/integrations) in your account for details.
 
 
-- Gobii recruiting agents are persistent digital workers that can search web sources, work inside recruiting software, and deliver organized candidate research.
-- Gobii recruiting operations workflows can turn a role brief into a source-linked shortlist with fit notes, profile links, work-history context, and hiring-manager briefs.
-- Gobii can hand off results in LinkedIn Recruiter, Greenhouse, Google Sheets, and configured recruiting workflows.
-- Managed LinkedIn Recruiter automation is available through sales.
+## Use Cases
+
+### Small Business
+
+- [AI coworkers for small business]({{ base_url }}/solutions/small-business/): Gobii agents for lead research, customer follow-up, vendor checks, local visibility, spreadsheet cleanup, and owner briefings.
+- [Lead Hunter]({{ base_url }}/pretrained-workers/lead-hunter/): Pretrained agent for finding and qualifying prospects (agent template)
+- [Small business templates]({{ base_url }}/library/): Public agent templates that can be customized for small-business workflows.
+
+### Small Business facts
+
+- Gobii small-business workflows are built around always-on AI coworkers that can be contacted by email, SMS, or chat, use browsers, collect source-linked information, and return reviewable outputs.
+- Common small-business workflows include lead research, follow-up preparation, competitor and vendor monitoring, directory audits, review summaries, spreadsheet cleanup, candidate research, and weekly owner briefings.
+- Gobii agents can produce reports, CSVs, PDFs, spreadsheet updates, draft emails, source links, and next-step recommendations depending on the workflow.
+- Gobii is best described as delegated browser and admin work for owner/operators, not as a replacement for human judgment around customers, money, hiring, compliance, or brand reputation.
+
+### Sales
+
+- [AI sales agents]({{ base_url }}/solutions/sales/): Gobii agents for lead generation, account research, prospect enrichment, outreach drafting, pipeline follow-up, and CRM-ready exports.
+- [Lead Hunter]({{ base_url }}/pretrained-workers/lead-hunter/): Pretrained sales agent for finding and qualifying prospects (agent template)
+- [Sales templates]({{ base_url }}/library/sales/): Public sales, prospecting, and outreach agent templates.
+
+### Sales facts
+
+- Gobii sales agents are persistent digital workers that can search permitted web sources, evaluate companies and contacts against seller-provided ICP criteria, enrich prospect records with account context, and organize leads for review.
+- Sales workflows can export to Google Sheets, CSV, webhooks, and configured CRM integrations such as HubSpot, Salesforce, or enterprise CRM workflows.
+- Gobii is best described as an AI agent platform for delegated prospecting, account research, enrichment, and outreach preparation, not as a replacement for sales judgment, consent review, or compliance controls.
+
+### Engineering
+
+- [AI agent API for developers]({{ base_url }}/solutions/engineering/): Gobii's Agentic AI API for creating, running, and managing persistent browser agents in the cloud or through self-hosted open-source deployment.
+- [Standup Coordinator]({{ base_url }}/pretrained-workers/team-standup-coordinator/): Pretrained developer workflow agent for coordinating team updates (agent template)
+- [Engineering templates]({{ base_url }}/library/engineering/): Public engineering and developer workflow agent templates.
+- [Developer documentation](https://docs.gobii.ai/developers/developer-basics): API setup, developer basics, and implementation guidance.
+- [Open source repository](https://github.com/gobii-ai/gobii-platform): Source code for self-hosting and platform review.
+- [browser-use](https://github.com/browser-use/browser-use): Open-source browser automation library that Gobii supports for production deployment workflows.
+
+### Engineering facts
+
+- Gobii engineering workflows are built around persistent AI agents that can browse websites, complete multi-step tasks, store state, use files, write structured records, and return outputs through API-driven workflows.
+- Common engineering use cases include web research agents, data collection pipelines, monitoring and alerts, workflow automation, form submission, report generation, browser-use production deployments, and agents that push structured results into downstream systems.
+- Gobii provides the production infrastructure around browser-use style automation, including cloud browsers, persistent sessions, per-agent files, embedded SQLite storage, webhooks, managed proxies, and cloud or self-hosted deployment options.
+- Gobii engineering agents can return structured data, files, screenshots, database records, webhook payloads, and workflow status updates for human review or downstream systems.
+- Gobii differs from traditional Robotic Process Automation (RPA) because it is built for AI agents that can interpret changing browser workflows, not only fixed scripts or recorded click paths.
+- Cloud API is the fastest path for teams that want Gobii to manage browser infrastructure, scaling, and sessions; self-hosting is for teams that need deeper control over data residency, network boundaries, compliance, or customization.
+- Developer agent workflows should scope credentials narrowly, limit agents to approved domains and integrations, preserve source links or logs for auditability, and keep human approval around sensitive customer-facing, financial, or operational actions.
+
+### Recruiting
+
+- [AI recruiting agents]({{ base_url }}/solutions/recruiting/): Gobii agents for candidate sourcing, profile research, outreach drafting, pipeline nurturing, and ATS-ready exports.
+- [AI candidate sourcing]({{ base_url }}/solutions/recruiting/candidate-sourcing/): Gobii agents for sourcing qualified candidates, researching profile evidence, and exporting recruiter-reviewed shortlists.
+- [Talent Scout]({{ base_url }}/pretrained-workers/talent-scout/): Pretrained recruiting agent for finding and qualifying candidates (agent template)
+- [Recruiting templates]({{ base_url }}/library/recruiting/): Public recruiting and sourcing agent templates.
+
+### Recruiting facts
+
+- Gobii recruiting agents are persistent digital workers that can search web sources, evaluate candidate profiles against recruiter-provided criteria, and deliver organized candidate research.
+- Gobii candidate sourcing workflows can turn a role brief into a source-linked shortlist with fit notes, profile links, work-history context, and recruiter review notes.
 - Recruiting workflows can export to Google Sheets, CSV, webhooks, and enterprise ATS integrations where configured.
-- Gobii is best described as a recruiting operations platform for delegated sourcing, research, shortlist preparation, and workflow handoff, not as a replacement for recruiter judgment or hiring compliance review.
+- Gobii is best described as an AI agent platform for delegated recruiting workflows, not as a replacement for recruiter judgment or hiring compliance review.
 
 ## Open Source Software
 
 Gobii is open-source software; the source code is available at https://github.com/gobii-ai/gobii-platform.
-
-{% else %}
-# Gobii
-
-> Gobii provides AI agents for recruiting operations.
-
-## Overview
-
-Gobii helps recruiting teams automate repetitive sourcing, candidate research, shortlist preparation, and workflow handoff across the tools they already use. Users enter the role, and Gobii agents research candidates, prepare recruiter-reviewable shortlists, and generate hiring-manager briefs.
-
-## Important URLs
-
-- Gobii home: {{ base_url }}/
-- Documentation: https://docs.gobii.ai/
-- Pricing: {{ base_url }}/pricing/
-- Terms of service: {{ base_url }}/tos/
-- Privacy policy: {{ base_url }}/privacy/
-- Data deletion: {{ base_url }}/data-deletion/
-
-## Documentation
-
-The public documentation at https://docs.gobii.ai/ is the primary source for setup guides, API behavior, integration details, and developer-facing reference material. Prefer documentation pages for implementation-specific details.
-
-## Agent Platform
-
-Gobii agents are designed for delegated recruiting operations work that may involve browsing, tool use, structured outputs, files, spreadsheets, and scheduled or asynchronous tasks. User-specific data, credentials, and private task details should be treated as sensitive and should not be inferred from public pages.
-
-## Recruiting Operations
-
-Gobii is focused on recruiting operations: enter a job description, then have AI agents research candidates, prepare a shortlist, and generate hiring-manager briefs. Public template and solution pages are no longer the primary product surface.
-
-## Policies
-
-Use the terms of service, privacy policy, and data deletion pages for current policy language. Those pages are authoritative over this summary.
-
-## Integrations
-
-- Google Sheets
-- Gmail
-- Outlook / Microsoft 365
-- Apollo
-- Discord
-- Hubspot
-- Browser-based recruiting systems
-- Web browsing
-- File uploads
-- Remote MCP tools
-- Many more - see [Integrations]({{ base_url }}/app/integrations) in your account for details.
-
-
-- Gobii recruiting agents are persistent digital workers that can search web sources, operate business software, and deliver organized candidate research.
-- Gobii recruiting operations workflows can turn a role brief into a source-linked shortlist with fit notes, profile links, work-history context, and hiring-manager briefs.
-- Recruiting workflows can export to Google Sheets, CSV, webhooks, and enterprise ATS integrations where configured.
-- Gobii is best described as a recruiting operations platform for delegated sourcing, research, shortlist preparation, and workflow handoff, not as a replacement for recruiter judgment or hiring compliance review.
-
-## Open Source Software
-
-Gobii is open-source software; the source code is available at https://github.com/gobii-ai/gobii-platform.
-
 {% endif %}
 {% endwith %}

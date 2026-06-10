@@ -5,23 +5,23 @@
 
 {% block head_extras %}
 {{ block.super }}
-<meta name="description" content="Explore Gobii AI agent solutions for recruiting, sales, healthcare, defense, and developers. Deploy browser agents that research, monitor, and automate work 24/7.">
+<meta name="description" content="Explore Gobii AI agent solutions for small business, recruiting, sales, healthcare, defense, and developers. Deploy browser agents that research, monitor, and automate work 24/7.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="AI Agent Solutions for Teams | Gobii">
-<meta property="og:description" content="Explore Gobii AI agent solutions for recruiting, sales, healthcare, defense, and developers. Deploy browser agents that research, monitor, and automate work 24/7.">
+<meta property="og:description" content="Explore Gobii AI agent solutions for small business, recruiting, sales, healthcare, defense, and developers. Deploy browser agents that research, monitor, and automate work 24/7.">
 <meta property="og:url" content="{{ canonical_url }}">
 <meta property="og:site_name" content="Gobii">
 <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/solutions/sales-hero.jpg' %}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="AI Agent Solutions for Teams | Gobii">
-<meta name="twitter:description" content="Explore Gobii AI agent solutions for recruiting, sales, healthcare, defense, and developers.">
+<meta name="twitter:description" content="Explore Gobii AI agent solutions for small business, recruiting, sales, healthcare, defense, and developers.">
 <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/solutions/sales-hero.jpg' %}">
 <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
     "name": "Gobii AI Agent Solutions",
-    "description": "Gobii solution pages for teams using AI browser agents in recruiting, sales, healthcare, defense, and developer workflows.",
+    "description": "Gobii solution pages for teams using AI browser agents in small business, recruiting, sales, healthcare, defense, and developer workflows.",
     "url": "{{ canonical_url|escapejs }}",
     "isPartOf": {
       "@type": "WebSite",
@@ -39,30 +39,36 @@
       {
         "@type": "ListItem",
         "position": 1,
+        "name": "AI coworkers for small business",
+        "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:solution' slug='small-business' %}"
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
         "name": "AI recruiting agents",
         "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:solution' slug='recruiting' %}"
       },
       {
         "@type": "ListItem",
-        "position": 2,
+        "position": 3,
         "name": "AI sales agents",
         "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:solution' slug='sales' %}"
       },
       {
         "@type": "ListItem",
-        "position": 3,
+        "position": 4,
         "name": "Healthcare AI agents",
         "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:solution' slug='health-care' %}"
       },
       {
         "@type": "ListItem",
-        "position": 4,
+        "position": 5,
         "name": "Open source AI agents for defense",
         "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:solution' slug='defense' %}"
       },
       {
         "@type": "ListItem",
-        "position": 5,
+        "position": 6,
         "name": "AI agent API for developers",
         "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:solution' slug='engineering' %}"
       }
@@ -100,7 +106,7 @@
         AI agent solutions for teams that need work done
       </h1>
       <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
-        Gobii agents browse the web, collect data, monitor changes, and complete repeatable workflows across sales, recruiting, healthcare, defense, and developer platforms.
+        Gobii agents browse the web, collect data, monitor changes, and complete repeatable workflows across small business, sales, recruiting, healthcare, defense, and developer platforms.
       </p>
       <div class="mt-9 flex flex-col gap-3 sm:flex-row">
         <a href="#solution-paths" class="inline-flex items-center justify-center rounded-lg bg-indigo-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-800">
@@ -187,6 +193,13 @@
     </div>
 
     <div class="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+      <a href="{% url 'pages:solution' slug='small-business' %}" class="group rounded-lg border border-indigo-100 bg-white p-5 transition hover:border-indigo-300 hover:bg-indigo-50/70">
+        <span class="inline-flex rounded-md bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">Small Business</span>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">AI coworkers for small business</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Delegate lead research, customer follow-up, vendor checks, data cleanup, local visibility, and weekly owner briefings.</p>
+        <span class="mt-5 inline-flex text-sm font-semibold text-indigo-700 group-hover:text-indigo-900">Explore small-business automation</span>
+      </a>
+
       <a href="{% url 'pages:solution' slug='recruiting' %}" class="group rounded-lg border border-indigo-100 bg-white p-5 transition hover:border-indigo-300 hover:bg-indigo-50/70">
         <span class="inline-flex rounded-md bg-violet-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-violet-800">Recruiting</span>
         <h3 class="mt-5 text-xl font-semibold text-slate-950">AI recruiting agents</h3>
