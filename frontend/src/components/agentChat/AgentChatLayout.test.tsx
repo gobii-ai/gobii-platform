@@ -533,12 +533,14 @@ describe('AgentChatLayout upgrade modal gating', () => {
   it('toggles the desktop plan panel in non-gallery mode', () => {
     renderAgentChatLayout({ planSnapshot: initialPlan })
 
+    expect(document.querySelector('.agent-chat-main')).toHaveAttribute('data-plan-mode', 'docked')
     expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
     expect(screen.getByTestId('banner-plan-button')).toHaveAttribute('data-plan-mode', 'docked')
     expect(screen.getByText('Research sources')).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId('banner-plan-button'))
 
+    expect(document.querySelector('.agent-chat-main')).toHaveAttribute('data-plan-mode', 'hidden')
     expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'hidden')
     expect(screen.getByTestId('banner-plan-button')).toHaveAttribute('data-plan-mode', 'hidden')
     expect(screen.queryByText('Research sources')).not.toBeInTheDocument()
