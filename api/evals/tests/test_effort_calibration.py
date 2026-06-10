@@ -36,6 +36,7 @@ from api.evals.scenarios.effort_calibration import (
     _web_query_value,
 )
 from api.evals.scenarios.sqlite_tool_results import (
+    INVENTORY_URLS,
     LISTING_URLS,
     SQLITE_ITEM_LINK_REPORT,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
@@ -173,6 +174,36 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                     "| --- | --- | --- |\n"
                     "| 2023 Model Y Long Range | $27,455 | Harrisburg Mitsubishi |\n"
                     "| 2025 Model Y | $39,129 | Renn Kirby Frederick |"
+                )
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._outbound_messages_after", return_value=messages):
+            passed = scenario._record_sourced_answer(
+                "run",
+                agent_id="agent",
+                after=None,
+                task_name="verify_listing_links_in_report",
+                source_urls=LISTING_URLS,
+                required_terms=["Model Y", "Harrisburg", "$27,455"],
+                min_sources=4,
+            )
+
+        self.assertFalse(passed)
+        self.assertIn("linked_sources=0", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_item_link_report_rejects_feed_urls_as_listing_substitutes(self):
+        scenario, recorded = SqliteToolResultScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        messages = [
+            SimpleNamespace(
+                body=(
+                    "## Tesla Model Y Inventory Report\n\n"
+                    "| Vehicle | Price | Dealer | Source |\n"
+                    "| --- | --- | --- | --- |\n"
+                    "| 2023 Model Y Long Range | $27,455 | Harrisburg Mitsubishi | "
+                    f"[local.json]({INVENTORY_URLS[0]}) |\n"
+                    "| 2025 Model Y | $39,129 | Renn Kirby Frederick | "
+                    f"[dealer.json]({INVENTORY_URLS[1]}) |"
                 )
             )
         ]
@@ -637,6 +668,34 @@ class EffortCalibrationHarnessTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("raw tool-call markup", result["message"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
+
+    def test_eval_send_chat_skips_in_progress_message_structurally(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="eval_in_progress_chat_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Eval In Progress Chat Browser")
+        agent = PersistentAgent.objects.create(
+            name="Eval In Progress Chat Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+
+        result = execute_send_chat_message(
+            agent,
+            {
+                "body": (
+                    "I have all 5 matching vehicles from both feeds. "
+                    "Let me compute batch-level comparisons and send the report."
+                ),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["skipped"])
+        self.assertIn("eval in-progress", result["message"])
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
 
     def test_send_chat_skips_progress_only_message_before_any_reply(self):

@@ -20,9 +20,10 @@ class FormattingGuidanceOtherChannelTests(SimpleTestCase):
 
     def test_guidance_preserves_row_level_links(self):
         guidance = _get_formatting_guidance()
-        self.assertIn("Preserve row/entity URLs", guidance)
-        self.assertIn("url/link/source_url/listing_url/detail_url", guidance)
+        self.assertIn("Preserve row/entity item URLs", guidance)
+        self.assertIn("url/link/listing_url/detail_url", guidance)
         self.assertIn("add a Link column", guidance)
+        self.assertIn("Source/feed URLs do not substitute for item links", guidance)
 
     def test_send_tool_descriptions_preserve_row_level_links(self):
         chat_tool = get_send_chat_tool()
@@ -31,5 +32,6 @@ class FormattingGuidanceOtherChannelTests(SimpleTestCase):
         email_description = email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"]
 
         for description in (chat_description, email_description):
-            self.assertIn("url/link/source_url/listing_url/detail_url", description)
+            self.assertIn("url/link/listing_url/detail_url", description)
             self.assertIn("Link column", description)
+            self.assertIn("source/feed URLs do not substitute for item links", description)

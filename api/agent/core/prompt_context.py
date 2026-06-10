@@ -3096,7 +3096,7 @@ def _get_formatting_guidance() -> str:
     return (
         "Formatting guidance:\n"
         "Use the matching delivery surface; be scannable, direct, sourced, and no longer than needed. "
-        "Preserve row/entity URLs from url/link/source_url/listing_url/detail_url fields in reports; in tables make the row label clickable or add a Link column, and say unavailable only when absent.\n\n"
+        "Preserve row/entity item URLs from url/link/listing_url/detail_url fields in reports; in tables make the row label clickable or add a Link column. Source/feed URLs do not substitute for item links.\n\n"
         "<web_chat>\n"
         f"{_get_web_chat_formatting_guidance()}\n"
         "</web_chat>\n\n"

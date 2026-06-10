@@ -126,6 +126,33 @@ class SqliteBatchToolTests(TestCase):
             result = out["results"][0]
             self.assertEqual(result["result"][0]["answer"], 42)
 
+    def test_result_with_listing_url_adds_reporting_note(self):
+        with self._with_temp_db():
+            sql = (
+                "CREATE TABLE listings(name TEXT, listing_url TEXT); "
+                "INSERT INTO listings VALUES ('Model Y', 'https://listings.example.test/model-y'); "
+                "SELECT name, listing_url FROM listings;"
+            )
+            out = execute_sqlite_batch(self.agent, {"sql": sql})
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            result = out["results"][-1]
+            self.assertIn("REPORTING", result["message"])
+            self.assertIn("listing_url", result["message"])
+            self.assertIn("Link column", result["reporting_note"])
+
+    def test_source_url_only_does_not_add_item_link_reporting_note(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT 'inventory' AS name, 'https://inventory.example.test/feed.json' AS source_url;"},
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            result = out["results"][0]
+            self.assertNotIn("reporting_note", result)
+            self.assertNotIn("REPORTING", result["message"])
+
     def test_splits_multi_statement_string(self):
         with self._with_temp_db():
             query = "CREATE TABLE t(a INTEGER); INSERT INTO t(a) VALUES (1),(2); SELECT a FROM t ORDER BY a;"
