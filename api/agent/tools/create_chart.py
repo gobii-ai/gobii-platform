@@ -39,6 +39,14 @@ CHART_TYPES = {
     "scatter",
 }
 
+TWO_COLUMN_SINGLE_SERIES_CHART_TYPES = {
+    "bar",
+    "horizontal_bar",
+    "line",
+    "area",
+    "scatter",
+}
+
 
 def _execute_query_for_data(query: str) -> tuple[List[Dict], Optional[List[str]], Optional[str]]:
     """Execute a SQL query and return results as a list of dicts."""
@@ -50,6 +58,105 @@ def _execute_query_for_data(query: str) -> tuple[List[Dict], Optional[List[str]]
 def _extract_values(data: List[Dict], key: str) -> List[Any]:
     """Extract values for a given key from list of dicts."""
     return [row.get(key) for row in data]
+
+
+def _is_numeric_value(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_numeric_column(data: List[Dict], column: str) -> bool:
+    observed_values = [value for row in data if (value := row.get(column)) is not None]
+    if not observed_values:
+        return False
+    return all(_is_numeric_value(value) for value in observed_values)
+
+
+def _result_columns(data: List[Dict], result_columns: Optional[List[str]]) -> List[str]:
+    if result_columns:
+        return result_columns
+    if data and isinstance(data[0], dict):
+        return list(data[0].keys())
+    return []
+
+
+def _other_two_column(columns: List[str], selected_column: Any) -> Optional[str]:
+    if not isinstance(selected_column, str) or selected_column not in columns:
+        return None
+    return next((column for column in columns if column != selected_column), None)
+
+
+def _classify_two_columns(data: List[Dict], columns: List[str]) -> tuple[Optional[str], Optional[str]]:
+    if len(columns) != 2:
+        return None, None
+
+    first, second = columns
+    first_is_numeric = _is_numeric_column(data, first)
+    second_is_numeric = _is_numeric_column(data, second)
+    if first_is_numeric and not second_is_numeric:
+        return second, first
+    if second_is_numeric and not first_is_numeric:
+        return first, second
+    return None, None
+
+
+def _infer_two_column_params(
+    params: Dict[str, Any],
+    data: List[Dict],
+    columns: List[str],
+    label_key: str,
+    numeric_key: str,
+) -> Dict[str, Any]:
+    if len(columns) != 2:
+        return params
+
+    inferred = dict(params)
+    if not inferred.get(label_key) and not inferred.get(numeric_key):
+        label_column, numeric_column = _classify_two_columns(data, columns)
+        if label_column and numeric_column:
+            inferred[label_key] = label_column
+            inferred[numeric_key] = numeric_column
+    elif inferred.get(label_key) and not inferred.get(numeric_key):
+        numeric_column = _other_two_column(columns, inferred.get(label_key))
+        if numeric_column and _is_numeric_column(data, numeric_column):
+            inferred[numeric_key] = numeric_column
+    elif inferred.get(numeric_key) and not inferred.get(label_key):
+        label_column = _other_two_column(columns, inferred.get(numeric_key))
+        if label_column:
+            inferred[label_key] = label_column
+
+    return inferred
+
+
+def _infer_missing_chart_params(
+    chart_type: str,
+    params: Dict[str, Any],
+    data: List[Dict],
+    result_columns: Optional[List[str]],
+) -> Dict[str, Any]:
+    columns = _result_columns(data, result_columns)
+    if chart_type in ("pie", "donut"):
+        return _infer_two_column_params(params, data, columns, "labels", "values")
+    if chart_type in TWO_COLUMN_SINGLE_SERIES_CHART_TYPES:
+        return _infer_two_column_params(params, data, columns, "x", "y")
+    return params
+
+
+def _format_query_error(error: str) -> str:
+    normalized = error.lower()
+    is_values_keyword_error = any(
+        marker in normalized
+        for marker in (
+            'near "values"',
+            "near 'values'",
+            "near `values`",
+        )
+    )
+    if is_values_keyword_error and "syntax error" in normalized:
+        return (
+            f"{error}. SQLite treats `values` as reserved syntax. "
+            "Use a safe alias such as `lead_count`, then pass `values: \"lead_count\"` to create_chart."
+        )
+    return error
 
 
 def _setup_style():
@@ -314,9 +421,10 @@ def get_create_chart_tool() -> Dict[str, Any]:
             "name": "create_chart",
             "description": (
                 "Create a chart artifact from a SQL query when the user requests a chart or a visual is materially necessary. "
-                "Do not use this for routine summaries just because numbers are present. The query runs against SQLite; SELECT column names become x/y/values/labels keys. "
+                "Do not use this for routine summaries just because numbers are present. The query runs against SQLite; chart parameters reference SELECT result column names. "
                 "Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter. "
-                "Pie/donut use values+labels; others use x+y (y may be list). Returns file/inline/inline_html/attach; paste inline/HTML, do not read chart files."
+                "Pie/donut: pass labels and values as tool parameters naming existing SELECT columns; use safe SQL aliases like category and lead_count, not AS values. "
+                "Other charts use x+y (y may be list). Returns file/inline/inline_html/attach; paste inline/HTML, do not read chart files."
             ),
             "parameters": {
                 "type": "object",
@@ -328,7 +436,7 @@ def get_create_chart_tool() -> Dict[str, Any]:
                     },
                     "query": {
                         "type": "string",
-                        "description": "SQL SELECT query. Column names become data keys for x/y/values/labels."
+                        "description": "SQL SELECT query. Use safe output column names, then reference those names from x/y/values/labels."
                     },
                     "x": {
                         "type": "string",
@@ -343,7 +451,7 @@ def get_create_chart_tool() -> Dict[str, Any]:
                     },
                     "values": {
                         "type": "string",
-                        "description": "Column name for numeric values (pie/donut)."
+                        "description": "Existing SELECT column name for numeric values (pie/donut). Avoid SQL aliases named values; use a safe alias like lead_count."
                     },
                     "labels": {
                         "type": "string",
@@ -415,13 +523,13 @@ def _validate_requested_chart_columns(
         "Requested chart columns are missing from query results. "
         f"Missing: {', '.join(missing_columns)}. "
         f"Available: {', '.join(str(col) for col in available_columns)}. "
-        "Ensure your SELECT aliases exactly match x/y/values/labels."
+        "Use safe SELECT aliases and pass those column names through the chart parameters."
     )
 
 
 def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the create_chart tool."""
-    chart_type = params.get("type")
+    chart_type = str(params.get("type") or "").strip().lower()
     query = params.get("query")
 
     # Validate required params
@@ -435,9 +543,11 @@ def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     # Execute query to get data
     data, result_columns, error = _execute_query_for_data(query)
     if error:
-        return {"status": "error", "message": error}
+        return {"status": "error", "message": _format_query_error(error)}
     if not data:
         return {"status": "error", "message": "Query returned no rows - nothing to chart"}
+
+    params = _infer_missing_chart_params(chart_type, params, data, result_columns)
 
     # Validate chart-specific params
     if chart_type in ("pie", "donut"):
