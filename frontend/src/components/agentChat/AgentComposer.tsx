@@ -1320,9 +1320,14 @@ export const AgentComposer = memo(function AgentComposer({
   const handleDraftHumanInputFreeTextChange = useCallback((requestId: string, value: string) => {
     const currentDrafts = draftHumanInputResponsesRef.current
     const existing = currentDrafts[requestId]
+    const request = pendingHumanInputRequests.find((candidate) => candidate.id === requestId)
+    const selectedOptionKey = request && request.options.length > 0 && value.trim()
+      ? HUMAN_INPUT_OTHER_OPTION_KEY
+      : existing?.selectedOptionKey
     const nextDraft = {
       ...existing,
       requestId,
+      selectedOptionKey,
       freeText: value,
     }
     const nextDrafts = { ...currentDrafts }
@@ -1332,7 +1337,7 @@ export const AgentComposer = memo(function AgentComposer({
       nextDrafts[requestId] = nextDraft
     }
     syncDraftHumanInputResponses(nextDrafts)
-  }, [syncDraftHumanInputResponses])
+  }, [pendingHumanInputRequests, syncDraftHumanInputResponses])
 
   const handleSubmitHumanInputRequest = useCallback(async () => {
     if (!activeHumanInputRequest || !onRespondHumanInput || disabled || isSending || busyHumanInputRequestId) {
