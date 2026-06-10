@@ -19,22 +19,16 @@ logger = logging.getLogger(__name__)
 EXTENSION = ".pdf"
 MIME_TYPE = "application/pdf"
 
-# Comprehensive PDF styling for publication-quality output
 DEFAULT_PRINT_CSS = """
-/* ==========================================================================
-   PAGE SETUP & RUNNING HEADERS/FOOTERS
-   ========================================================================== */
 @page {
     size: Letter;
     margin: 25mm 20mm 30mm 20mm;
-
     @top-center {
         content: string(doc-title);
         font-size: 9pt;
         color: #666;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-
     @bottom-center {
         content: counter(page);
         font-size: 9pt;
@@ -42,28 +36,16 @@ DEFAULT_PRINT_CSS = """
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 }
-
-/* Named page for cover - no headers/footers */
 @page cover {
     @top-center { content: none; }
     @bottom-center { content: none; }
 }
-
-/* First page - no page number */
 @page :first {
     @bottom-center { content: none; }
 }
-
-/* ==========================================================================
-   STRING SET FOR RUNNING HEADERS
-   ========================================================================== */
 .doc-title, h1:first-of-type {
     string-set: doc-title content();
 }
-
-/* ==========================================================================
-   BASE TYPOGRAPHY - Modern Minimal
-   ========================================================================== */
 html, body {
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                  "Helvetica Neue", Arial, sans-serif;
@@ -71,7 +53,6 @@ html, body {
     line-height: 1.6;
     color: #1a1a1a;
 }
-
 h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
     line-height: 1.3;
@@ -81,38 +62,22 @@ h1, h2, h3, h4, h5, h6 {
     break-after: avoid;
     break-inside: avoid;
 }
-
 h1 { font-size: 24pt; margin-top: 0; }
 h2 { font-size: 18pt; }
 h3 { font-size: 14pt; }
 h4 { font-size: 12pt; }
 h5, h6 { font-size: 11pt; }
-
 p { margin: 0 0 1em 0; }
-
-/* ==========================================================================
-   CRITICAL PAGE BREAK HANDLING
-   ========================================================================== */
-
-/* Keep headings with following content */
 h1 + *, h2 + *, h3 + *, h4 + *, h5 + *, h6 + * {
     break-before: avoid;
 }
-
-/* Orphan/widow control */
 p, li, dd, dt {
     orphans: 3;
     widows: 3;
 }
-
-/* Figures, images stay together */
 figure, img {
     break-inside: avoid;
 }
-
-/* ==========================================================================
-   TABLES - Repeating headers across pages
-   ========================================================================== */
 table {
     break-inside: auto;
     border-collapse: collapse;
@@ -120,29 +85,23 @@ table {
     margin: 1em 0;
     font-size: 10pt;
 }
-
 thead {
     display: table-header-group;
 }
-
 tfoot {
     display: table-footer-group;
 }
-
 tbody {
     display: table-row-group;
 }
-
 tr {
     break-inside: avoid;
 }
-
 th, td {
     padding: 10px 12px;
     text-align: left;
     border-bottom: 1px solid #e9ecef;
 }
-
 th {
     font-weight: 600;
     background: #f8f9fa;
@@ -151,24 +110,17 @@ th {
     font-size: 9pt;
     letter-spacing: 0.5px;
 }
-
 tbody tr:last-child td {
     border-bottom: none;
 }
-
 tbody tr:nth-child(even) {
     background: #fafbfc;
 }
-
-/* ==========================================================================
-   CODE BLOCKS
-   ========================================================================== */
 pre, code {
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
                  "Liberation Mono", monospace;
     font-size: 9.5pt;
 }
-
 pre {
     break-inside: avoid;
     overflow-wrap: break-word;
@@ -179,15 +131,9 @@ pre {
     padding: 1em;
     margin: 1em 0;
 }
-
-/* For very long code blocks, allow breaking */
 pre.allow-break {
     break-inside: auto;
 }
-
-/* ==========================================================================
-   BLOCKQUOTES
-   ========================================================================== */
 blockquote {
     margin: 1.5em 0;
     padding: 1em 1.5em;
@@ -197,63 +143,39 @@ blockquote {
     font-style: italic;
     break-inside: avoid;
 }
-
 blockquote p:last-child {
     margin-bottom: 0;
 }
-
-/* ==========================================================================
-   LISTS
-   ========================================================================== */
 ul, ol {
     margin: 1em 0;
     padding-left: 1.5em;
 }
-
 li {
     margin-bottom: 0.5em;
 }
-
 li > ul, li > ol {
     margin-top: 0.5em;
     margin-bottom: 0;
 }
-
-/* ==========================================================================
-   UTILITY CLASSES
-   ========================================================================== */
-
-/* Force page break after element */
 .page-break {
     break-after: always;
 }
-
-/* Force page break before element */
 .page-break-before {
     break-before: always;
 }
-
-/* Keep element together (no internal breaks) */
 .no-break {
     break-inside: avoid;
 }
-
-/* Logical section - prefer breaking before, not inside */
 .section {
     break-inside: avoid-page;
     break-before: auto;
 }
-
 .section > h1:first-child,
 .section > h2:first-child,
 .section > h3:first-child,
 .section > h4:first-child {
     break-after: avoid;
 }
-
-/* ==========================================================================
-   COVER PAGE
-   ========================================================================== */
 .cover-page {
     page: cover;
     break-after: always;
@@ -264,47 +186,34 @@ li > ul, li > ol {
     min-height: 100vh;
     text-align: center;
 }
-
 .cover-page h1 {
     font-size: 36pt;
     font-weight: 700;
     margin-bottom: 0.5em;
     color: #111;
 }
-
 .cover-page .subtitle {
     font-size: 16pt;
     color: #666;
     margin-bottom: 2em;
 }
-
 .cover-page .meta {
     font-size: 11pt;
     color: #888;
 }
-
-/* ==========================================================================
-   LINKS (show URL in print)
-   ========================================================================== */
 a {
     color: #4C78A8;
     text-decoration: none;
 }
-
 a[href^="http"]:after {
     content: " (" attr(href) ")";
     font-size: 0.8em;
     color: #888;
 }
-
 a[href^="#"]:after,
 a.no-url:after {
     content: none;
 }
-
-/* ==========================================================================
-   HORIZONTAL RULES
-   ========================================================================== */
 hr {
     border: none;
     border-top: 1px solid #e9ecef;
@@ -512,77 +421,24 @@ def _contains_blocked_asset_references(html: str) -> bool:
     return parser.blocked
 
 
-HTML_TAG_NAMES = (
-    "html",
-    "head",
-    "body",
-    "main",
-    "section",
-    "article",
-    "header",
-    "footer",
-    "style",
-    "div",
-    "span",
-    "p",
-    "br",
-    "h[1-6]",
-    "table",
-    "thead",
-    "tbody",
-    "tfoot",
-    "tr",
-    "td",
-    "th",
-    "ul",
-    "ol",
-    "li",
-    "strong",
-    "em",
-    "img",
-    "a",
-)
-HTML_TAG_PATTERN = "|".join(HTML_TAG_NAMES)
-ESCAPED_HTML_TAG_RE = re.compile(
-    rf"&lt;\s*/?\s*(?:{HTML_TAG_PATTERN})(?:\s|/|&gt;)",
-    re.IGNORECASE,
-)
-RAW_HTML_TAG_RE = re.compile(
-    rf"<\s*/?\s*(?:{HTML_TAG_PATTERN})(?:\s|/|>)",
-    re.IGNORECASE,
-)
-
-
-def _escaped_html_tag_count(html: str) -> int:
-    return len(ESCAPED_HTML_TAG_RE.findall(html))
-
-
-def _raw_html_tag_count(html: str) -> int:
-    return len(RAW_HTML_TAG_RE.findall(html))
+ESCAPED_HTML_TAG_RE = re.compile(r"&lt;\s*/?\s*[a-z][\w:-]*(?:\s|/|&gt;)", re.IGNORECASE)
+RAW_HTML_TAG_RE = re.compile(r"<\s*/?\s*[a-z][\w:-]*(?:\s|/|>)", re.IGNORECASE)
 
 
 def _looks_like_escaped_html_document(html: str) -> bool:
-    escaped_tag_count = _escaped_html_tag_count(html)
-    if escaped_tag_count == 0 or _raw_html_tag_count(html) > 0:
+    if RAW_HTML_TAG_RE.search(html):
         return False
-
-    starts_with_escaped_tag = bool(ESCAPED_HTML_TAG_RE.match(html.lstrip()))
-    return escaped_tag_count >= 4 or starts_with_escaped_tag
+    escaped_tag_count = len(ESCAPED_HTML_TAG_RE.findall(html))
+    return escaped_tag_count >= 4 or bool(escaped_tag_count and ESCAPED_HTML_TAG_RE.match(html.lstrip()))
 
 
 def _normalize_escaped_html_input(html: str) -> str:
-    if _looks_like_escaped_html_document(html):
-        return html_lib.unescape(html)
-
     once_unescaped = html_lib.unescape(html)
-    if once_unescaped != html and _looks_like_escaped_html_document(once_unescaped):
+    if _looks_like_escaped_html_document(html) or (
+        once_unescaped != html and _looks_like_escaped_html_document(once_unescaped)
+    ):
         return once_unescaped
-
     return html
-
-
-def _contains_unrenderable_escaped_html(html: str) -> bool:
-    return _looks_like_escaped_html_document(html)
 
 
 def _coerce_markdown_images_to_html(html: str) -> str:
@@ -665,7 +521,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
     html = decode_unicode_escapes(html)
     html = _normalize_escaped_html_input(html)
-    if _contains_unrenderable_escaped_html(html):
+    if _looks_like_escaped_html_document(html):
         return {
             "status": "error",
             "message": "HTML appears entity-escaped. Pass raw tags like <div>, not &lt;div&gt;.",

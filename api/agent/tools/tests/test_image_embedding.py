@@ -11,7 +11,7 @@ from api.agent.tools.agent_variables import (
 )
 from api.agent.tools.create_pdf import (
     _coerce_markdown_images_to_html,
-    _contains_unrenderable_escaped_html,
+    _looks_like_escaped_html_document,
     _normalize_escaped_html_input,
     execute_create_pdf,
 )
@@ -73,7 +73,7 @@ class ImageEmbeddingHelperTests(SimpleTestCase):
         result = _normalize_escaped_html_input(html)
 
         self.assertEqual(result, html)
-        self.assertFalse(_contains_unrenderable_escaped_html(result))
+        self.assertFalse(_looks_like_escaped_html_document(result))
 
     @patch("api.agent.tools.create_pdf.get_max_file_size", return_value=None)
     def test_double_escaped_pdf_markup_is_rejected(self, get_max_file_size_mock):
