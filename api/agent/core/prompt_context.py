@@ -3095,7 +3095,8 @@ def _get_formatting_guidance() -> str:
 
     return (
         "Formatting guidance:\n"
-        "Use the matching delivery surface; be scannable, direct, sourced, and no longer than needed.\n\n"
+        "Use the matching delivery surface; be scannable, direct, sourced, and no longer than needed. "
+        "Preserve row/entity URLs from url/link/source_url/listing_url/detail_url fields in reports; in tables make the row label clickable or add a Link column, and say unavailable only when absent.\n\n"
         "<web_chat>\n"
         f"{_get_web_chat_formatting_guidance()}\n"
         "</web_chat>\n\n"
@@ -3680,7 +3681,7 @@ def _get_system_instruction(
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
         f"{SYSTEM_ATTACHMENT_PREFLIGHT_GUIDANCE}\n\n"
-        "Formatting mechanics: put blank lines around headers, tables, charts, and lists. Never put a header and its content on the same line. Use copied result URLs/chart paths.\n"
+        "Formatting mechanics: put blank lines around headers, tables, charts, and lists. Never put a header and its content on the same line. Use copied chart paths.\n"
         f"File downloads are {'' if settings.ALLOW_FILE_DOWNLOAD else 'not'} supported. "
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
