@@ -2,7 +2,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import json
 
-from api.agent.comms.human_input_requests import dismiss_human_input_request
+from api.agent.comms.human_input_requests import MAX_OPTION_COUNT, dismiss_human_input_request
 from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.tools.eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
@@ -532,8 +532,21 @@ def get_pending_human_input_requests(agent_id, run_id, *, after=None):
     return list(queryset.order_by("created_at", "id"))
 
 
+def _valid_human_input_options(raw_options):
+    if not isinstance(raw_options, list) or not 1 <= len(raw_options) <= MAX_OPTION_COUNT:
+        return False
+    for raw_option in raw_options:
+        if not isinstance(raw_option, dict):
+            return False
+        title = str(raw_option.get("title") or "").strip()
+        description = str(raw_option.get("description") or "").strip()
+        if not title or not description:
+            return False
+    return True
+
+
 def all_requests_have_options(requests):
-    return all(isinstance(request.options_json, list) and len(request.options_json) > 0 for request in requests)
+    return all(_valid_human_input_options(request.options_json) for request in requests)
 
 
 class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
@@ -2672,7 +2685,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
     def _request_human_input_call_has_options(call):
         params = call.tool_params or {}
         options = params.get("options")
-        if isinstance(options, list) and options:
+        if _valid_human_input_options(options):
             return True
         for raw_requests_key in ("requests", "questions"):
             raw_requests = params.get(raw_requests_key)
@@ -2680,8 +2693,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 continue
             return all(
                 isinstance(request, dict)
-                and isinstance(request.get("options"), list)
-                and len(request.get("options")) > 0
+                and _valid_human_input_options(request.get("options"))
                 for request in raw_requests
             )
         return False

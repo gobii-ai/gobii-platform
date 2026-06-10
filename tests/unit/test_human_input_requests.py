@@ -322,6 +322,13 @@ class HumanInputRequestTests(TestCase):
         )
         self.assertEqual(function["parameters"]["required"], ["will_continue_work"])
         self.assertEqual(
+            function["parameters"]["anyOf"],
+            [
+                {"required": ["question", "options"]},
+                {"required": ["requests"]},
+            ],
+        )
+        self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["required"],
             ["question", "options"],
         )

@@ -120,6 +120,10 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     },
                 },
                 "required": ["will_continue_work"],
+                "anyOf": [
+                    {"required": ["question", "options"]},
+                    {"required": ["requests"]},
+                ],
             },
         },
     }
