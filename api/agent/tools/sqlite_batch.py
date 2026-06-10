@@ -1364,10 +1364,13 @@ def _execute_with_autocorrections(
                 rows = [dict(zip(columns, row)) for row in cur.fetchall()]
                 original_count = len(rows)
                 rows, limit_warning = _enforce_result_limits(rows, current_query)
+                reporting_note = _row_url_reporting_note(rows)
                 result_entry: Dict[str, Any] = {
                     "result": rows,
-                    "message": f"Query {idx} returned {original_count} rows.{limit_warning}",
+                    "message": f"Query {idx} returned {original_count} rows.{limit_warning}{reporting_note}",
                 }
+                if reporting_note:
+                    result_entry["reporting_note"] = reporting_note.strip()
             else:
                 affected = cur.rowcount if cur.rowcount is not None else 0
                 msg = f"Query {idx} affected {max(0, affected)} rows."
@@ -1486,6 +1489,40 @@ def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List
         warning = f" [!] Large result ({total_rows} rows). Consider adding LIMIT for efficiency."
 
     return rows, warning
+
+
+_ITEM_URL_FIELD_NAMES = {"url", "link", "listing_url", "detail_url", "item_url"}
+_NON_ITEM_URL_FIELD_NAMES = {"source_url", "feed_url", "page_url", "origin_url"}
+
+
+def _row_url_reporting_note(rows: List[Dict[str, Any]]) -> str:
+    """Return a terse reporting reminder when result rows include item-level URLs."""
+    if not rows:
+        return ""
+
+    url_fields: set[str] = set()
+    for row in rows[:20]:
+        for key, value in row.items():
+            key_text = str(key or "").strip()
+            key_lower = key_text.lower()
+            if key_lower in _NON_ITEM_URL_FIELD_NAMES:
+                continue
+            if key_lower not in _ITEM_URL_FIELD_NAMES and not key_lower.endswith(
+                ("_listing_url", "_detail_url", "_item_url", "_link")
+            ):
+                continue
+            if isinstance(value, str) and value.strip():
+                url_fields.add(key_text)
+
+    if not url_fields:
+        return ""
+
+    fields = ", ".join(sorted(url_fields)[:4])
+    return (
+        f" [!] REPORTING: rows include item URL field(s) {fields}; "
+        "include these row links in reports/tables (click row label or add Link column). "
+        "Feed/source URLs are not item links."
+    )
 
 
 def _clean_statement(statement: str) -> Optional[str]:

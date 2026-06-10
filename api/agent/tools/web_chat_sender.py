@@ -237,8 +237,9 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "User-facing chat text. For reports, use Markdown sections, bullets/tables, status labels, "
-                            "and tasteful emoji labels. Do not pass placeholders or tool-call/XML syntax; it is sent literally."
+                            "User-facing chat text. For reports, use Markdown sections, bullets/tables, status labels, tasteful emoji labels; "
+                            "preserve url/link/listing_url/detail_url item fields as clickable row labels or a Link column; source/feed URLs do not substitute for item links. "
+                            "Do not pass placeholders or tool-call/XML syntax; it is sent literally."
                         ),
                     },
                     "to_address": {
@@ -289,6 +290,13 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
             "retryable": False,
         }
     will_continue = _should_continue_work(params)
+    if agent.execution_environment == "eval" and will_continue:
+        return {
+            "status": "ok",
+            "message": "Skipped eval in-progress chat message.",
+            "auto_sleep_ok": False,
+            "skipped": True,
+        }
     if not will_continue:
         body = _strip_trailing_optional_followup(body)
         if not body:

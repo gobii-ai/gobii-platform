@@ -35,7 +35,17 @@ from api.evals.scenarios.effort_calibration import (
     _sqlite_result_text_reads,
     _web_query_value,
 )
-from api.evals.scenarios.sqlite_tool_results import SqliteDedupeRequeryScenario, SqliteIntermediateWorkingTableScenario, SqliteToolResultScenario
+from api.evals.scenarios.sqlite_tool_results import (
+    INVENTORY_URLS,
+    LISTING_URLS,
+    SQLITE_ITEM_LINK_REPORT,
+    SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
+    SQLITE_TOOL_RESULT_SUITE_SLUG,
+    SqliteDedupeRequeryScenario,
+    SqliteIntermediateWorkingTableScenario,
+    SqliteItemLinkReportScenario,
+    SqliteToolResultScenario,
+)
 from api.evals.stop_policy import should_stop_for_eval_policy
 from api.evals.suites import SuiteRegistry
 from api.models import (
@@ -64,6 +74,13 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn(EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME, suite.scenario_slugs)
         self.assertIn(EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES, suite.scenario_slugs)
         self.assertIn(EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE, suite.scenario_slugs)
+
+    def test_sqlite_tool_results_suite_contains_item_link_report(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+
+        self.assertIsNotNone(suite)
+        self.assertEqual(suite.scenario_slugs, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_ITEM_LINK_REPORT, suite.scenario_slugs)
 
     def test_near_duplicate_query_detector_flags_repetitive_searches(self):
         duplicates = _find_near_duplicate_texts(
@@ -145,6 +162,72 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             passed = scenario._record_sourced_answer("run", agent_id="agent", after=None, task_name="verify_sourced_answer", source_urls=["https://api.example.test/products/caremesh.json"], required_terms=["HIPAA"], min_sources=1)
         self.assertFalse(passed)
         self.assertIn("progress_messages=1", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_item_link_report_rejects_missing_listing_urls(self):
+        scenario, recorded = SqliteToolResultScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        messages = [
+            SimpleNamespace(
+                body=(
+                    "## Initial Model Y Report\n\n"
+                    "| Vehicle | Price | Dealer |\n"
+                    "| --- | --- | --- |\n"
+                    "| 2023 Model Y Long Range | $27,455 | Harrisburg Mitsubishi |\n"
+                    "| 2025 Model Y | $39,129 | Renn Kirby Frederick |"
+                )
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._outbound_messages_after", return_value=messages):
+            passed = scenario._record_sourced_answer(
+                "run",
+                agent_id="agent",
+                after=None,
+                task_name="verify_listing_links_in_report",
+                source_urls=LISTING_URLS,
+                required_terms=["Model Y", "Harrisburg", "$27,455"],
+                min_sources=2,
+            )
+
+        self.assertFalse(passed)
+        self.assertIn("linked_sources=0", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_item_link_report_rejects_feed_urls_as_listing_substitutes(self):
+        scenario, recorded = SqliteToolResultScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        messages = [
+            SimpleNamespace(
+                body=(
+                    "## Tesla Model Y Inventory Report\n\n"
+                    "| Vehicle | Price | Dealer | Source |\n"
+                    "| --- | --- | --- | --- |\n"
+                    "| 2023 Model Y Long Range | $27,455 | Harrisburg Mitsubishi | "
+                    f"[local.json]({INVENTORY_URLS[0]}) |\n"
+                    "| 2025 Model Y | $39,129 | Renn Kirby Frederick | "
+                    f"[dealer.json]({INVENTORY_URLS[1]}) |"
+                )
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._outbound_messages_after", return_value=messages):
+            passed = scenario._record_sourced_answer(
+                "run",
+                agent_id="agent",
+                after=None,
+                task_name="verify_listing_links_in_report",
+                source_urls=LISTING_URLS,
+                required_terms=["Model Y", "Harrisburg", "$27,455"],
+                min_sources=2,
+            )
+
+        self.assertFalse(passed)
+        self.assertIn("linked_sources=0", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_item_link_report_uses_declared_verifier_task(self):
+        scenario = SqliteItemLinkReportScenario()
+        task_names = [task.name for task in scenario.tasks]
+
+        self.assertEqual(scenario.sourced_answer_task_name, "verify_listing_links_in_report")
+        self.assertIn(scenario.sourced_answer_task_name, task_names)
+        self.assertNotIn("verify_sourced_answer", task_names)
 
     def test_sqlite_tool_result_usage_rejects_manual_values_working_table(self):
         scenario, recorded = SqliteToolResultScenario(), []
@@ -585,6 +668,34 @@ class EffortCalibrationHarnessTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("raw tool-call markup", result["message"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
+
+    def test_eval_send_chat_skips_in_progress_message_structurally(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="eval_in_progress_chat_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Eval In Progress Chat Browser")
+        agent = PersistentAgent.objects.create(
+            name="Eval In Progress Chat Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+
+        result = execute_send_chat_message(
+            agent,
+            {
+                "body": (
+                    "I have all 5 matching vehicles from both feeds. "
+                    "Let me compute batch-level comparisons and send the report."
+                ),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["skipped"])
+        self.assertIn("eval in-progress", result["message"])
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
 
     def test_send_chat_skips_progress_only_message_before_any_reply(self):

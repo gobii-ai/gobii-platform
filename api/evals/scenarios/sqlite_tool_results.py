@@ -15,11 +15,25 @@ SQLITE_TOOL_RESULT_SUITE_SLUG = "sqlite_tool_results"
 SQLITE_MULTI_RESULT_WEB_SYNTHESIS = "sqlite_tool_results_multi_result_web_synthesis"
 SQLITE_INTERMEDIATE_WORKING_TABLE = "sqlite_tool_results_intermediate_working_table"
 SQLITE_DEDUPE_REQUERY = "sqlite_tool_results_dedupe_requery"
-SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [SQLITE_MULTI_RESULT_WEB_SYNTHESIS, SQLITE_INTERMEDIATE_WORKING_TABLE, SQLITE_DEDUPE_REQUERY]
+SQLITE_ITEM_LINK_REPORT = "sqlite_tool_results_item_link_report"
+SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
+    SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
+    SQLITE_INTERMEDIATE_WORKING_TABLE,
+    SQLITE_DEDUPE_REQUERY,
+    SQLITE_ITEM_LINK_REPORT,
+]
 
 
 SOURCE_URLS = ("https://sources.example.test/helpdesk/axonflow", "https://sources.example.test/helpdesk/brightsupport", "https://sources.example.test/helpdesk/caremesh", "https://sources.example.test/helpdesk/dockwise")
 PRODUCT_URLS = ("https://api.example.test/products/axonflow.json", "https://api.example.test/products/brightsupport.json", "https://api.example.test/products/caremesh.json", "https://api.example.test/products/dockwise.json")
+INVENTORY_URLS = ("https://inventory.example.test/tesla/model-y/local.json", "https://inventory.example.test/tesla/model-y/dealer.json")
+LISTING_URLS = (
+    "https://listings.example.test/tesla/model-y/vin-7say-001",
+    "https://listings.example.test/tesla/model-y/vin-7say-002",
+    "https://listings.example.test/tesla/model-y/vin-7say-003",
+    "https://listings.example.test/tesla/model-y/vin-7say-004",
+    "https://listings.example.test/tesla/model-y/vin-7say-005",
+)
 WEB_SOURCE_FACTS = (
     ("AxonFlow support automation", ("Vendor: AxonFlow", "Best fit: enterprise support teams with strict audit needs.", "Strengths: SOC 2 controls, workflow analytics, Salesforce integration, and 99.95% SLA.", "Tradeoff: higher implementation effort and annual pricing.")),
     ("BrightSupport", ("Vendor: BrightSupport", "Best fit: SMB teams that need fast deployment and low administration overhead.", "Strengths: shared inbox automation, simple knowledge-base answers, and transparent monthly pricing.", "Tradeoff: fewer governance controls than enterprise suites.")),
@@ -31,6 +45,68 @@ PRODUCT_PLAN_ROWS = (
     ("BrightSupport", (("Team", 420, 25, (), 61), ("Business", 760, 45, ("SOC 2 pending",), 69))),
     ("CareMesh", (("Clinic", 720, 50, ("HIPAA", "SOC 2"), 92), ("Network", 1100, 100, ("HIPAA", "SOC 2"), 88))),
     ("Dockwise", (("Commerce", 640, 40, ("PCI",), 70), ("Commerce Plus", 890, 65, ("PCI", "SOC 2"), 76))),
+)
+INVENTORY_ROWS = (
+    (
+        INVENTORY_URLS[0],
+        (
+            {
+                "vin": "7SAY-001",
+                "year": 2023,
+                "trim": "Model Y Long Range",
+                "mileage": 26298,
+                "price_usd": 32985,
+                "distance_mi": 45,
+                "dealer": "Harrisburg Mitsubishi",
+                "listing_url": LISTING_URLS[0],
+            },
+            {
+                "vin": "7SAY-002",
+                "year": 2023,
+                "trim": "Model Y Long Range",
+                "mileage": 72189,
+                "price_usd": 27455,
+                "distance_mi": 45,
+                "dealer": "Harrisburg Mitsubishi",
+                "listing_url": LISTING_URLS[1],
+            },
+            {
+                "vin": "7SAY-003",
+                "year": 2024,
+                "trim": "Model Y",
+                "mileage": 37279,
+                "price_usd": 34800,
+                "distance_mi": 47,
+                "dealer": "Ourisman Chevrolet",
+                "listing_url": LISTING_URLS[2],
+            },
+        ),
+    ),
+    (
+        INVENTORY_URLS[1],
+        (
+            {
+                "vin": "7SAY-004",
+                "year": 2023,
+                "trim": "Model Y Performance",
+                "mileage": 32000,
+                "price_usd": 32920,
+                "distance_mi": 43,
+                "dealer": "Private Seller Exchange",
+                "listing_url": LISTING_URLS[3],
+            },
+            {
+                "vin": "7SAY-005",
+                "year": 2025,
+                "trim": "Model Y",
+                "mileage": 13896,
+                "price_usd": 39129,
+                "distance_mi": 26,
+                "dealer": "Renn Kirby Frederick",
+                "listing_url": LISTING_URLS[4],
+            },
+        ),
+    ),
 )
 
 
@@ -57,6 +133,25 @@ def _product_mock() -> dict:
     return {"http_request": {"rules": [{"url_contains": url, "result": {"status": "ok", "status_code": 200, "url": url, "content": payload}} for url, payload in payloads.items()], "default": {"status": "error", "message": "Unknown eval URL."}}}
 
 
+def _inventory_mock() -> dict:
+    rules = [
+        {
+            "url_contains": url,
+            "result": {
+                "status": "ok",
+                "status_code": 200,
+                "url": url,
+                "content": {
+                    "source_url": url,
+                    "vehicles": list(vehicles),
+                },
+            },
+        }
+        for url, vehicles in INVENTORY_ROWS
+    ]
+    return {"http_request": {"rules": rules, "default": {"status": "error", "message": "Unknown eval URL."}}}
+
+
 def _dedupe_mock() -> dict:
     claims = (
         "Claim: AxonFlow is strongest for enterprise teams because it combines SOC 2 controls, analytics, Salesforce integration, and a 99.95% SLA.",
@@ -68,7 +163,7 @@ def _dedupe_mock() -> dict:
     return {"http_request": {"rules": rules, "default": {"status": "error", "message": "Unknown eval URL."}}}
 
 
-MOCK_BUILDERS = {"web": _web_mock, "product": _product_mock, "dedupe": _dedupe_mock}
+MOCK_BUILDERS = {"web": _web_mock, "product": _product_mock, "dedupe": _dedupe_mock, "inventory": _inventory_mock}
 
 
 class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
@@ -82,6 +177,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
     builtin_tools: tuple[str, ...] = (); eval_synthetic_tools: tuple[str, ...] = (); answer_source_urls: tuple[str, ...] = (); required_terms: tuple[str, ...] = ()
     prompt = ""; mock_kind = ""; verify_task_name = "verify_sqlite_usage"; require_working_table = False; max_relevant_tool_calls = 18; min_sources = 1
     max_single_result_filters = 1
+    sourced_answer_task_name = "verify_sourced_answer"
 
     def run(self, run_id: str, agent_id: str) -> None:
         self._ready_agent(agent_id)
@@ -90,7 +186,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
                 self._enable_tools(agent_id, names, synthetic=synthetic)
         inbound = self._inject_and_wait(run_id, agent_id, self.prompt, MOCK_BUILDERS[self.mock_kind](), allowed_tool_names={*self.builtin_tools, *self.eval_synthetic_tools, "sqlite_batch", "update_plan", *MESSAGE_TOOL_NAMES, "search_tools"}, max_relevant_tool_calls=self.max_relevant_tool_calls)
         self._record_sqlite_usage(run_id, after=inbound.timestamp, task_name=self.verify_task_name, require_working_table=self.require_working_table, max_direct_fetches=0, max_single_result_filters=self.max_single_result_filters)
-        self._record_sourced_answer(run_id, agent_id=agent_id, after=inbound.timestamp, task_name="verify_sourced_answer", source_urls=self.answer_source_urls, required_terms=self.required_terms, min_sources=self.min_sources)
+        self._record_sourced_answer(run_id, agent_id=agent_id, after=inbound.timestamp, task_name=self.sourced_answer_task_name, source_urls=self.answer_source_urls, required_terms=self.required_terms, min_sources=self.min_sources)
 
     def _ready_agent(self, agent_id: str) -> None:
         PersistentAgent.objects.filter(id=agent_id).update(charter="Use tools for source data, SQLite for structured multi-result synthesis, and cite source URLs.", planning_state=PersistentAgent.PlanningState.SKIPPED)
@@ -208,3 +304,19 @@ class SqliteDedupeRequeryScenario(SqliteToolResultScenario):
     required_terms = ("HIPAA", "SMB")
     min_sources = 2
     max_single_result_filters = 2
+
+
+@register_scenario
+class SqliteItemLinkReportScenario(SqliteToolResultScenario):
+    slug = SQLITE_ITEM_LINK_REPORT
+    description = "Reports over item records should preserve item-level listing URLs, not just source feed URLs."
+    tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_item_link_sqlite_usage", assertion_type="tool_call"), ScenarioTask(name="verify_listing_links_in_report", assertion_type="manual")]
+    builtin_tools = ("http_request",)
+    prompt = "Fetch these vehicle inventory JSON feeds. Then use SQLite over __tool_results to compare 2023+ Tesla Model Y records within 50 miles and send one concise initial report with the best batch. Do not browse or create files.\n\n" + "\n".join(f"- {url}" for url in INVENTORY_URLS)
+    mock_kind = "inventory"
+    verify_task_name = "verify_item_link_sqlite_usage"
+    answer_source_urls = LISTING_URLS
+    required_terms = ("Model Y", "Harrisburg", "$27,455")
+    min_sources = 2
+    max_single_result_filters = 2
+    sourced_answer_task_name = "verify_listing_links_in_report"
