@@ -65,7 +65,7 @@ def _is_numeric_value(value: Any) -> bool:
 
 
 def _is_numeric_column(data: List[Dict], column: str) -> bool:
-    observed_values = [row.get(column) for row in data if row.get(column) is not None]
+    observed_values = [value for row in data if (value := row.get(column)) is not None]
     if not observed_values:
         return False
     return all(_is_numeric_value(value) for value in observed_values)
@@ -143,7 +143,15 @@ def _infer_missing_chart_params(
 
 def _format_query_error(error: str) -> str:
     normalized = error.lower()
-    if "values" in normalized and "syntax error" in normalized:
+    is_values_keyword_error = any(
+        marker in normalized
+        for marker in (
+            'near "values"',
+            "near 'values'",
+            "near `values`",
+        )
+    )
+    if is_values_keyword_error and "syntax error" in normalized:
         return (
             f"{error}. SQLite treats `values` as reserved syntax. "
             "Use a safe alias such as `lead_count`, then pass `values: \"lead_count\"` to create_chart."
