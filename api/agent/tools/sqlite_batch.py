@@ -1507,7 +1507,9 @@ def _row_url_reporting_note(rows: List[Dict[str, Any]]) -> str:
             key_lower = key_text.lower()
             if key_lower in _NON_ITEM_URL_FIELD_NAMES:
                 continue
-            if key_lower not in _ITEM_URL_FIELD_NAMES and not key_lower.endswith(("_listing_url", "_detail_url")):
+            if key_lower not in _ITEM_URL_FIELD_NAMES and not key_lower.endswith(
+                ("_listing_url", "_detail_url", "_item_url", "_link")
+            ):
                 continue
             if isinstance(value, str) and value.strip():
                 url_fields.add(key_text)

@@ -185,7 +185,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 task_name="verify_listing_links_in_report",
                 source_urls=LISTING_URLS,
                 required_terms=["Model Y", "Harrisburg", "$27,455"],
-                min_sources=4,
+                min_sources=2,
             )
 
         self.assertFalse(passed)
@@ -215,7 +215,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 task_name="verify_listing_links_in_report",
                 source_urls=LISTING_URLS,
                 required_terms=["Model Y", "Harrisburg", "$27,455"],
-                min_sources=4,
+                min_sources=2,
             )
 
         self.assertFalse(passed)

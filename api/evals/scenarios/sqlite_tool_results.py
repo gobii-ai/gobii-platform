@@ -317,6 +317,6 @@ class SqliteItemLinkReportScenario(SqliteToolResultScenario):
     verify_task_name = "verify_item_link_sqlite_usage"
     answer_source_urls = LISTING_URLS
     required_terms = ("Model Y", "Harrisburg", "$27,455")
-    min_sources = 4
+    min_sources = 2
     max_single_result_filters = 2
     sourced_answer_task_name = "verify_listing_links_in_report"

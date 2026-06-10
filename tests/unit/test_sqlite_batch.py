@@ -141,6 +141,23 @@ class SqliteBatchToolTests(TestCase):
             self.assertIn("listing_url", result["message"])
             self.assertIn("Link column", result["reporting_note"])
 
+    def test_result_with_suffixed_item_link_adds_reporting_note(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "SELECT 'Model Y' AS name, "
+                        "'https://listings.example.test/model-y' AS listing_link;"
+                    )
+                },
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            result = out["results"][0]
+            self.assertIn("REPORTING", result["message"])
+            self.assertIn("listing_link", result["message"])
+
     def test_source_url_only_does_not_add_item_link_reporting_note(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(
