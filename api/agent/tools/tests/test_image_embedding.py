@@ -9,12 +9,7 @@ from api.agent.tools.agent_variables import (
     substitute_variables_as_data_uris,
     substitute_variables_with_filespace,
 )
-from api.agent.tools.create_pdf import (
-    _coerce_markdown_images_to_html,
-    _looks_like_escaped_html_document,
-    _normalize_escaped_html_input,
-    execute_create_pdf,
-)
+from api.agent.tools import create_pdf
 
 
 @tag("context_hints_batch")
@@ -56,28 +51,30 @@ class ImageEmbeddingHelperTests(SimpleTestCase):
 
     def test_markdown_images_convert_to_html_for_pdf(self):
         html = "See ![Sales]($[/charts/foo.svg])"
-        result = _coerce_markdown_images_to_html(html)
+        result = create_pdf._coerce_markdown_images_to_html(html)
 
         self.assertIn("<img", result)
         self.assertIn("src=\"$[/charts/foo.svg]\"", result)
         self.assertIn("alt=\"Sales\"", result)
 
     def test_escaped_pdf_markup_is_normalized_to_raw_html(self):
-        html = "&lt;h1&gt;Title&lt;/h1&gt;&lt;p&gt;Body&lt;/p&gt;"
-        result = _normalize_escaped_html_input(html)
-
-        self.assertEqual(result, "<h1>Title</h1><p>Body</p>")
+        cases = [
+            ("&lt;h1&gt;Title&lt;/h1&gt;&lt;p&gt;Body&lt;/p&gt;", "<h1>Title</h1><p>Body</p>"),
+            ("Summary: &lt;strong&gt;Q4&lt;/strong&gt;", "Summary: <strong>Q4</strong>"),
+        ]
+        for html, expected in cases:
+            self.assertEqual(create_pdf._normalize_escaped_html_input(html), expected)
 
     def test_literal_angle_bracket_text_is_not_normalized(self):
         html = "Use &lt; and &gt; symbols, or mention &lt;div&gt; and &lt;p&gt; in prose."
-        result = _normalize_escaped_html_input(html)
+        result = create_pdf._normalize_escaped_html_input(html)
 
         self.assertEqual(result, html)
-        self.assertFalse(_looks_like_escaped_html_document(result))
+        self.assertFalse(create_pdf._looks_like_escaped_html_document(result))
 
     @patch("api.agent.tools.create_pdf.get_max_file_size", return_value=None)
     def test_double_escaped_pdf_markup_is_rejected(self, get_max_file_size_mock):
-        result = execute_create_pdf(
+        result = create_pdf.execute_create_pdf(
             self.agent,
             {
                 "html": "&amp;lt;h1&amp;gt;Title&amp;lt;/h1&amp;gt;",
@@ -96,7 +93,7 @@ class ImageEmbeddingHelperTests(SimpleTestCase):
 
     @patch("api.agent.tools.create_pdf.get_max_file_size", return_value=None)
     def test_escaped_external_asset_is_blocked_after_normalization(self, get_max_file_size_mock):
-        result = execute_create_pdf(
+        result = create_pdf.execute_create_pdf(
             self.agent,
             {
                 "html": "&lt;img src='https://example.com/chart.png'&gt;",

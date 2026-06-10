@@ -421,15 +421,21 @@ def _contains_blocked_asset_references(html: str) -> bool:
     return parser.blocked
 
 
-ESCAPED_HTML_TAG_RE = re.compile(r"&lt;\s*/?\s*[a-z][\w:-]*(?:\s|/|&gt;)", re.IGNORECASE)
-RAW_HTML_TAG_RE = re.compile(r"<\s*/?\s*[a-z][\w:-]*(?:\s|/|>)", re.IGNORECASE)
+ESCAPED_HTML_TAG_RE = re.compile(r"&lt;/?\s*[a-z][\w:-]*(?:\s|/|&gt;)", re.IGNORECASE)
+ESCAPED_HTML_CLOSE_TAG_RE = re.compile(r"&lt;/\s*[a-z][\w:-]*\s*&gt;", re.IGNORECASE)
+RAW_HTML_TAG_RE = re.compile(r"</?\s*[a-z][\w:-]*(?:\s|/|>)", re.IGNORECASE)
+LEADING_ESCAPED_HTML_TAG_RE = re.compile(r"\s*&lt;/?\s*[a-z][\w:-]*(?:\s|/|&gt;)", re.IGNORECASE)
 
 
 def _looks_like_escaped_html_document(html: str) -> bool:
     if RAW_HTML_TAG_RE.search(html):
         return False
-    escaped_tag_count = len(ESCAPED_HTML_TAG_RE.findall(html))
-    return escaped_tag_count >= 4 or bool(escaped_tag_count and ESCAPED_HTML_TAG_RE.match(html.lstrip()))
+    escaped_tag_count = sum(1 for _ in zip(range(4), ESCAPED_HTML_TAG_RE.finditer(html)))
+    return bool(escaped_tag_count) and (
+        escaped_tag_count >= 4
+        or LEADING_ESCAPED_HTML_TAG_RE.match(html)
+        or ESCAPED_HTML_CLOSE_TAG_RE.search(html)
+    )
 
 
 def _normalize_escaped_html_input(html: str) -> str:
