@@ -2,7 +2,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import json
 
-from api.agent.comms.human_input_requests import dismiss_human_input_request
+from api.agent.comms.human_input_requests import MAX_OPTION_COUNT, dismiss_human_input_request
 from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.tools.eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
@@ -326,6 +326,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_135_search_scrape_two_sources", "category": "web_research", "prompt": "Search current warehouse robotics funding, scrape two strong sources, and cite both without extra query variants.", "expected_tools": ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_136_apollo_connect_tool_search", "category": "integration_discovery", "prompt": "Connect my Apollo.io account so you can use it for lead sourcing.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_137_slack_connect_tool_search", "category": "integration_discovery", "prompt": "Connect Slack so you can read and summarize customer feedback from our support channel.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_138_intercom_notes_capability_answer", "category": "tool_choice", "prompt": "Are you able to add internal notes to Intercom threads, different from replies?", "expected_tools": ["send_chat_message"], "forbidden_tools": ["request_human_input"], "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -531,8 +532,21 @@ def get_pending_human_input_requests(agent_id, run_id, *, after=None):
     return list(queryset.order_by("created_at", "id"))
 
 
+def _valid_human_input_options(raw_options):
+    if not isinstance(raw_options, list) or not 1 <= len(raw_options) <= MAX_OPTION_COUNT:
+        return False
+    for raw_option in raw_options:
+        if not isinstance(raw_option, dict):
+            return False
+        title = str(raw_option.get("title") or "").strip()
+        description = str(raw_option.get("description") or "").strip()
+        if not title or not description:
+            return False
+    return True
+
+
 def all_requests_have_options(requests):
-    return all(isinstance(request.options_json, list) and len(request.options_json) > 0 for request in requests)
+    return all(_valid_human_input_options(request.options_json) for request in requests)
 
 
 class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
@@ -2095,13 +2109,13 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_human_input")
         requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
-        if requests:
+        if requests and all_requests_have_options(requests):
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_human_input",
-                observed_summary=f"Agent requested missing recipient/details via {len(requests)} human input request(s).",
+                observed_summary=f"Agent requested missing recipient/details via {len(requests)} option-based human input request(s).",
             )
         else:
             self.record_task_result(
@@ -2109,7 +2123,10 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_human_input",
-                observed_summary="Agent did not create a tracked human input request for missing email details.",
+                observed_summary=(
+                    f"Agent did not create an option-based tracked human input request for missing email details; "
+                    f"found {len(requests)} with options={all_requests_have_options(requests)}."
+                ),
             )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_no_send_email")
@@ -2651,6 +2668,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
     def _call_satisfies_expected_tool(self, call, expected_tool_name):
         if call.tool_name not in self.case.accepted_tool_names_for_expected_tool(expected_tool_name):
             return False
+        if expected_tool_name == "request_human_input" and not self._request_human_input_call_has_options(call):
+            return False
         if (
             self.case.expected_params
             and len(self.case.expected_tools) == 1
@@ -2661,6 +2680,23 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         if config_field and call.tool_name == "sqlite_batch":
             return sqlite_batch_mutates_agent_config_field(call, config_field)
         return True
+
+    @staticmethod
+    def _request_human_input_call_has_options(call):
+        params = call.tool_params or {}
+        options = params.get("options")
+        if _valid_human_input_options(options):
+            return True
+        for raw_requests_key in ("requests", "questions"):
+            raw_requests = params.get(raw_requests_key)
+            if not isinstance(raw_requests, list) or not raw_requests:
+                continue
+            return all(
+                isinstance(request, dict)
+                and _valid_human_input_options(request.get("options"))
+                for request in raw_requests
+            )
+        return False
 
 
 def _common_use_case_scenario_class(case):

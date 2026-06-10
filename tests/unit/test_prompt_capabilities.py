@@ -272,7 +272,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         contents = "\n".join(message["content"] for message in context)
 
         self.assertIn("Your response text is a user message", contents)
-        self.assertIn("monitoring targets/scope before setup", contents)
+        self.assertIn("Use request_human_input only for tracked option-based decisions", contents)
         self.assertIn("never search for it or refetch the same successful URL", contents)
         self.assertIn("update your ongoing charter/schedule", contents)
         self.assertIn("While working, respond with tool calls and no text", contents)
@@ -283,9 +283,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         description = tool["function"]["description"]
         will_continue_description = tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
 
-        self.assertIn("context, config changes, findings, or finals.", description)
-        self.assertIn("Use request_human_input instead when the agent has been blocked repeatedly", description)
-        self.assertIn("needs a tracked answer", description)
+        self.assertIn("free-text questions, context, config changes, capability/status/policy answers, findings, or finals.", description)
         self.assertIn("Do not narrate what you will do next", description)
         self.assertIn("Never send a message solely to justify continuing work", will_continue_description)
 

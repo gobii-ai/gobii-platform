@@ -16,7 +16,6 @@ from api.agent.core.event_processing import (
     _contact_permission_params_from_misrouted_human_input,
     _process_agent_events_locked,
     _is_warning_status,
-    _looks_like_blocking_human_input_request,
     _normalize_tool_params,
     _parse_tool_call_params,
     _PreparedToolExecution,
@@ -403,14 +402,6 @@ class ToolParamParsingTests(SimpleTestCase):
         self.assertEqual(
             _sanitize_tool_name("mcp_brightdata_scrape_as_mcp_brightdata_scrape_as_markdown"),
             "mcp_brightdata_scrape_as_markdown",
-        )
-
-    def test_optional_tweak_question_is_not_blocking_human_input(self):
-        self.assertFalse(
-            _looks_like_blocking_human_input_request(
-                "I'll get the RSS feed parsed and the schedule wired up now. "
-                "Any tweaks before I lock this in? Otherwise I'm off and running!"
-            )
         )
 
     def test_misrouted_sms_approval_question_becomes_contact_permission(self):

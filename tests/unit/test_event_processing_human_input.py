@@ -90,11 +90,23 @@ class EventProcessingHumanInputTests(TestCase):
             "target_channel": "web",
             "target_address": "web://user/1/agent/1",
             "web_chat_visible": True,
-            "requests": [{"request_id": request_id, "question": "What should I do next?", "options": []}],
+            "requests": [
+                {
+                    "request_id": request_id,
+                    "question": "What should I do next?",
+                    "options": [{"title": "Proceed", "description": "Continue with this option."}],
+                }
+            ],
             "auto_sleep_ok": True,
         }
         mock_completion.return_value = (
-            self._tool_completion("request_human_input", '{"question": "What should I do next?"}'),
+            self._tool_completion(
+                "request_human_input",
+                (
+                    '{"question": "What should I do next?", '
+                    '"options": [{"title": "Proceed", "description": "Continue with this option."}]}'
+                ),
+            ),
             {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"},
         )
 
@@ -135,12 +147,22 @@ class EventProcessingHumanInputTests(TestCase):
             "target_channel": "web",
             "target_address": "web://user/1/agent/1",
             "web_chat_visible": True,
-            "requests": [{"request_id": request_id, "question": "What should I do next?", "options": []}],
+            "requests": [
+                {
+                    "request_id": request_id,
+                    "question": "What should I do next?",
+                    "options": [{"title": "Proceed", "description": "Continue with this option."}],
+                }
+            ],
             "auto_sleep_ok": True,
         }
         first_response = self._tool_completion(
             "request_human_input",
-            '{"question": "What should I do next?", "will_continue_work": true}',
+            (
+                '{"question": "What should I do next?", '
+                '"options": [{"title": "Proceed", "description": "Continue with this option."}], '
+                '"will_continue_work": true}'
+            ),
         )
         second_response = self._tool_completion(
             "send_chat_message",
@@ -189,7 +211,13 @@ class EventProcessingHumanInputTests(TestCase):
             "target_channel": "email",
             "target_address": "person@example.com",
             "web_chat_visible": True,
-            "requests": [{"request_id": request_id, "question": "What should I do next?", "options": []}],
+            "requests": [
+                {
+                    "request_id": request_id,
+                    "question": "What should I do next?",
+                    "options": [{"title": "Proceed", "description": "Continue with this option."}],
+                }
+            ],
             "next_message_suggestion": {
                 "channel": "email",
                 "address": "person@example.com",
@@ -202,7 +230,11 @@ class EventProcessingHumanInputTests(TestCase):
 
         first_response = self._tool_completion(
             "request_human_input",
-            '{"question": "What should I do next?", "will_continue_work": false}',
+            (
+                '{"question": "What should I do next?", '
+                '"options": [{"title": "Proceed", "description": "Continue with this option."}], '
+                '"will_continue_work": false}'
+            ),
         )
         mock_completion.return_value = (
             first_response,
@@ -215,7 +247,11 @@ class EventProcessingHumanInputTests(TestCase):
         self.assertEqual(mock_completion.call_count, 1)
         mock_request_human_input.assert_called_once_with(
             self.agent,
-            {"question": "What should I do next?", "will_continue_work": False},
+            {
+                "question": "What should I do next?",
+                "options": [{"title": "Proceed", "description": "Continue with this option."}],
+                "will_continue_work": False,
+            },
         )
         mock_send_email.assert_not_called()
         self.assertEqual(
@@ -250,7 +286,13 @@ class EventProcessingHumanInputTests(TestCase):
             "target_channel": "email",
             "target_address": "person@example.com",
             "web_chat_visible": True,
-            "requests": [{"request_id": request_id, "question": "What should I do next?", "options": []}],
+            "requests": [
+                {
+                    "request_id": request_id,
+                    "question": "What should I do next?",
+                    "options": [{"title": "Proceed", "description": "Continue with this option."}],
+                }
+            ],
             "next_message_suggestion": {
                 "channel": "email",
                 "address": "person@example.com",
@@ -262,7 +304,11 @@ class EventProcessingHumanInputTests(TestCase):
         }
         first_response = self._tool_completion(
             "request_human_input",
-            '{"question": "What should I do next?", "will_continue_work": true}',
+            (
+                '{"question": "What should I do next?", '
+                '"options": [{"title": "Proceed", "description": "Continue with this option."}], '
+                '"will_continue_work": true}'
+            ),
         )
         second_response = self._tool_completion(
             "send_email",
@@ -279,7 +325,11 @@ class EventProcessingHumanInputTests(TestCase):
         self.assertEqual(mock_completion.call_count, 2)
         mock_request_human_input.assert_called_once_with(
             self.agent,
-            {"question": "What should I do next?", "will_continue_work": True},
+            {
+                "question": "What should I do next?",
+                "options": [{"title": "Proceed", "description": "Continue with this option."}],
+                "will_continue_work": True,
+            },
         )
         mock_send_email.assert_called_once()
         self.assertEqual(

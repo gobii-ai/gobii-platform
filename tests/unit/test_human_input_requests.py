@@ -294,14 +294,15 @@ class HumanInputRequestTests(TestCase):
             raw_payload=raw_payload or {"source": "test"},
         )
 
-    def test_tool_definition_allows_optional_options(self):
+    def test_tool_definition_requires_options(self):
         tool = get_request_human_input_tool()
         function = tool["function"]
         description = function["description"]
         self.assertEqual(function["name"], "request_human_input")
         self.assertIn("appears in web chat", description)
         self.assertIn("does not send email/SMS", description)
-        self.assertIn("Do not ask via chat/email/SMS instead", description)
+        self.assertIn("Every request needs at least one option", description)
+        self.assertIn("for free-text questions or capability/status/policy answers", description)
         self.assertIn("Plain text only", description)
         self.assertIn("at most three", description)
         self.assertIn("non-blocking backfill", description)
@@ -314,14 +315,26 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("will_continue_work", function["parameters"]["properties"])
         self.assertEqual(function["parameters"]["properties"]["question"]["maxLength"], 500)
         self.assertIn("Plain text only", function["parameters"]["properties"]["question"]["description"])
+        self.assertEqual(function["parameters"]["properties"]["options"]["minItems"], 1)
         self.assertIn(
             "use true when you will send an email/SMS containing these questions",
             function["parameters"]["properties"]["will_continue_work"]["description"],
         )
         self.assertEqual(function["parameters"]["required"], ["will_continue_work"])
         self.assertEqual(
+            function["parameters"]["anyOf"],
+            [
+                {"required": ["question", "options"]},
+                {"required": ["requests"]},
+            ],
+        )
+        self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["required"],
-            ["question"],
+            ["question", "options"],
+        )
+        self.assertEqual(
+            function["parameters"]["properties"]["requests"]["items"]["properties"]["options"]["minItems"],
+            1,
         )
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["properties"]["question"]["maxLength"],
@@ -332,8 +345,20 @@ class HumanInputRequestTests(TestCase):
             function["parameters"]["properties"]["requests"]["description"],
         )
 
-    def test_execute_request_human_input_creates_free_text_request(self):
-        before = timezone.now()
+    def test_execute_request_human_input_rejects_missing_options(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "What should I tell the team?",
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("requires at least one option", result["message"])
+        self.assertIn("send_* tool", result["message"])
+        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+
+    def test_execute_request_human_input_rejects_empty_options(self):
         result = execute_request_human_input(
             self.agent,
             {
@@ -341,38 +366,17 @@ class HumanInputRequestTests(TestCase):
                 "options": [],
             },
         )
-        after = timezone.now()
 
-        self.assertEqual(result["status"], "ok")
-        self.assertNotIn("reference_code", result)
-        self.assertEqual(result["request_ids"], [result["request_id"]])
-        self.assertEqual(result["requests_count"], 1)
-        self.assertEqual(result["target_channel"], CommsChannel.WEB)
-        self.assertEqual(result["target_address"], self.user_address)
-        self.assertTrue(result["web_chat_visible"])
-        self.assertTrue(result["auto_sleep_ok"])
-        self.assertNotIn("relay_mode", result)
-        self.assertNotIn("relay_payload", result)
-        self.assertNotIn("next_message_suggestion", result)
-        self.assertEqual(result["requests"][0]["question"], "What should I tell the team?")
-        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
-        self.assertEqual(
-            request_obj.input_mode,
-            PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
-        )
-        self.assertEqual(request_obj.conversation_id, self.conversation.id)
-        self.assertEqual(request_obj.recipient_channel, "")
-        self.assertEqual(request_obj.recipient_address, "")
-        self.assertIsNone(request_obj.requested_message_id)
-        self.assertGreaterEqual(request_obj.expires_at, before + timedelta(days=3))
-        self.assertLessEqual(request_obj.expires_at, after + timedelta(days=3))
+        self.assertEqual(result["status"], "error")
+        self.assertIn("requires at least one option", result["message"])
+        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
 
     def test_execute_request_human_input_will_continue_true_keeps_panel_request_active(self):
         result = execute_request_human_input(
             self.agent,
             {
                 "question": "What should I tell the team?",
-                "options": [],
+                "options": [{"title": "Proceed", "description": "Continue with this direction."}],
                 "will_continue_work": True,
             },
         )
@@ -396,13 +400,10 @@ class HumanInputRequestTests(TestCase):
         )
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("Planning Mode questions must include at least one option", result["message"])
+        self.assertIn("requires at least one option", result["message"])
         self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
 
-    def test_execute_request_human_input_requires_batch_options_in_planning_mode(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
+    def test_execute_request_human_input_rejects_batch_missing_options(self):
         result = execute_request_human_input(
             self.agent,
             {
@@ -420,7 +421,7 @@ class HumanInputRequestTests(TestCase):
         )
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("Planning Mode questions must include at least one option", result["message"])
+        self.assertIn("requires at least one option", result["message"])
         self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
 
     def test_execute_request_human_input_limits_planning_batch_to_three_questions(self):
@@ -492,7 +493,7 @@ class HumanInputRequestTests(TestCase):
             self.agent,
             {
                 "question": "x" * 500,
-                "options": [],
+                "options": [{"title": "Proceed", "description": "Continue with this answer."}],
             },
         )
 
@@ -504,7 +505,7 @@ class HumanInputRequestTests(TestCase):
             self.agent,
             {
                 "question": "x" * 501,
-                "options": [],
+                "options": [{"title": "Proceed", "description": "Continue with this answer."}],
             },
         )
 
@@ -524,7 +525,7 @@ class HumanInputRequestTests(TestCase):
                     },
                     {
                         "question": "What should happen second?",
-                        "options": [],
+                        "options": [{"title": "Wait", "description": "Pause until this is ready."}],
                     },
                 ],
             },
@@ -563,8 +564,14 @@ class HumanInputRequestTests(TestCase):
             self.agent,
             {
                 "requests": [
-                    {"question": "What should happen first?"},
-                    {"question": "x" * 501},
+                    {
+                        "question": "What should happen first?",
+                        "options": [{"title": "Ship", "description": "Move now."}],
+                    },
+                    {
+                        "question": "x" * 501,
+                        "options": [{"title": "Wait", "description": "Pause until this is ready."}],
+                    },
                 ],
             },
         )
@@ -625,8 +632,14 @@ class HumanInputRequestTests(TestCase):
                 self.agent,
                 {
                     "requests": [
-                        {"question": "What should happen first?"},
-                        {"question": "What should happen second?"},
+                        {
+                            "question": "What should happen first?",
+                            "options": [{"title": "First option", "description": "Do this first."}],
+                        },
+                        {
+                            "question": "What should happen second?",
+                            "options": [{"title": "Second option", "description": "Do this second."}],
+                        },
                     ],
                 },
             )
@@ -714,6 +727,7 @@ class HumanInputRequestTests(TestCase):
             self.agent,
             {
                 "question": "Who should review this?",
+                "options": [{"title": "Use this recipient", "description": "Send the review question here."}],
                 "recipient": {
                     "channel": CommsChannel.EMAIL,
                     "address": collaborator.email.upper(),
@@ -801,8 +815,14 @@ class HumanInputRequestTests(TestCase):
                         "address": self.user.email,
                     },
                     "requests": [
-                        {"question": "What should happen first?"},
-                        {"question": "What should happen second?"},
+                        {
+                            "question": "What should happen first?",
+                            "options": [{"title": "Ship first", "description": "Prioritize this item."}],
+                        },
+                        {
+                            "question": "What should happen second?",
+                            "options": [{"title": "Ship second", "description": "Prioritize this item second."}],
+                        },
                     ],
                 },
             )
@@ -1128,7 +1148,7 @@ class HumanInputRequestTests(TestCase):
         result = create_human_input_request(
             self.agent,
             question="Who should join the kickoff?",
-            raw_options=[],
+            raw_options=[{"title": "Other / I'll explain", "description": "Reply with the person or team to include."}],
         )
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
 
@@ -1160,7 +1180,7 @@ class HumanInputRequestTests(TestCase):
         result = create_human_input_request(
             org_agent,
             question="Who should review the budget?",
-            raw_options=[],
+            raw_options=[{"title": "Other / I'll explain", "description": "Reply with the person or team to include."}],
         )
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
 
@@ -1187,7 +1207,7 @@ class HumanInputRequestTests(TestCase):
         result = create_human_input_request(
             self.agent,
             question="What should we tell the customer?",
-            raw_options=[],
+            raw_options=[{"title": "Other / I'll explain", "description": "Reply with the customer update to use."}],
         )
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
 
@@ -1548,7 +1568,7 @@ class HumanInputRequestTests(TestCase):
         result = create_human_input_request(
             self.agent,
             question="Which reviewer should approve this?",
-            raw_options=[],
+            raw_options=[{"title": "Other / I'll explain", "description": "Reply with the reviewer to use."}],
             recipient={
                 "channel": CommsChannel.WEB,
                 "address": build_web_user_address(collaborator.id, self.agent.id),
@@ -1583,7 +1603,7 @@ class HumanInputRequestTests(TestCase):
         result = create_human_input_request(
             self.agent,
             question="What should we tell the customer?",
-            raw_options=[],
+            raw_options=[{"title": "Other / I'll explain", "description": "Reply with the customer update to use."}],
         )
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
         reply = self._create_cross_channel_message(
@@ -1774,8 +1794,14 @@ class HumanInputRequestTests(TestCase):
             self.agent,
             {
                 "requests": [
-                    {"question": "What ships first?"},
-                    {"question": "When should we launch?"},
+                    {
+                        "question": "What ships first?",
+                        "options": [{"title": "Option A", "description": "Use the first provided answer."}],
+                    },
+                    {
+                        "question": "When should we launch?",
+                        "options": [{"title": "Option B", "description": "Use the second provided answer."}],
+                    },
                 ],
             },
         )

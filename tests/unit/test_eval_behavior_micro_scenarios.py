@@ -109,9 +109,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
 
-        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 134)
-        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 134)
-        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 134)
+        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 135)
+        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 135)
+        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 135)
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
 
@@ -1528,8 +1528,47 @@ class BehaviorMicroHelperTests(TestCase):
         mock_delay.assert_not_called()
 
     def test_all_requests_have_options_requires_nonempty_options(self):
-        with_options = SimpleNamespace(options_json=[{"key": "yes", "title": "Yes"}])
+        with_options = SimpleNamespace(
+            options_json=[{"key": "yes", "title": "Yes", "description": "Proceed with yes."}]
+        )
         without_options = SimpleNamespace(options_json=[])
+        missing_description = SimpleNamespace(options_json=[{"key": "yes", "title": "Yes"}])
+        blank_title = SimpleNamespace(options_json=[{"key": "yes", "title": " ", "description": "Proceed."}])
 
         self.assertTrue(all_requests_have_options([with_options]))
         self.assertFalse(all_requests_have_options([with_options, without_options]))
+        self.assertFalse(all_requests_have_options([missing_description]))
+        self.assertFalse(all_requests_have_options([blank_title]))
+
+    def test_request_human_input_eval_tool_check_requires_valid_options(self):
+        valid_single = SimpleNamespace(
+            tool_params={"options": [{"title": "Yes", "description": "Proceed with yes."}]}
+        )
+        invalid_single = SimpleNamespace(
+            tool_params={"options": [{"title": "Yes"}]}
+        )
+        valid_batch = SimpleNamespace(
+            tool_params={
+                "requests": [
+                    {
+                        "question": "Proceed?",
+                        "options": [{"title": "Yes", "description": "Proceed with yes."}],
+                    }
+                ]
+            }
+        )
+        invalid_batch = SimpleNamespace(
+            tool_params={
+                "requests": [
+                    {
+                        "question": "Proceed?",
+                        "options": [{"title": "", "description": "Proceed with yes."}],
+                    }
+                ]
+            }
+        )
+
+        self.assertTrue(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(valid_single))
+        self.assertFalse(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(invalid_single))
+        self.assertTrue(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(valid_batch))
+        self.assertFalse(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(invalid_batch))

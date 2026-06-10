@@ -38,6 +38,10 @@ BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<bod
 MAX_OPTION_COUNT = 6
 MAX_HUMAN_INPUT_QUESTION_LENGTH = 500
 DEFAULT_HUMAN_INPUT_REQUEST_EXPIRATION_DAYS = 3
+OPTIONS_REQUIRED_MESSAGE = (
+    "request_human_input requires at least one option. Use a send_* tool for free-text questions, "
+    "or include an Other / I'll explain option for open-ended answers."
+)
 HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
 HUMAN_INPUT_LLM_MATCH_CONFIDENCE_THRESHOLD = 0.8
 
@@ -219,6 +223,15 @@ def build_option_payloads(raw_options: list[dict[str, Any]] | None) -> list[dict
             }
         )
     return options
+
+
+def _validate_human_input_options(raw_options: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    if not build_option_payloads(raw_options):
+        return {
+            "status": "error",
+            "message": OPTIONS_REQUIRED_MESSAGE,
+        }
+    return None
 
 
 def _latest_inbound_human_message(agent: PersistentAgent) -> PersistentAgentMessage | None:
@@ -550,6 +563,11 @@ def _create_human_input_request_for_target(
     if question_error:
         return None, question_error
     options = build_option_payloads(raw_options)
+    if not options:
+        return None, {
+            "status": "error",
+            "message": OPTIONS_REQUIRED_MESSAGE,
+        }
     input_mode = (
         PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT
         if options
@@ -605,6 +623,9 @@ def create_human_input_request(
     _, question_error = _validate_human_input_question(question)
     if question_error:
         return question_error
+    options_error = _validate_human_input_options(raw_options)
+    if options_error:
+        return options_error
 
     normalized_recipient, error = _normalize_human_input_recipient(recipient)
     if error:
@@ -650,6 +671,9 @@ def create_human_input_requests_batch(
         _, question_error = _validate_human_input_question(request.get("question"))
         if question_error:
             return question_error
+        options_error = _validate_human_input_options(request.get("options"))
+        if options_error:
+            return options_error
 
     normalized_recipient, error = _normalize_human_input_recipient(recipient)
     if error:
