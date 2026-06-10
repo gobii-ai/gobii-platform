@@ -1321,7 +1321,7 @@ export const AgentComposer = memo(function AgentComposer({
     const currentDrafts = draftHumanInputResponsesRef.current
     const existing = currentDrafts[requestId]
     const request = pendingHumanInputRequests.find((candidate) => candidate.id === requestId)
-    const selectedOptionKey = request && request.options.length > 0 && value.trim()
+    const selectedOptionKey = request && request.options.length > 0 && value.trim() !== ''
       ? HUMAN_INPUT_OTHER_OPTION_KEY
       : existing?.selectedOptionKey
     const nextDraft = {
