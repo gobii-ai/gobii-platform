@@ -24,6 +24,7 @@ from api.evals.meta_gobii import (
     META_GOBII_EVAL_SCENARIO_SLUGS,
     META_GOBII_EVAL_SUITE_SLUG,
     META_GOBII_SCHEDULE_EVAL_CASES,
+    META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS,
     SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
     SCHEDULE_EXPECTATION_EXPLICIT,
     find_duplicate_output_sections,
@@ -120,9 +121,12 @@ class MetaGobiiEvalRegistrationTests(TestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(suite.scenario_slugs, META_GOBII_EVAL_SCENARIO_SLUGS)
+        case_slugs = {case.scenario_slug for case in META_GOBII_EVAL_CASES}
+        suite_slugs = set(META_GOBII_EVAL_SCENARIO_SLUGS)
+        self.assertTrue(case_slugs.issubset(suite_slugs))
         self.assertEqual(
-            len(META_GOBII_EVAL_SCENARIO_SLUGS),
-            len(META_GOBII_EVAL_CASES),
+            suite_slugs - case_slugs,
+            {META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS},
         )
         self.assertEqual(
             len(META_GOBII_EVAL_SCENARIO_SLUGS),
@@ -147,6 +151,19 @@ class MetaGobiiEvalRegistrationTests(TestCase):
         )
         for slug in META_GOBII_EVAL_SCENARIO_SLUGS:
             self.assertIn(slug, registered)
+            if slug == META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS:
+                self.assertEqual(
+                    [task.name for task in registered[slug].tasks],
+                    [
+                        "inject_prompt",
+                        "verify_skill_search",
+                        "verify_meta_gobii_enabled",
+                        "verify_meta_gobii_surface_used",
+                        "verify_no_research_persona_path",
+                        "verify_no_config_mutation_substitute",
+                    ],
+                )
+                continue
             self.assertEqual(
                 [task.name for task in registered[slug].tasks],
                 [
@@ -400,6 +417,7 @@ class MetaGobiiEvalRegistrationTests(TestCase):
 
         self.assertIn("target Gobii lifecycle", schedule_action["description"])
         self.assertIn("existing named Gobii", schedule_action["description"])
+        self.assertIn("Use none whenever schedule_in_scope=false", schedule_action["description"])
 
     def test_standalone_meta_gobii_eval_command_is_removed(self):
         command_path = (
@@ -926,6 +944,28 @@ class MetaGobiiEvalScoringTests(TestCase):
 
         self.assertFalse(wrong_action_scores["schedule_scope"][0])
         self.assertTrue(good_scores["schedule_scope"][0])
+
+    def test_no_schedule_case_rejects_clarify_without_question(self):
+        case = _case("no_schedule_archive_stale_agents")
+        policy = _no_schedule_policy()
+        policy["schedule_action"] = "clarify"
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_update_agent"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": [],
+                "schedule_policy": policy,
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertFalse(scores["schedule_scope"][0])
 
     def test_duplicate_output_helper_detects_repeated_sections(self):
         text = (
@@ -1534,7 +1574,12 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         suite_run = EvalSuiteRun.objects.latest("created_at")
         self.assertEqual(suite_run.suite_slug, "meta_gobii")
         self.assertEqual(suite_run.launch_config, {"mode": "simulated"})
-        self.assertEqual(suite_run.runs.count(), len(META_GOBII_EVAL_CASES))
+        self.assertEqual(suite_run.runs.count(), len(META_GOBII_EVAL_SCENARIO_SLUGS))
+        self.assertTrue(
+            suite_run.runs.filter(
+                scenario_slug=META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS
+            ).exists()
+        )
         self.assertFalse(
             EvalRunTask.objects.filter(run__suite_run=suite_run)
             .exclude(status=EvalRunTask.Status.PASSED)

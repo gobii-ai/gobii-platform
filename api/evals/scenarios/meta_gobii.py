@@ -242,7 +242,9 @@ def _record_plan_tool() -> dict[str, Any]:
                                     "schedule row itself is new. Use create only for a newly created Gobii/team, "
                                     "update when modifying an existing named Gobii to add or change recurring work, "
                                     "and remove when the user asks to remove, disable, stop, or clear an existing "
-                                    "schedule, even though the implementation tool may be meta_gobii_update_agent."
+                                    "schedule, even though the implementation tool may be meta_gobii_update_agent. "
+                                    "Use none whenever schedule_in_scope=false and no clarifying schedule question "
+                                    "is being asked."
                                 ),
                             },
                             "cadence_or_schedule": {
@@ -825,7 +827,9 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "requests unless the user explicitly asks for scheduled, recurring, ongoing, proactive, digest, "
                     "watch, check-in, or cadence-based behavior. Ambiguous words such as monitor, watch, keep tabs, "
                     "research, or follow up should not invent a cadence; either keep schedule_in_scope=false or ask "
-                    "a clarifying schedule question with schedule_action=clarify. When a schedule is in scope, "
+                    "a clarifying schedule question with schedule_action=clarify. If schedule_in_scope=false and "
+                    "the plan is not asking a clarifying schedule question, schedule_action must be none. "
+                    "When a schedule is in scope, "
                     "schedule_policy must include the explicit cadence/removal and included_in_approval_scope=true. "
                     "Do not add extra team members, domains, schedules, contacts, files, or scenarios the user did "
                     "not ask for; record any accidental extras in extra_scope_items and in schedule_policy. "
@@ -852,7 +856,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "schedule_action describes the target Gobii lifecycle, not whether the schedule row itself is "
                     "new. Use schedule_action=create only for a newly created Gobii/team, update for an existing "
                     "named Gobii even when adding a new cadence to that Gobii, remove for removing an existing "
-                    "schedule, and clarify only when cadence is ambiguous. "
+                    "schedule, clarify only when cadence is ambiguous and a clarification question is asked, and "
+                    "none when no schedule change or clarification is in scope. "
                     "If the user says remove the schedule, stop running automatically, disable a cadence, or clear "
                     "recurring work, schedule_action must be remove, not update. "
                     "For contact scenarios, the contact_output_policy must say to avoid or redact full email or phone "
