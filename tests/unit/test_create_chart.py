@@ -48,7 +48,7 @@ class CreateChartToolTests(TestCase):
         self.assertEqual(result["status"], "error")
         message = result["message"].lower()
         self.assertIn(f"available: {', '.join(expected_available)}", message)
-        self.assertIn("aliases exactly match", message)
+        self.assertIn("safe select aliases", message)
 
         missing_part = message.split("missing: ", 1)[1].split(".", 1)[0]
         found_missing_set = {column.strip() for column in missing_part.split(",")}
@@ -65,6 +65,7 @@ class CreateChartToolTests(TestCase):
         self.assertIn("type", tool["function"]["parameters"]["properties"])
         self.assertIn("query", tool["function"]["parameters"]["properties"])
         self.assertIn("query", tool["function"]["parameters"]["required"])
+        self.assertIn("not AS values", tool["function"]["description"])
 
     def test_missing_type_returns_error(self):
         result = execute_create_chart(
@@ -106,6 +107,20 @@ class CreateChartToolTests(TestCase):
             self.assertEqual(result["status"], "error")
             self.assertIn("query failed", result["message"].lower())
 
+    def test_values_keyword_query_error_returns_specific_guidance(self):
+        with patch(
+            "api.agent.tools.create_chart._execute_query_for_data",
+            return_value=([], None, 'Query failed: near "values": syntax error'),
+        ):
+            result = execute_create_chart(
+                self.agent,
+                {"type": "donut", "query": "SELECT industry AS labels, COUNT(*) AS values FROM t"},
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("reserved syntax", result["message"].lower())
+        self.assertIn('values: "lead_count"', result["message"])
+
     def test_invalid_chart_type_returns_error(self):
         result = execute_create_chart(
             self.agent,
@@ -115,22 +130,62 @@ class CreateChartToolTests(TestCase):
         self.assertIn("invalid", result["message"].lower())
 
     def test_bar_chart_requires_x_and_y(self):
-        with mock_query_data([{"month": "Jan", "value": 100}]):
+        with mock_query_data([{"month": "Jan", "segment": "Online", "value": 100}]):
             result = execute_create_chart(
                 self.agent,
-                {"type": "bar", "query": "SELECT month, value FROM t"},
+                {"type": "bar", "query": "SELECT month, segment, value FROM t"},
             )
             self.assertEqual(result["status"], "error")
             self.assertIn("x", result["message"].lower())
 
     def test_pie_chart_requires_values_and_labels(self):
-        with mock_query_data([{"category": "A", "amount": 100}]):
+        with mock_query_data([{"category": "A", "segment": "Online", "amount": 100}]):
             result = execute_create_chart(
                 self.agent,
-                {"type": "pie", "query": "SELECT category, amount FROM t"},
+                {"type": "pie", "query": "SELECT category, segment, amount FROM t"},
             )
             self.assertEqual(result["status"], "error")
             self.assertIn("values", result["message"].lower())
+
+    @patch("api.agent.files.filespace_service.write_bytes_to_dir")
+    @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
+    def test_bar_chart_infers_x_and_y_from_two_column_result(self, mock_signed_url, mock_write):
+        mock_write.return_value = {"status": "ok", "path": "/charts/inferred_bar.svg", "node_id": "id1"}
+        mock_signed_url.return_value = "https://example.com/inferred_bar.svg"
+
+        with mock_query_data([
+            {"month": "Jan", "revenue": 100},
+            {"month": "Feb", "revenue": 150},
+        ]):
+            result = execute_create_chart(
+                self.agent,
+                {"type": "bar", "query": "SELECT month, revenue FROM t"},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["file"], "$[/charts/inferred_bar.svg]")
+        mock_write.assert_called_once()
+        mock_signed_url.assert_called_once()
+
+    @patch("api.agent.files.filespace_service.write_bytes_to_dir")
+    @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
+    def test_donut_chart_infers_values_and_labels_from_two_column_result(self, mock_signed_url, mock_write):
+        mock_write.return_value = {"status": "ok", "path": "/charts/inferred_donut.svg", "node_id": "id1"}
+        mock_signed_url.return_value = "https://example.com/inferred_donut.svg"
+
+        with mock_query_data([
+            {"industry": "Construction", "lead_count": 9},
+            {"industry": "Travel Nurse Housing", "lead_count": 1},
+        ]):
+            result = execute_create_chart(
+                self.agent,
+                {"type": "donut\n", "query": "SELECT industry, COUNT(*) AS lead_count FROM lodging_leads"},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["file"], "$[/charts/inferred_donut.svg]")
+        mock_write.assert_called_once()
+        mock_signed_url.assert_called_once()
 
     def test_non_pie_chart_missing_columns_returns_error(self):
         self._assert_missing_columns_error(

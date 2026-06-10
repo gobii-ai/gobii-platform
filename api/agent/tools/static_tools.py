@@ -14,6 +14,7 @@ PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
     "request_contact_permission",
     "spawn_web_task",
     "update_plan",
+    "create_chart"
 })
 
 
