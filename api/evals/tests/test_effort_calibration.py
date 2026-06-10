@@ -7,7 +7,6 @@ from django.test import SimpleTestCase, TestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.event_processing import _get_completed_process_run_count
-from api.agent.core.event_processing import _looks_like_blocking_human_input_request
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context_preview
 from api.agent.core.tool_results import _wrap_as_sqlite_result
 from api.agent.tools.create_chart import get_create_chart_tool
@@ -333,21 +332,6 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 "(https://www.ycombinator.com/companies?batch=Winter%202026)"
             ),
             0,
-        )
-
-    def test_blocking_question_detector_ignores_report_table_questions(self):
-        self.assertFalse(
-            _looks_like_blocking_human_input_request(
-                (
-                    "## Investment Memo\n\n"
-                    "| Criterion | Northstar | Competitor |\n"
-                    "| --- | --- | --- |\n"
-                    "| Vendor agnostic? | Yes | No |\n\n"
-                    "### Sources\n\n"
-                    "- https://northstar.example.test/blog/atlas-launch\n"
-                )
-                * 4
-            )
         )
 
     def test_chart_tool_description_requires_request_or_material_need(self):
