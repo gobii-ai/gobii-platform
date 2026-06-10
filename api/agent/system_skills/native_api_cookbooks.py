@@ -80,7 +80,10 @@ GOOGLE_DRIVE_COOKBOOK = NativeApiCookbook(
                 '`{"properties":{"title":"..."},"sheets":[{"properties":{"title":"Sheet1"}}]}`.'
             ),
             response_shape="Use `spreadsheetId`, `spreadsheetUrl`, and created `sheets[].properties`.",
-            guardrails="Do not use Drive file creation for Google Sheets.",
+            guardrails=(
+                "Do not use Drive file creation for Google Sheets. Preserve the returned "
+                "`sheets[0].properties.sheetId`; it is often not `0`."
+            ),
         ),
         _recipe(
             title="Read values",
@@ -122,13 +125,19 @@ GOOGLE_DRIVE_COOKBOOK = NativeApiCookbook(
             use_when="The user asks to polish, format, freeze headers, resize columns, add banding, or chart data.",
             request_shape=(
                 "Send valid Sheets `requests`. Use `addBanding` with exact key `bandedRange`; bind chart labels "
-                "through `basicChart.domains` and numeric values through `basicChart.series`."
+                "through `basicChart.domains` and numeric values through `basicChart.series`. Use a real numeric "
+                "`sheetId` from create response or spreadsheet metadata. For colors, prefer modern style fields: "
+                "`backgroundColorStyle.rgbColor`, `firstBandColorStyle.rgbColor`, `secondBandColorStyle.rgbColor`, "
+                "and text color under `textFormat.foregroundColorStyle.rgbColor`."
             ),
             response_shape="Inspect `replies[]` and returned IDs such as `bandedRangeId` or chart IDs.",
             guardrails=(
                 "Inspect metadata before adding banding to avoid duplicates. If helper rows/columns are hidden for charts, "
                 "set `hiddenDimensionStrategy` to `SHOW_ALL`; for `updateChartSpec`, send the complete chart spec and "
-                "do not include a `fields` parameter."
+                "do not include a `fields` parameter. Never assume `sheetId` is `0`; if a `batchUpdate` returns 400 "
+                "after using a guessed sheet ID, GET spreadsheet metadata and retry with the returned `sheetId`, not "
+                "by web-searching Sheets docs. If a formatting request returns 400 after using top-level "
+                "`foregroundColor` or legacy color keys, retry with the corresponding `*ColorStyle.rgbColor` fields."
             ),
         ),
     ),
@@ -199,6 +208,25 @@ APOLLO_COOKBOOK = NativeApiCookbook(
             guardrails="Summarize write scope and side effects before proceeding unless already clearly approved.",
         ),
         _recipe(
+            title="Search existing contacts/accounts",
+            method="POST",
+            url="https://api.apollo.io/api/v1/contacts/search and /accounts/search",
+            use_when="The user asks to inspect contacts or accounts already added to the team's Apollo workspace.",
+            request_shape=(
+                "Use a JSON body with `page`, `per_page`, and optional search filters. Contacts support "
+                "`q_keywords`, `contact_stage_ids`, and `contact_label_ids`; accounts support "
+                "`q_organization_name`, `account_stage_ids`, and `account_label_ids`."
+            ),
+            response_shape=(
+                "Contact records are under `contacts`; account records are under `accounts`; page state is under "
+                "`pagination`."
+            ),
+            guardrails=(
+                "These endpoints search the user's saved Apollo database, not the broader Apollo people/company index. "
+                "For net-new discovery, use people or organization search instead."
+            ),
+        ),
+        _recipe(
             title="Sequence search/add contact",
             method="POST",
             url=(
@@ -218,12 +246,18 @@ APOLLO_COOKBOOK = NativeApiCookbook(
         ),
         _recipe(
             title="Usage/profile",
-            method="GET",
-            url="https://api.apollo.io/api/v1/usage_stats and https://app.apollo.io/api/v1/users/api_profile",
+            method="POST/GET",
+            url=(
+                "https://api.apollo.io/api/v1/usage_stats/api_usage_stats and "
+                "https://app.apollo.io/api/v1/users/api_profile"
+            ),
             use_when="The user asks about Apollo API usage, credits, rate limits, or connected user profile.",
-            request_shape="No body.",
-            response_shape="Report the returned usage/profile fields and any visible rate/credit limits.",
-            guardrails="Use the app.apollo.io host only for the documented profile/OAuth metadata endpoints.",
+            request_shape="POST the usage-stats endpoint with no body. GET the OAuth profile endpoint with no body.",
+            response_shape="Report returned `api_usage_stats`/usage fields, profile fields, and any visible rate/credit limits.",
+            guardrails=(
+                "Do not call the obsolete `/usage_stats` path. Use the app.apollo.io host only for documented "
+                "profile/OAuth metadata endpoints."
+            ),
         ),
     ),
 )
