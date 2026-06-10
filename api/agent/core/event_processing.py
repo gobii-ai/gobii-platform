@@ -137,7 +137,6 @@ from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.request_human_input import execute_request_human_input
-from ..tools.spawn_agent import execute_spawn_agent
 from ..tools.search_tools import execute_search_tools
 from ..tools.static_tools import planning_mode_disallows_tool
 from ..tools.tool_manager import (
@@ -2370,7 +2369,6 @@ _DIRECT_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "secure_credentials_request": lambda: execute_secure_credentials_request,
     "request_contact_permission": lambda: execute_request_contact_permission,
     "request_human_input": lambda: execute_request_human_input,
-    "spawn_agent": lambda: execute_spawn_agent,
     "file_str_replace": lambda: execute_file_str_replace,
 }
 

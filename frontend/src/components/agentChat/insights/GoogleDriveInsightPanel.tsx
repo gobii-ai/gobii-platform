@@ -3,6 +3,7 @@ import { FolderOpen, Loader2 } from 'lucide-react'
 
 import {
   fetchNativeIntegrationPickerToken,
+  recordNativeIntegrationAgentEvent,
   type NativeIntegrationProvider,
 } from '../../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../../api/safeErrorMessage'
@@ -28,8 +29,9 @@ const GOOGLE_DRIVE_FALLBACK_ICON = (
   <img src="/static/images/integrations/native/google_drive.svg" alt="" className="h-5 w-5 object-contain" />
 )
 
-export function GoogleDriveInsightPanel({ nativeIntegrationsUrl = null }: GoogleDriveInsightPanelProps) {
+export function GoogleDriveInsightPanel({ agentId = null, nativeIntegrationsUrl = null }: GoogleDriveInsightPanelProps) {
   const panel = useNativeIntegrationPanelState({
+    agentId,
     nativeIntegrationsUrl,
     providerKey: GOOGLE_DRIVE_PROVIDER_KEY,
     providerDisplayName: 'Google',
@@ -38,8 +40,16 @@ export function GoogleDriveInsightPanel({ nativeIntegrationsUrl = null }: Google
   const pickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
       const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-      const selectedCount = await openGoogleDrivePicker(token)
-      return { provider, selectedCount }
+      const selectedFiles = await openGoogleDrivePicker(token)
+      if (agentId && selectedFiles.length > 0) {
+        await recordNativeIntegrationAgentEvent({
+          agentEventUrl: provider.agentEventUrl,
+          agentId,
+          eventType: 'files_selected',
+          files: selectedFiles,
+        })
+      }
+      return { provider, selectedCount: selectedFiles.length }
     },
     onMutate: () => {
       panel.setPendingAction('picker')

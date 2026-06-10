@@ -10,14 +10,19 @@ from unittest.mock import patch
 
 from api.models import (
     AgentCollaborator,
+    AgentSpawnRequest,
     BrowserUseAgent,
     BrowserUseAgentTask,
     CommsChannel,
+    CommsAllowlistRequest,
     Organization,
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
+    PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentSecret,
     PersistentAgentSystemSkillState,
     UserFlags,
     UserPreference,
@@ -843,6 +848,59 @@ class AgentChatAccessTests(TestCase):
         self.assertIn("daily_credit_remaining", matching_entry)
         self.assertEqual(matching_entry.get("daily_credit_low"), False)
         self.assertEqual(matching_entry.get("last_24h_credit_burn"), 0.0)
+
+    def test_roster_includes_pending_action_request_count(self):
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.org_agent,
+            channel=CommsChannel.WEB,
+            address=f"web://user/{self.user.id}/agent/{self.org_agent.id}",
+        )
+        PersistentAgentHumanInputRequest.objects.create(
+            agent=self.org_agent,
+            conversation=conversation,
+            question="Which plan should we use?",
+            requested_via_channel=CommsChannel.WEB,
+        )
+        AgentSpawnRequest.objects.create(
+            agent=self.org_agent,
+            requested_charter="Handle procurement approvals.",
+            handoff_message="Take over vendor approvals.",
+        )
+        requested_secret = PersistentAgentSecret(
+            agent=self.org_agent,
+            name="Procurement API Key",
+            description="Used for procurement sync",
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://procurement.example.com",
+            requested=True,
+        )
+        requested_secret.key = "procurement_api_key"
+        requested_secret.encrypted_value = b""
+        requested_secret.save()
+        CommsAllowlistRequest.objects.create(
+            agent=self.org_agent,
+            channel=CommsChannel.EMAIL,
+            address="approver@example.com",
+            reason="Need procurement approval",
+            purpose="Approve vendor contract",
+        )
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        roster_by_id = {entry["id"]: entry for entry in response.json().get("agents", [])}
+        self.assertEqual(
+            roster_by_id[str(self.org_agent.id)]["pending_action_request_count"],
+            4,
+        )
+        self.assertEqual(
+            roster_by_id[str(self.org_agent_two.id)]["pending_action_request_count"],
+            0,
+        )
 
     def test_roster_marks_shared_agents_as_collaborator_gallery_entries(self):
         User = get_user_model()

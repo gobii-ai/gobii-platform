@@ -66,7 +66,8 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
     setup_text = (
         f"If setup is needed, tell the user to open `{integrations_url}`, connect Google Drive, "
-        "then choose the spreadsheet(s) the agent should be allowed to access.\n"
+        "then choose the spreadsheet(s) the agent should be allowed to access. The native connection and file-selection "
+        "events will wake you once the user finishes.\n"
         if not _native_integration_connected(agent, "google_drive")
         else ""
     )
@@ -98,11 +99,30 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
         "mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false; add name contains 'text' "
         "when searching by title.\n"
         "- Spreadsheet metadata and sheet tabs: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}\n"
+        "- Create a new spreadsheet: POST https://sheets.googleapis.com/v4/spreadsheets with JSON body "
+        "{\"properties\":{\"title\":\"...\"},\"sheets\":[{\"properties\":{\"title\":\"Sheet1\"}}]}. Do not use "
+        "Drive file creation for Google Sheets.\n"
         "- Read values: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}\n"
         "- Update values: PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
         "{url_encoded_range}?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
         "- Append rows: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
         "{url_encoded_range}:append?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
+        "- Format or chart: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}:batchUpdate with "
+        "valid Sheets `requests`.\n"
+        "When creating a reasonable new spreadsheet and the user has not specified columns, choose safe, obvious "
+        "default columns and proceed instead of blocking on a preference question. For new data sheets, write the "
+        "values first, then apply a polished baseline in the same turn: freeze row 1, bold and color the header, "
+        "auto-resize populated columns, apply sensible number/date formats when column meaning is clear, and add "
+        "alternating row colors with `addBanding` using the exact key `bandedRange`.\n"
+        "Before adding banding to an existing sheet, inspect spreadsheet metadata. If a matching banded range "
+        "already exists, skip `addBanding` or update/delete the existing banded range instead of adding a duplicate. "
+        "Malformed `batchUpdate` requests usually need the request object names fixed, not blind retries.\n"
+        "For charts, bind labels through `basicChart.domains` and numeric values through `basicChart.series`. If "
+        "you add helper columns or rows for numeric data and hide them, set `hiddenDimensionStrategy` to `SHOW_ALL`; "
+        "otherwise the chart may show no series. For `updateChartSpec`, send the complete chart spec and do not "
+        "include a `fields` parameter.\n"
+        "For native API calls, treat a tool result with `status: error` or a non-2xx `status_code` as a failed API "
+        "call. Use the returned guidance and response body to repair the request before telling the user it worked.\n"
         f"{missing_file_text}"
     )
 
@@ -110,7 +130,8 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
 def _apollo_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
     setup_text = (
-        f"If setup is needed, tell the user to open `{integrations_url}` and connect Apollo. "
+        f"If setup is needed, tell the user to open `{integrations_url}` and connect Apollo; "
+        "the native connection event will wake you once the user finishes. "
         if not _native_integration_connected(agent, "apollo")
         else ""
     )
@@ -164,7 +185,8 @@ def _apollo_native_prompt_instructions(agent) -> str:
 def _hubspot_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
     setup_text = (
-        f"If setup is needed, tell the user to open `{integrations_url}` and connect HubSpot.\n"
+        f"If setup is needed, tell the user to open `{integrations_url}` and connect HubSpot; "
+        "the native connection event will wake you once the user finishes.\n"
         if not _native_integration_connected(agent, "hubspot")
         else ""
     )
@@ -285,18 +307,21 @@ CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
 GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
     name="Google Sheets",
-    search_summary="Read and update selected Google Sheets through the native Google Drive integration.",
+    search_summary="Create, read, update, format, and chart Google Sheets through the native Google Drive integration.",
     tool_names=("http_request",),
     enables=(
         "read Google Sheets metadata and worksheet names",
+        "create new Google Sheets spreadsheets",
         "read spreadsheet ranges and rows",
         "append rows to selected spreadsheets",
         "update ranges in selected spreadsheets",
+        "format sheets with headers, frozen rows, banding, sizing, and charts",
         "use native Google Drive OAuth with drive.file access",
     ),
     use_when=(
         "the user asks to read a Google Sheet",
         "the user asks to update, append, or write spreadsheet rows",
+        "the user asks to create, format, polish, or chart a Google Sheet",
         "the user asks to find or search for one of their Google Sheets by name",
         "the user asks to inspect worksheets, tabs, ranges, cells, or formulas in Google Sheets",
         "the work references a spreadsheet selected through the native Google Drive integration",

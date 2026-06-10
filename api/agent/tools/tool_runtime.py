@@ -16,7 +16,6 @@ from .schedule_updater import execute_update_schedule
 from .search_tools import execute_search_tools
 from .secure_credentials_request import execute_secure_credentials_request
 from .sms_sender import execute_send_sms
-from .spawn_agent import execute_spawn_agent
 from .spawn_web_task import execute_spawn_web_task
 from .static_tools import planning_mode_disallows_tool
 from .tool_manager import execute_enabled_tool
@@ -72,8 +71,6 @@ def execute_runtime_tool_call(
         return execute_request_contact_permission(agent, exec_params), updated_tools
     if tool_name == "request_human_input":
         return execute_request_human_input(agent, exec_params), updated_tools
-    if tool_name == "spawn_agent":
-        return execute_spawn_agent(agent, exec_params), updated_tools
     if tool_name == "search_tools":
         result = execute_search_tools(agent, exec_params)
         updated_tools = _refresh_agent_tools(agent)

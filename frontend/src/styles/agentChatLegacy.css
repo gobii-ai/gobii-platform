@@ -2190,19 +2190,6 @@
   display: none;
 }
 
-.composer-working-panel[data-has-pending-actions="true"] {
-  background: linear-gradient(135deg, rgba(240, 249, 255, 0.98) 0%, rgba(255, 251, 235, 0.96) 100%);
-  box-shadow: 0 -4px 22px -10px rgba(14, 165, 233, 0.22);
-}
-
-.composer-working-panel[data-has-pending-actions="true"] .composer-working-header-row {
-  background: rgba(255, 255, 255, 0.42);
-}
-
-.composer-working-panel[data-has-pending-actions="true"] .composer-working-header-row:hover {
-  background: rgba(255, 255, 255, 0.62);
-}
-
 .composer-working-panel[data-has-pending-actions="true"] .composer-working-indicator {
   color: #0284c7;
   opacity: 1;
@@ -2307,11 +2294,16 @@
 }
 
 .composer-working-tasks-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
   font-size: 0.6875rem;
   font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
   color: #64748b;
   background: rgba(100, 116, 139, 0.1);
-  padding: 0.125rem 0.5rem;
+  padding: 0.35rem 0.625rem;
   border-radius: 9999px;
 }
 
@@ -2391,7 +2383,15 @@
 }
 
 @container (max-width: 767px) {
+  .composer-working-panel[data-has-pending-actions="true"] .composer-working-status {
+    display: none;
+  }
+
   .composer-working-tasks-badge {
+    display: none;
+  }
+
+  .composer-pending-action-nav__count {
     display: none;
   }
 }
@@ -2406,6 +2406,7 @@
 }
 
 .composer-pending-action-nav + .composer-working-toggle,
+.composer-insight-tabs + .composer-pending-action-nav,
 .composer-insight-tabs + .composer-working-toggle {
   margin-left: 0;
 }
@@ -2637,6 +2638,30 @@
   background: var(--tab-color, #6b7280);
 }
 
+.composer-insight-tab[data-priority="true"] {
+  border: 1px solid color-mix(in srgb, var(--tab-color, #0284c7) 36%, transparent);
+  background: color-mix(in srgb, var(--tab-color, #0284c7) 13%, white);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.52) inset;
+}
+
+.composer-insight-tab[data-priority="true"]:hover {
+  background: color-mix(in srgb, var(--tab-color, #0284c7) 18%, white);
+}
+
+.composer-insight-tab[data-priority="true"][data-active="true"] {
+  border-color: color-mix(in srgb, var(--tab-color, #0284c7) 58%, white);
+  background: color-mix(in srgb, var(--tab-color, #0284c7) 22%, white);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--tab-color, #0284c7) 22%, white) inset,
+    0 0 0 2px color-mix(in srgb, var(--tab-color, #0284c7) 8%, transparent);
+}
+
+.composer-working-panel[data-expanded="false"] .composer-insight-tab[data-priority="true"] {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--tab-color, #0284c7) 30%, white) inset,
+    0 0 0 3px color-mix(in srgb, var(--tab-color, #0284c7) 10%, transparent);
+}
+
 .composer-insight-tab-inner {
   display: none;
 }
@@ -2650,6 +2675,24 @@
   color: var(--tab-color, #7c4ca0);
   line-height: 1;
   transition: color 150ms ease;
+}
+
+.composer-insight-tab-count {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  min-width: 0.9rem;
+  height: 0.9rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--tab-color, #7c4ca0) 16%, white);
+  padding: 0 0.2rem;
+  color: var(--tab-color, #7c4ca0);
+  font-size: 0.56rem;
+  font-weight: 800;
+  line-height: 1;
+  transition: background 150ms ease, color 150ms ease;
 }
 
 .composer-insight-tab-icon {
@@ -2669,9 +2712,25 @@
 }
 
 .composer-insight-tab[data-active="true"] .composer-insight-tab-label,
-.composer-insight-tab[data-active="true"] .composer-insight-tab-icon {
+.composer-insight-tab[data-active="true"] .composer-insight-tab-icon,
+.composer-insight-tab[data-active="true"] .composer-insight-tab-count {
   color: white;
   font-weight: 600;
+}
+
+.composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-label,
+.composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-icon,
+.composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-count {
+  color: var(--tab-color, #0284c7);
+  font-weight: 700;
+}
+
+.composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-count {
+  background: color-mix(in srgb, var(--tab-color, #0284c7) 16%, white);
+}
+
+.composer-insight-tab[data-active="true"] .composer-insight-tab-count {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 /* Countdown progress indicator */
@@ -6920,6 +6979,32 @@
 
 .chat-sidebar-agent[data-active='true'] .chat-sidebar-agent-desc {
   color: rgba(255, 255, 255, 0.74);
+}
+
+.agent-roster-pending-pill {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  height: 0.875rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  background: rgba(224, 242, 254, 0.5);
+  padding: 0 0.36rem;
+  color: #0369a1;
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-sidebar-agent .agent-roster-pending-pill {
+  border-color: rgba(125, 211, 252, 0.16);
+  background: rgba(125, 211, 252, 0.1);
+  color: rgba(186, 230, 253, 0.86);
 }
 
 .chat-sidebar-agent-state {

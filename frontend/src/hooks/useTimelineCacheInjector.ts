@@ -2,6 +2,7 @@ import type { QueryClient, InfiniteData } from '@tanstack/react-query'
 
 import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
 import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRequest, ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
+import type { AgentRosterEntry } from '../types/agentRoster'
 import { compareTimelineCursors } from '../util/timelineCursor'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import {
@@ -12,6 +13,10 @@ import {
 } from './useAgentTimeline'
 
 export const DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES = 20
+
+type AgentRosterQueryData = {
+  agents: AgentRosterEntry[]
+}
 
 export type RefreshTimelineMode = 'fast' | 'contiguous'
 
@@ -57,6 +62,7 @@ export function replacePendingHumanInputRequestsInCache(
   pendingHumanInputRequests: PendingHumanInputRequest[],
 ) {
   const key = timelineQueryKey(agentId)
+  let nextPendingActionsForRoster: PendingActionRequest[] | null = null
   queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
     if (!old?.pages?.length) {
       return old
@@ -90,6 +96,7 @@ export function replacePendingHumanInputRequestsInCache(
           ...nonHumanActions,
         ]
       : nonHumanActions
+    nextPendingActionsForRoster = nextPendingActions
 
     pages[lastIndex] = {
       ...lastPage,
@@ -105,6 +112,11 @@ export function replacePendingHumanInputRequestsInCache(
       pages,
     }
   })
+  if (nextPendingActionsForRoster) {
+    updateRosterPendingActionCountInCache(queryClient, agentId, nextPendingActionsForRoster)
+  } else {
+    void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+  }
 }
 
 export function replacePendingActionRequestsInCache(
@@ -112,6 +124,7 @@ export function replacePendingActionRequestsInCache(
   agentId: string,
   pendingActionRequests: PendingActionRequest[],
 ) {
+  updateRosterPendingActionCountInCache(queryClient, agentId, pendingActionRequests)
   const key = timelineQueryKey(agentId)
   queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
     if (!old?.pages?.length) {
@@ -137,6 +150,48 @@ export function replacePendingActionRequestsInCache(
       pages,
     }
   })
+}
+
+function getPendingActionRequestCount(action: PendingActionRequest): number {
+  switch (action.kind) {
+    case 'human_input':
+    case 'contact_requests':
+      return Math.max(1, action.count || action.requests.length)
+    case 'requested_secrets':
+      return Math.max(1, action.count || action.secrets.length)
+    case 'spawn_request':
+      return 1
+    default:
+      return 1
+  }
+}
+
+function updateRosterPendingActionCountInCache(
+  queryClient: QueryClient,
+  agentId: string,
+  pendingActionRequests: PendingActionRequest[],
+) {
+  const nextCount = pendingActionRequests.reduce((total, action) => total + getPendingActionRequestCount(action), 0)
+  queryClient.setQueriesData<AgentRosterQueryData>(
+    { queryKey: ['agent-roster'] },
+    (current) => {
+      if (!current?.agents?.length) {
+        return current
+      }
+      let changed = false
+      const nextAgents = current.agents.map((agent) => {
+        if (agent.id !== agentId) {
+          return agent
+        }
+        if ((agent.pendingActionRequestCount ?? 0) === nextCount) {
+          return agent
+        }
+        changed = true
+        return { ...agent, pendingActionRequestCount: nextCount }
+      })
+      return changed ? { ...current, agents: nextAgents } : current
+    },
+  )
 }
 
 function updateLatestTimelineRawInCache(

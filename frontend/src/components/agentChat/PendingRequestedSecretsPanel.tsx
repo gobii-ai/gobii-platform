@@ -1,8 +1,7 @@
-import { Globe } from 'lucide-react'
+import { Globe, ShieldCheck } from 'lucide-react'
 
 import type { PendingRequestedSecretsAction } from '../../types/agentChat'
 import { InlineInfoTooltipButton } from './InlineInfoTooltipButton'
-import { PendingActionSectionCard } from './PendingActionSectionCard'
 
 type PendingRequestedSecretsPanelProps = {
   action: PendingRequestedSecretsAction
@@ -11,6 +10,7 @@ type PendingRequestedSecretsPanelProps = {
   error?: string | null
   secretValues: Record<string, string>
   makeGlobal: boolean
+  showReviewSummary?: boolean
   onSecretValueChange: (secretId: string, value: string) => void
   onMakeGlobalChange: (checked: boolean) => void
   onSave: () => Promise<void> | void
@@ -24,6 +24,7 @@ export function PendingRequestedSecretsPanel({
   error = null,
   secretValues,
   makeGlobal,
+  showReviewSummary = true,
   onSecretValueChange,
   onMakeGlobalChange,
   onSave,
@@ -35,51 +36,25 @@ export function PendingRequestedSecretsPanel({
     return null
   }
 
-  return (
-    <PendingActionSectionCard toneClass="border-sky-200 bg-sky-50/55">
-      <div className="space-y-3">
-        <div className="rounded-xl bg-white px-3 py-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-                {secret.secretType === 'env_var' ? 'Env Var' : 'Credential'}
-              </span>
-              {secret.description ? <p className="text-sm text-slate-700">{secret.description}</p> : null}
-            </div>
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-              <input
-                type="password"
-                value={secretValues[secret.id] ?? ''}
-                onChange={(event) => onSecretValueChange(secret.id, event.currentTarget.value)}
-                disabled={disabled || busyAction !== null}
-                className="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200"
-                placeholder={`Enter value for ${secret.name}`}
-                autoComplete="new-password"
-              />
-              <label className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={makeGlobal}
-                  onChange={(event) => onMakeGlobalChange(event.currentTarget.checked)}
-                  disabled={disabled || busyAction !== null}
-                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                />
-                <Globe className="h-4 w-4 text-sky-600" aria-hidden="true" />
-                <span>Global</span>
-                <InlineInfoTooltipButton
-                  label="What Global does"
-                  description="Makes this value available across agents in the current scope instead of storing it only for this agent."
-                  disabled={disabled || busyAction !== null}
-                />
-              </label>
+  const actionRow = (
+    <div className="space-y-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {showReviewSummary ? (
+          <div className="hidden min-w-0 items-center gap-3 sm:flex">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900">Reviewing this request</p>
+              <p className="text-sm text-slate-600">You're allowing this agent to use this credential.</p>
             </div>
           </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
+        ) : null}
+        <div className="flex flex-col-reverse gap-2 sm:ml-auto sm:flex-row sm:justify-end">
           <button
             type="button"
             disabled={disabled || busyAction !== null}
-            className="inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
             onClick={() => void onRemove()}
           >
             {busyAction === 'remove' ? 'Removing...' : 'Remove'}
@@ -87,14 +62,65 @@ export function PendingRequestedSecretsPanel({
           <button
             type="button"
             disabled={disabled || busyAction !== null}
-            className="inline-flex w-full items-center justify-center rounded-xl bg-sky-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
             onClick={() => void onSave()}
           >
             {busyAction === 'save' ? 'Saving...' : 'Save'}
           </button>
         </div>
-        {error ? <p className="text-sm text-rose-600">{error}</p> : null}
       </div>
-    </PendingActionSectionCard>
+      {error ? <p className="text-sm text-rose-600 sm:text-right">{error}</p> : null}
+    </div>
+  )
+
+  return (
+    <div className="w-full space-y-3">
+      <div className="space-y-3">
+        {secret.description ? (
+          <div>
+            <p className="text-xs font-semibold text-slate-900">
+              {secret.secretType === 'env_var' ? 'Environment variable' : 'Credential'}
+            </p>
+            <p className="mt-1 text-sm leading-5 text-slate-700">{secret.description}</p>
+          </div>
+        ) : null}
+
+        <div className="space-y-2">
+          <label htmlFor={`pending-secret-${secret.id}`} className="text-xs font-semibold text-slate-900">
+            Value
+          </label>
+          <div className="space-y-2">
+            <input
+              id={`pending-secret-${secret.id}`}
+              type="password"
+              value={secretValues[secret.id] ?? ''}
+              onChange={(event) => onSecretValueChange(secret.id, event.currentTarget.value)}
+              disabled={disabled || busyAction !== null}
+              className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200"
+              placeholder={`Enter value for ${secret.name}`}
+              autoComplete="new-password"
+            />
+            <label className="inline-flex min-h-8 w-fit items-center gap-2 rounded-lg border border-white/70 bg-white/48 px-2.5 py-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={makeGlobal}
+                onChange={(event) => onMakeGlobalChange(event.currentTarget.checked)}
+                disabled={disabled || busyAction !== null}
+                className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+              />
+              <Globe className="h-4 w-4 text-sky-600" aria-hidden="true" />
+              <span>Make global</span>
+              <InlineInfoTooltipButton
+                label="What Global does"
+                description="Makes this value available across agents in the current scope instead of storing it only for this agent."
+                disabled={disabled || busyAction !== null}
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {actionRow}
+    </div>
   )
 }

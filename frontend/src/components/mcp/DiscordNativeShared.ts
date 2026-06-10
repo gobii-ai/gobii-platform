@@ -16,6 +16,7 @@ export const DISCORD_NATIVE_DISPLAY_PROVIDER: NativeIntegrationProvider = {
   connectUrl: '',
   filesUrl: '',
   pickerTokenUrl: '',
+  agentEventUrl: '',
   revokeUrl: '',
 }
 

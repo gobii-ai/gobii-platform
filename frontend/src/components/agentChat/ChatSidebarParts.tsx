@@ -219,6 +219,8 @@ export function AgentListItem({
     : undefined
   const showMeta = variant === 'drawer' || !collapsed
   const miniDescription = (agent.miniDescription || '').trim()
+  const pendingRequestCount = Math.max(0, agent.pendingActionRequestCount ?? 0)
+  const hasPendingRequests = pendingRequestCount > 0
   const longDescription = (agent.shortDescription || '').trim()
   const hoverDescription = longDescription && longDescription !== miniDescription ? longDescription : undefined
   const showFavoriteButton = Boolean(onToggleFavorite) && (variant === 'drawer' || !collapsed) && showFavoriteToggle
@@ -295,7 +297,11 @@ export function AgentListItem({
       {showMeta ? (
         <span className={styles.metaClass}>
           <span className={styles.nameClass}>{agent.name || 'Agent'}</span>
-          {isWorking ? (
+          {hasPendingRequests ? (
+            <span className="agent-roster-pending-pill">
+              {pendingRequestCount} {pendingRequestCount === 1 ? 'request' : 'requests'}
+            </span>
+          ) : isWorking ? (
             <span className={styles.descClass}>
               <AgentWorkingIndicator />
             </span>

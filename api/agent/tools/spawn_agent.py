@@ -70,56 +70,6 @@ def _build_urls(agent: PersistentAgent, spawn_request: AgentSpawnRequest) -> tup
     return approval_url, decision_path
 
 
-def get_spawn_agent_tool(
-    agent: PersistentAgent | None = None,
-    *,
-    available_capacity: int | None = None,
-) -> Dict[str, Any]:
-    availability_note = ""
-    if agent:
-        available = available_capacity
-        if available is None:
-            owner = _owner_for_agent(agent)
-            available = AgentService.get_agents_available(owner)
-        availability_note = f" Current owner capacity: {max(int(available), 0)} additional agent(s)."
-
-    return {
-        "type": "function",
-        "function": {
-            "name": "spawn_agent",
-            "description": (
-                "Request creation of a specialist partner agent when work is genuinely outside your charter/scope. "
-                "This does not create the agent immediately: it creates a human approval request (Create/Decline). "
-                "On approval, the new agent is automatically peer-linked and receives your handoff message. "
-                "Use sparingly for clear scope boundaries, not for convenience."
-                f"{availability_note}"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "charter": {
-                        "type": "string",
-                        "description": "Full charter/instructions for the specialist agent to run with.",
-                    },
-                    "handoff_message": {
-                        "type": "string",
-                        "description": "Initial task handoff sent from you to the spawned agent after approval.",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "Why this work is out-of-scope and requires a specialist agent.",
-                    },
-                    "will_continue_work": {
-                        "type": "boolean",
-                        "description": "REQUIRED. true = you will continue with more work now, false = done after this action.",
-                    },
-                },
-                "required": ["charter", "handoff_message", "will_continue_work"],
-            },
-        },
-    }
-
-
 def execute_spawn_agent(
     agent: PersistentAgent,
     params: Dict[str, Any],

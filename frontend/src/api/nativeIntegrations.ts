@@ -14,6 +14,7 @@ export type NativeIntegrationProviderDTO = {
   connect_url: string
   files_url: string
   picker_token_url: string
+  agent_event_url: string
   revoke_url: string
 }
 
@@ -64,6 +65,7 @@ export type NativeIntegrationProvider = {
   connectUrl: string
   filesUrl: string
   pickerTokenUrl: string
+  agentEventUrl: string
   revokeUrl: string
 }
 
@@ -114,6 +116,7 @@ export const mapNativeIntegrationProvider = (provider: NativeIntegrationProvider
   connectUrl: provider.connect_url,
   filesUrl: provider.files_url,
   pickerTokenUrl: provider.picker_token_url,
+  agentEventUrl: provider.agent_event_url,
   revokeUrl: provider.revoke_url,
 })
 
@@ -179,4 +182,38 @@ export async function revokeNativeIntegration(revokeUrl: string, csrfToken?: str
     csrfToken,
     json: {},
   })
+}
+
+export async function recordNativeIntegrationAgentEvent({
+  agentEventUrl,
+  agentId,
+  eventType,
+  files = [],
+  csrfToken,
+}: {
+  agentEventUrl: string
+  agentId: string
+  eventType: 'connected' | 'files_selected'
+  files?: NativeIntegrationAccessibleFile[]
+  csrfToken?: string
+}): Promise<{ recorded: boolean; stepId: string }> {
+  const payload = await jsonRequest<{ recorded: boolean; step_id: string }>(agentEventUrl, {
+    method: 'POST',
+    includeCsrf: true,
+    csrfToken,
+    json: {
+      agent_id: agentId,
+      event_type: eventType,
+      files: files.map((file) => ({
+        external_id: file.externalId,
+        name: file.name,
+        mime_type: file.mimeType,
+        web_url: file.webUrl,
+      })),
+    },
+  })
+  return {
+    recorded: Boolean(payload.recorded),
+    stepId: payload.step_id,
+  }
 }

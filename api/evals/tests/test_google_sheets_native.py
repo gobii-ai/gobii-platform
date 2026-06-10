@@ -24,12 +24,12 @@ from api.evals.suites import SuiteRegistry
 
 @tag("eval_sim")
 class GoogleSheetsNativeScenarioTests(SimpleTestCase):
-    def test_google_sheets_native_suite_contains_six_scenarios(self):
+    def test_google_sheets_native_suite_contains_ten_scenarios(self):
         suite = SuiteRegistry.get(GOOGLE_SHEETS_NATIVE_SUITE_SLUG)
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 6)
+        self.assertEqual(len(suite.scenario_slugs), 10)
 
     def test_generated_scenarios_have_expected_metadata(self):
         registered = ScenarioRegistry.list_all()
@@ -61,7 +61,7 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
             for expectation in case.expected_http_requests:
                 self.assertEqual(expectation.name.startswith("google_sheets-"), False)
                 self.assertTrue(expectation.url_terms)
-                self.assertIn(expectation.method, {"GET", "POST"})
+                self.assertIn(expectation.method, {"GET", "POST", "PUT"})
 
             prompt_and_description = f"{case.prompt} {case.description}"
             self.assertNotIn("google_sheets-", prompt_and_description)

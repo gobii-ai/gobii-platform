@@ -3070,6 +3070,7 @@ export function AgentChatPage({
       dailyCreditLow: false,
       last24hCreditBurn: null,
       isOrgOwned: false,
+      pendingActionRequestCount: 0,
     }
   }, [activeAgentId, resolvedAgentColorHex, resolvedAgentName, resolvedAvatarUrl])
   const rosterAgentsWithActiveMeta = useMemo(() => {
@@ -3532,6 +3533,7 @@ export function AgentChatPage({
           email: createdAgentEmail,
           signupPreviewState: personalSignupPreviewAvailable ? 'awaiting_first_reply_pause' : 'none',
           planningState: createdPlanningState,
+          pendingActionRequestCount: 0,
         }
         pendingAgentMetaRef.current = {
           agentId: result.agent_id,

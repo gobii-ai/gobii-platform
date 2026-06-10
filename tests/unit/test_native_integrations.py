@@ -5,6 +5,7 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -27,7 +28,9 @@ from api.models import (
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentEnabledTool,
+    PersistentAgentStep,
     PersistentAgentSystemSkillState,
+    PersistentAgentSystemStep,
 )
 from api.services.native_integrations import (
     APOLLO_PROVIDER,
@@ -272,6 +275,9 @@ class NativeIntegrationTests(TestCase):
                 "google_drive",
                 {
                     "google_drive_file_discovery",
+                    "google_sheets_chart",
+                    "google_sheets_create",
+                    "google_sheets_format",
                     "google_sheets_read",
                     "google_sheets_write",
                 },
@@ -371,12 +377,148 @@ class NativeIntegrationTests(TestCase):
             provider["picker_token_url"],
             reverse("console-native-integration-picker-token", args=["google_drive"]),
         )
+        self.assertEqual(
+            provider["agent_event_url"],
+            reverse("console-native-integration-agent-events", args=["google_drive"]),
+        )
         self.assertIn("granted_scopes", provider)
         self.assertIn("requested_scopes", provider)
         self.assertIn("available_capabilities", provider)
         self.assertIn("missing_capabilities", provider)
         self.assertIn("capability_summary", provider)
         self.assertIn("Read selected Google Sheets", provider["capability_summary"])
+
+    @patch("api.services.native_integration_events.process_agent_events_task.delay")
+    def test_agent_event_records_connected_step_and_queues_processing(self, mock_delay):
+        response = None
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("console-native-integration-agent-events", args=["google_drive"]),
+                data=json.dumps(
+                    {
+                        "agent_id": str(self.agent.id),
+                        "event_type": "connected",
+                        "files": [],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        step = PersistentAgentStep.objects.get(id=response.json()["step_id"])
+        self.assertEqual(step.agent, self.agent)
+        self.assertIn("Google Drive was connected", step.description)
+        system_step = PersistentAgentSystemStep.objects.get(step=step)
+        self.assertEqual(system_step.code, PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE)
+        notes = json.loads(system_step.notes)
+        self.assertEqual(notes["provider_key"], "google_drive")
+        self.assertEqual(notes["event_type"], "connected")
+        self.assertEqual(notes["files"], [])
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @patch("api.services.native_integration_events.process_agent_events_task.delay")
+    def test_agent_event_records_selected_files(self, mock_delay):
+        selected_file = {
+            "external_id": "sheet-123",
+            "name": "Q2 Sales Tracker",
+            "mime_type": "application/vnd.google-apps.spreadsheet",
+            "web_url": "https://docs.google.com/spreadsheets/d/sheet-123/edit",
+        }
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("console-native-integration-agent-events", args=["google_drive"]),
+                data=json.dumps(
+                    {
+                        "agent_id": str(self.agent.id),
+                        "event_type": "files_selected",
+                        "files": [selected_file],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        system_step = PersistentAgentSystemStep.objects.get(step_id=response.json()["step_id"])
+        notes = json.loads(system_step.notes)
+        self.assertEqual(notes["event_type"], "files_selected")
+        self.assertEqual(notes["files"], [selected_file])
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    def test_agent_event_rejects_agent_outside_owner_context(self):
+        other_user = User.objects.create_user(
+            username="other-native-user",
+            email="other-native@example.com",
+            password="password123",
+        )
+        other_browser_agent = BrowserUseAgent.objects.create(user=other_user, name="Other Browser")
+        other_agent = PersistentAgent.objects.create(
+            user=other_user,
+            name="Other Agent",
+            charter="other",
+            browser_use_agent=other_browser_agent,
+        )
+
+        response = self.client.post(
+            reverse("console-native-integration-agent-events", args=["google_drive"]),
+            data=json.dumps(
+                {
+                    "agent_id": str(other_agent.id),
+                    "event_type": "connected",
+                    "files": [],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_agent_event_rejects_malformed_agent_id(self):
+        response = self.client.post(
+            reverse("console-native-integration-agent-events", args=["google_drive"]),
+            data=json.dumps(
+                {
+                    "agent_id": "not-a-uuid",
+                    "event_type": "connected",
+                    "files": [],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["errors"]["agent_id"], ["Invalid agent_id format."])
+
+    def test_agent_event_rejects_non_object_json_payload(self):
+        response = self.client.post(
+            reverse("console-native-integration-agent-events", args=["google_drive"]),
+            data=json.dumps([]),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.content, b"Invalid JSON payload: expected an object")
+
+    @patch(
+        "console.native_integrations_api.normalize_native_integration_event_files",
+        side_effect=ValidationError(["List-style validation error."]),
+    )
+    def test_agent_event_serializes_list_style_validation_error(self, mock_normalize):
+        response = self.client.post(
+            reverse("console-native-integration-agent-events", args=["google_drive"]),
+            data=json.dumps(
+                {
+                    "agent_id": str(self.agent.id),
+                    "event_type": "connected",
+                    "files": [],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["errors"], {"non_field_errors": ["List-style validation error."]})
+        mock_normalize.assert_called_once_with([])
 
     def test_list_reports_connected_state_for_apollo(self):
         cases = (
@@ -753,6 +895,34 @@ class NativeIntegrationTests(TestCase):
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
+    def test_http_request_marks_native_non_2xx_responses_as_errors(self, mock_request, mock_proxy):
+        self._create_integration_secret(owner_user=self.user)
+        mock_proxy.return_value = None
+        mock_request.return_value = _mock_response(
+            b'{"error":{"message":"Unknown name bandingProperties at requests[2].add_banding"}}',
+            status_code=400,
+        )
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "POST",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123:batchUpdate",
+                "body": '{"requests":[]}',
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["status_code"], 400)
+        self.assertEqual(result["provider_key"], "google_drive")
+        self.assertEqual(result["method"], "POST")
+        self.assertIn("Google Drive API request failed", result["message"])
+        self.assertIn("addBanding.bandedRange", result["guidance"])
+        self.assertIn("content", result)
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
     def test_http_request_returns_native_integration_not_connected_before_provider_call(self, mock_request, mock_proxy):
         mock_proxy.return_value = None
 
@@ -1029,6 +1199,14 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("List accessible spreadsheets", block)
         self.assertIn("Do not use web search or public `docs.google.com` results", block)
         self.assertIn("https://www.googleapis.com/drive/v3/files", block)
+        self.assertIn("POST https://sheets.googleapis.com/v4/spreadsheets with JSON body", block)
+        self.assertIn("Do not use Drive file creation for Google Sheets", block)
+        self.assertIn("freeze row 1", block)
+        self.assertIn("addBanding", block)
+        self.assertIn("bandedRange", block)
+        self.assertIn("hiddenDimensionStrategy", block)
+        self.assertIn("SHOW_ALL", block)
+        self.assertIn("do not include a `fields` parameter", block)
         self.assertIn("https://www.googleapis.com/drive/", block)
         self.assertIn("mimeType = 'application/vnd.google-apps.spreadsheet'", block)
         self.assertIn("name contains 'text'", block)
@@ -1043,6 +1221,8 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("- Status: Google Drive is connected.", block)
         self.assertIn("Available capabilities", block)
         self.assertIn("Read selected Google Sheets", block)
+        self.assertIn("Create new Google Sheets spreadsheets", block)
+        self.assertIn("Create and update charts in selected Google Sheets", block)
         self.assertEqual(block.count("Read selected Google Sheets metadata and values"), 1)
         self.assertNotIn("connected with access for", block)
         self.assertIn("Granted scopes", block)

@@ -187,8 +187,8 @@ export function HomepageIntegrationsModal({
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
       setNativeErrorMessage(null)
     },
-    onSuccess: (payload, { popup }) => {
-      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(payload.providerKey, payload.state, popup))
+    onSuccess: (payload, { provider, popup }) => {
+      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(provider, payload.state, popup))
       if (popup && !popup.closed) {
         popup.location.href = payload.authorizationUrl
         popup.focus()
@@ -234,8 +234,8 @@ export function HomepageIntegrationsModal({
       try {
         scrollPageToTop()
         const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-        const selectedCount = await openGoogleDrivePicker(token)
-        return { provider, selectedCount }
+        const selectedFiles = await openGoogleDrivePicker(token)
+        return { provider, selectedCount: selectedFiles.length }
       } finally {
         window.scrollTo(previousScrollX, previousScrollY)
       }

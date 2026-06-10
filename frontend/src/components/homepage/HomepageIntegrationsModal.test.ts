@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildLoginUrl } from '../../api/http'
 import type {
+  NativeIntegrationAccessibleFile,
   NativeIntegrationPickerTokenResponse,
   NativeIntegrationProviderDTO,
 } from '../../api/nativeIntegrations'
@@ -64,6 +65,7 @@ const googleDriveProvider: NativeIntegrationProviderDTO = {
   connect_url: '/console/api/native-integrations/google_drive/connect/',
   files_url: '/console/api/native-integrations/google_drive/files/',
   picker_token_url: '/console/api/native-integrations/google_drive/picker-token/',
+  agent_event_url: '/console/api/native-integrations/google_drive/agent-events/',
   revoke_url: '/console/api/native-integrations/google_drive/revoke/',
 }
 
@@ -115,7 +117,7 @@ describe('homepage native integration login redirects', () => {
 
   it('keeps the homepage modal mounted while Google Picker is active and restores scroll afterward', async () => {
     const tokenDeferred = createDeferred<NativeIntegrationPickerTokenResponse>()
-    const pickerDeferred = createDeferred<number>()
+    const pickerDeferred = createDeferred<NativeIntegrationAccessibleFile[]>()
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
     Object.defineProperty(window, 'scrollX', { configurable: true, value: 12 })
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 640 })
@@ -143,7 +145,14 @@ describe('homepage native integration login redirects', () => {
     })
     expect(screen.getByRole('dialog', { name: 'Manage integrations' })).toBeInTheDocument()
 
-    pickerDeferred.resolve(1)
+    pickerDeferred.resolve([
+      {
+        externalId: 'sheet-123',
+        name: 'Q2 Sales Tracker',
+        mimeType: 'application/vnd.google-apps.spreadsheet',
+        webUrl: 'https://docs.google.com/spreadsheets/d/sheet-123/edit',
+      },
+    ])
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: 'Manage integrations' })).toBeInTheDocument()
     })

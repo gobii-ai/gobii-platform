@@ -33,6 +33,7 @@ const DISCORD_PROVIDER: NativeIntegrationProvider = {
   connectUrl: '',
   filesUrl: '',
   pickerTokenUrl: '',
+  agentEventUrl: '',
   revokeUrl: '',
 }
 

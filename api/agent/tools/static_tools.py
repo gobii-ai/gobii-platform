@@ -12,7 +12,6 @@ PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
     CREATE_CUSTOM_TOOL_NAME,
     "file_str_replace",
     "request_contact_permission",
-    "spawn_agent",
     "spawn_web_task",
     "update_plan",
 })

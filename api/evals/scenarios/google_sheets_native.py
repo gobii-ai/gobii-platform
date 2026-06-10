@@ -22,6 +22,10 @@ GOOGLE_SHEETS_NATIVE_SEARCH_TEST_BY_NAME = "google_sheets_native_search_test_by_
 GOOGLE_SHEETS_NATIVE_LIST_TABS = "google_sheets_native_list_tabs"
 GOOGLE_SHEETS_NATIVE_READ_RANGE = "google_sheets_native_read_range"
 GOOGLE_SHEETS_NATIVE_APPEND_ROW = "google_sheets_native_append_row"
+GOOGLE_SHEETS_NATIVE_CREATE_DEFAULT_COLUMNS = "google_sheets_native_create_default_columns"
+GOOGLE_SHEETS_NATIVE_CREATE_AND_FORMAT = "google_sheets_native_create_and_format"
+GOOGLE_SHEETS_NATIVE_FORMAT_EXISTING_IDEMPOTENT = "google_sheets_native_format_existing_idempotent"
+GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA = "google_sheets_native_chart_with_helper_data"
 GOOGLE_SHEETS_NATIVE_MISSING_SELECTED_FILE = "google_sheets_native_missing_selected_file"
 
 FORBIDDEN_DISCOVERY_TOOL_NAMES = ("search_tools", "enable_system_skills")
@@ -39,6 +43,7 @@ def _http_result(url: str, content: Any, *, status_code: int = 200) -> dict[str,
 DRIVE_SEARCH_URL = "https://www.googleapis.com/drive/v3/files"
 SALES_TRACKER_ID = "sheet-sales-q2"
 GENERIC_TRACKER_ID = "sheet-123"
+LOCAL_LLMS_SHEET_ID = "sheet-local-llms"
 
 
 def _drive_files_result(files: list[dict[str, str]]) -> dict[str, Any]:
@@ -90,6 +95,54 @@ def _generic_tracker_leads_values_rule() -> dict[str, Any]:
                 "values": [
                     ["Company", "Owner", "Priority"],
                     ["Existing Co", "Mina", "Medium"],
+                ],
+            },
+        ),
+    }
+
+
+def _create_local_llms_rule() -> dict[str, Any]:
+    return {
+        "url_contains": "sheets.googleapis.com/v4/spreadsheets",
+        "result": _http_result(
+            "https://sheets.googleapis.com/v4/spreadsheets",
+            {
+                "spreadsheetId": LOCAL_LLMS_SHEET_ID,
+                "spreadsheetUrl": f"https://docs.google.com/spreadsheets/d/{LOCAL_LLMS_SHEET_ID}/edit",
+                "properties": {"title": "Top Local LLM Models"},
+                "sheets": [{"properties": {"sheetId": 0, "title": "Models"}}],
+            },
+        ),
+    }
+
+
+def _local_llms_values_update_rule() -> dict[str, Any]:
+    return {
+        "url_contains": (
+            f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
+            "models",
+        ),
+        "result": _http_result(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values/Models!A1:F10",
+            {"spreadsheetId": LOCAL_LLMS_SHEET_ID, "updatedRows": 6, "updatedCells": 30},
+        ),
+    }
+
+
+def _local_llms_format_rule() -> dict[str, Any]:
+    return {
+        "url_contains": (
+            f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchUpdate",
+        ),
+        "result": _http_result(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchUpdate",
+            {
+                "spreadsheetId": LOCAL_LLMS_SHEET_ID,
+                "replies": [
+                    {"updateSheetProperties": {}},
+                    {"repeatCell": {}},
+                    {"addBanding": {"bandedRange": {"bandedRangeId": 88}}},
+                    {"autoResizeDimensions": {}},
                 ],
             },
         ),
@@ -284,6 +337,158 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         ),
         response_term_groups=(("row", "appended", "updated"),),
         tags=("values_write",),
+    ),
+    GoogleSheetsNativeCase(
+        slug=GOOGLE_SHEETS_NATIVE_CREATE_DEFAULT_COLUMNS,
+        description="Create a useful spreadsheet with safe default columns instead of asking for preferences.",
+        prompt=(
+            "Create a Google Sheet named Top Local LLM Models with the latest useful local LLM model list. "
+            "Use sensible default columns if I did not specify them."
+        ),
+        http_rules=(
+            _local_llms_values_update_rule(),
+            _local_llms_format_rule(),
+            _create_local_llms_rule(),
+        ),
+        expected_http_requests=(
+            HttpRequestExpectation(
+                name="create_spreadsheet",
+                method="POST",
+                url_terms=("sheets.googleapis.com/v4/spreadsheets",),
+                body_terms=("top local llm models",),
+            ),
+            HttpRequestExpectation(
+                name="write_default_columns",
+                method="PUT",
+                url_terms=(
+                    f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
+                    "models",
+                    "valueinputoption=user_entered",
+                ),
+                body_terms=("name", "size", "license", "links"),
+            ),
+        ),
+        response_term_groups=(("Top Local LLM Models", LOCAL_LLMS_SHEET_ID),),
+        tags=("create", "defaults"),
+    ),
+    GoogleSheetsNativeCase(
+        slug=GOOGLE_SHEETS_NATIVE_CREATE_AND_FORMAT,
+        description="Create, populate, and apply baseline formatting to a new spreadsheet.",
+        prompt=(
+            "Make a polished Google Sheet called Top Local LLM Models with columns for name, size, license, links, "
+            "and release date."
+        ),
+        http_rules=(
+            _local_llms_values_update_rule(),
+            _local_llms_format_rule(),
+            _create_local_llms_rule(),
+        ),
+        expected_http_requests=(
+            HttpRequestExpectation(
+                name="create_spreadsheet",
+                method="POST",
+                url_terms=("sheets.googleapis.com/v4/spreadsheets",),
+                body_terms=("top local llm models",),
+            ),
+            HttpRequestExpectation(
+                name="write_values",
+                method="PUT",
+                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",),
+                body_terms=("release date", "license", "links"),
+            ),
+            HttpRequestExpectation(
+                name="format_spreadsheet",
+                method="POST",
+                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchupdate",),
+                body_terms=("freezerowcount", "repeatcell", "addbanding", "bandedrange", "autoresizedimensions"),
+            ),
+        ),
+        response_term_groups=(("polished", "formatted", "ready"), (LOCAL_LLMS_SHEET_ID,)),
+        tags=("create", "format"),
+    ),
+    GoogleSheetsNativeCase(
+        slug=GOOGLE_SHEETS_NATIVE_FORMAT_EXISTING_IDEMPOTENT,
+        description="Inspect existing formatting before adding banding to avoid duplicate banded ranges.",
+        prompt="Format Google spreadsheet sheet-123 so it looks polished. Avoid breaking existing alternating row colors.",
+        http_rules=(
+            {
+                "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+                "result": _http_result(
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+                    {
+                        "spreadsheetId": GENERIC_TRACKER_ID,
+                        "properties": {"title": "Ops Tracker"},
+                        "sheets": [
+                            {
+                                "properties": {"sheetId": 0, "title": "Leads"},
+                                "bandedRanges": [{"bandedRangeId": 77, "range": {"sheetId": 0}}],
+                            }
+                        ],
+                    },
+                ),
+            },
+            {
+                "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
+                "result": _http_result(
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
+                    {"spreadsheetId": GENERIC_TRACKER_ID, "replies": [{"repeatCell": {}}, {"autoResizeDimensions": {}}]},
+                ),
+            },
+        ),
+        expected_http_requests=(
+            HttpRequestExpectation(
+                name="inspect_existing_formatting",
+                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",),
+            ),
+            HttpRequestExpectation(
+                name="format_without_duplicate_banding",
+                method="POST",
+                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchupdate",),
+                body_terms=("repeatcell", "autoresizedimensions"),
+            ),
+        ),
+        response_term_groups=(("formatted", "polished"),),
+        tags=("format", "idempotent"),
+    ),
+    GoogleSheetsNativeCase(
+        slug=GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA,
+        description="Create a chart that binds numeric helper data even when helper columns are hidden.",
+        prompt=(
+            "In Google spreadsheet sheet-123, add a chart visualizing model sizes. If you need a helper numeric "
+            "column, make sure the chart still reads it."
+        ),
+        http_rules=(
+            {
+                "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+                "result": _http_result(
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Leads!F1:F10",
+                    {"spreadsheetId": GENERIC_TRACKER_ID, "updatedRows": 6, "updatedCells": 6},
+                ),
+            },
+            {
+                "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
+                "result": _http_result(
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
+                    {"spreadsheetId": GENERIC_TRACKER_ID, "replies": [{"addChart": {"chart": {"chartId": 55}}}]},
+                ),
+            },
+        ),
+        expected_http_requests=(
+            HttpRequestExpectation(
+                name="write_numeric_helper_data",
+                method="PUT",
+                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",),
+                body_terms=("values",),
+            ),
+            HttpRequestExpectation(
+                name="add_bound_chart",
+                method="POST",
+                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchupdate",),
+                body_terms=("addchart", "basicchart", "domains", "series", "hiddendimensionstrategy", "show_all"),
+            ),
+        ),
+        response_term_groups=(("chart",),),
+        tags=("chart", "helper_data"),
     ),
     GoogleSheetsNativeCase(
         slug=GOOGLE_SHEETS_NATIVE_MISSING_SELECTED_FILE,

@@ -1,5 +1,6 @@
+import { Inbox, Send, ShieldCheck } from 'lucide-react'
+
 import type { PendingContactRequestsAction } from '../../types/agentChat'
-import { PendingActionSectionCard } from './PendingActionSectionCard'
 
 export type PendingContactDraft = {
   allowInbound: boolean
@@ -13,6 +14,7 @@ type PendingContactRequestsPanelProps = {
   busy?: boolean
   error?: string | null
   contactDrafts: Record<string, PendingContactDraft>
+  showReviewSummary?: boolean
   onContactDraftChange: (requestId: string, nextDraft: PendingContactDraft) => void
   onSubmit: (decision: 'approve' | 'decline', requestId: string) => Promise<void> | void
 }
@@ -23,6 +25,7 @@ export function PendingContactRequestsPanel({
   busy = false,
   error = null,
   contactDrafts,
+  showReviewSummary = true,
   onContactDraftChange,
   onSubmit,
 }: PendingContactRequestsPanelProps) {
@@ -42,67 +45,25 @@ export function PendingContactRequestsPanel({
     && !draft.smsContactPermissionAttested
   )
 
-  return (
-    <PendingActionSectionCard toneClass="border-amber-200 bg-amber-50/65">
-      <div className="space-y-3">
-        <div className="rounded-xl bg-white px-3 py-3">
-          <div className="space-y-3">
-            {activeRequest.reason ? (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Reason</p>
-                <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{activeRequest.reason}</p>
-              </div>
-            ) : null}
-            {activeRequest.channel === 'sms' && activeRequest.smsContactPurpose ? (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">SMS purpose</p>
-                <p className="mt-1 text-sm text-slate-700">{activeRequest.smsContactPurpose.replace(/_/g, ' ')}</p>
-                {activeRequest.smsContactPurposeDetails ? (
-                  <p className="mt-1 whitespace-pre-line text-sm text-slate-600">{activeRequest.smsContactPurposeDetails}</p>
-                ) : null}
-              </div>
-            ) : null}
-            <div className="grid gap-2 md:grid-cols-2">
-              <label className="flex items-start gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={draft.allowInbound}
-                  onChange={(event) => onContactDraftChange(activeRequest.id, { ...draft, allowInbound: event.currentTarget.checked })}
-                  disabled={disabled || busy}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
-                />
-                <span>Inbound</span>
-              </label>
-              <label className="flex items-start gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={draft.allowOutbound}
-                  onChange={(event) => onContactDraftChange(activeRequest.id, { ...draft, allowOutbound: event.currentTarget.checked })}
-                  disabled={disabled || busy}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
-                />
-                <span>Outbound</span>
-              </label>
+  const actionRow = (
+    <div className="space-y-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {showReviewSummary ? (
+          <div className="hidden min-w-0 items-center gap-3 sm:flex">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900">Reviewing this request</p>
+              <p className="text-sm text-slate-600">You're allowing this contact to message your organization.</p>
             </div>
-            {activeRequest.channel === 'sms' ? (
-              <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={draft.smsContactPermissionAttested}
-                  onChange={(event) => onContactDraftChange(activeRequest.id, { ...draft, smsContactPermissionAttested: event.currentTarget.checked })}
-                  disabled={disabled || busy}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
-                />
-                <span>I confirm I have permission to contact this number by SMS.</span>
-              </label>
-            ) : null}
           </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
+        ) : null}
+        <div className="flex flex-col-reverse gap-2 sm:ml-auto sm:flex-row sm:justify-end">
           <button
             type="button"
             disabled={disabled || busy}
-            className="inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
             onClick={() => void onSubmit('decline', activeRequest.id)}
           >
             {busy ? 'Saving...' : 'Deny'}
@@ -110,14 +71,87 @@ export function PendingContactRequestsPanel({
           <button
             type="button"
             disabled={disabled || busy || smsApprovalBlocked}
-            className="inline-flex w-full items-center justify-center rounded-xl bg-amber-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
             onClick={() => void onSubmit('approve', activeRequest.id)}
           >
             {busy ? 'Saving...' : 'Approve'}
           </button>
         </div>
-        {error ? <p className="text-sm text-rose-600">{error}</p> : null}
       </div>
-    </PendingActionSectionCard>
+      {error ? <p className="text-sm text-rose-600 sm:text-right">{error}</p> : null}
+    </div>
+  )
+
+  return (
+    <div className="max-w-3xl space-y-3">
+      <div className="space-y-3">
+        {activeRequest.reason ? (
+          <div>
+            <p className="text-xs font-semibold text-slate-900">Reason</p>
+            <p className="mt-1 whitespace-pre-line text-sm leading-5 text-slate-700">{activeRequest.reason}</p>
+          </div>
+        ) : null}
+
+        {activeRequest.channel === 'sms' && activeRequest.smsContactPurpose ? (
+          <div>
+            <p className="text-xs font-semibold text-slate-900">SMS purpose</p>
+            <p className="mt-1 text-sm leading-5 text-slate-700">{activeRequest.smsContactPurpose.replace(/_/g, ' ')}</p>
+            {activeRequest.smsContactPurposeDetails ? (
+              <p className="mt-1 whitespace-pre-line text-sm leading-5 text-slate-600">{activeRequest.smsContactPurposeDetails}</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-slate-900">Permissions</p>
+          <div className="max-w-2xl space-y-2">
+            <label className="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-slate-200/70 bg-white/56 px-3 py-2.5 text-sm text-slate-800">
+              <span className="inline-flex min-w-0 items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={draft.allowInbound}
+                  onChange={(event) => onContactDraftChange(activeRequest.id, { ...draft, allowInbound: event.currentTarget.checked })}
+                  disabled={disabled || busy}
+                  className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                />
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+                  <Inbox className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="truncate font-semibold">Allow inbound</span>
+              </span>
+            </label>
+            <label className="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-slate-200/70 bg-white/56 px-3 py-2.5 text-sm text-slate-800">
+              <span className="inline-flex min-w-0 items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={draft.allowOutbound}
+                  onChange={(event) => onContactDraftChange(activeRequest.id, { ...draft, allowOutbound: event.currentTarget.checked })}
+                  disabled={disabled || busy}
+                  className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                />
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+                  <Send className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="truncate font-semibold">Allow outbound</span>
+              </span>
+            </label>
+          </div>
+          {activeRequest.channel === 'sms' ? (
+            <label className="inline-flex max-w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={draft.smsContactPermissionAttested}
+                onChange={(event) => onContactDraftChange(activeRequest.id, { ...draft, smsContactPermissionAttested: event.currentTarget.checked })}
+                disabled={disabled || busy}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+              />
+              <span>I confirm I have permission to contact this number by SMS.</span>
+            </label>
+          ) : null}
+        </div>
+      </div>
+
+      {actionRow}
+    </div>
   )
 }

@@ -42,6 +42,7 @@ const hubspotProvider = {
   connectUrl: '/console/api/native-integrations/hubspot/connect/',
   filesUrl: '',
   pickerTokenUrl: '',
+  agentEventUrl: '/console/api/native-integrations/hubspot/agent-events/',
   revokeUrl: '/console/api/native-integrations/hubspot/revoke/',
 }
 

@@ -191,6 +191,7 @@ from console.secrets_api_views import (
 )
 from console.native_integrations_api import (
     NativeIntegrationCallbackAPIView,
+    NativeIntegrationAgentEventAPIView,
     NativeIntegrationConnectAPIView,
     NativeIntegrationFilesAPIView,
     NativeIntegrationListAPIView,
@@ -637,6 +638,11 @@ urlpatterns = [
         "console/api/native-integrations/<slug:provider_key>/files/",
         NativeIntegrationFilesAPIView.as_view(),
         name="console-native-integration-files",
+    ),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/agent-events/",
+        NativeIntegrationAgentEventAPIView.as_view(),
+        name="console-native-integration-agent-events",
     ),
     path(
         "console/api/native-integrations/<slug:provider_key>/revoke/",
