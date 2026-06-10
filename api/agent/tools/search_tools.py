@@ -911,7 +911,8 @@ def _search_with_llm(
     if system_skill_lines:
         system_prompt += (
             "\n- System skills: Treat system skills as capability bundles. "
-            "Call enable_system_skills with exact Available system skill keys when `use when`/`enables` match.\n"
+            "When `use when`/`enables` match, call enable_system_skills with exact Available system skill keys "
+            "even if ordinary tools also seem relevant; do not select ordinary tools instead.\n"
         )
     if app_lines:
         if auto_enable_apps and enable_apps_callback is not None:

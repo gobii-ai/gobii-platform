@@ -35,6 +35,7 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
     """
     from api.models import (
         AgentAllowlistInvite,
+        BrowserUseAgentTask,
         CommsAllowlistEntry,
         CommsAllowlistRequest,
         EvalRunTask,
@@ -48,6 +49,7 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
         "sms_contact_permission_attested_at",
     )
     compat_fields = (
+        (BrowserUseAgentTask, ("filespace_artifacts",)),
         (EvalRunTask, ("debug_artifacts",)),
         (PersistentAgent, ("sms_disabled",)),
         (AgentAllowlistInvite, sms_contact_fields),
