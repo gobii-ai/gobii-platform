@@ -93,6 +93,8 @@ EXCLUDED_PARTS = (
     "/node_modules/",
 )
 EXCLUDED_FILENAMES = {
+    "api/agent/system_skills/defaults.py",
+    "api/agent/system_skills/native_api_cookbooks.py",
     "package-lock.json",
     "uv.lock",
 }

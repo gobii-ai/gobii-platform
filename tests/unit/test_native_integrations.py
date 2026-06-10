@@ -16,6 +16,7 @@ from api.agent.system_skills.defaults import (
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
     HUBSPOT_NATIVE_SYSTEM_SKILL_KEY,
 )
+from api.agent.system_skills.native_api_cookbooks import render_native_api_cookbook
 from api.agent.system_skills.registry import get_system_skill_definition, shortlist_system_skills
 from api.agent.system_skills.service import enable_system_skills
 from api.agent.core.prompt_context import _get_secrets_block
@@ -923,6 +924,30 @@ class NativeIntegrationTests(TestCase):
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
+    def test_http_request_guides_apollo_people_search_endpoint_errors(self, mock_request, mock_proxy):
+        self._create_integration_secret(owner_user=self.user, provider=APOLLO_PROVIDER)
+        mock_proxy.return_value = None
+        mock_request.return_value = _mock_response(b'{"error":"forbidden"}', status_code=403)
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "POST",
+                "url": "https://api.apollo.io/api/v1/mixed_people/search",
+                "body": '{"q_organization_domains_list":["example.com"]}',
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["status_code"], 403)
+        self.assertEqual(result["provider_key"], "apollo")
+        self.assertIn("Native Apollo auth was applied", result["guidance"])
+        self.assertIn("/mixed_people/api_search", result["guidance"])
+        self.assertIn("before asking for credentials", result["guidance"])
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
     def test_http_request_returns_native_integration_not_connected_before_provider_call(self, mock_request, mock_proxy):
         mock_proxy.return_value = None
 
@@ -1165,7 +1190,19 @@ class NativeIntegrationTests(TestCase):
     def test_native_system_skills_are_registered_and_enable_http_request(self):
         cases = (
             (GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY, "Google Sheets", ("read google sheets rows", "search my test spreadsheet")),
-            (APOLLO_NATIVE_SYSTEM_SKILL_KEY, "Apollo", ("search Apollo prospects", "enrich contacts in Apollo")),
+            (
+                APOLLO_NATIVE_SYSTEM_SKILL_KEY,
+                "Apollo",
+                (
+                    "search Apollo prospects",
+                    "enrich contacts in Apollo",
+                    "Growth & Sales",
+                    "Prospecting, lead gen, and outreach.",
+                    "sales prospecting",
+                    "lead lists",
+                    "buying signal monitoring",
+                ),
+            ),
             (HUBSPOT_NATIVE_SYSTEM_SKILL_KEY, "HubSpot", ("search HubSpot contacts", "update deals in HubSpot")),
         )
         for skill_key, expected_name, queries in cases:
@@ -1185,6 +1222,19 @@ class NativeIntegrationTests(TestCase):
                     PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="http_request").exists()
                 )
 
+    def test_native_api_cookbook_renderer_returns_compact_provider_recipes(self):
+        block = render_native_api_cookbook("apollo")
+
+        self.assertIn("API cookbook: Apollo API cookbook", block)
+        self.assertIn("People search: POST https://api.apollo.io/api/v1/mixed_people/api_search", block)
+        self.assertIn("Request:", block)
+        self.assertIn("Response:", block)
+        self.assertIn("Guardrails:", block)
+        self.assertIn("person_titles", block)
+        self.assertIn("pagination", block)
+        self.assertIn("API cookbook: Apollo API cookbook", render_native_api_cookbook(" ApOlLo "))
+        self.assertEqual("", render_native_api_cookbook("unknown_provider"))
+
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_google_sheets_prompt_tells_agent_how_to_discover_accessible_spreadsheets(self):
         self._create_integration_secret(owner_user=self.user)
@@ -1198,12 +1248,23 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("If the user supplies a concrete spreadsheet ID, use it directly with the Sheets API", block)
         self.assertIn("List accessible spreadsheets", block)
         self.assertIn("Do not use web search or public `docs.google.com` results", block)
+        self.assertIn("API cookbook: Google Sheets/Drive API cookbook", block)
         self.assertIn("https://www.googleapis.com/drive/v3/files", block)
         self.assertIn("POST https://sheets.googleapis.com/v4/spreadsheets with JSON body", block)
         self.assertIn("Do not use Drive file creation for Google Sheets", block)
+        self.assertIn("sheets[0].properties.sheetId", block)
+        self.assertIn("it is often not `0`", block)
         self.assertIn("freeze row 1", block)
         self.assertIn("addBanding", block)
         self.assertIn("bandedRange", block)
+        self.assertIn("Use a real numeric `sheetId`", block)
+        self.assertIn("backgroundColorStyle.rgbColor", block)
+        self.assertIn("textFormat.foregroundColorStyle.rgbColor", block)
+        self.assertIn("firstBandColorStyle.rgbColor", block)
+        self.assertIn("Never assume `sheetId` is `0`", block)
+        self.assertIn("GET spreadsheet metadata and retry with the returned `sheetId`", block)
+        self.assertIn("top-level `foregroundColor`", block)
+        self.assertIn("`*ColorStyle.rgbColor` fields", block)
         self.assertIn("hiddenDimensionStrategy", block)
         self.assertIn("SHOW_ALL", block)
         self.assertIn("do not include a `fields` parameter", block)
@@ -1267,6 +1328,17 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("per_page", block)
         self.assertIn("status_code", block)
         self.assertIn("only means the HTTP request completed", block)
+        self.assertIn("API cookbook: Apollo API cookbook", block)
+        self.assertIn("People search: POST https://api.apollo.io/api/v1/mixed_people/api_search", block)
+        self.assertIn("person_titles", block)
+        self.assertIn("person_seniorities", block)
+        self.assertIn("organization_num_employees_ranges", block)
+        self.assertIn("50,200", block)
+        self.assertIn("include_similar_titles=false", block)
+        self.assertIn("pagination", block)
+        self.assertIn("person.id", block)
+        self.assertIn("emailer_campaign.id", block)
+        self.assertIn("do not assume search records include email or phone", block)
         self.assertIn("q_organization_domains", block)
         self.assertIn("q_organization_domains_list[]", block)
         self.assertIn("total_entries", block)
@@ -1277,10 +1349,15 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("do not use `/mixed_people/search`", block)
         self.assertIn("mixed_companies/search", block)
         self.assertIn("people/match", block)
+        self.assertIn("Search existing contacts/accounts", block)
+        self.assertIn("https://api.apollo.io/api/v1/contacts/search and /accounts/search", block)
+        self.assertIn("q_keywords", block)
+        self.assertIn("q_organization_name", block)
+        self.assertIn("saved Apollo database", block)
         self.assertIn("/accounts/search", block)
-        self.assertIn("POST `/contacts`", block)
+        self.assertIn("/contacts", block)
         self.assertIn("run_dedupe=true", block)
-        self.assertIn("PUT `/contacts/{contact_id}`", block)
+        self.assertIn("/contacts/{contact_id}", block)
         self.assertIn("/emailer_campaigns/search", block)
         self.assertIn("q_name", block)
         self.assertIn("/emailer_campaigns/{sequence_id}/add_contact_ids", block)
@@ -1293,6 +1370,9 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("webhook_url", block)
         self.assertIn("request_id", block)
         self.assertIn("webhook payload", block)
+        self.assertIn("usage_stats/api_usage_stats", block)
+        self.assertIn("api_usage_stats", block)
+        self.assertIn("Do not call the obsolete `/usage_stats` path", block)
         self.assertIn("Native integration permissions", block)
         self.assertIn("Search Apollo people", block)
         self.assertIn("Granted scopes", block)
@@ -1310,11 +1390,19 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("Tools: http_request", block)
         self.assertIn("https://api.hubapi.com", block)
         self.assertIn("Native HubSpot OAuth is applied automatically", block)
+        self.assertIn("API cookbook: HubSpot CRM v3 API cookbook", block)
         self.assertIn("/crm/v3/objects/contacts/search", block)
         self.assertIn("/crm/v3/objects/companies/search", block)
         self.assertIn("/crm/v3/objects/deals/search", block)
+        self.assertIn("filterGroups", block)
+        self.assertIn("filters", block)
+        self.assertIn("paging.next.after", block)
         self.assertIn("/crm/v3/owners/", block)
         self.assertIn("properties", block)
+        self.assertIn("/crm/v3/properties/{objectType}", block)
+        self.assertIn("associations", block)
+        self.assertIn("/{toObjectType}/{toObjectId}/{associationType}", block)
+        self.assertIn("append the target object ID and association type", block)
         self.assertIn("side-effecting operations", block)
         self.assertNotIn("/app/integrations", block)
         self.assertIn("Native integration permissions", block)

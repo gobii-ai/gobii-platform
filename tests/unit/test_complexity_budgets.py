@@ -68,6 +68,8 @@ class ComplexityBudgetSourceFilterTests(SimpleTestCase):
 
     def test_excludes_non_core_product_adjacent_paths(self):
         non_core_paths = (
+            "api/agent/system_skills/defaults.py",
+            "api/agent/system_skills/native_api_cookbooks.py",
             "marketing_events/views.py",
             "pages/templates/pages/home.html",
             "proprietary/enterprise_overlay.py",

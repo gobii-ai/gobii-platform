@@ -46,10 +46,17 @@ _JSON_PREFIXES = (
 )
 
 
-def _native_http_error_guidance(provider_key: str, status_code: int, content: Any) -> str:
-    if provider_key != "google_drive":
-        return "Check the native integration connection, requested scopes, endpoint, and request body before retrying."
+def _apollo_http_error_guidance(status_code: int) -> str:
+    if status_code in {401, 403, 404}:
+        return (
+            "Native Apollo auth was applied. Check the Apollo endpoint and required scopes before asking "
+            "for credentials. For people search, use POST https://api.apollo.io/api/v1/mixed_people/api_search "
+            "with `q_organization_domains_list`."
+        )
+    return "Check the Apollo endpoint, request body, and rate-limit headers before retrying."
 
+
+def _google_drive_http_error_guidance(status_code: int, content: Any) -> str:
     content_text = json.dumps(content) if isinstance(content, (dict, list)) else str(content or "")
     content_lower = content_text.lower()
     if "addbanding" in content_lower or "banding" in content_lower:
@@ -71,6 +78,14 @@ def _native_http_error_guidance(provider_key: str, status_code: int, content: An
         "Check the Google Sheets or Drive API request shape, especially batchUpdate request names, ranges, and "
         "selected-file access."
     )
+
+
+def _native_http_error_guidance(provider_key: str, status_code: int, content: Any) -> str:
+    if provider_key == "apollo":
+        return _apollo_http_error_guidance(status_code)
+    if provider_key == "google_drive":
+        return _google_drive_http_error_guidance(status_code, content)
+    return "Check the native integration connection, requested scopes, endpoint, and request body before retrying."
 
 
 def _strip_json_prefixes(text: str) -> str:
