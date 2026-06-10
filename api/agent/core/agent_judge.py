@@ -867,6 +867,7 @@ def _build_trajectory_packet(
                 "manager/peer routing, and known contact responsibilities; do not assume the account owner or "
                 "user is always the right recipient."
             ),
+            "When user feedback changes future behavior, direct the agent to persist it in charter, not only acknowledge it.",
             "If task complexity exceeds the current intelligence tier, suggest an intelligence upgrade instead of silently struggling.",
             (
                 "Do not suggest an intelligence upgrade when the evidence is burn-rate throttling or burn-rate "

@@ -51,6 +51,8 @@ CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_pr
 CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL = "charter_expands_sparse_charter_with_detail"
 CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE = "charter_narrows_scope_preserving_unrelated_guidance"
 CHARTER_IGNORES_ONE_OFF_PREFERENCE = "charter_ignores_one_off_preference"
+CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION = "charter_adds_feedback_rule_from_correction"
+CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD = "charter_adds_plain_preference_without_save_word"
 
 TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST = "tool_choice_exact_json_url_uses_http_request"
 TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV = "tool_choice_csv_deliverable_uses_create_csv"
@@ -353,6 +355,8 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
     CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
+    CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
+    CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
 ]
 
 TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
@@ -1571,6 +1575,7 @@ class CharterMemoryScenario(BehaviorMicroScenario):
     tags = ("agent_behavior", "micro", "charter", "memory")
     existing_charter = ""
     prompt = ""
+    prior_outbound_body = ""
     verification_task_name = ""
     success_summary = ""
     failure_summary = ""
@@ -1599,6 +1604,40 @@ class CharterMemoryScenario(BehaviorMicroScenario):
         PersistentAgent.objects.filter(id=agent_id).update(charter=self.existing_charter)
         self._seed_prior_processing_run(agent_id)
         self._enable_builtin_tools(agent_id, ["sqlite_batch"])
+        if self.prior_outbound_body:
+            self._seed_prior_outbound_message(agent_id, self.prior_outbound_body)
+
+    def _seed_prior_outbound_message(self, agent_id, body):
+        agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
+        user_address = build_web_user_address(agent.user_id, agent.id)
+        agent_address = build_web_agent_address(agent.id)
+        agent_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=agent_address,
+            defaults={"owner_agent": agent, "is_primary": True},
+        )
+        if agent_endpoint.owner_agent_id is None:
+            agent_endpoint.owner_agent = agent
+            agent_endpoint.is_primary = True
+            agent_endpoint.save(update_fields=["owner_agent", "is_primary"])
+        user_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=agent_endpoint,
+            to_endpoint=user_endpoint,
+            conversation=conversation,
+            owner_agent=agent,
+            body=body,
+            raw_payload={"source": "eval_seed_prior_outbound_feedback_context"},
+        )
 
     def _inject_charter_prompt(self, run_id, agent_id):
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
@@ -1821,6 +1860,66 @@ class CharterIgnoresOneOffPreferenceScenario(CharterMemoryScenario):
 
     def _charter_check(self, agent, mutation_calls):
         passed = not mutation_calls and agent.charter == self.existing_charter
+        return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterAddsFeedbackRuleFromCorrectionScenario(CharterMemoryScenario):
+    slug = CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION
+    description = "User feedback phrased as a rule should be merged into charter without requiring explicit save wording."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_feedback_rule_saved", assertion_type="manual"),
+    ]
+    existing_charter = (
+        "Source qualified candidates for open roles and send structured recruiting updates with names, "
+        "titles, companies, and fit notes."
+    )
+    prior_outbound_body = (
+        "I found several promising leads: Ana Rivera at Acme Health, Jordan Lee at Northstar, "
+        "and Priya Shah at Apex Clinics."
+    )
+    prompt = (
+        "Great that you found some leads, but you did not include links to their information. "
+        "Do I have to request that you add this each time? Can we just make that a rule?"
+    )
+    verification_task_name = "verify_feedback_rule_saved"
+    success_summary = "Agent saved the user's correction as an ongoing report-link rule while preserving sourcing guidance."
+    failure_summary = "Expected charter to preserve sourcing role and add durable lead/source link guidance"
+
+    def _charter_check(self, agent, mutation_calls):
+        charter = (agent.charter or "").lower()
+        preserved_job = "candidate" in charter or "lead" in charter or "recruit" in charter
+        includes_link_rule = (
+            ("link" in charter or "url" in charter or "source" in charter or "profile" in charter)
+            and ("report" in charter or "update" in charter or "lead" in charter or "candidate" in charter)
+        )
+        passed = bool(mutation_calls and preserved_job and includes_link_rule)
+        return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterAddsPlainPreferenceWithoutSaveWordScenario(CharterMemoryScenario):
+    slug = CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD
+    description = "Plain user feedback/preferences should become durable memory even without save/charter wording."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_plain_preference_saved", assertion_type="manual"),
+    ]
+    existing_charter = "Prepare weekly market briefs for the user with current source-backed findings."
+    prior_outbound_body = (
+        "Here is the market brief in narrative form: funding increased, hiring slowed, and pricing stayed flat."
+    )
+    prompt = "I prefer comparison tables and bullet takeaways. The narrative format is hard to scan."
+    verification_task_name = "verify_plain_preference_saved"
+    success_summary = "Agent saved the user's table-and-bullets preference while preserving market brief guidance."
+    failure_summary = "Expected charter to preserve market brief role and add durable table/bullet format preference"
+
+    def _charter_check(self, agent, mutation_calls):
+        charter = (agent.charter or "").lower()
+        preserved_job = "market" in charter and ("brief" in charter or "finding" in charter)
+        added_format_preference = "table" in charter and ("bullet" in charter or "takeaway" in charter)
+        passed = bool(mutation_calls and preserved_job and added_format_preference)
         return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
 
 

@@ -50,7 +50,7 @@ EPHEMERAL_TABLES = {
 }
 BUILTIN_TABLE_NOTES = {
     TOOL_RESULTS_TABLE: "built-in, ephemeral (dropped before persistence)",
-    AGENT_CONFIG_TABLE: "built-in, ephemeral (reset every LLM call; charter/schedule updates)",
+    AGENT_CONFIG_TABLE: "built-in, ephemeral (reset every LLM call; charter/schedule/standing preference updates)",
     MESSAGES_TABLE: "built-in, ephemeral (recent messages snapshot for this cycle)",
     FILES_TABLE: "built-in, ephemeral (recent file index for this cycle; metadata only)",
     CONTACTS_TABLE: "built-in, ephemeral (effective contacts and contact request state for this cycle)",

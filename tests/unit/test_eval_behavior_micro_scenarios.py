@@ -22,7 +22,9 @@ from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
     BehaviorMicroScenario,
     CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING,
+    CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
     CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING,
+    CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
     CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
@@ -105,6 +107,8 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn(CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL, charter_memory_suite.scenario_slugs)
         self.assertIn(CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE, charter_memory_suite.scenario_slugs)
         self.assertIn(CHARTER_IGNORES_ONE_OFF_PREFERENCE, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD, charter_memory_suite.scenario_slugs)
 
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()

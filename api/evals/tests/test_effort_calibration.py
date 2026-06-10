@@ -901,6 +901,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Stopping without a schedule is correct for one-time work", system_prompt)
         self.assertIn("## Configuration Discipline (CRITICAL)", system_prompt)
         self.assertIn("## Plan Discipline (CRITICAL)", system_prompt)
+        self.assertIn("Feedback and preferences are durable without the user saying save/remember/charter", system_prompt)
         self.assertIn("A finished answer, briefing, chart, or lookup is not a charter change.", system_prompt)
         self.assertIn("update charter/schedule once and stop", system_prompt)
         self.assertIn("do not request contact permission during setup", system_prompt)

@@ -53,7 +53,8 @@ class PromptContextSqlitePlacementTests(TestCase):
 
         self.assertIn("Preserve still-relevant guidance", combined)
         self.assertIn("Merge new durable guidance into the existing charter", combined)
-        self.assertIn("stable durable preferences", combined)
+        self.assertIn("user feedback/preferences", combined)
+        self.assertIn("Feedback and preferences are durable without the user saying save/remember/charter", combined)
         self.assertIn("durable standing memory", combined)
         self.assertIn("named channels/tools", combined)
         self.assertIn("weak guesses", combined)
