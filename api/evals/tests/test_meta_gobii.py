@@ -10,12 +10,14 @@ from api.agent.tools.meta_gobii_names import META_GOBII_TOOL_NAMES
 from api.agent.tools.search_tools import get_search_tools_tool
 from api.evals.meta_gobii import _planned_extra_scope_items
 from api.evals.meta_gobii import META_GOBII_EVAL_CASES
+from api.evals.meta_gobii import META_GOBII_EVAL_SUITE_SLUG
 from api.evals.meta_gobii import score_meta_gobii_case
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.meta_gobii import (
     ENABLE_SYSTEM_SKILLS_TOOL_NAME,
     META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS,
     META_GOBII_REAL_HARNESS_SUITE_SLUG,
+    META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS,
     META_GOBII_SYSTEM_SKILL_KEY,
     SKILL_SEARCH_TOOL_NAME,
     MetaGobiiImplicitResearchTeamRealHarnessScenario,
@@ -142,13 +144,17 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
 
     def test_implicit_research_team_real_harness_scenario_is_registered(self):
         scenario = ScenarioRegistry.get(META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS)
+        meta_gobii_suite = SuiteRegistry.get(META_GOBII_EVAL_SUITE_SLUG)
         suite = SuiteRegistry.get(META_GOBII_REAL_HARNESS_SUITE_SLUG)
 
         self.assertIsNotNone(scenario)
         self.assertFalse(scenario.supports_simulation)
         self.assertIn("real_harness", scenario.tags)
+        self.assertIsNotNone(meta_gobii_suite)
+        self.assertIn(META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS, meta_gobii_suite.scenario_slugs)
         self.assertIsNotNone(suite)
         self.assertIn(META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS, suite.scenario_slugs)
+        self.assertIn(META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS, suite.scenario_slugs)
 
     def test_search_tools_surface_mentions_hidden_system_skills_for_agent_teams(self):
         description = get_search_tools_tool()["function"]["description"].lower()
@@ -163,6 +169,22 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
         )
 
         self.assertEqual(matches[0].skill_key, META_GOBII_SYSTEM_SKILL_KEY)
+
+    def test_specialist_agent_launch_shortlists_meta_gobii_system_skill(self):
+        queries = (
+            "Launch the Growth Operator (Lead Hunter) and the other specialist agents now.",
+            "spawn agent launch specialist agent lead hunter project manager vendor price analyst",
+            "launch specialist agent Gobii coordinate delegate growth operator finance ops analyst",
+        )
+
+        for query in queries:
+            with self.subTest(query=query):
+                matches = shortlist_system_skills(
+                    query,
+                    available_tool_names=set(META_GOBII_TOOL_NAMES),
+                )
+
+                self.assertEqual(matches[0].skill_key, META_GOBII_SYSTEM_SKILL_KEY)
 
     def test_real_harness_evidence_uses_tool_call_primary_key(self):
         class EmptyCompletionQuery:

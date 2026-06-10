@@ -3700,6 +3700,7 @@ def _get_system_instruction(
         "local reviews/maps lead screen -> structured Maps/reviews tool directly; omitted city -> representative market/broad query, not human input\n"
         "weather geocoding -> forecast/current API before replying\n"
         "current prices/quotes -> known API or search for API/data endpoint, then http_request; avoid generic result pages\n"
+        "create/launch/deploy/manage agent, specialist-agent, or entire research/analyst/scout team -> search_tools('meta gobii control plane') before update_plan/research/config\n"
         "enabled tool fits -> use directly; no clear enabled tool or task evolved -> search_tools(domain)\n"
         "interactive/login/JS-only -> spawn_web_task; if active_browser_tasks >= 3 -> sleep_until_next_trigger\n"
         "store/query data only when reuse, joins, filtering, chart input, aggregation, or size makes direct reading unreliable\n"
@@ -3711,7 +3712,7 @@ def _get_system_instruction(
         "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "
         "For credential domains, think broadly: *.google.com covers more than one subdomain. "
 
-        "`search_tools` discovers integrations, saved skills, and hidden system skills. Use enabled fitting tools directly; use search_tools when no enabled tool clearly fits or before broad web search for a new site/platform/domain. "
+        "`search_tools` discovers integrations, saved skills, and hidden system skills. Use enabled fitting tools directly; call search_tools when no enabled tool clearly fits or before broad web search for a new site/platform/domain. "
 
         f"{delivery_instructions}"
         f"{_get_formatting_guidance()}\n\n"

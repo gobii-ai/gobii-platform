@@ -24,6 +24,7 @@ from api.evals.meta_gobii import (
     ENABLE_SYSTEM_SKILLS_TOOL_NAME,
     LEGACY_SPAWN_TOOL_NAME,
     META_GOBII_EVAL_CASES,
+    META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS,
     MUTATING_META_GOBII_TOOLS,
     SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
     SCHEDULE_EXPECTATION_EXPLICIT,
@@ -58,10 +59,14 @@ _LLM_RETRY_DELAYS_SECONDS = (2, 5, 10)
 
 META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS = "meta_gobii_implicit_research_team_real_harness"
 META_GOBII_REAL_HARNESS_SUITE_SLUG = "meta_gobii_real_harness"
-META_GOBII_REAL_HARNESS_SCENARIO_SLUGS = (META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS,)
+META_GOBII_REAL_HARNESS_SCENARIO_SLUGS = (
+    META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS,
+    META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS,
+)
 IMPLICIT_RESEARCH_TEAM_PROMPT = (
     "Create an entire research team to help me figure out something cool to do in NYC this summer/fall."
 )
+SPECIALIST_AGENT_LAUNCH_PROMPT = "Launch the Growth Operator (Lead Hunter) and the other specialist agents now."
 _BAD_IMPLICIT_TEAM_TOOL_NAMES = {
     "mcp_brightdata_search_engine",
     "mcp_brightdata_scrape_as_markdown",
@@ -1393,6 +1398,8 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
     owner = "agent-platform"
     area = "meta_gobii"
     tags = ("meta_gobii", "system_skill", "control_plane", "tool_choice", "real_harness", "micro")
+    prompt = IMPLICIT_RESEARCH_TEAM_PROMPT
+    bad_path_tool_names = _BAD_IMPLICIT_TEAM_TOOL_NAMES
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_skill_search", assertion_type="tool_call"),
@@ -1414,7 +1421,7 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
         with self.wait_for_agent_idle(agent_id, timeout=180):
             inbound = self.inject_message(
                 agent_id,
-                IMPLICIT_RESEARCH_TEAM_PROMPT,
+                self.prompt,
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=self._mock_config(),
@@ -1440,6 +1447,7 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
         self._record_meta_gobii_enabled_result(run_id, agent_id, inbound, calls)
         self._record_meta_gobii_surface_result(run_id, agent_id, inbound, calls)
         self._record_bad_path_result(run_id, agent_id, inbound, calls)
+        self._record_additional_results(run_id, agent_id, inbound, calls)
 
     @staticmethod
     def _prepare_agent(agent_id: str) -> None:
@@ -1494,7 +1502,6 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
             ],
             "stop_on_tool_names": list(_BAD_IMPLICIT_TEAM_TOOL_NAMES),
             "stop_on_tool_names_after_finish": [
-                "send_chat_message",
                 "request_human_input",
                 "meta_gobii_get_agent_config_options",
                 "meta_gobii_list_agents",
@@ -1750,7 +1757,7 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
             task_name="verify_no_research_persona_path",
             expected_summary="The agent should not start web research or persona-simulation workflow before Meta Gobii.",
         )
-        bad_calls = [call for call in calls if call.tool_name in _BAD_IMPLICIT_TEAM_TOOL_NAMES]
+        bad_calls = [call for call in calls if call.tool_name in self.bad_path_tool_names]
         if bad_calls:
             self.record_task_result(
                 run_id,
@@ -1783,6 +1790,135 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
                 after=inbound.timestamp,
             ),
         )
+
+    def _record_additional_results(
+        self,
+        run_id: str,
+        agent_id: str,
+        inbound,
+        calls: list[PersistentAgentToolCall],
+    ) -> None:
+        return None
+
+
+class MetaGobiiSpecialistAgentLaunchRealHarnessScenario(MetaGobiiImplicitResearchTeamRealHarnessScenario):
+    slug = META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS
+    description = (
+        "Runs the Nicholas Ridge specialist-agent launch regression through normal agent processing and verifies "
+        "Meta Gobii discovery instead of simulating agents with durable config changes."
+    )
+    tags = (
+        "meta_gobii",
+        "system_skill",
+        "control_plane",
+        "tool_choice",
+        "real_harness",
+        "micro",
+        "audit_regression",
+    )
+    prompt = SPECIALIST_AGENT_LAUNCH_PROMPT
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_skill_search", assertion_type="tool_call"),
+        ScenarioTask(name="verify_meta_gobii_enabled", assertion_type="tool_call"),
+        ScenarioTask(name="verify_meta_gobii_surface_used", assertion_type="tool_call"),
+        ScenarioTask(name="verify_no_research_persona_path", assertion_type="tool_call"),
+        ScenarioTask(name="verify_no_config_mutation_substitute", assertion_type="tool_call"),
+    ]
+
+    def _record_additional_results(
+        self,
+        run_id: str,
+        agent_id: str,
+        inbound,
+        calls: list[PersistentAgentToolCall],
+    ) -> None:
+        self._record_no_config_mutation_substitute_result(run_id, agent_id, inbound, calls)
+
+    @staticmethod
+    def _eval_stop_policy() -> dict[str, Any]:
+        return {
+            "allowed_tool_names": [
+                "search_tools",
+                "sqlite_batch",
+                "update_plan",
+                "send_chat_message",
+                "request_human_input",
+                *META_GOBII_TOOL_NAMES,
+            ],
+            "stop_on_tool_names": list(_BAD_IMPLICIT_TEAM_TOOL_NAMES),
+            "stop_on_tool_names_after_finish": [
+                "request_human_input",
+                "meta_gobii_get_agent_config_options",
+                "meta_gobii_list_agents",
+                "meta_gobii_request_agent_creation",
+            ],
+            "stop_on_human_input_request": True,
+            "stop_on_sqlite_agent_config_mutation": True,
+            "stop_on_unexpected_relevant_tool": True,
+            "max_relevant_tool_calls": 6,
+        }
+
+    def _record_no_config_mutation_substitute_result(
+        self,
+        run_id: str,
+        agent_id: str,
+        inbound,
+        calls: list[PersistentAgentToolCall],
+    ) -> None:
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_no_config_mutation_substitute",
+            expected_summary=(
+                "The agent should not treat __agent_config or __agent_skills mutations as specialist-agent launch."
+            ),
+        )
+        bad_calls = [call for call in calls if self._is_config_mutation_substitute(call)]
+        if bad_calls:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_no_config_mutation_substitute",
+                observed_summary=(
+                    "Agent used SQLite durable-config mutation instead of Meta Gobii specialist-agent launch."
+                ),
+                artifacts=self._evidence_artifacts(
+                    run_id,
+                    agent_id,
+                    inbound=inbound,
+                    calls=calls,
+                    after=inbound.timestamp,
+                    step=bad_calls[0].step,
+                ),
+            )
+            return
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="verify_no_config_mutation_substitute",
+            observed_summary="Agent did not mutate durable config as a substitute for specialist-agent launch.",
+            artifacts=self._evidence_artifacts(
+                run_id,
+                agent_id,
+                inbound=inbound,
+                calls=calls,
+                after=inbound.timestamp,
+            ),
+        )
+
+    @staticmethod
+    def _is_config_mutation_substitute(call: PersistentAgentToolCall) -> bool:
+        if call.tool_name != "sqlite_batch":
+            return False
+        sql = str((call.tool_params or {}).get("sql") or "").lower()
+        if "__agent_config" not in sql and "__agent_skills" not in sql:
+            return False
+        return bool(re.search(r"\b(update|insert|delete|replace|create|drop|alter)\b", sql))
 
 
 def _scenario_class(case: MetaGobiiEvalCase):
@@ -1877,3 +2013,4 @@ for meta_gobii_case in META_GOBII_EVAL_CASES:
     ScenarioRegistry.register(_scenario_class(meta_gobii_case)())
 
 ScenarioRegistry.register(MetaGobiiImplicitResearchTeamRealHarnessScenario())
+ScenarioRegistry.register(MetaGobiiSpecialistAgentLaunchRealHarnessScenario())

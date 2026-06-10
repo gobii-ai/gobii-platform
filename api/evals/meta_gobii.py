@@ -5,6 +5,7 @@ from typing import Any
 
 META_GOBII_EVAL_SUITE_SLUG = "meta_gobii"
 META_GOBII_EVAL_SCENARIO_PREFIX = "meta_gobii_"
+META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS = "meta_gobii_specialist_agent_launch_real_harness"
 SKILL_SEARCH_TOOL_NAME = "search_system_skills"
 ENABLE_SYSTEM_SKILLS_TOOL_NAME = "enable_system_skills"
 LEGACY_SPAWN_TOOL_NAME = "spawn_agent"
@@ -897,7 +898,10 @@ META_GOBII_EVAL_CASES = (
     *META_GOBII_SCHEDULE_EVAL_CASES,
 )
 
-META_GOBII_EVAL_SCENARIO_SLUGS = [case.scenario_slug for case in META_GOBII_EVAL_CASES]
+META_GOBII_EVAL_SCENARIO_SLUGS = [
+    *(case.scenario_slug for case in META_GOBII_EVAL_CASES),
+    META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS,
+]
 
 
 def score_meta_gobii_case(
