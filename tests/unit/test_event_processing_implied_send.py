@@ -1138,6 +1138,9 @@ class ImpliedSendTests(TestCase):
             "Change my scope to enterprise customers only going forward.",
             "Remember this customer context for renewal alerts.",
             "Update your process: verify source links before reporting.",
+            "Can we just make that a rule?",
+            "Do I have to request that you add links each time?",
+            "Feedback: I prefer comparison tables for reports.",
         ]
 
         for text in durable_examples:

@@ -275,6 +275,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Use request_human_input only for tracked option-based decisions", contents)
         self.assertIn("never search for it or refetch the same successful URL", contents)
         self.assertIn("update your ongoing charter/schedule", contents)
+        self.assertIn("Feedback and preferences are durable without the user saying save/remember/charter", contents)
         self.assertIn("While working, respond with tool calls and no text", contents)
         self.assertIn("never status narration", contents)
 

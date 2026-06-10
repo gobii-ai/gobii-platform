@@ -232,6 +232,7 @@ SQLITE_MUTATION_RE = re.compile(r"\b(?:insert|update|delete|replace|alter|drop|c
 AGENT_CONFIG_TABLE_RE = re.compile(r"\b__agent_config\b", re.IGNORECASE)
 DURABLE_CONFIG_INTENT_RE = re.compile(
     r"\b(?:going forward|from now on|in the future|next time|always|never|remember|prefer|preference|"
+    r"feedback|each time|every time|make (?:that|this|it) a rule|should(?:n't| not) have to|"
     r"update (?:your )?(?:charter|schedule|instructions)|change (?:your )?(?:charter|schedule|instructions)|"
     r"charter|schedule|scheduled|recurring|ongoing|proactive|monitor|track|alert|digest|cadence|"
     r"setup|set up|role|scope|process|workflow|customer context|client context|operating boundary)\b",
@@ -243,6 +244,7 @@ TRANSIENT_CONFIG_SCOPE_RE = re.compile(
 )
 STRONG_DURABLE_CONFIG_INTENT_RE = re.compile(
     r"\b(?:going forward|from now on|in the future|next time|always|never|remember|"
+    r"feedback|each time|every time|make (?:that|this|it) a rule|should(?:n't| not) have to|"
     r"update (?:your )?(?:charter|schedule|instructions)|change (?:your )?(?:charter|schedule|instructions)|"
     r"charter|schedule|scheduled|recurring|ongoing|proactive|monitor|track|alert|digest|cadence|"
     r"setup|set up|role|scope|process|workflow|customer context|client context|operating boundary)\b",

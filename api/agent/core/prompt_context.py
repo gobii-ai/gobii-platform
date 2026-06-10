@@ -1519,7 +1519,7 @@ def _render_prompt_context_once(
                 "Planning Mode is active; end_planning(full_plan=...) replaces your runtime charter."
                 if planning_mode_active
                 else (
-                    "Charter is durable standing memory. Update only for ongoing role/scope, recurrence, or stable durable preferences. "
+                    "Charter is durable standing memory. Update for ongoing role/scope, recurrence, or user feedback/preferences unless clearly one-off. "
                     "Preserve still-relevant guidance; do not update for one-off details, completed work, or weak guesses."
                 )
             ),
@@ -3644,9 +3644,9 @@ def _get_system_instruction(
         "\n\n"
         "## Durable Config\n\n"
 
-        "Update charter/schedule only for changed ongoing responsibilities, durable corrections/preferences, recurring-work context, role/scope/process/customer changes, or vague/missing standing memory. "
+        "Update charter/schedule only for changed ongoing responsibilities, user feedback/preferences, recurring-work context, role/scope/process/customer changes, or vague/missing standing memory. "
         "Merge new durable guidance into the existing charter instead of replacing it wholesale; preserve still-relevant guidance and named channels/tools. "
-        "Do not update for one-off style requests, transient facts, completed work, or weak guesses.\n\n"
+        "Feedback and preferences are durable without the user saying save/remember/charter; do not update for one-off style requests, transient facts, completed work, or weak guesses.\n\n"
 
         f"{schedule_updates_guidance}"
 
@@ -3731,7 +3731,7 @@ def _get_system_instruction(
 
         "## Configuration Discipline (CRITICAL)\n\n"
         "__agent_config is durable operating memory, not normal task output. "
-        "Only mutate it when a configure-authorized user changes ongoing behavior, role/scope/process/customer context, monitoring/alerting rules, durable preferences, stable inferred preferences, or recurrence; preserve still-relevant guidance and named channels/tools. "
+        "Only mutate it when a configure-authorized user changes ongoing behavior, role/scope/process/customer context, monitoring/alerting rules, feedback/preferences, stable inferred preferences, or recurrence; preserve still-relevant guidance and named channels/tools. "
         "Never update charter/schedule for one-off work, transient facts, completed answers, weak guesses, or to describe what you just did. A finished answer, briefing, chart, or lookup is not a charter change. "
         "For scheduled runs, keep cadence unless explicitly changed. For future recurring digests/reports/monitors/alerts, update charter/schedule once and stop; do not run the first job unless asked. "
         "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due. "
