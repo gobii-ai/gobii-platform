@@ -1616,7 +1616,7 @@ export function AgentChatLayout({
         taskQuota={taskQuota}
         manageBillingUrl={contactPackManageUrl}
       />
-      <main className={mainClassName} data-sidebar-mode={sidebarMode}>
+      <main className={mainClassName} data-sidebar-mode={sidebarMode} data-plan-mode={workspacePlanMode}>
         <div
           id="agent-workspace-root"
           data-plan-mode={workspacePlanMode}

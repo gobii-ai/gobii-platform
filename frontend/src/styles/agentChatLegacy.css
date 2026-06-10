@@ -1148,6 +1148,7 @@
 /* Main content flex child - fills remaining space after banner */
 .agent-chat-main {
   --agent-chat-sidebar-current-width: var(--agent-chat-sidebar-width, 18rem);
+  --agent-chat-plan-panel-width: min(18.5rem, calc(100vw - 2rem));
   flex: 1;
   min-height: 0; /* Critical for flex child to shrink and enable overflow */
   display: flex;
@@ -2969,6 +2970,16 @@
 @media (max-width: 767px) {
   .agent-chat-main .jump-to-latest {
     left: 50%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .agent-chat-main[data-plan-mode='docked'] .jump-to-latest {
+    left: calc(
+      50%
+      + (var(--agent-chat-sidebar-current-width, var(--agent-chat-sidebar-width, 18rem)) / 2)
+      - ((var(--agent-chat-plan-panel-width) + 0.875rem) / 2)
+    );
   }
 }
 
