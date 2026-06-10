@@ -21,6 +21,7 @@ from api.evals.scenarios.meta_gobii import (
     META_GOBII_SYSTEM_SKILL_KEY,
     SKILL_SEARCH_TOOL_NAME,
     MetaGobiiImplicitResearchTeamRealHarnessScenario,
+    MetaGobiiSpecialistAgentLaunchRealHarnessScenario,
     MetaGobiiSystemSkillScenario,
 )
 from api.evals.suites import SuiteRegistry
@@ -144,11 +145,14 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
 
     def test_implicit_research_team_real_harness_scenario_is_registered(self):
         scenario = ScenarioRegistry.get(META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS)
+        launch_scenario = ScenarioRegistry.get(META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS)
         meta_gobii_suite = SuiteRegistry.get(META_GOBII_EVAL_SUITE_SLUG)
         suite = SuiteRegistry.get(META_GOBII_REAL_HARNESS_SUITE_SLUG)
 
         self.assertIsNotNone(scenario)
         self.assertFalse(scenario.supports_simulation)
+        self.assertIsNotNone(launch_scenario)
+        self.assertTrue(launch_scenario.supports_simulation)
         self.assertIn("real_harness", scenario.tags)
         self.assertIsNotNone(meta_gobii_suite)
         self.assertIn(META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS, meta_gobii_suite.scenario_slugs)
@@ -185,6 +189,14 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
                 )
 
                 self.assertEqual(matches[0].skill_key, META_GOBII_SYSTEM_SKILL_KEY)
+
+    def test_specialist_agent_launch_detects_sqlite_config_mutation_substitute(self):
+        call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={"sql": "UPDATE __agent_config SET value = 'x' WHERE key = 'charter'"},
+        )
+
+        self.assertTrue(MetaGobiiSpecialistAgentLaunchRealHarnessScenario._is_config_mutation_substitute(call))
 
     def test_real_harness_evidence_uses_tool_call_primary_key(self):
         class EmptyCompletionQuery:

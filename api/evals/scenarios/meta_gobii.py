@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -1816,6 +1817,7 @@ class MetaGobiiSpecialistAgentLaunchRealHarnessScenario(MetaGobiiImplicitResearc
         "micro",
         "audit_regression",
     )
+    supports_simulation = True
     prompt = SPECIALIST_AGENT_LAUNCH_PROMPT
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
@@ -1834,6 +1836,72 @@ class MetaGobiiSpecialistAgentLaunchRealHarnessScenario(MetaGobiiImplicitResearc
         calls: list[PersistentAgentToolCall],
     ) -> None:
         self._record_no_config_mutation_substitute_result(run_id, agent_id, inbound, calls)
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        if self._is_simulated(run_id):
+            self._run_simulated(run_id, agent_id)
+            return
+        super().run(run_id, agent_id)
+
+    def _is_simulated(self, run_id: str) -> bool:
+        try:
+            run = self.get_run(run_id)
+        except EvalRun.DoesNotExist:
+            return False
+        suite_run = run.suite_run
+        return bool(suite_run and (suite_run.launch_config or {}).get("mode") == "simulated")
+
+    def _run_simulated(self, run_id: str, agent_id: str) -> None:
+        self._prepare_agent(agent_id)
+        inbound = self.inject_message(
+            agent_id,
+            self.prompt,
+            trigger_processing=False,
+            eval_run_id=run_id,
+        )
+        PersistentAgentSystemSkillState.objects.update_or_create(
+            agent_id=agent_id,
+            skill_key=META_GOBII_SYSTEM_SKILL_KEY,
+            defaults={"is_enabled": True},
+        )
+        step = PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            eval_run_id=run_id,
+            description="Simulated Meta Gobii specialist-agent launch discovery",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="search_tools",
+            tool_params={"query": "launch specialist agents growth operator lead hunter meta gobii control plane"},
+            result=json.dumps({"status": "success", "system_skills": {"enabled": [META_GOBII_SYSTEM_SKILL_KEY]}}),
+        )
+        PersistentAgentCompletion.objects.create(
+            agent_id=agent_id,
+            eval_run_id=run_id,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            llm_tool_names=["search_tools", "meta_gobii_list_agents", "meta_gobii_get_agent_config_options"],
+        )
+        calls = self._tool_calls_after(run_id, after=inbound.timestamp)
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Simulated prompt injection recorded without live agent processing.",
+            artifacts=self._evidence_artifacts(
+                run_id,
+                agent_id,
+                inbound=inbound,
+                calls=calls,
+                after=inbound.timestamp,
+            ),
+        )
+        self._record_skill_search_result(run_id, agent_id, inbound, calls)
+        self._record_meta_gobii_enabled_result(run_id, agent_id, inbound, calls)
+        self._record_meta_gobii_surface_result(run_id, agent_id, inbound, calls)
+        self._record_bad_path_result(run_id, agent_id, inbound, calls)
+        self._record_additional_results(run_id, agent_id, inbound, calls)
 
     @staticmethod
     def _eval_stop_policy() -> dict[str, Any]:
