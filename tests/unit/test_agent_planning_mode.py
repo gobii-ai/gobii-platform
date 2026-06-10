@@ -156,8 +156,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         tool = get_request_human_input_tool()
         function = tool["function"]
 
-        self.assertIn("In Planning Mode, planning questions must use this tool", function["description"])
-        self.assertIn("chat/email/SMS-only questions are not tracked", function["description"])
+        self.assertIn("Every request needs at least one option", function["description"])
+        self.assertIn("send_chat_message/send_email/send_sms/send_agent_message for free-text questions", function["description"])
 
     def test_end_planning_replaces_charter_and_removes_planning_tool(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -218,9 +218,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("`requests` parameter", prompt)
         self.assertIn("each item contains exactly one question", prompt)
         self.assertIn("`will_continue_work=false` on request_human_input", prompt)
-        self.assertIn("Use request_human_input for every planning question or blocker", prompt)
-        self.assertIn("never use send_chat_message/email/SMS as the question itself", prompt)
-        self.assertIn("untracked and do not count", prompt)
+        self.assertIn("Human input rule: use request_human_input only for tracked option-based decisions", prompt)
+        self.assertIn("Use send tools for free-text clarification and capability/status/policy answers", prompt)
         self.assertIn("questions are visible in web chat", prompt)
         self.assertIn("reference pending questions", prompt)
         self.assertIn(
@@ -286,7 +285,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
         self.assertIn("Use read-only research during planning only when the scope is unclear", prompt)
         self.assertIn("Named integration setup/use: if no enabled tool fits, call search_tools before asking how to connect", prompt)
-        self.assertIn("Use request_human_input for every planning question or blocker", prompt)
+        self.assertIn("Human input rule: use request_human_input only for tracked option-based decisions", prompt)
         self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
         self.assertNotIn("REQUIRED: First-Run Welcome", prompt)

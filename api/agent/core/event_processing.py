@@ -278,83 +278,8 @@ CONTINUATION_PHRASES = (
     "moving on to ",
 )
 
-BLOCKING_HUMAN_INPUT_PATTERNS = (
-    re.compile(r"\bbefore\s+(?:i|we)\b", re.IGNORECASE),
-    re.compile(r"\bi\s+need\s+to\s+know\b", re.IGNORECASE),
-    re.compile(r"\bi\s+need\b.*\b(?:first|before|from you)\b", re.IGNORECASE),
-    re.compile(r"\b(?:please|can you|could you)\s+(?:clarify|provide|share|confirm|choose|tell|send|point|direct|link)\b", re.IGNORECASE),
-    re.compile(r"\bwhich\b.*\bshould\s+(?:i|we)\b", re.IGNORECASE),
-    re.compile(r"\bwhat\b.*\bshould\s+(?:i|we)\b", re.IGNORECASE),
-    re.compile(r"\b(?:which|what)\b.*\bwould\s+you\s+like\s+(?:me|us)\b", re.IGNORECASE),
-)
-MARKDOWN_PUNCTUATION_RE = re.compile(r"[*_`>#\[\]]+")
-OPTIONAL_NON_BLOCKING_QUESTION_RE = re.compile(
-    r"\b(?:any tweaks|any changes|anything to adjust|otherwise\b|if not\b|unless you want)\b",
-    re.IGNORECASE,
-)
-
-
 class OrchestratorPromptStale(RuntimeError):
     """Raised when newer human input makes an in-flight orchestrator prompt stale."""
-
-
-def _looks_like_blocking_human_input_request(message_text: str) -> bool:
-    tableless_text = "\n".join(
-        line
-        for line in (message_text or "").splitlines()
-        if not line.lstrip().startswith("|")
-    )
-    if "?" not in tableless_text:
-        return False
-    if len(message_text or "") > 800 and (
-        "##" in message_text
-        or "###" in message_text
-        or "Sources" in message_text
-        or "|" in message_text
-    ):
-        return False
-
-    normalized = " ".join(tableless_text.split())
-    if OPTIONAL_NON_BLOCKING_QUESTION_RE.search(normalized):
-        return False
-    return bool("?" in normalized and any(pattern.search(normalized) for pattern in BLOCKING_HUMAN_INPUT_PATTERNS))
-
-
-def _extract_human_input_question(message_text: str) -> str:
-    for raw_line in (message_text or "").splitlines():
-        line = MARKDOWN_PUNCTUATION_RE.sub("", raw_line).strip(" -\t")
-        if "?" in line:
-            return _truncate_text_bytes(line, 500).strip()
-
-    fallback = MARKDOWN_PUNCTUATION_RE.sub("", message_text or "").strip()
-    return _truncate_text_bytes(fallback, 500).strip()
-
-
-def _request_human_input_params_from_blocking_chat_question(
-    agent: PersistentAgent,
-    message_text: str,
-    original_tool_params: Dict[str, Any],
-) -> Dict[str, Any]:
-    params = {
-        "question": _extract_human_input_question(message_text),
-        "will_continue_work": _coerce_optional_bool(original_tool_params.get("will_continue_work")) is True,
-    }
-    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
-        params["options"] = [
-            {
-                "label": "I'll provide details",
-                "description": "Share the missing planning detail before the agent continues.",
-            },
-            {
-                "label": "Use a default",
-                "description": "Let the agent choose a reasonable default and continue.",
-            },
-            {
-                "label": "Other",
-                "description": "Explain a different preference or constraint.",
-            },
-        ]
-    return params
 
 
 def _latest_inbound_message_text(agent: PersistentAgent) -> str:
@@ -2197,7 +2122,7 @@ def _message_tool_is_terminal(tool_name: str, tool_params: Dict[str, Any]) -> bo
     if tool_name not in MESSAGE_TOOL_NAMES:
         return False
     body = _message_tool_body_from_params(tool_name, tool_params)
-    if not body or _looks_like_blocking_human_input_request(body):
+    if not body:
         return False
     return not _message_tool_has_progress_intent(tool_name, tool_params)
 
@@ -2700,20 +2625,6 @@ def _prepare_tool_batch(
                     logger.debug("Failed to persist correction step", exc_info=True)
                 followup_required = True
                 break
-
-            if tool_name == "send_chat_message" and not batch_has_human_input_request:
-                message_body = str(tool_params.get("body") or "")
-                if _looks_like_blocking_human_input_request(message_body):
-                    tool_name = "request_human_input"
-                    tool_params = _request_human_input_params_from_blocking_chat_question(
-                        agent,
-                        message_body,
-                        tool_params,
-                    )
-                    logger.info(
-                        "Agent %s: routing blocking chat question to request_human_input.",
-                        agent.id,
-                    )
 
             if tool_name == "send_chat_message":
                 message_body = str(tool_params.get("body") or "")
@@ -3391,19 +3302,6 @@ def _build_implied_send_tool_call(
         return None, "Implied send failed: no deliverable web session."
     if channel != "web":
         return None, "Implied send failed: active web session required."
-
-    if _looks_like_blocking_human_input_request(message_text):
-        tool_params = {
-            "question": _extract_human_input_question(message_text),
-            "will_continue_work": will_continue_work,
-        }
-        return (
-            {
-                "id": "implied_human_input",
-                "function": {"name": "request_human_input", "arguments": json.dumps(tool_params)},
-            },
-            None,
-        )
 
     tool_params = {"to_address": to_address, "body": message_text}
     if will_continue_work:

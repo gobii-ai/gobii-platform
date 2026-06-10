@@ -462,7 +462,7 @@ class ImpliedSendTests(TestCase):
             0,
         )
 
-    def test_planning_blocking_chat_question_routes_to_tracked_human_input(self):
+    def test_planning_chat_question_stays_chat_without_auto_conversion(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
@@ -499,11 +499,11 @@ class ImpliedSendTests(TestCase):
 
         self.assertEqual(len(prepared.prepared_calls), 1)
         routed = prepared.prepared_calls[0]
-        self.assertEqual(routed.tool_name, "request_human_input")
-        self.assertIn("target company", routed.tool_params["question"])
-        self.assertEqual(len(routed.tool_params["options"]), 3)
+        self.assertEqual(routed.tool_name, "send_chat_message")
+        self.assertIn("target company", routed.tool_params["body"])
+        self.assertFalse(routed.tool_params["will_continue_work"])
 
-    def test_clarify_chat_question_routes_to_tracked_human_input(self):
+    def test_clarify_chat_question_stays_chat_outside_planning(self):
         prepared = ep._prepare_tool_batch(
             self.agent,
             tool_calls=[
@@ -539,8 +539,8 @@ class ImpliedSendTests(TestCase):
 
         self.assertEqual(len(prepared.prepared_calls), 1)
         routed = prepared.prepared_calls[0]
-        self.assertEqual(routed.tool_name, "request_human_input")
-        self.assertIn("project", routed.tool_params["question"])
+        self.assertEqual(routed.tool_name, "send_chat_message")
+        self.assertIn("project", routed.tool_params["body"])
         self.assertFalse(routed.tool_params["will_continue_work"])
 
     def test_defaultable_schedule_setup_question_gets_runtime_correction(self):
@@ -1621,7 +1621,7 @@ class ImpliedSendTests(TestCase):
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_routes_blocking_question_to_human_input(
+    def test_implied_send_keeps_free_text_question_as_chat_outside_planning(
         self,
         mock_completion,
         mock_build_prompt,
@@ -1652,23 +1652,18 @@ class ImpliedSendTests(TestCase):
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertFalse(mock_send_chat.called)
-        mock_request_human_input.assert_called_once()
-        params = mock_request_human_input.call_args[0][1]
-        self.assertEqual(
-            params,
-            {
-                "question": "Before I start researching, which target account segment should I research?",
-                "will_continue_work": False,
-            },
-        )
+        mock_send_chat.assert_called_once()
+        mock_request_human_input.assert_not_called()
+        params = mock_send_chat.call_args[0][1]
+        self.assertIn("which target account segment", params["body"])
+        self.assertIsNone(params.get("will_continue_work"))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_routes_would_you_like_question_to_human_input(
+    def test_implied_send_keeps_would_you_like_question_as_chat_outside_planning(
         self,
         mock_completion,
         mock_build_prompt,
@@ -1700,23 +1695,18 @@ class ImpliedSendTests(TestCase):
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertFalse(mock_send_chat.called)
-        mock_request_human_input.assert_called_once()
-        params = mock_request_human_input.call_args[0][1]
-        self.assertEqual(
-            params,
-            {
-                "question": "Which target account segment would you like me to research?",
-                "will_continue_work": False,
-            },
-        )
+        mock_send_chat.assert_called_once()
+        mock_request_human_input.assert_not_called()
+        params = mock_send_chat.call_args[0][1]
+        self.assertIn("Which target account segment", params["body"])
+        self.assertIsNone(params.get("will_continue_work"))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_explicit_chat_blocking_question_routes_to_human_input(
+    def test_explicit_chat_keeps_free_text_question_as_chat_outside_planning(
         self,
         mock_completion,
         mock_build_prompt,
@@ -1761,23 +1751,18 @@ class ImpliedSendTests(TestCase):
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertFalse(mock_send_chat.called)
-        mock_request_human_input.assert_called_once()
-        params = mock_request_human_input.call_args[0][1]
-        self.assertEqual(
-            params,
-            {
-                "question": "Before I start monitoring, which competitors should I track?",
-                "will_continue_work": False,
-            },
-        )
+        mock_send_chat.assert_called_once()
+        mock_request_human_input.assert_not_called()
+        params = mock_send_chat.call_args[0][1]
+        self.assertEqual(params["body"], "Before I start monitoring, which competitors should I track?")
+        self.assertIsNone(params.get("will_continue_work"))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_explicit_chat_source_request_routes_to_human_input(
+    def test_explicit_chat_source_request_stays_chat_outside_planning(
         self,
         mock_completion,
         mock_build_prompt,
@@ -1826,19 +1811,11 @@ class ImpliedSendTests(TestCase):
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertFalse(mock_send_chat.called)
-        mock_request_human_input.assert_called_once()
-        params = mock_request_human_input.call_args[0][1]
-        self.assertEqual(
-            params,
-            {
-                "question": (
-                    "I don't have any project status data available yet. Could you point me to where I "
-                    "can find the latest project status? For example:"
-                ),
-                "will_continue_work": False,
-            },
-        )
+        mock_send_chat.assert_called_once()
+        mock_request_human_input.assert_not_called()
+        params = mock_send_chat.call_args[0][1]
+        self.assertIn("project status data", params["body"])
+        self.assertIsNone(params.get("will_continue_work"))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
@@ -2540,10 +2517,10 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         ):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertFalse(mock_send_chat.called)
-        mock_request_human_input.assert_called_once()
-        params = mock_request_human_input.call_args[0][1]
-        self.assertIs(params.get("will_continue_work"), False)
+        mock_send_chat.assert_called_once()
+        mock_request_human_input.assert_not_called()
+        params = mock_send_chat.call_args[0][1]
+        self.assertIsNone(params.get("will_continue_work"))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})

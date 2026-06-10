@@ -5,6 +5,7 @@ from typing import Any
 from api.agent.comms.human_input_requests import (
     MAX_HUMAN_INPUT_QUESTION_LENGTH,
     MAX_OPTION_COUNT,
+    OPTIONS_REQUIRED_MESSAGE,
     create_human_input_request,
     create_human_input_requests_batch,
 )
@@ -68,12 +69,11 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "options": {
                 "type": "array",
                 "items": option_schema,
-                "description": (
-                    "Optional choices; omit or [] for free text. Required in Planning Mode; include an open-ended option."
-                ),
+                "minItems": 1,
+                "description": "Required choices; include an Other / I'll explain option for open-ended answers.",
             },
         },
-        "required": ["question"],
+        "required": ["question", "options"],
     }
 
     return {
@@ -81,9 +81,10 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create tracked human input for blockers/planning questions; it appears in web chat and does not send email/SMS. "
-                "Do not ask via chat/email/SMS instead; chat/email/SMS-only questions are not tracked. "
-                "In Planning Mode, planning questions must use this tool with options, at most three. "
+                "Create tracked, option-based human input; it appears in web chat and does not send email/SMS. "
+                "Every request needs at least one option; use send_chat_message/send_email/send_sms/send_agent_message for free-text questions or capability/status/policy answers. "
+                "Include an Other / I'll explain option when useful. "
+                "Planning questions should use at most three options. "
                 "Outside Planning Mode, do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose. "
                 "Use it when the user explicitly asks you to ask for targets/scope before setup or missing targets/scope block a recurring monitor. "
                 f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
@@ -99,12 +100,13 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "options": {
                         "type": "array",
                         "items": option_schema,
-                        "description": "Optional choices; omit/[] for free text. Required in Planning Mode; include open-ended option.",
+                        "minItems": 1,
+                        "description": "Required choices; include an Other / I'll explain option for open-ended answers.",
                     },
                     "requests": {
                         "type": "array",
                         "items": request_schema,
-                        "description": "Multiple requests; omit top-level question/options. Planning Mode: at most three.",
+                        "description": "Multiple requests with options; omit top-level question/options. Planning Mode: at most three.",
                     },
                     "recipient": {
                         "description": "Optional explicit recipient; omit for the current implicit conversation target.",
@@ -158,6 +160,13 @@ def _normalize_request_options(raw_options: Any) -> tuple[list[dict[str, Any]] |
             }
         )
     return options, None
+
+
+def _missing_required_options_error() -> dict[str, Any]:
+    return {
+        "status": "error",
+        "message": OPTIONS_REQUIRED_MESSAGE,
+    }
 
 
 def _normalize_recipient(raw_recipient: Any) -> tuple[dict[str, str] | None, dict[str, Any] | None]:
@@ -222,20 +231,14 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
             options, error = _normalize_request_options(raw_request.get("options"))
             if error:
                 return error
+            if not options:
+                return _missing_required_options_error()
             requests.append(
                 {
                     "question": question,
-                    "options": options or [],
+                    "options": options,
                 }
             )
-
-        if agent.planning_state == PersistentAgent.PlanningState.PLANNING and any(
-            not request["options"] for request in requests
-        ):
-            return {
-                "status": "error",
-                "message": "Planning Mode questions must include at least one option; include an Other / I'll explain option for open-ended questions.",
-            }
 
         omitted_request_count = 0
         if agent.planning_state == PersistentAgent.PlanningState.PLANNING and len(requests) > 3:
@@ -264,11 +267,8 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
     if error:
         return error
 
-    if agent.planning_state == PersistentAgent.PlanningState.PLANNING and not options:
-        return {
-            "status": "error",
-            "message": "Planning Mode questions must include at least one option; include an Other / I'll explain option for open-ended questions.",
-        }
+    if not options:
+        return _missing_required_options_error()
     if agent.planning_state != PersistentAgent.PlanningState.PLANNING and options and len(options) > 3:
         return {
             "status": "error",

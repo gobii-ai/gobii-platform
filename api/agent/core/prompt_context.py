@@ -3398,10 +3398,10 @@ def _get_planning_mode_prompt_block() -> str:
         "- Treat named local time zones such as ET as sufficiently clear; handle DST and UTC conversion as "
         "implementation details instead of asking the user.\n"
         "- Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them. Keep the conversation focused on the user's need, scope, and desired outcome. If goal/source/cadence/output are clear, call end_planning and use current conversation/contact setup.\n"
-        "- Use request_human_input for every planning question or blocker; never use send_chat_message/email/SMS as the question itself. Those messages are untracked and do not count.\n"
+        "- Human input rule: use request_human_input only for tracked option-based decisions; every request needs explicit options. Use send tools for free-text clarification and capability/status/policy answers.\n"
         "- Once request_human_input succeeds, questions are visible in web chat. Do not repeat them; an optional chat message may only frame why you asked or reference pending questions.\n"
         "- Each planning question must be its own request item. If asking multiple questions, prefer one request_human_input call with the `requests` parameter, where each item contains exactly one question; top-level `question` is fine for one.\n"
-        "- Prefer tangible, mutually exclusive options. DO NOT use request_human_input without any options; include an `Other / I'll explain` option for open-ended questions.\n"
+        "- Prefer tangible, mutually exclusive options; add `Other / I'll explain` when useful.\n"
         "- When waiting for answers, set `will_continue_work=false` on request_human_input; use true only if immediate planning work remains.\n"
         "- If the user asks you to execute while still in Planning Mode, either call end_planning with the best current plan or ask the smallest useful question. Do not start doing the task while planning mode is still active.\n"
         "- When the plan is ready, call end_planning(full_plan=...). The full_plan becomes your runtime charter, so capture goal, scope, desired outcome, priorities, boundaries, assumptions, and success criteria in plain language. Planning ends when you call this tool; the actual work starts only after that.\n"
@@ -3509,7 +3509,7 @@ def _get_system_instruction(
         delivery_context = (
             f"## Implied Send → {display_name}\n\n"
             "Your response text is a user message: use it only for questions, blockers, config changes, findings, or final deliverables. "
-            "Use request_human_input when the answer controls the next step. If the user explicitly asks you to ask for monitoring targets/scope before setup, use request_human_input before any setup/config mutation. "
+            "Use request_human_input only for tracked option-based decisions; use this chat for free-text questions and capability/status/policy answers. "
             "While working, respond with tool calls and no text; if an exact URL/result already succeeded, never search for it or refetch the same successful URL. "
             "Text-only messages auto-send and stop; add \"CONTINUE_WORK_SIGNAL\" alone to continue. "
             "To reach someone else, use explicit tools: "
@@ -3519,7 +3519,7 @@ def _get_system_instruction(
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
         response_structure = (
-            "Response structure: tools only while working; message for blockers/questions/findings/finals; request_human_input for blocking answers; empty response sleeps. "
+            "Response structure: tools only while working; message for blockers/questions/findings/finals; request_human_input only for option-based tracked decisions; empty response sleeps. "
             "Use CONTINUE_WORK_SIGNAL only after a message that must continue."
         )
         tool_calls_note = "Text + tools in one response is only for real user-facing content, never status narration. "
@@ -3528,7 +3528,7 @@ def _get_system_instruction(
         delivery_context = (
             "## Delivery & Response Behavior\n\n"
             "Text output is not delivered; communicate with send_email/send_sms/send_agent_message/send_chat_message. "
-            "Use request_human_input, not plain chat/email/SMS, when the next step depends on a human answer, including requested monitoring target/scope questions before setup. "
+            "Use request_human_input only for tracked option-based decisions; use send tools for free-text questions and capability/status/policy answers. "
             "If notifying by email/SMS too, include the same questions in that outbound body. "
             "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts. "
             "Focus on tool calls—text alone is not delivered.\n\n"
