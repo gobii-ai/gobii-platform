@@ -512,6 +512,79 @@ def _contains_blocked_asset_references(html: str) -> bool:
     return parser.blocked
 
 
+HTML_TAG_NAMES = (
+    "html",
+    "head",
+    "body",
+    "main",
+    "section",
+    "article",
+    "header",
+    "footer",
+    "style",
+    "div",
+    "span",
+    "p",
+    "br",
+    "h[1-6]",
+    "table",
+    "thead",
+    "tbody",
+    "tfoot",
+    "tr",
+    "td",
+    "th",
+    "ul",
+    "ol",
+    "li",
+    "strong",
+    "em",
+    "img",
+    "a",
+)
+HTML_TAG_PATTERN = "|".join(HTML_TAG_NAMES)
+ESCAPED_HTML_TAG_RE = re.compile(
+    rf"&lt;\s*/?\s*(?:{HTML_TAG_PATTERN})(?:\s|/|&gt;)",
+    re.IGNORECASE,
+)
+RAW_HTML_TAG_RE = re.compile(
+    rf"<\s*/?\s*(?:{HTML_TAG_PATTERN})(?:\s|/|>)",
+    re.IGNORECASE,
+)
+
+
+def _escaped_html_tag_count(html: str) -> int:
+    return len(ESCAPED_HTML_TAG_RE.findall(html))
+
+
+def _raw_html_tag_count(html: str) -> int:
+    return len(RAW_HTML_TAG_RE.findall(html))
+
+
+def _looks_like_escaped_html_document(html: str) -> bool:
+    escaped_tag_count = _escaped_html_tag_count(html)
+    if escaped_tag_count == 0 or _raw_html_tag_count(html) > 0:
+        return False
+
+    starts_with_escaped_tag = bool(ESCAPED_HTML_TAG_RE.match(html.lstrip()))
+    return escaped_tag_count >= 4 or starts_with_escaped_tag
+
+
+def _normalize_escaped_html_input(html: str) -> str:
+    if _looks_like_escaped_html_document(html):
+        return html_lib.unescape(html)
+
+    once_unescaped = html_lib.unescape(html)
+    if once_unescaped != html and _looks_like_escaped_html_document(once_unescaped):
+        return once_unescaped
+
+    return html
+
+
+def _contains_unrenderable_escaped_html(html: str) -> bool:
+    return _looks_like_escaped_html_document(html)
+
+
 def _coerce_markdown_images_to_html(html: str) -> str:
     def replace(match: re.Match) -> str:
         alt = html_lib.escape(match.group("alt") or "", quote=True)
@@ -566,7 +639,7 @@ def get_create_pdf_tool() -> Dict[str, Any]:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "html": {"type": "string", "description": "HTML string to convert into a PDF."},
+                    "html": {"type": "string", "description": "Raw HTML string to convert into a PDF; do not HTML-escape tags."},
                     "file_path": {
                         "type": "string",
                         "description": (
@@ -591,6 +664,13 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         return {"status": "error", "message": "Missing required parameter: html"}
 
     html = decode_unicode_escapes(html)
+    html = _normalize_escaped_html_input(html)
+    if _contains_unrenderable_escaped_html(html):
+        return {
+            "status": "error",
+            "message": "HTML appears entity-escaped. Pass raw tags like <div>, not &lt;div&gt;.",
+        }
+
     html = _coerce_markdown_images_to_html(html)
 
     # Substitute $[path] variables with data URIs (PDF needs embedded content, not URLs)
