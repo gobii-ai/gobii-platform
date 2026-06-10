@@ -1232,6 +1232,7 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("Guardrails:", block)
         self.assertIn("person_titles", block)
         self.assertIn("pagination", block)
+        self.assertIn("API cookbook: Apollo API cookbook", render_native_api_cookbook(" ApOlLo "))
         self.assertEqual("", render_native_api_cookbook("unknown_provider"))
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
@@ -1400,6 +1401,8 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("properties", block)
         self.assertIn("/crm/v3/properties/{objectType}", block)
         self.assertIn("associations", block)
+        self.assertIn("/{toObjectType}/{toObjectId}/{associationType}", block)
+        self.assertIn("append the target object ID and association type", block)
         self.assertIn("side-effecting operations", block)
         self.assertNotIn("/app/integrations", block)
         self.assertIn("Native integration permissions", block)

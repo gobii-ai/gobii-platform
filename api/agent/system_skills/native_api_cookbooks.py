@@ -313,9 +313,15 @@ HUBSPOT_COOKBOOK = NativeApiCookbook(
         _recipe(
             title="Associations",
             method="GET/PUT",
-            url="https://api.hubapi.com/crm/v3/objects/{fromObjectType}/{fromObjectId}/associations/{toObjectType}",
+            url=(
+                "https://api.hubapi.com/crm/v3/objects/{fromObjectType}/{fromObjectId}/associations/"
+                "{toObjectType} and /{toObjectType}/{toObjectId}/{associationType}"
+            ),
             use_when="The user asks for relationships between CRM records or explicitly approves association changes.",
-            request_shape="Use object types and IDs from prior search/read calls.",
+            request_shape=(
+                "For reads, use the source object type/ID and target object type. For writes, append the target object "
+                "ID and association type: `/{toObjectType}/{toObjectId}/{associationType}`."
+            ),
             response_shape="Read associated object IDs and association metadata from returned results.",
             guardrails="Work with associations only when requested; association writes are side-effecting and need clear approval.",
         ),
@@ -332,7 +338,7 @@ NATIVE_API_COOKBOOKS = {
 
 
 def render_native_api_cookbook(provider_key: str) -> str:
-    cookbook = NATIVE_API_COOKBOOKS.get(str(provider_key or "").strip())
+    cookbook = NATIVE_API_COOKBOOKS.get(str(provider_key or "").strip().lower())
     if cookbook is None:
         return ""
 
