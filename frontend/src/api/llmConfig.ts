@@ -12,6 +12,7 @@ export type ProviderEndpoint = {
   label: string
   key: string
   model: string
+  litellm_pricing_model?: string | null
   api_base?: string
   temperature_override?: number | null
   supports_temperature?: boolean

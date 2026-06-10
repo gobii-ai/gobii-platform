@@ -24,7 +24,7 @@ from django.conf import settings
 
 from api.agent.core.endpoint_config_utils import resolve_provider_api_key
 from api.openrouter import get_attribution_headers
-from api.llm.utils import normalize_model_name
+from api.llm.utils import normalize_model_name, normalize_pricing_model
 from api.services.web_sessions import has_active_web_session
 from util.subscription_helper import get_owner_plan
 from constants.plans import PlanNames, PlanSlugs
@@ -859,7 +859,7 @@ def _infer_low_latency_preference(
 
 
 def _build_weighted_failover_configs(
-    endpoints_with_weights: list[tuple[Any, Any, float, str, Optional[str]]],
+    endpoints_with_weights: list[tuple[Any, Any, float, str, Optional[str], Optional[str]]],
     *,
     tier_label: str,
 ) -> list[tuple[str, str, dict]]:
@@ -868,7 +868,7 @@ def _build_weighted_failover_configs(
     while remaining:
         weights = [r[2] for r in remaining]
         selected_idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
-        endpoint, provider, _weight, effective_model, reasoning_effort_override = remaining.pop(selected_idx)
+        endpoint, provider, _weight, effective_model, effective_pricing_model, reasoning_effort_override = remaining.pop(selected_idx)
 
         supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
         params: Dict[str, Any] = {}
@@ -929,6 +929,8 @@ def _build_weighted_failover_configs(
         params_with_hints["allow_implied_send"] = bool(getattr(endpoint, "allow_implied_send", True))
         params_with_hints["supports_reasoning"] = supports_reasoning
         params_with_hints["low_latency"] = bool(getattr(endpoint, "low_latency", False))
+        if effective_pricing_model:
+            params_with_hints["pricing_model"] = effective_pricing_model
         if supports_reasoning and reasoning_effort:
             params_with_hints["reasoning_effort"] = reasoning_effort
 
@@ -960,6 +962,7 @@ def _collect_failover_configs(
             api_base_value = getattr(endpoint, "api_base", None)
             has_api_base = bool(api_base_value)
             effective_model = normalize_model_name(provider, raw_model, api_base=api_base_value)
+            effective_pricing_model = normalize_pricing_model(endpoint, provider, api_base=api_base_value)
 
             is_openai_compat = effective_model.startswith("openai/") and has_api_base
             if not (has_admin_key or has_env_key or is_openai_compat):
@@ -981,6 +984,7 @@ def _collect_failover_configs(
                     provider,
                     te.weight,
                     effective_model,
+                    effective_pricing_model,
                     te.reasoning_effort_override,
                 )
             )
@@ -1358,9 +1362,10 @@ def _build_profile_endpoint_config(
     effective_model = normalize_model_name(provider, raw_model, api_base=api_base_value)
     if not effective_model:
         return None
+    effective_pricing_model = normalize_pricing_model(endpoint, provider, api_base=api_base_value)
 
     configs = _build_weighted_failover_configs(
-        [(endpoint, provider, 1.0, effective_model, None)],
+        [(endpoint, provider, 1.0, effective_model, effective_pricing_model, None)],
         tier_label=tier_label,
     )
     if not configs:

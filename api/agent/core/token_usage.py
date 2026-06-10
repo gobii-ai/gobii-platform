@@ -80,7 +80,7 @@ def compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any]
     if not token_usage:
         return {}
 
-    model = token_usage.get("model")
+    model = token_usage.get("pricing_model") or token_usage.get("model")
     provider = token_usage.get("provider")
     if not model:
         return {}
@@ -261,6 +261,7 @@ def extract_token_usage(
     *,
     model: Optional[str] = None,
     provider: Optional[str] = None,
+    pricing_model: Optional[str] = None,
 ) -> Tuple[Optional[dict], Optional[Any]]:
     if response is None:
         return None, None
@@ -284,6 +285,8 @@ def extract_token_usage(
         resolved_provider = usage_attribute(usage, "provider")
 
     token_usage: dict[str, Any] = {"model": resolved_model, "provider": resolved_provider}
+    if pricing_model:
+        token_usage["pricing_model"] = pricing_model
     direct_cost_fields = _extract_direct_cost_breakdown(
         response,
         usage=usage,
@@ -565,6 +568,7 @@ def log_agent_completion(
     response: Any = None,
     model: Optional[str] = None,
     provider: Optional[str] = None,
+    pricing_model: Optional[str] = None,
     response_id: Optional[str] = None,
     request_duration_ms: Optional[int] = None,
 ) -> Tuple[Optional[dict], Optional[Any]]:
@@ -586,6 +590,7 @@ def log_agent_completion(
                 response,
                 model=model,
                 provider=provider,
+                pricing_model=pricing_model,
             )
             if derived_token_usage is None:
                 derived_token_usage = extracted_token_usage
@@ -597,6 +602,8 @@ def log_agent_completion(
 
     if derived_token_usage is None:
         derived_token_usage = {"model": model, "provider": provider}
+        if pricing_model:
+            derived_token_usage["pricing_model"] = pricing_model
 
     resolved_eval_run_id = eval_run_id or _get_budget_eval_run_id()
     try:

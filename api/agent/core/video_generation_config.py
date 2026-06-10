@@ -21,6 +21,7 @@ class VideoGenerationLLMConfig:
     params: Dict[str, Any]
     endpoint_key: str
     supports_image_to_video: bool
+    pricing_model: str | None = None
 
 
 def _build_eligible_tier_endpoint_queryset(use_case: str):
@@ -79,6 +80,7 @@ def get_video_generation_llm_configs(
                     params=params,
                     endpoint_key=getattr(entry.endpoint, "key", ""),
                     supports_image_to_video=bool(getattr(entry.endpoint, "supports_image_to_video", False)),
+                    pricing_model=params.get("pricing_model"),
                 )
             )
             if len(configs) >= limit:

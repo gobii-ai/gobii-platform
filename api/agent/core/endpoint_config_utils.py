@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 from cryptography.exceptions import InvalidTag
 
 from api.encryption import SecretsEncryption
-from api.llm.utils import normalize_model_name
+from api.llm.utils import normalize_model_name, normalize_pricing_model
 from api.openrouter import get_attribution_headers
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,10 @@ def build_endpoint_params(endpoint, provider) -> Optional[Dict[str, Any]]:
         headers = get_attribution_headers()
         if headers:
             params["extra_headers"] = headers
+
+    pricing_model = normalize_pricing_model(endpoint, provider, api_base=api_base)
+    if pricing_model:
+        params["pricing_model"] = pricing_model
 
     return params
 

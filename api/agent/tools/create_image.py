@@ -50,6 +50,7 @@ def _log_image_generation_completion(
     *,
     agent: PersistentAgent,
     model_name: str,
+    pricing_model: str | None = None,
     response: Any,
 ) -> None:
     if response is None:
@@ -60,6 +61,7 @@ def _log_image_generation_completion(
         response=response,
         model=model_name,
         provider=provider_hint_from_model(model_name),
+        pricing_model=pricing_model,
     )
 
 
@@ -520,12 +522,22 @@ def execute_create_image(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 aspect_ratio=aspect_ratio,
                 source_image_data_uris=source_image_data_uris,
             )
-            _log_image_generation_completion(agent=agent, model_name=config.model, response=generated.response)
+            _log_image_generation_completion(
+                agent=agent,
+                model_name=config.model,
+                pricing_model=config.pricing_model,
+                response=generated.response,
+            )
             image_bytes = generated.image_bytes
             mime_type = generated.mime_type
             break
         except ImageGenerationResponseError as exc:
-            _log_image_generation_completion(agent=agent, model_name=config.model, response=exc.response)
+            _log_image_generation_completion(
+                agent=agent,
+                model_name=config.model,
+                pricing_model=config.pricing_model,
+                response=exc.response,
+            )
             errors.append(f"{config.endpoint_key or config.model}: {exc}")
             logger.info("Image generation attempt failed: %s", errors[-1])
         except ValueError as exc:

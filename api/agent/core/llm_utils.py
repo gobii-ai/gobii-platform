@@ -26,6 +26,7 @@ _HINT_KEYS = (
     "supports_reasoning",
     "reasoning_effort",
     "low_latency",
+    "pricing_model",
 )
 
 logger = logging.getLogger(__name__)
@@ -418,7 +419,7 @@ def run_completion(
 ):
     """Invoke ``litellm.completion`` with shared parameter handling.
 
-    - Removes internal hints (``supports_temperature``, ``supports_tool_choice``, ``use_parallel_tool_calls``, ``allow_implied_send``, ``supports_vision``, and ``supports_reasoning``).
+    - Removes internal hints (``supports_temperature``, ``supports_tool_choice``, ``use_parallel_tool_calls``, ``allow_implied_send``, ``supports_vision``, ``supports_reasoning``, and ``pricing_model``).
     - Allows ``reasoning_effort`` through LiteLLM's OpenAI parameter filter when reasoning is supported.
     - Adds ``tool_choice`` when tools are provided and supported.
     - Propagates ``parallel_tool_calls`` only when tools are provided.

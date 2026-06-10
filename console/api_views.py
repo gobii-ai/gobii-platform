@@ -278,7 +278,7 @@ from api.evals.global_skill_evals import (
     build_skill_eval_summary,
     serialize_global_skill_eval_skill,
 )
-from api.llm.utils import normalize_model_name
+from api.llm.utils import normalize_model_name, normalize_pricing_model
 from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
@@ -862,6 +862,7 @@ def _build_completion_params(
         raise ValueError("Endpoint does not specify a model identifier")
     api_base = (getattr(endpoint, base_attr, "") or "").strip() or None
     model = normalize_model_name(provider, raw_model, api_base=api_base)
+    pricing_model = normalize_pricing_model(endpoint, provider, api_base=api_base)
 
     supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
     temperature: float | None = None
@@ -879,6 +880,8 @@ def _build_completion_params(
     }
     if temperature is not None:
         params["temperature"] = temperature
+    if pricing_model:
+        params["pricing_model"] = pricing_model
     params["supports_temperature"] = supports_temperature
     if hasattr(endpoint, "supports_tool_choice"):
         params["supports_tool_choice"] = bool(getattr(endpoint, "supports_tool_choice", True))
@@ -1254,7 +1257,12 @@ def _run_llm_performance_sample(
         }
 
     latency_ms = int((time.monotonic() - started) * 1000)
-    token_usage, _usage = extract_token_usage(response, model=model, provider=endpoint.provider.key)
+    token_usage, _usage = extract_token_usage(
+        response,
+        model=model,
+        provider=endpoint.provider.key,
+        pricing_model=params.get("pricing_model"),
+    )
     completion_tokens = token_usage.get("completion_tokens") if token_usage else None
     completion_tokens_per_second = None
     if isinstance(completion_tokens, int) and completion_tokens > 0 and latency_ms > 0:
@@ -1939,6 +1947,7 @@ def _create_aux_llm_endpoint_from_payload(
         "key": key,
         "provider": provider,
         "litellm_model": model,
+        "litellm_pricing_model": (payload.get("litellm_pricing_model") or "").strip() or None,
         "api_base": (payload.get("api_base") or "").strip(),
         "low_latency": _coerce_bool(payload.get("low_latency", False)),
         "enabled": _coerce_bool(payload.get("enabled", True)),
@@ -1967,6 +1976,8 @@ def _update_aux_llm_endpoint_from_payload(
         model = (payload.get("model") or payload.get("litellm_model") or "").strip()
         if model:
             endpoint.litellm_model = model
+    if "litellm_pricing_model" in payload:
+        endpoint.litellm_pricing_model = (payload.get("litellm_pricing_model") or "").strip() or None
 
     if "api_base" in payload:
         endpoint.api_base = (payload.get("api_base") or "").strip()
@@ -5534,6 +5545,7 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
             key=key,
             provider=provider,
             litellm_model=model,
+            litellm_pricing_model=(payload.get("litellm_pricing_model") or "").strip() or None,
             temperature_override=temperature_override,
             supports_temperature=_coerce_bool(payload.get("supports_temperature", True)),
             supports_tool_choice=_coerce_bool(payload.get("supports_tool_choice", True)),
@@ -5567,6 +5579,8 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
                 if endpoint.provider and endpoint.provider.model_prefix and model.startswith(endpoint.provider.model_prefix):
                     return HttpResponseBadRequest("Store persistent models without the provider prefix; it is applied at runtime.")
                 endpoint.litellm_model = model
+        if "litellm_pricing_model" in payload:
+            endpoint.litellm_pricing_model = (payload.get("litellm_pricing_model") or "").strip() or None
         if "temperature_override" in payload:
             temp = payload.get("temperature_override")
             if temp in (None, ""):

@@ -40,10 +40,22 @@ def normalize_model_name(
                 model = f"{prefix}{model}"
 
     backend = getattr(provider, "browser_backend", None)
-    if api_base and backend in OPENAI_BACKENDS and "/" not in model:
+    if api_base and backend in OPENAI_BACKENDS and not model.startswith("openai/"):
         model = f"openai/{model}"
 
     return model
 
 
-__all__ = ["normalize_model_name"]
+def normalize_pricing_model(
+    endpoint: object,
+    provider: Optional[LLMProvider],
+    *,
+    api_base: str | None = None,
+) -> str | None:
+    raw_pricing_model = (getattr(endpoint, "litellm_pricing_model", "") or "").strip()
+    if not raw_pricing_model:
+        return None
+    return normalize_model_name(provider, raw_pricing_model, api_base=api_base)
+
+
+__all__ = ["normalize_model_name", "normalize_pricing_model"]
