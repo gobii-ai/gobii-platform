@@ -6,6 +6,7 @@ from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TO
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 
+from .native_api_cookbooks import render_native_api_cookbook
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
 
 
@@ -75,6 +76,7 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
         "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
         "integration before making Sheets API calls for that file."
     )
+    cookbook = render_native_api_cookbook("google_drive")
     return (
         "Use `http_request` for Google Sheets and Drive API calls. Native Google Drive OAuth is applied "
         "automatically for `https://sheets.googleapis.com/` and `https://www.googleapis.com/drive/` requests.\n"
@@ -85,30 +87,7 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
         "When the user asks to find or search for one of their sheets by name, use Drive file discovery over "
         "connected files. Do not use web search or public `docs.google.com` results to choose a private sheet.\n"
         f"{setup_text}"
-        "For Drive spreadsheet discovery, first build the complete `q` string in your reasoning, then URL-encode it "
-        "and call `http_request`. The canonical base query is exactly "
-        "`mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`; add "
-        "`and name contains 'text'` only when the search text is known. Never call partial Drive URLs like "
-        "`?q=mimeType%3D`, `?q=name%20%3D`, or `?q=name%20contains%20`. If you do not know the name text yet, "
-        "omit the name predicate and use the canonical base query instead. If Drive returns an error with "
-        "`location: q`, repair the query once with the canonical base query plus any known name predicate; do not "
-        "retry the same malformed URL.\n"
-        "Common calls:\n"
-        "- Search/list accessible spreadsheets: GET https://www.googleapis.com/drive/v3/files with "
-        "fields=files(id,name,mimeType,webViewLink), pageSize=100, and a complete `q` filter such as "
-        "mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false; add name contains 'text' "
-        "when searching by title.\n"
-        "- Spreadsheet metadata and sheet tabs: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}\n"
-        "- Create a new spreadsheet: POST https://sheets.googleapis.com/v4/spreadsheets with JSON body "
-        "{\"properties\":{\"title\":\"...\"},\"sheets\":[{\"properties\":{\"title\":\"Sheet1\"}}]}. Do not use "
-        "Drive file creation for Google Sheets.\n"
-        "- Read values: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}\n"
-        "- Update values: PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
-        "{url_encoded_range}?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
-        "- Append rows: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
-        "{url_encoded_range}:append?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
-        "- Format or chart: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}:batchUpdate with "
-        "valid Sheets `requests`.\n"
+        f"{cookbook}\n"
         "When creating a reasonable new spreadsheet and the user has not specified columns, choose safe, obvious "
         "default columns and proceed instead of blocking on a preference question. For new data sheets, write the "
         "values first, then apply a polished baseline in the same turn: freeze row 1, bold and color the header, "
@@ -135,6 +114,7 @@ def _apollo_native_prompt_instructions(agent) -> str:
         if not _native_integration_connected(agent, "apollo")
         else ""
     )
+    cookbook = render_native_api_cookbook("apollo")
     return (
         "Use `http_request` for Apollo REST API calls. Native Apollo OAuth is applied automatically for "
         "`https://api.apollo.io/` requests and the Apollo profile endpoint "
@@ -145,25 +125,7 @@ def _apollo_native_prompt_instructions(agent) -> str:
         "Use bounded requests with explicit filters plus `page` and `per_page`; avoid broad unbounded exports or "
         "searches, and report when more pages remain. Inspect both `status_code` and response `content`: "
         "`http_request` status `ok` only means the HTTP request completed, not that Apollo returned useful data.\n"
-        "Representative calls: for people search, use exactly POST "
-        "`https://api.apollo.io/api/v1/mixed_people/api_search`; do not use `/mixed_people/search`. "
-        "For one employer domain in a JSON body, use `q_organization_domains` as a string such as "
-        "`\"apollo.io\"`; if using Apollo's documented query parameter form, use `q_organization_domains_list[]`. "
-        "Validate that returned people match requested titles/domains; a very broad `total_entries` count or "
-        "mismatched organizations means Apollo ignored the filter and the result should not be reported as a pass. "
-        "Use POST `/mixed_companies/search` for organization search, POST `/people/match` or "
-        "`/people/bulk_match` for enrichment, and Apollo's "
-        "accounts, contacts, sequences, tasks, analytics, usage, and user endpoints for the corresponding user request. "
-        "Use organization search for net-new companies; `/accounts/search` only searches accounts already added to "
-        "the team's Apollo database, so an empty accounts list is not necessarily a plan failure. For contacts, use "
-        "POST `/contacts` to create, include `run_dedupe=true` when idempotency matters, validate required fields "
-        "such as email before calling Apollo, and use PUT `/contacts/{contact_id}` to update. For sequences, "
-        "search with POST `/emailer_campaigns/search` and `q_name`, then add contacts with POST "
-        "`/emailer_campaigns/{sequence_id}/add_contact_ids`; include the sequence id as `emailer_campaign_id`, "
-        "`contact_ids`, and a `send_email_from_email_account_id` from the user's linked email accounts, or ask for "
-        "the sending mailbox before attempting the write. Many sequence/list endpoints require "
-        "a master API key, so HTTP 403 `API_INACCESSIBLE` or 404 on those endpoints should be reported as a "
-        "master-key, scope, endpoint, or plan limitation, not as success.\n"
+        f"{cookbook}\n"
         "Classify Apollo outcomes by the actual response: useful nonempty output, connect/reconnect required, "
         "invalid credentials, missing scopes or API-inaccessible plan/master-key limitation, no results/no email, "
         "validation error, or partial side-effect failure. A 200 with an empty `people`, `contacts`, `accounts`, "
@@ -190,21 +152,14 @@ def _hubspot_native_prompt_instructions(agent) -> str:
         if not _native_integration_connected(agent, "hubspot")
         else ""
     )
+    cookbook = render_native_api_cookbook("hubspot")
     return (
         "Use `http_request` for HubSpot REST API calls. Native HubSpot OAuth is applied automatically for "
         "`https://api.hubapi.com/` requests.\n"
         f"{setup_text}"
         "Use HubSpot CRM v3 endpoints for core CRM work. Keep requests bounded with explicit filters, "
         "`limit`, and `after` pagination where applicable; report when more pages remain.\n"
-        "Representative calls:\n"
-        "- Search contacts: POST `https://api.hubapi.com/crm/v3/objects/contacts/search`\n"
-        "- Search companies: POST `https://api.hubapi.com/crm/v3/objects/companies/search`\n"
-        "- Search deals: POST `https://api.hubapi.com/crm/v3/objects/deals/search`\n"
-        "- Read, create, update contacts/companies/deals: use `/crm/v3/objects/{objectType}` and "
-        "`/crm/v3/objects/{objectType}/{objectId}` with explicit `properties`.\n"
-        "- Read owners: GET `https://api.hubapi.com/crm/v3/owners/`\n"
-        "- Read properties: GET `https://api.hubapi.com/crm/v3/properties/{objectType}`\n"
-        "- Work with associations only when the user asks for relationships between CRM records.\n"
+        f"{cookbook}\n"
         "For creates, updates, deletes, merges, bulk changes, association changes, lifecycle-stage changes, "
         "or other side-effecting operations, summarize the exact records, properties, filters, and side effects "
         "before proceeding unless the user has already clearly approved that operation.\n"
@@ -368,7 +323,16 @@ APOLLO_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "apollo api",
         "apollo leads",
         "lead sourcing",
+        "lead generation",
+        "lead gen",
+        "sales prospecting",
+        "sales leads",
+        "growth sales",
         "prospect search",
+        "prospecting",
+        "lead lists",
+        "account research",
+        "buying signal monitoring",
         "people enrichment",
         "contact enrichment",
         "account enrichment",
