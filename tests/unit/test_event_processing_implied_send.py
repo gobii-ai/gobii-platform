@@ -2130,7 +2130,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
     )
     @patch(
         "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
-        return_value=Decimal("5"),
+        return_value=Decimal("0"),
     )
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing.get_agent_daily_credit_state")
