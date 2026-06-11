@@ -6,7 +6,7 @@ import type {
   TdHTMLAttributes,
   ThHTMLAttributes,
 } from 'react'
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
@@ -119,9 +119,32 @@ export const MarkdownViewer = memo(function MarkdownViewer({ content, className,
     () => /(^|\n)\s*```/.test(content) || /(^|\n)\s*~~~/.test(content) || /(^|\n)( {4}|\t)\S/.test(content),
     [content],
   )
+  const wantHighlight = enableHighlight && hasCodeFence
+  // Defer syntax highlighting until after the first paint. rehype-highlight (highlight.js) is
+  // the dominant render cost, and a burst of message cards mounting at once — e.g. an older
+  // page prepending while scrolling up — would otherwise block the main thread (~250ms) and
+  // make the scroll stutter. The first paint shows un-highlighted code, then we re-render with
+  // highlighting during idle time, off the scroll-critical path.
+  const [highlightReady, setHighlightReady] = useState(false)
+  useEffect(() => {
+    // Once highlighted, stay highlighted (avoids flicker on streaming content updates).
+    if (!wantHighlight || highlightReady) {
+      return
+    }
+    const ric = (window as typeof window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    })
+    if (typeof ric.requestIdleCallback === 'function') {
+      const handle = ric.requestIdleCallback(() => setHighlightReady(true), { timeout: 500 })
+      return () => ric.cancelIdleCallback?.(handle)
+    }
+    const timer = window.setTimeout(() => setHighlightReady(true), 0)
+    return () => window.clearTimeout(timer)
+  }, [wantHighlight, highlightReady, content])
   const rehypePlugins = useMemo(
-    () => (enableHighlight && hasCodeFence ? [rehypeHighlight as unknown as any] : []),
-    [enableHighlight, hasCodeFence],
+    () => (wantHighlight && highlightReady ? [rehypeHighlight as unknown as any] : []),
+    [wantHighlight, highlightReady],
   )
   return (
     <div className={className}>
