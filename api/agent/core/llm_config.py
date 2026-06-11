@@ -962,7 +962,7 @@ def _collect_failover_configs(
             api_base_value = getattr(endpoint, "api_base", None)
             has_api_base = bool(api_base_value)
             effective_model = normalize_model_name(provider, raw_model, api_base=api_base_value)
-            effective_pricing_model = normalize_pricing_model(endpoint, provider, api_base=api_base_value)
+            effective_pricing_model = normalize_pricing_model(endpoint, provider)
 
             is_openai_compat = effective_model.startswith("openai/") and has_api_base
             if not (has_admin_key or has_env_key or is_openai_compat):
@@ -1362,7 +1362,7 @@ def _build_profile_endpoint_config(
     effective_model = normalize_model_name(provider, raw_model, api_base=api_base_value)
     if not effective_model:
         return None
-    effective_pricing_model = normalize_pricing_model(endpoint, provider, api_base=api_base_value)
+    effective_pricing_model = normalize_pricing_model(endpoint, provider)
 
     configs = _build_weighted_failover_configs(
         [(endpoint, provider, 1.0, effective_model, effective_pricing_model, None)],

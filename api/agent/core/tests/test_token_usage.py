@@ -41,7 +41,7 @@ class ModelNormalizationTests(SimpleTestCase):
 
         self.assertEqual(model, "openai/deepseek-ai/DeepSeek-V4-Flash")
 
-    def test_pricing_model_uses_same_openai_compatible_prefixing(self):
+    def test_pricing_model_does_not_use_openai_compatible_prefixing(self):
         provider = SimpleNamespace(
             model_prefix="",
             browser_backend=LLMProvider.BrowserBackend.OPENAI_COMPAT,
@@ -51,10 +51,9 @@ class ModelNormalizationTests(SimpleTestCase):
         model = normalize_pricing_model(
             endpoint,
             provider,
-            api_base="https://api.makora.example/v1",
         )
 
-        self.assertEqual(model, "openai/deepseek/deepseek-chat")
+        self.assertEqual(model, "deepseek/deepseek-chat")
 
 
 @tag("batch_token_usage")

@@ -1,5 +1,4 @@
 """Utilities for normalizing LLM model identifiers."""
-from __future__ import annotations
 
 from typing import Optional
 
@@ -49,13 +48,17 @@ def normalize_model_name(
 def normalize_pricing_model(
     endpoint: object,
     provider: Optional[LLMProvider],
-    *,
-    api_base: str | None = None,
 ) -> str | None:
-    raw_pricing_model = (getattr(endpoint, "litellm_pricing_model", "") or "").strip()
+    raw_pricing_model = (_safe_getattr(endpoint, "litellm_pricing_model", "") or "").strip()
     if not raw_pricing_model:
         return None
-    return normalize_model_name(provider, raw_pricing_model, api_base=api_base)
+    return normalize_model_name(provider, raw_pricing_model)
+
+
+def _safe_getattr(source: object | None, attr: str, default=None):
+    if source is None:
+        return default
+    return getattr(source, attr, default)
 
 
 __all__ = ["normalize_model_name", "normalize_pricing_model"]

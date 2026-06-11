@@ -48,6 +48,7 @@ def _log_avatar_image_generation_completion(
     *,
     agent: PersistentAgent,
     model_name: str | None,
+    pricing_model: str | None = None,
     response: Any,
 ) -> None:
     log_agent_completion(
@@ -56,6 +57,7 @@ def _log_avatar_image_generation_completion(
         response=response,
         model=model_name,
         provider=provider_hint_from_model(model_name),
+        pricing_model=pricing_model,
     )
 
 
@@ -154,6 +156,7 @@ def _generate_visual_description_via_llm(
         response=response,
         model=model,
         provider=provider,
+        pricing_model=params.get("pricing_model"),
     )
 
     try:
@@ -195,6 +198,7 @@ def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerat
             _log_avatar_image_generation_completion(
                 agent=agent,
                 model_name=model_name,
+                pricing_model=config.pricing_model,
                 response=generated.response,
             )
             image_bytes = generated.image_bytes
@@ -210,6 +214,7 @@ def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerat
             _log_avatar_image_generation_completion(
                 agent=agent,
                 model_name=model_name,
+                pricing_model=config.pricing_model,
                 response=getattr(exc, "response", None),
             )
             errors.append(f"{config.endpoint_key or config.model}: {exc}")
@@ -218,6 +223,7 @@ def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerat
             _log_avatar_image_generation_completion(
                 agent=agent,
                 model_name=model_name,
+                pricing_model=config.pricing_model,
                 response=None,
             )
             errors.append(f"{config.endpoint_key or config.model}: {exc}")
@@ -226,6 +232,7 @@ def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerat
             _log_avatar_image_generation_completion(
                 agent=agent,
                 model_name=model_name,
+                pricing_model=config.pricing_model,
                 response=None,
             )
             errors.append(f"{config.endpoint_key or config.model}: {type(exc).__name__}: {exc}")

@@ -862,7 +862,7 @@ def _build_completion_params(
         raise ValueError("Endpoint does not specify a model identifier")
     api_base = (getattr(endpoint, base_attr, "") or "").strip() or None
     model = normalize_model_name(provider, raw_model, api_base=api_base)
-    pricing_model = normalize_pricing_model(endpoint, provider, api_base=api_base)
+    pricing_model = normalize_pricing_model(endpoint, provider)
 
     supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
     temperature: float | None = None

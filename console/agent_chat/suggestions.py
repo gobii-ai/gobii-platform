@@ -346,6 +346,7 @@ def _generate_dynamic_suggestions(
                 response=response,
                 model=model,
                 provider=provider_key,
+                pricing_model=params.get("pricing_model"),
             )
             suggestions = _extract_generated_suggestions(response, prompt_count)
             if suggestions:

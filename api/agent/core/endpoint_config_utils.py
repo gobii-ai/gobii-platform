@@ -69,7 +69,7 @@ def build_endpoint_params(endpoint, provider) -> Optional[Dict[str, Any]]:
         if headers:
             params["extra_headers"] = headers
 
-    pricing_model = normalize_pricing_model(endpoint, provider, api_base=api_base)
+    pricing_model = normalize_pricing_model(endpoint, provider)
     if pricing_model:
         params["pricing_model"] = pricing_model
 
