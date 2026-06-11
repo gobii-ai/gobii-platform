@@ -48,7 +48,7 @@ def _encode_node_content_b64(node: AgentFsNode) -> Optional[str]:
     try:
         with node.content.open("rb") as handle:
             content = handle.read()
-    except (OSError, ValueError):
+    except (OSError, TypeError, ValueError):
         return None
     if not isinstance(content, (bytes, bytearray)):
         return None
