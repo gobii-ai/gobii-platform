@@ -1554,6 +1554,11 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  /* Viewport preservation during older-page prepends is handled explicitly in JS via an
+     anchor element (see AgentChatPage.tsx). The browser's native scroll anchoring would
+     also adjust scrollTop as late-measuring variable-height/collapsed items settle, and the
+     two corrections race and can slam the viewport to the bottom. Disable it here. */
+  overflow-anchor: none;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   -ms-overflow-style: none;

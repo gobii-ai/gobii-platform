@@ -1002,6 +1002,9 @@ const NEAR_BOTTOM_THRESHOLD_PX = 100
 const TOP_LOAD_THRESHOLD_PX = 200
 const BOTTOM_EXIT_THRESHOLD_PX = 1
 const PROGRAMMATIC_SCROLL_GUARD_MS = 150
+// How long after an older-page prepend we keep re-pinning the anchor element as
+// variable-height/collapsed items finish measuring.
+const PREPEND_ANCHOR_SETTLE_MS = 700
 const RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES = DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES
 
 function isEditableEventTarget(target: EventTarget | null): boolean {
@@ -1365,7 +1368,13 @@ export function AgentChatPage({
   )
 
   const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
-  const prevScrollHeightRef = useRef(0)
+  // Anchor-element based viewport preservation for older-page prepends. We pin a real
+  // DOM node (the event nearest the top of the viewport) and re-derive scrollTop from its
+  // live position, so async-settling variable-height/collapsed items can't desync a
+  // one-shot scrollHeight delta. overflow-anchor:none on the container (see CSS) keeps the
+  // browser's native scroll anchoring from also adjusting and racing this logic.
+  const prependAnchorRef = useRef<{ el: HTMLElement; offset: number } | null>(null)
+  const prependAnchorClearTimerRef = useRef<number | null>(null)
   const prependTrackingAgentIdRef = useRef<string | null>(activeAgentId)
   const preservePrependViewportRef = useRef(false)
   const olderPageRequestInFlightRef = useRef(false)
@@ -1418,7 +1427,66 @@ export function AgentChatPage({
       window.clearTimeout(autoRepinTimeoutRef.current)
       autoRepinTimeoutRef.current = null
     }
+    // Drop any active prepend anchor: a fresh user gesture takes priority over re-pinning.
+    // (requestPreviousPage re-captures a new anchor immediately after calling this.)
+    prependAnchorRef.current = null
+    if (prependAnchorClearTimerRef.current !== null) {
+      window.clearTimeout(prependAnchorClearTimerRef.current)
+      prependAnchorClearTimerRef.current = null
+    }
   }, [setAutoScrollPinned, suppressAutoScrollPin])
+
+  const clearPrependAnchor = useCallback(() => {
+    prependAnchorRef.current = null
+    if (prependAnchorClearTimerRef.current !== null) {
+      window.clearTimeout(prependAnchorClearTimerRef.current)
+      prependAnchorClearTimerRef.current = null
+    }
+  }, [])
+
+  // Capture the event element nearest the top of the viewport as a stable anchor. Older
+  // events prepend above it, so it survives the prepend and lets us re-derive scrollTop.
+  const capturePrependAnchor = useCallback(() => {
+    const container = timelineRef.current
+    const inner = document.getElementById('timeline-events')
+    if (!container || !inner) {
+      prependAnchorRef.current = null
+      return
+    }
+    const containerTop = container.getBoundingClientRect().top
+    let chosen: HTMLElement | null = null
+    for (const child of Array.from(inner.children)) {
+      const el = child as HTMLElement
+      // Skip zero-height spacers/sentinels.
+      if (el.offsetHeight === 0) continue
+      const rect = el.getBoundingClientRect()
+      if (rect.bottom > containerTop + 1) {
+        chosen = el
+        break
+      }
+    }
+    if (!chosen) {
+      chosen = inner.firstElementChild as HTMLElement | null
+    }
+    prependAnchorRef.current = chosen
+      ? { el: chosen, offset: chosen.getBoundingClientRect().top - containerTop }
+      : null
+  }, [])
+
+  // Re-pin the anchor element to its captured viewport offset. Idempotent and immune to
+  // late height changes, since it reads the anchor's live position each call.
+  const restorePrependAnchor = useCallback(() => {
+    const container = timelineRef.current
+    const anchor = prependAnchorRef.current
+    if (!container || !anchor || !anchor.el.isConnected) {
+      return
+    }
+    const currentOffset = anchor.el.getBoundingClientRect().top - container.getBoundingClientRect().top
+    const correction = currentOffset - anchor.offset
+    if (Math.abs(correction) > 0.5) {
+      container.scrollTop += correction
+    }
+  }, [])
 
   const requestPreviousPage = useCallback(() => {
     if (
@@ -1432,7 +1500,11 @@ export function AgentChatPage({
 
     freezeTimelineViewport()
     prevPageCountRef.current = timelineQuery.data?.pages?.length ?? 0
-    prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
+    capturePrependAnchor()
+    if (prependAnchorClearTimerRef.current !== null) {
+      window.clearTimeout(prependAnchorClearTimerRef.current)
+      prependAnchorClearTimerRef.current = null
+    }
     preservePrependViewportRef.current = true
     olderPageRequestInFlightRef.current = true
     void timelineQuery.fetchPreviousPage().finally(() => {
@@ -1445,6 +1517,7 @@ export function AgentChatPage({
     timelineQuery.isFetchingPreviousPage,
     timelineQuery.isFetchPreviousPageError,
     freezeTimelineViewport,
+    capturePrependAnchor,
   ])
 
   useEffect(() => {
@@ -1485,18 +1558,14 @@ export function AgentChatPage({
       prependTrackingAgentIdRef.current = activeAgentId
       preservePrependViewportRef.current = false
       prevPageCountRef.current = pageCount
-      prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
+      clearPrependAnchor()
       return
     }
 
     if (preservePrependViewportRef.current && pageCount > prevPageCountRef.current && prevPageCountRef.current > 0) {
       const container = timelineRef.current
       if (container) {
-        const newScrollHeight = container.scrollHeight
-        const delta = newScrollHeight - prevScrollHeightRef.current
-        if (delta > 0) {
-          container.scrollTop += delta
-        }
+        restorePrependAnchor()
         syncTimelineScrollability(container)
         syncNearBottomState(container)
       }
@@ -1508,9 +1577,22 @@ export function AgentChatPage({
 
     preservePrependViewportRef.current = false
     prevPageCountRef.current = pageCount
-    prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
+    // Keep the anchor live for a short settling window so the timeline ResizeObserver can
+    // re-pin as late-measuring collapsed/variable-height items finish laying out. Cleared
+    // earlier than this if the user scrolls (freezeTimelineViewport on the next gesture).
+    if (prependAnchorRef.current) {
+      if (prependAnchorClearTimerRef.current !== null) {
+        window.clearTimeout(prependAnchorClearTimerRef.current)
+      }
+      prependAnchorClearTimerRef.current = window.setTimeout(() => {
+        prependAnchorClearTimerRef.current = null
+        prependAnchorRef.current = null
+      }, PREPEND_ANCHOR_SETTLE_MS)
+    }
   }, [
     activeAgentId,
+    clearPrependAnchor,
+    restorePrependAnchor,
     syncNearBottomState,
     syncTimelineScrollability,
     timelineQuery.data?.pages?.length,
@@ -2290,6 +2372,13 @@ export function AgentChatPage({
 
     const observer = new ResizeObserver(() => {
       syncTimelineScrollability(timelineNode)
+      // During the settle window after an older-page prepend, re-pin the anchor element so
+      // late-measuring collapsed/variable-height items can't drift (or snap) the viewport.
+      if (prependAnchorRef.current) {
+        restorePrependAnchor()
+        syncNearBottomState(timelineNode)
+        return
+      }
       const shouldFollow = shouldAutoFollowTimeline()
       // If pinned, ensure we stay at the bottom when content changes
       // Skip while user is actively touching to prevent scroll fighting on mobile
@@ -2306,7 +2395,7 @@ export function AgentChatPage({
       observer.observe(inner)
     }
     return () => observer.disconnect()
-  }, [executeAutoFollow, syncTimelineScrollability, timelineNode, shouldAutoFollowTimeline, syncNearBottomState])
+  }, [executeAutoFollow, restorePrependAnchor, syncTimelineScrollability, timelineNode, shouldAutoFollowTimeline, syncNearBottomState])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
@@ -2323,6 +2412,9 @@ export function AgentChatPage({
     }
     if (touchEndTimerRef.current !== null) {
       window.clearTimeout(touchEndTimerRef.current)
+    }
+    if (prependAnchorClearTimerRef.current !== null) {
+      window.clearTimeout(prependAnchorClearTimerRef.current)
     }
   }, [])
 
