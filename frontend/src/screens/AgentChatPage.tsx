@@ -2220,6 +2220,9 @@ export function AgentChatPage({
   const jumpToBottom = useCallback(() => {
     const container = document.getElementById('timeline-shell')
     if (!container) return
+    // An explicit jump-to-bottom overrides prepend preservation: drop any active anchor so a
+    // late settle-window ResizeObserver tick can't re-pin us back to the old reading spot.
+    clearPrependAnchor()
     lastProgrammaticScrollAtRef.current = Date.now()
     // Kill iOS momentum scrolling — toggling overflow forces the scroll to stop immediately
     container.style.overflowY = 'hidden'
@@ -2227,7 +2230,7 @@ export function AgentChatPage({
     requestAnimationFrame(() => { container.style.overflowY = '' })
     isNearBottomRef.current = true
     setIsNearBottom(true)
-  }, [])
+  }, [clearPrependAnchor])
 
   // rAF-coalesced auto-follow (for ResizeObserver / content change paths)
   const scrollToBottom = useCallback(() => {
@@ -2372,14 +2375,16 @@ export function AgentChatPage({
 
     const observer = new ResizeObserver(() => {
       syncTimelineScrollability(timelineNode)
+      const shouldFollow = shouldAutoFollowTimeline()
       // During the settle window after an older-page prepend, re-pin the anchor element so
       // late-measuring collapsed/variable-height items can't drift (or snap) the viewport.
-      if (prependAnchorRef.current) {
+      // Yield to auto-follow if the user has (re)pinned to the bottom (e.g. jump-to-latest)
+      // so we don't pull them back to their old reading spot before the settle timer expires.
+      if (prependAnchorRef.current && !shouldFollow) {
         restorePrependAnchor()
         syncNearBottomState(timelineNode)
         return
       }
-      const shouldFollow = shouldAutoFollowTimeline()
       // If pinned, ensure we stay at the bottom when content changes
       // Skip while user is actively touching to prevent scroll fighting on mobile
       // Uses rAF-coalesced scrollToBottom to avoid ResizeObserver feedback loops
