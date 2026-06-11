@@ -48,7 +48,15 @@ def _encode_node_content_b64(node: AgentFsNode) -> Optional[str]:
     try:
         with node.content.open("rb") as handle:
             content = handle.read()
-    except (OSError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning(
+            "Filespace pull inline content read failed for node=%s path=%s content=%s: %s",
+            node.id,
+            node.path,
+            node.content.name,
+            exc,
+            exc_info=True,
+        )
         return None
     if not isinstance(content, (bytes, bytearray)):
         return None
