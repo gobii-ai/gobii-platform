@@ -105,10 +105,11 @@ from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
 from . import internal_reasoning
 from .daily_limit_mode import (
+    DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT,
     DAILY_LIMIT_MESSAGE_TOOL_NAMES,
     filter_tools_for_daily_limit_message_only_mode,
+    is_daily_limit_allowed_tool,
     is_daily_hard_limit_message_only_mode,
-    is_daily_limit_message_tool,
 )
 from .agent_judge import maybe_run_agent_judge
 from .prompt_context import (
@@ -2535,14 +2536,14 @@ def _prepare_tool_batch(
 
             if (
                 is_daily_hard_limit_message_only_mode(daily_state)
-                and not is_daily_limit_message_tool(tool_name)
+                and not is_daily_limit_allowed_tool(tool_name)
             ):
                 try:
                     step_kwargs = {
                         "agent": agent,
                         "description": (
-                            "Daily hard limit mode is active. Only message tools are allowed right now: "
-                            "send_email, send_sms, send_chat_message, send_agent_message. "
+                            "Daily hard limit mode is active. Only message and sleep tools are allowed right now: "
+                            f"{DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT}. "
                             f"Do not call {tool_name}; message the user and ask them to raise the limit."
                         ),
                     }
@@ -4440,7 +4441,7 @@ def _ensure_credit_for_tool(
         if credit_snapshot is not None:
             credit_snapshot["daily_state"] = daily_state
 
-    if is_daily_hard_limit_message_only_mode(daily_state) and is_daily_limit_message_tool(tool_name):
+    if is_daily_hard_limit_message_only_mode(daily_state) and is_daily_limit_allowed_tool(tool_name):
         if available is not None and available != TASKS_UNLIMITED and Decimal(available) <= Decimal("0"):
             msg_desc = (
                 f"Skipped tool '{tool_name}' due to insufficient credits mid-loop."
@@ -4466,7 +4467,7 @@ def _ensure_credit_for_tool(
             return False
         if span is not None:
             try:
-                span.add_event("Message tool allowed in daily-limit message-only mode")
+                span.add_event("Tool allowed in daily-limit message-only mode")
                 span.set_attribute("credit_check.daily_limit_message_only_mode", True)
             except Exception:
                 pass

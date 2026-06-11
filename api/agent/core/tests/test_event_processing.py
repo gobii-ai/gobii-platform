@@ -692,7 +692,8 @@ class DailyLimitPromptContextTests(TestCase):
         self.assertIn(settings_url, content)
         self.assertIn(f"double {double_limit_url_prefix}?token=", content)
         self.assertIn(f"unlimited {unlimited_limit_url_prefix}?token=", content)
-        self.assertIn("Only message tools are available until the user raises the limit", content)
+        self.assertIn("Only message and sleep tools are available until the user raises the limit", content)
+        self.assertIn("sleep_until_next_trigger", content)
         self.assertIn("Once the user raises the limit, you can continue the task.", content)
 
 
