@@ -235,6 +235,32 @@ class SandboxComputeSyncTests(TestCase):
         )
         self.assertEqual(manifest.get("sync_cursor"), expected_cursor.isoformat() if expected_cursor else None)
 
+    def test_pull_manifest_falls_back_to_download_url_when_storage_read_type_error(self):
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"tool source",
+            extension="",
+            mime_type="text/x-python",
+            path="/tools/custom.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        with patch(
+            "django.db.models.fields.files.FieldFile.open",
+            side_effect=TypeError("_GzipDecoder.decompress() got an unexpected keyword argument 'max_length'"),
+        ), patch(
+            "api.services.sandbox_filespace_sync.build_signed_filespace_download_url",
+            return_value="https://files.example/download",
+        ):
+            manifest = build_filespace_pull_manifest(self.agent)
+
+        self.assertEqual(manifest.get("status"), "ok")
+        entries = manifest.get("files") or []
+        tool_entry = next(entry for entry in entries if entry.get("path") == "/tools/custom.py")
+        self.assertNotIn("content_b64", tool_entry)
+        self.assertEqual(tool_entry["download_url"], "https://files.example/download")
+
     def test_running_session_refreshes_pull_using_cursor(self):
         backend = _DummyBackend()
         now = timezone.now()
