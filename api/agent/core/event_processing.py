@@ -6279,7 +6279,7 @@ def _run_agent_loop(
                     daily_credit_state=(
                         credit_snapshot.get("daily_state")
                         if isinstance(credit_snapshot, dict)
-                        else None
+                        else daily_state
                     ),
                     attach_completion=_attach_completion,
                     attach_prompt_archive=_attach_prompt_archive,
