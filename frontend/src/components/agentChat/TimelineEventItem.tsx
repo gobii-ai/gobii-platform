@@ -8,7 +8,7 @@ import type { AgentMessage } from '../../types/agentChat'
 import { buildThinkingCluster, flattenTimelineEventsToEntries } from './activityEntryUtils'
 import type { StatusExpansionTargets } from './statusExpansion'
 
-type TimelineVirtualItemProps = {
+type TimelineEventItemProps = {
   event: SimplifiedTimelineItem
   isLatestEvent: boolean
   agentFirstName: string
@@ -25,7 +25,7 @@ type TimelineVirtualItemProps = {
   onReportMessage?: (message: AgentMessage) => void
 }
 
-export const TimelineVirtualItem = memo(function TimelineVirtualItem({
+export const TimelineEventItem = memo(function TimelineEventItem({
   event,
   isLatestEvent,
   agentFirstName,
@@ -40,7 +40,7 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
   onMessageLinkClick,
   onMessageCopied,
   onReportMessage,
-}: TimelineVirtualItemProps) {
+}: TimelineEventItemProps) {
   const collapsedEntries = useMemo(() => {
     if (event.kind !== 'collapsed-group') {
       return []

@@ -18,8 +18,8 @@ vi.mock('./AgentComposer', () => ({
   AgentComposer: () => <div data-testid="agent-composer" />,
 }))
 
-vi.mock('./TimelineVirtualItem', () => ({
-  TimelineVirtualItem: ({ event, onMessageLinkClick }: { event?: { messageLinkHref?: string | null }, onMessageLinkClick?: (href: string) => boolean | void }) => {
+vi.mock('./TimelineEventItem', () => ({
+  TimelineEventItem: ({ event, onMessageLinkClick }: { event?: { messageLinkHref?: string | null }, onMessageLinkClick?: (href: string) => boolean | void }) => {
     const href = event?.messageLinkHref
     if (!href) {
       return null

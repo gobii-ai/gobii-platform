@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -64,6 +63,7 @@ import { getInitialAgentChatSidebarMode } from '../components/agentChat/sidebarM
 import { findLatestStatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import { parseToolSearchResult } from '../components/agentChat/tooling/searchUtils'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
+import { useTimelineScrollController } from '../components/agentChat/useTimelineScrollController'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentRoster } from '../hooks/useAgentRoster'
@@ -116,7 +116,6 @@ const ROSTER_REFRESH_INTERVAL_MS = 20_000
 const ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS = 4_000
 const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
-const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
 const RESOLVED_NOISE_DARK_TEXTURE_URL = new URL(noiseDarkTextureUrl, import.meta.url).toString()
@@ -996,20 +995,7 @@ export type AgentChatPageProps = {
 
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
-const AUTO_SCROLL_REPIN_SUPPRESSION_MS = 1500
-const BOTTOM_REPIN_THRESHOLD_PX = 50
-const NEAR_BOTTOM_THRESHOLD_PX = 100
-const TOP_LOAD_THRESHOLD_PX = 200
-const BOTTOM_EXIT_THRESHOLD_PX = 1
-const PROGRAMMATIC_SCROLL_GUARD_MS = 150
 const RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES = DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES
-
-function isEditableEventTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) {
-    return false
-  }
-  return target.closest('input, textarea, select, [contenteditable="true"]') !== null
-}
 
 export function AgentChatPage({
   agentId,
@@ -1070,7 +1056,6 @@ export function AgentChatPage({
   } = useSubscriptionStore()
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
-  const timelineRef = useRef<HTMLDivElement | null>(null)
   const pendingCreateRef = useRef<{
     body: string
     attachments: File[]
@@ -1295,8 +1280,6 @@ export function AgentChatPage({
   const insightsPaused = useAgentChatStore((state) => state.insightsPaused)
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
-  const suppressAutoScrollPin = useAgentChatStore((state) => state.suppressAutoScrollPin)
-  const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
   const previousViewedAgentIdRef = useRef<string | null>(activeAgentId)
 
   useEffect(() => {
@@ -1338,184 +1321,59 @@ export function AgentChatPage({
     () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets, { keepTrailingActivityExpanded }),
     [keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets],
   )
-  const [timelineCanScrollForOlder, setTimelineCanScrollForOlder] = useState(false)
-  const [isNearBottom, setIsNearBottom] = useState(true)
-
-  const canLoadOlderViaScroll = useCallback((container: HTMLElement | null) => {
-    if (!container) {
-      return false
-    }
-    return container.scrollHeight > container.clientHeight + TIMELINE_SCROLLABILITY_EPSILON_PX
-  }, [])
-
-  const syncTimelineScrollability = useCallback((container: HTMLElement | null) => {
-    const next = canLoadOlderViaScroll(container)
-    setTimelineCanScrollForOlder((current) => (current === next ? current : next))
-    return next
-  }, [canLoadOlderViaScroll])
-
-  const showOlderLoadButton = (
-    !initialLoading
-    && !isNewAgent
-    && !switchingAgentId
-    && timelineEvents.length > 0
-    && timelineHasMoreOlder
-    && !timelineLoadingOlder
-    && !timelineCanScrollForOlder
-  )
-
-  const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
-  const prevScrollHeightRef = useRef(0)
-  const prependTrackingAgentIdRef = useRef<string | null>(activeAgentId)
-  const preservePrependViewportRef = useRef(false)
-  const olderPageRequestInFlightRef = useRef(false)
-  const autoScrollPinnedRef = useRef(autoScrollPinned)
-  const autoScrollPinSuppressedUntilRef = useRef(autoScrollPinSuppressedUntil)
-  const lastProgrammaticScrollAtRef = useRef(0)
-  const forceScrollOnNextUpdateRef = useRef(false)
-  const didInitialScrollRef = useRef(false)
-  const isNearBottomRef = useRef(isNearBottom)
-  const autoRepinTimeoutRef = useRef<number | null>(null)
-  const composerFocusNudgeTimeoutRef = useRef<number | null>(null)
-  const userTouchActiveRef = useRef(false)
-  const touchEndTimerRef = useRef<number | null>(null)
+  const latestTimelineCursor = timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : ''
+  const timelineStreamingVersion = timelineStreaming
+    ? [
+        timelineStreaming.streamId,
+        timelineStreaming.cursor ?? '',
+        timelineStreaming.done ? 'done' : 'active',
+        timelineStreaming.content.length,
+        timelineStreaming.reasoning.length,
+      ].join(':')
+    : 'none'
+  const timelineScrollContentVersion = [
+    timelineEvents.length,
+    latestTimelineCursor,
+    timelineStreamingVersion,
+    timelineLoadingOlder ? 'older' : 'older-idle',
+    timelineLoadingNewer ? 'newer' : 'newer-idle',
+    timelineHasMoreNewer ? 'has-newer' : 'latest',
+    timelineHasUnseenActivity ? 'unseen' : 'seen',
+    timelineProcessingActive ? 'processing' : 'idle',
+    timelineAwaitingResponse ? 'awaiting' : 'settled',
+  ].join('|')
+  const {
+    autoScrollPinnedRef,
+    isNearBottom,
+    pinAndJumpToBottom,
+    requestPreviousPage,
+    scrollOnComposerFocus,
+    scrollToBottom,
+    showOlderLoadButton,
+    timelineContentRef,
+    timelineRef: captureTimelineRef,
+    composerShellRef,
+  } = useTimelineScrollController({
+    activeAgentId,
+    autoScrollPinned,
+    contentVersion: timelineScrollContentVersion,
+    eventCount: timelineEvents.length,
+    fetchPreviousPage: timelineQuery.fetchPreviousPage,
+    hasMoreOlder: timelineHasMoreOlder,
+    hasPreviousPage: Boolean(timelineQuery.hasPreviousPage),
+    initialLoading,
+    isFetchPreviousPageError: timelineQuery.isFetchPreviousPageError,
+    isFetchingPreviousPage: timelineQuery.isFetchingPreviousPage,
+    isNewAgent,
+    loadingOlder: timelineLoadingOlder,
+    pageCount: timelineQuery.data?.pages?.length ?? 0,
+    setAutoScrollPinned,
+    switchingAgentId,
+  })
   const pinnedAtSuspendRef = useRef(autoScrollPinned)
   const resumeBackfillInFlightRef = useRef<Promise<void> | null>(null)
   const resumeBackfillRunIdRef = useRef(0)
   const allowAgentRefreshRef = useRef(false)
-
-  // Track if we should scroll on next content update (captured before DOM changes)
-  const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
-
-  useLayoutEffect(() => {
-    autoScrollPinnedRef.current = autoScrollPinned
-    autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
-    isNearBottomRef.current = isNearBottom
-  }, [autoScrollPinned, autoScrollPinSuppressedUntil, isNearBottom])
-
-  const syncNearBottomState = useCallback((container: HTMLElement | null): number | null => {
-    if (!container) {
-      return null
-    }
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-    const nearBottom = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
-    isNearBottomRef.current = nearBottom
-    setIsNearBottom((previous) => (previous === nearBottom ? previous : nearBottom))
-    return distanceFromBottom
-  }, [])
-
-  const freezeTimelineViewport = useCallback(() => {
-    const wasPinned = autoScrollPinnedRef.current
-    shouldScrollOnNextUpdateRef.current = false
-    forceScrollOnNextUpdateRef.current = false
-    autoScrollPinnedRef.current = false
-    autoScrollPinSuppressedUntilRef.current = Date.now() + AUTO_SCROLL_REPIN_SUPPRESSION_MS
-    if (wasPinned) {
-      setAutoScrollPinned(false)
-    }
-    suppressAutoScrollPin(AUTO_SCROLL_REPIN_SUPPRESSION_MS)
-    if (autoRepinTimeoutRef.current !== null) {
-      window.clearTimeout(autoRepinTimeoutRef.current)
-      autoRepinTimeoutRef.current = null
-    }
-  }, [setAutoScrollPinned, suppressAutoScrollPin])
-
-  const requestPreviousPage = useCallback(() => {
-    if (
-      olderPageRequestInFlightRef.current
-      || !timelineQuery.hasPreviousPage
-      || timelineQuery.isFetchingPreviousPage
-      || timelineQuery.isFetchPreviousPageError
-    ) {
-      return
-    }
-
-    freezeTimelineViewport()
-    prevPageCountRef.current = timelineQuery.data?.pages?.length ?? 0
-    prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
-    preservePrependViewportRef.current = true
-    olderPageRequestInFlightRef.current = true
-    void timelineQuery.fetchPreviousPage().finally(() => {
-      olderPageRequestInFlightRef.current = false
-    })
-  }, [
-    timelineQuery.data?.pages?.length,
-    timelineQuery.fetchPreviousPage,
-    timelineQuery.hasPreviousPage,
-    timelineQuery.isFetchingPreviousPage,
-    timelineQuery.isFetchPreviousPageError,
-    freezeTimelineViewport,
-  ])
-
-  useEffect(() => {
-    olderPageRequestInFlightRef.current = false
-  }, [activeAgentId])
-
-  // Auto-trigger older loading when scrolled near top
-  useEffect(() => {
-    const container = timelineRef.current
-    const canReachOlderViaScroll = canLoadOlderViaScroll(container)
-    const nearTopByScroll = container ? container.scrollTop <= TOP_LOAD_THRESHOLD_PX : false
-    if (
-      !didInitialScrollRef.current
-      || initialLoading
-      || isNewAgent
-      || switchingAgentId
-      || !timelineEvents.length
-      || !canReachOlderViaScroll
-    ) {
-      return
-    }
-    if (nearTopByScroll) {
-      requestPreviousPage()
-    }
-  }, [
-    initialLoading,
-    isNewAgent,
-    canLoadOlderViaScroll,
-    requestPreviousPage,
-    switchingAgentId,
-    timelineEvents.length,
-  ])
-
-  // Preserve the viewport when older pages prepend above the current scroll position.
-  useLayoutEffect(() => {
-    const pageCount = timelineQuery.data?.pages?.length ?? 0
-    if (prependTrackingAgentIdRef.current !== activeAgentId) {
-      prependTrackingAgentIdRef.current = activeAgentId
-      preservePrependViewportRef.current = false
-      prevPageCountRef.current = pageCount
-      prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
-      return
-    }
-
-    if (preservePrependViewportRef.current && pageCount > prevPageCountRef.current && prevPageCountRef.current > 0) {
-      const container = timelineRef.current
-      if (container) {
-        const newScrollHeight = container.scrollHeight
-        const delta = newScrollHeight - prevScrollHeightRef.current
-        if (delta > 0) {
-          container.scrollTop += delta
-        }
-        syncTimelineScrollability(container)
-        syncNearBottomState(container)
-      }
-    }
-
-    if (preservePrependViewportRef.current && timelineQuery.isFetchingPreviousPage) {
-      return
-    }
-
-    preservePrependViewportRef.current = false
-    prevPageCountRef.current = pageCount
-    prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
-  }, [
-    activeAgentId,
-    syncNearBottomState,
-    syncTimelineScrollability,
-    timelineQuery.data?.pages?.length,
-    timelineQuery.isFetchingPreviousPage,
-  ])
 
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
   const [publicShareOpen, setPublicShareOpen] = useState(false)
@@ -1875,46 +1733,6 @@ export function AgentChatPage({
     setPendingAvatarTracking((current) => prunePendingAvatarTracking(current, rosterQuery.data.agents))
   }, [rosterQuery.data?.agents])
 
-  const shouldAutoFollowTimeline = useCallback(() => {
-    return autoScrollPinnedRef.current && isNearBottomRef.current && !userTouchActiveRef.current
-  }, [])
-
-  const repinAutoScrollIfAtBottom = useCallback((container: HTMLElement | null) => {
-    if (!container || autoScrollPinnedRef.current) {
-      return
-    }
-    // Respect the suppression window after intentional user scroll-up
-    if (autoScrollPinSuppressedUntilRef.current && Date.now() < autoScrollPinSuppressedUntilRef.current) {
-      return
-    }
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-    if (distanceFromBottom > BOTTOM_REPIN_THRESHOLD_PX) {
-      return
-    }
-    // If unseen events are waiting in pending cache, force a post-flush jump so
-    // we don't strand the viewport just above newly injected latest content.
-    if (timelineHasUnseenActivity) {
-      forceScrollOnNextUpdateRef.current = true
-    }
-    autoScrollPinnedRef.current = true
-    setAutoScrollPinned(true)
-  }, [setAutoScrollPinned, timelineHasUnseenActivity])
-
-  const unpinAutoScrollFromUserGesture = useCallback(() => {
-    if (!autoScrollPinnedRef.current) {
-      return
-    }
-    freezeTimelineViewport()
-    autoRepinTimeoutRef.current = window.setTimeout(() => {
-      autoRepinTimeoutRef.current = null
-      repinAutoScrollIfAtBottom(document.getElementById('timeline-shell'))
-    }, AUTO_SCROLL_REPIN_SUPPRESSION_MS + 16)
-  }, [freezeTimelineViewport, repinAutoScrollIfAtBottom])
-
-  useEffect(() => {
-    didInitialScrollRef.current = false
-  }, [activeAgentId])
-
   useEffect(() => {
     resumeBackfillRunIdRef.current += 1
     resumeBackfillInFlightRef.current = null
@@ -1925,259 +1743,12 @@ export function AgentChatPage({
     setCollaboratorInviteOpen(false)
   }, [activeAgentId])
 
-  // IntersectionObserver-based bottom detection - simpler and more reliable than scroll math
-  const bottomSentinelRef = useRef<HTMLElement | null>(null)
-  // Track whether sentinel exists to re-run effect when it appears
-  const hasSentinel = !initialLoading && !timelineHasMoreNewer
-  useEffect(() => {
-    // Find the bottom sentinel element and scroll container
-    const sentinel = document.getElementById('timeline-bottom-sentinel')
-    const container = document.getElementById('timeline-shell')
-    bottomSentinelRef.current = sentinel
-
-    // If no sentinel yet, mark as at-bottom by default (will be corrected when it appears)
-    if (!sentinel || !container) {
-      isNearBottomRef.current = true
-      setIsNearBottom(true)
-      return
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        const distanceFromBottom = syncNearBottomState(container)
-        const atBottom = entry.isIntersecting
-          && typeof distanceFromBottom === 'number'
-          && distanceFromBottom <= BOTTOM_REPIN_THRESHOLD_PX
-
-        // Auto-restick only when the user is truly at the bottom.
-        if (atBottom) {
-          repinAutoScrollIfAtBottom(container)
-        }
-      },
-      {
-        // Use container as root for container scrolling
-        root: container,
-        // Extend bottom edge so sentinel is "visible" before fully in view.
-        rootMargin: '0px 0px 50px 0px',
-        threshold: 0,
-      },
-    )
-
-    syncNearBottomState(container)
-    observer.observe(sentinel)
-    return () => observer.disconnect()
-  }, [hasSentinel, repinAutoScrollIfAtBottom, syncNearBottomState])
-
-  // Detect user scrolling UP to immediately unpin (wheel, touch, keyboard, scrollbar drag)
-  useEffect(() => {
-    const container = document.getElementById('timeline-shell')
-    if (!container) return
-
-    let lastScrollTop = container.scrollTop
-
-    // Catch scrollbar drags / momentum scrolling where wheel events may not fire consistently.
-    const handleScroll = () => {
-      const nextScrollTop = container.scrollTop
-      const distanceFromBottom = syncNearBottomState(container)
-      const canReachOlderViaScroll = syncTimelineScrollability(container)
-      if (
-        didInitialScrollRef.current
-        && !initialLoading
-        && !isNewAgent
-        && !switchingAgentId
-        && timelineEvents.length
-        && canReachOlderViaScroll
-        && nextScrollTop <= TOP_LOAD_THRESHOLD_PX
-      ) {
-        requestPreviousPage()
-      }
-      // Don't try to re-pin while user is actively touching — let their scroll intent take priority
-      if (!userTouchActiveRef.current) {
-        repinAutoScrollIfAtBottom(container)
-      }
-      const movedAwayFromBottom = typeof distanceFromBottom === 'number'
-        && distanceFromBottom > BOTTOM_EXIT_THRESHOLD_PX
-      // Guard against false unpins from programmatic scrolls (scrollIntoView can cause transient scrollTop decreases).
-      // Bypass the guard when the user is actively touching — touch scroll is always user-initiated.
-      if (
-        movedAwayFromBottom
-        && nextScrollTop < lastScrollTop - 2
-        && (userTouchActiveRef.current || Date.now() - lastProgrammaticScrollAtRef.current > PROGRAMMATIC_SCROLL_GUARD_MS)
-      ) {
-        unpinAutoScrollFromUserGesture()
-      }
-      lastScrollTop = nextScrollTop
-    }
-
-    // Detect scroll-up via wheel
-    const handleWheel = (e: WheelEvent) => {
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      if (e.deltaY < 0 && distanceFromBottom > BOTTOM_EXIT_THRESHOLD_PX) {
-        unpinAutoScrollFromUserGesture()
-      }
-    }
-
-    // Track touch lifecycle to suppress programmatic scrolls while user is touching
-    let touchStartY: number | null = null
-    const handleTouchStart = (e: TouchEvent) => {
-      if (touchEndTimerRef.current !== null) {
-        window.clearTimeout(touchEndTimerRef.current)
-        touchEndTimerRef.current = null
-      }
-      userTouchActiveRef.current = true
-      touchStartY = e.touches[0]?.clientY ?? null
-    }
-    // Detect upward swipe directly via touch movement — more reliable than waiting
-    // for scroll events on mobile, which can be blocked by the programmatic scroll guard.
-    const handleTouchMove = (e: TouchEvent) => {
-      if (!autoScrollPinnedRef.current || touchStartY === null) return
-      const currentY = e.touches[0]?.clientY
-      if (currentY === undefined) return
-      // Finger moving down on screen = scrolling up (revealing older content)
-      if (currentY - touchStartY > 10) {
-        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-        if (distanceFromBottom > BOTTOM_EXIT_THRESHOLD_PX) {
-          unpinAutoScrollFromUserGesture()
-        }
-      }
-    }
-    const handleTouchEnd = () => {
-      touchStartY = null
-      if (touchEndTimerRef.current !== null) {
-        window.clearTimeout(touchEndTimerRef.current)
-      }
-      touchEndTimerRef.current = window.setTimeout(() => {
-        userTouchActiveRef.current = false
-        touchEndTimerRef.current = null
-      }, 200)
-    }
-
-    // Detect scroll-up via keyboard
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!autoScrollPinnedRef.current) return
-      if (isEditableEventTarget(e.target)) return
-      const scrollUpKeys = ['ArrowUp', 'PageUp', 'Home']
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      if (scrollUpKeys.includes(e.key) && distanceFromBottom > BOTTOM_EXIT_THRESHOLD_PX) {
-        unpinAutoScrollFromUserGesture()
-      }
-    }
-
-    // Listen on the container, not window
-    syncNearBottomState(container)
-    syncTimelineScrollability(container)
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    container.addEventListener('wheel', handleWheel, { passive: true })
-    container.addEventListener('touchstart', handleTouchStart, { passive: true })
-    container.addEventListener('touchmove', handleTouchMove, { passive: true })
-    container.addEventListener('touchend', handleTouchEnd, { passive: true })
-    container.addEventListener('touchcancel', handleTouchEnd, { passive: true })
-    window.addEventListener('keydown', handleKeyDown) // Keyboard stays on window
-
-    return () => {
-      container.removeEventListener('scroll', handleScroll)
-      container.removeEventListener('wheel', handleWheel)
-      container.removeEventListener('touchstart', handleTouchStart)
-      container.removeEventListener('touchmove', handleTouchMove)
-      container.removeEventListener('touchend', handleTouchEnd)
-      container.removeEventListener('touchcancel', handleTouchEnd)
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [
-    initialLoading,
-    isNewAgent,
-    repinAutoScrollIfAtBottom,
-    requestPreviousPage,
-    syncTimelineScrollability,
-    switchingAgentId,
-    syncNearBottomState,
-    timelineEvents.length,
-    unpinAutoScrollFromUserGesture,
-  ])
-
-  // Unpin auto-scroll when processing ends so user's reading position is preserved
-  const prevProcessingRef = useRef(timelineProcessingActive)
-  useEffect(() => {
-    const wasProcessing = prevProcessingRef.current
-    prevProcessingRef.current = timelineProcessingActive
-    if (wasProcessing && !timelineProcessingActive && !isNearBottomRef.current && !autoScrollPinnedRef.current) {
-      setAutoScrollPinned(false)
-    }
-  }, [timelineProcessingActive, setAutoScrollPinned])
-
-  // Capture scroll decision BEFORE content changes to avoid race with scroll handler
-  const prevEventsRef = useRef(timelineEvents)
-  const prevStreamingRef = useRef(timelineStreaming)
-
-  if (timelineEvents !== prevEventsRef.current || timelineStreaming !== prevStreamingRef.current) {
-    shouldScrollOnNextUpdateRef.current = autoScrollPinned && isNearBottom
-    prevEventsRef.current = timelineEvents
-    prevStreamingRef.current = timelineStreaming
-  }
-
-  const pendingScrollFrameRef = useRef<number | null>(null)
-
-  // Lightweight auto-follow: just set scrollTop, no overflow toggle.
-  // Used by ResizeObserver callbacks to avoid layout thrashing during rapid layout updates.
-  // Does NOT update lastProgrammaticScrollAtRef — that guard is for user-initiated
-  // programmatic scrolls (jump-to-latest, send). Auto-follow must not block detection
-  // of user scroll-up gestures (especially momentum scrolling after touch end on mobile).
-  const snapToBottom = useCallback(() => {
-    const container = document.getElementById('timeline-shell')
-    if (!container) return
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-    // Already at bottom — skip to avoid triggering scroll events
-    if (distanceFromBottom < 2) return
-    container.scrollTop = container.scrollHeight
-    isNearBottomRef.current = true
-    setIsNearBottom(true)
-  }, [])
-
-  // Full jump with iOS momentum kill — used for user-initiated actions
-  // (send message, click jump button, composer focus, initial scroll).
-  const jumpToBottom = useCallback(() => {
-    const container = document.getElementById('timeline-shell')
-    if (!container) return
-    lastProgrammaticScrollAtRef.current = Date.now()
-    // Kill iOS momentum scrolling — toggling overflow forces the scroll to stop immediately
-    container.style.overflowY = 'hidden'
-    container.scrollTop = container.scrollHeight + 10000
-    requestAnimationFrame(() => { container.style.overflowY = '' })
-    isNearBottomRef.current = true
-    setIsNearBottom(true)
-  }, [])
-
-  // rAF-coalesced auto-follow (for ResizeObserver / content change paths)
-  const scrollToBottom = useCallback(() => {
-    if (pendingScrollFrameRef.current !== null) {
-      return
-    }
-    pendingScrollFrameRef.current = requestAnimationFrame(() => {
-      pendingScrollFrameRef.current = null
-      snapToBottom()
-    })
-  }, [snapToBottom])
-
-  const executeAutoFollow = useCallback(() => {
-    scrollToBottom()
-    isNearBottomRef.current = true
-    setIsNearBottom(true)
-  }, [scrollToBottom])
-
   const runContiguousTimelineBackfill = useCallback(async (agentIdToRefresh: string) => {
     return refreshTimelineLatestInCache(queryClient, agentIdToRefresh, {
       mode: 'contiguous',
       maxNewerPages: RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES,
     })
   }, [queryClient])
-
-  const repinAndJumpToBottom = useCallback(() => {
-    autoScrollPinnedRef.current = true
-    forceScrollOnNextUpdateRef.current = true
-    setAutoScrollPinned(true)
-    jumpToBottom()
-    scrollToBottom()
-  }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
 
   const syncLatestTimeline = useCallback(async (
     agentIdToRefresh: string,
@@ -2190,8 +1761,8 @@ export function AgentChatPage({
     if (!repinToLatest) {
       return
     }
-    repinAndJumpToBottom()
-  }, [repinAndJumpToBottom, runContiguousTimelineBackfill])
+    pinAndJumpToBottom()
+  }, [pinAndJumpToBottom, runContiguousTimelineBackfill])
 
   const triggerResumeTimelineBackfill = useCallback(() => {
     const currentAgentId = activeAgentIdRef.current
@@ -2238,138 +1809,6 @@ export function AgentChatPage({
     },
     { resumeThrottleMs: 4000 },
   )
-
-  // Keep track of composer height to adjust scroll when it changes
-  const prevComposerHeight = useRef<number | null>(null)
-
-  useEffect(() => {
-    const composer = document.getElementById('agent-composer-shell')
-    const container = document.getElementById('timeline-shell')
-    if (!composer || !container) return
-
-    const observer = new ResizeObserver((entries) => {
-      const height = entries[0].borderBoxSize?.[0]?.blockSize ?? entries[0].contentRect.height
-      const shouldFollow = shouldAutoFollowTimeline()
-
-      if (prevComposerHeight.current !== null) {
-        const delta = height - prevComposerHeight.current
-        // If composer grew and we're at the bottom, scroll down to keep content visible
-        if (delta > 0 && shouldFollow) {
-          container.scrollTop += delta
-        }
-      }
-
-      prevComposerHeight.current = height
-
-      // If pinned, ensure we stay at the bottom
-      if (shouldFollow) {
-        executeAutoFollow()
-        return
-      }
-      syncNearBottomState(container)
-    })
-
-    observer.observe(composer)
-    return () => observer.disconnect()
-  }, [executeAutoFollow, shouldAutoFollowTimeline, syncNearBottomState])
-
-  const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
-  const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
-    timelineRef.current = node
-    syncTimelineScrollability(node)
-    setTimelineNode(node)
-  }, [syncTimelineScrollability])
-
-  // Observe timeline changes (e.g. images loading, new DOM elements) to keep pinned to bottom
-  useEffect(() => {
-    if (!timelineNode) {
-      setTimelineCanScrollForOlder(false)
-      return
-    }
-    const inner = document.getElementById('timeline-events')
-
-    const observer = new ResizeObserver(() => {
-      syncTimelineScrollability(timelineNode)
-      const shouldFollow = shouldAutoFollowTimeline()
-      // If pinned, ensure we stay at the bottom when content changes
-      // Skip while user is actively touching to prevent scroll fighting on mobile
-      // Uses rAF-coalesced scrollToBottom to avoid ResizeObserver feedback loops
-      if (shouldFollow) {
-        executeAutoFollow()
-        return
-      }
-      syncNearBottomState(timelineNode)
-    })
-
-    observer.observe(timelineNode)
-    if (inner) {
-      observer.observe(inner)
-    }
-    return () => observer.disconnect()
-  }, [executeAutoFollow, syncTimelineScrollability, timelineNode, shouldAutoFollowTimeline, syncNearBottomState])
-
-  useEffect(() => () => {
-    if (pendingScrollFrameRef.current !== null) {
-      cancelAnimationFrame(pendingScrollFrameRef.current)
-    }
-  }, [])
-
-  useEffect(() => () => {
-    if (autoRepinTimeoutRef.current !== null) {
-      window.clearTimeout(autoRepinTimeoutRef.current)
-    }
-    if (composerFocusNudgeTimeoutRef.current !== null) {
-      window.clearTimeout(composerFocusNudgeTimeoutRef.current)
-    }
-    if (touchEndTimerRef.current !== null) {
-      window.clearTimeout(touchEndTimerRef.current)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (isNewAgent) {
-      // New agent: no events yet, but ensure auto-scroll is pinned for when content arrives
-      didInitialScrollRef.current = true
-      setAutoScrollPinned(true)
-      return
-    }
-    if (!initialLoading && timelineEvents.length && !didInitialScrollRef.current) {
-      didInitialScrollRef.current = true
-      setAutoScrollPinned(true)
-      // Immediate scroll attempt
-      jumpToBottom()
-      // Plus delayed scroll to catch any async layout (images, fonts, etc)
-      const timeout = setTimeout(() => jumpToBottom(), 50)
-      return () => clearTimeout(timeout)
-    }
-  }, [timelineEvents.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
-
-  useLayoutEffect(() => {
-    if (forceScrollOnNextUpdateRef.current) {
-      // Force scroll (user-initiated actions like send, jump-to-latest) — always honor
-      forceScrollOnNextUpdateRef.current = false
-      shouldScrollOnNextUpdateRef.current = false
-      jumpToBottom()
-    } else if (shouldScrollOnNextUpdateRef.current) {
-      // Auto scroll (new content while pinned) — use lightweight snap to avoid layout thrashing
-      shouldScrollOnNextUpdateRef.current = false
-      if (!userTouchActiveRef.current) {
-        snapToBottom()
-      }
-    }
-  }, [
-    jumpToBottom,
-    snapToBottom,
-    timelineEvents,
-    timelineStreaming,
-    timelineLoadingOlder,
-    timelineLoadingNewer,
-    timelineHasMoreNewer,
-    timelineHasUnseenActivity,
-    initialLoading,
-    timelineProcessingActive,
-    timelineAwaitingResponse,
-  ])
 
   const rosterContextMismatch = Boolean(
     effectiveContext
@@ -3427,28 +2866,13 @@ export function AgentChatPage({
         await syncLatestTimeline(currentAgentId, { repinToLatest: true })
         return
       }
-      repinAndJumpToBottom()
+      pinAndJumpToBottom()
     })()
-  }, [repinAndJumpToBottom, syncLatestTimeline, timelineHasMoreNewer])
+  }, [pinAndJumpToBottom, syncLatestTimeline, timelineHasMoreNewer])
 
   const handleComposerFocus = useCallback(() => {
-    if (typeof window === 'undefined') return
-    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-    if (!isTouch) return
-
-    setAutoScrollPinned(true)
-    forceScrollOnNextUpdateRef.current = true
-    jumpToBottom()
-
-    if (composerFocusNudgeTimeoutRef.current !== null) {
-      window.clearTimeout(composerFocusNudgeTimeoutRef.current)
-    }
-    composerFocusNudgeTimeoutRef.current = window.setTimeout(() => {
-      jumpToBottom()
-      scrollToBottom()
-      composerFocusNudgeTimeoutRef.current = null
-    }, 180)
-  }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
+    scrollOnComposerFocus()
+  }, [scrollOnComposerFocus])
 
   const handleUpgrade = useCallback(async (plan: PlanTier, source?: string) => {
     const resolvedSource = source ?? upgradeModalSource ?? 'upgrade_modal'
@@ -4829,6 +4253,7 @@ export function AgentChatPage({
         planSnapshot={latestPlanSnapshot}
         {...chatLayoutSidebarProps}
         onComposerFocus={handleComposerFocus}
+        onComposerRequestScrollToBottom={scrollToBottom}
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}
         dailyCreditsStatus={dailyCreditsStatus}
@@ -4919,6 +4344,8 @@ export function AgentChatPage({
         isNearBottom={isNearBottom}
         hasUnseenActivity={timelineHasUnseenActivity}
         timelineRef={captureTimelineRef}
+        timelineContentRef={timelineContentRef}
+        composerShellRef={composerShellRef}
         loadingOlder={timelineLoadingOlder}
         loadingNewer={timelineLoadingNewer}
         initialLoading={initialLoading}
