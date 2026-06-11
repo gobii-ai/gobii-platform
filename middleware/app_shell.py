@@ -26,6 +26,7 @@ APP_SECRETS_PATH_PREFIX = f"{APP_PATH_PREFIX}/secrets"
 APP_USAGE_PATH_PREFIX = f"{APP_PATH_PREFIX}/usage"
 APP_INTEGRATIONS_PATH_PREFIX = f"{APP_PATH_PREFIX}/integrations"
 APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
+APP_ROBOTS_HEADER_VALUE = "noindex, follow"
 
 
 def _format_vite_tags() -> str:
@@ -221,6 +222,7 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <meta name="robots" content="{APP_ROBOTS_HEADER_VALUE}">
   <meta name="csrf-cookie-name" content="{csrf_cookie_name}">
   <title>Gobii App</title>
   <link rel="icon" type="image/png" href="{icon_url}" />
@@ -266,10 +268,12 @@ class AppShellMiddleware:
             return self.get_response(request)
 
         if request.method not in {"GET", "HEAD"}:
-            return HttpResponseNotAllowed(["GET", "HEAD"])
+            return self._with_robots_header(HttpResponseNotAllowed(["GET", "HEAD"]))
 
         if self._requires_login(request.path) and not request.user.is_authenticated:
-            return redirect_to_login(request.get_full_path(), login_url=reverse("account_login"))
+            return self._with_robots_header(
+                redirect_to_login(request.get_full_path(), login_url=reverse("account_login"))
+            )
 
         if request.user.is_authenticated:
             self._apply_context_query(request)
@@ -295,17 +299,22 @@ class AppShellMiddleware:
             response = HttpResponseNotModified()
             response["ETag"] = self._cached_etag
             response["Cache-Control"] = APP_SHELL_CACHE_CONTROL
-            return response
+            return self._with_robots_header(response)
 
         response = HttpResponse(self._cached_shell, content_type="text/html; charset=utf-8")
         response["Cache-Control"] = APP_SHELL_CACHE_CONTROL
         if self._cached_etag:
             response["ETag"] = self._cached_etag
-        return response
+        return self._with_robots_header(response)
 
     @staticmethod
     def _should_handle(path: str) -> bool:
         return path == APP_PATH_PREFIX or path.startswith(f"{APP_PATH_PREFIX}/")
+
+    @staticmethod
+    def _with_robots_header(response):
+        response["X-Robots-Tag"] = APP_ROBOTS_HEADER_VALUE
+        return response
 
     @staticmethod
     def _legacy_console_redirect(request) -> str | None:

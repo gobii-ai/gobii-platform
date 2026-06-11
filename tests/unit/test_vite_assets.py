@@ -116,7 +116,9 @@ class AppShellCacheHeaderTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
+        self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
         self.assertIn("ETag", response)
+        self.assertContains(response, '<meta name="robots" content="noindex, follow">')
 
     def test_app_shell_returns_304_for_matching_etag(self):
         initial_response = self.client.get("/app")
@@ -124,6 +126,7 @@ class AppShellCacheHeaderTests(TestCase):
 
         self.assertEqual(response.status_code, 304)
         self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
+        self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
         self.assertEqual(response["ETag"], initial_response["ETag"])
 
 
@@ -153,6 +156,7 @@ class AppShellAuthenticationTests(TestCase):
                 parsed = urlparse(response["Location"])
                 self.assertEqual(parsed.path, reverse("account_login"))
                 self.assertEqual(parse_qs(parsed.query), {"next": [path]})
+                self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
 
     def test_unauthenticated_agent_detail_redirects_to_login_with_query_string(self):
         agent_id = uuid.uuid4()
@@ -165,12 +169,14 @@ class AppShellAuthenticationTests(TestCase):
             parse_qs(parsed.query),
             {"next": [f"/app/agents/{agent_id}/?return_to=%2Fconsole%2Fagents%2F"]},
         )
+        self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
 
     def test_unauthenticated_app_root_still_serves_shell(self):
         response = self.client.get("/app")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
+        self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
         self.assertContains(response, 'id="gobii-frontend-root"')
 
     @override_settings(
