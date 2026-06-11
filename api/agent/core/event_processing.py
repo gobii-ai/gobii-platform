@@ -4442,7 +4442,12 @@ def _ensure_credit_for_tool(
             credit_snapshot["daily_state"] = daily_state
 
     if is_daily_hard_limit_message_only_mode(daily_state) and is_daily_limit_allowed_tool(tool_name):
-        if available is not None and available != TASKS_UNLIMITED and Decimal(available) <= Decimal("0"):
+        if (
+            tool_name in DAILY_LIMIT_MESSAGE_TOOL_NAMES
+            and available is not None
+            and available != TASKS_UNLIMITED
+            and Decimal(available) <= Decimal("0")
+        ):
             msg_desc = (
                 f"Skipped tool '{tool_name}' due to insufficient credits mid-loop."
             )
