@@ -393,6 +393,7 @@ def _run_judge(
         response=response,
         model=model,
         provider=provider,
+        pricing_model=params.get("pricing_model"),
     )
     completion = (
         PersistentAgentCompletion.objects.filter(

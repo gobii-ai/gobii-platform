@@ -131,6 +131,7 @@ export type ProviderEndpointCard = {
   id: string
   name: string
   enabled: boolean
+  litellm_pricing_model?: string | null
   api_base?: string
   browser_base_url?: string
   max_output_tokens?: number | null
@@ -323,6 +324,7 @@ export type EndpointTestStatus = {
 
 export type EndpointFormValues = {
   model: string
+  litellm_pricing_model?: string
   temperature?: string
   supportsTemperature?: boolean
   api_base?: string
@@ -913,6 +915,7 @@ export function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] 
       id: endpoint.id,
       name: endpoint.model,
       enabled: endpoint.enabled,
+      litellm_pricing_model: endpoint.litellm_pricing_model ?? null,
       api_base: endpoint.api_base,
       browser_base_url: endpoint.browser_base_url,
       max_output_tokens: endpoint.max_output_tokens ?? null,

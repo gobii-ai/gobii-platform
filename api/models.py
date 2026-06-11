@@ -3353,6 +3353,12 @@ class PersistentModelEndpoint(models.Model):
 
     # LiteLLM model string and options
     litellm_model = models.CharField(max_length=256)
+    litellm_pricing_model = models.CharField(
+        max_length=256,
+        blank=True,
+        null=True,
+        help_text="Optional LiteLLM model identifier used for pricing lookup only.",
+    )
     temperature_override = models.FloatField(null=True, blank=True)
     supports_temperature = models.BooleanField(
         default=True,
@@ -3505,6 +3511,12 @@ class EmbeddingsModelEndpoint(models.Model):
     )
 
     litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM for embeddings.")
+    litellm_pricing_model = models.CharField(
+        max_length=256,
+        blank=True,
+        null=True,
+        help_text="Optional LiteLLM model identifier used for pricing lookup only.",
+    )
     api_base = models.CharField(
         max_length=256,
         blank=True,
@@ -3591,6 +3603,12 @@ class FileHandlerModelEndpoint(models.Model):
     )
 
     litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM.")
+    litellm_pricing_model = models.CharField(
+        max_length=256,
+        blank=True,
+        null=True,
+        help_text="Optional LiteLLM model identifier used for pricing lookup only.",
+    )
     api_base = models.CharField(
         max_length=256,
         blank=True,
@@ -3681,6 +3699,12 @@ class ImageGenerationModelEndpoint(models.Model):
     )
 
     litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM.")
+    litellm_pricing_model = models.CharField(
+        max_length=256,
+        blank=True,
+        null=True,
+        help_text="Optional LiteLLM model identifier used for pricing lookup only.",
+    )
     api_base = models.CharField(
         max_length=256,
         blank=True,
@@ -3787,6 +3811,12 @@ class VideoGenerationModelEndpoint(models.Model):
     )
 
     litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM.")
+    litellm_pricing_model = models.CharField(
+        max_length=256,
+        blank=True,
+        null=True,
+        help_text="Optional LiteLLM model identifier used for pricing lookup only.",
+    )
     api_base = models.CharField(
         max_length=256,
         blank=True,

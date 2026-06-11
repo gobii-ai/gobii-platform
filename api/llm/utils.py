@@ -1,5 +1,4 @@
 """Utilities for normalizing LLM model identifiers."""
-from __future__ import annotations
 
 from typing import Optional
 
@@ -40,10 +39,26 @@ def normalize_model_name(
                 model = f"{prefix}{model}"
 
     backend = getattr(provider, "browser_backend", None)
-    if api_base and backend in OPENAI_BACKENDS and "/" not in model:
+    if api_base and backend in OPENAI_BACKENDS and not model.startswith("openai/"):
         model = f"openai/{model}"
 
     return model
 
 
-__all__ = ["normalize_model_name"]
+def normalize_pricing_model(
+    endpoint: object,
+    provider: Optional[LLMProvider],
+) -> str | None:
+    raw_pricing_model = (_safe_getattr(endpoint, "litellm_pricing_model", "") or "").strip()
+    if not raw_pricing_model:
+        return None
+    return normalize_model_name(provider, raw_pricing_model)
+
+
+def _safe_getattr(source: object | None, attr: str, default=None):
+    if source is None:
+        return default
+    return getattr(source, attr, default)
+
+
+__all__ = ["normalize_model_name", "normalize_pricing_model"]

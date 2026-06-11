@@ -3953,6 +3953,7 @@ def _completion_with_failover(
                     response,
                     model=model,
                     provider=provider,
+                    pricing_model=params_base.get("pricing_model"),
                 )
                 _attach_completion_runtime_hints(
                     response,

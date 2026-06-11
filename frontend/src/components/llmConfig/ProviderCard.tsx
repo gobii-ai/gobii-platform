@@ -349,6 +349,7 @@ function ProviderEndpointForm({
   const isCreate = mode === 'create'
   const [key, setKey] = useState('')
   const [model, setModel] = useState(endpoint?.name ?? '')
+  const [pricingModel, setPricingModel] = useState(endpoint?.litellm_pricing_model ?? '')
   const [temperature, setTemperature] = useState(endpoint?.temperature?.toString() ?? '')
   const [supportsTemperature, setSupportsTemperature] = useState(
     endpoint?.supports_temperature ?? true,
@@ -372,6 +373,7 @@ function ProviderEndpointForm({
   const handleSubmit = async () => {
     const values: EndpointFormValues = {
       model,
+      litellm_pricing_model: pricingModel,
       temperature,
       api_base: apiBase,
       browser_base_url: apiBase,
@@ -407,6 +409,7 @@ function ProviderEndpointForm({
   const isImageGeneration = type === 'image_generation'
   const isVideoGeneration = type === 'video_generation'
   const isPersistent = type === 'persistent'
+  const isLiteLLMEndpoint = !isBrowser
   const isMediaGeneration = isImageGeneration || isVideoGeneration
   const isToolingEndpoint = !isEmbedding && !isFileHandler && !isMediaGeneration
   const showTemperatureOverride = isCreate ? (isPersistent || isEmbedding) : (!isBrowser && !isMediaGeneration)
@@ -425,6 +428,17 @@ function ProviderEndpointForm({
           <label className="text-xs text-slate-500">Model identifier</label>
           <input value={model} onChange={(event) => setModel(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
         </div>
+        {isLiteLLMEndpoint && (
+          <div>
+            <label className="text-xs text-slate-500">LiteLLM pricing model override</label>
+            <input
+              value={pricingModel}
+              onChange={(event) => setPricingModel(event.target.value)}
+              placeholder="Optional"
+              className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            />
+          </div>
+        )}
         {showTemperatureOverride && (
           <div>
             <label className="text-xs text-slate-500">Temperature override</label>

@@ -67,6 +67,7 @@ def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any
         response=response,
         model=model,
         provider=provider,
+        pricing_model=params.get("pricing_model"),
     )
 
     try:

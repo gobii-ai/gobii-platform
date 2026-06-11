@@ -5951,6 +5951,8 @@ from .models import (
     FileHandlerModelEndpoint,
     FileHandlerLLMTier,
     FileHandlerTierEndpoint,
+    ImageGenerationModelEndpoint,
+    VideoGenerationModelEndpoint,
     BrowserModelEndpoint,
     BrowserLLMPolicy,
     BrowserLLMTier,
@@ -6012,6 +6014,7 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "key",
         "provider",
         "litellm_model",
+        "litellm_pricing_model",
         "api_base",
         "openrouter_preset",
         "max_input_tokens",
@@ -6026,13 +6029,14 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "reasoning_effort",
     )
     list_filter = ("enabled", "low_latency", "provider", "allow_implied_send", "supports_vision", "supports_reasoning")
-    search_fields = ("key", "litellm_model")
+    search_fields = ("key", "litellm_model", "litellm_pricing_model")
     fields = (
         "key",
         "provider",
         "enabled",
         "low_latency",
         "litellm_model",
+        "litellm_pricing_model",
         "api_base",
         "openrouter_preset",
         "max_input_tokens",
@@ -6047,18 +6051,30 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(EmbeddingsModelEndpoint)
-class EmbeddingsModelEndpointAdmin(admin.ModelAdmin):
-    list_display = ("key", "provider", "litellm_model", "api_base", "low_latency", "enabled")
+class LiteLLMEndpointAdminBase(admin.ModelAdmin):
     list_filter = ("enabled", "low_latency", "provider")
-    search_fields = ("key", "litellm_model", "api_base")
+    search_fields = ("key", "litellm_model", "litellm_pricing_model", "api_base")
     fields = (
         "key",
         "provider",
         "enabled",
         "low_latency",
         "litellm_model",
+        "litellm_pricing_model",
         "api_base",
+    )
+
+
+@admin.register(EmbeddingsModelEndpoint)
+class EmbeddingsModelEndpointAdmin(LiteLLMEndpointAdminBase):
+    list_display = (
+        "key",
+        "provider",
+        "litellm_model",
+        "litellm_pricing_model",
+        "api_base",
+        "low_latency",
+        "enabled",
     )
 
 
@@ -6077,19 +6093,51 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
 
 
 @admin.register(FileHandlerModelEndpoint)
-class FileHandlerModelEndpointAdmin(admin.ModelAdmin):
-    list_display = ("key", "provider", "litellm_model", "api_base", "low_latency", "supports_vision", "enabled")
-    list_filter = ("enabled", "low_latency", "provider", "supports_vision")
-    search_fields = ("key", "litellm_model", "api_base")
-    fields = (
+class FileHandlerModelEndpointAdmin(LiteLLMEndpointAdminBase):
+    list_display = (
         "key",
         "provider",
-        "enabled",
-        "low_latency",
         "litellm_model",
+        "litellm_pricing_model",
         "api_base",
+        "low_latency",
         "supports_vision",
+        "enabled",
     )
+    list_filter = (*LiteLLMEndpointAdminBase.list_filter, "supports_vision")
+    fields = (*LiteLLMEndpointAdminBase.fields, "supports_vision")
+
+
+@admin.register(ImageGenerationModelEndpoint)
+class ImageGenerationModelEndpointAdmin(LiteLLMEndpointAdminBase):
+    list_display = (
+        "key",
+        "provider",
+        "litellm_model",
+        "litellm_pricing_model",
+        "api_base",
+        "low_latency",
+        "supports_image_to_image",
+        "enabled",
+    )
+    list_filter = (*LiteLLMEndpointAdminBase.list_filter, "supports_image_to_image")
+    fields = (*LiteLLMEndpointAdminBase.fields, "supports_image_to_image")
+
+
+@admin.register(VideoGenerationModelEndpoint)
+class VideoGenerationModelEndpointAdmin(LiteLLMEndpointAdminBase):
+    list_display = (
+        "key",
+        "provider",
+        "litellm_model",
+        "litellm_pricing_model",
+        "api_base",
+        "low_latency",
+        "supports_image_to_video",
+        "enabled",
+    )
+    list_filter = (*LiteLLMEndpointAdminBase.list_filter, "supports_image_to_video")
+    fields = (*LiteLLMEndpointAdminBase.fields, "supports_image_to_video")
 
 
 class FileHandlerTierEndpointInline(admin.TabularInline):

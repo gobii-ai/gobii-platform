@@ -74,6 +74,7 @@ def _log_video_generation_completion(
     *,
     agent: PersistentAgent,
     model_name: str,
+    pricing_model: str | None = None,
     response: Any,
 ) -> None:
     if response is None:
@@ -84,6 +85,7 @@ def _log_video_generation_completion(
         response=response,
         model=model_name,
         provider=provider_hint_from_model(model_name),
+        pricing_model=pricing_model,
     )
 
 
@@ -347,6 +349,7 @@ def _create_openai_video_job(
     source_image: ResolvedSourceImage | None,
 ) -> VideoObject:
     params = dict(config.params or {})
+    params.pop("pricing_model", None)
     api_base = _get_openai_video_api_base(params)
     headers = _build_openai_video_headers(params)
     headers["Content-Type"] = "application/json"
@@ -546,6 +549,7 @@ def _generate_video(
     source_image: ResolvedSourceImage | None = None,
 ) -> GeneratedVideoResult:
     params = dict(config.params or {})
+    params.pop("pricing_model", None)
     is_openai_sora_request = _is_openai_sora_model(config.model)
 
     gen_kwargs: Dict[str, Any] = {
@@ -694,11 +698,21 @@ def execute_create_video(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 size=size,
                 source_image=source_image,
             )
-            _log_video_generation_completion(agent=agent, model_name=config.model, response=generated.response)
+            _log_video_generation_completion(
+                agent=agent,
+                model_name=config.model,
+                pricing_model=config.pricing_model,
+                response=generated.response,
+            )
             video_bytes = generated.video_bytes
             break
         except VideoGenerationResponseError as exc:
-            _log_video_generation_completion(agent=agent, model_name=config.model, response=exc.response)
+            _log_video_generation_completion(
+                agent=agent,
+                model_name=config.model,
+                pricing_model=config.pricing_model,
+                response=exc.response,
+            )
             errors.append(f"{config.endpoint_key or config.model}: {exc}")
             logger.info("Video generation attempt failed: %s", errors[-1])
         except ValueError as exc:

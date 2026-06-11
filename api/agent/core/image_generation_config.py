@@ -24,6 +24,7 @@ class ImageGenerationLLMConfig:
     endpoint_key: str
     supports_image_config: bool
     supports_image_to_image: bool
+    pricing_model: str | None = None
 
 
 def _supports_image_config(model_name: str, provider_key: str | None) -> bool:
@@ -109,6 +110,7 @@ def get_image_generation_llm_configs(
                     endpoint_key=getattr(entry.endpoint, "key", ""),
                     supports_image_config=_supports_image_config(model_name, getattr(provider, "key", None)),
                     supports_image_to_image=bool(getattr(entry.endpoint, "supports_image_to_image", False)),
+                    pricing_model=params.get("pricing_model"),
                 )
             )
             if len(configs) >= limit:

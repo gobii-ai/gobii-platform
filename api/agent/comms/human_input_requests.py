@@ -1382,6 +1382,7 @@ def _resolve_requests_with_llm(
             response=response,
             model=model,
             provider=provider,
+            pricing_model=completion_params.get("pricing_model"),
         )
         tool_payload = _extract_human_input_match_tool_payload(response)
         if not tool_payload:

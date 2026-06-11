@@ -204,6 +204,9 @@ export function useProviderEndpointActions({
       if (maxInput !== undefined) payload.max_input_tokens = maxInput
       payload.enabled = true
     }
+    if (type !== 'browser') {
+      payload.litellm_pricing_model = values.litellm_pricing_model?.trim() || null
+    }
     payload.low_latency = values.lowLatency ?? false
     return runMutation(() => llmApi.createEndpoint(kind, payload), {
       successMessage: 'Endpoint added',
@@ -223,6 +226,9 @@ export function useProviderEndpointActions({
       payload.model = values.model
       if (kind === 'browser') payload.browser_model = values.model
       if (kind !== 'browser') payload.litellm_model = values.model
+    }
+    if (kind !== 'browser' && values.litellm_pricing_model !== undefined) {
+      payload.litellm_pricing_model = values.litellm_pricing_model.trim() || null
     }
     if (values.api_base) {
       payload.api_base = values.api_base

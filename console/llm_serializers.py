@@ -74,6 +74,7 @@ def _serialize_persistent_endpoint(
         {
             "key": endpoint.key,
             "model": endpoint.litellm_model,
+            "litellm_pricing_model": endpoint.litellm_pricing_model,
             "temperature_override": endpoint.temperature_override,
             "supports_temperature": endpoint.supports_temperature,
             "supports_tool_choice": endpoint.supports_tool_choice,
@@ -130,6 +131,7 @@ def _serialize_aux_endpoint(
         {
             "key": endpoint.key,
             "model": endpoint.litellm_model,
+            "litellm_pricing_model": getattr(endpoint, "litellm_pricing_model", None),
             "api_base": endpoint.api_base,
             "provider_id": str(endpoint.provider_id) if endpoint.provider_id else None,
             "type": endpoint_type,
