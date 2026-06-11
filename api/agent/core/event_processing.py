@@ -2989,6 +2989,7 @@ def _finalize_tool_batch(
     agent: PersistentAgent,
     execution_outcomes: list[_ToolExecutionOutcome],
     *,
+    daily_credit_state: dict | None = None,
     attach_completion: Any,
     attach_prompt_archive: Any,
 ) -> _FinalizedToolBatch:
@@ -3127,6 +3128,7 @@ def _finalize_tool_batch(
         agent.planning_state != PersistentAgent.PlanningState.PLANNING
         and terminal_message_delivery_ok
         and not followup_required
+        and not is_daily_hard_limit_message_only_mode(daily_credit_state)
         and _plan_has_unfinished_items(agent)
     ):
         _record_terminal_send_unfinished_plan_correction(
@@ -6274,6 +6276,11 @@ def _run_agent_loop(
                 finalized_batch = _finalize_tool_batch(
                     agent,
                     executed_batch.execution_outcomes,
+                    daily_credit_state=(
+                        credit_snapshot.get("daily_state")
+                        if isinstance(credit_snapshot, dict)
+                        else None
+                    ),
                     attach_completion=_attach_completion,
                     attach_prompt_archive=_attach_prompt_archive,
                 )
