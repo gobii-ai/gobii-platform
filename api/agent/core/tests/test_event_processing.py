@@ -256,6 +256,63 @@ class MessageToolExplicitContinuationTests(TestCase):
             ).exists()
         )
 
+    def test_daily_limit_terminal_message_with_unfinished_plan_can_stop(self):
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Synthesize final report",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+        prepared = _PreparedToolExecution(
+            idx=1,
+            tool_name="send_chat_message",
+            tool_params={"body": "I hit today's limit. Please raise it to continue.", "will_continue_work": False},
+            exec_params={"body": "I hit today's limit. Please raise it to continue.", "will_continue_work": False},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call_1",
+            explicit_continue=False,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason=None,
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [
+                _ToolExecutionOutcome(
+                    prepared=prepared,
+                    result={
+                        "status": "ok",
+                        "message": "Web chat message sent.",
+                        "message_id": str(uuid4()),
+                        "auto_sleep_ok": True,
+                    },
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+            ],
+            daily_credit_state={
+                "hard_limit": Decimal("5"),
+                "hard_limit_remaining": Decimal("0"),
+                "used": Decimal("5"),
+            },
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.terminal_message_delivery_ok)
+        self.assertFalse(finalized.followup_required)
+        self.assertIs(finalized.last_explicit_continue, False)
+        self.assertFalse(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="current plan still has unfinished items",
+            ).exists()
+        )
+
     def test_planning_mode_terminal_message_with_unfinished_plan_allows_stale_skip(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state"])
