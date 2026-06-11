@@ -72,6 +72,7 @@ export function useTimelineScrollController({
   const programmaticScrollUntilRef = useRef(0)
   const prependAnchorRef = useRef<PrependAnchor | null>(null)
   const ignorePinUntilRef = useRef(0)
+  const lastScrollTopRef = useRef(0)
 
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
   const [contentNode, setContentNode] = useState<HTMLDivElement | null>(null)
@@ -80,12 +81,7 @@ export function useTimelineScrollController({
   const [timelineCanScroll, setTimelineCanScroll] = useState(false)
 
   useEffect(() => {
-    if (!autoScrollPinned) {
-      pinnedRef.current = false
-      return
-    }
-    const container = containerRef.current
-    pinnedRef.current = !container || !canScroll(container) || bottomDistance(container) <= NEAR_BOTTOM_PX
+    pinnedRef.current = autoScrollPinned
   }, [autoScrollPinned])
 
   const setPinned = useCallback((nextPinned: boolean) => {
@@ -219,6 +215,7 @@ export function useTimelineScrollController({
 
   const timelineRef: RefCallback<HTMLDivElement> = useCallback((node) => {
     containerRef.current = node
+    lastScrollTopRef.current = node?.scrollTop ?? 0
     setTimelineNode(node)
     syncMeasurements(node)
   }, [syncMeasurements])
@@ -244,6 +241,9 @@ export function useTimelineScrollController({
     }
 
     const handleScroll = () => {
+      const previousScrollTop = lastScrollTopRef.current
+      const nextScrollTop = container.scrollTop
+      lastScrollTopRef.current = nextScrollTop
       syncMeasurements(container)
 
       if (
@@ -257,7 +257,7 @@ export function useTimelineScrollController({
       const distance = bottomDistance(container)
       if (distance <= NEAR_BOTTOM_PX) {
         setPinned(true)
-      } else if (distance > UNPIN_PX) {
+      } else if (distance > UNPIN_PX && nextScrollTop < previousScrollTop - 2) {
         setPinned(false)
       }
 
@@ -320,9 +320,9 @@ export function useTimelineScrollController({
   useEffect(() => {
     syncMeasurements()
     if (pinnedRef.current && !prependAnchorRef.current) {
-      scrollToBottom()
+      scrollToBottomAcrossFrames(2)
     }
-  }, [contentVersion, scrollToBottom, syncMeasurements])
+  }, [contentVersion, scrollToBottomAcrossFrames, syncMeasurements])
 
   useEffect(() => {
     const container = timelineNode
@@ -333,7 +333,7 @@ export function useTimelineScrollController({
     const observer = new ResizeObserver(() => {
       syncMeasurements(container)
       if (pinnedRef.current && !prependAnchorRef.current) {
-        scrollToBottom()
+        scrollToBottomAcrossFrames(2)
       }
     })
     observer.observe(container)
@@ -344,7 +344,7 @@ export function useTimelineScrollController({
       observer.observe(composerNode)
     }
     return () => observer.disconnect()
-  }, [composerNode, contentNode, scrollToBottom, syncMeasurements, timelineNode])
+  }, [composerNode, contentNode, scrollToBottomAcrossFrames, syncMeasurements, timelineNode])
 
   useEffect(() => () => {
     if (scrollFrameRef.current !== null) {
