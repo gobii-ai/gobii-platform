@@ -543,6 +543,54 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             return "create_file.content"
         return "missing"
 
+    @staticmethod
+    def _apply_patch_to_content(content: str, patch_text: str, source_path: str) -> str:
+        lines = patch_text.splitlines()
+        if not lines or lines[0].strip() != "*** Begin Patch" or lines[-1].strip() != "*** End Patch":
+            return content
+
+        index = 1
+        while index < len(lines) - 1:
+            section = lines[index]
+            if not section.startswith("*** Update File: "):
+                index += 1
+                continue
+
+            path = section[len("*** Update File: "):].strip()
+            if path.startswith("$[") and path.endswith("]"):
+                path = path[2:-1].strip()
+            index += 1
+
+            change_lines: list[str] = []
+            while index < len(lines) - 1 and not lines[index].startswith("*** "):
+                if not lines[index].startswith("@@"):
+                    change_lines.append(lines[index])
+                index += 1
+
+            if path != source_path:
+                continue
+
+            old_lines: list[str] = []
+            new_lines: list[str] = []
+            for change_line in change_lines:
+                if not change_line:
+                    continue
+                prefix = change_line[0]
+                value = change_line[1:]
+                if prefix == " ":
+                    old_lines.append(value)
+                    new_lines.append(value)
+                elif prefix == "-":
+                    old_lines.append(value)
+                elif prefix == "+":
+                    new_lines.append(value)
+
+            old_text = "\n".join(old_lines)
+            if old_text and old_text in content:
+                content = content.replace(old_text, "\n".join(new_lines), 1)
+
+        return content
+
     @classmethod
     def _source_code_for_create_call(
         cls,
@@ -589,7 +637,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
 
         content, content_time = candidates[-1]
         for tool_call in tool_calls:
-            if tool_call.tool_name != "file_str_replace":
+            if tool_call.tool_name != "apply_patch":
                 continue
             step = getattr(tool_call, "step", None)
             call_time = getattr(step, "created_at", None)
@@ -598,16 +646,10 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             if create_time is not None and call_time is not None and call_time > create_time:
                 continue
             call_params = tool_call.tool_params or {}
-            if call_params.get("path") != source_path:
+            patch_text = call_params.get("patch")
+            if not isinstance(patch_text, str):
                 continue
-            old_text = call_params.get("old_text")
-            new_text = call_params.get("new_text")
-            if not isinstance(old_text, str) or not isinstance(new_text, str) or old_text not in content:
-                continue
-            if call_params.get("replace_all"):
-                content = content.replace(old_text, new_text)
-            else:
-                content = content.replace(old_text, new_text, 1)
+            content = cls._apply_patch_to_content(content, patch_text, source_path)
 
         return content
 

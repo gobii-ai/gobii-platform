@@ -118,11 +118,12 @@ from .prompt_context import (
     get_agent_tools,
 )
 
+from ..tools.apply_patch import execute_apply_patch
+from ..tools.charter_updater import execute_update_charter
 from ..tools.email_sender import execute_send_email
 from ..tools.sms_sender import execute_send_sms
 from ..tools.spawn_web_task import execute_spawn_web_task
 from ..tools.schedule_updater import execute_update_schedule
-from ..tools.charter_updater import execute_update_charter
 from ..tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     seed_sqlite_agent_config,
@@ -130,7 +131,6 @@ from ..tools.sqlite_agent_config import (
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
-from ..tools.file_str_replace import execute_file_str_replace
 from ..tools.plan import build_plan_snapshot, build_redundant_research_plan_skip_result, execute_update_plan
 from ..tools.planning import execute_end_planning
 from ..tools.runtime_execution_context import tool_execution_context
@@ -2307,7 +2307,7 @@ _DIRECT_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "secure_credentials_request": lambda: execute_secure_credentials_request,
     "request_contact_permission": lambda: execute_request_contact_permission,
     "request_human_input": lambda: execute_request_human_input,
-    "file_str_replace": lambda: execute_file_str_replace,
+    "apply_patch": lambda: execute_apply_patch,
 }
 
 _REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {

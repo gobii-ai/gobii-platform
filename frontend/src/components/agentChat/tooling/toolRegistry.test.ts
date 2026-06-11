@@ -32,7 +32,54 @@ function clusterForRequest(url: string, method = 'GET'): ToolClusterEvent {
   }
 }
 
+function clusterForApplyPatch(): ToolClusterEvent {
+  return {
+    kind: 'steps',
+    cursor: 'step:1',
+    entryCount: 1,
+    collapsible: false,
+    collapseThreshold: 4,
+    earliestTimestamp: '2026-01-01T00:00:00Z',
+    latestTimestamp: '2026-01-01T00:00:00Z',
+    entries: [
+      {
+        id: 'tool-call-apply-patch',
+        cursor: 'step:1',
+        timestamp: '2026-01-01T00:00:00Z',
+        toolName: 'apply_patch',
+        meta: {
+          label: 'Apply patch',
+          iconPaths: [],
+          iconBg: '',
+          iconColor: '',
+        },
+        parameters: {
+          patch: [
+            '*** Begin Patch',
+            '*** Update File: /tools/greeter.py',
+            '@@',
+            "-    return {'message': 'hi'}",
+            "+    return {'message': 'hello'}",
+            '*** End Patch',
+          ].join('\n'),
+        },
+        result: '{}',
+        status: 'pending',
+      },
+    ],
+  }
+}
+
 describe('transformToolCluster Google API display', () => {
+  it('labels apply_patch previews with the target file path', () => {
+    const transformed = transformToolCluster(clusterForApplyPatch())
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Apply patch',
+      caption: '/tools/greeter.py',
+    })
+  })
+
   it('labels Google Sheets values reads with the official Sheets icon', () => {
     const transformed = transformToolCluster(
       clusterForRequest('https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Leads!A1:D5'),

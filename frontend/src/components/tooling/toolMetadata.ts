@@ -92,6 +92,17 @@ function buildTrailingPreview(value: string, max = 96): string {
   return `${preview}…`
 }
 
+function extractFirstPatchPath(patch: string | null): string | null {
+  if (!patch) return null
+  const match = patch.match(/^\*\*\* (?:Add|Update|Delete) File:\s+(.+)$/m)
+  const rawPath = match?.[1]?.trim()
+  if (!rawPath) return null
+  if (rawPath.startsWith('$[') && rawPath.endsWith(']')) {
+    return rawPath.slice(2, -1).trim() || null
+  }
+  return rawPath
+}
+
 export function coerceString(value: unknown): string | null {
   if (typeof value === 'string' && value.trim().length > 0) {
     return value
@@ -462,24 +473,23 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
-    name: 'file_str_replace',
-    label: 'Replace in file',
+    name: 'apply_patch',
+    label: 'Apply patch',
     icon: FilePen,
     iconBgClass: 'bg-emerald-100',
     iconColorClass: 'text-emerald-700',
-    detailKind: 'fileStringReplace',
+    detailKind: 'applyPatch',
     derive(entry, parameters) {
-      const path = coerceString(parameters?.path)
+      const patch = coerceString(parameters?.patch)
       const result = parseResultObject(entry.result)
-      const replacements = result?.['replacements']
-      const replacementLabel =
-        typeof replacements === 'number' || typeof replacements === 'string'
-          ? `${String(replacements)} replacement${String(replacements) === '1' ? '' : 's'}`
-          : null
+      const paths = Array.isArray(result?.['paths']) ? result?.['paths'] : null
+      const firstPath = paths && paths.length ? coerceString(paths[0]) : null
+      const pathCount = paths && paths.length > 1 ? `${paths.length} files` : null
+      const patchPath = extractFirstPatchPath(patch)
 
       return {
-        caption: path ? truncate(path, 56) : 'Replace in file',
-        summary: replacementLabel ?? coerceString(result?.['message']) ?? entry.summary ?? null,
+        caption: truncate(firstPath ?? patchPath ?? summarizeCode(patch, 'Apply patch'), 56),
+        summary: pathCount ?? coerceString(result?.['message']) ?? entry.summary ?? null,
       }
     },
   },

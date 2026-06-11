@@ -39,8 +39,8 @@ from api.agent.tools.custom_tools import (
     validate_custom_tool_source_code,
 )
 from api.agent.tools.custom_tool_names import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
+from api.agent.tools.apply_patch import execute_apply_patch
 from api.agent.tools.create_file import get_create_file_tool
-from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_state import agent_sqlite_db
@@ -1050,47 +1050,103 @@ def run(params, ctx):
         mock_service._ensure_session.assert_called_once_with(self.agent, source="custom_tool_source_sync")
         mock_service._sync_workspace_push.assert_called_once()
 
-    def test_file_str_replace_updates_source_and_touches_custom_tool(self):
+    def test_apply_patch_updates_source_and_touches_custom_tool(self):
         write_result = write_bytes_to_dir(
             agent=self.agent,
             content_bytes=b"def run(params, ctx):\n    return {'message': 'hi'}\n",
             extension=".py",
             mime_type="text/x-python",
-            path="/tools/greeter.py",
+            path="/tools/patch_greeter.py",
             overwrite=True,
         )
         self.assertEqual(write_result.get("status"), "ok")
 
         tool = PersistentAgentCustomTool.objects.create(
             agent=self.agent,
-            name="Greeter",
-            tool_name="custom_greeter",
+            name="Patch Greeter",
+            tool_name="custom_patch_greeter",
             description="Return a greeting.",
-            source_path="/tools/greeter.py",
+            source_path="/tools/patch_greeter.py",
             parameters_schema={"type": "object", "properties": {}},
         )
         later = tool.updated_at + timedelta(minutes=5)
 
-        with patch("api.agent.tools.file_str_replace.timezone.now", return_value=later):
-            result = execute_file_str_replace(
-                self.agent,
-                {
-                    "path": "/tools/greeter.py",
-                    "old_text": "'hi'",
-                    "new_text": "'hello'",
-                    "expected_replacements": 1,
-                },
-            )
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /tools/patch_greeter.py",
+            "@@",
+            " def run(params, ctx):",
+            "-    return {'message': 'hi'}",
+            "+    return {'message': 'hello'}",
+            "*** End Patch",
+        ])
+        with patch("api.agent.tools.apply_patch.timezone.now", return_value=later):
+            result = execute_apply_patch(self.agent, {"patch": patch_text})
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["replacements"], 1)
+        self.assertEqual(result["updated"], ["/tools/patch_greeter.py"])
 
-        node = AgentFsNode.objects.get(path="/tools/greeter.py")
+        node = AgentFsNode.objects.get(path="/tools/patch_greeter.py")
         with node.content.open("rb") as handle:
             self.assertIn(b"hello", handle.read())
 
         tool.refresh_from_db()
         self.assertEqual(tool.updated_at, later)
+
+    def test_apply_patch_rejects_invalid_filespace_paths(self):
+        cases = [
+            (
+                "relative",
+                "\n".join([
+                    "*** Begin Patch",
+                    "*** Add File: tools/relative.py",
+                    "+print('hi')",
+                    "*** End Patch",
+                ]),
+                "absolute filespace path",
+            ),
+            (
+                "traversal",
+                "\n".join([
+                    "*** Begin Patch",
+                    "*** Add File: /tools/../escape.py",
+                    "+print('hi')",
+                    "*** End Patch",
+                ]),
+                "must not contain '.' or '..'",
+            ),
+            (
+                "unsafe",
+                "\n".join([
+                    "*** Begin Patch",
+                    "*** Add File: /tools/bad name.py",
+                    "+print('hi')",
+                    "*** End Patch",
+                ]),
+                "unsafe characters",
+            ),
+        ]
+
+        for _name, patch_text, expected_message in cases:
+            with self.subTest(_name):
+                result = execute_apply_patch(self.agent, {"patch": patch_text})
+                self.assertEqual(result["status"], "error")
+                self.assertIn(expected_message, result["message"])
+
+    def test_apply_patch_reports_missing_file(self):
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /tools/missing.py",
+            "@@",
+            "-print('old')",
+            "+print('new')",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "File not found: /tools/missing.py")
 
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager._get_manager")
