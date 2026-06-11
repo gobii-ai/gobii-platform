@@ -169,6 +169,34 @@ class FileExportToolTests(TestCase):
         with node.content.open("rb") as handle:
             self.assertEqual(handle.read(), b"hello\n")
 
+    def test_create_file_accepts_workspace_alias(self):
+        result = execute_create_file(
+            self.agent,
+            {"content": "hello\n", "file_path": "/workspace/exports/alias.txt", "mime_type": "text/plain"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["file"], "$[/exports/alias.txt]")
+        node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/alias.txt")
+        with node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), b"hello\n")
+
+    def test_create_file_accepts_agent_scoped_workspace_alias(self):
+        result = execute_create_file(
+            self.agent,
+            {
+                "content": "hello scoped\n",
+                "file_path": f"/workspace/{self.agent.id}/exports/scoped-alias.txt",
+                "mime_type": "text/plain",
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["file"], "$[/exports/scoped-alias.txt]")
+        node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/scoped-alias.txt")
+        with node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), b"hello scoped\n")
+
     def test_create_file_infers_extension(self):
         result = execute_create_file(
             self.agent,

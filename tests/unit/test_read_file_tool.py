@@ -71,6 +71,28 @@ class ReadFileToolTests(TestCase):
         self.assertNotIn("markdown", result)
         mock_markitdown.assert_not_called()
 
+    @patch("api.agent.tools.read_file.MarkItDown")
+    def test_read_file_accepts_workspace_alias(self, mock_markitdown):
+        self._write_file(path="/exports/alias.txt", content=b"hello alias\n", mime_type="text/plain")
+
+        result = execute_read_file(self.agent, {"path": "/workspace/exports/alias.txt"})
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("format"), "raw_text")
+        self.assertEqual(result.get("text"), "hello alias\n")
+        mock_markitdown.assert_not_called()
+
+    @patch("api.agent.tools.read_file.MarkItDown")
+    def test_read_file_accepts_agent_scoped_workspace_alias(self, mock_markitdown):
+        self._write_file(path="/exports/scoped-alias.txt", content=b"hello scoped\n", mime_type="text/plain")
+
+        result = execute_read_file(self.agent, {"path": f"/workspace/{self.agent.id}/exports/scoped-alias.txt"})
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("format"), "raw_text")
+        self.assertEqual(result.get("text"), "hello scoped\n")
+        mock_markitdown.assert_not_called()
+
     @patch("api.agent.tools.read_file.get_file_handler_llm_config", return_value=None)
     @patch("api.agent.tools.read_file.MarkItDown")
     def test_default_response_format_uses_markdown_for_pdf_without_vision_llm(

@@ -1103,7 +1103,7 @@ def run(params, ctx):
                     "+print('hi')",
                     "*** End Patch",
                 ]),
-                "absolute filespace path",
+                "Path must be absolute",
             ),
             (
                 "traversal",
@@ -1147,6 +1147,63 @@ def run(params, ctx):
 
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["message"], "File not found: /tools/missing.py")
+
+    def test_apply_patch_workspace_alias_updates_filespace_path(self):
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b".button { color: blue; }\n",
+            extension=".css",
+            mime_type="text/css",
+            path="/gobii-platform/frontend/src/styles/app.css",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /workspace/gobii-platform/frontend/src/styles/app.css",
+            "@@",
+            "-.button { color: blue; }",
+            "+.button { color: purple; }",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["updated"], ["/gobii-platform/frontend/src/styles/app.css"])
+
+        node = AgentFsNode.objects.get(path="/gobii-platform/frontend/src/styles/app.css")
+        with node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), b".button { color: purple; }\n")
+
+    def test_apply_patch_agent_scoped_workspace_alias_updates_filespace_path(self):
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"def run(params, ctx):\n    return {'ok': False}\n",
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/scoped_patch.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            f"*** Update File: /workspace/{self.agent.id}/tools/scoped_patch.py",
+            "@@",
+            " def run(params, ctx):",
+            "-    return {'ok': False}",
+            "+    return {'ok': True}",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["updated"], ["/tools/scoped_patch.py"])
+
+        node = AgentFsNode.objects.get(path="/tools/scoped_patch.py")
+        with node.content.open("rb") as handle:
+            self.assertIn(b"True", handle.read())
 
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager._get_manager")

@@ -1,13 +1,14 @@
 import logging
 import posixpath
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from django.core.files.storage import default_storage
 from django.utils import timezone
 from django.utils.text import get_valid_filename
 
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
+from api.agent.tools.filespace_paths import normalize_filespace_tool_path
 from api.models import AgentFileSpaceAccess, AgentFsNode, PersistentAgent, PersistentAgentCustomTool
 from api.services.system_settings import get_max_file_size
 
@@ -30,16 +31,14 @@ class _PatchOp:
     move_to: str | None = None
 
 
-def _resolve_path(value: Any) -> tuple[str | None, str | None]:
+def _resolve_path(value: Any, *, agent_id: Any = None) -> tuple[str | None, str | None]:
     if not isinstance(value, str):
         return None, "Path must be a string."
-    path = value.strip()
-    if path.startswith("$[") and path.endswith("]"):
-        path = path[2:-1].strip()
-    if not path:
+    path = normalize_filespace_tool_path(value, agent_id=agent_id)
+    if path is None:
         return None, "Path must be non-empty."
     if not path.startswith("/"):
-        return None, "Path must be an absolute filespace path like /tools/my_tool.py."
+        return None, "Path must be absolute, like /tools/my_tool.py or /exports/report.txt."
     if "\x00" in path:
         return None, "Path must not contain null bytes."
 
@@ -63,8 +62,12 @@ def _agent_has_access(agent: PersistentAgent, filespace_id) -> bool:
 
 def _patch_tool_description() -> str:
     return (
-        "Apply a unified, reviewable patch to UTF-8 filespace files. Prefer this over exact string replacement for "
-        "source code, HTML/CSS/JS, config, and custom tool edits. The patch must be a single string using this format:\n"
+        "Apply a unified, reviewable patch to UTF-8 text files. Prefer this over exact string replacement for "
+        "source code, HTML/CSS/JS, config, and custom tool edits. Paths are Gobii filespace paths such as "
+        "/tools/my_tool.py or $[/tools/my_tool.py]. If a sandbox showed the same filespace file under "
+        "/workspace/path/to/file or /workspace/<agent-id>/path/to/file, that path is accepted as an alias "
+        "and normalized to /path/to/file. "
+        "The patch must be a single string using this format:\n"
         "*** Begin Patch\n"
         "*** Add File: /path/to/file\n"
         "+new file line\n"
@@ -77,8 +80,7 @@ def _patch_tool_description() -> str:
         "+new line\n"
         "*** End Patch\n"
         "Use Add File for new files, Delete File to trash files, and Update File for line-based edits. "
-        "For Update File, include enough unchanged context lines (prefixed with a space) to make the edit unique. "
-        "Paths are filespace paths such as /tools/my_tool.py or $[/tools/my_tool.py]."
+        "For Update File, include enough unchanged context lines (prefixed with a space) to make the edit unique."
     )
 
 
@@ -102,7 +104,7 @@ def get_apply_patch_tool() -> Dict[str, Any]:
     }
 
 
-def _parse_patch(patch_text: str) -> tuple[list[_PatchOp] | None, str | None]:
+def _parse_patch(patch_text: str, *, agent_id: Any = None) -> tuple[list[_PatchOp] | None, str | None]:
     raw_lines = patch_text.splitlines()
     if not raw_lines or raw_lines[0].strip() != BEGIN_PATCH:
         return None, f"Patch must start with {BEGIN_PATCH}."
@@ -114,7 +116,7 @@ def _parse_patch(patch_text: str) -> tuple[list[_PatchOp] | None, str | None]:
     while index < len(raw_lines) - 1:
         line = raw_lines[index]
         if line.startswith(ADD_FILE):
-            path, path_error = _resolve_path(line[len(ADD_FILE):])
+            path, path_error = _resolve_path(line[len(ADD_FILE):], agent_id=agent_id)
             if path_error:
                 return None, f"Add File path error: {path_error}"
             index += 1
@@ -129,7 +131,7 @@ def _parse_patch(patch_text: str) -> tuple[list[_PatchOp] | None, str | None]:
             continue
 
         if line.startswith(DELETE_FILE):
-            path, path_error = _resolve_path(line[len(DELETE_FILE):])
+            path, path_error = _resolve_path(line[len(DELETE_FILE):], agent_id=agent_id)
             if path_error:
                 return None, f"Delete File path error: {path_error}"
             ops.append(_PatchOp(kind="delete", path=path or "", lines=[]))
@@ -137,13 +139,13 @@ def _parse_patch(patch_text: str) -> tuple[list[_PatchOp] | None, str | None]:
             continue
 
         if line.startswith(UPDATE_FILE):
-            path, path_error = _resolve_path(line[len(UPDATE_FILE):])
+            path, path_error = _resolve_path(line[len(UPDATE_FILE):], agent_id=agent_id)
             if path_error:
                 return None, f"Update File path error: {path_error}"
             index += 1
             move_to = None
             if index < len(raw_lines) - 1 and raw_lines[index].startswith(MOVE_TO):
-                move_to, move_error = _resolve_path(raw_lines[index][len(MOVE_TO):])
+                move_to, move_error = _resolve_path(raw_lines[index][len(MOVE_TO):], agent_id=agent_id)
                 if move_error:
                     return None, f"Move target path error: {move_error}"
                 index += 1
@@ -298,7 +300,7 @@ def execute_apply_patch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
     if not isinstance(patch_text, str) or not patch_text.strip():
         return {"status": "error", "message": "patch must be a non-empty string."}
 
-    ops, parse_error = _parse_patch(patch_text.strip())
+    ops, parse_error = _parse_patch(patch_text.strip(), agent_id=agent.id)
     if parse_error:
         return {"status": "error", "message": parse_error}
 

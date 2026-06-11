@@ -1,8 +1,12 @@
 from typing import Any, Dict, Tuple
 
+from api.agent.tools.filespace_paths import normalize_filespace_tool_path
+
 
 def resolve_export_target(
     params: Dict[str, Any],
+    *,
+    agent_id: Any = None,
 ) -> Tuple[str | None, bool, Dict[str, Any] | None]:
     if "filename" in params:
         return None, False, {"status": "error", "message": "Use file_path instead of filename."}
@@ -14,9 +18,7 @@ def resolve_export_target(
         return None, False, {"status": "error", "message": "Missing required parameter: file_path"}
     if not isinstance(file_path, str):
         return None, False, {"status": "error", "message": "file_path must be a string"}
-    file_path = file_path.strip()
-    if file_path.startswith("$[") and file_path.endswith("]"):
-        file_path = file_path[2:-1].strip()
+    file_path = normalize_filespace_tool_path(file_path, agent_id=agent_id) or ""
     if not file_path:
         return None, False, {"status": "error", "message": "file_path must be a non-empty string"}
 

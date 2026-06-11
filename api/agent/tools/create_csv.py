@@ -41,6 +41,8 @@ def get_create_csv_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "Required filespace path (recommended: /exports/report.csv). "
+                            "Sandbox-visible /workspace and /workspace/<agent-id> paths are accepted as aliases "
+                            "for the filespace root. "
                             "Use overwrite=true to replace an existing file at that path."
                         ),
                     },
@@ -68,7 +70,7 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if csv_text and query:
         return {"status": "error", "message": "Use csv_text OR query, not both."}
 
-    path, overwrite, error = resolve_export_target(params)
+    path, overwrite, error = resolve_export_target(params, agent_id=agent.id)
     if error:
         return error
 
