@@ -30,6 +30,7 @@ from api.models import (
     LLMRoutingProfile,
     PersistentAgent,
     PersistentAgentCompletion,
+    PersistentAgentCustomTool,
     PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
     PersistentAgentSkill,
@@ -822,7 +823,11 @@ def _build_trajectory_packet(
         .values("id", "body", "created_at", "delivered_at", "is_active")[:JUDGE_RECENT_DIRECTIVE_LIMIT]
     )
     plan_snapshot = _plan_snapshot(agent)
-    current_context = _build_current_context_snapshot(agent, prompt_limits)
+    current_context = _build_current_context_snapshot(
+        agent,
+        prompt_limits,
+        recent_tool_calls=recent_tool_calls,
+    )
 
     return {
         "agent": {
@@ -845,8 +850,8 @@ def _build_trajectory_packet(
                 "evidence from timing, parameters, results, messages, or steps."
             ),
             (
-                "When trigger_context.custom_tool_sources is present, inspect that source as direct evidence "
-                "for the custom tool behavior involved in the trigger."
+                "When trigger_context.custom_tool_sources or current_context.custom_tool_sources is present, "
+                "inspect that source as direct evidence for the custom tool behavior involved in the trajectory."
             ),
         ],
         "trigger_reasons": trigger_reasons,
@@ -882,6 +887,11 @@ def _build_trajectory_packet(
                 "credentials, destructive action, or legal/policy judgment."
             ),
             "If the current approach is failing, suggest a concrete strategy shift grounded in available tools.",
+            (
+                "When custom tool source, parameters, results, or recent calls show a tool should be created "
+                "or updated, use a strategy_shift directive that tells the agent exactly what custom tool "
+                "change to make."
+            ),
         ],
         "capability_manifest": _capability_manifest(tools, prompt_limits),
         "current_context": current_context,
@@ -909,9 +919,15 @@ def _plan_snapshot(agent: PersistentAgent) -> dict[str, Any]:
     }
 
 
-def _build_current_context_snapshot(agent: PersistentAgent, prompt_limits: JudgePromptLimits) -> dict[str, Any]:
+def _build_current_context_snapshot(
+    agent: PersistentAgent,
+    prompt_limits: JudgePromptLimits,
+    *,
+    recent_tool_calls: list[PersistentAgentToolCall] | None = None,
+) -> dict[str, Any]:
     return {
         "skills": _skill_context(agent, prompt_limits),
+        "custom_tool_sources": _custom_tool_sources_context(agent, recent_tool_calls or []),
         "sqlite": _sqlite_context_snapshot(),
     }
 
@@ -990,6 +1006,79 @@ def _sqlite_context_snapshot() -> dict[str, Any]:
             "digest": "",
             "error": "unavailable",
         }
+
+
+def _custom_tool_sources_context(
+    agent: PersistentAgent,
+    recent_tool_calls: list[PersistentAgentToolCall],
+) -> list[dict[str, Any]]:
+    try:
+        from api.agent.tools.custom_tools import CUSTOM_TOOL_PREFIX, read_custom_tool_source_text
+    except ImportError:
+        logger.debug("Unable to import custom tool source helpers for judge context.", exc_info=True)
+        return []
+
+    tool_names: list[str] = []
+    seen: set[str] = set()
+    for call in reversed(recent_tool_calls):
+        tool_name = str(call.tool_name or "").strip()
+        if not tool_name.startswith(CUSTOM_TOOL_PREFIX) or tool_name in seen:
+            continue
+        seen.add(tool_name)
+        tool_names.append(tool_name)
+    if not tool_names:
+        return []
+
+    try:
+        custom_tools = {
+            tool.tool_name: tool
+            for tool in PersistentAgentCustomTool.objects.filter(agent=agent, tool_name__in=tool_names)
+        }
+    except DatabaseError:
+        logger.debug("Unable to query custom tools for judge context.", exc_info=True)
+        custom_tools = {}
+
+    sources: list[dict[str, Any]] = []
+    for tool_name in tool_names:
+        tool = custom_tools.get(tool_name)
+        if tool is None:
+            sources.append(
+                {
+                    "source_type": "custom_tool_source",
+                    "trajectory_scope": "recent_tool_call_history",
+                    "tool_name": tool_name,
+                    "source_error": "Custom tool metadata not found for recent tool call.",
+                }
+            )
+            continue
+
+        source_context: dict[str, Any] = {
+            "source_type": "custom_tool_source",
+            "trajectory_scope": "recent_tool_call_history",
+            "tool_name": tool.tool_name,
+            "name": tool.name or "",
+            "description": _truncate(tool.description or "", 1000),
+            "source_path": tool.source_path,
+            "parameters_schema": tool.parameters_schema if isinstance(tool.parameters_schema, dict) else {},
+            "timeout_seconds": tool.timeout_seconds,
+        }
+        try:
+            source_text, source_error = read_custom_tool_source_text(agent, tool.source_path)
+        except (OSError, RuntimeError, ValueError, DatabaseError):
+            logger.debug(
+                "Unable to read custom tool source for judge context: agent=%s tool=%s",
+                getattr(agent, "id", None),
+                tool.tool_name,
+                exc_info=True,
+            )
+            source_context["source_error"] = "Failed to read custom tool source."
+        else:
+            if source_error:
+                source_context["source_error"] = source_error
+            else:
+                source_context["source_code"] = source_text or ""
+        sources.append(source_context)
+    return sources
 
 
 def _capability_manifest(tools: list[dict[str, Any]], prompt_limits: JudgePromptLimits) -> list[dict[str, str]]:
@@ -1103,7 +1192,8 @@ def _judge_system_prompt() -> str:
         "Keep message short. For intelligence_upgrade, recommend the minimum higher tier that would likely "
         "help. Base suggestions only on evidence in the packet. Separate directly observed facts from "
         "inferred causes; when a cause is uncertain, say so instead of presenting it as fact. Prefer concrete "
-        "operational guidance over diagnosis."
+        "operational guidance over diagnosis. When custom tool source, params, results, or recent calls show "
+        "that a custom tool should be created or changed, you may recommend that as a strategy_shift directive."
     )
 
 
@@ -1166,6 +1256,12 @@ def _build_judge_user_prompt(
             "trigger_context",
             _json_section(trajectory.get("trigger_context") or {}),
             weight=9,
+        )
+    if current_context.get("custom_tool_sources"):
+        high_priority.section_text(
+            "custom_tool_sources",
+            _json_section(current_context.get("custom_tool_sources") or []),
+            weight=8,
         )
     high_priority.section_text(
         "messages",

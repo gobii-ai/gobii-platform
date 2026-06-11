@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError
 from django.test import TestCase, tag
 from django.utils import timezone
 from waffle.models import Flag
@@ -33,6 +34,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
+    PersistentAgentCustomTool,
     PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
     PersistentAgentSkill,
@@ -335,6 +337,135 @@ class AgentJudgeTests(TestCase):
         self.assertIn("custom_tool_sources", user_content)
         self.assertIn("/tools/outreach_sender.py", user_content)
         self.assertIn("ctx.call_tool('send_email', params)", user_content)
+
+    def test_recent_custom_tool_call_includes_source_in_judge_prompt(self):
+        source_code = (
+            "from _gobii_ctx import main\n\n"
+            "def run(params, ctx):\n"
+            "    return {'count': params.get('limit', 0)}\n\n"
+            "if __name__ == '__main__': main(run)\n"
+        )
+        PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Counter",
+            tool_name="custom_counter",
+            description="Count records for a report.",
+            source_path="/tools/counter.py",
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer"},
+                },
+            },
+            timeout_seconds=120,
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: custom_counter",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="custom_counter",
+            tool_params={"limit": 5},
+            result='{"status":"ok","result":{"count":5}}',
+            status="complete",
+        )
+
+        with patch(
+            "api.agent.tools.custom_tools.read_custom_tool_source_text",
+            return_value=(source_code, None),
+        ) as read_source:
+            trigger = build_judge_trigger(
+                self.agent,
+                tools=[],
+                extra_trigger_reasons=["manual_custom_tool_review"],
+            )
+
+        self.assertIsNotNone(trigger)
+        read_source.assert_called_once_with(self.agent, "/tools/counter.py")
+        custom_tool_sources = trigger.trajectory["current_context"]["custom_tool_sources"]
+        self.assertEqual(custom_tool_sources[0]["tool_name"], "custom_counter")
+        self.assertEqual(custom_tool_sources[0]["source_path"], "/tools/counter.py")
+        self.assertEqual(custom_tool_sources[0]["parameters_schema"]["properties"]["limit"]["type"], "integer")
+        self.assertEqual(custom_tool_sources[0]["timeout_seconds"], 120)
+        self.assertEqual(custom_tool_sources[0]["source_code"], source_code)
+
+        limits = JudgePromptLimits(
+            prompt_token_budget=2500,
+            message_history_limit=2,
+            tool_call_history_limit=2,
+            skill_prompt_limit=1,
+            enabled_tool_limit=1,
+        )
+        with patch("api.agent.core.agent_judge._create_token_estimator", return_value=lambda text: len(text.split())):
+            messages = _build_judge_messages(trigger.trajectory, model="test-model", prompt_limits=limits)
+
+        self.assertIn("custom tool should be created or changed", messages[0]["content"])
+        user_content = messages[1]["content"]
+        self.assertIn("<custom_tool_sources>", user_content)
+        self.assertIn("/tools/counter.py", user_content)
+        self.assertIn("return {'count': params.get('limit', 0)}", user_content)
+
+    def test_recent_custom_tool_call_missing_metadata_adds_source_error(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: custom_missing",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="custom_missing",
+            tool_params={},
+            result='{"status":"error","message":"not available"}',
+            status="error",
+        )
+
+        with patch("api.agent.tools.custom_tools.read_custom_tool_source_text") as read_source:
+            trigger = build_judge_trigger(
+                self.agent,
+                tools=[],
+                extra_trigger_reasons=["manual_custom_tool_review"],
+            )
+
+        self.assertIsNotNone(trigger)
+        read_source.assert_not_called()
+        custom_tool_sources = trigger.trajectory["current_context"]["custom_tool_sources"]
+        self.assertEqual(custom_tool_sources[0]["tool_name"], "custom_missing")
+        self.assertEqual(
+            custom_tool_sources[0]["source_error"],
+            "Custom tool metadata not found for recent tool call.",
+        )
+
+    def test_recent_custom_tool_query_error_adds_source_error(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: custom_unavailable",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="custom_unavailable",
+            tool_params={},
+            result='{"status":"error","message":"database unavailable"}',
+            status="error",
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.PersistentAgentCustomTool.objects.filter",
+            side_effect=DatabaseError("database unavailable"),
+        ), patch("api.agent.tools.custom_tools.read_custom_tool_source_text") as read_source:
+            trigger = build_judge_trigger(
+                self.agent,
+                tools=[],
+                extra_trigger_reasons=["manual_custom_tool_review"],
+            )
+
+        self.assertIsNotNone(trigger)
+        read_source.assert_not_called()
+        custom_tool_sources = trigger.trajectory["current_context"]["custom_tool_sources"]
+        self.assertEqual(custom_tool_sources[0]["tool_name"], "custom_unavailable")
+        self.assertEqual(
+            custom_tool_sources[0]["source_error"],
+            "Custom tool metadata not found for recent tool call.",
+        )
 
     def test_judge_tool_does_not_offer_request_human_input_suggestion(self):
         tool = _judge_tool_definition()
