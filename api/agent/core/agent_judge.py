@@ -1028,10 +1028,14 @@ def _custom_tool_sources_context(
     if not tool_names:
         return []
 
-    custom_tools = {
-        tool.tool_name: tool
-        for tool in PersistentAgentCustomTool.objects.filter(agent=agent, tool_name__in=tool_names)
-    }
+    try:
+        custom_tools = {
+            tool.tool_name: tool
+            for tool in PersistentAgentCustomTool.objects.filter(agent=agent, tool_name__in=tool_names)
+        }
+    except DatabaseError:
+        logger.debug("Unable to query custom tools for judge context.", exc_info=True)
+        custom_tools = {}
 
     sources: list[dict[str, Any]] = []
     for tool_name in tool_names:

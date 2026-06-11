@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError
 from django.test import TestCase, tag
 from django.utils import timezone
 from waffle.models import Flag
@@ -429,6 +430,38 @@ class AgentJudgeTests(TestCase):
         read_source.assert_not_called()
         custom_tool_sources = trigger.trajectory["current_context"]["custom_tool_sources"]
         self.assertEqual(custom_tool_sources[0]["tool_name"], "custom_missing")
+        self.assertEqual(
+            custom_tool_sources[0]["source_error"],
+            "Custom tool metadata not found for recent tool call.",
+        )
+
+    def test_recent_custom_tool_query_error_adds_source_error(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: custom_unavailable",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="custom_unavailable",
+            tool_params={},
+            result='{"status":"error","message":"database unavailable"}',
+            status="error",
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.PersistentAgentCustomTool.objects.filter",
+            side_effect=DatabaseError("database unavailable"),
+        ), patch("api.agent.tools.custom_tools.read_custom_tool_source_text") as read_source:
+            trigger = build_judge_trigger(
+                self.agent,
+                tools=[],
+                extra_trigger_reasons=["manual_custom_tool_review"],
+            )
+
+        self.assertIsNotNone(trigger)
+        read_source.assert_not_called()
+        custom_tool_sources = trigger.trajectory["current_context"]["custom_tool_sources"]
+        self.assertEqual(custom_tool_sources[0]["tool_name"], "custom_unavailable")
         self.assertEqual(
             custom_tool_sources[0]["source_error"],
             "Custom tool metadata not found for recent tool call.",
