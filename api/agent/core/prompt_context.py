@@ -114,7 +114,10 @@ from .tool_results import (
     ToolResultPromptInfo,
     prepare_tool_results_for_prompt,
 )
-from .daily_limit_mode import is_daily_hard_limit_message_only_mode
+from .daily_limit_mode import (
+    DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT,
+    is_daily_hard_limit_message_only_mode,
+)
 from .contact_results import store_contacts_for_prompt
 from .contact_snapshot import build_contacts_snapshot_records
 from .file_results import FileSQLiteRecord, store_files_for_prompt
@@ -139,9 +142,7 @@ SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
-MESSAGE_ONLY_TOOL_NAMES_TEXT = (
-    "send_email, send_sms, send_chat_message, and send_agent_message"
-)
+MESSAGE_ONLY_TOOL_NAMES_TEXT = DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT
 SQLITE_EFFICIENCY_WARNING = (
     "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
     "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
@@ -2786,7 +2787,8 @@ def add_budget_awareness_sections(
                     "daily_limit_message_only_mode",
                     (
                         "DAILY HARD LIMIT MODE: You reached today's hard task limit. "
-                        f"Only message tools are available until the user raises the limit: {MESSAGE_ONLY_TOOL_NAMES_TEXT}. "
+                        "Only message and sleep tools are available until the user raises the limit: "
+                        f"{MESSAGE_ONLY_TOOL_NAMES_TEXT}. "
                         "Do not attempt any other tools or non-message work right now. "
                         f"Ask the user to raise the limit with one of these links: settings {links['settings_url']} ; "
                         f"double {links['double_limit_url']} ; unlimited {links['unlimited_limit_url']}. "

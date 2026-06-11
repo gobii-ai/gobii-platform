@@ -1979,6 +1979,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
             self._tool_definition("send_sms"),
             self._tool_definition("send_chat_message"),
             self._tool_definition("send_agent_message"),
+            self._tool_definition("sleep_until_next_trigger"),
             self._tool_definition("sqlite_query"),
         ]
         mock_get_daily_state.return_value = self._daily_limit_state()
@@ -2009,7 +2010,13 @@ class DailyLimitMessageOnlyModeTests(TestCase):
 
         self.assertEqual(
             observed_tool_names,
-            ["send_email", "send_sms", "send_chat_message", "send_agent_message"],
+            [
+                "send_email",
+                "send_sms",
+                "send_chat_message",
+                "send_agent_message",
+                "sleep_until_next_trigger",
+            ],
         )
 
     @patch("api.agent.core.event_processing.execute_enabled_tool")
@@ -2050,7 +2057,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         mock_execute_enabled_tool.assert_not_called()
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__contains="Only message tools are allowed right now",
+            description__contains="Only message and sleep tools are allowed right now",
         ).first()
         self.assertIsNotNone(correction_step)
 
@@ -2059,7 +2066,10 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
         return_value={"success": True, "credit": None},
     )
-    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=Decimal("5"))
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+        return_value=Decimal("5"),
+    )
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing.get_agent_daily_credit_state")
     @patch("api.agent.core.event_processing.get_agent_tools")
@@ -2113,6 +2123,57 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         self.assertIsNotNone(tool_call)
         self.assertIsNone(tool_call.step.credits_cost)
         self.assertIsNone(tool_call.step.completion_id)
+
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
+        return_value={"success": True, "credit": None},
+    )
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+        return_value=Decimal("5"),
+    )
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.get_agent_daily_credit_state")
+    @patch("api.agent.core.event_processing.get_agent_tools")
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    def test_daily_limit_mode_allows_sleep_without_consuming_credit(
+        self,
+        mock_get_tools,
+        mock_get_daily_state,
+        mock_build_prompt,
+        _mock_available,
+        mock_consume,
+    ):
+        mock_get_tools.return_value = [self._tool_definition("sleep_until_next_trigger")]
+        mock_get_daily_state.return_value = self._daily_limit_state()
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+        completion = self._completion(
+            tool_calls=[self._tool_call("sleep_until_next_trigger", {})]
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._completion_with_failover",
+            return_value=(
+                completion,
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "model": "m",
+                    "provider": "p",
+                },
+            ),
+        ):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        mock_consume.assert_not_called()
+        sleep_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description="Decided to sleep until next trigger.",
+        ).order_by("-id").first()
+        self.assertIsNotNone(sleep_step)
+        self.assertIsNone(sleep_step.credits_cost)
+        self.assertIsNone(sleep_step.task_credit)
 
     @patch("api.agent.core.event_processing._should_imply_continue", return_value=False)
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})

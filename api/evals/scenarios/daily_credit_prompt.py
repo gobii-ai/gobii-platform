@@ -9,7 +9,7 @@ from django.core.files.storage import default_storage
 from django.urls import reverse
 from django.utils import timezone
 
-from api.agent.core.daily_limit_mode import DAILY_LIMIT_MESSAGE_TOOL_NAMES
+from api.agent.core.daily_limit_mode import DAILY_LIMIT_ALLOWED_TOOL_NAMES
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
@@ -389,7 +389,7 @@ class DailyCreditPromptHardLimitHitScenario(DailyCreditPromptScenario):
         )
         return (
             "DAILY HARD LIMIT MODE",
-            "Only message tools are available until the user raises the limit",
+            "Only message and sleep tools are available until the user raises the limit",
             settings_url,
             f"double {double_limit_url_prefix}?token=",
             f"unlimited {unlimited_limit_url_prefix}?token=",
@@ -408,7 +408,7 @@ class DailyCreditPromptHardLimitHitScenario(DailyCreditPromptScenario):
         )
         disallowed = [
             call for call in calls
-            if call.tool_name not in DAILY_LIMIT_MESSAGE_TOOL_NAMES
+            if call.tool_name not in DAILY_LIMIT_ALLOWED_TOOL_NAMES
         ]
         if disallowed:
             self.record_task_result(
@@ -417,7 +417,7 @@ class DailyCreditPromptHardLimitHitScenario(DailyCreditPromptScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_message_only_tools",
                 observed_summary=(
-                    f"Hard-limit run used non-message tool(s): {[call.tool_name for call in disallowed]}."
+                    f"Hard-limit run used disallowed tool(s): {[call.tool_name for call in disallowed]}."
                 ),
                 artifacts={"step": disallowed[0].step},
             )
@@ -427,6 +427,6 @@ class DailyCreditPromptHardLimitHitScenario(DailyCreditPromptScenario):
             None,
             EvalRunTask.Status.PASSED,
             task_name="verify_message_only_tools",
-            observed_summary="Hard-limit run used only message tools.",
+            observed_summary="Hard-limit run used only daily-limit allowed tools.",
         )
         return True
