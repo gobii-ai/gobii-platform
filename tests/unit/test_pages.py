@@ -2936,13 +2936,13 @@ class SolutionCtaCopyTests(TestCase):
                 {
                     "name": "description",
                     "content": (
-                        "Explore Gobii AI agent solutions for recruiting, sales, healthcare, defense, "
-                        "and developers. Deploy browser agents that research, monitor, and automate work 24/7."
+                        "Explore Gobii AI agent solutions for startups, recruiting, sales, healthcare, "
+                        "defense, and developers. Deploy browser agents that research, monitor, and automate work 24/7."
                     ),
                 },
             )
         )
-        for slug in ("recruiting", "sales", "health-care", "defense", "engineering"):
+        for slug in ("startups", "recruiting", "sales", "health-care", "defense", "engineering"):
             self.assertIsNotNone(
                 soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": slug})}),
                 f"Missing link to {slug} solution page",

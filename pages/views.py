@@ -3898,6 +3898,7 @@ class SolutionsIndexView(TemplateView):
 class SolutionView(TemplateView):
     # Solutions with dedicated landing page templates
     DEDICATED_TEMPLATES = {
+        'startups': 'solutions/startups.html',
         'recruiting': 'solutions/recruiting.html',
         'recruiting/candidate-sourcing': 'solutions/recruiting_candidate_sourcing.html',
         'sales': 'solutions/sales.html',
@@ -3916,6 +3917,44 @@ class SolutionView(TemplateView):
     )
 
     SOLUTION_DATA = {
+        'startups': {
+            'title': 'Startups',
+            'tagline': 'Delegate the roles your early-stage team cannot hire yet.',
+            'description': 'Give a 2-3 person startup always-on agents for growth, finance ops, customer research, recruiting, and founder admin.',
+            'seo_title': 'AI Agents for Startups Without the Headcount | Gobii',
+            'seo_description': 'Gobii helps early-stage startups delegate growth, finance ops, research, recruiting, and admin to AI agents before they can hire the role.',
+            'social_image': 'images/blog/newsletters/newsletter-2026-03-17-one-click-integrations-for-your-agents-hero.png',
+            'social_image_alt': 'Gobii startup agents connected to apps like Stripe, Brex, Slack, and Google Sheets',
+            'schema_audience': 'Early-stage startup founders and lean startup teams',
+            'schema_service_outputs': [
+                'Prospect lists',
+                'Finance ops briefs',
+                'Customer follow-up alerts',
+                'Candidate research',
+                'Competitor monitoring',
+                'Founder admin recaps',
+            ],
+            'schema_offers': [
+                {
+                    'name': 'Growth operator workflows',
+                    'description': 'AI agents that research prospects, monitor buying signals, draft outreach, and update lightweight sales trackers.',
+                },
+                {
+                    'name': 'Finance ops workflows',
+                    'description': 'AI agents that watch Stripe, Brex, vendors, renewals, spend anomalies, and weekly operating metrics.',
+                },
+                {
+                    'name': 'Founder operations workflows',
+                    'description': 'AI agents that track customer follow-up, candidate research, competitor changes, milestones, blockers, and weekly recaps.',
+                },
+            ],
+            'related_link': {
+                'intro': 'Want a growth workflow to inspect?',
+                'label': 'View the Lead Hunter AI sales agent',
+                'route': 'pages:pretrained_worker_detail',
+                'kwargs': {'slug': 'lead-hunter'},
+            },
+        },
         'recruiting': {
             'title': 'Recruiting',
             'tagline': 'Automate candidate sourcing and screening.',
@@ -4048,6 +4087,7 @@ class SolutionView(TemplateView):
         solutions_url = self.request.build_absolute_uri(reverse('pages:solutions'))
         home_url = self.request.build_absolute_uri(reverse('pages:home'))
         social_image_url = self.request.build_absolute_uri(static(data['social_image']))
+        seo_description = data.get('seo_description') or data.get('description') or data['tagline']
         organization_schema = {
             "@type": "Organization",
             "name": "Gobii",
@@ -4068,11 +4108,46 @@ class SolutionView(TemplateView):
                 'url': reverse(related_link['route'], kwargs=related_link.get('kwargs', {})),
             }
 
+        main_entity = {
+            "@type": "Service",
+            "name": f"Gobii {data['title']} AI agents",
+            "description": seo_description,
+            "url": solution_url,
+            "image": social_image_url,
+            "serviceType": "AI agent solution",
+            "category": data['title'],
+            "provider": organization_schema,
+        }
+        if data.get('schema_audience'):
+            main_entity["audience"] = {
+                "@type": "BusinessAudience",
+                "audienceType": data['schema_audience'],
+            }
+        if data.get('schema_service_outputs'):
+            main_entity["serviceOutput"] = data['schema_service_outputs']
+        if data.get('schema_offers'):
+            main_entity["hasOfferCatalog"] = {
+                "@type": "OfferCatalog",
+                "name": f"{data['title']} AI agent workflows",
+                "itemListElement": [
+                    {
+                        "@type": "Offer",
+                        "itemOffered": {
+                            "@type": "Service",
+                            "name": offer['name'],
+                            "description": offer['description'],
+                            "provider": organization_schema,
+                        },
+                    }
+                    for offer in data['schema_offers']
+                ],
+            }
+
         structured_data = {
             "@context": "https://schema.org",
             "@type": "WebPage",
             "name": data['seo_title'],
-            "description": data['seo_description'],
+            "description": seo_description,
             "url": solution_url,
             "image": social_image_url,
             "publisher": organization_schema,
@@ -4081,16 +4156,7 @@ class SolutionView(TemplateView):
                 "name": "Gobii",
                 "url": home_url,
             },
-            "mainEntity": {
-                "@type": "Service",
-                "name": f"Gobii {data['title']} AI agents",
-                "description": data['seo_description'],
-                "url": solution_url,
-                "image": social_image_url,
-                "serviceType": "AI agent solution",
-                "category": data['title'],
-                "provider": organization_schema,
-            },
+            "mainEntity": main_entity,
         }
         if data.get('date_modified'):
             structured_data["dateModified"] = data['date_modified']
@@ -4134,7 +4200,7 @@ class SolutionView(TemplateView):
             'solution_tagline': data['tagline'],
             'solution_description': data['description'],
             'solution_seo_title': data['seo_title'],
-            'solution_seo_description': data['seo_description'],
+            'solution_seo_description': seo_description,
             'solution_social_image_alt': data['social_image_alt'],
             'solution_social_image_url': social_image_url,
             'solution_structured_data_json': html_safe_json_dumps(structured_data),
