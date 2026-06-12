@@ -3716,6 +3716,7 @@ def _get_system_instruction(
         "For credential domains, think broadly: *.google.com covers more than one subdomain. "
 
         "`search_tools` discovers integrations, saved skills, and hidden system skills. Use enabled fitting tools directly; call search_tools when no enabled tool clearly fits or before broad web search for a new site/platform/domain. "
+        "For software engineering work, including writing, editing, debugging, reviewing, testing, building, deploying, or inspecting a code repository, call search_tools with `code work` before using file, shell, patch, or deployment tools unless the Code Work system skill is already enabled. "
 
         f"{delivery_instructions}"
         f"{_get_formatting_guidance()}\n\n"

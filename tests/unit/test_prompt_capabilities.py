@@ -233,6 +233,18 @@ class AgentCapabilitiesPromptTests(TestCase):
 
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_routes_code_work_through_system_skill_discovery(self, _mock_comms, _mock_steps):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn(
+            "call search_tools with `code work` before using file, shell, patch, or deployment tools",
+            contents,
+        )
+        self.assertIn("unless the Code Work system skill is already enabled", contents)
+
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
     def test_build_prompt_context_says_final_send_stops(self, _mock_comms, _mock_steps):
         context, _, _ = build_prompt_context(self.agent)
         contents = "\n".join(message["content"] for message in context)
