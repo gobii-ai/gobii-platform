@@ -12527,6 +12527,14 @@ class PersistentAgentToolCall(models.Model):
         related_name="tool_call",
     )
 
+    parent_tool_call = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="child_tool_calls",
+        help_text="Parent tool call that spawned this nested tool call, when applicable.",
+    )
     tool_name = models.CharField(max_length=256)
     tool_params = models.JSONField(null=True, blank=True)
     result = models.TextField(blank=True, help_text="Raw result or output from the tool call (may be large)")

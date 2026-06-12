@@ -4,11 +4,13 @@ import time
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
+from django.core.exceptions import ObjectDoesNotExist
+
 from api.agent.comms.human_input_requests import (
     attach_originating_step_from_result,
     track_human_input_request_created,
 )
-from api.models import PersistentAgent, PersistentAgentStep
+from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
 
 from .runtime_execution_context import tool_execution_context
 from .tool_runtime import execute_runtime_tool_call
@@ -38,6 +40,15 @@ def _no_prompt_archive(_step: PersistentAgentStep) -> None:
     return None
 
 
+def _parent_tool_call_from_step(parent_step: Optional[PersistentAgentStep]) -> Optional[PersistentAgentToolCall]:
+    if parent_step is None:
+        return None
+    try:
+        return parent_step.tool_call
+    except ObjectDoesNotExist:
+        return None
+
+
 def execute_tracked_runtime_tool_call(
     agent: PersistentAgent,
     *,
@@ -58,6 +69,7 @@ def execute_tracked_runtime_tool_call(
     )
 
     attach_completion = _build_attach_completion(parent_step)
+    parent_tool_call = _parent_tool_call_from_step(parent_step)
 
     if not _enforce_tool_rate_limit(
         agent,
@@ -87,6 +99,7 @@ def execute_tracked_runtime_tool_call(
         consumed_credit=consumed_credit,
         attach_completion=attach_completion,
         attach_prompt_archive=_no_prompt_archive,
+        parent_tool_call=parent_tool_call,
     )
 
     result = None
@@ -132,6 +145,7 @@ def execute_tracked_runtime_tool_call(
             result_content=result_content,
             execution_duration_ms=duration_ms,
             status=tool_status,
+            parent_tool_call=parent_tool_call,
         )
         step = pending_step
     else:
@@ -146,6 +160,7 @@ def execute_tracked_runtime_tool_call(
             consumed_credit=consumed_credit,
             attach_completion=attach_completion,
             attach_prompt_archive=_no_prompt_archive,
+            parent_tool_call=parent_tool_call,
         )
 
     if step is not None and tool_name == "request_human_input" and isinstance(result, dict):
