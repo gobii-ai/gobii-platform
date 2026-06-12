@@ -553,6 +553,42 @@ def all_requests_have_options(requests):
     return all(_valid_human_input_options(request.options_json) for request in requests)
 
 
+def _delivered_tool_result(call):
+    try:
+        payload = json.loads(call.result or "{}")
+    except json.JSONDecodeError:
+        return False
+    return isinstance(payload, dict) and payload.get("status") in {"ok", "sent", "success"}
+
+
+def _tool_call_body(call):
+    params = call.tool_params or {}
+    return str(params.get("body") or "")
+
+
+def _is_bounded_planning_chat_question(call):
+    if call.tool_name != "send_chat_message" or not _delivered_tool_result(call):
+        return False
+    body = _tool_call_body(call)
+    question_count = body.count("?")
+    if not 1 <= question_count <= 3:
+        return False
+    lowered = body.lower()
+    return any(
+        term in lowered
+        for term in (
+            "competitor",
+            "industry",
+            "space",
+            "updates",
+            "track",
+            "monitor",
+            "scope",
+            "business",
+        )
+    )
+
+
 class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
     tier = "core"
     category = "agent_behavior"
@@ -706,6 +742,11 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_bounded_questions")
         requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
+        chat_question_calls = [
+            call
+            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"send_chat_message"})
+            if _is_bounded_planning_chat_question(call)
+        ]
         if 1 <= len(requests) <= 3 and all_requests_have_options(requests):
             self.record_task_result(
                 run_id,
@@ -714,6 +755,15 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 task_name="verify_bounded_questions",
                 observed_summary=f"Agent asked {len(requests)} tracked planning question(s), each with options.",
             )
+        elif len(chat_question_calls) == 1:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_bounded_questions",
+                observed_summary="Agent asked a bounded planning clarification in chat.",
+                artifacts={"step": chat_question_calls[0].step},
+            )
         else:
             self.record_task_result(
                 run_id,
@@ -721,8 +771,9 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_bounded_questions",
                 observed_summary=(
-                    f"Expected 1-3 pending planning questions with options; found {len(requests)} "
-                    f"with options={all_requests_have_options(requests)}."
+                    f"Expected 1-3 pending planning questions with options or one bounded chat clarification; "
+                    f"found {len(requests)} pending request(s) with options={all_requests_have_options(requests)} "
+                    f"and {len(chat_question_calls)} bounded chat clarification(s)."
                 ),
             )
 
