@@ -1,4 +1,4 @@
-import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react'
+import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, Ref } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, KeyRound, Loader2, Mail, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
@@ -443,6 +443,7 @@ type AgentComposerProps = {
   // Key that triggers re-focus when changed (e.g., agentId for switching agents)
   focusKey?: string | null
   onFocus?: () => void
+  onRequestScrollToBottom?: () => void
   // Working panel props
   insightsPanelExpandedPreference?: boolean | null
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
@@ -482,6 +483,7 @@ type AgentComposerProps = {
   hubspotNativeTabEnabled?: boolean
   discordNativeTabEnabled?: boolean
   compact?: boolean
+  externalShellRef?: Ref<HTMLDivElement>
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -504,6 +506,7 @@ export const AgentComposer = memo(function AgentComposer({
   autoFocus = false,
   focusKey,
   onFocus,
+  onRequestScrollToBottom,
   insightsPanelExpandedPreference = null,
   onInsightsPanelExpandedPreferenceChange,
   agentFirstName = 'Agent',
@@ -542,6 +545,7 @@ export const AgentComposer = memo(function AgentComposer({
   hubspotNativeTabEnabled = false,
   discordNativeTabEnabled = false,
   compact = false,
+  externalShellRef,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -559,6 +563,16 @@ export const AgentComposer = memo(function AgentComposer({
   const [appsModal, showAppsModal] = useModal()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
+  const composedShellRef = useCallback((node: HTMLDivElement | null) => {
+    shellRef.current = node
+    if (typeof externalShellRef === 'function') {
+      externalShellRef(node)
+      return
+    }
+    if (externalShellRef) {
+      externalShellRef.current = node
+    }
+  }, [externalShellRef])
   const focusScrollTimeoutRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragCounter = useRef(0)
@@ -734,12 +748,8 @@ export const AgentComposer = memo(function AgentComposer({
 
   const scrollToBottom = useCallback(() => {
     if (!isTouchDevice) return
-    // Container scrolling: scroll the timeline-shell, not the window
-    const container = document.getElementById('timeline-shell')
-    if (container) {
-      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
-    }
-  }, [isTouchDevice])
+    onRequestScrollToBottom?.()
+  }, [isTouchDevice, onRequestScrollToBottom])
 
   const selectWorkingTab = useCallback((tabId: string) => {
     if (!resolvedWorkingExpanded) {
@@ -1831,7 +1841,7 @@ export const AgentComposer = memo(function AgentComposer({
     <div
       className="composer-shell"
       id="agent-composer-shell"
-      ref={shellRef}
+      ref={composedShellRef}
       data-processing={isProcessing ? 'true' : 'false'}
       data-expanded={resolvedWorkingExpanded ? 'true' : 'false'}
       data-panel-visible={showWorkingPanel ? 'true' : 'false'}

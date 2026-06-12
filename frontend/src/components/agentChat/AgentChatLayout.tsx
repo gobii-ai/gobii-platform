@@ -2,24 +2,17 @@ import type { KeyboardEvent, MouseEvent, ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Flag, Loader2, Zap } from 'lucide-react'
 import '../../styles/agentChatLegacy.css'
-import { TypingIndicator, deriveTypingStatusText } from './TypingIndicator'
+import { deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
-import { TimelineVirtualItem } from './TimelineVirtualItem'
-import { StreamingReplyCard } from './StreamingReplyCard'
-import { StreamingThinkingCard } from './StreamingThinkingCard'
+import { AgentTimelinePane } from './AgentTimelinePane'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
-import { HardLimitCalloutCard } from './HardLimitCalloutCard'
-import { ContactCapCalloutCard } from './ContactCapCalloutCard'
-import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
-import { ScheduledResumeCard } from './ScheduledResumeCard'
-import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { reportAgentMessageIssue, trackAgentMessageCopy } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
@@ -168,16 +161,6 @@ function getAppMessageLinkShellPage(href: string): AppMessageLinkShellPage | nul
   }
 }
 
-function timelineEventKey(event: SimplifiedTimelineItem): string {
-  if (event.kind === 'collapsed-group') {
-    return `collapsed:${event.cursor}`
-  }
-  if (event.kind === 'steps' && event.entries.length > 0) {
-    return `cluster:${event.entries[0].id}`
-  }
-  return event.cursor
-}
-
 type AgentChatLayoutProps = AgentTimelineProps & {
   displayEvents?: SimplifiedTimelineItem[]
   statusExpansionTargets?: StatusExpansionTargets
@@ -295,10 +278,13 @@ type AgentChatLayoutProps = AgentTimelineProps & {
     attachments?: File[],
   ) => void | Promise<void>
   onComposerFocus?: () => void
+  onComposerRequestScrollToBottom?: () => void
   autoScrollPinned?: boolean
   isNearBottom?: boolean
   hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>
+  timelineContentRef?: Ref<HTMLDivElement>
+  composerShellRef?: Ref<HTMLDivElement>
   loadingOlder?: boolean
   loadingNewer?: boolean
   initialLoading?: boolean
@@ -491,10 +477,13 @@ export function AgentChatLayout({
   onBlockedCollaborate,
   onSendMessage,
   onComposerFocus,
+  onComposerRequestScrollToBottom,
   autoScrollPinned = true,
   isNearBottom = true,
   hasUnseenActivity = false,
   timelineRef,
+  timelineContentRef,
+  composerShellRef,
   loadingOlder = false,
   loadingNewer = false,
   initialLoading = false,
@@ -921,7 +910,6 @@ export function AgentChatLayout({
     && !hasMoreNewer
     && nextScheduledAt,
   )
-  const showBottomSentinel = !initialLoading && !hasMoreNewer
   const starterPromptCount = typeof window !== 'undefined' && window.innerWidth < 768 ? 2 : 3
   const {
     starterPrompts,
@@ -1623,173 +1611,70 @@ export function AgentChatLayout({
           style={composerPalette.cssVars}
         >
           <div className="agent-chat-workspace-main">
-          <div className="agent-chat-timeline-region">
-            {/* Scrollable timeline container */}
-            <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
-              {/* Spacer pushes content to bottom when there's extra space */}
-              <div id="timeline-spacer" aria-hidden="true" />
-              <div id="timeline-inner">
-                <div id="timeline-events" className="flex flex-col" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
-                {loadingOlder ? (
-                  <div className="timeline-load-control" data-side="older" data-state="loading">
-                    <div className="timeline-load-button" role="status">
-                      <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
-                      <span className="timeline-load-label">Loading…</span>
-                    </div>
-                  </div>
-                ) : showOlderLoadButton && onLoadOlder ? (
-                  <div className="timeline-load-control" data-side="older" data-state="ready">
-                    <button type="button" className="timeline-load-button" onClick={onLoadOlder}>
-                      <span className="timeline-load-indicator" aria-hidden="true" />
-                      <span className="timeline-load-label">Load older activity</span>
-                    </button>
-                  </div>
-                ) : null}
-
-                {initialLoading ? (
-                  <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
-                    <div className="flex flex-col items-center gap-3 text-center">
-                      <Loader2 size={28} className="animate-spin text-blue-600" aria-hidden="true" />
-                      <div>
-                        <p className="text-sm font-semibold text-slate-700">Loading conversation…</p>
-                      </div>
-                    </div>
-                  </div>
-                ) : timelineRenderEvents.map((event, index) => (
-                  <TimelineVirtualItem
-                    key={timelineEventKey(event)}
-                    event={event}
-                    isLatestEvent={index === timelineRenderEvents.length - 1}
-                    agentFirstName={agentFirstName}
-                    agentColorHex={agentColorHex || undefined}
-                    agentAvatarUrl={agentAvatarUrl}
-                    viewerUserId={viewerUserId ?? null}
-                    viewerEmail={viewerEmail ?? null}
-                    suppressedThinkingCursor={suppressedThinkingCursor}
-                    statusExpansionTargets={statusExpansionTargets}
-                    animateIncoming={realtimeEventCursors?.has(event.cursor) ?? false}
-                    onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
-                    onMessageLinkClick={handleMessageLinkClick}
-                    onMessageCopied={handleMessageCopied}
-                    onReportMessage={handleReportMessage}
-                  />
-                ))}
-                {showScheduledResumeEvent ? (
-                  <ScheduledResumeCard nextScheduledAt={nextScheduledAt} />
-                ) : null}
-                {showHardLimitCallout ? (
-                  <HardLimitCalloutCard
-                    onOpenSettings={handleSettingsOpen}
-                    onQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
-                    quickIncreaseLabel={quickIncreaseLabel ?? undefined}
-                    quickIncreaseBusy={quickIncreaseBusy}
-                    upgradeUrl={hardLimitUpgradeUrl}
-                    showUpsell={hardLimitShowUpsell}
-                  />
-                ) : null}
-                {showNoSeatsCallout ? (
-                  <TaskCreditsCalloutCard
-                    billingIssue="no_org_seats"
-                    onPurchaseSeats={handlePurchaseSeats}
-                    variant="out"
-                  />
-                ) : showTaskCreditsCallout ? (
-                  <TaskCreditsCalloutCard
-                    onOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0
-                      ? () => handleAddonsOpen('tasks')
-                      : undefined}
-                    showUpgrade={showTaskCreditsUpgrade}
-                    onDismiss={handleTaskCreditsDismiss}
-                    variant={taskCreditsWarningVariant === 'out' ? 'out' : 'low'}
-                  />
-                ) : null}
-                {showContactCapCallout ? (
-                  <ContactCapCalloutCard
-                    onOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0
-                      ? () => handleAddonsOpen('contacts')
-                      : undefined}
-                    showUpgrade={contactPackShowUpgrade}
-                    onDismiss={handleContactCapDismiss}
-                  />
-                ) : null}
-                {pendingActionRequests.length === 0
-                && signupPreviewState === 'none'
-                && (starterPromptsLoading || starterPrompts.length > 0) ? (
-                  <StarterPromptSuggestions
-                    prompts={starterPrompts}
-                    loading={starterPromptsLoading}
-                    loadingCount={starterPromptCount}
-                    disabled={starterPromptSubmitting || starterPromptsDisabled || composerDisabled}
-                    onSelect={handleStarterPromptSelect}
-                  />
-                ) : null}
-
-                {showStreamingThinking ? (
-                  <StreamingThinkingCard
-                    reasoning={streaming?.reasoning || ''}
-                    isStreaming={isStreaming}
-                  />
-                ) : null}
-
-                {showStreamingSlot && !hasMoreNewer ? (
-                  <div id="streaming-response-slot" className="streaming-response-slot flex flex-col">
-                    {hasStreamingContent ? (
-                      <StreamingReplyCard
-                        content={streaming?.content || ''}
-                        agentFirstName={agentFirstName}
-                        agentAvatarUrl={agentAvatarUrl}
-                        agentColorHex={agentColorHex}
-                        isStreaming={isStreaming}
-                        onLinkClick={handleMessageLinkClick}
-                      />
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {showTypingIndicator ? (
-                  <TypingIndicator
-                    statusText={typingStatusText}
-                    agentColorHex={agentColorHex || undefined}
-                    agentAvatarUrl={agentAvatarUrl}
-                    agentFirstName={agentFirstName}
-                    hidden={hideTypingIndicator}
-                  />
-                ) : null}
-
-                {showBottomSentinel ? (
-                  <div id="timeline-bottom-sentinel" className="timeline-bottom-sentinel" aria-hidden="true" />
-                ) : null}
-
-                {loadingNewer ? (
-                  <div className="timeline-load-control" data-side="newer" data-state="loading">
-                    <div className="timeline-load-button" role="status">
-                      <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
-                      <span className="timeline-load-label">Loading…</span>
-                    </div>
-                  </div>
-                ) : null}
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          {/* Jump button outside scroll container so position:fixed works on iOS Safari */}
-          <button
-            id="jump-to-latest"
-            className="jump-to-latest"
-            type="button"
-            aria-label="Jump to latest"
-            aria-hidden={showJumpButton ? 'false' : 'true'}
-            onClick={onJumpToLatest}
-            data-has-activity={hasUnseenActivity ? 'true' : 'false'}
-            data-visible={showJumpButton ? 'true' : 'false'}
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
-            </svg>
-            <span className="sr-only">Jump to latest</span>
-          </button>
+          <AgentTimelinePane
+            agentAvatarUrl={agentAvatarUrl}
+            agentColorHex={agentColorHex}
+            agentFirstName={agentFirstName}
+            animateCursors={realtimeEventCursors}
+            autoScrollPinned={autoScrollPinned}
+            composerDisabled={composerDisabled}
+            contactCapOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0 ? () => handleAddonsOpen('contacts') : undefined}
+            contactCapShowUpgrade={contactPackShowUpgrade}
+            events={timelineRenderEvents}
+            hardLimitShowUpsell={hardLimitShowUpsell}
+            hardLimitUpgradeUrl={hardLimitUpgradeUrl}
+            hasMoreNewer={hasMoreNewer}
+            hasStreamingContent={hasStreamingContent}
+            hasUnseenActivity={hasUnseenActivity}
+            hideTypingIndicator={hideTypingIndicator}
+            initialLoading={initialLoading}
+            isStreaming={isStreaming}
+            loadingNewer={loadingNewer}
+            loadingOlder={loadingOlder}
+            nextScheduledAt={nextScheduledAt}
+            onContactCapDismiss={handleContactCapDismiss}
+            onHardLimitOpenSettings={handleSettingsOpen}
+            onHardLimitQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
+            onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
+            onJumpToLatest={onJumpToLatest}
+            onLoadOlder={onLoadOlder}
+            onMessageCopied={handleMessageCopied}
+            onMessageLinkClick={handleMessageLinkClick}
+            onPurchaseSeats={handlePurchaseSeats}
+            onReportMessage={handleReportMessage}
+            onStarterPromptSelect={handleStarterPromptSelect}
+            onTaskCreditsDismiss={handleTaskCreditsDismiss}
+            onTaskCreditsOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0 ? () => handleAddonsOpen('tasks') : undefined}
+            quickIncreaseBusy={quickIncreaseBusy}
+            quickIncreaseLabel={quickIncreaseLabel ?? undefined}
+            showContactCapCallout={showContactCapCallout}
+            showHardLimitCallout={showHardLimitCallout}
+            showJumpButton={showJumpButton}
+            showNoSeatsCallout={showNoSeatsCallout}
+            showOlderLoadButton={showOlderLoadButton}
+            showProcessingIndicator={showProcessingIndicator}
+            showScheduledResumeEvent={showScheduledResumeEvent}
+            showStarterPrompts={pendingActionRequests.length === 0 && signupPreviewState === 'none' && (starterPromptsLoading || starterPrompts.length > 0)}
+            showStreamingSlot={showStreamingSlot}
+            showStreamingThinking={showStreamingThinking}
+            showTaskCreditsCallout={showTaskCreditsCallout}
+            showTaskCreditsUpgrade={showTaskCreditsUpgrade}
+            showTypingIndicator={showTypingIndicator}
+            starterPromptCount={starterPromptCount}
+            starterPromptSubmitting={starterPromptSubmitting}
+            starterPrompts={starterPrompts}
+            starterPromptsDisabled={starterPromptsDisabled}
+            starterPromptsLoading={starterPromptsLoading}
+            statusExpansionTargets={statusExpansionTargets}
+            streaming={streaming}
+            suppressedThinkingCursor={suppressedThinkingCursor}
+            taskCreditsWarningVariant={taskCreditsWarningVariant}
+            timelineContentRef={timelineContentRef}
+            timelineRef={timelineRef}
+            typingStatusText={typingStatusText}
+            viewerEmail={viewerEmail}
+            viewerUserId={viewerUserId}
+          />
 
           {/* Composer at bottom of flex layout */}
           {spawnIntentLoading ? (
@@ -1852,6 +1737,8 @@ export function AgentChatLayout({
               onResolveContactRequests={onResolveContactRequests}
               onViewAllContactRequests={onViewAllContactRequests}
               onFocus={onComposerFocus}
+              onRequestScrollToBottom={onComposerRequestScrollToBottom}
+              externalShellRef={composerShellRef}
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}
               processingTasks={processingWebTasks}
