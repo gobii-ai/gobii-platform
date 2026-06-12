@@ -4363,15 +4363,18 @@ def _get_unified_history_prompt(
             parent_tool_call_results = (
                 PersistentAgentToolCall.objects
                 .filter(step_id__in=missing_parent_ids)
-                .values("step_id", "result", "tool_name", "step__created_at")
+                .values("step_id", "result", "tool_name", "step__created_at", "step__completion_id")
             )
             for row in parent_tool_call_results:
                 result_text = row.get("result") or ""
                 if not result_text:
                     continue
+                step_id = str(row["step_id"])
+                completion_id = row.get("step__completion_id")
+                tool_call_completion_ids[step_id] = str(completion_id) if completion_id else None
                 tool_call_records.append(
                     ToolCallResultRecord(
-                        step_id=str(row["step_id"]),
+                        step_id=step_id,
                         tool_name=row.get("tool_name") or "",
                         created_at=row["step__created_at"],
                         result_text=result_text,

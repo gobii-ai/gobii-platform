@@ -4,8 +4,6 @@ import time
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
-from django.core.exceptions import ObjectDoesNotExist
-
 from api.agent.comms.human_input_requests import (
     attach_originating_step_from_result,
     track_human_input_request_created,
@@ -43,10 +41,7 @@ def _no_prompt_archive(_step: PersistentAgentStep) -> None:
 def _parent_tool_call_from_step(parent_step: Optional[PersistentAgentStep]) -> Optional[PersistentAgentToolCall]:
     if parent_step is None:
         return None
-    try:
-        return parent_step.tool_call
-    except ObjectDoesNotExist:
-        return None
+    return parent_step.tool_call if hasattr(parent_step, "tool_call") else None
 
 
 def execute_tracked_runtime_tool_call(
