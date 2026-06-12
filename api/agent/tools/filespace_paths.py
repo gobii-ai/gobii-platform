@@ -5,8 +5,11 @@ from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
 WORKSPACE_ALIAS_PREFIX = "/workspace"
 
 
-def unwrap_filespace_reference(value: str) -> str:
+def unwrap_filespace_reference(value: str) -> str | None:
     cleaned = value.strip()
+    if cleaned.startswith("$[") or cleaned.endswith("]"):
+        if not (cleaned.startswith("$[") and cleaned.endswith("]")):
+            return None
     if cleaned.startswith("$[") and cleaned.endswith("]"):
         cleaned = cleaned[2:-1].strip()
     return cleaned

@@ -18,7 +18,10 @@ def resolve_export_target(
         return None, False, {"status": "error", "message": "Missing required parameter: file_path"}
     if not isinstance(file_path, str):
         return None, False, {"status": "error", "message": "file_path must be a string"}
-    file_path = normalize_filespace_tool_path(file_path, agent_id=agent_id) or ""
+    raw_file_path = file_path
+    file_path = normalize_filespace_tool_path(raw_file_path, agent_id=agent_id) or ""
+    if not file_path and raw_file_path.strip():
+        return None, False, {"status": "error", "message": "file_path is invalid"}
     if not file_path:
         return None, False, {"status": "error", "message": "file_path must be a non-empty string"}
 
