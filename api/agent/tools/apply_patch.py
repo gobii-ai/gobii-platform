@@ -64,9 +64,7 @@ def _patch_tool_description() -> str:
     return (
         "Apply a unified, reviewable patch to UTF-8 text files. Prefer this over exact string replacement for "
         "source code, HTML/CSS/JS, config, and custom tool edits. Paths are Gobii filespace paths such as "
-        "/tools/my_tool.py or $[/tools/my_tool.py]. If a sandbox showed the same filespace file under "
-        "/workspace/path/to/file or /workspace/<agent-id>/path/to/file, that path is accepted as an alias "
-        "and normalized to /path/to/file. "
+        "/tools/my_tool.py or $[/tools/my_tool.py]. "
         "The patch must be a single string using this format:\n"
         "*** Begin Patch\n"
         "*** Add File: /path/to/file\n"

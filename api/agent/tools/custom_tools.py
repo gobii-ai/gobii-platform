@@ -1029,7 +1029,7 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "Name ready outputs specifically (`direct_post_urls`, `scrape_ready_urls`, `rows_written`, `records_to_sync`). Validators return accepted ready-to-use values and rejected reasons; require source params like `urls`, `domains`, `candidates`, `source_table`, or `input_table`. "
                 "Secrets are in os.environ; if missing, request `secret_type='env_var'`, not a domain-scoped credential. "
                 "Network code needs SOCKS5 proxy support: use requests[socks]/httpx[socks], declare `dependencies = [\"requests[socks]\"]`, read ALL_PROXY/HTTP_PROXY/HTTPS_PROXY/NO_PROXY, and prefer ctx.requests_proxies() or ctx.proxy_url(); not bare `requests`/`httpx` or direct HTTPS tunneling. "
-                "Filespace paths like `/tools/my_tool.py` and `/exports/report.txt` are Gobii tool args; if using create_file first, pass file_path='/tools/my_tool.py' and content=<python source>. Inside code use Path('/workspace/exports/report.txt'), not open('/exports/report.txt', ...). "
+                "Filespace paths like `/tools/my_tool.py` and `/exports/report.txt` are Gobii tool args; if using create_file first, pass file_path='/tools/my_tool.py' and content=<python source>. "
                 "Latest workspace edits are synced automatically; use apply_patch on the same file instead of creating near-duplicates. "
                 "Saved tool id like `custom_my_tool`; enabled by default."
             ),

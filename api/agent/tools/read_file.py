@@ -201,8 +201,6 @@ def get_read_file_tool() -> Dict[str, Any]:
             "description": (
                 "Read an agent-filesystem file as markdown or raw text. "
                 "Do not use this for http:// or https:// URLs; use http_request, scraping, or spawn_web_task for URLs. "
-                "Sandbox-visible /workspace and /workspace/<agent-id> paths are accepted as aliases "
-                "for the filespace root. "
                 "Defaults to raw_text for text and markdown for PDFs, images/OCR, scans, and office files. "
                 "Not for SQLite snapshots; use sqlite_batch on __tool_results, __messages, or __files."
             ),
@@ -211,10 +209,7 @@ def get_read_file_tool() -> Dict[str, Any]:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": (
-                            "Path to a file in the agent filespace (accepts $[/path] variables, /workspace/path aliases, "
-                            "and /workspace/<agent-id>/path aliases)."
-                        ),
+                        "description": "Path to a file in the agent filespace (accepts $[/path] variables).",
                     },
                     "max_chars": {
                         "type": "integer",

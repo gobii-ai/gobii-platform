@@ -95,8 +95,6 @@ def get_create_file_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "Required filespace path (recommended: /exports/report.txt). "
-                            "Sandbox-visible /workspace and /workspace/<agent-id> paths are accepted as aliases "
-                            "for the filespace root. "
                             "If no extension is provided, one may be inferred from mime_type. "
                             "Use overwrite=true to replace an existing file at that path."
                         ),
