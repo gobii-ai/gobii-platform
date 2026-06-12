@@ -579,15 +579,15 @@ class Command(BaseCommand):
         )
         ensure_local_eval_sandbox_flag(stdout=self.stdout)
 
-        def _create_ephemeral_agent(label_suffix: str) -> PersistentAgent:
+        def _create_ephemeral_agent(label_suffix: str, *, organization) -> PersistentAgent:
             unique_id = f"{label_suffix}-{uuid.uuid4().hex[:8]}" if label_suffix else uuid.uuid4().hex[:12]
             browser_agent = BrowserUseAgent(name=f"Eval Browser {unique_id}", user=user)
-            browser_agent._agent_creation_organization = eval_organization
+            browser_agent._agent_creation_organization = organization
             browser_agent.save()
             agent = PersistentAgent.objects.create(
                 name=f"Eval Agent {unique_id}",
                 user=user,
-                organization=eval_organization,
+                organization=organization,
                 browser_use_agent=browser_agent,
                 execution_environment="eval",
                 charter="You are a test agent.",
@@ -660,7 +660,15 @@ class Command(BaseCommand):
                     for iteration in range(requested_runs):
                         run_agent = shared_agent
                         if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
-                            run_agent = _create_ephemeral_agent(label_suffix=f"{scenario.slug[:8]}-{iteration + 1}")
+                            scenario_eval_organization = (
+                                None
+                                if getattr(scenario, "requires_personal_agent", False)
+                                else eval_organization
+                            )
+                            run_agent = _create_ephemeral_agent(
+                                label_suffix=f"{scenario.slug[:8]}-{iteration + 1}",
+                                organization=scenario_eval_organization,
+                            )
                             self.stdout.write(f"  Created ephemeral agent for {scenario.slug}: {run_agent.id}")
                             _print_audit_link(run_agent)
 

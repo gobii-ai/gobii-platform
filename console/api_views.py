@@ -9067,10 +9067,15 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                     run_agent = shared_agent
                     if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
                         suffix = f"{scenario.slug[:8]}-{iteration + 1}" if requested_runs > 1 else scenario.slug[:8]
+                        scenario_eval_organization = (
+                            None
+                            if getattr(scenario, "requires_personal_agent", False)
+                            else eval_organization
+                        )
                         run_agent = _create_eval_ephemeral_agent(
                             label_suffix=suffix,
                             eval_user=eval_user,
-                            eval_organization=eval_organization,
+                            eval_organization=scenario_eval_organization,
                         )
 
                     run = EvalRun.objects.create(
