@@ -69,6 +69,7 @@ from api.evals.stop_policy import (
 from api.evals.suites import SuiteRegistry
 from api.models import (
     BrowserUseAgent,
+    CommsAllowlistEntry,
     CommsChannel,
     EvalRun,
     EvalRunTask,
@@ -171,9 +172,11 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("BiomeBoost Pro", by_slug["common_use_case_020_search_reddit_mentions"].prompt)
         self.assertIn("API latency stayed under 120 ms", by_slug["common_use_case_064_send_digest_email"].prompt)
         self.assertIn("sqlite_batch", by_slug["common_use_case_061_send_summary_email"].allowed_preamble_tools)
+        self.assertIn("sqlite_batch", by_slug["common_use_case_063_send_followup_email"].allowed_preamble_tools)
         self.assertIn("sqlite_batch", by_slug["common_use_case_064_send_digest_email"].allowed_preamble_tools)
         self.assertIn("sqlite_batch", by_slug["common_use_case_065_send_status_sms"].allowed_preamble_tools)
         self.assertIn("sqlite_batch", by_slug["common_use_case_066_send_meeting_sms"].allowed_preamble_tools)
+        self.assertIn("sqlite_batch", by_slug["common_use_case_067_request_contact_email_permission"].allowed_preamble_tools)
         self.assertIn("sqlite_batch", by_slug["common_use_case_068_request_sms_permission"].allowed_preamble_tools)
         self.assertEqual(
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
@@ -703,9 +706,11 @@ class BehaviorMicroHelperTests(TestCase):
     def test_outbound_contact_lookup_cases_allow_sqlite_preamble(self):
         for slug, expected_tool in (
             ("common_use_case_061_send_summary_email", "send_email"),
+            ("common_use_case_063_send_followup_email", "send_email"),
             ("common_use_case_064_send_digest_email", "send_email"),
             ("common_use_case_065_send_status_sms", "send_sms"),
             ("common_use_case_066_send_meeting_sms", "send_sms"),
+            ("common_use_case_067_request_contact_email_permission", "request_contact_permission"),
             ("common_use_case_068_request_sms_permission", "request_contact_permission"),
         ):
             with self.subTest(slug=slug):
@@ -715,8 +720,44 @@ class BehaviorMicroHelperTests(TestCase):
 
                 self.assertIn("sqlite_batch", policy["allowed_tool_names"])
                 self.assertIn(expected_tool, policy["allowed_tool_names"])
-                self.assertIn("sqlite_batch", mock_config)
+                self.assertNotIn("sqlite_batch", mock_config)
                 self.assertIn("sqlite_batch", scenario._tool_names_to_enable())
+
+    def test_outbound_contact_lookup_seeds_real_email_allowlist_rows(self):
+        for slug, address in (
+            ("common_use_case_061_send_summary_email", "ana@example.test"),
+            ("common_use_case_062_send_attachment_email", "pat@example.test"),
+            ("common_use_case_063_send_followup_email", "lee@example.test"),
+            ("common_use_case_064_send_digest_email", "ops@example.test"),
+        ):
+            with self.subTest(slug=slug):
+                scenario = ScenarioRegistry.get(slug)
+
+                scenario._seed_outbound_contact_context(self.agent.id)
+
+                entry = CommsAllowlistEntry.objects.get(
+                    agent=self.agent,
+                    channel=CommsChannel.EMAIL,
+                    address=address,
+                )
+                self.assertTrue(entry.is_active)
+                self.assertTrue(entry.allow_outbound)
+                self.assertTrue(entry.allow_inbound)
+
+    def test_outbound_sms_cases_do_not_seed_sendable_sms_contacts(self):
+        for slug in (
+            "common_use_case_065_send_status_sms",
+            "common_use_case_066_send_meeting_sms",
+            "common_use_case_068_request_sms_permission",
+        ):
+            with self.subTest(slug=slug):
+                scenario = ScenarioRegistry.get(slug)
+
+                scenario._seed_outbound_contact_context(self.agent.id)
+
+                self.assertFalse(
+                    CommsAllowlistEntry.objects.filter(agent=self.agent, channel=CommsChannel.SMS).exists()
+                )
 
     def test_outbound_contact_lookup_sqlite_preamble_does_not_stop_eval(self):
         scenario = ScenarioRegistry.get("common_use_case_066_send_meeting_sms")
