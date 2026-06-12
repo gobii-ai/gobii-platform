@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import posixpath
+import re
 from dataclasses import dataclass
 from typing import Any, List
 
@@ -10,7 +11,6 @@ from celery.utils.log import get_task_logger
 from django.core.exceptions import SuspiciousFileOperation
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.utils.text import get_valid_filename
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -25,6 +25,7 @@ from ...models import (
 logger = get_task_logger(__name__)
 EXPORTS_DIR_NAME = "exports"
 DOWNLOADS_DIR_NAME = "downloads"
+UNSAFE_FILESPACE_PART_CHARS_RE = re.compile(r"(?u)[^-\w.+@]")
 
 
 @dataclass
@@ -103,7 +104,8 @@ def _normalize_filename(raw_name: str | None, fallback_name: str, extension: str
     name = (raw_name or "").strip()
     if not name:
         name = fallback_name
-    name = get_valid_filename(os.path.basename(name)) or fallback_name
+    name = os.path.basename(name)
+    name = UNSAFE_FILESPACE_PART_CHARS_RE.sub("", name.replace(" ", "_"))
     if not name.lower().endswith(extension):
         name = f"{name}{extension}"
     return name
@@ -129,7 +131,7 @@ def _normalize_write_path(
         return None
     dir_parts: list[str] = []
     for part in parts[:-1]:
-        safe_part = get_valid_filename(part)
+        safe_part = UNSAFE_FILESPACE_PART_CHARS_RE.sub("", part.replace(" ", "_"))
         if not safe_part:
             return None
         dir_parts.append(safe_part)

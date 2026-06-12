@@ -68,7 +68,7 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if csv_text and query:
         return {"status": "error", "message": "Use csv_text OR query, not both."}
 
-    path, overwrite, error = resolve_export_target(params)
+    path, overwrite, error = resolve_export_target(params, agent_id=agent.id)
     if error:
         return error
 

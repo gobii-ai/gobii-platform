@@ -13,6 +13,7 @@ from api.models import AgentFileSpaceAccess, AgentFsNode, PersistentAgent
 from api.agent.core.file_handler_config import get_file_handler_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.files.filespace_service import get_or_create_default_filespace
+from api.agent.tools.filespace_paths import normalize_filespace_tool_path
 from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)
@@ -91,14 +92,11 @@ class MarkItDownLitellmClient:
         self.chat = _MarkItDownChat(model, params)
 
 
-def _resolve_path(params: Dict[str, Any]) -> Optional[str]:
+def _resolve_path(params: Dict[str, Any], *, agent_id: Any = None) -> Optional[str]:
     for key in ("path", "file_path", "filename"):
         value = params.get(key)
-        if isinstance(value, str) and value.strip():
-            cleaned = value.strip()
-            # Strip $[...] wrapper if present
-            if cleaned.startswith("$[") and cleaned.endswith("]"):
-                cleaned = cleaned[2:-1].strip()
+        cleaned = normalize_filespace_tool_path(value, agent_id=agent_id)
+        if cleaned:
             return cleaned
     return None
 
@@ -237,7 +235,7 @@ def get_read_file_tool() -> Dict[str, Any]:
 
 
 def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
-    path = _resolve_path(params)
+    path = _resolve_path(params, agent_id=agent.id)
     if not path:
         return {"status": "error", "message": "Missing required parameter: path"}
 

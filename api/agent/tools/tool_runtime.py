@@ -3,11 +3,11 @@ from typing import Any, Dict, Optional
 from api.models import PersistentAgent
 from api.services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 
+from .apply_patch import execute_apply_patch
 from .charter_updater import execute_update_charter
 from .custom_tools import execute_create_custom_tool
 from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from .email_sender import execute_send_email
-from .file_str_replace import execute_file_str_replace
 from .peer_dm import execute_send_agent_message
 from .planning import execute_end_planning
 from .request_contact_permission import execute_request_contact_permission
@@ -79,8 +79,8 @@ def execute_runtime_tool_call(
         result = execute_create_custom_tool(agent, exec_params)
         updated_tools = _refresh_agent_tools(agent)
         return result, updated_tools
-    if tool_name == "file_str_replace":
-        return execute_file_str_replace(agent, exec_params), updated_tools
+    if tool_name == "apply_patch":
+        return execute_apply_patch(agent, exec_params), updated_tools
     if tool_name == "end_planning":
         result = execute_end_planning(agent, exec_params)
         updated_tools = _refresh_agent_tools(agent)

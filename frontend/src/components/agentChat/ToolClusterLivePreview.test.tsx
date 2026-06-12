@@ -38,6 +38,44 @@ function clusterForRequest(url: string, method = 'GET'): ToolClusterEvent {
   }
 }
 
+function clusterForApplyPatch(): ToolClusterEvent {
+  return {
+    kind: 'steps',
+    cursor: 'step:1',
+    entryCount: 1,
+    collapsible: false,
+    collapseThreshold: 4,
+    earliestTimestamp: '2026-01-01T00:00:00Z',
+    latestTimestamp: '2026-01-01T00:00:00Z',
+    entries: [
+      {
+        id: 'tool-call-apply-patch',
+        cursor: 'step:1',
+        timestamp: '2026-01-01T00:00:00Z',
+        toolName: 'apply_patch',
+        meta: {
+          label: 'Apply patch',
+          iconPaths: [],
+          iconBg: '',
+          iconColor: '',
+        },
+        parameters: {
+          patch: [
+            '*** Begin Patch',
+            '*** Update File: /tools/greeter.py',
+            '@@',
+            "-    return {'message': 'hi'}",
+            "+    return {'message': 'hello'}",
+            '*** End Patch',
+          ].join('\n'),
+        },
+        result: '{}',
+        status: 'pending',
+      },
+    ],
+  }
+}
+
 function renderPreview(cluster: ToolClusterEvent) {
   return render(
     <ToolClusterLivePreview
@@ -50,6 +88,13 @@ function renderPreview(cluster: ToolClusterEvent) {
 }
 
 describe('ToolClusterLivePreview Google API display', () => {
+  it('renders apply_patch as a live patch preview with the target file path', () => {
+    renderPreview(clusterForApplyPatch())
+
+    expect(screen.getByText('Apply patch')).toBeInTheDocument()
+    expect(screen.getByText('/tools/greeter.py')).toBeInTheDocument()
+  })
+
   it('does not render Google Drive file discovery as generic web search', () => {
     renderPreview(
       clusterForRequest(

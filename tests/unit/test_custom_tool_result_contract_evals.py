@@ -120,16 +120,20 @@ def _create_file_call(case):
     )
 
 
-def _file_str_replace_call(case, old_text, new_text):
+def _apply_patch_call(case, old_text, new_text):
     return SimpleNamespace(
-        tool_name="file_str_replace",
+        tool_name="apply_patch",
         tool_params={
-            "path": f"/tools/{case.slug}.py",
-            "old_text": old_text,
-            "new_text": new_text,
-            "replace_all": False,
+            "patch": "\n".join([
+                "*** Begin Patch",
+                f"*** Update File: /tools/{case.slug}.py",
+                "@@",
+                *[f"-{line}" for line in old_text.splitlines()],
+                *[f"+{line}" for line in new_text.splitlines()],
+                "*** End Patch",
+            ]),
         },
-        result={"status": "ok", "replacements": 1},
+        result={"status": "ok", "updated": [f"/tools/{case.slug}.py"]},
         step=None,
     )
 
@@ -259,13 +263,13 @@ class CustomToolResultContractEvalTests(TestCase):
 
         self.assertEqual(source_code, _source_code())
 
-    def test_source_lookup_applies_file_str_replace_before_registration(self):
+    def test_source_lookup_applies_apply_patch_before_registration(self):
         case = _case("linkedin_post_urls")
         create_call = _create_call(case)
         create_call.tool_params.pop("source_code")
         old_text = "if __name__ == \"__main__\":\n    main(run)"
         new_text = "if __name__ == \"__main__\": main(run)"
-        tool_calls = [_create_file_call(case), _file_str_replace_call(case, old_text, new_text), create_call]
+        tool_calls = [_create_file_call(case), _apply_patch_call(case, old_text, new_text), create_call]
 
         source_code = CustomToolResultContractScenario._source_code_for_create_call(
             tool_calls,
@@ -274,6 +278,26 @@ class CustomToolResultContractEvalTests(TestCase):
 
         self.assertIn(new_text, source_code)
         self.assertNotIn(old_text, source_code)
+
+    def test_eval_apply_patch_helper_treats_empty_lines_as_context(self):
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /tools/example.py",
+            "@@",
+            " first",
+            "",
+            "-third",
+            "+fourth",
+            "*** End Patch",
+        ])
+
+        content = CustomToolResultContractScenario._apply_patch_to_content(
+            "first\n\nthird",
+            patch_text,
+            "/tools/example.py",
+        )
+
+        self.assertEqual(content, "first\n\nfourth")
 
     def test_local_create_tool_check_catches_missing_params(self):
         case = _case("scrape_url_normalization")

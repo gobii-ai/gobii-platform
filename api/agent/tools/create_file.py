@@ -122,7 +122,7 @@ def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
     if mime_type_raw is None:
         return {"status": "error", "message": "Missing required parameter: mime_type"}
 
-    path, overwrite, error = resolve_export_target(params)
+    path, overwrite, error = resolve_export_target(params, agent_id=agent.id)
     if error:
         return error
 

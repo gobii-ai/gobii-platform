@@ -657,7 +657,7 @@ def execute_create_video(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     if not isinstance(prompt, str) or not prompt.strip():
         return {"status": "error", "message": "Missing required parameter: prompt"}
 
-    path, overwrite, error = resolve_export_target(params)
+    path, overwrite, error = resolve_export_target(params, agent_id=agent.id)
     if error:
         return error
 

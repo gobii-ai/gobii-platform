@@ -10,7 +10,7 @@ from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 
 PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
     CREATE_CUSTOM_TOOL_NAME,
-    "file_str_replace",
+    "apply_patch",
     "request_contact_permission",
     "spawn_web_task",
     "update_plan",
@@ -66,8 +66,8 @@ def _get_sleep_tool() -> Dict[str, object]:
 
 def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     """Return static (always-present) tool definitions for an agent."""
+    from .apply_patch import get_apply_patch_tool
     from .email_sender import get_send_email_tool
-    from .file_str_replace import get_file_str_replace_tool
     from .planning import get_end_planning_tool
     from .request_human_input import get_request_human_input_tool
     from .request_contact_permission import get_request_contact_permission_tool
@@ -102,7 +102,7 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
         static_tools.append(get_end_planning_tool())
 
-    static_tools.append(get_file_str_replace_tool())
+    static_tools.append(get_apply_patch_tool())
 
     if agent.webhooks.exists():
         static_tools.append(get_send_webhook_tool())

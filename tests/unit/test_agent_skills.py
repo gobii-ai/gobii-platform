@@ -20,6 +20,7 @@ from api.agent.system_skills.service import (
     enable_and_refresh_system_skills_for_tool,
     enable_system_skills,
 )
+from api.agent.system_skills.defaults import CODE_WORK_SYSTEM_SKILL_KEY, DEFAULT_SYSTEM_SKILL_DEFINITIONS
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tools.tool_manager import (
@@ -469,6 +470,16 @@ class AgentSkillsPersistenceTests(TestCase):
             ).exists()
         )
 
+    def test_code_work_system_skill_is_registered_but_not_default_enabled(self):
+        self.assertIn(CODE_WORK_SYSTEM_SKILL_KEY, DEFAULT_SYSTEM_SKILL_DEFINITIONS)
+        self.assertNotIn(CODE_WORK_SYSTEM_SKILL_KEY, default_enabled_system_skill_keys())
+
+        definition = DEFAULT_SYSTEM_SKILL_DEFINITIONS[CODE_WORK_SYSTEM_SKILL_KEY]
+        self.assertIn("apply_patch", definition.tool_names)
+        self.assertIn("run_command", definition.tool_names)
+        self.assertIn("git status --short", definition.prompt_instructions)
+        self.assertNotIn("search_tools", definition.prompt_instructions)
+
     @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True)
     def test_enable_system_skill_accepts_available_create_custom_tool(self, _mock_sandbox):
         result = enable_system_skills(self.agent, [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
@@ -784,6 +795,7 @@ class AgentSkillToolEnablementTests(TestCase):
     @patch("api.agent.tools.tool_manager._build_available_tool_index", return_value={})
     def test_available_tool_ids_include_static_base_tools(self, _mock_catalog):
         available = get_available_tool_ids(self.agent)
+        self.assertIn("apply_patch", available)
         self.assertIn("search_tools", available)
         self.assertIn("send_email", available)
 

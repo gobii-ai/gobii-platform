@@ -14,6 +14,7 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
 APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
 HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
+CODE_WORK_SYSTEM_SKILL_KEY = "code_work"
 
 
 def _custom_tool_development_prompt_available(agent) -> bool:
@@ -168,6 +169,82 @@ def _hubspot_native_prompt_instructions(agent) -> str:
     )
 
 
+CODE_WORK_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=CODE_WORK_SYSTEM_SKILL_KEY,
+    name="Code Work",
+    search_summary="Write, edit, debug, verify, and deploy code with source-of-truth discovery and reviewable changes.",
+    tool_names=("read_file", "create_file", "apply_patch", "run_command"),
+    enables=(
+        "inspect project structure, instructions, and existing code patterns",
+        "make small reviewable source, script, config, HTML, CSS, and JavaScript edits",
+        "debug failures with concrete commands and evidence",
+        "verify changes with tests, builds, syntax checks, smoke checks, or browser/render checks",
+        "prepare cautious deployments and rollback context for live software or static sites",
+    ),
+    use_when=(
+        "the user asks to write, edit, modify, fix, debug, refactor, review, test, build, or deploy code",
+        "the task touches scripts, source files, configuration, infrastructure files, HTML, CSS, JavaScript, or templates",
+        "the task involves a live site or software artifact that needs code changes",
+        "the work requires understanding an existing project before changing files",
+        "the agent is about to use shell, file-read, file-write, string-replacement, or deployment tools for engineering work",
+    ),
+    query_aliases=(
+        "code",
+        "coding",
+        "programming",
+        "software engineering",
+        "developer workflow",
+        "edit code",
+        "fix code",
+        "debug code",
+        "refactor",
+        "repo",
+        "git",
+        "tests",
+        "frontend",
+        "html css",
+        "javascript",
+        "python",
+        "deploy site",
+    ),
+    prompt_instructions=(
+        "Treat code changes as durable engineering artifacts, not one-off text generation.\n"
+        "Start by identifying the source of truth. Check project instructions such as AGENTS.md, README, "
+        "package/test config, and nearby files. Check whether the workspace is a git repo with commands like "
+        "`git rev-parse --show-toplevel` and `git status --short` before assuming there is repo-backed rollback. "
+        "If there is no git repo, preserve rollback context for risky edits by keeping a local baseline, backup, "
+        "or generated diff before changing important files.\n"
+        "Read before writing. Inspect surrounding code, conventions, naming, tests, build scripts, deployment "
+        "scripts, and existing helper APIs. Prefer fast targeted discovery such as rg/find/ls/sed/git grep. "
+        "Do not infer architecture from filenames alone.\n"
+        "Prefer small, reviewable edits. Use patch- or diff-capable editing flows when available. For structured "
+        "files, prefer structured parsers when practical: ASTs for code, JSON/YAML parsers for config, and DOM/HTML "
+        "parsers for HTML. Avoid whole-file rewrites unless creating a new file, regenerating a deliberately "
+        "generated artifact, or replacing a tiny standalone file. Avoid brittle exact-string replacements for large "
+        "blocks; if a replacement fails once, inspect the current file before retrying.\n"
+        "For repeated transformations, create a named reusable script instead of embedding a long one-off command. "
+        "Make transformation scripts idempotent where practical and print a compact summary of files changed, counts, "
+        "and validation signals. Do not leave a throwaway script as the only explanation of a complex change.\n"
+        "Prove the change with the narrowest meaningful verification first. Use the project's existing commands when "
+        "present: targeted tests, typecheck, lint, build, syntax/import checks, smoke commands, local render, curl, "
+        "or browser checks. Match verification to risk: HTTP 200 and byte size are not enough for a visual redesign; "
+        "use screenshot or browser verification for layout/UI changes when possible. If a check cannot run, state why "
+        "and use the best available substitute.\n"
+        "Debug by evidence, not guesses. Capture the exact failing command and error, inspect state before retrying, "
+        "and if the same class of failure happens twice, stop varying parameters randomly. Re-read docs, list actual "
+        "paths/permissions, or ask for the missing fact. Avoid path-variant guessing, guessed web roots, repeated "
+        "failed replacements, and routine polling or health checks that do not answer a current question.\n"
+        "If git exists, check `git status --short` before edits, avoid overwriting unrelated user changes, and review "
+        "`git diff` before finalizing. If git does not exist, make the changed files and verification summary explicit "
+        "so the work remains reviewable.\n"
+        "Deploy only after local verification unless the user explicitly asks for emergency live repair. Before "
+        "deploying, know the target host, user, path, and privilege boundary; batch uploads and commands; preserve "
+        "the previous live artifact for risky changes; and verify the live result once with checks that match the "
+        "change. Do not run routine live health checks after unrelated cron/message events."
+    ),
+)
+
+
 CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
     name="Custom Tool Development",
@@ -217,7 +294,7 @@ CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
         "Development loop: call `create_custom_tool(source_path='/tools/my_tool.py', source_code=...)` first. "
         "If rejected, fix every listed issue and retry create_custom_tool, not create_file. Do not pass only `source_path` unless "
         "that file already exists. Invoke `custom_*`, inspect result/error, patch the same file with "
-        "`file_str_replace`, then re-run. Start with a small sample or limit, verify, then widen scope.\n"
+        "`apply_patch`, then re-run. Start with a small sample or limit, verify, then widen scope.\n"
         "Source format: scripts run via `uv run`; add PEP 723 third-party deps, never stdlib deps; "
         "define `def run(params, ctx): ...`.\n"
         "Expose useful runtime parameters instead of hardcoding sample data, ids, filters, table names, URLs, "
@@ -760,6 +837,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
 
 
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
+    CODE_WORK_SYSTEM_SKILL.skill_key: CODE_WORK_SYSTEM_SKILL,
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,

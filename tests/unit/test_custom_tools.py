@@ -39,8 +39,8 @@ from api.agent.tools.custom_tools import (
     validate_custom_tool_source_code,
 )
 from api.agent.tools.custom_tool_names import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
+from api.agent.tools.apply_patch import execute_apply_patch
 from api.agent.tools.create_file import get_create_file_tool
-from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_state import agent_sqlite_db
@@ -1050,47 +1050,260 @@ def run(params, ctx):
         mock_service._ensure_session.assert_called_once_with(self.agent, source="custom_tool_source_sync")
         mock_service._sync_workspace_push.assert_called_once()
 
-    def test_file_str_replace_updates_source_and_touches_custom_tool(self):
+    def test_apply_patch_updates_source_and_touches_custom_tool(self):
         write_result = write_bytes_to_dir(
             agent=self.agent,
             content_bytes=b"def run(params, ctx):\n    return {'message': 'hi'}\n",
             extension=".py",
             mime_type="text/x-python",
-            path="/tools/greeter.py",
+            path="/tools/patch_greeter.py",
             overwrite=True,
         )
         self.assertEqual(write_result.get("status"), "ok")
 
         tool = PersistentAgentCustomTool.objects.create(
             agent=self.agent,
-            name="Greeter",
-            tool_name="custom_greeter",
+            name="Patch Greeter",
+            tool_name="custom_patch_greeter",
             description="Return a greeting.",
-            source_path="/tools/greeter.py",
+            source_path="/tools/patch_greeter.py",
             parameters_schema={"type": "object", "properties": {}},
         )
         later = tool.updated_at + timedelta(minutes=5)
 
-        with patch("api.agent.tools.file_str_replace.timezone.now", return_value=later):
-            result = execute_file_str_replace(
-                self.agent,
-                {
-                    "path": "/tools/greeter.py",
-                    "old_text": "'hi'",
-                    "new_text": "'hello'",
-                    "expected_replacements": 1,
-                },
-            )
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /tools/patch_greeter.py",
+            "@@",
+            " def run(params, ctx):",
+            "-    return {'message': 'hi'}",
+            "+    return {'message': 'hello'}",
+            "*** End Patch",
+        ])
+        with patch("api.agent.tools.apply_patch.timezone.now", return_value=later):
+            result = execute_apply_patch(self.agent, {"patch": patch_text})
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["replacements"], 1)
+        self.assertEqual(result["updated"], ["/tools/patch_greeter.py"])
 
-        node = AgentFsNode.objects.get(path="/tools/greeter.py")
+        node = AgentFsNode.objects.get(path="/tools/patch_greeter.py")
         with node.content.open("rb") as handle:
             self.assertIn(b"hello", handle.read())
 
         tool.refresh_from_db()
         self.assertEqual(tool.updated_at, later)
+
+    def test_apply_patch_rejects_invalid_filespace_paths(self):
+        cases = [
+            (
+                "relative",
+                "\n".join([
+                    "*** Begin Patch",
+                    "*** Add File: tools/relative.py",
+                    "+print('hi')",
+                    "*** End Patch",
+                ]),
+                "Path must be absolute",
+            ),
+            (
+                "traversal",
+                "\n".join([
+                    "*** Begin Patch",
+                    "*** Add File: /tools/../escape.py",
+                    "+print('hi')",
+                    "*** End Patch",
+                ]),
+                "must not contain '.' or '..'",
+            ),
+            (
+                "unsafe",
+                "\n".join([
+                    "*** Begin Patch",
+                    "*** Add File: /tools/bad name.py",
+                    "+print('hi')",
+                    "*** End Patch",
+                ]),
+                "unsafe characters",
+            ),
+        ]
+
+        for _name, patch_text, expected_message in cases:
+            with self.subTest(_name):
+                result = execute_apply_patch(self.agent, {"patch": patch_text})
+                self.assertEqual(result["status"], "error")
+                self.assertIn(expected_message, result["message"])
+
+    def test_apply_patch_reports_missing_file(self):
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /tools/missing.py",
+            "@@",
+            "-print('old')",
+            "+print('new')",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "File not found: /tools/missing.py")
+
+    def test_apply_patch_does_not_persist_earlier_add_when_later_op_fails(self):
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Add File: /tools/partial.py",
+            "+print('created')",
+            "*** Update File: /tools/missing.py",
+            "@@",
+            "-print('old')",
+            "+print('new')",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "File not found: /tools/missing.py")
+        self.assertFalse(AgentFsNode.objects.alive().filter(path="/tools/partial.py").exists())
+
+    def test_apply_patch_allows_common_frontend_path_characters(self):
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Add File: /frontend/src/routes/+page.svelte",
+            "+<h1>Hello</h1>",
+            "*** Add File: /node_modules/@scope/pkg/index.ts",
+            "+export const ok = true;",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(AgentFsNode.objects.alive().filter(path="/frontend/src/routes/+page.svelte").exists())
+        self.assertTrue(AgentFsNode.objects.alive().filter(path="/node_modules/@scope/pkg/index.ts").exists())
+
+    def test_apply_patch_treats_empty_update_lines_as_context(self):
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"first\n\nthird\n",
+            extension=".txt",
+            mime_type="text/plain",
+            path="/exports/blank_context.txt",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /exports/blank_context.txt",
+            "@@",
+            " first",
+            "",
+            "-third",
+            "+fourth",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        node = AgentFsNode.objects.get(path="/exports/blank_context.txt", is_deleted=False)
+        with node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), b"first\n\nfourth\n")
+
+    def test_apply_patch_move_updates_custom_tool_source_path(self):
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"def run(params, ctx):\n    return {'ok': False}\n",
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/move_source.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Move Source",
+            tool_name="custom_move_source",
+            description="Move source.",
+            source_path="/tools/move_source.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /tools/move_source.py",
+            "*** Move to: /tools/moved_source.py",
+            "@@",
+            " def run(params, ctx):",
+            "-    return {'ok': False}",
+            "+    return {'ok': True}",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["updated"], ["/tools/moved_source.py"])
+        self.assertFalse(AgentFsNode.objects.alive().filter(path="/tools/move_source.py").exists())
+        self.assertTrue(AgentFsNode.objects.alive().filter(path="/tools/moved_source.py").exists())
+        tool.refresh_from_db()
+        self.assertEqual(tool.source_path, "/tools/moved_source.py")
+
+    def test_apply_patch_workspace_alias_updates_filespace_path(self):
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b".button { color: blue; }\n",
+            extension=".css",
+            mime_type="text/css",
+            path="/gobii-platform/frontend/src/styles/app.css",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /workspace/gobii-platform/frontend/src/styles/app.css",
+            "@@",
+            "-.button { color: blue; }",
+            "+.button { color: purple; }",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["updated"], ["/gobii-platform/frontend/src/styles/app.css"])
+
+        node = AgentFsNode.objects.get(path="/gobii-platform/frontend/src/styles/app.css")
+        with node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), b".button { color: purple; }\n")
+
+    def test_apply_patch_agent_scoped_workspace_alias_updates_filespace_path(self):
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"def run(params, ctx):\n    return {'ok': False}\n",
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/scoped_patch.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            f"*** Update File: /workspace/{self.agent.id}/tools/scoped_patch.py",
+            "@@",
+            " def run(params, ctx):",
+            "-    return {'ok': False}",
+            "+    return {'ok': True}",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["updated"], ["/tools/scoped_patch.py"])
+
+        node = AgentFsNode.objects.get(path="/tools/scoped_patch.py")
+        with node.content.open("rb") as handle:
+            self.assertIn(b"True", handle.read())
 
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager._get_manager")
@@ -1256,8 +1469,6 @@ def run(params, ctx):
         self.assertIn("file_path='/tools/my_tool.py'", description)
         self.assertIn("content=<python source>", description)
         self.assertIn("`/exports/report.txt` are Gobii tool args", description)
-        self.assertIn("Path('/workspace/exports/report.txt')", description)
-        self.assertIn("open('/exports/report.txt', ...)", description)
         self.assertIn("Latest workspace edits are synced automatically", description)
         self.assertIn("Use for 3+ repeated steps", description)
         self.assertIn("err early", description)
@@ -1266,7 +1477,7 @@ def run(params, ctx):
         self.assertIn("include `limit`/`batch_size`, filters, progress", description)
         self.assertIn("batch/limit tools return `remaining_work`/`next_cursor`", description)
         self.assertIn("patch for smaller resumable batches", description)
-        self.assertIn("Prefer patching the same file", description)
+        self.assertIn("use apply_patch on the same file", description)
         self.assertIn("with ctx.sqlite() as db", description)
         self.assertIn("after the block exits the DB is closed", description)
         self.assertIn("agent SQLite DB", description)

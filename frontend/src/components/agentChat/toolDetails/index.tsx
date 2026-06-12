@@ -25,9 +25,9 @@ import { ChartDetail } from './details/chart'
 import { ImageDetail } from './details/image'
 import { VideoDetail } from './details/video'
 import {
+  ApplyPatchDetail,
   CreateCustomToolDetail,
   CustomToolRunDetail,
-  FileStringReplaceDetail,
   PythonExecDetail,
   RunCommandDetail,
 } from './details/sandbox'
@@ -73,7 +73,7 @@ export {
   VideoDetail,
   RunCommandDetail,
   PythonExecDetail,
-  FileStringReplaceDetail,
+  ApplyPatchDetail,
   CreateCustomToolDetail,
   CustomToolRunDetail,
 }
@@ -117,7 +117,7 @@ export const TOOL_DETAIL_COMPONENTS = {
   mcpTool: McpToolDetail,
   runCommand: RunCommandDetail,
   pythonExec: PythonExecDetail,
-  fileStringReplace: FileStringReplaceDetail,
+  applyPatch: ApplyPatchDetail,
   createCustomTool: CreateCustomToolDetail,
   customToolRun: CustomToolRunDetail,
 } satisfies Record<string, ToolDetailComponent>

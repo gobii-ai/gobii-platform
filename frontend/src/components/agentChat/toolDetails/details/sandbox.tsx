@@ -112,30 +112,24 @@ export function PythonExecDetail({ entry }: ToolDetailProps) {
   )
 }
 
-export function FileStringReplaceDetail({ entry }: ToolDetailProps) {
+export function ApplyPatchDetail({ entry }: ToolDetailProps) {
   const params = entry.parameters || {}
   const result = parseResultObject(entry.result)
-  const path = toText(params.path) || toText(result?.path)
-  const oldText = toContent(params.old_text)
-  const newTextValue = typeof params.new_text === 'string' ? params.new_text : null
+  const patch = toContent(params.patch)
+  const paths = Array.isArray(result?.paths) ? result.paths.map(toText).filter(Boolean).join(', ') : null
 
   return (
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList
         items={[
-          path ? { label: 'Path', value: path } : null,
+          paths ? { label: 'Paths', value: paths } : null,
         ]}
       />
-      {oldText ? (
-        <Section title="Find">
-          <CodeBlock code={oldText} language="text" />
-        </Section>
-      ) : null}
-      <Section title="Replace With">
-        {newTextValue && newTextValue.length ? (
-          <CodeBlock code={newTextValue} language="text" />
+      <Section title="Patch">
+        {patch ? (
+          <CodeBlock code={patch} language="diff" />
         ) : (
-          <p className="text-slate-700">Empty string. Matching text is removed.</p>
+          <p className="text-slate-700">Patch content was not recorded.</p>
         )}
       </Section>
     </div>

@@ -559,7 +559,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             ),
         }
 
-    path, overwrite, error = resolve_export_target(params)
+    path, overwrite, error = resolve_export_target(params, agent_id=agent.id)
     if error:
         return error
 
