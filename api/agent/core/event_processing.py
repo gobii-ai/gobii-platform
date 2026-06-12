@@ -1279,6 +1279,7 @@ def _persist_tool_call_step(
     consumed_credit: Any,
     attach_completion: Any,
     attach_prompt_archive: Any,
+    parent_tool_call: Any = None,
 ) -> Optional["PersistentAgentStep"]:
     """Persist a tool call step with robust error handling.
 
@@ -1312,6 +1313,7 @@ def _persist_tool_call_step(
         tool_call_status = status or "complete"
         PersistentAgentToolCall.objects.create(
             step=step,
+            parent_tool_call=parent_tool_call,
             tool_name=safe_tool_name,
             tool_params=tool_params,
             result=normalized_result,
@@ -1409,6 +1411,7 @@ def _create_pending_tool_call_step(
     consumed_credit: Any,
     attach_completion: Any,
     attach_prompt_archive: Any,
+    parent_tool_call: Any = None,
 ) -> Optional["PersistentAgentStep"]:
     from api.models import PersistentAgentStep, PersistentAgentToolCall
 
@@ -1426,6 +1429,7 @@ def _create_pending_tool_call_step(
         attach_prompt_archive(step)
         PersistentAgentToolCall.objects.create(
             step=step,
+            parent_tool_call=parent_tool_call,
             tool_name=safe_tool_name,
             tool_params=tool_params,
             result="",
@@ -1459,6 +1463,7 @@ def _finalize_pending_tool_call_step(
     result_content: str,
     execution_duration_ms: Optional[int],
     status: str,
+    parent_tool_call: Any = None,
 ) -> None:
     from api.models import PersistentAgentToolCall
 
@@ -1500,6 +1505,7 @@ def _finalize_pending_tool_call_step(
         if tool_call is None:
             tool_call = PersistentAgentToolCall.objects.create(
                 step=step,
+                parent_tool_call=parent_tool_call,
                 tool_name=safe_tool_name,
                 tool_params=tool_params,
                 result=normalized_result,
@@ -1513,7 +1519,11 @@ def _finalize_pending_tool_call_step(
             tool_call.result = normalized_result
             tool_call.execution_duration_ms = execution_duration_ms
             tool_call.status = status
-            tool_call.save(update_fields=["tool_name", "tool_params", "result", "execution_duration_ms", "status"])
+            update_fields = ["tool_name", "tool_params", "result", "execution_duration_ms", "status"]
+            if parent_tool_call is not None and tool_call.parent_tool_call_id is None:
+                tool_call.parent_tool_call = parent_tool_call
+                update_fields.append("parent_tool_call")
+            tool_call.save(update_fields=update_fields)
     except Exception as exc:
         agent = _agent_from_step(step)
         if agent is not None:

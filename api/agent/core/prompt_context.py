@@ -4323,8 +4323,17 @@ def _get_unified_history_prompt(
         tool_call_results = (
             PersistentAgentToolCall.objects
             .filter(step_id__in=list(step_lookup.keys()))
-            .values("step_id", "result", "tool_name", "step__completion_id")
+            .values(
+                "step_id",
+                "result",
+                "tool_name",
+                "step__completion_id",
+                "parent_tool_call_id",
+                "parent_tool_call__tool_name",
+            )
         )
+        tool_call_parent_ids: Dict[str, str] = {}
+        tool_call_parent_names: Dict[str, str] = {}
         for row in tool_call_results:
             step_id = str(row["step_id"])
             step = step_lookup.get(step_id)
@@ -4340,6 +4349,13 @@ def _get_unified_history_prompt(
                 continue
             completion_id = row.get("step__completion_id")
             tool_call_completion_ids[step_id] = str(completion_id) if completion_id else None
+            parent_tool_call_id = row.get("parent_tool_call_id")
+            if parent_tool_call_id:
+                parent_id = str(parent_tool_call_id)
+                tool_call_parent_ids[step_id] = parent_id
+                parent_tool_name = row.get("parent_tool_call__tool_name") or ""
+                if parent_tool_name:
+                    tool_call_parent_names[step_id] = str(parent_tool_name)
             tool_call_records.append(
                 ToolCallResultRecord(
                     step_id=step_id,
@@ -4348,6 +4364,28 @@ def _get_unified_history_prompt(
                     result_text=result_text,
                 )
             )
+        missing_parent_ids = set(tool_call_parent_ids.values()) - {record.step_id for record in tool_call_records}
+        if missing_parent_ids:
+            parent_tool_call_results = (
+                PersistentAgentToolCall.objects
+                .filter(step_id__in=missing_parent_ids)
+                .values("step_id", "result", "tool_name", "step__created_at", "step__completion_id")
+            )
+            for row in parent_tool_call_results:
+                result_text = row.get("result") or ""
+                if not result_text:
+                    continue
+                step_id = str(row["step_id"])
+                completion_id = row.get("step__completion_id")
+                tool_call_completion_ids[step_id] = str(completion_id) if completion_id else None
+                tool_call_records.append(
+                    ToolCallResultRecord(
+                        step_id=step_id,
+                        tool_name=row.get("tool_name") or "",
+                        created_at=row["step__created_at"],
+                        result_text=result_text,
+                    )
+                )
         if tool_call_records:
             newest_record = max(tool_call_records, key=lambda record: record.created_at)
             newest_completion_id = tool_call_completion_ids.get(newest_record.step_id)
@@ -4390,6 +4428,13 @@ def _get_unified_history_prompt(
                 "meta": f"[{s.created_at.isoformat()}] Tool {tc.tool_name} called.",
                 "params": json.dumps(tc.tool_params)
             }
+            parent_tool_call_id = tool_call_parent_ids.get(str(s.id))
+            parent_result_info = tool_result_prompt_info.get(parent_tool_call_id) if parent_tool_call_id else None
+            if parent_result_info:
+                parent_tool_name = tool_call_parent_names.get(str(s.id))
+                if parent_tool_name:
+                    components["parent_tool_name"] = parent_tool_name
+                components["parent_result_id"] = parent_result_info.result_id
             if getattr(s, "credits_cost", None) is not None:
                 components["cost"] = f"{s.credits_cost} credits"
             result_info = tool_result_prompt_info.get(str(s.id))
@@ -4643,6 +4688,8 @@ def _get_unified_history_prompt(
         # Component weights within each event
         COMPONENT_WEIGHTS = {
             "meta": 3,        # High priority - always want to see what happened
+            "parent_tool_name": 3,  # High priority - identifies the parent tool without a lookup
+            "parent_result_id": 3,  # High priority - preserves nested tool attribution
             "cost": 2,        # Helpful for budgeting; small and should remain visible
             "params": 1,      # Low priority - can be shrunk aggressively
             "prompt": 1,      # Browser task/user prompt context; useful but repeatable

@@ -3,6 +3,7 @@ import re
 import sqlite3
 import shutil
 import tempfile
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -1764,6 +1765,48 @@ class PromptContextBuilderTests(TestCase):
         content = user_message['content']
         self.assertIn("_tool_call>", content)
         self.assertIn("<cost>1.234 credits</cost>", content)
+
+    def test_tool_call_history_includes_parent_result_id_component(self):
+        parent_step = PersistentAgentStep.objects.create(
+            id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+            agent=self.agent,
+            description="Tool call: custom_wrapper",
+        )
+        parent_tool_call = PersistentAgentToolCall.objects.create(
+            step=parent_step,
+            tool_name="custom_wrapper",
+            tool_params={},
+            result=json.dumps({"status": "ok"}),
+        )
+        child_step = PersistentAgentStep.objects.create(
+            id=uuid.UUID("22222222-2222-4222-8222-222222222222"),
+            agent=self.agent,
+            description="Tool call: send_email",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=child_step,
+            parent_tool_call=parent_tool_call,
+            tool_name="send_email",
+            tool_params={"to": "person@example.com"},
+            result=json.dumps({"status": "sent"}),
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message['content']
+        self.assertIn(
+            "<parent_tool_name>custom_wrapper</parent_tool_name>",
+            content,
+        )
+        self.assertIn(
+            "<parent_result_id>111111</parent_result_id>",
+            content,
+        )
+        self.assertNotIn(f"<parent_result_id>{parent_tool_call.pk}</parent_result_id>", content)
 
     def test_completed_browser_tasks_use_unified_history_window_not_tool_history_limit(self):
         self._configure_unified_history_limits(

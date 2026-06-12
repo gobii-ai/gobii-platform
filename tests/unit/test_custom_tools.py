@@ -67,6 +67,7 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentSystemSkillState,
+    PersistentAgentToolCall,
     SystemSkillProfile,
     TaskCredit,
     UserQuota,
@@ -1992,6 +1993,13 @@ def run(params, ctx):
             credits_cost=Decimal("0.000"),
             task_credit=credit,
         )
+        parent_tool_call = PersistentAgentToolCall.objects.create(
+            step=parent_step,
+            tool_name="custom_wrapper",
+            tool_params={},
+            result=json.dumps({"status": "running"}),
+            status="complete",
+        )
         custom_tool = PersistentAgentCustomTool.objects.create(
             agent=self.agent,
             name="Wrapper",
@@ -2032,7 +2040,7 @@ def run(params, ctx):
         nested_steps = (
             PersistentAgentStep.objects.filter(agent=self.agent)
             .exclude(id=parent_step.id)
-            .select_related("tool_call", "completion", "task_credit")
+            .select_related("tool_call", "tool_call__parent_tool_call", "completion", "task_credit")
         )
         self.assertEqual(nested_steps.count(), 1)
         nested_step = nested_steps.get()
@@ -2040,6 +2048,8 @@ def run(params, ctx):
         self.assertEqual(nested_step.credits_cost, Decimal("0.040"))
         self.assertEqual(nested_step.task_credit_id, credit.id)
         self.assertEqual(nested_step.tool_call.tool_name, "update_charter")
+        self.assertEqual(nested_step.tool_call.parent_tool_call_id, parent_tool_call.pk)
+        self.assertEqual(nested_step.tool_call.parent_tool_call.tool_name, "custom_wrapper")
         self.assertEqual(nested_step.tool_call.status, "complete")
         self.assertIn("Charter updated successfully.", nested_step.tool_call.result)
 
