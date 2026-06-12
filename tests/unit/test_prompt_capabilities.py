@@ -237,27 +237,14 @@ class AgentCapabilitiesPromptTests(TestCase):
         context, _, _ = build_prompt_context(self.agent)
         contents = "\n".join(message["content"] for message in context)
 
-        self.assertIn(
-            "This tool sends the final answer/report and no work remains after it → will_continue_work=false",
-            contents,
-        )
-        self.assertIn(
-            "Plan-aware termination sequence",
-            contents,
-        )
-        self.assertIn(
-            "Send the final report with will_continue_work=false only if no current plan items remain todo/doing",
-            contents,
-        )
-        self.assertIn(
-            "send with will_continue_work=true, then call update_plan with every finished/deferred item resolved and will_continue_work=false",
-            contents,
-        )
-        self.assertIn(
-            "After the final send and final plan update, stop with no extra message",
-            contents,
-        )
-        self.assertIn("Plain text is invisible and update_plan is not delivery", contents)
+        self.assertIn("Set will_continue_work on every tool call", contents)
+        self.assertIn("Use true while another immediate action remains", contents)
+        self.assertIn("Use false only after the requested reply/report/config change is delivered", contents)
+        self.assertIn("Future scheduled work does not count as continuing now", contents)
+        self.assertIn("Plans: final report first", contents)
+        self.assertIn("then update_plan to mark finished/deferred items", contents)
+        self.assertIn("Text is not delivered in this mode", contents)
+        self.assertIn("update_plan is not delivery", contents)
         self.assertNotIn(
             "Need to send the user your answer, summary, or final report → will_continue_work=true",
             contents,

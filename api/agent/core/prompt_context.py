@@ -3483,9 +3483,10 @@ def _get_planning_first_run_welcome_instruction(
 def _get_continuation_mode_prompt_block() -> str:
     return (
         "## Continuation Mode\n\n"
-        "Continue the existing work thread; history, summaries, tool results, and user messages contain task state. "
-        "Identify completed work, latest successful result, latest failure/blocker, and the next concrete action. "
-        "Do not restart from the charter, recreate artifacts, repeat setup, or re-solve solved parts. Verify only the smallest needed fact, prefer one direct next tool call, and change strategy after a specific failure.\n\n"
+        "Continue the existing work thread; history, summaries, tool results, and user messages contain state. "
+        "Identify completed work, latest success/failure/blocker, and the next concrete action. "
+        "Do not restart, recreate artifacts, repeat setup, or resolve solved parts. Verify the smallest needed fact, prefer one direct next tool call, and change strategy after failure. "
+        "If one workstream waits on human input, credentials, auth, or a third party, park it and continue the next unblocked charter/plan item. Sleep or ask only when all active useful work is done or blocked; on recurring wakeups, verify blockers once, then keep moving.\n\n"
     )
 
 
@@ -3529,57 +3530,31 @@ def _get_system_instruction(
     else:
         delivery_context = (
             "## Delivery & Response Behavior\n\n"
-            "Text output is not delivered; communicate with send_email/send_sms/send_agent_message/send_chat_message. "
+            "Text is not delivered in this mode: use send_ tools for questions, blockers, findings, config changes, and final deliverables; update_plan is not delivery. "
             "Use request_human_input only for tracked option-based decisions; use send tools for free-text questions and capability/status/policy answers. "
             "If notifying by email/SMS too, include the same questions in that outbound body. "
             "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts. "
-            "Focus on tool calls—text alone is not delivered.\n\n"
+            "Focus on tool calls - text alone is not delivered.\n\n"
         )
         response_structure = (
-            "Response structure: tools while working; empty response sleeps; message + send tool only for FINDINGS, blockers, config changes, or final output. "
-            "Note: Text-only output is never delivered. Always use send tools for communication."
+            "Response structure: tools while working; empty response sleeps; message + send tool only for FINDINGS, blockers, config changes, or final output."
+            "Note: Text output is never delivered. Always use send tools for communication."
         )
         tool_calls_note = ""
         stop_explicit_note = "To stop explicitly: use `sleep_until_next_trigger`.\n"
 
-    # Comprehensive examples showing stop vs continue, charter/schedule updates.
-    # Keep explicit-send examples channel-agnostic when implied send is unavailable.
-    reply = (
-        "'Message'"
-        if implied_send_active
-        else "use the right explicit send tool (`send_chat_message`, `send_email`, `send_sms`, or `send_agent_message`) with 'Message'"
-    )
-    fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
+    # Keep stop/continue guidance compact; tool schemas carry channel-specific details.
     text_only_guidance = (
         "- Text-only replies stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n\n"
         if implied_send_active
-        else "- Text-only replies are not delivered when implied send is unavailable—use explicit send tools.\n\n"
-    )
-    stop_examples_schedule = (
-        ""
-        if planning_mode_active
-        else "- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=true), then reply with will_continue_work=false → STOP.\n"
-    )
-    mid_conversation_schedule_examples = (
-        ""
-        if planning_mode_active
-        else "- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *', will_continue_work=true), then reply with will_continue_work=false → STOP.\n"
+        else ""
     )
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
-        "**ALWAYS set will_continue_work explicitly on every tool call.** STOP means no current-turn result, question, or work remains; continue means another immediate action remains. "
-        f"Brief replies, finished config changes, empty cron runs, and sent final reports stop with will_continue_work=false.{stop_examples_schedule}\n"
-        "- Future scheduled work does not count as continuing now; after configuring a schedule and sending any requested confirmation/report, stop.\n"
-        f"- Fetched data but {fetched_note} → will_continue_work=true, keep going.\n"
-        "- This tool sends the final answer/report and no work remains after it → will_continue_work=false, STOP.\n"
-        "- Requested count/distinctness/constraints not yet verified on the final set → will_continue_work=true, keep going.\n"
-        "- Need a blocking human answer, another tool result, or a final user-facing report → will_continue_work=true, keep going.\n"
+        "Set will_continue_work on every tool call. Use true while another immediate action remains: unsent results, unverified requested constraints, unfinished useful plan work, needed tool results, or a final user-facing report. "
+        "Use false only after the requested reply/report/config change is delivered and no active useful work remains. Future scheduled work does not count as continuing now.\n"
         f"{text_only_guidance}"
-        f"{mid_conversation_schedule_examples}"
-        "**Plan-aware termination sequence:** "
-        "1. Send the final report with will_continue_work=false only if no current plan items remain todo/doing. "
-        "2. If the report is ready but the plan is unfinished, send with will_continue_work=true, then call update_plan with every finished/deferred item resolved and will_continue_work=false. "
-        "3. After the final send and final plan update, stop with no extra message.\n\n"
+        "Plans: final report first. If visible plan items remain, send the report with will_continue_work=true, then update_plan to mark finished/deferred items and stop with will_continue_work=false.\n\n"
         "Recurring or truly multi-phase work may need charter/schedule updates; one-off work usually needs neither.\n"
     )
 
@@ -3604,7 +3579,7 @@ def _get_system_instruction(
         "Use exactly the requested delivery channel; if asked to email, send_email and stop without a chat confirmation unless both channels were requested. "
         "Never announce what you're about to do—announcements terminate you before delivery. "
         "Wrong: 'Let me fetch that data...' Right: [just make the tool call with no text]\n\n"
-        "Scheduled/background triggers without implied send still need explicit delivery: after an exact feed/API fetch, call send_chat_message(body=brief sourced report, will_continue_work=false). Plain text is invisible and update_plan is not delivery.\n\n"
+        "Scheduled/background exact feed/API fetches without implied send still need send_chat_message(body=brief sourced report, will_continue_work=false).\n\n"
         f"{stop_continue_examples}"
     )
 

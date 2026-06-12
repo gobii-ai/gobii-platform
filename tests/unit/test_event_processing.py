@@ -1706,7 +1706,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("Implied Send", content)
         self.assertNotIn("send_<channel>", content)
         self.assertIn(
-            "Text-only replies are not delivered when implied send is unavailable",
+            "Text is not delivered in this mode",
             content,
         )
         self.assertNotIn(
@@ -1734,7 +1734,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(len(metadata["prompt_failover_configs"]), 2)
         self.assertNotIn("Implied Send", content)
         self.assertIn(
-            "Text-only replies are not delivered when implied send is unavailable",
+            "Text is not delivered in this mode",
             content,
         )
 

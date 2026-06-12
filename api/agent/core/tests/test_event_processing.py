@@ -733,6 +733,9 @@ class ContinuationModePromptContextTests(TestCase):
         self.assertIn("## Continuation Mode", system_prompt)
         self.assertIn("Continue the existing work thread", system_prompt)
         self.assertIn("prefer one direct next tool call", system_prompt)
+        self.assertIn("If one workstream waits on human input, credentials, auth, or a third party", system_prompt)
+        self.assertIn("continue the next unblocked charter/plan item", system_prompt)
+        self.assertIn("verify blockers once, then keep moving", system_prompt)
 
     def test_prompt_omits_continuation_mode_on_first_run(self):
         system_prompt = self._render_system_prompt(is_first_run=True)
