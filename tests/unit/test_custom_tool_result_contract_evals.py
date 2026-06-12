@@ -279,6 +279,26 @@ class CustomToolResultContractEvalTests(TestCase):
         self.assertIn(new_text, source_code)
         self.assertNotIn(old_text, source_code)
 
+    def test_eval_apply_patch_helper_treats_empty_lines_as_context(self):
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /tools/example.py",
+            "@@",
+            " first",
+            "",
+            "-third",
+            "+fourth",
+            "*** End Patch",
+        ])
+
+        content = CustomToolResultContractScenario._apply_patch_to_content(
+            "first\n\nthird",
+            patch_text,
+            "/tools/example.py",
+        )
+
+        self.assertEqual(content, "first\n\nfourth")
+
     def test_local_create_tool_check_catches_missing_params(self):
         case = _case("scrape_url_normalization")
         schema = {"type": "object", "properties": {}, "required": []}

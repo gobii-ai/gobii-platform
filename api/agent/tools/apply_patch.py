@@ -1,11 +1,11 @@
 import logging
 import posixpath
+import re
 from dataclasses import dataclass
 from typing import Any, Dict
 
 from django.core.files.storage import default_storage
 from django.utils import timezone
-from django.utils.text import get_valid_filename
 
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.agent.tools.filespace_paths import normalize_filespace_tool_path
@@ -21,6 +21,7 @@ ADD_FILE = "*** Add File: "
 DELETE_FILE = "*** Delete File: "
 UPDATE_FILE = "*** Update File: "
 MOVE_TO = "*** Move to: "
+SAFE_PATH_PART_RE = re.compile(r"^[-a-zA-Z0-9_.+@]+$")
 
 
 @dataclass
@@ -29,6 +30,16 @@ class _PatchOp:
     path: str
     lines: list[str]
     move_to: str | None = None
+
+
+@dataclass
+class _PreparedPatchOp:
+    kind: str
+    path: str
+    target_path: str | None = None
+    content_bytes: bytes | None = None
+    mime_type: str = "text/plain"
+    node: AgentFsNode | None = None
 
 
 def _resolve_path(value: Any, *, agent_id: Any = None) -> tuple[str | None, str | None]:
@@ -51,7 +62,7 @@ def _resolve_path(value: Any, *, agent_id: Any = None) -> tuple[str | None, str 
     if parts[-1] in {".", ".."}:
         return None, "Path must include a filename."
     for part in parts:
-        if get_valid_filename(part) != part:
+        if not SAFE_PATH_PART_RE.match(part):
             return None, "Path contains unsafe characters."
     return normalized, None
 
@@ -152,7 +163,7 @@ def _parse_patch(patch_text: str, *, agent_id: Any = None) -> tuple[list[_PatchO
                 change_line = raw_lines[index]
                 if change_line.startswith("@@"):
                     change_lines.append(change_line)
-                elif change_line.startswith(("+", "-", " ")):
+                elif change_line.startswith(("+", "-", " ")) or change_line == "":
                     change_lines.append(change_line)
                 else:
                     return None, f"Update lines must start with ' ', '+', '-', or '@@': {change_line!r}"
@@ -262,6 +273,10 @@ def _apply_update(text: str, change_lines: list[str]) -> tuple[str | None, str |
         new_lines: list[str] = []
         changed = False
         for line in group:
+            if line == "":
+                old_lines.append("")
+                new_lines.append("")
+                continue
             prefix = line[:1]
             value = line[1:]
             if prefix == " ":
@@ -293,6 +308,68 @@ def _touch_custom_tool_sources(agent: PersistentAgent, paths: list[str]) -> None
         PersistentAgentCustomTool.objects.filter(agent=agent, source_path__in=paths).update(updated_at=timezone.now())
 
 
+def _prepare_patch_ops(filespace, ops: list[_PatchOp]) -> tuple[list[_PreparedPatchOp] | None, dict[str, Any] | None]:
+    prepared: list[_PreparedPatchOp] = []
+
+    for op in ops:
+        node = _get_alive_node(filespace, op.path)
+
+        if op.kind == "add":
+            if node is not None:
+                return None, {"status": "error", "message": f"File already exists: {op.path}"}
+            content = "\n".join(op.lines)
+            if op.lines:
+                content += "\n"
+            prepared.append(
+                _PreparedPatchOp(
+                    kind="add",
+                    path=op.path,
+                    target_path=op.path,
+                    content_bytes=content.encode("utf-8"),
+                    mime_type="text/plain",
+                )
+            )
+            continue
+
+        if node is None:
+            return None, {"status": "error", "message": f"File not found: {op.path}"}
+
+        if op.kind == "delete":
+            if node.node_type != AgentFsNode.NodeType.FILE:
+                return None, {"status": "error", "message": f"Path is a directory: {op.path}"}
+            prepared.append(_PreparedPatchOp(kind="delete", path=op.path, node=node))
+            continue
+
+        if op.kind == "update":
+            original_text, read_error = _read_utf8_node(node)
+            if read_error:
+                return None, read_error
+            updated_text, apply_error, hunks_applied = _apply_update(original_text or "", op.lines)
+            if apply_error:
+                return None, {
+                    "status": "error",
+                    "message": apply_error,
+                    "path": op.path,
+                    "hunks_applied": hunks_applied,
+                }
+            target_path = op.move_to or op.path
+            if op.move_to and op.move_to != op.path and _get_alive_node(filespace, target_path) is not None:
+                return None, {"status": "error", "message": f"Move target already exists: {target_path}"}
+            prepared.append(
+                _PreparedPatchOp(
+                    kind="update",
+                    path=op.path,
+                    target_path=target_path,
+                    content_bytes=(updated_text or "").encode("utf-8"),
+                    mime_type=node.mime_type or "text/plain",
+                    node=node,
+                )
+            )
+            continue
+
+    return prepared, None
+
+
 def execute_apply_patch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     patch_text = params.get("patch")
     if not isinstance(patch_text, str) or not patch_text.strip():
@@ -306,25 +383,22 @@ def execute_apply_patch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
     if filespace_error:
         return filespace_error
 
+    prepared_ops, prepare_error = _prepare_patch_ops(filespace, ops or [])
+    if prepare_error:
+        return prepare_error
+
     changed_paths: list[str] = []
     created_paths: list[str] = []
     updated_paths: list[str] = []
     deleted_paths: list[str] = []
 
-    for op in ops or []:
-        node = _get_alive_node(filespace, op.path)
-
+    for op in prepared_ops or []:
         if op.kind == "add":
-            if node is not None:
-                return {"status": "error", "message": f"File already exists: {op.path}"}
-            content = "\n".join(op.lines)
-            if op.lines:
-                content += "\n"
             write_result = write_bytes_to_dir(
                 agent=agent,
-                content_bytes=content.encode("utf-8"),
+                content_bytes=op.content_bytes or b"",
                 extension="",
-                mime_type="text/plain",
+                mime_type=op.mime_type,
                 path=op.path,
                 overwrite=False,
             )
@@ -334,41 +408,34 @@ def execute_apply_patch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
             changed_paths.append(op.path)
             continue
 
-        if node is None:
-            return {"status": "error", "message": f"File not found: {op.path}"}
-
         if op.kind == "delete":
-            if node.node_type != AgentFsNode.NodeType.FILE:
-                return {"status": "error", "message": f"Path is a directory: {op.path}"}
-            node.trash_subtree()
+            assert op.node is not None
+            op.node.trash_subtree()
             deleted_paths.append(op.path)
             changed_paths.append(op.path)
             continue
 
         if op.kind == "update":
-            original_text, read_error = _read_utf8_node(node)
-            if read_error:
-                return read_error
-            updated_text, apply_error, hunks_applied = _apply_update(original_text or "", op.lines)
-            if apply_error:
-                return {"status": "error", "message": apply_error, "path": op.path, "hunks_applied": hunks_applied}
-            target_path = op.move_to or op.path
-            if op.move_to and op.move_to != op.path and _get_alive_node(filespace, target_path) is not None:
-                return {"status": "error", "message": f"Move target already exists: {target_path}"}
+            assert op.target_path is not None
+            assert op.node is not None
             write_result = write_bytes_to_dir(
                 agent=agent,
-                content_bytes=(updated_text or "").encode("utf-8"),
+                content_bytes=op.content_bytes or b"",
                 extension="",
-                mime_type=node.mime_type or "text/plain",
-                path=target_path,
+                mime_type=op.mime_type,
+                path=op.target_path,
                 overwrite=True,
             )
             if write_result.get("status") != "ok":
                 return write_result
-            if op.move_to and op.move_to != op.path:
-                node.trash_subtree()
-            updated_paths.append(target_path)
-            changed_paths.append(target_path)
+            if op.target_path != op.path:
+                PersistentAgentCustomTool.objects.filter(agent=agent, source_path=op.path).update(
+                    source_path=op.target_path,
+                    updated_at=timezone.now(),
+                )
+                op.node.trash_subtree()
+            updated_paths.append(op.target_path)
+            changed_paths.append(op.target_path)
             continue
 
     _touch_custom_tool_sources(agent, changed_paths)

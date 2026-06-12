@@ -1148,6 +1148,106 @@ def run(params, ctx):
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["message"], "File not found: /tools/missing.py")
 
+    def test_apply_patch_does_not_persist_earlier_add_when_later_op_fails(self):
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Add File: /tools/partial.py",
+            "+print('created')",
+            "*** Update File: /tools/missing.py",
+            "@@",
+            "-print('old')",
+            "+print('new')",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "File not found: /tools/missing.py")
+        self.assertFalse(AgentFsNode.objects.alive().filter(path="/tools/partial.py").exists())
+
+    def test_apply_patch_allows_common_frontend_path_characters(self):
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Add File: /frontend/src/routes/+page.svelte",
+            "+<h1>Hello</h1>",
+            "*** Add File: /node_modules/@scope/pkg/index.ts",
+            "+export const ok = true;",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(AgentFsNode.objects.alive().filter(path="/frontend/src/routes/+page.svelte").exists())
+        self.assertTrue(AgentFsNode.objects.alive().filter(path="/node_modules/@scope/pkg/index.ts").exists())
+
+    def test_apply_patch_treats_empty_update_lines_as_context(self):
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"first\n\nthird\n",
+            extension=".txt",
+            mime_type="text/plain",
+            path="/exports/blank_context.txt",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /exports/blank_context.txt",
+            "@@",
+            " first",
+            "",
+            "-third",
+            "+fourth",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        node = AgentFsNode.objects.get(path="/exports/blank_context.txt", is_deleted=False)
+        with node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), b"first\n\nfourth\n")
+
+    def test_apply_patch_move_updates_custom_tool_source_path(self):
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"def run(params, ctx):\n    return {'ok': False}\n",
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/move_source.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Move Source",
+            tool_name="custom_move_source",
+            description="Move source.",
+            source_path="/tools/move_source.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        patch_text = "\n".join([
+            "*** Begin Patch",
+            "*** Update File: /tools/move_source.py",
+            "*** Move to: /tools/moved_source.py",
+            "@@",
+            " def run(params, ctx):",
+            "-    return {'ok': False}",
+            "+    return {'ok': True}",
+            "*** End Patch",
+        ])
+
+        result = execute_apply_patch(self.agent, {"patch": patch_text})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["updated"], ["/tools/moved_source.py"])
+        self.assertFalse(AgentFsNode.objects.alive().filter(path="/tools/move_source.py").exists())
+        self.assertTrue(AgentFsNode.objects.alive().filter(path="/tools/moved_source.py").exists())
+        tool.refresh_from_db()
+        self.assertEqual(tool.source_path, "/tools/moved_source.py")
+
     def test_apply_patch_workspace_alias_updates_filespace_path(self):
         write_result = write_bytes_to_dir(
             agent=self.agent,

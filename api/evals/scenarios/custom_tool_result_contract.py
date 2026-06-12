@@ -574,6 +574,8 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             new_lines: list[str] = []
             for change_line in change_lines:
                 if not change_line:
+                    old_lines.append("")
+                    new_lines.append("")
                     continue
                 prefix = change_line[0]
                 value = change_line[1:]
