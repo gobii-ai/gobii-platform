@@ -4329,9 +4329,11 @@ def _get_unified_history_prompt(
                 "tool_name",
                 "step__completion_id",
                 "parent_tool_call_id",
+                "parent_tool_call__tool_name",
             )
         )
         tool_call_parent_ids: Dict[str, str] = {}
+        tool_call_parent_names: Dict[str, str] = {}
         for row in tool_call_results:
             step_id = str(row["step_id"])
             step = step_lookup.get(step_id)
@@ -4349,7 +4351,11 @@ def _get_unified_history_prompt(
             tool_call_completion_ids[step_id] = str(completion_id) if completion_id else None
             parent_tool_call_id = row.get("parent_tool_call_id")
             if parent_tool_call_id:
-                tool_call_parent_ids[step_id] = str(parent_tool_call_id)
+                parent_id = str(parent_tool_call_id)
+                tool_call_parent_ids[step_id] = parent_id
+                parent_tool_name = row.get("parent_tool_call__tool_name") or ""
+                if parent_tool_name:
+                    tool_call_parent_names[step_id] = str(parent_tool_name)
             tool_call_records.append(
                 ToolCallResultRecord(
                     step_id=step_id,
@@ -4425,6 +4431,9 @@ def _get_unified_history_prompt(
             parent_tool_call_id = tool_call_parent_ids.get(str(s.id))
             parent_result_info = tool_result_prompt_info.get(parent_tool_call_id) if parent_tool_call_id else None
             if parent_result_info:
+                parent_tool_name = tool_call_parent_names.get(str(s.id))
+                if parent_tool_name:
+                    components["parent_tool_name"] = parent_tool_name
                 components["parent_result_id"] = parent_result_info.result_id
             if getattr(s, "credits_cost", None) is not None:
                 components["cost"] = f"{s.credits_cost} credits"
@@ -4679,6 +4688,7 @@ def _get_unified_history_prompt(
         # Component weights within each event
         COMPONENT_WEIGHTS = {
             "meta": 3,        # High priority - always want to see what happened
+            "parent_tool_name": 3,  # High priority - identifies the parent tool without a lookup
             "parent_result_id": 3,  # High priority - preserves nested tool attribution
             "cost": 2,        # Helpful for budgeting; small and should remain visible
             "params": 1,      # Low priority - can be shrunk aggressively

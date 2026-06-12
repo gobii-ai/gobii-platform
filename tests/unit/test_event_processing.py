@@ -1799,6 +1799,10 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(user_message)
         content = user_message['content']
         self.assertIn(
+            "<parent_tool_name>custom_wrapper</parent_tool_name>",
+            content,
+        )
+        self.assertIn(
             "<parent_result_id>111111</parent_result_id>",
             content,
         )
