@@ -1,4 +1,4 @@
-import type { Ref } from 'react'
+import { useMemo, type Ref } from 'react'
 import { Loader2 } from 'lucide-react'
 import { TimelineEventItem } from './TimelineEventItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
@@ -152,6 +152,15 @@ export function AgentTimelinePane({
   viewerEmail,
   viewerUserId,
 }: AgentTimelinePaneProps) {
+  const lastRenderedIndex = useMemo(() => {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      if (events[index].kind !== 'plan' && events[index].kind !== 'kanban') {
+        return index
+      }
+    }
+    return -1
+  }, [events])
+
   return (
     <>
       <div className="agent-chat-timeline-region">
@@ -192,7 +201,7 @@ export function AgentTimelinePane({
                   <div key={timelineEventKey(event)} data-timeline-item="true">
                     <TimelineEventItem
                       event={event}
-                      isLatestEvent={index === events.length - 1}
+                      isLatestEvent={index === lastRenderedIndex}
                       agentFirstName={agentFirstName}
                       agentColorHex={agentColorHex || undefined}
                       agentAvatarUrl={agentAvatarUrl}

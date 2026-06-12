@@ -44,6 +44,7 @@ type PrependAnchor = {
   element: HTMLElement | null
   offsetTop: number
   pageCount: number
+  scrollHeight: number
 }
 
 export function useTimelineScrollController({
@@ -68,6 +69,7 @@ export function useTimelineScrollController({
   const didInitialJumpRef = useRef(false)
   const fetchOlderInFlightRef = useRef(false)
   const scrollFrameRef = useRef<number | null>(null)
+  const acrossFramesRafRef = useRef<number | null>(null)
   const followupScrollFramesRef = useRef(0)
   const programmaticScrollUntilRef = useRef(0)
   const prependAnchorRef = useRef<PrependAnchor | null>(null)
@@ -128,26 +130,35 @@ export function useTimelineScrollController({
       window.cancelAnimationFrame(scrollFrameRef.current)
       scrollFrameRef.current = null
     }
+    if (acrossFramesRafRef.current !== null) {
+      window.cancelAnimationFrame(acrossFramesRafRef.current)
+      acrossFramesRafRef.current = null
+    }
   }, [])
 
   const scrollToBottomAcrossFrames = useCallback((frames: number) => {
-    followupScrollFramesRef.current = Math.max(followupScrollFramesRef.current, frames)
+    if (acrossFramesRafRef.current !== null) {
+      window.cancelAnimationFrame(acrossFramesRafRef.current)
+      acrossFramesRafRef.current = null
+    }
+    followupScrollFramesRef.current = frames
     const run = () => {
       if (followupScrollFramesRef.current <= 0) {
+        acrossFramesRafRef.current = null
         return
       }
       followupScrollFramesRef.current -= 1
       scrollToBottomNow()
-      window.requestAnimationFrame(run)
+      acrossFramesRafRef.current = window.requestAnimationFrame(run)
     }
-    window.requestAnimationFrame(run)
+    acrossFramesRafRef.current = window.requestAnimationFrame(run)
   }, [scrollToBottomNow])
 
   const capturePrependAnchor = useCallback((): PrependAnchor => {
     const container = containerRef.current
     const content = contentNode
     if (!container || !content) {
-      return { element: null, offsetTop: 0, pageCount }
+      return { element: null, offsetTop: 0, pageCount, scrollHeight: 0 }
     }
 
     const containerTop = container.getBoundingClientRect().top
@@ -157,6 +168,7 @@ export function useTimelineScrollController({
       element,
       offsetTop: element ? element.getBoundingClientRect().top - containerTop : 0,
       pageCount,
+      scrollHeight: container.scrollHeight,
     }
   }, [contentNode, pageCount])
 
@@ -171,7 +183,10 @@ export function useTimelineScrollController({
       const containerTop = container.getBoundingClientRect().top
       const nextOffsetTop = anchor.element.getBoundingClientRect().top - containerTop
       container.scrollTop += nextOffsetTop - anchor.offsetTop
+    } else if (anchor.scrollHeight > 0) {
+      container.scrollTop += container.scrollHeight - anchor.scrollHeight
     }
+    lastScrollTopRef.current = container.scrollTop
 
     ignorePinUntilRef.current = Date.now() + PREPEND_RESTORE_GUARD_MS
     prependAnchorRef.current = null
@@ -349,6 +364,9 @@ export function useTimelineScrollController({
   useEffect(() => () => {
     if (scrollFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollFrameRef.current)
+    }
+    if (acrossFramesRafRef.current !== null) {
+      window.cancelAnimationFrame(acrossFramesRafRef.current)
     }
     followupScrollFramesRef.current = 0
   }, [])
