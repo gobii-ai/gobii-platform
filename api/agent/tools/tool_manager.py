@@ -83,9 +83,9 @@ from .discord_channel_subscriptions import (
     get_discord_channel_subscriptions_tool,
     execute_discord_channel_subscriptions,
 )
-from .discord_send_message import (
-    get_discord_send_message_tool,
-    execute_discord_send_message,
+from .send_discord_message import (
+    get_send_discord_message_tool,
+    execute_send_discord_message,
 )
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from .meta_gobii import (
@@ -112,7 +112,7 @@ PYTHON_EXEC_TOOL_NAME = "python_exec"
 RUN_COMMAND_TOOL_NAME = "run_command"
 META_ADS_TOOL_NAME = "meta_ads"
 DISCORD_CHANNEL_SUBSCRIPTIONS_TOOL_NAME = "discord_channel_subscriptions"
-DISCORD_SEND_MESSAGE_TOOL_NAME = "discord_send_message"
+DISCORD_SEND_MESSAGE_TOOL_NAME = "send_discord_message"
 PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
@@ -289,8 +289,8 @@ BUILTIN_TOOL_REGISTRY = {
         "system_skill_key": DISCORD_NATIVE_SYSTEM_SKILL_KEY,
     },
     DISCORD_SEND_MESSAGE_TOOL_NAME: {
-        "definition": get_discord_send_message_tool,
-        "executor": execute_discord_send_message,
+        "definition": get_send_discord_message_tool,
+        "executor": execute_send_discord_message,
         "search_hidden": True,
         "system_skill_key": DISCORD_NATIVE_SYSTEM_SKILL_KEY,
     },

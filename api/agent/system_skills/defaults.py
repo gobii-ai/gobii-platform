@@ -589,7 +589,7 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=DISCORD_NATIVE_SYSTEM_SKILL_KEY,
     name="Discord",
     search_summary="Provision inbound Discord server/channel subscriptions through the native Gobii bot.",
-    tool_names=("discord_channel_subscriptions", "discord_send_message"),
+    tool_names=("discord_channel_subscriptions", "send_discord_message"),
     enables=(
         "receive Discord channel messages through the native Gobii Discord bot",
         "discover Discord guild channels claimed by the agent owner",
@@ -628,7 +628,7 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "then call `ensure` with the selected `guild_id`, `channel_id`, and `channel_name` so future channel messages wake this agent.\n"
         "Only ask the user for raw server or channel IDs if discovery fails or returns no useful choices. "
         "Do not request Discord server IDs or channel IDs as secrets.\n"
-        "Use `discord_send_message` for outbound Discord replies to subscribed channels. Pass `channel_id`, `message`, and the correct `will_continue_work` value. "
+        "Use `send_discord_message` for outbound Discord replies to subscribed channels. Pass `channel_id`, `message`, and the correct `will_continue_work` value. "
         f"To upload files: {SEND_TOOL_ATTACHMENTS_DESCRIPTION} "
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"

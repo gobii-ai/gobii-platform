@@ -16,7 +16,7 @@ from django.utils import timezone
 from api.agent.system_skills.registry import get_system_skill_definition
 from api.agent.files.attachment_helpers import ResolvedAttachment
 from api.agent.tools.discord_channel_subscriptions import execute_discord_channel_subscriptions
-from api.agent.tools.discord_send_message import execute_discord_send_message
+from api.agent.tools.send_discord_message import execute_send_discord_message
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.models import (
     BrowserUseAgent,
@@ -857,7 +857,7 @@ class NativeDiscordBotTests(TestCase):
             ),
         ]
 
-        result = execute_discord_send_message(
+        result = execute_send_discord_message(
             self.agent,
             {
                 "channel_id": "10",
@@ -959,7 +959,7 @@ class NativeDiscordBotTests(TestCase):
         skill = get_system_skill_definition("discord_native")
 
         self.assertIn("discord_channel_subscriptions", skill.tool_names)
-        self.assertIn("discord_send_message", skill.tool_names)
+        self.assertIn("send_discord_message", skill.tool_names)
         self.assertNotIn("pipedream_trigger_subscriptions", skill.tool_names)
         self.assertIn("Use the native Gobii Discord bot tools", skill.prompt_instructions)
         self.assertIn("immediately call `discord_channel_subscriptions`", skill.prompt_instructions)
