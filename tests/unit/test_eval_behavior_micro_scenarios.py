@@ -169,6 +169,11 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertFalse(by_slug["common_use_case_020_search_reddit_mentions"].stop_after_success)
         self.assertIn("BiomeBoost Pro", by_slug["common_use_case_020_search_reddit_mentions"].prompt)
         self.assertIn("API latency stayed under 120 ms", by_slug["common_use_case_064_send_digest_email"].prompt)
+        self.assertIn("sqlite_batch", by_slug["common_use_case_061_send_summary_email"].allowed_preamble_tools)
+        self.assertIn("sqlite_batch", by_slug["common_use_case_064_send_digest_email"].allowed_preamble_tools)
+        self.assertIn("sqlite_batch", by_slug["common_use_case_065_send_status_sms"].allowed_preamble_tools)
+        self.assertIn("sqlite_batch", by_slug["common_use_case_066_send_meeting_sms"].allowed_preamble_tools)
+        self.assertIn("sqlite_batch", by_slug["common_use_case_068_request_sms_permission"].allowed_preamble_tools)
         self.assertEqual(
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
             {"send_email": ("request_contact_permission",)},
@@ -693,6 +698,33 @@ class BehaviorMicroHelperTests(TestCase):
         policy = scenario._build_eval_stop_policy()
 
         self.assertIn("search_tools", policy["allowed_tool_names"])
+
+    def test_outbound_contact_lookup_cases_allow_sqlite_preamble(self):
+        for slug, expected_tool in (
+            ("common_use_case_061_send_summary_email", "send_email"),
+            ("common_use_case_064_send_digest_email", "send_email"),
+            ("common_use_case_065_send_status_sms", "send_sms"),
+            ("common_use_case_066_send_meeting_sms", "send_sms"),
+            ("common_use_case_068_request_sms_permission", "request_contact_permission"),
+        ):
+            with self.subTest(slug=slug):
+                scenario = ScenarioRegistry.get(slug)
+                policy = scenario._build_eval_stop_policy()
+                mock_config = scenario._build_mock_config()
+
+                self.assertIn("sqlite_batch", policy["allowed_tool_names"])
+                self.assertIn(expected_tool, policy["allowed_tool_names"])
+                self.assertIn("sqlite_batch", mock_config)
+                self.assertIn("sqlite_batch", scenario._tool_names_to_enable())
+
+    def test_outbound_contact_lookup_sqlite_preamble_does_not_stop_eval(self):
+        scenario = ScenarioRegistry.get("common_use_case_066_send_meeting_sms")
+        policy = scenario._build_eval_stop_policy()
+        self._add_tool_call("sqlite_batch", {"sql": 'SELECT * FROM "__contacts" WHERE channel = "sms";'})
+
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertFalse(should_stop, reason)
 
     def test_custom_tool_common_use_case_exposes_enabled_sandbox_builtin(self):
         scenario = ScenarioRegistry.get("common_use_case_122_custom_tool_bulk_api_sqlite")

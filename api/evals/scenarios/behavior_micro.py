@@ -253,14 +253,14 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_058_sheets_get_by_id", "category": "sheets", "prompt": "Open spreadsheet sheet-123 by id and return its name.", "expected_tools": ["google_sheets-get-spreadsheet-by-id"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_059_sheets_current_user", "category": "sheets", "prompt": "Check the connected Google Sheets user before editing the tracker.", "expected_tools": ["google_sheets-get-current-user"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_060_sheets_append_rows", "category": "sheets", "prompt": "Append two new rows to the Research worksheet in spreadsheet sheet-123: company Vanta priority high owner Maya; company Notion priority medium owner Omar.", "expected_tools": ["google_sheets-add-rows"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-add-rows": ["google_sheets-add-multiple-rows"]}, "plan_expected": False},
-    {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test three sentences: Enterprise leads increased. Acme renewal moved to legal review. Globex needs a Friday follow-up.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test three sentences: Enterprise leads increased. Acme renewal moved to legal review. Globex needs a Friday follow-up.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_062_send_attachment_email", "category": "outbound", "prompt": "Email pat@example.test that the prepared report is attached at $[/exports/report.pdf].", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch", "read_file"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_063_send_followup_email", "category": "outbound", "prompt": "Send a polite follow-up email to lee@example.test about the demo times.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with bullets: API latency stayed under 120 ms; queue backlog cleared by 14:00 UTC; no Sev1 incidents opened.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["search_tools"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with bullets: API latency stayed under 120 ms; queue backlog cleared by 14:00 UTC; no Sev1 incidents opened.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["search_tools", "sqlite_batch"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "allowed_preamble_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "allowed_preamble_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_067_request_contact_email_permission", "category": "outbound", "prompt": "Ask permission to email new-contact@example.test about the partnership intro.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_068_request_sms_permission", "category": "outbound", "prompt": "Create a contact-permission request for SMS +15555550123 so you can text that number about the urgent outage after approval.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_sms"], "plan_expected": False},
+    {"slug": "common_use_case_068_request_sms_permission", "category": "outbound", "prompt": "Create a contact-permission request for SMS +15555550123 so you can text that number about the urgent outage after approval.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_069_secure_api_key_request", "category": "credentials", "prompt": "Request the missing STRIPE_API_KEY secret so you can call the Stripe API.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
     {"slug": "common_use_case_070_secure_login_request", "category": "credentials", "prompt": "Create a secure credential request for the portal password for https://vendor.example.test before logging in.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
     {"slug": "common_use_case_071_create_leads_csv", "category": "files", "prompt": "Create /exports/leads.csv with columns company,email,priority and two rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
@@ -2521,6 +2521,13 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             accepted.extend(self.case.accepted_tool_names_for_expected_tool(tool_name))
         return list(dict.fromkeys(accepted))
 
+    def _tool_names_to_enable(self):
+        return list(dict.fromkeys([
+            *self._accepted_expected_tool_names(),
+            *self.case.forbidden_tool_names(),
+            *self.case.allowed_preamble_tool_names(),
+        ]))
+
     @staticmethod
     def _agent_config_field_for_expected_tool(tool_name):
         if tool_name == "update_schedule":
@@ -2598,7 +2605,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         forbidden_tools = case.forbidden_tool_names()
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
         self._seed_prior_processing_run(agent_id)
-        tool_names = [*self._accepted_expected_tool_names(), *forbidden_tools]
+        tool_names = self._tool_names_to_enable()
         synthetic_tool_names = [
             tool_name
             for tool_name in [*tool_names, *case.allowed_preamble_tool_names(), *case.eval_synthetic_tools]
