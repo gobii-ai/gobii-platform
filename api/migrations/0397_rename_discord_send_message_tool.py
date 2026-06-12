@@ -1,4 +1,5 @@
 from django.db import migrations
+from django.db.models import Subquery
 
 
 OLD_TOOL_NAME = "discord_send_message"
@@ -16,21 +17,18 @@ def reverse_rename_enabled_discord_send_tool(apps, schema_editor):
 
 
 def _rename_enabled_tool_rows(PersistentAgentEnabledTool, old_tool_name, new_tool_name):
-    old_rows = list(
+    already_enabled_agent_ids = (
         PersistentAgentEnabledTool.objects
-        .filter(tool_full_name=old_tool_name)
-        .only("id", "agent_id", "tool_full_name")
+        .filter(tool_full_name=new_tool_name)
+        .values("agent_id")
     )
-    for old_row in old_rows:
-        if PersistentAgentEnabledTool.objects.filter(
-            agent_id=old_row.agent_id,
-            tool_full_name=new_tool_name,
-        ).exists():
-            old_row.delete()
-            continue
-
-        old_row.tool_full_name = new_tool_name
-        old_row.save(update_fields=["tool_full_name"])
+    PersistentAgentEnabledTool.objects.filter(
+        tool_full_name=old_tool_name,
+        agent_id__in=Subquery(already_enabled_agent_ids),
+    ).delete()
+    PersistentAgentEnabledTool.objects.filter(tool_full_name=old_tool_name).update(
+        tool_full_name=new_tool_name
+    )
 
 
 class Migration(migrations.Migration):
