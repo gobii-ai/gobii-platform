@@ -14,11 +14,11 @@ from api.services.discord_bot import DiscordBotIntegrationError, send_channel_me
 logger = logging.getLogger(__name__)
 
 
-def get_discord_send_message_tool() -> Dict[str, Any]:
+def get_send_discord_message_tool() -> Dict[str, Any]:
     return {
         "type": "function",
         "function": {
-            "name": "discord_send_message",
+            "name": "send_discord_message",
             "description": (
                 "Send a message to a Discord channel subscribed through the native Gobii Discord bot. "
                 "The backend sends via a channel webhook using this agent's name and avatar."
@@ -52,7 +52,7 @@ def get_discord_send_message_tool() -> Dict[str, Any]:
     }
 
 
-def execute_discord_send_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     channel_id = str(params.get("channel_id") or "").strip()
     body = str(params.get("message") or "").strip()
     attachment_paths = params.get("attachments")

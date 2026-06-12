@@ -970,7 +970,7 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
             "listen to discord channel messages",
             available_tool_names={
                 "discord_channel_subscriptions",
-                "discord_send_message",
+                "send_discord_message",
             },
         )
         self.assertEqual([match.skill_key for match in matches], ["discord_native"])
@@ -978,7 +978,7 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
             "discord integration, discord bot, discord webhook, pipedream discord",
             available_tool_names={
                 "discord_channel_subscriptions",
-                "discord_send_message",
+                "send_discord_message",
             },
         )
         self.assertEqual([match.skill_key for match in integration_matches], ["discord_native"])
@@ -995,7 +995,7 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
         self.assertTrue(
             PersistentAgentEnabledTool.objects.filter(
                 agent=agent,
-                tool_full_name="discord_send_message",
+                tool_full_name="send_discord_message",
             ).exists()
         )
         self.assertFalse(
@@ -1016,7 +1016,7 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
         self.assertIn("action=\"discover_channels\"", instructions)
         self.assertIn("ask the user to choose by channel name", instructions)
         self.assertIn("call `ensure` with the selected `guild_id`, `channel_id`, and `channel_name`", instructions)
-        self.assertIn("Use `discord_send_message` for outbound Discord replies", instructions)
+        self.assertIn("Use `send_discord_message` for outbound Discord replies", instructions)
         self.assertIn("Use the native Gobii Discord bot tools", instructions)
         self.assertNotIn("legacy fallback", instructions)
         self.assertNotIn("pipedream_trigger_subscriptions", instructions)
