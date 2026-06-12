@@ -238,10 +238,10 @@ class AgentCapabilitiesPromptTests(TestCase):
         contents = "\n".join(message["content"] for message in context)
 
         self.assertIn(
-            "call search_tools with `code work` before using file, shell, patch, or deployment tools",
+            "call search_tools with `code work` before file/shell/patch/deploy tools",
             contents,
         )
-        self.assertIn("unless the Code Work system skill is already enabled", contents)
+        self.assertIn("unless Code Work is enabled", contents)
 
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
