@@ -224,6 +224,7 @@
       }
     }
 
+    {% if homepage_perf_motion_reduction_enabled %}
     @media (pointer: coarse), (max-width: 767px) {
       .gobii-hero-fish-cursor,
       .gobii-hero-fish,
@@ -241,6 +242,7 @@
         will-change: auto;
       }
     }
+    {% endif %}
 
     .game-of-life-panel {
       position: relative;
@@ -385,6 +387,7 @@
       }
     }
 
+    {% if homepage_perf_motion_reduction_enabled %}
     @media (pointer: coarse), (max-width: 767px) {
       .magic-cta,
       .magic-cta::before,
@@ -403,6 +406,7 @@
         box-shadow: 0 18px 32px -20px rgba(139, 92, 246, 0.55);
       }
     }
+    {% endif %}
 
     /* Scroll-triggered fade-in animation */
     [data-animate] {
@@ -422,6 +426,7 @@
       }
     }
 
+    {% if homepage_perf_motion_reduction_enabled %}
     @media (pointer: coarse), (max-width: 767px) {
       [data-animate] {
         opacity: 1;
@@ -429,6 +434,7 @@
         transition: none;
       }
     }
+    {% endif %}
 
     {% include "partials/_immersive_overlay_styles.html" %}
   </style>
@@ -889,6 +895,7 @@
     </div>
   </section>
 
+  {% if homepage_perf_motion_reduction_enabled %}
   <script>
     window.GobiiHomePerf = window.GobiiHomePerf || (function () {
       const matchesMedia = function (query) {
@@ -918,6 +925,7 @@
       };
     })();
   </script>
+  {% endif %}
 
   <script>
     document.addEventListener('DOMContentLoaded', function () {
@@ -1013,11 +1021,15 @@
         window.addEventListener('blur', reset);
       };
 
+      {% if homepage_perf_motion_reduction_enabled %}
       if (window.GobiiHomePerf && typeof window.GobiiHomePerf.runWhenIdle === 'function') {
         window.GobiiHomePerf.runWhenIdle(initFishCursor, 1800);
         return;
       }
       window.setTimeout(initFishCursor, 250);
+      {% else %}
+      initFishCursor();
+      {% endif %}
     });
   </script>
 
@@ -1767,11 +1779,15 @@
           });
         };
 
+        {% if homepage_perf_motion_reduction_enabled %}
         if (window.GobiiHomePerf && typeof window.GobiiHomePerf.runWhenIdle === 'function') {
           window.GobiiHomePerf.runWhenIdle(initScrollAnimations, 2200);
           return;
         }
         window.setTimeout(initScrollAnimations, 250);
+        {% else %}
+        initScrollAnimations();
+        {% endif %}
       });
     </script>
 </main>

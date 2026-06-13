@@ -438,6 +438,28 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(soup.select_one("[data-gobii-fish-cursor]"))
         self.assertIsNone(soup.find("img", {"src": "/static/images/undraw/texting.svg"}))
 
+    def test_home_page_includes_perf_motion_reduction_when_switch_is_on(self):
+        with override_switch("homepage_perf_motion_reduction", active=True):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn("window.GobiiHomePerf = window.GobiiHomePerf ||", content)
+        self.assertIn("window.GobiiHomePerf.runWhenIdle(initFishCursor, 1800)", content)
+        self.assertIn("@media (pointer: coarse), (max-width: 767px)", content)
+
+    def test_home_page_omits_perf_motion_reduction_when_switch_is_off(self):
+        with override_switch("homepage_perf_motion_reduction", active=False):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertNotIn("window.GobiiHomePerf = window.GobiiHomePerf ||", content)
+        self.assertNotIn("window.GobiiHomePerf.runWhenIdle(initFishCursor, 1800)", content)
+        self.assertNotIn("@media (pointer: coarse), (max-width: 767px)", content)
+        self.assertIn("initFishCursor();", content)
+        self.assertIn("initScrollAnimations();", content)
+
     def test_home_page_excludes_eval_agents(self):
         User = get_user_model()
         user = User.objects.create_user(
