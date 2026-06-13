@@ -6329,6 +6329,14 @@ class PersistentAgentTemplate(models.Model):
         related_name="templates",
         help_text="Public profile that owns this template when shared publicly.",
     )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="agent_templates",
+        help_text="Organization that owns this private template, when scoped to an organization.",
+    )
     slug = models.SlugField(
         max_length=80,
         blank=True,
@@ -6448,6 +6456,10 @@ class PersistentAgentTemplate(models.Model):
     class Meta:
         ordering = ["priority", "display_name"]
         constraints = [
+            models.CheckConstraint(
+                condition=~(Q(public_profile__isnull=False) & Q(organization__isnull=False)),
+                name="persistent_agent_template_single_scope",
+            ),
             UniqueConstraint(
                 fields=["public_profile", "slug"],
                 condition=Q(public_profile__isnull=False),
@@ -6459,6 +6471,14 @@ class PersistentAgentTemplate(models.Model):
                 name="unique_public_template_slug",
             ),
         ]
+        indexes = [
+            models.Index(fields=["organization", "is_active"], name="pa_template_org_active_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.public_profile_id and self.organization_id:
+            raise ValidationError("A template cannot be both public and organization-scoped.")
 
     def __str__(self) -> str:  # pragma: no cover - simple repr
         return f"PretrainedWorkerTemplate<{self.display_name}>"

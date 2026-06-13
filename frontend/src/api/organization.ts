@@ -26,6 +26,46 @@ export type OrganizationInvite = {
   expiresAt: string | null
 }
 
+export type OrganizationTemplate = {
+  id: string
+  code: string
+  name: string
+  tagline: string
+  description: string
+  category: string
+  sourceAgentId: string | null
+  sourceAgentName: string | null
+  createdBy: string | null
+  baseSchedule: string
+  scheduleDescription: string | null
+  defaultTools: string[]
+  updatedAt: string | null
+}
+
+export type OrganizationTemplateSourceAgent = {
+  id: string
+  name: string
+}
+
+export type CurrentOrganizationTemplatesPayload = {
+  organization: {
+    id: string
+    name: string
+  }
+  viewer: {
+    canManageTemplates: boolean
+  }
+  templates: OrganizationTemplate[]
+  sourceAgents: OrganizationTemplateSourceAgent[]
+  created?: boolean
+  templateId?: string
+}
+
+export type OrganizationTemplateLaunchPayload = {
+  templateId: string
+  redirectUrl: string
+}
+
 export type CurrentOrganizationPayload = {
   organization: {
     id: string
@@ -66,6 +106,7 @@ export type OrganizationInviteAcceptPayload = {
 }
 
 const CURRENT_ORGANIZATION_URL = '/console/api/organization/'
+const CURRENT_ORGANIZATION_TEMPLATES_URL = '/console/api/organization/templates/'
 
 export function fetchCurrentOrganization(signal?: AbortSignal): Promise<CurrentOrganizationPayload> {
   return jsonFetch<CurrentOrganizationPayload>(CURRENT_ORGANIZATION_URL, { signal })
@@ -119,6 +160,32 @@ export function updateOrganizationMemberRole(userId: string, role: string): Prom
 export function removeOrganizationMember(userId: string): Promise<CurrentOrganizationPayload> {
   return jsonRequest<CurrentOrganizationPayload>(`/console/api/organization/members/${userId}/`, {
     method: 'DELETE',
+    includeCsrf: true,
+  })
+}
+
+export function fetchCurrentOrganizationTemplates(signal?: AbortSignal): Promise<CurrentOrganizationTemplatesPayload> {
+  return jsonFetch<CurrentOrganizationTemplatesPayload>(CURRENT_ORGANIZATION_TEMPLATES_URL, { signal })
+}
+
+export function createOrganizationTemplate(sourceAgentId: string): Promise<CurrentOrganizationTemplatesPayload> {
+  return jsonRequest<CurrentOrganizationTemplatesPayload>(CURRENT_ORGANIZATION_TEMPLATES_URL, {
+    method: 'POST',
+    json: { sourceAgentId },
+    includeCsrf: true,
+  })
+}
+
+export function deactivateOrganizationTemplate(templateId: string): Promise<CurrentOrganizationTemplatesPayload> {
+  return jsonRequest<CurrentOrganizationTemplatesPayload>(`/console/api/organization/templates/${templateId}/`, {
+    method: 'DELETE',
+    includeCsrf: true,
+  })
+}
+
+export function launchOrganizationTemplate(templateId: string): Promise<OrganizationTemplateLaunchPayload> {
+  return jsonRequest<OrganizationTemplateLaunchPayload>(`/console/api/organization/templates/${templateId}/launch/`, {
+    method: 'POST',
     includeCsrf: true,
   })
 }

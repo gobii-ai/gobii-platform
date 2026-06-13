@@ -63,8 +63,10 @@ from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
 logger = logging.getLogger(__name__)
 AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY = "agent_selected_pipedream_app_slugs"
 AGENT_TEMPLATE_SOURCE_SESSION_KEY = "agent_template_source"
+AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY = "agent_template_organization_id"
 AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER = "pretrained_worker"
 AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE = "public_template"
+AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE = "organization_template"
 
 
 def _customer_account_pause_creation_message(owner) -> str:
@@ -160,8 +162,8 @@ def create_persistent_agent_from_charter(
     contact_email = (contact_email or "").strip()
 
     template_code = request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
-    selected_template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
     template_source = (request.session.get(AGENT_TEMPLATE_SOURCE_SESSION_KEY) or "").strip()
+    selected_template = None
 
     resolved_context = build_console_context(request)
     preview_config = resolve_personal_signup_preview(
@@ -177,12 +179,33 @@ def create_persistent_agent_from_charter(
                 request,
                 "You no longer have access to that organization. Creating a personal agent instead.",
             )
-        elif not resolved_context.can_manage_org_agents:
+        elif (
+            not resolved_context.can_manage_org_agents
+            and not (
+                template_code
+                and template_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
+                and str(request.session.get(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY) or "").strip() == str(membership.org.id)
+            )
+        ):
             raise ValidationError(
                 "You need to be an organization owner or admin to create agents for this organization."
             )
         else:
             organization = membership.org
+
+    if template_code:
+        template_organization_id = str(request.session.get(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY) or "").strip()
+        if template_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE:
+            if organization is None:
+                raise ValidationError("Switch to the organization context to use this template.")
+            if template_organization_id and template_organization_id != str(organization.id):
+                raise ValidationError("This template belongs to a different organization.")
+        selected_template = PretrainedWorkerTemplateService.get_template_by_code(
+            template_code,
+            organization=organization,
+        )
+        if selected_template is None:
+            raise ValidationError("This template is no longer available.")
 
     owner = organization or request.user
     if get_owner_account_pause_state(owner).get("customer_paused"):
@@ -467,6 +490,7 @@ def create_persistent_agent_from_charter(
             "agent_charter_override",
             AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
             AGENT_TEMPLATE_SOURCE_SESSION_KEY,
+            AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY,
             PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
         ):
             if key in request.session:

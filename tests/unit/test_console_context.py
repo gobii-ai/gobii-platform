@@ -1,6 +1,7 @@
 import uuid
 import json
 import tempfile
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from django.urls import reverse
@@ -12,13 +13,22 @@ from django.test import TestCase, override_settings, tag
 from waffle.models import Flag
 from waffle.testutils import override_flag
 
+from agents.services import PretrainedWorkerTemplateService
 from api.models import (
     Organization,
     OrganizationMembership,
     AgentCollaborator,
     BrowserUseAgent,
     PersistentAgent,
+    PersistentAgentTemplate,
+    BrowserUseAgentTask,
+    TaskCredit,
     OrganizationInvite,
+)
+from console.agent_creation import (
+    AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
+    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
 )
 from django.utils import timezone
 from constants.plans import PlanNamesChoices
@@ -126,6 +136,29 @@ class CurrentOrganizationAPITests(TestCase):
         session["context_name"] = self.org.name
         session.save()
 
+    def _create_org_agent(self, *, name="Ops Agent"):
+        browser_agent = BrowserUseAgent.objects.create(user=self.owner, name=f"{name} Browser")
+        return PersistentAgent.objects.create(
+            user=self.owner,
+            organization=self.org,
+            name=name,
+            charter="Keep the org on track.",
+            browser_use_agent=browser_agent,
+        )
+
+    def _create_org_template(self, *, code="org-context-template"):
+        return PersistentAgentTemplate.objects.create(
+            code=code,
+            organization=self.org,
+            display_name="Org Context Template",
+            tagline="Private workflow",
+            description="Only members of this organization can use it.",
+            charter="Run the private organization workflow.",
+            base_schedule="@daily",
+            category="Operations",
+            is_active=True,
+        )
+
     def test_current_organization_api_lists_members_and_invites_for_org_context(self):
         self._login_in_org_context(self.owner)
 
@@ -149,6 +182,89 @@ class CurrentOrganizationAPITests(TestCase):
         resp = self.client.get(reverse("console-current-organization"))
 
         self.assertEqual(resp.status_code, 404)
+
+    def test_current_organization_templates_api_lists_templates_for_active_members(self):
+        template = self._create_org_template()
+        self._login_in_org_context(self.member)
+
+        resp = self.client.get(reverse("console-current-organization-templates"))
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertFalse(payload["viewer"]["canManageTemplates"])
+        self.assertEqual(payload["sourceAgents"], [])
+        self.assertEqual([item["id"] for item in payload["templates"]], [str(template.id)])
+
+    def test_current_organization_template_launch_seeds_org_spawn_session(self):
+        template = self._create_org_template()
+        self._login_in_org_context(self.member)
+
+        resp = self.client.post(
+            reverse("console-current-organization-template-launch", kwargs={"template_id": template.id}),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["redirectUrl"], "/app/agents/new?spawn=1")
+        session = self.client.session
+        self.assertEqual(session["context_type"], "organization")
+        self.assertEqual(session["context_id"], str(self.org.id))
+        self.assertEqual(session["agent_charter"], template.charter)
+        self.assertEqual(session["agent_charter_source"], "template")
+        self.assertEqual(session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY], template.code)
+        self.assertEqual(session[AGENT_TEMPLATE_SOURCE_SESSION_KEY], AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE)
+        self.assertEqual(session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY], str(self.org.id))
+
+    @patch("api.services.template_clone.TemplateCloneService._generate_template")
+    def test_current_organization_templates_api_allows_manage_roles_to_create_and_deactivate(self, mock_generate_template):
+        source_agent = self._create_org_agent()
+        mock_generate_template.return_value = {
+            "display_name": "Generated Org Template",
+            "tagline": "Reusable workflow",
+            "description": "A reusable private workflow.",
+            "charter": "Run this reusable private workflow.",
+            "base_schedule": "@daily",
+            "schedule_jitter_minutes": 0,
+            "default_tools": [],
+            "recommended_contact_channel": "email",
+            "category": "Operations",
+            "event_triggers": [],
+        }
+        self._login_in_org_context(self.admin)
+
+        create_resp = self.client.post(
+            reverse("console-current-organization-templates"),
+            data=json.dumps({"sourceAgentId": str(source_agent.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(create_resp.status_code, 201)
+        template = PersistentAgentTemplate.objects.get(source_agent=source_agent)
+        self.assertEqual(template.organization, self.org)
+        self.assertIsNone(template.public_profile_id)
+        self.assertIn(str(template.id), [item["id"] for item in create_resp.json()["templates"]])
+
+        delete_resp = self.client.delete(
+            reverse("console-current-organization-template-detail", kwargs={"template_id": template.id}),
+        )
+
+        self.assertEqual(delete_resp.status_code, 200)
+        template.refresh_from_db()
+        self.assertFalse(template.is_active)
+
+    def test_current_organization_templates_api_rejects_create_for_member_role(self):
+        source_agent = self._create_org_agent()
+        self._login_in_org_context(self.member)
+
+        resp = self.client.post(
+            reverse("console-current-organization-templates"),
+            data=json.dumps({"sourceAgentId": str(source_agent.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(PersistentAgentTemplate.objects.filter(source_agent=source_agent).exists())
 
     def test_owner_can_update_organization_name(self):
         self._login_in_org_context(self.owner)

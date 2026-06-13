@@ -54,7 +54,7 @@ class TemplateCloneError(Exception):
 class TemplateCloneResult:
     template: PersistentAgentTemplate
     created: bool
-    public_profile: PublicProfile
+    public_profile: PublicProfile | None = None
 
 
 class TemplateCloneService:
@@ -69,7 +69,11 @@ class TemplateCloneService:
             raise TemplateCloneError("Organization agents cannot be cloned into public templates.")
 
         existing = (
-            PersistentAgentTemplate.objects.filter(source_agent=agent, created_by=user)
+            PersistentAgentTemplate.objects.filter(
+                source_agent=agent,
+                created_by=user,
+                organization__isnull=True,
+            )
             .select_related("public_profile")
             .order_by("-created_at")
             .first()
@@ -106,6 +110,52 @@ class TemplateCloneService:
             )
 
         return TemplateCloneResult(template=template, created=True, public_profile=public_profile)
+
+    @staticmethod
+    def clone_agent_to_organization_template(
+        *,
+        agent: PersistentAgent,
+        user,
+    ) -> TemplateCloneResult:
+        if agent.organization_id is None:
+            raise TemplateCloneError("Only organization agents can be cloned into organization templates.")
+
+        existing = (
+            PersistentAgentTemplate.objects.filter(
+                source_agent=agent,
+                organization=agent.organization,
+                is_active=True,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if existing:
+            return TemplateCloneResult(template=existing, created=False)
+
+        payload = TemplateCloneService._build_template_payload(agent)
+        generated = TemplateCloneService._generate_template(agent, payload)
+        cleaned = TemplateCloneService._sanitize_template_payload(generated, payload)
+        template_code = TemplateCloneService._generate_template_code()
+
+        with transaction.atomic():
+            template = PersistentAgentTemplate.objects.create(
+                code=template_code,
+                organization=agent.organization,
+                source_agent=agent,
+                created_by=user,
+                display_name=cleaned["display_name"],
+                tagline=cleaned["tagline"],
+                description=cleaned["description"],
+                charter=cleaned["charter"],
+                base_schedule=cleaned.get("base_schedule", ""),
+                schedule_jitter_minutes=cleaned.get("schedule_jitter_minutes", 0),
+                event_triggers=cleaned.get("event_triggers", []),
+                default_tools=cleaned.get("default_tools", []),
+                recommended_contact_channel=cleaned.get("recommended_contact_channel", "email"),
+                category=cleaned.get("category", "Custom"),
+            )
+
+        return TemplateCloneResult(template=template, created=True)
 
     @staticmethod
     def _resolve_public_profile(user, requested_handle: str | None) -> PublicProfile:
@@ -406,6 +456,7 @@ class TemplateCloneService:
         suffix = 1
         while PersistentAgentTemplate.objects.filter(
             public_profile__isnull=False,
+            organization__isnull=True,
             slug=candidate,
         ).exists():
             suffix += 1

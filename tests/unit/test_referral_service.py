@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 from allauth.account.models import EmailAddress
 
 from api.models import (
+    Organization,
     UserReferral,
     UserAttribution,
     PersistentAgentTemplate,
@@ -119,6 +120,37 @@ class ReferralServiceTests(TestCase):
         result = ReferralService.process_signup_referral(
             new_user=self.new_user,
         )
+        self.assertIsNone(result)
+
+    @override_settings(
+        SEGMENT_WRITE_KEY="",
+        SEGMENT_WEB_WRITE_KEY="",
+        GOBII_PROPRIETARY_MODE=False,
+    )
+    def test_process_template_referral_ignores_organization_templates(self):
+        """Organization templates are private and should not award public template referral credits."""
+        org = Organization.objects.create(
+            name="Referral Org",
+            slug="referral-org",
+            created_by=self.referrer,
+        )
+        template = PersistentAgentTemplate.objects.create(
+            code="org-referral-template",
+            organization=org,
+            created_by=self.referrer,
+            display_name="Org Referral Template",
+            tagline="Private workflow",
+            description="Private organization template.",
+            charter="Run the private workflow.",
+            category="Operations",
+            is_active=True,
+        )
+
+        result = ReferralService.process_signup_referral(
+            new_user=self.new_user,
+            template_code=template.code,
+        )
+
         self.assertIsNone(result)
 
     def test_get_referral_link(self):

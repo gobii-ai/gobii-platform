@@ -4,7 +4,7 @@ import uuid
 from datetime import timedelta
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import send_mail
 from django.db import transaction
 from django.http import JsonResponse
@@ -16,12 +16,20 @@ from django.views import View
 from anymail.exceptions import AnymailError
 from waffle import flag_is_active
 
-from api.models import Organization, OrganizationInvite, OrganizationMembership
+from agents.services import PretrainedWorkerTemplateService
+from api.models import Organization, OrganizationInvite, OrganizationMembership, PersistentAgent, PersistentAgentTemplate
+from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from console.api_helpers import _parse_json_body as _parse_json_body_or_raise
 from console.context_helpers import build_console_context
 from console.forms import OrganizationForm, OrganizationInviteForm
+from console.agent_creation import (
+    AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
+    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
+)
 from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.urls import IMMERSIVE_APP_BASE_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +163,82 @@ def _serialize_organization(org: Organization, membership: OrganizationMembershi
     }
 
 
+def _serialize_organization_template(template: PersistentAgentTemplate) -> dict:
+    source_agent = getattr(template, "source_agent", None)
+    created_by = getattr(template, "created_by", None)
+    return {
+        "id": str(template.id),
+        "code": template.code,
+        "name": template.display_name,
+        "tagline": template.tagline,
+        "description": template.description,
+        "category": template.category or "Custom",
+        "sourceAgentId": str(template.source_agent_id) if template.source_agent_id else None,
+        "sourceAgentName": source_agent.name if source_agent else None,
+        "createdBy": (
+            created_by.get_full_name()
+            or created_by.email
+            or created_by.username
+            if created_by
+            else None
+        ),
+        "baseSchedule": template.base_schedule or "",
+        "scheduleDescription": PretrainedWorkerTemplateService.describe_schedule(template.base_schedule),
+        "defaultTools": list(template.default_tools or []),
+        "updatedAt": template.updated_at.isoformat() if template.updated_at else None,
+    }
+
+
+def _organization_template_queryset(org: Organization):
+    return (
+        PersistentAgentTemplate.objects
+        .select_related("source_agent", "created_by")
+        .filter(
+            organization=org,
+            public_profile__isnull=True,
+            is_active=True,
+        )
+        .order_by("priority", "display_name")
+    )
+
+
+def _serialize_source_agent(agent: PersistentAgent) -> dict:
+    return {
+        "id": str(agent.id),
+        "name": agent.name or "Untitled Agent",
+    }
+
+
+def _serialize_organization_templates(org: Organization, membership: OrganizationMembership) -> dict:
+    can_manage_templates = membership.role in MEMBER_MANAGE_ROLES
+    source_agents = []
+    if can_manage_templates:
+        source_agents = [
+            _serialize_source_agent(agent)
+            for agent in (
+                PersistentAgent.objects
+                .non_eval()
+                .alive()
+                .filter(organization=org)
+                .order_by("name", "id")
+            )
+        ]
+    return {
+        "organization": {
+            "id": str(org.id),
+            "name": org.name,
+        },
+        "viewer": {
+            "canManageTemplates": can_manage_templates,
+        },
+        "templates": [
+            _serialize_organization_template(template)
+            for template in _organization_template_queryset(org)
+        ],
+        "sourceAgents": source_agents,
+    }
+
+
 def _resolve_current_org(request):
     if not flag_is_active(request, "organizations"):
         raise PermissionDenied("Organizations are not available.")
@@ -253,6 +337,126 @@ class CurrentOrganizationAPIView(LoginRequiredMixin, View):
             properties=props.copy(),
         ))
         return JsonResponse(_serialize_organization(org, membership))
+
+
+class CurrentOrganizationTemplateAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get", "post"]
+
+    def get(self, request):
+        try:
+            org, membership, error = _require_current_org(request)
+        except PermissionDenied as exc:
+            return _json_error(str(exc), status=404)
+        if error:
+            return error
+        return JsonResponse(_serialize_organization_templates(org, membership))
+
+    @transaction.atomic
+    def post(self, request):
+        try:
+            org, membership, error = _require_current_org(request)
+        except PermissionDenied as exc:
+            return _json_error(str(exc), status=404)
+        if error:
+            return error
+        if membership.role not in MEMBER_MANAGE_ROLES:
+            return _json_error("You do not have permission to manage templates.", status=403)
+
+        payload, error = _parse_json_body(request)
+        if error:
+            return error
+
+        source_agent_id = str(payload.get("sourceAgentId") or payload.get("source_agent_id") or "").strip()
+        if not source_agent_id:
+            return _json_error("sourceAgentId is required.", status=400)
+        try:
+            source_agent_uuid = uuid.UUID(source_agent_id)
+        except (TypeError, ValueError, AttributeError):
+            return _json_error("sourceAgentId must be a valid UUID.", status=400)
+
+        source_agent = get_object_or_404(
+            PersistentAgent.objects.non_eval().alive().select_related("organization"),
+            id=source_agent_uuid,
+            organization=org,
+        )
+        try:
+            result = TemplateCloneService.clone_agent_to_organization_template(
+                agent=source_agent,
+                user=request.user,
+            )
+        except TemplateCloneError as exc:
+            return _json_error(str(exc), status=400)
+        except ValidationError as exc:
+            message = exc.messages[0] if getattr(exc, "messages", None) else "Unable to create template."
+            return _json_error(message, status=400)
+
+        return JsonResponse(
+            {
+                **_serialize_organization_templates(org, membership),
+                "created": result.created,
+                "templateId": str(result.template.id),
+            },
+            status=201 if result.created else 200,
+        )
+
+
+class CurrentOrganizationTemplateDetailAPIView(LoginRequiredMixin, View):
+    http_method_names = ["delete"]
+
+    @transaction.atomic
+    def delete(self, request, template_id):
+        try:
+            org, membership, error = _require_current_org(request)
+        except PermissionDenied as exc:
+            return _json_error(str(exc), status=404)
+        if error:
+            return error
+        if membership.role not in MEMBER_MANAGE_ROLES:
+            return _json_error("You do not have permission to manage templates.", status=403)
+
+        template = get_object_or_404(
+            PersistentAgentTemplate,
+            id=template_id,
+            organization=org,
+            public_profile__isnull=True,
+            is_active=True,
+        )
+        template.is_active = False
+        template.save(update_fields=["is_active", "updated_at"])
+        return JsonResponse(_serialize_organization_templates(org, membership))
+
+
+class CurrentOrganizationTemplateLaunchAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request, template_id):
+        try:
+            org, membership, error = _require_current_org(request)
+        except PermissionDenied as exc:
+            return _json_error(str(exc), status=404)
+        if error:
+            return error
+
+        template = get_object_or_404(
+            PersistentAgentTemplate,
+            id=template_id,
+            organization=org,
+            public_profile__isnull=True,
+            is_active=True,
+        )
+        request.session["context_type"] = "organization"
+        request.session["context_id"] = str(org.id)
+        request.session["context_name"] = org.name
+        request.session["agent_charter"] = template.charter
+        request.session["agent_charter_source"] = "template"
+        request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
+        request.session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(org.id)
+        request.session.modified = True
+        return JsonResponse({
+            "templateId": str(template.id),
+            "redirectUrl": f"{IMMERSIVE_APP_BASE_PATH}/agents/new?spawn=1",
+        })
 
 
 class CurrentOrganizationInviteAPIView(LoginRequiredMixin, View):

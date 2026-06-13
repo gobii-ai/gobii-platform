@@ -291,6 +291,9 @@ from console.organization_api_views import (
     CurrentOrganizationInviteDetailAPIView,
     CurrentOrganizationInviteResendAPIView,
     CurrentOrganizationMemberAPIView,
+    CurrentOrganizationTemplateAPIView,
+    CurrentOrganizationTemplateDetailAPIView,
+    CurrentOrganizationTemplateLaunchAPIView,
 )
 from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView, PipedreamConnectRedirectView
@@ -657,6 +660,9 @@ urlpatterns = [
     path("console/api/api-keys/", ApiKeyListAPIView.as_view(), name="console-api-key-list"),
     path("console/api/api-keys/<uuid:api_key_id>/", ApiKeyDetailAPIView.as_view(), name="console-api-key-detail"),
     path("console/api/organization/", CurrentOrganizationAPIView.as_view(), name="console-current-organization"),
+    path("console/api/organization/templates/", CurrentOrganizationTemplateAPIView.as_view(), name="console-current-organization-templates"),
+    path("console/api/organization/templates/<uuid:template_id>/", CurrentOrganizationTemplateDetailAPIView.as_view(), name="console-current-organization-template-detail"),
+    path("console/api/organization/templates/<uuid:template_id>/launch/", CurrentOrganizationTemplateLaunchAPIView.as_view(), name="console-current-organization-template-launch"),
     path("console/api/organization/invites/", CurrentOrganizationInviteAPIView.as_view(), name="console-current-organization-invites"),
     path("console/api/organization/invites/<str:token>/", CurrentOrganizationInviteDetailAPIView.as_view(), name="console-current-organization-invite-detail"),
     path("console/api/organization/invites/<str:token>/resend/", CurrentOrganizationInviteResendAPIView.as_view(), name="console-current-organization-invite-resend"),

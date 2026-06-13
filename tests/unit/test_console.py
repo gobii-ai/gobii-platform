@@ -30,6 +30,8 @@ from util.onboarding import (
 from api.models import MCPServerConfig, PipedreamAppSelection
 from console.agent_creation import (
     AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+    AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
     AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
     AGENT_TEMPLATE_SOURCE_SESSION_KEY,
 )
@@ -2090,6 +2092,173 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(properties.get("template_code"), template.code)
         self.assertEqual(properties.get("template_source"), AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER)
         self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, self.client.session)
+
+    @override_settings(
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
+        SEGMENT_WRITE_KEY="",
+        SEGMENT_WEB_WRITE_KEY="",
+        GOBII_PROPRIETARY_MODE=False,
+    )
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.emit_configured_custom_capi_event")
+    @patch("console.agent_creation.Analytics.track_event")
+    @tag("batch_console_agents_management")
+    def test_quick_create_from_organization_template_allows_member_to_create_org_agent(
+        self,
+        _mock_track_event,
+        _mock_capi_event,
+        _mock_delay,
+    ):
+        from agents.services import PretrainedWorkerTemplateService
+        from api.models import Organization, OrganizationMembership, PersistentAgentTemplate, PersistentAgent
+
+        organization = Organization.objects.create(
+            name="Template Create Org",
+            slug="template-create-org",
+            created_by=self.user,
+        )
+        organization.billing.purchased_seats = 2
+        organization.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        template = PersistentAgentTemplate.objects.create(
+            code="console-org-template",
+            organization=organization,
+            display_name="Console Org Template",
+            tagline="Private workflow",
+            description="Private reusable workflow.",
+            charter="Run the organization workflow.",
+            base_schedule="@daily",
+            category="Operations",
+            is_active=True,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session["agent_charter"] = template.charter
+        session["agent_charter_source"] = "template"
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
+        session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(organization.id)
+        session.save()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/console/api/agents/create/",
+                data=json.dumps({"message": template.charter}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        created_agent = PersistentAgent.objects.get(id=response.json()["agent_id"])
+        self.assertEqual(created_agent.organization, organization)
+        self.assertEqual(created_agent.schedule_snapshot, template.base_schedule)
+        self.assertEqual(created_agent.schedule, template.base_schedule)
+        session = self.client.session
+        self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
+        self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, session)
+        self.assertNotIn(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, session)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.Analytics.track_event")
+    @tag("batch_console_agents_management")
+    def test_quick_create_rejects_organization_template_from_different_context(
+        self,
+        _mock_track_event,
+        _mock_delay,
+    ):
+        from agents.services import PretrainedWorkerTemplateService
+        from api.models import Organization, OrganizationMembership, PersistentAgentTemplate, PersistentAgent
+
+        source_org = Organization.objects.create(name="Source Org", slug="source-org", created_by=self.user)
+        target_org = Organization.objects.create(name="Target Org", slug="target-org", created_by=self.user)
+        target_org.billing.purchased_seats = 2
+        target_org.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=target_org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        template = PersistentAgentTemplate.objects.create(
+            code="wrong-org-template",
+            organization=source_org,
+            display_name="Wrong Org Template",
+            tagline="Private workflow",
+            description="Private reusable workflow.",
+            charter="Run the source org workflow.",
+            category="Operations",
+            is_active=True,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(target_org.id)
+        session["context_name"] = target_org.name
+        session["agent_charter"] = template.charter
+        session["agent_charter_source"] = "template"
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
+        session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(source_org.id)
+        session.save()
+
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": template.charter}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("different organization", response.json()["error"])
+        self.assertFalse(PersistentAgent.objects.filter(organization=target_org).exists())
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.Analytics.track_event")
+    @tag("batch_console_agents_management")
+    def test_quick_create_rejects_organization_template_from_personal_context(
+        self,
+        _mock_track_event,
+        _mock_delay,
+    ):
+        from agents.services import PretrainedWorkerTemplateService
+        from api.models import Organization, PersistentAgentTemplate, PersistentAgent
+
+        organization = Organization.objects.create(name="Personal Block Org", slug="personal-block-org", created_by=self.user)
+        template = PersistentAgentTemplate.objects.create(
+            code="personal-block-org-template",
+            organization=organization,
+            display_name="Personal Block Template",
+            tagline="Private workflow",
+            description="Private reusable workflow.",
+            charter="Run the private workflow.",
+            category="Operations",
+            is_active=True,
+        )
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.user.id)
+        session["agent_charter"] = template.charter
+        session["agent_charter_source"] = "template"
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
+        session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(organization.id)
+        session.save()
+
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": template.charter}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("organization context", response.json()["error"])
+        self.assertFalse(PersistentAgent.objects.filter(user=self.user, organization__isnull=True).exists())
 
     @tag("batch_console_agents_management")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')
