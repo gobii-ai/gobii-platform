@@ -25,8 +25,8 @@ def is_waffle_switch_active(switch_name: str, *, default: bool = False) -> bool:
     """Safely evaluate a waffle switch even when the row or DB isn't ready."""
     try:
         Switch = get_waffle_switch_model()
-        switch = Switch.get(switch_name)
-        if not switch.pk:
+        switch = Switch.objects.filter(name=switch_name).first()
+        if switch is None:
             return default
         return switch.is_active()
     except (DatabaseError, ImproperlyConfigured):
