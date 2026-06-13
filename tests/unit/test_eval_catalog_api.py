@@ -62,3 +62,24 @@ class EvalCatalogAPITests(TestCase):
         self.assertGreaterEqual(run.agent.organization.billing.purchased_seats, 1)
         mock_run_eval_delay.assert_called_once_with(str(run.id))
         mock_gc_delay.assert_called_once()
+
+    @patch("console.api_views.gc_eval_runs_task.delay")
+    @patch("console.api_views.run_eval_task.delay")
+    def test_create_suite_run_uses_personal_agent_for_sms_scenario(self, mock_run_eval_delay, mock_gc_delay):
+        response = self.client.post(
+            reverse("console_evals_suite_runs_create"),
+            data={
+                "scenario_slugs": ["permit_followup_single_reply"],
+                "n_runs": 1,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        run = EvalRun.objects.select_related("agent__user", "agent__organization").get()
+        self.assertEqual(run.scenario_slug, "permit_followup_single_reply")
+        self.assertEqual(run.agent.user.username, EVAL_RUNNER_USERNAME)
+        self.assertIsNone(run.agent.organization_id)
+        self.assertEqual(run.agent.execution_environment, "eval")
+        mock_run_eval_delay.assert_called_once_with(str(run.id))
+        mock_gc_delay.assert_called_once()

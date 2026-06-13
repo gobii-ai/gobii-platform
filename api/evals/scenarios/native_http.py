@@ -1,7 +1,11 @@
 import json
+import re
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 from urllib.parse import parse_qs, unquote_plus, urlparse
+
+from django.utils import timezone
 
 from api.agent.system_skills.service import enable_system_skills
 from api.evals.base import EvalScenario
@@ -15,6 +19,11 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentToolCall,
 )
+from api.services.native_integrations import (
+    get_native_integration_provider,
+    save_native_integration_credentials,
+)
+from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
 
 
 @dataclass(frozen=True)
@@ -107,9 +116,24 @@ def call_matches_url_terms(call: PersistentAgentToolCall, url_terms: tuple[str, 
     return all(term.lower() in decoded_url(call) for term in url_terms)
 
 
+def response_contains_term(body: str, term: str) -> bool:
+    body_lower = body.lower()
+    term_lower = term.lower()
+    if term_lower in body_lower:
+        return True
+
+    compact_term = re.sub(r"[$,\s]", "", term_lower)
+    if compact_term.isdigit():
+        compact_body = re.sub(r"[$,\s]", "", body_lower)
+        return compact_term in compact_body
+
+    return False
+
+
 class NativeHttpScenarioBase(EvalScenario, ScenarioExecutionTools):
     system_skill_key = ""
     system_skill_name = "native HTTP"
+    native_provider_key = ""
     forbidden_tool_names: tuple[str, ...] = ()
     forbidden_tool_prefixes: tuple[str, ...] = ()
     allowed_tool_names: tuple[str, ...] = ("http_request", "send_chat_message")
@@ -141,17 +165,44 @@ class NativeHttpScenarioBase(EvalScenario, ScenarioExecutionTools):
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
         )
 
+    def _should_seed_native_connection(self) -> bool:
+        case = self._case()
+        return bool(self.native_provider_key) and "missing_connection" not in case.tags
+
+    def _seed_native_connection(self, agent: PersistentAgent) -> None:
+        if not self._should_seed_native_connection():
+            return
+
+        provider = get_native_integration_provider(self.native_provider_key)
+        owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
+        save_native_integration_credentials(
+            provider,
+            owner_user,
+            owner_org,
+            {
+                "provider_key": provider.key,
+                "auth_type": "oauth2",
+                "access_token": f"eval-{provider.key}-access-token",
+                "refresh_token": f"eval-{provider.key}-refresh-token",
+                "token_type": "Bearer",
+                "scope": provider.scope_string,
+                "expires_at": (timezone.now() + timedelta(hours=1)).isoformat(),
+            },
+        )
+
     def _prepare_agent(self, agent_id: str) -> None:
         PersistentAgent.objects.filter(id=agent_id).update(planning_state=PersistentAgent.PlanningState.SKIPPED)
         self._seed_prior_processing_run(agent_id)
-        result = enable_system_skills(PersistentAgent.objects.get(id=agent_id), [self.system_skill_key])
+        agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
+        self._seed_native_connection(agent)
+        result = enable_system_skills(agent, [self.system_skill_key])
         if result.get("invalid"):
             raise ValueError(f"Could not enable {self.system_skill_name} native system skill: {result}")
 
     def _eval_stop_policy(self) -> dict[str, Any]:
         return {
             "allowed_tool_names": list(self.allowed_tool_names),
-            "ignored_tool_names": ["sleep_until_next_trigger"],
+            "ignored_tool_names": ["sleep_until_next_trigger", "update_plan"],
             "stop_on_unexpected_relevant_tool": True,
             "stop_on_tool_names": list(self.forbidden_tool_names),
             "stop_on_tool_names_after_finish": ["send_chat_message"],
@@ -267,7 +318,7 @@ class NativeHttpScenarioBase(EvalScenario, ScenarioExecutionTools):
         missing_groups = [
             terms
             for terms in case.response_term_groups
-            if not any(term.lower() in body.lower() for term in terms)
+            if not any(response_contains_term(body, term) for term in terms)
         ]
         if not missing_groups:
             self.record_task_result(

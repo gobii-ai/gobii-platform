@@ -12,6 +12,7 @@ from api.evals.scenarios.hubspot_native import (
     HubSpotHttpRequestExpectation,
     _call_matches_expectation,
 )
+from api.evals.scenarios.native_http import response_contains_term
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 
@@ -116,6 +117,9 @@ class HubSpotNativeScenarioTests(SimpleTestCase):
 
         self.assertTrue(_call_matches_expectation(error_call, expectation))
         self.assertFalse(_call_matches_expectation(complete_call, expectation))
+
+    def test_response_term_matching_accepts_currency_formatting(self):
+        self.assertTrue(response_contains_term("Amount is now $25,000.", "25000"))
 
     def test_expected_http_request_can_require_body_terms(self):
         create_case = next(case for case in HUBSPOT_NATIVE_CASES if case.slug == HUBSPOT_NATIVE_CREATE_CONTACT)

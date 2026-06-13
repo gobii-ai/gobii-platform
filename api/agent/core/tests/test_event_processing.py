@@ -444,6 +444,17 @@ class ToolParamParsingTests(SimpleTestCase):
         self.assertEqual(normalized["url"], "https://api.coindesk.com/v1/bpi/currentprice/USD.json")
         self.assertTrue(normalized["will_continue_work"])
 
+    def test_http_url_normalization_preserves_google_drive_query_quotes(self):
+        url = (
+            "https://www.googleapis.com/drive/v3/files?"
+            "q=mimeType%20%3D%20'application%2Fvnd.google-apps.spreadsheet'"
+            "%20and%20trashed%20%3D%20false"
+        )
+
+        normalized = _normalize_tool_params("http_request", {"method": "GET", "url": url, "will_continue_work": True})
+
+        self.assertEqual(normalized["url"], url)
+
     def test_brightdata_markdown_scrape_drops_extraction_prompt_when_url_is_known(self):
         normalized = _normalize_tool_params(
             "mcp_brightdata_scrape_as_markdown",
@@ -733,6 +744,9 @@ class ContinuationModePromptContextTests(TestCase):
         self.assertIn("## Continuation Mode", system_prompt)
         self.assertIn("Continue the existing work thread", system_prompt)
         self.assertIn("prefer one direct next tool call", system_prompt)
+        self.assertIn("If one workstream waits on human input, credentials, auth, or a third party", system_prompt)
+        self.assertIn("continue the next unblocked charter/plan item", system_prompt)
+        self.assertIn("verify blockers once, then keep moving", system_prompt)
 
     def test_prompt_omits_continuation_mode_on_first_run(self):
         system_prompt = self._render_system_prompt(is_first_run=True)

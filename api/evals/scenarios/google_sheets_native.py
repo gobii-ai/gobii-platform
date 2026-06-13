@@ -40,6 +40,10 @@ def _http_result(url: str, content: Any, *, status_code: int = 200) -> dict[str,
     }
 
 
+def _method_equals(method: str) -> dict[str, dict[str, str]]:
+    return {"param_equals": {"method": method.upper()}}
+
+
 DRIVE_SEARCH_URL = "https://www.googleapis.com/drive/v3/files"
 SALES_TRACKER_ID = "sheet-sales-q2"
 GENERIC_TRACKER_ID = "sheet-123"
@@ -67,6 +71,8 @@ def _drive_spreadsheet_rule(files: list[dict[str, str]], *extra_url_terms: str) 
 def _generic_tracker_metadata_rule() -> dict[str, Any]:
     return {
         "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+        "url_not_contains": ("/values/", ":batchupdate"),
+        **_method_equals("GET"),
         "result": _http_result(
             f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
             {
@@ -88,6 +94,7 @@ def _generic_tracker_leads_values_rule() -> dict[str, Any]:
             f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
             "leads",
         ),
+        **_method_equals("GET"),
         "result": _http_result(
             f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Leads!A1:Z",
             {
@@ -101,9 +108,62 @@ def _generic_tracker_leads_values_rule() -> dict[str, Any]:
     }
 
 
+def _model_sizes_metadata_rule() -> dict[str, Any]:
+    return {
+        "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+        "url_not_contains": ("/values/", ":batchupdate"),
+        **_method_equals("GET"),
+        "result": _http_result(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+            {
+                "spreadsheetId": GENERIC_TRACKER_ID,
+                "properties": {"title": "Model Tracker"},
+                "sheets": [{"properties": {"sheetId": 0, "title": "Models"}}],
+            },
+        ),
+    }
+
+
+def _model_sizes_values_rule() -> dict[str, Any]:
+    return {
+        "url_contains": (
+            f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+            "models",
+        ),
+        **_method_equals("GET"),
+        "result": _http_result(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Models!A1:C6",
+            {
+                "range": "Models!A1:C6",
+                "values": [
+                    ["Model", "Size", "Downloads"],
+                    ["Llama 3.1 8B", "8B", "125000"],
+                    ["Qwen2.5 7B", "7B", "98000"],
+                    ["Mistral 7B", "7B", "87000"],
+                ],
+            },
+        ),
+    }
+
+
+def _model_sizes_helper_column_values_rule() -> dict[str, Any]:
+    return {
+        "url_decoded_contains": f"/values/models!d",
+        **_method_equals("GET"),
+        "result": _http_result(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Models!D1:D4",
+            {
+                "range": "Models!D1:D4",
+                "values": [["Helper Size"], ["8"], ["7"], ["7"]],
+            },
+        ),
+    }
+
+
 def _create_local_llms_rule() -> dict[str, Any]:
     return {
         "url_contains": "sheets.googleapis.com/v4/spreadsheets",
+        **_method_equals("POST"),
         "result": _http_result(
             "https://sheets.googleapis.com/v4/spreadsheets",
             {
@@ -122,6 +182,7 @@ def _local_llms_values_update_rule() -> dict[str, Any]:
             f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
             "models",
         ),
+        **_method_equals("PUT"),
         "result": _http_result(
             f"https://sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values/Models!A1:F10",
             {"spreadsheetId": LOCAL_LLMS_SHEET_ID, "updatedRows": 6, "updatedCells": 30},
@@ -134,6 +195,7 @@ def _local_llms_format_rule() -> dict[str, Any]:
         "url_contains": (
             f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchUpdate",
         ),
+        **_method_equals("POST"),
         "result": _http_result(
             f"https://sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchUpdate",
             {
@@ -183,6 +245,8 @@ GOOGLE_SHEETS_NATIVE_CASES = (
             _drive_spreadsheet_rule([SALES_TRACKER_FILE], "q2", "sales", "tracker"),
             {
                 "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{SALES_TRACKER_ID}",
+                "url_not_contains": ("/values/", ":batchupdate"),
+                **_method_equals("GET"),
                 "result": _http_result(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{SALES_TRACKER_ID}",
                     {
@@ -270,6 +334,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
             _drive_spreadsheet_rule([GENERIC_TRACKER_FILE]),
             {
                 "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+                **_method_equals("GET"),
                 "result": _http_result(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Leads!A1:D5",
                     {
@@ -310,6 +375,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                     f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
                     "append",
                 ),
+                **_method_equals("POST"),
                 "result": _http_result(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Leads!A:D:append",
                     {
@@ -342,8 +408,9 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         slug=GOOGLE_SHEETS_NATIVE_CREATE_DEFAULT_COLUMNS,
         description="Create a useful spreadsheet with safe default columns instead of asking for preferences.",
         prompt=(
-            "Create a Google Sheet named Top Local LLM Models with the latest useful local LLM model list. "
-            "Use sensible default columns if I did not specify them."
+            "Create a Google Sheet named Top Local LLM Models with sensible default columns. "
+            "Use these rows: Llama 3.1 8B, Qwen2.5 7B, and Mistral 7B. Include columns for name, size, "
+            "license, and links."
         ),
         http_rules=(
             _local_llms_values_update_rule(),
@@ -365,10 +432,10 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                     "models",
                     "valueinputoption=user_entered",
                 ),
-                body_terms=("name", "size", "license", "links"),
+                body_terms=("name", "size", "license", "link"),
             ),
         ),
-        response_term_groups=(("Top Local LLM Models", LOCAL_LLMS_SHEET_ID),),
+        response_term_groups=(("Top Local LLM Models", "created", "ready"),),
         tags=("create", "defaults"),
     ),
     GoogleSheetsNativeCase(
@@ -376,7 +443,11 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         description="Create, populate, and apply baseline formatting to a new spreadsheet.",
         prompt=(
             "Make a polished Google Sheet called Top Local LLM Models with columns for name, size, license, links, "
-            "and release date."
+            "and release date. Use only this provided dataset; no external research is needed: "
+            "Llama 3.1 8B | 8B | Llama 3.1 Community License | "
+            "https://huggingface.co/meta-llama/Llama-3.1-8B | 2024-07-23; "
+            "Qwen2.5 7B | 7B | Apache 2.0 | https://huggingface.co/Qwen/Qwen2.5-7B | 2024-09-19; "
+            "Mistral 7B | 7B | Apache 2.0 | https://huggingface.co/mistralai/Mistral-7B-v0.1 | 2023-09-27."
         ),
         http_rules=(
             _local_llms_values_update_rule(),
@@ -394,16 +465,16 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                 name="write_values",
                 method="PUT",
                 url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",),
-                body_terms=("release date", "license", "links"),
+                body_terms=("release date", "license", "link"),
             ),
             HttpRequestExpectation(
                 name="format_spreadsheet",
                 method="POST",
                 url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchupdate",),
-                body_terms=("freezerowcount", "repeatcell", "addbanding", "bandedrange", "autoresizedimensions"),
+                body_terms=("frozenrowcount", "repeatcell", "addbanding", "bandedrange", "autoresizedimensions"),
             ),
         ),
-        response_term_groups=(("polished", "formatted", "ready"), (LOCAL_LLMS_SHEET_ID,)),
+        response_term_groups=(("polishing", "applied"), ("Top Local LLM Models", "sheet")),
         tags=("create", "format"),
     ),
     GoogleSheetsNativeCase(
@@ -412,7 +483,27 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         prompt="Format Google spreadsheet sheet-123 so it looks polished. Avoid breaking existing alternating row colors.",
         http_rules=(
             {
+                "url_contains": (
+                    f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+                    "leads",
+                ),
+                **_method_equals("GET"),
+                "result": _http_result(
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Leads!A1:D10",
+                    {
+                        "range": "Leads!A1:D10",
+                        "values": [
+                            ["Company", "Owner", "Priority", "Status"],
+                            ["Acme", "Sam", "High", "Qualified"],
+                            ["Globex", "Priya", "Medium", "Contacted"],
+                        ],
+                    },
+                ),
+            },
+            {
                 "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+                "url_not_contains": ("/values/", ":batchupdate"),
+                **_method_equals("GET"),
                 "result": _http_result(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
                     {
@@ -429,6 +520,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
             },
             {
                 "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
+                **_method_equals("POST"),
                 "result": _http_result(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
                     {"spreadsheetId": GENERIC_TRACKER_ID, "replies": [{"repeatCell": {}}, {"autoResizeDimensions": {}}]},
@@ -454,19 +546,25 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         slug=GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA,
         description="Create a chart that binds numeric helper data even when helper columns are hidden.",
         prompt=(
-            "In Google spreadsheet sheet-123, add a chart visualizing model sizes. If you need a helper numeric "
-            "column, make sure the chart still reads it."
+            "In Google spreadsheet sheet-123, the Models tab has model names in A and size labels in B. "
+            "Add numeric helper values for the sizes to empty helper column D, then add a chart visualizing model sizes. "
+            "Make sure the chart reads the helper values even if that helper column is hidden."
         ),
         http_rules=(
+            _model_sizes_helper_column_values_rule(),
+            _model_sizes_values_rule(),
+            _model_sizes_metadata_rule(),
             {
                 "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+                **_method_equals("PUT"),
                 "result": _http_result(
-                    f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Leads!F1:F10",
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Models!D1:D10",
                     {"spreadsheetId": GENERIC_TRACKER_ID, "updatedRows": 6, "updatedCells": 6},
                 ),
             },
             {
                 "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
+                **_method_equals("POST"),
                 "result": _http_result(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
                     {"spreadsheetId": GENERIC_TRACKER_ID, "replies": [{"addChart": {"chart": {"chartId": 55}}}]},
@@ -564,6 +662,7 @@ class GoogleSheetsNativeScenario(NativeHttpScenarioBase):
     case: GoogleSheetsNativeCase | None = None
     system_skill_key = GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
     system_skill_name = "Google Sheets"
+    native_provider_key = "google_drive"
     forbidden_tool_names = FORBIDDEN_DISCOVERY_TOOL_NAMES
     forbidden_tool_prefixes = ("google_sheets-",)
     expected_requests_summary = "Agent completed the expected Google Drive/Sheets REST request(s)."

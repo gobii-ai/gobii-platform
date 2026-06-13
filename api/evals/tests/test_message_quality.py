@@ -186,6 +186,11 @@ class MessageQualityScenarioTests(SimpleTestCase):
         )
         self.assertIn("send_chat_message", MessageQualityScenario._allowed_tool_names(case))
 
+    def test_email_cases_allow_sqlite_contact_lookup_preamble(self):
+        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
+
+        self.assertIn("sqlite_batch", MessageQualityScenario._allowed_tool_names(case))
+
     def test_email_cases_still_reject_other_secondary_delivery_channels(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
         calls = [

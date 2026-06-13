@@ -596,6 +596,61 @@ class EffortCalibrationHarnessTests(TestCase):
             EvalRunTask.Status.PASSED,
         )
 
+    def test_future_work_preserved_accepts_persisted_sqlite_resume_state(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="future_work_sqlite_resume_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Future Work SQLite Resume Browser")
+        agent = PersistentAgent.objects.create(
+            name="Future Work SQLite Resume Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+            schedule="",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug="future_work_sqlite_resume_test",
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        EvalRunTask.objects.create(run=run, name="verify_future_work_preserved", sequence=1)
+        work_step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=work_step,
+            tool_name="eval_verify_candidate_batch",
+            tool_params={},
+            result='{"status":"partial","remaining_work":12,"next_cursor":"candidate-offset-3"}',
+        )
+        sqlite_step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=sqlite_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "CREATE TABLE IF NOT EXISTS candidate_verification_state "
+                    "(next_cursor TEXT, remaining_work INTEGER); "
+                    "INSERT INTO candidate_verification_state (next_cursor, remaining_work) "
+                    "VALUES ('candidate-offset-3', 12);"
+                )
+            },
+            result='{"status":"ok"}',
+        )
+
+        passed = EffortCalibrationScenario()._record_future_work_preserved(
+            str(run.id),
+            agent_id=str(agent.id),
+            after=agent.created_at,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_verify_candidate_batch"},
+        )
+
+        self.assertTrue(passed)
+        self.assertEqual(
+            run.tasks.get(name="verify_future_work_preserved").status,
+            EvalRunTask.Status.PASSED,
+        )
+
     def test_future_work_preserved_rejects_single_unscheduled_batch(self):
         User = get_user_model()
         user = User.objects.create_user(username="future_work_missing_schedule_user")

@@ -185,7 +185,11 @@ APOLLO_NATIVE_CASES = (
                 allowed_statuses=("error",),
             ),
         ),
-        response_term_groups=(("Apollo",), ("/app/integrations",), ("connect", "connected")),
+        response_term_groups=(
+            ("Apollo",),
+            ("/app/integrations", "Integrations page", "Integrations section"),
+            ("connect", "connected"),
+        ),
         tags=("missing_connection",),
     ),
     ApolloNativeCase(
@@ -239,6 +243,7 @@ class ApolloNativeScenario(NativeHttpScenarioBase):
     ]
     system_skill_key = APOLLO_NATIVE_SYSTEM_SKILL_KEY
     system_skill_name = "Apollo"
+    native_provider_key = "apollo"
     forbidden_tool_names = FORBIDDEN_APOLLO_DISCOVERY_TOOL_NAMES
     forbidden_tool_prefixes = ("apollo_io-",)
     allowed_tool_names = ("http_request", "send_chat_message", "sqlite_batch")
