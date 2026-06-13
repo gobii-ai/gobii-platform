@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any
 
@@ -231,6 +232,14 @@ def _tool_call_has_succeeded(tool_call) -> bool:
     return str(getattr(tool_call, "status", "") or "").lower() == "complete"
 
 
+def _tool_call_was_skipped(tool_call) -> bool:
+    try:
+        parsed = json.loads(getattr(tool_call, "result", "") or "{}")
+    except (TypeError, ValueError):
+        return False
+    return isinstance(parsed, dict) and parsed.get("skipped") is True
+
+
 def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] | None) -> tuple[bool, str]:
     if not eval_run_id or not policy:
         return False, ""
@@ -253,13 +262,21 @@ def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] 
     stop_after_execution_tool_names = set(policy.get("stop_on_tool_names_after_execution") or ())
     if stop_after_execution_tool_names:
         for call in calls:
-            if call.tool_name in stop_after_execution_tool_names and _tool_call_has_succeeded(call):
+            if (
+                call.tool_name in stop_after_execution_tool_names
+                and not _tool_call_was_skipped(call)
+                and _tool_call_has_succeeded(call)
+            ):
                 return True, f"terminal tool call completed: {call.tool_name}"
 
     stop_after_finish_tool_names = set(policy.get("stop_on_tool_names_after_finish") or ())
     if stop_after_finish_tool_names:
         for call in calls:
-            if call.tool_name in stop_after_finish_tool_names and _tool_call_has_finished(call):
+            if (
+                call.tool_name in stop_after_finish_tool_names
+                and not _tool_call_was_skipped(call)
+                and _tool_call_has_finished(call)
+            ):
                 return True, f"terminal tool call finished: {call.tool_name}"
 
     if policy.get("stop_on_unexpected_relevant_tool"):

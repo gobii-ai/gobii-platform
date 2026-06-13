@@ -1,11 +1,14 @@
+import os
 from types import SimpleNamespace
 
-from django.test import SimpleTestCase, tag
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.scenarios.apollo_native import (
     APOLLO_NATIVE_CASES,
     APOLLO_NATIVE_CREATE_CONTACT,
+    APOLLO_NATIVE_MISSING_CONNECTION,
     APOLLO_NATIVE_PEOPLE_SEARCH,
     APOLLO_NATIVE_SCENARIO_SLUGS,
     APOLLO_NATIVE_SUITE_SLUG,
@@ -15,6 +18,11 @@ from api.evals.scenarios.apollo_native import (
 )
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
+from api.models import BrowserUseAgent, GlobalSecret, Organization, OrganizationMembership, PersistentAgent
+from api.services.native_integrations import get_native_integration_secret, load_native_integration_credentials
+
+
+User = get_user_model()
 
 
 @tag("eval_sim")
@@ -153,3 +161,56 @@ class ApolloNativeScenarioTests(SimpleTestCase):
 
         self.assertFalse(_call_matches_expectation(missing_body_call, expectation))
         self.assertTrue(_call_matches_expectation(complete_call, expectation))
+
+
+@tag("eval_sim")
+class ApolloNativeScenarioConnectionSeedTests(TestCase):
+    def setUp(self):
+        os.environ.setdefault("GOBII_ENCRYPTION_KEY", "test-key-for-native-eval-seeds")
+        self.user = User.objects.create_user(
+            username="apollo-native-eval",
+            email="apollo-native-eval@example.com",
+            password="password123",
+        )
+        self.org = Organization.objects.create(
+            name="Apollo Native Eval Org",
+            slug="apollo-native-eval-org",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        billing = self.org.billing
+        billing.purchased_seats = 1
+        billing.save(update_fields=["purchased_seats", "updated_at"])
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Apollo Native Eval Browser")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=self.org,
+            name="Apollo Native Eval Agent",
+            charter="native eval",
+            browser_use_agent=browser_agent,
+        )
+
+    def test_connected_native_eval_seeds_integration_secret_before_prompt(self):
+        scenario = ScenarioRegistry.get(APOLLO_NATIVE_PEOPLE_SEARCH)
+
+        scenario._prepare_agent(str(self.agent.id))
+
+        secret = get_native_integration_secret("apollo", None, self.org)
+        self.assertIsNotNone(secret)
+        self.assertEqual(secret.secret_type, GlobalSecret.SecretType.INTEGRATION)
+        credentials = load_native_integration_credentials(secret)
+        self.assertEqual(credentials["provider_key"], "apollo")
+        self.assertIn("access_token", credentials)
+        self.assertIn("scope", credentials)
+
+    def test_missing_connection_eval_does_not_seed_integration_secret(self):
+        scenario = ScenarioRegistry.get(APOLLO_NATIVE_MISSING_CONNECTION)
+
+        scenario._prepare_agent(str(self.agent.id))
+
+        self.assertIsNone(get_native_integration_secret("apollo", None, self.org))

@@ -1671,7 +1671,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(system_message)
         content = system_message["content"]
         self.assertIn(
-            "communicate with send_email/send_sms/send_agent_message/send_chat_message",
+            "use send_ tools for questions, blockers, findings, config changes, and final deliverables",
             content,
         )
         self.assertIn(

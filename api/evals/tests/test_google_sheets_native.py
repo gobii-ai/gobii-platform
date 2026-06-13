@@ -3,12 +3,15 @@ from types import SimpleNamespace
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
-from api.agent.core.event_processing import _eval_mock_rule_matches
+from api.agent.core.event_processing import _eval_mock_rule_matches, _resolve_eval_mock_result
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.google_sheets_native import (
     FORBIDDEN_DISCOVERY_TOOL_NAMES,
     GOOGLE_SHEETS_NATIVE_CASES,
     GOOGLE_SHEETS_NATIVE_APPEND_ROW,
+    GOOGLE_SHEETS_NATIVE_CREATE_AND_FORMAT,
+    GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA,
+    GOOGLE_SHEETS_NATIVE_CREATE_DEFAULT_COLUMNS,
     GOOGLE_SHEETS_NATIVE_LIST_TABS,
     GOOGLE_SHEETS_NATIVE_READ_RANGE,
     GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
@@ -52,7 +55,7 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
             self.assertTrue(mock["rules"])
             self.assertIn("default", mock)
             for rule in mock["rules"]:
-                self.assertIn("url_contains", rule)
+                self.assertTrue("url_contains" in rule or "url_decoded_contains" in rule)
                 self.assertIn("result", rule)
 
     def test_cases_expect_http_request_not_legacy_sheets_tools_or_enablement(self):
@@ -67,6 +70,12 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
             self.assertNotIn("google_sheets-", prompt_and_description)
             for tool_name in FORBIDDEN_DISCOVERY_TOOL_NAMES:
                 self.assertNotIn(tool_name, prompt_and_description)
+
+    def test_eval_stop_policy_ignores_update_plan(self):
+        scenario = ScenarioRegistry.get(GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS[0])
+        policy = scenario._eval_stop_policy()
+
+        self.assertIn("update_plan", policy["ignored_tool_names"])
 
     def test_known_id_cases_allow_drive_preflight(self):
         known_id_cases = {
@@ -121,6 +130,130 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
 
         self.assertTrue(_eval_mock_rule_matches(rule, {"url": good_query}))
         self.assertFalse(_eval_mock_rule_matches(rule, {"url": bad_query}))
+
+    def test_get_method_mock_rule_accepts_omitted_method(self):
+        rule = {"param_equals": {"method": "GET"}}
+
+        self.assertTrue(_eval_mock_rule_matches(rule, {}))
+        self.assertFalse(_eval_mock_rule_matches(rule, {"method": "POST"}))
+
+    def test_url_not_contains_prevents_broad_metadata_rule_from_matching_values(self):
+        rule = {
+            "url_contains": "sheets.googleapis.com/v4/spreadsheets/sheet-123",
+            "url_not_contains": "/values/",
+        }
+
+        self.assertTrue(
+            _eval_mock_rule_matches(
+                rule,
+                {"url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123"},
+            )
+        )
+        self.assertFalse(
+            _eval_mock_rule_matches(
+                rule,
+                {"url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Models!A1:C6"},
+            )
+        )
+
+    def test_create_default_columns_prompt_provides_source_rows(self):
+        case = next(
+            case
+            for case in GOOGLE_SHEETS_NATIVE_CASES
+            if case.slug == GOOGLE_SHEETS_NATIVE_CREATE_DEFAULT_COLUMNS
+        )
+
+        self.assertIn("Use these rows", case.prompt)
+        self.assertNotIn("latest", case.prompt.lower())
+
+    def test_create_and_format_prompt_provides_complete_source_data(self):
+        case = next(
+            case
+            for case in GOOGLE_SHEETS_NATIVE_CASES
+            if case.slug == GOOGLE_SHEETS_NATIVE_CREATE_AND_FORMAT
+        )
+
+        self.assertIn("Use only this provided dataset", case.prompt)
+        self.assertIn("no external research is needed", case.prompt)
+        self.assertIn("2024-07-23", case.prompt)
+        self.assertNotIn("latest", case.prompt.lower())
+
+    def test_chart_value_read_mock_does_not_return_write_result(self):
+        case = next(
+            case
+            for case in GOOGLE_SHEETS_NATIVE_CASES
+            if case.slug == GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA
+        )
+        mock_config = case.mock_config()
+
+        read_result = _resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {
+                "method": "GET",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Models!A1:C6",
+            },
+        )
+        write_result = _resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {
+                "method": "PUT",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Leads!F1:F10",
+            },
+        )
+
+        self.assertIn("values", read_result["content"])
+        self.assertIn("updatedRows", write_result["content"])
+
+    def test_chart_helper_value_reads_do_not_prepopulate_empty_helper_column(self):
+        case = next(
+            case
+            for case in GOOGLE_SHEETS_NATIVE_CASES
+            if case.slug == GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA
+        )
+        mock_config = case.mock_config()
+
+        helper_column_result = _resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {
+                "method": "GET",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Models!D1:D4",
+            },
+        )
+        full_range_result = _resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {
+                "method": "GET",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Models!A1:D10",
+            },
+        )
+
+        self.assertEqual(helper_column_result["content"]["values"][0], ["Helper Size"])
+        self.assertEqual(full_range_result["content"]["values"][0], ["Model", "Size", "Downloads"])
+
+    def test_chart_case_points_to_models_tab_and_does_not_mock_other_tabs_as_model_data(self):
+        case = next(
+            case
+            for case in GOOGLE_SHEETS_NATIVE_CASES
+            if case.slug == GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA
+        )
+        mock_config = case.mock_config()
+
+        self.assertIn("Models tab", case.prompt)
+        self.assertIn("empty helper column D", case.prompt)
+        other_tab_result = _resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {
+                "method": "GET",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Leads",
+            },
+        )
+
+        self.assertEqual(other_tab_result["status"], "error")
 
     def test_expected_http_request_requires_completed_tool_call(self):
         expectation = HttpRequestExpectation(

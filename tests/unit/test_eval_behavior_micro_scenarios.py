@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -1356,6 +1357,31 @@ class BehaviorMicroHelperTests(TestCase):
 
         self.assertTrue(should_stop)
         self.assertIn("completed", reason)
+
+    def test_eval_stop_policy_ignores_skipped_terminal_message(self):
+        skipped_message = self._add_tool_call(
+            "send_chat_message",
+            {"body": "Working...", "will_continue_work": True},
+        )
+        skipped_message.result = json.dumps({"status": "ok", "skipped": True, "auto_sleep_ok": False})
+        skipped_message.save(update_fields=["result"])
+        self._add_tool_call("http_request", {"url": "https://example.test"}, status="complete")
+
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_finish": ["send_chat_message"]},
+        )
+
+        self.assertFalse(should_stop)
+
+        self._add_tool_call("send_chat_message", {"body": "Done", "will_continue_work": False})
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_finish": ["send_chat_message"]},
+        )
+
+        self.assertTrue(should_stop)
+        self.assertIn("finished", reason)
 
     def test_eval_stop_policy_stops_on_unexpected_relevant_tool(self):
         self._add_tool_call("send_chat_message")
