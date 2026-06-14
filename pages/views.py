@@ -112,6 +112,7 @@ from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from constants.feature_flags import (
     CTA_SIGNUP_FIRST,
     CTA_SIGNUP_MODAL,
+    HOMEPAGE_PERF_MOTION_REDUCTION,
     SOLUTION_CRAWLABLE_LINKS,
     STRIPE_SCALE_TRIAL_CHECKOUT_BILLING_ADDRESS_REQUIRED,
     STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_ENABLED,
@@ -132,7 +133,7 @@ from util.attribution_referrers import (
     clean_acquisition_referrer,
     decode_attribution_value,
 )
-from util.waffle_flags import is_waffle_flag_active
+from util.waffle_flags import is_waffle_flag_active, is_waffle_switch_active
 from util.fish_collateral import build_web_manifest_payload, is_fish_collateral_enabled
 from api.services.pipedream_apps import (
     PipedreamCatalogError,
@@ -1030,6 +1031,10 @@ class HomePage(TemplateView):
         context["suppress_htmx"] = True
         context["suppress_preline"] = True
         context["suppress_stripe_js"] = not self._has_direct_checkout_cta()
+        context["homepage_perf_motion_reduction_enabled"] = is_waffle_switch_active(
+            HOMEPAGE_PERF_MOTION_REDUCTION,
+            default=True,
+        )
         home_brand_name = settings.PUBLIC_BRAND_NAME or "Gobii"
         context["home_brand_name"] = home_brand_name
         context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"

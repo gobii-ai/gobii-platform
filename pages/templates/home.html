@@ -224,12 +224,32 @@
       }
     }
 
-	    .game-of-life-panel {
-	      position: relative;
-	      overflow: clip;
-	      isolation: isolate;
-        z-index: 1;
-	    }
+    {% if homepage_perf_motion_reduction_enabled %}
+    @media (pointer: coarse), (max-width: 767px) {
+      .gobii-hero-fish-cursor,
+      .gobii-hero-fish,
+      .gobii-hero-fish svg #body,
+      .gobii-hero-fish svg #top-fin,
+      .gobii-hero-fish svg #tail-fin,
+      .gobii-hero-fish svg #bottom-left-fin,
+      .gobii-hero-fish svg #bottom-right-fin,
+      .gobii-hero-fish svg #left-eye,
+      .gobii-hero-fish svg #right-eye,
+      .gobii-hero-fish svg #left-eye path,
+      .gobii-hero-fish svg #right-eye path {
+        animation: none !important;
+        transition: none !important;
+        will-change: auto;
+      }
+    }
+    {% endif %}
+
+    .game-of-life-panel {
+      position: relative;
+      overflow: clip;
+      isolation: isolate;
+      z-index: 1;
+    }
 
     .game-of-life-panel::before {
       content: "";
@@ -367,6 +387,27 @@
       }
     }
 
+    {% if homepage_perf_motion_reduction_enabled %}
+    @media (pointer: coarse), (max-width: 767px) {
+      .magic-cta,
+      .magic-cta::before,
+      .magic-cta::after {
+        animation: none !important;
+        transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+      }
+
+      .magic-cta::before,
+      .magic-cta::after {
+        opacity: 0;
+      }
+
+      .magic-cta:hover {
+        transform: none;
+        box-shadow: 0 18px 32px -20px rgba(139, 92, 246, 0.55);
+      }
+    }
+    {% endif %}
+
     /* Scroll-triggered fade-in animation */
     [data-animate] {
       opacity: 0;
@@ -384,6 +425,16 @@
         transition: none;
       }
     }
+
+    {% if homepage_perf_motion_reduction_enabled %}
+    @media (pointer: coarse), (max-width: 767px) {
+      [data-animate] {
+        opacity: 1;
+        transform: none;
+        transition: none;
+      }
+    }
+    {% endif %}
 
     {% include "partials/_immersive_overlay_styles.html" %}
   </style>
@@ -844,96 +895,141 @@
     </div>
   </section>
 
+  {% if homepage_perf_motion_reduction_enabled %}
+  <script>
+    window.GobiiHomePerf = window.GobiiHomePerf || (function () {
+      const matchesMedia = function (query) {
+        return typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
+      };
+
+      const shouldReduceHomepageMotion = function () {
+        return (
+          matchesMedia('(prefers-reduced-motion: reduce)') ||
+          matchesMedia('(pointer: coarse)') ||
+          matchesMedia('(max-width: 767px)')
+        );
+      };
+
+      const runWhenIdle = function (callback, timeout) {
+        const resolvedTimeout = timeout || 1500;
+        if ('requestIdleCallback' in window) {
+          window.requestIdleCallback(callback, { timeout: resolvedTimeout });
+          return;
+        }
+        window.setTimeout(callback, 250);
+      };
+
+      return {
+        runWhenIdle: runWhenIdle,
+        shouldReduceHomepageMotion: shouldReduceHomepageMotion
+      };
+    })();
+  </script>
+  {% endif %}
+
   <script>
     document.addEventListener('DOMContentLoaded', function () {
-      const fish = document.querySelector('[data-gobii-fish-cursor]');
-      if (!fish) return;
+      const initFishCursor = function () {
+        const fish = document.querySelector('[data-gobii-fish-cursor]');
+        if (!fish) return;
 
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        return;
-      }
-
-      if (window.matchMedia('(pointer: coarse)').matches) {
-        return;
-      }
-
-      const MAX_X = 11;
-      const MAX_Y = 8;
-      const MAX_ROT = 3.2;
-      const MAX_EYE_X = 6.2;
-      const MAX_EYE_Y = 3.6;
-      const SMOOTHING = 0.14;
-
-      let targetX = 0;
-      let targetY = 0;
-      let targetRot = 0;
-      let targetEyeX = 0;
-      let targetEyeY = 0;
-      let currentX = 0;
-      let currentY = 0;
-      let currentRot = 0;
-      let currentEyeX = 0;
-      let currentEyeY = 0;
-      let rafId = null;
-
-      const applyTransform = () => {
-        currentX += (targetX - currentX) * SMOOTHING;
-        currentY += (targetY - currentY) * SMOOTHING;
-        currentRot += (targetRot - currentRot) * SMOOTHING;
-        currentEyeX += (targetEyeX - currentEyeX) * SMOOTHING;
-        currentEyeY += (targetEyeY - currentEyeY) * SMOOTHING;
-
-        fish.style.setProperty('--fish-cursor-x', `${currentX.toFixed(2)}px`);
-        fish.style.setProperty('--fish-cursor-y', `${currentY.toFixed(2)}px`);
-        fish.style.setProperty('--fish-cursor-rot', `${currentRot.toFixed(2)}deg`);
-        fish.style.setProperty('--fish-eye-x', `${currentEyeX.toFixed(2)}px`);
-        fish.style.setProperty('--fish-eye-y', `${currentEyeY.toFixed(2)}px`);
-
-        const stillMoving =
-          Math.abs(targetX - currentX) > 0.02 ||
-          Math.abs(targetY - currentY) > 0.02 ||
-          Math.abs(targetRot - currentRot) > 0.02 ||
-          Math.abs(targetEyeX - currentEyeX) > 0.02 ||
-          Math.abs(targetEyeY - currentEyeY) > 0.02;
-
-        if (stillMoving) {
-          rafId = window.requestAnimationFrame(applyTransform);
-        } else {
-          rafId = null;
+        const homePerf = window.GobiiHomePerf;
+        if (
+          homePerf &&
+          typeof homePerf.shouldReduceHomepageMotion === 'function' &&
+          homePerf.shouldReduceHomepageMotion()
+        ) {
+          return;
         }
+
+        const MAX_X = 11;
+        const MAX_Y = 8;
+        const MAX_ROT = 3.2;
+        const MAX_EYE_X = 6.2;
+        const MAX_EYE_Y = 3.6;
+        const SMOOTHING = 0.14;
+
+        let targetX = 0;
+        let targetY = 0;
+        let targetRot = 0;
+        let targetEyeX = 0;
+        let targetEyeY = 0;
+        let currentX = 0;
+        let currentY = 0;
+        let currentRot = 0;
+        let currentEyeX = 0;
+        let currentEyeY = 0;
+        let rafId = null;
+
+        const applyTransform = () => {
+          currentX += (targetX - currentX) * SMOOTHING;
+          currentY += (targetY - currentY) * SMOOTHING;
+          currentRot += (targetRot - currentRot) * SMOOTHING;
+          currentEyeX += (targetEyeX - currentEyeX) * SMOOTHING;
+          currentEyeY += (targetEyeY - currentEyeY) * SMOOTHING;
+
+          fish.style.setProperty('--fish-cursor-x', `${currentX.toFixed(2)}px`);
+          fish.style.setProperty('--fish-cursor-y', `${currentY.toFixed(2)}px`);
+          fish.style.setProperty('--fish-cursor-rot', `${currentRot.toFixed(2)}deg`);
+          fish.style.setProperty('--fish-eye-x', `${currentEyeX.toFixed(2)}px`);
+          fish.style.setProperty('--fish-eye-y', `${currentEyeY.toFixed(2)}px`);
+
+          const stillMoving =
+            Math.abs(targetX - currentX) > 0.02 ||
+            Math.abs(targetY - currentY) > 0.02 ||
+            Math.abs(targetRot - currentRot) > 0.02 ||
+            Math.abs(targetEyeX - currentEyeX) > 0.02 ||
+            Math.abs(targetEyeY - currentEyeY) > 0.02;
+
+          if (stillMoving) {
+            rafId = window.requestAnimationFrame(applyTransform);
+          } else {
+            rafId = null;
+          }
+        };
+
+        const scheduleFrame = () => {
+          if (rafId !== null) return;
+          rafId = window.requestAnimationFrame(applyTransform);
+        };
+
+        const handleMove = (event) => {
+          const nx = (event.clientX / window.innerWidth) * 2 - 1;
+          const ny = (event.clientY / window.innerHeight) * 2 - 1;
+          const nMag = Math.hypot(nx, ny);
+          const nScale = nMag > 1 ? 1 / nMag : 1;
+
+          targetX = nx * MAX_X;
+          targetY = ny * MAX_Y;
+          targetRot = nx * MAX_ROT;
+          targetEyeX = nx * nScale * MAX_EYE_X;
+          targetEyeY = ny * nScale * MAX_EYE_Y;
+          scheduleFrame();
+        };
+
+        const reset = () => {
+          targetX = 0;
+          targetY = 0;
+          targetRot = 0;
+          targetEyeX = 0;
+          targetEyeY = 0;
+          scheduleFrame();
+        };
+
+        window.addEventListener('mousemove', handleMove, { passive: true });
+        document.addEventListener('mouseleave', reset);
+        window.addEventListener('blur', reset);
       };
 
-      const scheduleFrame = () => {
-        if (rafId !== null) return;
-        rafId = window.requestAnimationFrame(applyTransform);
-      };
-
-      const handleMove = (event) => {
-        const nx = (event.clientX / window.innerWidth) * 2 - 1;
-        const ny = (event.clientY / window.innerHeight) * 2 - 1;
-        const nMag = Math.hypot(nx, ny);
-        const nScale = nMag > 1 ? 1 / nMag : 1;
-
-        targetX = nx * MAX_X;
-        targetY = ny * MAX_Y;
-        targetRot = nx * MAX_ROT;
-        targetEyeX = nx * nScale * MAX_EYE_X;
-        targetEyeY = ny * nScale * MAX_EYE_Y;
-        scheduleFrame();
-      };
-
-      const reset = () => {
-        targetX = 0;
-        targetY = 0;
-        targetRot = 0;
-        targetEyeX = 0;
-        targetEyeY = 0;
-        scheduleFrame();
-      };
-
-      window.addEventListener('mousemove', handleMove, { passive: true });
-      document.addEventListener('mouseleave', reset);
-      window.addEventListener('blur', reset);
+      {% if homepage_perf_motion_reduction_enabled %}
+      if (window.GobiiHomePerf && typeof window.GobiiHomePerf.runWhenIdle === 'function') {
+        window.GobiiHomePerf.runWhenIdle(initFishCursor, 1800);
+        return;
+      }
+      window.setTimeout(initFishCursor, 250);
+      {% else %}
+      initFishCursor();
+      {% endif %}
     });
   </script>
 
@@ -947,6 +1043,7 @@
         return;
       }
 
+      const homePerf = window.GobiiHomePerf;
       const baseScenarios = [
         ' find 200 ideal customers and their emails.',
         ' keep my Salesforce pipeline clean every day.',
@@ -965,6 +1062,28 @@
         ' watch for price drops on my wishlist items.',
         " track flights to my destination and alert me when they're cheap."
       ];
+
+      function toggleGhostVisibility() {
+        const hasValue = textarea.value.trim().length > 0;
+        ghostWrapper.classList.toggle('opacity-0', hasValue);
+        ghostWrapper.classList.toggle('invisible', hasValue);
+        ghostWrapper.setAttribute('aria-hidden', hasValue ? 'true' : 'false');
+      }
+
+      textarea.addEventListener('input', toggleGhostVisibility);
+      textarea.addEventListener('focus', toggleGhostVisibility);
+      textarea.addEventListener('blur', toggleGhostVisibility);
+
+      toggleGhostVisibility();
+
+      if (
+        homePerf &&
+        typeof homePerf.shouldReduceHomepageMotion === 'function' &&
+        homePerf.shouldReduceHomepageMotion()
+      ) {
+        ghostText.textContent = baseScenarios[0];
+        return;
+      }
 
       function shuffle(list) {
         const array = [...list];
@@ -1002,19 +1121,6 @@
 
       ghostText.textContent = '';
 
-      function toggleGhostVisibility() {
-        const hasValue = textarea.value.trim().length > 0;
-        ghostWrapper.classList.toggle('opacity-0', hasValue);
-        ghostWrapper.classList.toggle('invisible', hasValue);
-        ghostWrapper.setAttribute('aria-hidden', hasValue ? 'true' : 'false');
-      }
-
-      textarea.addEventListener('input', toggleGhostVisibility);
-      textarea.addEventListener('focus', toggleGhostVisibility);
-      textarea.addEventListener('blur', toggleGhostVisibility);
-
-      toggleGhostVisibility();
-
       function typeLoop() {
         const hasValue = textarea.value.trim().length > 0;
         if (hasValue) {
@@ -1050,7 +1156,15 @@
         }
       }
 
-      setTimeout(typeLoop, 400);
+      const startTypeLoop = function () {
+        setTimeout(typeLoop, 400);
+      };
+
+      if (homePerf && typeof homePerf.runWhenIdle === 'function') {
+        homePerf.runWhenIdle(startTypeLoop, 1800);
+        return;
+      }
+      startTypeLoop();
     });
   </script>
 
@@ -1487,15 +1601,22 @@
         }
       }
 
-      // Auto-focus the textarea when page loads
       document.addEventListener('DOMContentLoaded', function() {
         const textarea = document.querySelector('textarea[name="charter"]');
         if (textarea) {
+          textareaAutoResize(textarea);
+          const homePerf = window.GobiiHomePerf;
+          if (
+            homePerf &&
+            typeof homePerf.shouldReduceHomepageMotion === 'function' &&
+            homePerf.shouldReduceHomepageMotion()
+          ) {
+            return;
+          }
           textarea.focus();
           // Move cursor to the end of the text
           const length = textarea.value.length;
           textarea.setSelectionRange(length, length);
-          textareaAutoResize(textarea);
         }
       });
 
@@ -1621,17 +1742,41 @@
     <!-- Scroll-triggered fade-in -->
     <script>
       document.addEventListener('DOMContentLoaded', function () {
-        var observer = new IntersectionObserver(function (entries) {
-          entries.forEach(function (entry) {
-            if (entry.isIntersecting) {
-              entry.target.classList.add('is-visible');
-              observer.unobserve(entry.target);
-            }
+        const initScrollAnimations = function () {
+          if (
+            window.GobiiHomePerf &&
+            typeof window.GobiiHomePerf.shouldReduceHomepageMotion === 'function' &&
+            window.GobiiHomePerf.shouldReduceHomepageMotion()
+          ) {
+            return;
+          }
+
+          const animatedElements = document.querySelectorAll('[data-animate]');
+          if (!animatedElements.length) {
+            return;
+          }
+
+          if (!('IntersectionObserver' in window)) {
+            animatedElements.forEach(function (el) {
+              el.classList.add('is-visible');
+            });
+            return;
+          }
+
+          var observer = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('is-visible');
+                observer.unobserve(entry.target);
+              }
+            });
+          }, { threshold: 0.15 });
+          animatedElements.forEach(function (el) {
+            observer.observe(el);
           });
-        }, { threshold: 0.15 });
-        document.querySelectorAll('[data-animate]').forEach(function (el) {
-          observer.observe(el);
-        });
+        };
+
+        initScrollAnimations();
       });
     </script>
 </main>
