@@ -98,6 +98,44 @@ COMPARISON_CATALOG = (
         "reviewed_by": "Gobii editorial team",
         "source_reviewed": "June 2026",
     },
+    {
+        "slug": "lindy-vs-gobii",
+        "competitor_name": "Lindy",
+        "title": "Lindy vs Gobii",
+        "template_name": "comparisons/detail_lindy.html",
+        "seo_title": "Lindy vs Gobii: AI Assistant or AI Coworker? | Gobii",
+        "seo_description": (
+            "Comparing Lindy vs Gobii? See when to choose Lindy's AI assistant for inbox "
+            "and meetings, and when to choose Gobii's browser-native AI coworkers."
+        ),
+        "summary": (
+            "A source-aware comparison for teams deciding between Lindy's AI assistant "
+            "workflows and Gobii's persistent AI coworkers for browser-native operations."
+        ),
+        "status": COMPARISON_STATUS_PUBLISHED,
+        "target_keywords": (
+            "Lindy vs Gobii",
+            "Gobii vs Lindy",
+            "Lindy alternative",
+            "AI assistant comparison",
+        ),
+        "competitor_url": "https://www.lindy.ai/",
+        "competitor_application_category": "AI assistant and agent workflow platform",
+        "competitor_operating_system": "Web",
+        "competitor_same_as": (
+            "https://www.lindy.ai/",
+            "https://docs.lindy.ai/",
+        ),
+        "competitor_schema_description": (
+            "AI assistant and custom agent workflow platform for inbox, meetings, "
+            "calendar, follow-ups, and connected work automation."
+        ),
+        "published_date": "2026-06-14",
+        "last_reviewed_date": "2026-06-14",
+        "last_reviewed_display": "June 14, 2026",
+        "reviewed_by": "Gobii editorial team",
+        "source_reviewed": "June 2026",
+    },
 )
 
 

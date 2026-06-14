@@ -1704,6 +1704,7 @@ class ComparisonPageTests(TestCase):
     comparison_slug = "openclaw-vs-gobii"
     n8n_comparison_slug = "n8n-vs-gobii"
     zapier_agents_comparison_slug = "zapier-agents-vs-gobii"
+    lindy_comparison_slug = "lindy-vs-gobii"
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_comparisons_page_renders_with_metadata_and_published_links(self):
@@ -1782,24 +1783,14 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(
             structured_data["about"],
             [
-                {
-                    "@type": "SoftwareApplication",
-                    "name": comparison["competitor_name"],
-                    "applicationCategory": "AI agent platform",
-                    "url": comparison["competitor_url"],
-                }
+                page_views._comparison_competitor_application(comparison)
                 for comparison in published_comparisons
             ],
         )
 
         for comparison in published_comparisons:
             self.assertIn(
-                {
-                    "@type": "SoftwareApplication",
-                    "name": comparison["competitor_name"],
-                    "applicationCategory": "AI agent platform",
-                    "url": comparison["competitor_url"],
-                },
+                page_views._comparison_competitor_application(comparison),
                 structured_data["about"],
             )
 
@@ -1861,6 +1852,10 @@ class ComparisonPageTests(TestCase):
         self.assertIsNotNone(zapier_agents_card)
         self.assertIn("Zapier Agents vs Gobii", zapier_agents_card.get_text(" ", strip=True))
         self.assertIn("Published", zapier_agents_card.get_text(" ", strip=True))
+        lindy_card = soup.find("article", {"id": "lindy"})
+        self.assertIsNotNone(lindy_card)
+        self.assertIn("Lindy vs Gobii", lindy_card.get_text(" ", strip=True))
+        self.assertIn("Published", lindy_card.get_text(" ", strip=True))
         self.assertIsNotNone(
             soup.find(
                 "a",
@@ -1877,6 +1872,12 @@ class ComparisonPageTests(TestCase):
             soup.find(
                 "a",
                 {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.zapier_agents_comparison_slug})},
+            )
+        )
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.lindy_comparison_slug})},
             )
         )
 
@@ -2231,6 +2232,132 @@ class ComparisonPageTests(TestCase):
         self.assertIsNone(main.find("a", {"href": "https://github.com/gobii-ai"}))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_lindy_comparison_page_renders_with_metadata_and_decision_copy(self):
+        response = self.client.get(
+            reverse("proprietary:comparison_detail", kwargs={"slug": self.lindy_comparison_slug})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        comparison = page_views.get_comparison(self.lindy_comparison_slug)
+        expected_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
+        expected_image_url = response.wsgi_request.build_absolute_uri(
+            static(page_views.ComparisonDetailView.social_image_path)
+        )
+
+        self.assertEqual(soup.title.get_text(strip=True), comparison["seo_title"])
+        self.assertEqual(len(soup.find_all("meta", {"name": "description"})), 1)
+        self.assertEqual(
+            soup.find("meta", {"name": "description"}).get("content"),
+            comparison["seo_description"],
+        )
+        self.assertEqual(soup.find("link", {"rel": "canonical"}).get("href"), expected_url)
+        self.assertEqual(soup.find("meta", {"property": "og:type"}).get("content"), "website")
+        self.assertEqual(soup.find("meta", {"property": "og:title"}).get("content"), comparison["seo_title"])
+        self.assertEqual(soup.find("meta", {"property": "og:url"}).get("content"), expected_url)
+        self.assertEqual(soup.find("meta", {"property": "og:image"}).get("content"), expected_image_url)
+        self.assertEqual(
+            soup.find("meta", {"property": "og:image:alt"}).get("content"),
+            "Gobii and Lindy AI agent platform comparison",
+        )
+        self.assertEqual(soup.find("meta", {"name": "twitter:card"}).get("content"), "summary_large_image")
+
+        json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
+        self.assertEqual(len(json_ld_scripts), 2)
+        structured_data = json.loads(json_ld_scripts[0].string)
+        self.assertEqual(structured_data["@type"], "WebPage")
+        self.assertEqual(structured_data["@id"], f"{expected_url}#webpage")
+        self.assertEqual(structured_data["name"], comparison["seo_title"])
+        self.assertEqual(structured_data["url"], expected_url)
+        self.assertEqual(structured_data["datePublished"], comparison["published_date"])
+        self.assertEqual(structured_data["dateModified"], comparison["last_reviewed_date"])
+        self.assertEqual(
+            [item["name"] for item in structured_data["about"]],
+            ["Gobii", "Lindy"],
+        )
+        self.assertEqual(
+            structured_data["about"][0]["description"],
+            (
+                "Always-on AI coworker platform for recurring business work across "
+                "integrations, browsers, files, and communication channels."
+            ),
+        )
+        self.assertEqual(structured_data["about"][0]["operatingSystem"], "Web")
+        self.assertEqual(
+            structured_data["about"][1]["applicationCategory"],
+            "AI assistant and agent workflow platform",
+        )
+        self.assertEqual(structured_data["about"][1]["operatingSystem"], "Web")
+        self.assertEqual(
+            structured_data["about"][1]["sameAs"],
+            list(comparison["competitor_same_as"]),
+        )
+        self.assertEqual(
+            structured_data["about"][1]["description"],
+            (
+                "AI assistant and custom agent workflow platform for inbox, meetings, "
+                "calendar, follow-ups, and connected work automation."
+            ),
+        )
+        self.assertEqual(structured_data["about"][1]["url"], comparison["competitor_url"])
+
+        breadcrumb_data = json.loads(json_ld_scripts[1].string)
+        self.assertEqual(breadcrumb_data["@type"], "BreadcrumbList")
+        self.assertEqual(
+            [item["name"] for item in breadcrumb_data["itemListElement"]],
+            ["Home", "Comparisons", "Lindy vs Gobii"],
+        )
+
+        content = soup.get_text(" ", strip=True)
+        self.assertIn("Lindy vs Gobii", content)
+        self.assertIn("Lindy vs Gobii: AI assistant or AI coworker?", content)
+        self.assertIn("Choose Lindy if", content)
+        self.assertIn("Choose Gobii if", content)
+        self.assertIn(
+            "Lindy helps manage the workday. Gobii helps teams delegate recurring web work.",
+            content,
+        )
+        self.assertIn(
+            "Lindy is a polished AI assistant. Gobii is a browser-native AI coworker platform.",
+            content,
+        )
+        self.assertIn("Gobii vs Lindy comparison", content)
+        self.assertIn("Lindy alternative", content)
+        self.assertIn("Source note", content)
+        self.assertIn("Last reviewed June 14, 2026 by Gobii editorial team.", content)
+        webp_source = soup.find("source", {"type": "image/webp"})
+        self.assertIsNotNone(webp_source)
+        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
+        hero_image = soup.find("img", {"alt": "AI agent platform evaluation workspace"})
+        self.assertIsNotNone(hero_image)
+        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        self.assertNotContains(response, "https://js.stripe.com")
+        self.assertNotContains(response, "js/account_auth_forms.js")
+        self.assertNotContains(response, "js/cta_signup_modal.js")
+        self.assertNotContains(response, "libphonenumber-js")
+        self.assertNotContains(response, "js/phone_format.js")
+        main = soup.find("main")
+        self.assertIsNotNone(main)
+        self.assertGreaterEqual(
+            len(main.find_all("a", {"href": "https://github.com/gobii-ai/gobii-platform"})),
+            2,
+        )
+        self.assertIsNotNone(main.find("a", {"href": "https://docs.lindy.ai/"}))
+        self.assertIsNotNone(
+            main.find("a", {"href": "https://docs.lindy.ai/fundamentals/lindy-101/introduction"})
+        )
+        self.assertIsNotNone(
+            main.find("a", {"href": "https://docs.lindy.ai/skills/web-browsing/web-browser"})
+        )
+        self.assertIsNotNone(
+            main.find("a", {"href": "https://docs.lindy.ai/skills/by-lindy/computer-use"})
+        )
+        self.assertIsNotNone(main.find("a", {"href": "https://www.lindy.ai/pricing"}))
+        self.assertIsNotNone(main.find("a", {"href": "https://www.lindy.ai/security"}))
+        self.assertIsNotNone(main.find("a", {"href": "https://gobii.ai/pricing/"}))
+        self.assertIsNone(main.find("a", {"href": "https://github.com/gobii-ai"}))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_footer_includes_comparisons_hub_link_in_proprietary_mode(self):
         response = self.client.get(reverse("proprietary:comparisons"))
 
@@ -2261,6 +2388,12 @@ class ComparisonPageTests(TestCase):
         )
         self.assertIsNotNone(zapier_agents_link)
         self.assertEqual(zapier_agents_link.get_text(strip=True), "Zapier Agents vs Gobii")
+        lindy_link = footer.find(
+            "a",
+            {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.lindy_comparison_slug})},
+        )
+        self.assertIsNotNone(lindy_link)
+        self.assertEqual(lindy_link.get_text(strip=True), "Lindy vs Gobii")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_comparison_pages_and_footer_column_are_absent_in_community_mode(self):
@@ -2278,6 +2411,10 @@ class ComparisonPageTests(TestCase):
             reverse("proprietary:comparison_detail", kwargs={"slug": self.zapier_agents_comparison_slug})
         )
         self.assertEqual(zapier_agents_detail_response.status_code, 404)
+        lindy_detail_response = self.client.get(
+            reverse("proprietary:comparison_detail", kwargs={"slug": self.lindy_comparison_slug})
+        )
+        self.assertEqual(lindy_detail_response.status_code, 404)
 
         home_response = self.client.get(reverse("pages:home"))
         self.assertEqual(home_response.status_code, 200)
@@ -2302,6 +2439,7 @@ class ComparisonPageTests(TestCase):
         self.assertIn(f"<loc>http://example.com/comparisons/{self.comparison_slug}/</loc>", content)
         self.assertIn(f"<loc>http://example.com/comparisons/{self.n8n_comparison_slug}/</loc>", content)
         self.assertIn(f"<loc>http://example.com/comparisons/{self.zapier_agents_comparison_slug}/</loc>", content)
+        self.assertIn(f"<loc>http://example.com/comparisons/{self.lindy_comparison_slug}/</loc>", content)
         self.assertNotIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -2314,6 +2452,7 @@ class ComparisonPageTests(TestCase):
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.comparison_slug}/</loc>", content)
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.n8n_comparison_slug}/</loc>", content)
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.zapier_agents_comparison_slug}/</loc>", content)
+        self.assertNotIn(f"<loc>http://example.com/comparisons/{self.lindy_comparison_slug}/</loc>", content)
 
 
 @tag("batch_pages")
