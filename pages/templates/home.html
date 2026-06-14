@@ -1743,19 +1743,16 @@
     <script>
       document.addEventListener('DOMContentLoaded', function () {
         const initScrollAnimations = function () {
-          const animatedElements = document.querySelectorAll('[data-animate]');
-          if (!animatedElements.length) {
-            return;
-          }
-
           if (
             window.GobiiHomePerf &&
             typeof window.GobiiHomePerf.shouldReduceHomepageMotion === 'function' &&
             window.GobiiHomePerf.shouldReduceHomepageMotion()
           ) {
-            animatedElements.forEach(function (el) {
-              el.classList.add('is-visible');
-            });
+            return;
+          }
+
+          const animatedElements = document.querySelectorAll('[data-animate]');
+          if (!animatedElements.length) {
             return;
           }
 
@@ -1779,15 +1776,7 @@
           });
         };
 
-        {% if homepage_perf_motion_reduction_enabled %}
-        if (window.GobiiHomePerf && typeof window.GobiiHomePerf.runWhenIdle === 'function') {
-          window.GobiiHomePerf.runWhenIdle(initScrollAnimations, 2200);
-          return;
-        }
-        window.setTimeout(initScrollAnimations, 250);
-        {% else %}
         initScrollAnimations();
-        {% endif %}
       });
     </script>
 </main>

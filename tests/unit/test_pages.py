@@ -446,6 +446,8 @@ class HomePageTests(TestCase):
         content = response.content.decode("utf-8")
         self.assertIn("window.GobiiHomePerf = window.GobiiHomePerf ||", content)
         self.assertIn("window.GobiiHomePerf.runWhenIdle(initFishCursor, 1800)", content)
+        self.assertNotIn("runWhenIdle(initScrollAnimations", content)
+        self.assertIn("initScrollAnimations();", content)
         self.assertIn("@media (pointer: coarse), (max-width: 767px)", content)
 
     def test_home_page_omits_perf_motion_reduction_when_switch_is_off(self):
