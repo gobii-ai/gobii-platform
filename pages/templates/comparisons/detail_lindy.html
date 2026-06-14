@@ -1,0 +1,426 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ comparison_seo_title }}{% endblock %}
+
+{% block canonical_link %}
+<link rel="canonical" href="{{ canonical_url }}">
+{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="{{ comparison_seo_description }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ comparison_seo_title }}">
+<meta property="og:description" content="{{ comparison_seo_description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="Gobii">
+<meta property="og:image" content="{{ comparison_social_image_url }}">
+<meta property="og:image:alt" content="{{ comparison_social_image_alt }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ comparison_seo_title }}">
+<meta name="twitter:description" content="{{ comparison_seo_description }}">
+<meta name="twitter:image" content="{{ comparison_social_image_url }}">
+<meta name="twitter:image:alt" content="{{ comparison_social_image_alt }}">
+<script type="application/ld+json">{{ comparison_structured_data_json }}</script>
+<script type="application/ld+json">{{ comparison_breadcrumb_json }}</script>
+{% endblock %}
+
+{% block content %}
+<main id="main-content" class="bg-white">
+  <section class="relative isolate overflow-hidden bg-slate-950 text-white">
+    <picture>
+      <source
+        type="image/webp"
+        srcset="{% static 'images/solutions/engineering-hero-640.webp' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.webp' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.webp' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.webp' %} 1920w"
+        sizes="100vw"
+      >
+      <img
+        src="{% static 'images/solutions/engineering-hero-1280.jpg' %}"
+        srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w"
+        sizes="100vw"
+        alt="AI agent platform evaluation workspace"
+        class="absolute inset-0 h-full w-full object-cover"
+        width="1280"
+        height="720"
+        loading="eager"
+        decoding="async"
+        fetchpriority="high"
+        style="opacity: 0.72;"
+      >
+    </picture>
+    <div class="absolute inset-0" style="background: linear-gradient(90deg, rgba(2, 6, 23, 0.84) 0%, rgba(15, 23, 42, 0.70) 48%, rgba(15, 23, 42, 0.34) 100%);"></div>
+    <div class="relative mx-auto max-w-7xl px-6 py-20 sm:px-8 sm:py-24 lg:px-12 lg:py-28">
+      <div class="max-w-4xl rounded-lg border border-white/15 p-6 sm:p-8 lg:p-10" style="background: rgba(2, 6, 23, 0.58); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+        <a href="{% url 'proprietary:comparisons' %}" class="inline-flex items-center text-sm font-semibold text-cyan-200 hover:text-white">
+          <i aria-hidden="true" data-lucide="arrow-left" class="mr-2 size-4"></i>
+          Comparisons
+        </a>
+        <p class="mt-8 text-sm font-semibold uppercase text-cyan-200">Lindy vs Gobii</p>
+        <h1 class="mt-5 text-4xl font-light leading-[1.08] text-white sm:text-5xl lg:text-6xl">
+          Lindy vs Gobii: AI assistant or AI coworker?
+        </h1>
+        <p class="mt-6 max-w-3xl text-lg leading-8 text-cyan-50">
+          Comparing Lindy vs Gobii? Lindy is a strong AI assistant for inbox, meetings, calendar, follow-ups, and no-code workflows. Gobii is built for teams that need persistent AI coworkers with real browser sessions, files, structured data, schedules, approvals, and finished operational outputs.
+        </p>
+        <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+          <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center rounded-lg bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-50">
+            Create Your First Gobii Agent
+            <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg border border-white/50 bg-slate-950/35 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/15">
+            Review the Open Source Repo
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Executive summary</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">
+            Lindy helps manage the workday. Gobii helps teams delegate recurring web work.
+          </h2>
+        </div>
+        <div class="space-y-5 text-base leading-7 text-slate-700">
+          <p>
+            Lindy is closest to Gobii when buyers are evaluating AI that can do work, not just answer questions. Lindy has custom agents, workflows, triggers, actions, memory, web browsing, computer use, phone agents, and human approval flows.
+          </p>
+          <p>
+            Gobii starts from a different operating model. A Gobii agent is an always-on AI coworker with its own identity, browser environment, files, structured state, schedules, approvals, and channels for email, SMS, chat, webhooks, and API work.
+          </p>
+          <p>
+            The honest Gobii vs Lindy comparison is not whether Lindy has agents. It does. The sharper question is whether your team wants an AI executive assistant for inbox and meeting work, or persistent AI workers that can operate websites, maintain sessions, collect data, and produce deliverables over time.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-cyan-50 py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-cyan-800">Which should you choose?</p>
+        <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">Pick based on the job you are delegating.</h2>
+      </div>
+      <div class="mt-10 grid gap-5 lg:grid-cols-2">
+        <article class="rounded-lg border border-cyan-200 bg-white p-6">
+          <div class="flex items-center gap-3">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-cyan-700 text-white">
+              <i aria-hidden="true" data-lucide="calendar-check" class="size-5"></i>
+            </span>
+            <h3 class="text-xl font-semibold text-slate-950">Choose Lindy if...</h3>
+          </div>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            You want an AI assistant for email triage, drafting, scheduling, meeting prep, notes, follow-ups, reminders, iMessage or SMS delegation, voice workflows, and no-code assistant automations around your workday.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-indigo-200 bg-white p-6">
+          <div class="flex items-center gap-3">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-indigo-700 text-white">
+              <i aria-hidden="true" data-lucide="briefcase" class="size-5"></i>
+            </span>
+            <h3 class="text-xl font-semibold text-slate-950">Choose Gobii if...</h3>
+          </div>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            You want AI coworkers for recurring business operations that require real browser sessions, logged-in website work, files, structured data, schedules, approvals, reports, CSVs, PDFs, and cloud or self-hosted deployment control.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-indigo-700">At a glance</p>
+        <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">The practical comparison</h2>
+      </div>
+      <div class="mt-10 overflow-x-auto rounded-lg border border-indigo-200">
+        <table class="min-w-[1120px] divide-y divide-indigo-100 text-left text-sm">
+          <thead class="bg-indigo-950 text-white">
+            <tr>
+              <th scope="col" class="px-5 py-4 font-semibold">Dimension</th>
+              <th scope="col" class="px-5 py-4 font-semibold">Gobii</th>
+              <th scope="col" class="px-5 py-4 font-semibold">Lindy</th>
+              <th scope="col" class="px-5 py-4 font-semibold">Why it matters</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-indigo-100 bg-white">
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Best fit</th>
+              <td class="px-5 py-5 text-slate-700">Always-on AI coworkers for browser-native team operations</td>
+              <td class="px-5 py-5 text-slate-700">AI assistant for inbox, meetings, calendar, follow-ups, and personal work automation</td>
+              <td class="px-5 py-5 text-slate-700">Both products delegate work, but the center of gravity is different.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Primary abstraction</th>
+              <td class="px-5 py-5 text-slate-700">A persistent coworker with identity, browser sessions, files, database, schedules, and work history</td>
+              <td class="px-5 py-5 text-slate-700">An assistant and custom agent system made from workflows, steps, integrations, and memory</td>
+              <td class="px-5 py-5 text-slate-700">Gobii is organized around durable workers; Lindy is organized around assistant workflows.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Inbox and meetings</th>
+              <td class="px-5 py-5 text-slate-700">Can receive instructions and attachments, respond through channels, and support team operations</td>
+              <td class="px-5 py-5 text-slate-700">Strong public product focus on email triage, drafting, scheduling, notes, prep, and follow-ups</td>
+              <td class="px-5 py-5 text-slate-700">For a personal executive assistant workflow, Lindy is the more specialized fit.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Browser and web work</th>
+              <td class="px-5 py-5 text-slate-700">Real browser runtime with logged-in sessions, clicking, forms, downloads, screenshots, files, and structured outputs</td>
+              <td class="px-5 py-5 text-slate-700">Web Browser actions for search, webpage and PDF extraction, contact scraping, RAG browsing, and crawling</td>
+              <td class="px-5 py-5 text-slate-700">Do not evaluate this as "can browse" vs "cannot browse." Evaluate depth, persistence, and operating environment.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Computer use</th>
+              <td class="px-5 py-5 text-slate-700">Browser execution is core infrastructure, with persistent sessions and production browser-agent controls</td>
+              <td class="px-5 py-5 text-slate-700">Computer Use is available for processes that cannot be automated through APIs or integrations</td>
+              <td class="px-5 py-5 text-slate-700">Lindy can operate computers; Gobii is purpose-built around browser-agent infrastructure as the runtime.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Memory and state</th>
+              <td class="px-5 py-5 text-slate-700">Persistent workspace, files, per-agent structured data, context, browser state, and deliverable history</td>
+              <td class="px-5 py-5 text-slate-700">Context settings and Memories that persist across task runs and can be read, created, updated, or deleted</td>
+              <td class="px-5 py-5 text-slate-700">Gobii's memory story is part of a broader operating environment, not only preference memory.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Structured data and outputs</th>
+              <td class="px-5 py-5 text-slate-700">Built-in database, filespace, reports, charts, PDFs, CSV exports, screenshots, attachments, and webhook payloads</td>
+              <td class="px-5 py-5 text-slate-700">Spreadsheets, app actions, API calls, code, knowledge bases, notes, drafts, and workflow outputs</td>
+              <td class="px-5 py-5 text-slate-700">Gobii is strongest when the result is an operational artifact your team can use.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Communication channels</th>
+              <td class="px-5 py-5 text-slate-700">Agents can be contacted through email, SMS, chat, webhooks, and API calls</td>
+              <td class="px-5 py-5 text-slate-700">Strong public support for iMessage, SMS, Slack, email, and web app delegation</td>
+              <td class="px-5 py-5 text-slate-700">Channel access is not Gobii's exclusive advantage; Gobii's edge is channel access plus work runtime.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Voice and phone</th>
+              <td class="px-5 py-5 text-slate-700">Public positioning focuses on email, SMS, chat identity, and business workflow execution</td>
+              <td class="px-5 py-5 text-slate-700">Phone agents with inbound and outbound call workflows, language support, phone numbers, SMS, and integrations</td>
+              <td class="px-5 py-5 text-slate-700">If voice agents are the central requirement, Lindy deserves serious evaluation.</td>
+            </tr>
+            <tr class="bg-cyan-50">
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Pricing unit</th>
+              <td class="px-5 py-5 text-slate-700">Task-based plans tied to submitted automation jobs, with included monthly tasks and additional task rates</td>
+              <td class="px-5 py-5 text-slate-700">Assistant plans plus custom-agent credits that vary by model, complexity, premium actions, and duration</td>
+              <td class="px-5 py-5 text-slate-700">Neither model is universally cheaper. Compare using the work you actually expect agents to run.</td>
+            </tr>
+            <tr>
+              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Deployment and control</th>
+              <td class="px-5 py-5 text-slate-700">Gobii Cloud, dedicated enterprise infrastructure, and self-hosted open-source code with MIT licensing</td>
+              <td class="px-5 py-5 text-slate-700">Public materials reviewed position Lindy primarily as hosted software with enterprise controls</td>
+              <td class="px-5 py-5 text-slate-700">Self-hosting and infrastructure ownership can matter for technical and regulated teams.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-indigo-950 py-16 text-white sm:py-20">
+    <div class="mx-auto grid max-w-7xl gap-12 px-6 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:px-12">
+      <div>
+        <p class="text-sm font-semibold uppercase text-cyan-200">Key finding</p>
+        <h2 class="mt-4 text-3xl font-light sm:text-4xl">Lindy is a polished AI assistant. Gobii is a browser-native AI coworker platform.</h2>
+      </div>
+      <div class="space-y-5 text-base leading-7 text-indigo-50">
+        <p>
+          Lindy should not be dismissed as a chatbot. It has custom agents, triggers, actions, memory, web browsing, computer use, phone workflows, monitoring, and approval paths. It is especially strong when the work maps to an assistant that helps one person or team manage communications and meetings.
+        </p>
+        <p>
+          Gobii is stronger when the work looks like recurring operations: log into a portal, gather records, compare websites, update a sheet or database, download files, create a report, send a CSV, and repeat the job on a schedule or when an event arrives.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-8 lg:grid-cols-2">
+        <article class="rounded-lg border border-cyan-200 bg-cyan-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">Lindy's genuine strength: the executive assistant experience</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            Lindy's public product story is tightly focused on the daily work surface: inbox triage, drafting, scheduling, meeting notes, prep, reminders, follow-ups, and text-based delegation from iMessage or SMS.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            For a founder, executive, or individual contributor who mostly wants one AI assistant for the workday, Lindy may feel more immediately tailored than a platform built around business operations.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-emerald-200 bg-emerald-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">Gobii's edge: browser-native operations</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            Lindy has Web Browser actions and Computer Use, so the fair comparison is not whether Lindy can touch the web. It can.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii's advantage is that browser execution is the center of the product: real web sessions, forms, clicks, downloads, screenshots, files, structured outputs, and recurring work wrapped in a durable agent lifecycle.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-amber-200 bg-amber-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">A complete working environment</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            Custom Lindy agents are built from workflows, steps, integrations, and memory. That is a powerful model for no-code automation and assistant work.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii gives each worker the infrastructure to do the job over time: a browser, files, structured data, schedules, approvals, channels, and outputs that are meant to be reviewed, shared, and routed through a business process.
+          </p>
+        </article>
+
+        <article class="rounded-lg border border-rose-200 bg-rose-50 p-7">
+          <h2 class="text-2xl font-semibold text-slate-950">More infrastructure control</h2>
+          <p class="mt-5 text-sm leading-6 text-slate-700">
+            Lindy has a credible public security posture, including encryption, enterprise controls, and compliance claims. Gobii should not frame Lindy as weak on security.
+          </p>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            Gobii's stronger claim is control: self-hosted source code, cloud deployment, dedicated enterprise infrastructure, per-agent sandboxing, encrypted secrets, audit trails, and browser-agent-specific boundaries.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-cyan-50 py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr]">
+        <div>
+          <p class="text-sm font-semibold uppercase text-cyan-800">Where Lindy fits</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">A strong choice for assistant-led workday automation.</h2>
+        </div>
+        <div class="space-y-5 text-base leading-7 text-slate-700">
+          <p>
+            Lindy deserves serious consideration if your primary need is an AI assistant for inbox, meetings, calendar, reminders, SMS or iMessage access, and meeting follow-up. It is also a credible option when you want a no-code workflow builder with triggers, actions, conditions, integrations, memory, monitoring, and approvals.
+          </p>
+          <p>
+            It is especially compelling when the workflow is person-centered: draft this reply, reschedule this meeting, take notes, prep me for a call, follow up with action items, respond to a text, route a Slack message, or run a lightweight custom workflow from a trigger.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-2">
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Where Gobii fits</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">A stronger fit for persistent business operations.</h2>
+          <p class="mt-5 text-base leading-7 text-slate-700">
+            Gobii is purpose-built for work that a human teammate would otherwise do across websites, portals, files, data, and follow-up loops. A Gobii agent can keep context, preserve browser sessions, maintain structured records, use files, wake from schedules or events, and return finished work.
+          </p>
+          <p class="mt-4 text-base leading-7 text-slate-700">
+            For teams searching for a Gobii vs Lindy comparison or a Lindy alternative for browser-native AI work, the practical distinction is whether you want an assistant to manage the workday, or AI coworkers that take on recurring operational responsibilities.
+          </p>
+        </div>
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Common Gobii workloads</p>
+          <ul class="mt-6 grid gap-3 text-sm leading-6 text-slate-700 sm:grid-cols-2">
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Lead research and enrichment</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Competitor and pricing monitoring</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Recruiting and candidate sourcing</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Vendor and supplier checks</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Portal workflows and downloads</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Customer health summaries</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Compliance and public-record monitoring</span></li>
+            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Reports, CSVs, PDFs, and webhook outputs</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-indigo-950 py-16 text-white sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-cyan-200">Bottom line</p>
+        <h2 class="mt-4 text-3xl font-light sm:text-4xl">Lindy is excellent for assistant workflows. Gobii is built for always-on AI coworkers.</h2>
+        <p class="mt-6 text-base leading-7 text-indigo-50">
+          If you mostly need help with inbox, meetings, scheduling, notes, follow-ups, SMS, iMessage, and phone-agent workflows, Lindy is worth evaluating. If you need AI workers that operate the web, maintain browser sessions, use files and structured data, run recurring business workflows, and deliver operational artifacts, Gobii is the stronger fit.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 sm:py-20">
+    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+      <div class="grid gap-10 lg:grid-cols-[1fr_0.8fr] lg:items-start">
+        <div>
+          <p class="text-sm font-semibold uppercase text-indigo-700">Deploy AI coworkers built for real web work</p>
+          <h2 class="mt-4 text-3xl font-light text-slate-950 sm:text-4xl">Start with one recurring responsibility. Scale into an AI workforce your team can contact directly.</h2>
+          <p class="mt-6 max-w-3xl text-base leading-7 text-slate-700">
+            Gobii gives teams always-on agents with browser automation, persistent state, secure credentials, files, direct communication endpoints, and cloud or self-hosted deployment options.
+          </p>
+          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+            <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center rounded-lg bg-indigo-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-800">
+              Create Your First Gobii Agent
+              <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-white px-6 py-3 text-sm font-semibold text-indigo-800 transition hover:border-indigo-300 hover:bg-indigo-50">
+              Review the Open Source Repo
+            </a>
+          </div>
+        </div>
+        <aside class="rounded-lg border border-indigo-200 bg-indigo-50 p-6">
+          <h2 class="text-lg font-semibold text-slate-950">Source note</h2>
+          <p class="mt-4 text-sm leading-6 text-slate-700">
+            This comparison is based on public Gobii and Lindy documentation, pricing pages, security pages, product pages, and public repository information reviewed in {{ comparison.source_reviewed }}.
+          </p>
+          <p class="mt-3 text-sm leading-6 text-slate-700">
+            Last reviewed {{ comparison.last_reviewed_display }} by {{ comparison.reviewed_by }}.
+          </p>
+          <div class="mt-5 flex flex-col gap-3 text-sm font-semibold">
+            <a href="https://docs.lindy.ai/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Lindy documentation overview
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://docs.lindy.ai/fundamentals/lindy-101/introduction" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Lindy custom agents
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://docs.lindy.ai/skills/web-browsing/web-browser" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Lindy Web Browser
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://docs.lindy.ai/skills/by-lindy/computer-use" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Lindy Computer Use
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://www.lindy.ai/pricing" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Lindy pricing
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://www.lindy.ai/security" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Lindy security
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://gobii.ai/pricing/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Gobii pricing
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://gobii.ai/solutions/engineering/" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Gobii developer platform
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+            <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center text-indigo-700 hover:text-indigo-900">
+              Gobii open source repo
+              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+            </a>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

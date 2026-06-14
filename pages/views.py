@@ -3371,6 +3371,25 @@ class PricingView(TemplateView):
     pass
 
 
+def _comparison_competitor_application(comparison):
+    application = {
+        "@type": "SoftwareApplication",
+        "name": comparison["competitor_name"],
+        "applicationCategory": comparison.get(
+            "competitor_application_category",
+            "AI agent platform",
+        ),
+        "url": comparison["competitor_url"],
+    }
+    if "competitor_operating_system" in comparison:
+        application["operatingSystem"] = comparison["competitor_operating_system"]
+    if "competitor_same_as" in comparison:
+        application["sameAs"] = list(comparison["competitor_same_as"])
+    if "competitor_schema_description" in comparison:
+        application["description"] = comparison["competitor_schema_description"]
+    return application
+
+
 class ComparisonsIndexView(TemplateView):
     template_name = "comparisons/index.html"
     seo_title = "AI Agent Platform Comparisons and Alternatives | Gobii"
@@ -3379,7 +3398,7 @@ class ComparisonsIndexView(TemplateView):
         "agent operations, security, governance, and production readiness."
     )
     social_image_path = "images/gobii_fish_social_1280x640.png"
-    last_modified_date = "2026-06-07"
+    last_modified_date = "2026-06-14"
 
     def dispatch(self, request, *args, **kwargs):
         if not settings.GOBII_PROPRIETARY_MODE:
@@ -3429,12 +3448,7 @@ class ComparisonsIndexView(TemplateView):
                 "itemListElement": item_list_elements,
             },
             "about": [
-                {
-                    "@type": "SoftwareApplication",
-                    "name": comparison["competitor_name"],
-                    "applicationCategory": "AI agent platform",
-                    "url": comparison["competitor_url"],
-                }
+                _comparison_competitor_application(comparison)
                 for comparison in published_comparisons
             ],
         }
@@ -3520,23 +3534,7 @@ class ComparisonDetailView(TemplateView):
                 "integrations, browsers, files, and communication channels."
             ),
         }
-        competitor_application = {
-            "@type": "SoftwareApplication",
-            "name": comparison["competitor_name"],
-            "applicationCategory": comparison.get(
-                "competitor_application_category",
-                "AI agent platform",
-            ),
-            "url": comparison["competitor_url"],
-        }
-        if "competitor_operating_system" in comparison:
-            competitor_application["operatingSystem"] = comparison[
-                "competitor_operating_system"
-            ]
-        if "competitor_same_as" in comparison:
-            competitor_application["sameAs"] = list(comparison["competitor_same_as"])
-        if "competitor_schema_description" in comparison:
-            competitor_application["description"] = comparison["competitor_schema_description"]
+        competitor_application = _comparison_competitor_application(comparison)
 
         structured_data = {
             "@context": "https://schema.org",
