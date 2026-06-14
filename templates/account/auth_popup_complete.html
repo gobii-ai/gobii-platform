@@ -5,7 +5,7 @@
 
 {% block head_extras %}
   {{ block.super }}
-  <meta name="robots" content="{{ robots_meta }}">
+  <meta name="robots" content="{{ robots_meta|default:'noindex, nofollow' }}">
 {% endblock %}
 
 {% block content %}
