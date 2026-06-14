@@ -22,6 +22,7 @@ PASSWORD_RESET_BRIDGE_SESSION_KEY = "_password_reset_bridge"
 PASSWORD_RESET_BRIDGE_INVALID_SENTINEL = "invalid"
 AUTH_MODAL_REQUEST_HEADER = "X-Gobii-Auth-Modal"
 AUTH_MODAL_ROBOTS_HEADER = "noindex, nofollow, noarchive"
+AUTH_POPUP_COMPLETE_ROBOTS_HEADER = "noindex, follow"
 _UID_RE = re.compile(r"^[0-9A-Za-z]+$")
 
 
@@ -214,7 +215,13 @@ class AccountLoginModalView(ModalAuthNoIndexMixin, ModalAuthViewMixin, LoginView
 class AccountAuthPopupCompleteView(TemplateView):
     template_name = "account/auth_popup_complete.html"
 
+    def dispatch(self, request, *args, **kwargs):
+        response = super().dispatch(request, *args, **kwargs)
+        response["X-Robots-Tag"] = AUTH_POPUP_COMPLETE_ROBOTS_HEADER
+        return response
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["suppress_signup_tracking_snippet"] = True
+        context["robots_meta"] = AUTH_POPUP_COMPLETE_ROBOTS_HEADER
         return context

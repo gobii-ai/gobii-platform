@@ -5654,6 +5654,8 @@ class AuthLinkTests(TestCase):
         response = self.client.get(reverse("account_auth_popup_complete"), {"auth_popup_state": "test-state"})
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
+        self.assertContains(response, '<meta name="robots" content="noindex, follow">')
         self.assertContains(response, "Completing sign in")
         self.assertContains(response, "js/account_auth_popup_complete.js")
 
