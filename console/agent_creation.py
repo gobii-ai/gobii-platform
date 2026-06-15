@@ -458,11 +458,12 @@ def create_persistent_agent_from_charter(
                         exc,
                     )
 
-        _apply_pending_pipedream_app_selections(
-            request,
-            organization=organization,
-            selected_pipedream_app_slugs=selected_pipedream_app_slugs,
-        )
+        if organization is None or resolved_context.can_manage_org_agents:
+            _apply_pending_pipedream_app_selections(
+                request,
+                organization=organization,
+                selected_pipedream_app_slugs=selected_pipedream_app_slugs,
+            )
 
         initial_message_id = str(initial_message_obj.id)
         has_initial_attachments = initial_message_obj.attachments.exists()

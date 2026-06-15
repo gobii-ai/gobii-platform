@@ -2095,6 +2095,7 @@ class ConsoleViewsTest(TestCase):
 
     @override_settings(
         PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
+        PIPEDREAM_PREFETCH_APPS="trello",
         SEGMENT_WRITE_KEY="",
         SEGMENT_WEB_WRITE_KEY="",
         GOBII_PROPRIETARY_MODE=False,
@@ -2125,6 +2126,10 @@ class ConsoleViewsTest(TestCase):
             role=OrganizationMembership.OrgRole.MEMBER,
             status=OrganizationMembership.OrgStatus.ACTIVE,
         )
+        PipedreamAppSelection.objects.create(
+            organization=organization,
+            selected_app_slugs=["notion"],
+        )
         template = PersistentAgentTemplate.objects.create(
             code="console-org-template",
             organization=organization,
@@ -2150,7 +2155,10 @@ class ConsoleViewsTest(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(
                 "/console/api/agents/create/",
-                data=json.dumps({"message": template.charter}),
+                data=json.dumps({
+                    "message": template.charter,
+                    "selected_pipedream_app_slugs": ["slack", "trello"],
+                }),
                 content_type="application/json",
             )
 
@@ -2163,6 +2171,8 @@ class ConsoleViewsTest(TestCase):
         self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
         self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, session)
         self.assertNotIn(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, session)
+        selection = PipedreamAppSelection.objects.get(organization=organization)
+        self.assertEqual(selection.selected_app_slugs, ["notion"])
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     @patch("console.agent_creation.process_agent_events_task.delay")
