@@ -41,7 +41,6 @@ from api.agent.core.event_processing import (
     _ToolExecutionOutcome,
     _run_agent_loop,
     _maybe_enqueue_sandbox_warmup_for_recent_tool_history,
-    _recent_sandbox_tool_history_warm_reason,
     process_agent_events,
 )
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError
@@ -133,6 +132,7 @@ from api.services.tool_settings import (
     get_tool_settings_for_plan,
     invalidate_tool_settings_cache,
 )
+from api.services.sandbox_warmup import recent_sandbox_tool_history_warm_reason
 from api.services.web_sessions import start_web_session
 from api.services.signup_preview import is_signup_preview_processing_paused
 from util.personal_signup_preview import GENERIC_STARTER_CHARTER
@@ -250,7 +250,7 @@ class SandboxWarmupTests(TestCase):
         platform_tool = "mcp_platform_lookup"
         self._create_tool_call(platform_agent, platform_tool)
         self._enable_tool(platform_agent, platform_tool, platform_server)
-        self.assertIsNone(_recent_sandbox_tool_history_warm_reason(platform_agent))
+        self.assertIsNone(recent_sandbox_tool_history_warm_reason(platform_agent))
 
         http_agent = self._create_agent("HttpMCPAgent")
         http_server = self._create_server(
@@ -260,7 +260,7 @@ class SandboxWarmupTests(TestCase):
         http_tool = "mcp_http_lookup"
         self._create_tool_call(http_agent, http_tool)
         self._enable_tool(http_agent, http_tool, http_server)
-        self.assertIsNone(_recent_sandbox_tool_history_warm_reason(http_agent))
+        self.assertIsNone(recent_sandbox_tool_history_warm_reason(http_agent))
 
         stdio_agent = self._create_agent("StdioMCPAgent")
         stdio_server = self._create_server(
@@ -271,7 +271,7 @@ class SandboxWarmupTests(TestCase):
         self._create_tool_call(stdio_agent, stdio_tool)
         self._enable_tool(stdio_agent, stdio_tool, stdio_server)
 
-        reason = _recent_sandbox_tool_history_warm_reason(stdio_agent)
+        reason = recent_sandbox_tool_history_warm_reason(stdio_agent)
 
         self.assertIn(
             "recent_sandbox_tool_history:mcp_stdio:mcp_stdio_lookup",

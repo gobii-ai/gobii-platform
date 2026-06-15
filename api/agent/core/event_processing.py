@@ -30,7 +30,6 @@ from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
 from django.apps import apps
 from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
-from django.db.models import Q
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 from waffle import switch_is_active
@@ -119,7 +118,6 @@ from .prompt_context import (
     build_prompt_context,
     get_agent_daily_credit_state,
     get_agent_tools,
-    tool_call_history_limit,
 )
 
 from ..tools.apply_patch import execute_apply_patch
@@ -133,7 +131,7 @@ from ..tools.sqlite_agent_config import (
     seed_sqlite_agent_config,
 )
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
-from ..tools.custom_tools import CUSTOM_TOOL_PREFIX, execute_create_custom_tool
+from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from ..tools.plan import build_plan_snapshot, build_redundant_research_plan_skip_result, execute_update_plan
 from ..tools.planning import execute_end_planning
@@ -145,7 +143,6 @@ from ..tools.request_human_input import execute_request_human_input
 from ..tools.search_tools import execute_search_tools
 from ..tools.static_tools import planning_mode_disallows_tool
 from ..tools.tool_manager import (
-    BUILTIN_TOOL_REGISTRY,
     execute_enabled_tool,
     auto_enable_heuristic_tools,
     get_parallel_safe_tool_rejection_reason,
@@ -177,10 +174,9 @@ from ...models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
-    PersistentAgentEnabledTool,
-    MCPServerConfig,
     SmsContactPurpose,
 )
+from api.services.sandbox_warmup import recent_sandbox_tool_history_warm_reason
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
 from api.services.agent_error_logging import (
@@ -5114,90 +5110,8 @@ def process_agent_events(
             logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
 
 
-_SANDBOX_WARM_REASON_PREFIX = "recent_sandbox_tool_history"
-
-
-def _sandbox_warm_reason(tool_type: str, tool_name: str) -> str:
-    safe_tool_name = str(tool_name or "").strip()[:96]
-    return f"{_SANDBOX_WARM_REASON_PREFIX}:{tool_type}:{safe_tool_name}"
-
-
-def _recent_sandbox_tool_history_warm_reason(agent: PersistentAgent) -> Optional[str]:
-    try:
-        limit = max(0, int(tool_call_history_limit(agent)))
-    except (TypeError, ValueError, DatabaseError) as exc:
-        logger.warning(
-            "Failed to resolve tool history limit for sandbox warm-up agent=%s: %s",
-            agent.id,
-            exc,
-        )
-        return None
-    if limit <= 0:
-        return None
-
-    try:
-        raw_tool_names = list(
-            PersistentAgentToolCall.objects.filter(step__agent=agent)
-            .order_by("-step__created_at")
-            .values_list("tool_name", flat=True)[:limit]
-        )
-    except DatabaseError as exc:
-        logger.warning(
-            "Failed to load recent tool history for sandbox warm-up agent=%s: %s",
-            agent.id,
-            exc,
-        )
-        return None
-
-    recent_tool_names = [
-        tool_name.strip()
-        for tool_name in raw_tool_names
-        if isinstance(tool_name, str) and tool_name.strip()
-    ]
-    if not recent_tool_names:
-        return None
-
-    sandbox_builtin_names = {
-        name
-        for name, entry in BUILTIN_TOOL_REGISTRY.items()
-        if isinstance(entry, dict) and (entry.get("sandboxed") or entry.get("sandbox_only"))
-    }
-    for tool_name in recent_tool_names:
-        if tool_name in sandbox_builtin_names:
-            return _sandbox_warm_reason("builtin", tool_name)
-        if tool_name.startswith(CUSTOM_TOOL_PREFIX):
-            return _sandbox_warm_reason("custom", tool_name)
-
-    unique_tool_names = list(dict.fromkeys(recent_tool_names))
-    try:
-        sandbox_mcp_tool_names = set(
-            PersistentAgentEnabledTool.objects.filter(
-                agent=agent,
-                tool_full_name__in=unique_tool_names,
-                server_config__isnull=False,
-                server_config__is_active=True,
-                server_config__command__gt="",
-            )
-            .filter(Q(server_config__url="") | Q(server_config__url__isnull=True))
-            .exclude(server_config__scope=MCPServerConfig.Scope.PLATFORM)
-            .values_list("tool_full_name", flat=True)
-        )
-    except DatabaseError as exc:
-        logger.warning(
-            "Failed to load enabled MCP tools for sandbox warm-up agent=%s: %s",
-            agent.id,
-            exc,
-        )
-        return None
-
-    for tool_name in recent_tool_names:
-        if tool_name in sandbox_mcp_tool_names:
-            return _sandbox_warm_reason("mcp_stdio", tool_name)
-    return None
-
-
 def _maybe_enqueue_sandbox_warmup_for_recent_tool_history(agent: PersistentAgent, span) -> None:
-    reason = _recent_sandbox_tool_history_warm_reason(agent)
+    reason = recent_sandbox_tool_history_warm_reason(agent)
     if not reason:
         return
 
