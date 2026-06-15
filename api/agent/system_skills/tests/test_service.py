@@ -1,4 +1,5 @@
 import uuid
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
@@ -105,8 +106,8 @@ class NativeSystemSkillPipedreamCleanupTests(TestCase):
                 {
                     "google_sheets-add-row",
                     "google_drive-upload-file",
-                    "google_docs-create-document",
                 },
+                {"google_docs-create-document"},
             ),
             (
                 APOLLO_NATIVE_SYSTEM_SKILL_KEY,
@@ -114,13 +115,14 @@ class NativeSystemSkillPipedreamCleanupTests(TestCase):
                     "apollo_io-search-contacts",
                     "apollo_io_oauth-search-contacts",
                 },
+                set(),
             ),
         )
-        for skill_key, pipedream_tool_names in cases:
+        for skill_key, pipedream_tool_names, preserved_tool_names in cases:
             with self.subTest(skill_key=skill_key):
                 agent = self._create_agent(self.user, f"{skill_key} Agent")
                 self._enable_http_request(agent)
-                for pipedream_tool_name in pipedream_tool_names:
+                for pipedream_tool_name in pipedream_tool_names | preserved_tool_names:
                     self._enable_pipedream_tool(agent, pipedream_tool_name)
                 self._enable_pipedream_tool(agent, "slack-post-message")
 
@@ -128,7 +130,10 @@ class NativeSystemSkillPipedreamCleanupTests(TestCase):
 
                 self.assertEqual(result["status"], "success")
                 self.assertEqual(set(result["disabled_pipedream_tools"]), pipedream_tool_names)
-                self.assertEqual(self._enabled_tool_names(agent), {"http_request", "slack-post-message"})
+                self.assertEqual(
+                    self._enabled_tool_names(agent),
+                    {"http_request", "slack-post-message"} | preserved_tool_names,
+                )
 
     def test_reenabling_already_enabled_native_skill_still_cleans_up_pipedream_tools(self):
         PersistentAgentSystemSkillState.objects.create(
@@ -143,3 +148,24 @@ class NativeSystemSkillPipedreamCleanupTests(TestCase):
         self.assertEqual(result["already_enabled"], [HUBSPOT_NATIVE_SYSTEM_SKILL_KEY])
         self.assertEqual(result["disabled_pipedream_tools"], ["hubspot-search-crm-objects"])
         self.assertEqual(self._enabled_tool_names(self.agent), {"http_request"})
+
+    def test_cleanup_runs_before_enabling_native_dependency_to_avoid_lru_eviction(self):
+        agent = self._create_agent(self.user, "Native Tool Cap Agent")
+        self._enable_pipedream_tool(agent, "hubspot-search-crm-objects")
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="slack-post-message",
+            tool_name="slack-post-message",
+            tool_server=PIPEDREAM_RUNTIME_NAME,
+        )
+
+        with (
+            patch("api.agent.tools.tool_manager.get_enabled_tool_limit", return_value=2),
+            patch("api.agent.tools.tool_manager.MCPToolManager.get_tools_for_agent", return_value=[]),
+        ):
+            result = enable_system_skills(agent, [HUBSPOT_NATIVE_SYSTEM_SKILL_KEY])
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["disabled_pipedream_tools"], ["hubspot-search-crm-objects"])
+        self.assertEqual(self._enabled_tool_names(agent), {"http_request", "slack-post-message"})
+        self.assertEqual(result["evicted"], [])

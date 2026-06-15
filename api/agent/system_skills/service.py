@@ -23,7 +23,7 @@ from .defaults import (
 
 
 NATIVE_SYSTEM_SKILL_PIPEDREAM_APP_SLUGS = {
-    GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY: ("google_sheets", "google_drive", "google_docs"),
+    GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY: ("google_sheets", "google_drive"),
     HUBSPOT_NATIVE_SYSTEM_SKILL_KEY: ("hubspot",),
     APOLLO_NATIVE_SYSTEM_SKILL_KEY: ("apollo_io", "apollo_io_oauth"),
 }
@@ -254,6 +254,8 @@ def enable_system_skills(
                 invalid.append(skill_key)
                 continue
 
+            disabled_pipedream_tools.extend(_disable_overlapping_pipedream_tools(agent, skill_key))
+
             static_tool_names = _static_system_skill_tool_names(agent)
 
             dynamic_tool_names = [tool_name for tool_name in tool_names if tool_name not in static_tool_names]
@@ -299,7 +301,8 @@ def enable_system_skills(
         else:
             already_enabled.append(skill_key)
 
-        disabled_pipedream_tools.extend(_disable_overlapping_pipedream_tools(agent, skill_key))
+        if not tool_names:
+            disabled_pipedream_tools.extend(_disable_overlapping_pipedream_tools(agent, skill_key))
 
     return {
         "status": "success",
