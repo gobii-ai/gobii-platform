@@ -2620,7 +2620,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         )
 
     def _seed_file_context(self, agent_id):
-        if self.case.slug != "common_use_case_062_send_attachment_email":
+        case = getattr(self, "case", None)
+        if case is None or case.slug != "common_use_case_062_send_attachment_email":
             return
         agent = PersistentAgent.objects.get(id=agent_id)
         result = write_bytes_to_dir(

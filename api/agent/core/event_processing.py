@@ -523,6 +523,8 @@ def _build_safe_error_payload(
 
 
 def _coerce_error_json_value(value: Any, max_bytes: int) -> Any:
+    if isinstance(value, str):
+        return _coerce_error_text(value, max_bytes)
     try:
         encoded = json.dumps(value, ensure_ascii=False)
     except (TypeError, ValueError):

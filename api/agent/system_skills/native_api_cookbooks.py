@@ -172,7 +172,7 @@ APOLLO_COOKBOOK = NativeApiCookbook(
                 "Use `person.id` and related `organization.id` values for follow-up calls."
             ),
             guardrails=(
-                "Use exactly `/mixed_people/api_search`; do not use `/mixed_people` or `/mixed_people/search`. "
+                "Use exactly `/mixed_people/api_search`; do not use `/mixed_people/search` or `/mixed_people`. "
                 "Validate titles/domains, and do not assume search records include email or phone."
             ),
         ),
@@ -272,9 +272,9 @@ APOLLO_COOKBOOK = NativeApiCookbook(
             request_shape="POST the usage-stats endpoint with no body. GET the OAuth profile endpoint with no body.",
             response_shape="Report returned `api_usage_stats`/usage fields, profile fields, and any visible rate/credit limits.",
             guardrails=(
-                "Do not call obsolete usage endpoints such as `/usage_stats`, `/credit_usage`, or "
-                "`/auth/credit_usage_stats`; use `/usage_stats/api_usage_stats` instead. Use the app.apollo.io host only "
-                "for documented profile/OAuth metadata endpoints."
+                "Do not call the obsolete `/usage_stats` path or other obsolete usage endpoints such as "
+                "`/credit_usage` or `/auth/credit_usage_stats`; use `/usage_stats/api_usage_stats` instead. "
+                "Use the app.apollo.io host only for documented profile/OAuth metadata endpoints."
             ),
         ),
     ),
