@@ -15,7 +15,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
 from django.urls import NoReverseMatch, reverse
 from django.contrib import messages
-from django.db import transaction, models, IntegrityError, DatabaseError
+from django.db import transaction, IntegrityError, DatabaseError
 from django.db.models import Q
 from django.http import (
     FileResponse,
@@ -107,7 +107,6 @@ from api.models import (
     ApiKey,
     UserBilling,
     BrowserUseAgent,
-    BrowserUseAgentTask,
     ProxyServer,
     PersistentAgent,
     PersistentAgentInboundWebhook,
@@ -369,7 +368,6 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.services.sms_contact_purpose import track_sms_contact_approval
-from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import (
     CTA_CONTINUE_AGENT_BTN,
@@ -1480,199 +1478,6 @@ def resume_subscription(request):
             },
             status=500,
         )
-
-@login_required
-def tasks_view(request):
-    # Get current context from session
-    context_type = request.session.get('context_type', 'personal')
-    context_id = request.session.get('context_id', str(request.user.id))
-    
-    # Get tasks for the current context
-    with traced("CONSOLE Tasks View") as span:
-        if context_type == 'organization':
-            # Ensure the requester is an active member of the organization context
-            if not OrganizationMembership.objects.filter(
-                user=request.user,
-                org_id=context_id,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-            ).exists():
-                return HttpResponseForbidden("You do not have access to this organization.")
-
-            tasks_queryset = (
-                BrowserUseAgentTask.objects.alive().filter(
-                    models.Q(organization_id=context_id) |
-                    models.Q(agent__persistent_agent__organization_id=context_id),
-                )
-                .distinct()
-                .order_by('-created_at')
-            )
-        else:
-            # For personal context, show user's personal tasks only
-            tasks_queryset = (
-                BrowserUseAgentTask.objects.alive().filter(
-                    user=request.user,
-                    organization__isnull=True,
-                )
-                .exclude(agent__persistent_agent__organization__isnull=False)
-                .order_by('-created_at')
-            )
-
-        # Handle filtering by status
-        status_filter = request.GET.get('status')
-        if status_filter:
-            span.set_attribute('tasks.status_filter', status_filter)
-            tasks_queryset = tasks_queryset.filter(status=status_filter)
-
-        # Handle search
-        search_query = request.GET.get('search')
-        if search_query:
-            span.set_attribute('tasks.search_query', search_query)
-            tasks_queryset = tasks_queryset.filter(prompt__icontains=search_query)
-
-        # Pagination
-        paginator = Paginator(tasks_queryset, 10)  # Show 10 tasks per page
-        page_number = request.GET.get('page', 1)
-
-        with traced("CONSOLE Tasks View Pagination") as span:
-            span.set_attribute('tasks.page_number', page_number)
-            tasks = paginator.get_page(page_number)
-
-        # Get user's organization memberships for context switcher
-        user_organizations = OrganizationMembership.objects.filter(
-            user=request.user,
-            status=OrganizationMembership.OrgStatus.ACTIVE
-        ).select_related('org').order_by('org__name')
-        
-        context = {
-            'tasks': tasks,
-            'status_filter': status_filter,
-            'user_organizations': user_organizations,
-            'current_context': {
-                'type': context_type,
-                'id': context_id,
-                'name': request.session.get('context_name', request.user.get_full_name() or request.user.username)
-            }
-        }
-        
-        return render(request, 'tasks.html', context)
-
-@login_required
-def task_detail_view(request, task_id):
-    # Get the task with related steps
-    with traced("CONSOLE Task Detail View") as span:
-        span.set_attribute('task.id', str(task_id))
-        with traced("CONSOLE Task Detail Fetch Task"):
-            task = get_object_or_404(
-                BrowserUseAgentTask.objects.alive().prefetch_related('steps'),
-                id=task_id,
-                user=request.user,
-            )
-
-        return render(request, 'task_detail.html', {'task': task})
-
-@login_required
-def task_cancel_view(request, task_id):
-    if request.method == 'POST':
-        with traced("CONSOLE Task Cancel", user_id=request.user.id):
-            # Get the task
-            task = get_object_or_404(
-                BrowserUseAgentTask.objects.alive(),
-                id=task_id,
-                user=request.user,
-            )
-
-            # Only allow cancelling tasks that are pending or in_progress
-            if task.status in [BrowserUseAgentTask.StatusChoices.PENDING, BrowserUseAgentTask.StatusChoices.IN_PROGRESS]:
-                # Update task status
-                task.status = BrowserUseAgentTask.StatusChoices.CANCELLED
-                task.save()
-
-                Analytics.track_event(
-                    user_id=request.user.id,
-                    event=AnalyticsEvent.WEB_TASK_CANCELLED,
-                    source=AnalyticsSource.WEB,
-                    properties={
-                        'task_id': str(task.id),
-                        'task_status': task.status
-                    }
-                )
-
-                messages.success(request, "Task successfully cancelled.")
-            else:
-                messages.error(request, "This task cannot be cancelled.")
-
-            return redirect('task_detail', task_id=task_id)
-
-    # If not POST, redirect to task detail
-    return redirect('task_detail', task_id=task_id)
-
-@login_required
-@tracer.start_as_current_span("CONSOLE Task Result View")
-def task_result_view(request, task_id):
-    # Get the task
-    span = trace.get_current_span()
-    span.set_attribute('task.id', str(task_id))
-    span.set_attribute('user.id', str(request.user.id))
-    with traced("CONSOLE Task Result Fetch Task"):
-        task = get_object_or_404(
-            BrowserUseAgentTask.objects.alive().prefetch_related('steps'),
-            id=task_id,
-            user=request.user,
-        )
-
-    span.set_attribute('task.status', task.status)
-
-    # Ensure the task is completed
-    if task.status != BrowserUseAgentTask.StatusChoices.COMPLETED:
-        messages.error(request, "Task result is not available yet.")
-        return redirect('task_detail', task_id=task_id)
-
-    # Find the result step
-    with traced("CONSOLE Task Result Fetch Step"):
-        result_step = task.steps.filter(is_result=True).first()
-
-    # Handle JSON download format
-    if request.GET.get('format') == 'json' and result_step and result_step.result_value:
-        # if result_step.result_value is a string, parse it as JSON
-        response = None
-
-        # Some shenanigans to handle both JSON and invalid JSON gracefully (send as text if invalid)
-        try:
-            response = JsonResponse(result_step.result_value)
-            span.set_attribute('task.result_format', 'json')
-            response['Content-Disposition'] = f'attachment; filename="task_{task_id}_result.json"'
-        except TypeError:
-            span.set_attribute('task.result_format', 'text')
-            response = HttpResponse(result_step.result_value, content_type='text/plain; charset=utf-8')
-            response['Content-Disposition'] = f'attachment; filename="task_{task_id}_result.txt"'
-
-        # Track the download event
-        download_props = _org_event_properties(
-            request,
-            {
-                'task_id': str(task.id),
-                'task_status': task.status,
-                'result_step_id': str(result_step.id),
-            },
-        )
-        Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.WEB_TASK_RESULT_DOWNLOADED,
-            source=AnalyticsSource.WEB,
-            properties=download_props.copy(),
-        )
-
-        return response
-
-    span.set_attribute('task.result_format', 'html')
-
-    # For regular HTML rendering
-    context = {
-        'task': task,
-        'result_step': result_step,
-    }
-
-    return render(request, 'task_result.html', context)
 
 # ────────── Persistent Agents (Feature-Flagged) ──────────
 class AgentQuickSpawnView(LoginRequiredMixin, View):

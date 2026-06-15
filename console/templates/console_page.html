@@ -64,11 +64,6 @@
             <i data-lucide="bar-chart-2" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
             Analytics
           </a>
-          <a href="{% url 'tasks' %}"
-              class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'tasks' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
-            <i data-lucide="clipboard" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'tasks' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
-              Tasks
-          </a>
           <a href="/app/api-keys"
              class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
             <i data-lucide="key-round" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>

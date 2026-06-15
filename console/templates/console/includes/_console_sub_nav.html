@@ -22,11 +22,6 @@
       <i aria-hidden="true" data-lucide="bar-chart-2" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'console-home' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
       Analytics
     </a>
-    <a href="{% url 'tasks' %}"
-       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'tasks' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
-      <i aria-hidden="true" data-lucide="clipboard" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'tasks' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
-      Tasks
-    </a>
     <a href="/app/api-keys"
        class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
       <i aria-hidden="true" data-lucide="key-round" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
