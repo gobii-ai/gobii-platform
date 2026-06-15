@@ -555,9 +555,15 @@ def all_requests_have_options(requests):
 
 
 def _delivered_tool_result(call):
-    try:
-        payload = json.loads(call.result or "{}")
-    except json.JSONDecodeError:
+    result = call.result
+    if isinstance(result, dict):
+        payload = result
+    elif isinstance(result, str):
+        try:
+            payload = json.loads(result or "{}")
+        except json.JSONDecodeError:
+            return False
+    else:
         return False
     return isinstance(payload, dict) and payload.get("status") in {"ok", "sent", "success"}
 

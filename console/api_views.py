@@ -9017,6 +9017,19 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 shared_agent = PersistentAgent.objects.get(id=agent_id)
             except PersistentAgent.DoesNotExist:
                 return HttpResponseBadRequest("Agent not found")
+            if shared_agent.organization_id is not None:
+                personal_agent_scenarios = [
+                    scenario_slug
+                    for _suite_slug, scenario_slugs in suite_specs
+                    for scenario_slug in scenario_slugs
+                    if getattr(ScenarioRegistry.get(scenario_slug), "requires_personal_agent", False)
+                ]
+                if personal_agent_scenarios:
+                    scenario_list = ", ".join(dict.fromkeys(personal_agent_scenarios))
+                    return HttpResponseBadRequest(
+                        "agent_strategy=reuse_agent cannot use an organization-owned agent "
+                        f"for personal-agent scenario(s): {scenario_list}"
+                    )
 
         total_ephemeral_run_count = 0
         if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO:

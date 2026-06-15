@@ -51,6 +51,7 @@ from api.evals.scenarios.behavior_micro import (
     get_plan_activity_calls_for_run,
     get_pending_human_input_requests,
     get_planning_mutation_calls_before_end_planning,
+    _delivered_tool_result,
     _is_bounded_planning_chat_question,
     tool_call_is_plan_activity,
 )
@@ -1191,6 +1192,11 @@ class BehaviorMicroHelperTests(TestCase):
         call.result = '{"status": "ok"}'
 
         self.assertTrue(_is_bounded_planning_chat_question(call))
+
+    def test_delivered_tool_result_accepts_preparsed_dict_payload(self):
+        call = SimpleNamespace(result={"status": "sent"})
+
+        self.assertTrue(_delivered_tool_result(call))
 
     def test_planning_first_turn_rejects_unbounded_chat_clarification(self):
         call = self._add_tool_call(

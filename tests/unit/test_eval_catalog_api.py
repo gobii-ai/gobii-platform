@@ -6,7 +6,7 @@ from django.urls import reverse
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.owner import EVAL_RUNNER_ORG_SLUG, EVAL_RUNNER_USERNAME
-from api.models import EvalRun, EvalSuiteRun
+from api.models import BrowserUseAgent, EvalRun, EvalSuiteRun, Organization, PersistentAgent
 
 
 @tag("batch_eval_fingerprint")
@@ -83,3 +83,43 @@ class EvalCatalogAPITests(TestCase):
         self.assertEqual(run.agent.execution_environment, "eval")
         mock_run_eval_delay.assert_called_once_with(str(run.id))
         mock_gc_delay.assert_called_once()
+
+    @patch("console.api_views.gc_eval_runs_task.delay")
+    @patch("console.api_views.run_eval_task.delay")
+    def test_reuse_agent_rejects_organization_agent_for_personal_scenario(self, mock_run_eval_delay, mock_gc_delay):
+        organization = Organization.objects.create(
+            name="Shared Eval Org",
+            slug="shared-eval-org",
+            created_by=self.user,
+        )
+        organization.billing.purchased_seats = 1
+        organization.billing.save(update_fields=["purchased_seats"])
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Shared Eval Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=organization,
+            browser_use_agent=browser_agent,
+            name="Shared Eval Agent",
+            execution_environment="eval",
+        )
+
+        response = self.client.post(
+            reverse("console_evals_suite_runs_create"),
+            data={
+                "scenario_slugs": ["permit_followup_single_reply"],
+                "n_runs": 1,
+                "agent_strategy": EvalSuiteRun.AgentStrategy.REUSE_AGENT,
+                "agent_id": str(agent.id),
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("personal-agent scenario", response.content.decode())
+        self.assertFalse(EvalSuiteRun.objects.exists())
+        self.assertFalse(EvalRun.objects.exists())
+        mock_run_eval_delay.assert_not_called()
+        mock_gc_delay.assert_not_called()
