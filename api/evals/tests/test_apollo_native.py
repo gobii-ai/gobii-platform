@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.agent.system_skills.native_api_cookbooks import render_native_api_cookbook
 from api.evals.scenarios.apollo_native import (
     APOLLO_NATIVE_CASES,
     APOLLO_NATIVE_CREATE_CONTACT,
@@ -77,6 +78,19 @@ class ApolloNativeScenarioTests(SimpleTestCase):
         self.assertIn("first page", case.prompt.lower())
         self.assertIn("Return the matches Apollo returns.", case.prompt)
         self.assertNotIn("top matches", case.prompt.lower())
+
+    def test_apollo_cookbook_warns_about_obsolete_endpoints_and_bulk_limits(self):
+        cookbook = render_native_api_cookbook("apollo")
+
+        self.assertIn("`/mixed_people/api_search`", cookbook)
+        self.assertIn("do not use `/mixed_people` or `/mixed_people/search`", cookbook)
+        self.assertIn("`GET /email_accounts`", cookbook)
+        self.assertIn("Do not call `/email_accounts/list`", cookbook)
+        self.assertIn("`/usage_stats/api_usage_stats`", cookbook)
+        self.assertIn("`/credit_usage`", cookbook)
+        self.assertIn("`/auth/credit_usage_stats`", cookbook)
+        self.assertIn("at most 10 person objects", cookbook)
+        self.assertIn("do not retry the same malformed batch", cookbook)
 
     def test_eval_stop_policy_allows_sqlite_batch_for_result_shaping(self):
         scenario = ScenarioRegistry.get(APOLLO_NATIVE_SCENARIO_SLUGS[0])

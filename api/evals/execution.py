@@ -544,7 +544,11 @@ class ScenarioExecutionTools:
         Returns:
             A tuple of (choice, reasoning). choice will be one of the strings in `options`.
         """
-        from api.agent.core.llm_config import get_llm_config_with_failover, LLMNotConfiguredError
+        from api.agent.core.llm_config import (
+            get_eval_judge_llm_config,
+            get_llm_config_with_failover,
+            LLMNotConfiguredError,
+        )
 
         options_list = list(options)
 
@@ -598,7 +602,15 @@ class ScenarioExecutionTools:
         # Use failover configs with routing profile support
         try:
             routing_profile = get_eval_routing_profile_for_current_run()
-            failover_configs = get_llm_config_with_failover(routing_profile=routing_profile)
+            try:
+                eval_judge_config = get_eval_judge_llm_config(routing_profile=routing_profile)
+            except LLMNotConfiguredError:
+                eval_judge_config = None
+            failover_configs = (
+                [eval_judge_config]
+                if eval_judge_config is not None
+                else get_llm_config_with_failover(routing_profile=routing_profile)
+            )
         except LLMNotConfiguredError as exc:
             logger.error("LLM judge missing configuration: %s", exc)
             return "Error", "No LLM configuration available for judgment."
@@ -609,7 +621,8 @@ class ScenarioExecutionTools:
         last_error: Optional[Exception] = None
         for _provider, cfg_model, cfg_params in failover_configs:
             effective_model = model or cfg_model
-            safe_params = dict(params or cfg_params or {})
+            safe_params = dict(cfg_params or {})
+            safe_params.update(params or {})
             if safe_params.get("temperature") is None:
                 safe_params["temperature"] = 0.0
 

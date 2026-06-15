@@ -37,8 +37,8 @@ class EvalCatalogAPITests(TestCase):
         self.assertIn("smoke", echo["metadata"]["tags"])
         self.assertGreaterEqual(echo["task_count"], 1)
 
-    @patch("console.api_views.gc_eval_runs_task.delay")
-    @patch("console.api_views.run_eval_task.delay")
+    @patch("console.evals.api_views.gc_eval_runs_task.delay")
+    @patch("console.evals.api_views.run_eval_task.delay")
     def test_create_suite_run_accepts_single_scenario_slug(self, mock_run_eval_delay, mock_gc_delay):
         response = self.client.post(
             reverse("console_evals_suite_runs_create"),
@@ -63,8 +63,8 @@ class EvalCatalogAPITests(TestCase):
         mock_run_eval_delay.assert_called_once_with(str(run.id))
         mock_gc_delay.assert_called_once()
 
-    @patch("console.api_views.gc_eval_runs_task.delay")
-    @patch("console.api_views.run_eval_task.delay")
+    @patch("console.evals.api_views.gc_eval_runs_task.delay")
+    @patch("console.evals.api_views.run_eval_task.delay")
     def test_create_suite_run_uses_personal_agent_for_sms_scenario(self, mock_run_eval_delay, mock_gc_delay):
         response = self.client.post(
             reverse("console_evals_suite_runs_create"),
@@ -84,8 +84,8 @@ class EvalCatalogAPITests(TestCase):
         mock_run_eval_delay.assert_called_once_with(str(run.id))
         mock_gc_delay.assert_called_once()
 
-    @patch("console.api_views.gc_eval_runs_task.delay")
-    @patch("console.api_views.run_eval_task.delay")
+    @patch("console.evals.api_views.gc_eval_runs_task.delay")
+    @patch("console.evals.api_views.run_eval_task.delay")
     def test_reuse_agent_rejects_organization_agent_for_personal_scenario(self, mock_run_eval_delay, mock_gc_delay):
         organization = Organization.objects.create(
             name="Shared Eval Org",

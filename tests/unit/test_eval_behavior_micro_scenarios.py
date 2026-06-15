@@ -71,6 +71,7 @@ from api.evals.stop_policy import (
 from api.evals.suites import SuiteRegistry
 from api.models import (
     BrowserUseAgent,
+    AgentFsNode,
     CommsAllowlistEntry,
     CommsChannel,
     EvalRun,
@@ -1197,6 +1198,23 @@ class BehaviorMicroHelperTests(TestCase):
         call = SimpleNamespace(result={"status": "sent"})
 
         self.assertTrue(_delivered_tool_result(call))
+
+    def test_attachment_email_case_seeds_real_filespace_file(self):
+        by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
+        scenario = CommonUseCaseToolChoiceScenario()
+        scenario.case = by_slug["common_use_case_062_send_attachment_email"]
+
+        scenario._seed_file_context(self.agent.id)
+
+        self.assertTrue(
+            AgentFsNode.objects.filter(
+                created_by_agent=self.agent,
+                path="/exports/report.pdf",
+                node_type=AgentFsNode.NodeType.FILE,
+                mime_type="application/pdf",
+                size_bytes__gt=0,
+            ).exists()
+        )
 
     def test_planning_first_turn_rejects_unbounded_chat_clarification(self):
         call = self._add_tool_call(

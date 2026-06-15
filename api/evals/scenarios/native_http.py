@@ -32,6 +32,7 @@ class HttpRequestExpectation:
     url_terms: tuple[str, ...]
     method: str = "GET"
     body_terms: tuple[str, ...] = ()
+    body_term_groups: tuple[tuple[str, ...], ...] = ()
     allowed_statuses: tuple[str, ...] = ("complete",)
 
 
@@ -101,13 +102,16 @@ def request_method(call: PersistentAgentToolCall) -> str:
 
 def call_matches_expectation(call: PersistentAgentToolCall, expectation: HttpRequestExpectation) -> bool:
     allowed_statuses = {status.lower() for status in expectation.allowed_statuses}
+    body = request_body(call)
     if str(getattr(call, "status", "") or "").lower() not in allowed_statuses:
         return False
     if request_method(call) != expectation.method.upper():
         return False
     if not all(term.lower() in decoded_url(call) for term in expectation.url_terms):
         return False
-    if not all(term.lower() in request_body(call) for term in expectation.body_terms):
+    if not all(term.lower() in body for term in expectation.body_terms):
+        return False
+    if not all(any(term.lower() in body for term in group) for group in expectation.body_term_groups):
         return False
     return True
 

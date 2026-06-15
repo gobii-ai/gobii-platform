@@ -4,6 +4,7 @@ import json
 
 from api.agent.comms.human_input_requests import MAX_OPTION_COUNT, dismiss_human_input_request
 from api.agent.core.processing_flags import get_human_inbound_generation
+from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.tools.eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
     EVAL_SYNTHETIC_TOOL_SERVER,
@@ -2618,6 +2619,27 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             },
         )
 
+    def _seed_file_context(self, agent_id):
+        case = getattr(self, "case", None)
+        if case is None or case.slug != "common_use_case_062_send_attachment_email":
+            return
+        agent = PersistentAgent.objects.get(id=agent_id)
+        result = write_bytes_to_dir(
+            agent,
+            (
+                b"%PDF-1.4\n"
+                b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+                b"2 0 obj << /Type /Pages /Count 0 >> endobj\n"
+                b"trailer << /Root 1 0 R >>\n%%EOF\n"
+            ),
+            "/exports/report.pdf",
+            "application/pdf",
+            extension=".pdf",
+            overwrite=True,
+        )
+        if result.get("status") != "ok":
+            raise ValueError(f"Failed to seed attachment eval file: {result}")
+
     @staticmethod
     def _agent_config_field_for_expected_tool(tool_name):
         if tool_name == "update_schedule":
@@ -2696,6 +2718,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
         self._seed_prior_processing_run(agent_id)
         self._seed_outbound_contact_context(agent_id)
+        self._seed_file_context(agent_id)
         tool_names = self._tool_names_to_enable()
         synthetic_tool_names = [
             tool_name

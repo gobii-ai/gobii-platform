@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 RESPONSE_MAX_BYTES = 5 * 1024 * 1024
 PREVIEW_MAX_BYTES = RESPONSE_MAX_BYTES
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
+API_ERROR_MESSAGE_MAX_CHARS = 1200
 
 _JSON_PREFIXES = (
     ")]}',",
@@ -44,6 +45,12 @@ _JSON_PREFIXES = (
     "for(;;);",
     "/*-secure-*/",
 )
+
+
+def _truncate_api_error_message(message: str) -> str:
+    if len(message) <= API_ERROR_MESSAGE_MAX_CHARS:
+        return message
+    return message[:API_ERROR_MESSAGE_MAX_CHARS].rstrip() + "... [truncated]"
 
 
 def _apollo_http_error_guidance(status_code: int) -> str:
@@ -86,6 +93,23 @@ def _native_http_error_guidance(provider_key: str, status_code: int, content: An
     if provider_key == "google_drive":
         return _google_drive_http_error_guidance(status_code, content)
     return "Check the native integration connection, requested scopes, endpoint, and request body before retrying."
+
+
+def _native_api_error_message(content: Any) -> str:
+    if isinstance(content, dict):
+        error = content.get("error")
+        if isinstance(error, dict):
+            for key in ("message", "error_description", "status"):
+                value = error.get(key)
+                if value:
+                    return _truncate_api_error_message(str(value))
+        for key in ("message", "error_description", "error"):
+            value = content.get(key)
+            if isinstance(value, str) and value:
+                return _truncate_api_error_message(value)
+    if isinstance(content, str) and content:
+        return _truncate_api_error_message(content)
+    return ""
 
 
 def _strip_json_prefixes(text: str) -> str:
@@ -682,6 +706,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         "content": content_str,
     }
     if native_provider is not None and (resp.status_code < 200 or resp.status_code >= 300):
+        api_error_message = _native_api_error_message(content_str)
         response.update(
             {
                 "status": "error",
@@ -694,6 +719,8 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 "guidance": _native_http_error_guidance(native_provider.key, resp.status_code, content_str),
             }
         )
+        if api_error_message:
+            response["api_error_message"] = api_error_message
     if download_requested:
         content_type_header = resp.headers.get("Content-Type") or ""
         mime_type = content_type_header.split(";", 1)[0].strip().lower() or "application/octet-stream"

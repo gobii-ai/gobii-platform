@@ -1,9 +1,11 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.event_processing import _eval_mock_rule_matches, _resolve_eval_mock_result
+from api.agent.system_skills.defaults import _google_sheets_native_prompt_instructions
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.google_sheets_native import (
     FORBIDDEN_DISCOVERY_TOOL_NAMES,
@@ -231,7 +233,7 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
             },
         )
 
-        self.assertEqual(helper_column_result["content"]["values"][0], ["Helper Size"])
+        self.assertEqual(helper_column_result["content"]["values"], [])
         self.assertEqual(full_range_result["content"]["values"][0], ["Model", "Size", "Downloads"])
 
     def test_chart_case_points_to_models_tab_and_does_not_mock_other_tabs_as_model_data(self):
@@ -278,6 +280,34 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         self.assertFalse(_call_matches_expectation(pending_call, expectation))
         self.assertTrue(_call_matches_expectation(complete_call, expectation))
 
+    def test_expected_http_request_accepts_body_term_alternatives(self):
+        expectation = HttpRequestExpectation(
+            name="write_default_columns",
+            method="PUT",
+            url_terms=("sheets.googleapis.com/v4/spreadsheets/sheet-local-llms/values", "models"),
+            body_terms=("name", "license", "link"),
+            body_term_groups=(("size", "parameters"),),
+        )
+        parameters_call = SimpleNamespace(
+            status="complete",
+            tool_params={
+                "method": "PUT",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-local-llms/values/Models!A1:D4",
+                "body": '{"values":[["Name","Parameters","License","Source / Link"]]}',
+            },
+        )
+        missing_size_call = SimpleNamespace(
+            status="complete",
+            tool_params={
+                "method": "PUT",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-local-llms/values/Models!A1:D4",
+                "body": '{"values":[["Name","License","Source / Link"]]}',
+            },
+        )
+
+        self.assertTrue(_call_matches_expectation(parameters_call, expectation))
+        self.assertFalse(_call_matches_expectation(missing_size_call, expectation))
+
     def test_partial_drive_query_detector_flags_incomplete_q_filters(self):
         partial_call = SimpleNamespace(
             tool_name="http_request",
@@ -310,3 +340,13 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         ]
 
         self.assertTrue(all(_call_has_partial_drive_query(call) for call in repeated_calls))
+
+    def test_google_sheets_prompt_includes_live_error_guardrails(self):
+        with patch("api.agent.system_skills.defaults._native_integration_connected", return_value=True):
+            instructions = _google_sheets_native_prompt_instructions(SimpleNamespace())
+
+        self.assertIn("never call `GET https://sheets.googleapis.com/v4/spreadsheets`", instructions)
+        self.assertIn("POST https://sheets.googleapis.com/v4/spreadsheets", instructions)
+        self.assertIn("do not use `/v1/spreadsheets`", instructions)
+        self.assertIn("Do not assume a tab is named `Sheet1`", instructions)
+        self.assertIn("do not mix legacy color fields", instructions)

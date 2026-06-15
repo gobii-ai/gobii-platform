@@ -158,16 +158,18 @@ from console.api_views import (
     StaffAgentSystemMessageAPIView,
     StaffAgentSystemMessageDetailAPIView,
     StaffPromptArchiveAPIView,
+)
+from console.evals.api_views import (
+    EvalRunCompareAPIView,
+    EvalRunDetailAPIView,
     EvalSuiteListAPIView,
-    GlobalSkillEvalLauncherAPIView,
-    GlobalSkillEvalRunCreateAPIView,
+    EvalSuiteRunCompareAPIView,
     EvalSuiteRunCreateAPIView,
     EvalSuiteRunDetailAPIView,
     EvalSuiteRunListAPIView,
     EvalSuiteRunRunTypeAPIView,
-    EvalRunDetailAPIView,
-    EvalRunCompareAPIView,
-    EvalSuiteRunCompareAPIView,
+    GlobalSkillEvalLauncherAPIView,
+    GlobalSkillEvalRunCreateAPIView,
 )
 from console.pipedream_apps_api import (
     AgentPipedreamAppAPIView,

@@ -172,8 +172,9 @@ APOLLO_COOKBOOK = NativeApiCookbook(
                 "Use `person.id` and related `organization.id` values for follow-up calls."
             ),
             guardrails=(
-                "Use exactly `/mixed_people/api_search`; do not use `/mixed_people/search`. Validate titles/domains, "
-                "and do not assume search records include email or phone."
+                "Use exactly `/mixed_people/api_search`; do not use `/mixed_people/search`; "
+                "do not use `/mixed_people` or `/mixed_people/search`. "
+                "Validate titles/domains, and do not assume search records include email or phone."
             ),
         ),
         _recipe(
@@ -193,15 +194,20 @@ APOLLO_COOKBOOK = NativeApiCookbook(
             url="https://api.apollo.io/api/v1/people/match or /people/bulk_match",
             use_when="The user needs enriched person/company data or revealed email data for known people.",
             request_shape=(
-                "Match with email or identity details. Email-only enrichment can proceed without phone reveal. Phone reveal "
-                "requires `reveal_phone_number=true` and an explicit HTTPS `webhook_url`."
+                "For one person, match with email or rich identity details through `/people/match`. For multiple people, "
+                "send `/people/bulk_match` with `details` containing at most 10 person objects per request. Include enough "
+                "identity data to match reliably, such as email, LinkedIn URL, first/last name plus organization domain or "
+                "organization ID. Email-only enrichment can proceed without phone reveal. Phone reveal requires "
+                "`reveal_phone_number=true` and an explicit HTTPS `webhook_url`."
             ),
             response_shape=(
                 "Single match returns `person`; bulk/asynchronous paths may return `people`, `contacts`, or a `request_id`."
             ),
             guardrails=(
                 "A 200 with blank person or missing email is no_match/no_email, not integration failure. Never invent webhook URLs; "
-                "wait for webhook payloads when Apollo returns `request_id`."
+                "wait for webhook payloads when Apollo returns `request_id`. If `/people/bulk_match` returns 400, do not retry "
+                "the same malformed batch; fix the payload, reduce to smaller batches or single `/people/match` calls, and "
+                "keep each bulk request to 10 people or fewer."
             ),
         ),
         _recipe(
@@ -237,17 +243,23 @@ APOLLO_COOKBOOK = NativeApiCookbook(
             method="POST",
             url=(
                 "https://api.apollo.io/api/v1/emailer_campaigns/search and "
+                "GET /email_accounts and "
                 "/emailer_campaigns/{sequence_id}/add_contact_ids"
             ),
             use_when="The user asks to find sequences or add contacts to a sequence.",
             request_shape=(
-                "Search with `q_name`. Add with `emailer_campaign_id`, `contact_ids`, and "
-                "`send_email_from_email_account_id` from linked email accounts."
+                "Search sequences with `q_name`. Before adding contacts, call `GET https://api.apollo.io/api/v1/email_accounts` "
+                "to list linked sending inboxes and choose a valid `send_email_from_email_account_id`. Add contacts with "
+                "`emailer_campaign_id`, `contact_ids`, and the selected sending email account ID."
             ),
-            response_shape="Sequences are under `emailer_campaigns`; use `emailer_campaign.id` for writes.",
+            response_shape=(
+                "Sequences are under `emailer_campaigns`; use `emailer_campaign.id` for writes. Email account records are under "
+                "`email_accounts`; use `email_account.id` as `send_email_from_email_account_id`."
+            ),
             guardrails=(
-                "Ask for the sending mailbox if unknown. HTTP 403 `API_INACCESSIBLE` or 404 may indicate "
-                "master-key, scope, endpoint, or plan limitations."
+                "Do not call `/email_accounts/list`; use `GET /email_accounts` instead. Ask for the sending mailbox if "
+                "the available account is ambiguous. HTTP 403 `API_INACCESSIBLE` or 404 may indicate master-key, scope, "
+                "endpoint, or plan limitations."
             ),
         ),
         _recipe(
@@ -261,8 +273,9 @@ APOLLO_COOKBOOK = NativeApiCookbook(
             request_shape="POST the usage-stats endpoint with no body. GET the OAuth profile endpoint with no body.",
             response_shape="Report returned `api_usage_stats`/usage fields, profile fields, and any visible rate/credit limits.",
             guardrails=(
-                "Do not call the obsolete `/usage_stats` path. Use the app.apollo.io host only for documented "
-                "profile/OAuth metadata endpoints."
+                "Do not call the obsolete `/usage_stats` path or other obsolete usage endpoints such as "
+                "`/credit_usage` or `/auth/credit_usage_stats`; use `/usage_stats/api_usage_stats` instead. "
+                "Use the app.apollo.io host only for documented profile/OAuth metadata endpoints."
             ),
         ),
     ),
