@@ -138,6 +138,7 @@ class ToolErrorNormalizationTests(SimpleTestCase):
                 "method": "POST",
                 "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123:batchUpdate",
                 "guidance": "Check the Google Sheets or Drive API request shape.",
+                "api_error_message": "Invalid JSON payload received.",
                 "headers": {"Content-Type": "application/json"},
                 "content": {
                     "error": {

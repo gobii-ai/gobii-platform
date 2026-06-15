@@ -532,38 +532,17 @@ def _coerce_error_json_value(value: Any, max_bytes: int) -> Any:
     return _truncate_text_bytes(encoded, max_bytes)
 
 
-def _native_api_error_message(content: Any) -> str:
-    if isinstance(content, dict):
-        error = content.get("error")
-        if isinstance(error, dict):
-            for key in ("message", "error_description", "status"):
-                value = error.get(key)
-                if value:
-                    return _coerce_error_text(value, TOOL_ERROR_MESSAGE_MAX_BYTES)
-        for key in ("message", "error_description", "error"):
-            value = content.get(key)
-            if isinstance(value, str) and value:
-                return _coerce_error_text(value, TOOL_ERROR_MESSAGE_MAX_BYTES)
-    if isinstance(content, str) and content:
-        return _coerce_error_text(content, TOOL_ERROR_MESSAGE_MAX_BYTES)
-    return ""
-
-
 def _copy_native_http_error_context(source: dict, payload: dict) -> None:
     if source.get("provider_key") is None and source.get("provider_name") is None:
         return
 
-    for key in ("provider_key", "provider_name", "method", "url", "guidance"):
+    for key in ("provider_key", "provider_name", "method", "url", "guidance", "api_error_message"):
         value = source.get(key)
         if value is not None:
             payload[key] = _coerce_error_text(value, TOOL_ERROR_DETAIL_MAX_BYTES)
 
     if "content" in source:
-        content = source.get("content")
-        api_error_message = _native_api_error_message(content)
-        if api_error_message:
-            payload["api_error_message"] = api_error_message
-        payload["content"] = _coerce_error_json_value(content, TOOL_ERROR_NATIVE_CONTENT_MAX_BYTES)
+        payload["content"] = _coerce_error_json_value(source.get("content"), TOOL_ERROR_NATIVE_CONTENT_MAX_BYTES)
 
     if "headers" in source:
         payload["headers"] = _coerce_error_json_value(source.get("headers"), TOOL_ERROR_NATIVE_HEADERS_MAX_BYTES)
