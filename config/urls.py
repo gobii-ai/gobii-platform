@@ -281,12 +281,7 @@ from console.views import (
     cancel_subscription,
     sync_billing_subscription_state,
     resume_subscription,
-    tasks_view,
-    task_result_view,
-    task_cancel_view,
-    task_detail_view,
     grant_credits,
-    task_detail_view,
     console_billing_update,
 )
 from console.context_views import OrganizationCreateAPIView, SwitchContextView
@@ -716,13 +711,6 @@ urlpatterns = [
     path("console/organizations/<uuid:org_id>/members/<int:user_id>/role/", OrganizationMemberRoleUpdateOrgView.as_view(), name="org_member_role_update_org"),
     path("console/organizations/<uuid:org_id>/leave/", OrganizationLeaveOrgView.as_view(), name="org_leave_org"),
     path("console/organizations/<uuid:org_id>/seats/portal/", OrganizationSeatPortalView.as_view(), name="organization_seat_portal"),
-
-    # Task management views
-    path("console/tasks/", tasks_view, name="tasks"),
-    # Add these to your urlpatterns in urls.py
-    path("console/tasks/<uuid:task_id>/", task_detail_view, name="task_detail"),
-    path("console/tasks/<uuid:task_id>/cancel/", task_cancel_view, name="task_cancel"),
-    path("console/tasks/<uuid:task_id>/result/", task_result_view, name="task_result"),
 
     # Admin actions
     path("console/grant-credits/", grant_credits, name="grant_credits"),

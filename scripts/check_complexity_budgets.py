@@ -226,7 +226,10 @@ def measure_source_loc() -> SourceLocMeasurement:
     for relative_path in sorted(_git_files()):
         if not _is_counted_source(relative_path):
             continue
-        line_count += _count_nonblank_lines(REPO_ROOT / relative_path)
+        path = REPO_ROOT / relative_path
+        if not path.exists():
+            continue
+        line_count += _count_nonblank_lines(path)
         file_count += 1
     return SourceLocMeasurement(line_count=line_count, file_count=file_count)
 

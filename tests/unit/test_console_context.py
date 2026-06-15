@@ -18,12 +18,9 @@ from api.models import (
     AgentCollaborator,
     BrowserUseAgent,
     PersistentAgent,
-    BrowserUseAgentTask,
-    TaskCredit,
     OrganizationInvite,
 )
 from django.utils import timezone
-from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 
 
@@ -339,43 +336,6 @@ class CurrentOrganizationAPITests(TestCase):
 
 @tag('batch_console_context')
 class ConsoleContextTests(TestCase):
-    def _ensure_current_month_task_credit(self, *, user=None, organization=None):
-        now = timezone.now()
-        expiration_date = now + timezone.timedelta(days=30)
-        credit = (
-            TaskCredit.objects.filter(
-                user=user,
-                organization=organization,
-                plan=PlanNamesChoices.FREE,
-                grant_type=GrantTypeChoices.PLAN,
-                additional_task=False,
-                voided=False,
-                granted_date__year=now.year,
-                granted_date__month=now.month,
-            )
-            .order_by("-granted_date")
-            .first()
-        )
-        if credit:
-            credit.credits = 10
-            credit.credits_used = 0
-            credit.expiration_date = expiration_date
-            credit.save(update_fields=["credits", "credits_used", "expiration_date"])
-            return credit
-
-        return TaskCredit.objects.create(
-            user=user,
-            organization=organization,
-            credits=10,
-            credits_used=0,
-            granted_date=now,
-            expiration_date=expiration_date,
-            plan=PlanNamesChoices.FREE,
-            grant_type=GrantTypeChoices.PLAN,
-            additional_task=False,
-            voided=False,
-        )
-
     def setUp(self):
         # Enable organizations feature flag for all requests
         Flag.objects.update_or_create(name="organizations", defaults={"everyone": True})
@@ -421,16 +381,6 @@ class ConsoleContextTests(TestCase):
             browser_use_agent=self.org_browser,
         )
 
-        # Ensure both contexts have credits so task fixtures can be created
-        # regardless of whether signup bootstrap credits are enabled.
-        self._ensure_current_month_task_credit(organization=self.org)
-        self._ensure_current_month_task_credit(user=self.owner)
-
-        # Tasks: one personal, one org-owned, one agent-less
-        self.personal_task = BrowserUseAgentTask.objects.create(user=self.owner, agent=self.personal_browser)
-        self.org_task = BrowserUseAgentTask.objects.create(user=self.owner, agent=self.org_browser)
-        self.agentless_task = BrowserUseAgentTask.objects.create(user=self.owner, agent=None)
-
         # Login owner by default
         assert self.client.login(username="owner", password="pw")
 
@@ -447,17 +397,6 @@ class ConsoleContextTests(TestCase):
         session["context_id"] = str(self.org.id)
         session["context_name"] = self.org.name
         session.save()
-
-    def test_tasks_view_personal_excludes_org_owned(self):
-        self._set_personal_context()
-        url = reverse("tasks")
-        resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 200)
-        tasks = list(resp.context["tasks"])  # paginated page object
-        ids = {t.id for t in tasks}
-        self.assertIn(self.personal_task.id, ids)
-        self.assertIn(self.agentless_task.id, ids)
-        self.assertNotIn(self.org_task.id, ids)
 
     def test_switch_context_invalid_org_override_format_returns_403(self):
         resp = self.client.get(
@@ -595,22 +534,6 @@ class ConsoleContextTests(TestCase):
         payload = resp.json().get("context", {})
         self.assertEqual(payload.get("type"), "personal")
         self.assertEqual(payload.get("id"), str(self.stranger.id))
-
-    def test_tasks_view_org_requires_membership_and_shows_org_tasks(self):
-        # As owner (member) — should see org tasks
-        self._set_org_context()
-        url = reverse("tasks")
-        resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 200)
-        tasks = list(resp.context["tasks"])  # paginated page object
-        ids = {t.id for t in tasks}
-        self.assertIn(self.org_task.id, ids)
-        # Switch to stranger (no membership) — should be forbidden
-        self.client.logout()
-        assert self.client.login(username="stranger", password="pw")
-        self._set_org_context()
-        resp2 = self.client.get(url)
-        self.assertEqual(resp2.status_code, 403)
 
     @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_agent_detail_scoping(self):
