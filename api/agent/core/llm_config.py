@@ -877,7 +877,7 @@ def _build_weighted_failover_configs(
         effective_key = resolve_provider_api_key(provider)
         if effective_key:
             params["api_key"] = effective_key
-        elif endpoint.litellm_model.startswith("openai/") and getattr(endpoint, "api_base", None):
+        elif effective_model.startswith("openai/") and getattr(endpoint, "api_base", None):
             params["api_key"] = "sk-noauth"
         if supports_temperature and endpoint.temperature_override is not None:
             params["temperature"] = float(endpoint.temperature_override)
@@ -1318,6 +1318,25 @@ def _build_summarization_override_config(profile: Any | None) -> Tuple[str, str,
         endpoint_id_attr="summarization_endpoint_id",
         tier_label="summarization_override",
     )
+
+
+def get_eval_judge_llm_config(
+    *,
+    routing_profile: Any | None = None,
+) -> Tuple[str, str, dict]:
+    """Return the configured eval-judge endpoint for a routing profile."""
+    profile = _resolve_active_routing_profile(routing_profile, purpose="eval judge")
+    config = _build_profile_endpoint_config(
+        profile,
+        endpoint_attr="eval_judge_endpoint",
+        endpoint_id_attr="eval_judge_endpoint_id",
+        tier_label="eval_judge",
+    )
+    if config is None:
+        raise LLMNotConfiguredError("No eval judge endpoint is configured.")
+
+    provider_key, model, params_with_hints = config
+    return provider_key, model, _prepare_summarization_params(model, params_with_hints)
 
 
 def _build_profile_endpoint_config(

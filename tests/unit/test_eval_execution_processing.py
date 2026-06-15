@@ -18,9 +18,11 @@ from api.models import (
     EvalRunTask,
     EvalSuiteRun,
     LLMRoutingProfile,
+    LLMProvider,
     PersistentAgent,
     PersistentAgentMessage,
     PersistentAgentWebSession,
+    PersistentModelEndpoint,
     build_web_user_address,
 )
 
@@ -207,6 +209,67 @@ class EvalExecutionProcessingTests(TestCase):
         self.assertIn("tools", mock_completion.call_args_list[0].kwargs)
         self.assertNotIn("tools", mock_completion.call_args_list[1].kwargs)
         self.assertNotIn("tool_choice", mock_completion.call_args_list[1].kwargs)
+
+    @patch("api.evals.execution.run_completion")
+    def test_llm_judge_prefers_eval_judge_endpoint_from_snapshot(self, mock_completion):
+        provider = LLMProvider.objects.create(
+            key="eval-openai-compat",
+            display_name="Eval OpenAI Compat",
+            browser_backend=LLMProvider.BrowserBackend.OPENAI_COMPAT,
+        )
+        endpoint = PersistentModelEndpoint.objects.create(
+            key="eval_judge_model",
+            provider=provider,
+            litellm_model="judge-model",
+            api_base="https://judge.example.test/v1",
+            supports_tool_choice=True,
+        )
+        profile = LLMRoutingProfile.objects.create(
+            name="eval-judge-snapshot",
+            display_name="Eval Judge Snapshot",
+            is_eval_snapshot=True,
+            eval_judge_endpoint=endpoint,
+        )
+        suite_run = EvalSuiteRun.objects.create(
+            suite_slug="debug_suite",
+            initiated_by=self.user,
+            llm_routing_profile=profile,
+        )
+        run = EvalRun.objects.create(
+            suite_run=suite_run,
+            scenario_slug="debug_artifact_test",
+            agent=self.agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.RUNNING,
+        )
+        judgment_call = SimpleNamespace(
+            function=SimpleNamespace(
+                name="submit_judgment",
+                arguments=json.dumps({"choice": "Yes", "reasoning": "The endpoint was used."}),
+            )
+        )
+        mock_completion.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[judgment_call]))]
+        )
+
+        set_current_eval_run_id(str(run.id))
+        try:
+            choice, reasoning = self.tools.llm_judge(
+                question="Was the snapshot judge endpoint used?",
+                context="Endpoint-specific config should be preserved.",
+                params={"temperature": 0.0, "max_tokens": 42},
+            )
+        finally:
+            set_current_eval_run_id(None)
+
+        self.assertEqual(choice, "Yes")
+        self.assertEqual(reasoning, "The endpoint was used.")
+        kwargs = mock_completion.call_args.kwargs
+        self.assertEqual(kwargs["model"], "openai/judge-model")
+        self.assertEqual(kwargs["params"]["api_base"], "https://judge.example.test/v1")
+        self.assertEqual(kwargs["params"]["api_key"], "sk-noauth")
+        self.assertEqual(kwargs["params"]["temperature"], 0.0)
+        self.assertEqual(kwargs["params"]["max_tokens"], 42)
 
     def test_record_task_result_persists_sanitized_debug_artifacts(self):
         run = EvalRun.objects.create(

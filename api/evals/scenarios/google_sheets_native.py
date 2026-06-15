@@ -154,7 +154,7 @@ def _model_sizes_helper_column_values_rule() -> dict[str, Any]:
             f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Models!D1:D4",
             {
                 "range": "Models!D1:D4",
-                "values": [["Helper Size"], ["8"], ["7"], ["7"]],
+                "values": [],
             },
         ),
     }
@@ -432,7 +432,8 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                     "models",
                     "valueinputoption=user_entered",
                 ),
-                body_terms=("name", "size", "license", "link"),
+                body_terms=("name", "license", "link"),
+                body_term_groups=(("size", "parameters"),),
             ),
         ),
         response_term_groups=(("Top Local LLM Models", "created", "ready"),),
