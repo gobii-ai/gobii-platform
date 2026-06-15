@@ -172,7 +172,8 @@ APOLLO_COOKBOOK = NativeApiCookbook(
                 "Use `person.id` and related `organization.id` values for follow-up calls."
             ),
             guardrails=(
-                "Use exactly `/mixed_people/api_search`; do not use `/mixed_people/search` or `/mixed_people`. "
+                "Use exactly `/mixed_people/api_search`; do not use `/mixed_people/search`; "
+                "do not use `/mixed_people` or `/mixed_people/search`. "
                 "Validate titles/domains, and do not assume search records include email or phone."
             ),
         ),
