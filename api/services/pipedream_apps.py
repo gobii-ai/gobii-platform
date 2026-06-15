@@ -340,30 +340,101 @@ def _delete_disabled_enabled_tools(
     disabled_app_slugs: Iterable[str],
     owner_user=None,
     owner_org=None,
-) -> None:
+) -> list[str]:
     disabled = normalize_app_slugs(disabled_app_slugs)
     if not disabled:
-        return
+        return []
 
     pipedream_server_ids = list(
         MCPServerConfig.objects.filter(name=PIPEDREAM_RUNTIME_NAME).values_list("id", flat=True)
     )
-    if not pipedream_server_ids:
-        return
+    pipedream_tool_query = Q(tool_server=PIPEDREAM_RUNTIME_NAME)
+    if pipedream_server_ids:
+        pipedream_tool_query |= Q(server_config_id__in=pipedream_server_ids)
 
-    agent_ids = list(owner_agents_queryset(owner_scope, owner_user=owner_user, owner_org=owner_org).values_list("id", flat=True))
+    agent_ids = list(
+        owner_agents_queryset(
+            owner_scope,
+            owner_user=owner_user,
+            owner_org=owner_org,
+        ).values_list("id", flat=True)
+    )
     if not agent_ids:
-        return
+        return []
 
+    disabled_tool_names: list[str] = []
     for slug in disabled:
         prefix = f"{slug}-"
-        PersistentAgentEnabledTool.objects.filter(
-            agent_id__in=agent_ids,
-        ).filter(
-            Q(server_config_id__in=pipedream_server_ids) | Q(tool_server=PIPEDREAM_RUNTIME_NAME)
-        ).filter(
-            Q(tool_name__startswith=prefix) | Q(tool_full_name__startswith=prefix)
-        ).delete()
+        queryset = (
+            PersistentAgentEnabledTool.objects
+            .filter(agent_id__in=agent_ids)
+            .filter(pipedream_tool_query)
+            .filter(Q(tool_name__startswith=prefix) | Q(tool_full_name__startswith=prefix))
+        )
+        disabled_tool_names.extend(
+            queryset.order_by("tool_full_name").values_list("tool_full_name", flat=True)
+        )
+        queryset.delete()
+    return list(dict.fromkeys(disabled_tool_names))
+
+
+def disable_pipedream_apps_for_owner(
+    owner_scope: str,
+    app_slugs: Iterable[object],
+    *,
+    owner_user=None,
+    owner_org=None,
+) -> dict[str, object]:
+    disabled = normalize_app_slugs(app_slugs, strict=True)
+    if not disabled:
+        return {
+            "disabled_apps": [],
+            "disabled_tools": [],
+            "selected": get_owner_selected_app_slugs(
+                owner_scope,
+                owner_user=owner_user,
+                owner_org=owner_org,
+            ),
+        }
+
+    disabled_set = set(disabled)
+    prior_selected = get_owner_selected_app_slugs(
+        owner_scope,
+        owner_user=owner_user,
+        owner_org=owner_org,
+    )
+    next_selected = [slug for slug in prior_selected if slug not in disabled_set]
+
+    with transaction.atomic():
+        selected = set_owner_selected_app_slugs(
+            owner_scope,
+            next_selected,
+            owner_user=owner_user,
+            owner_org=owner_org,
+        )
+        disabled_tools = _delete_disabled_enabled_tools(
+            owner_scope,
+            disabled_app_slugs=disabled,
+            owner_user=owner_user,
+            owner_org=owner_org,
+        )
+
+        owner_id = owner_id_from_scope(owner_scope, owner_user=owner_user, owner_org=owner_org)
+
+        def refresh_owner_cache():
+            from api.agent.tools.mcp_manager import get_mcp_manager
+
+            manager = get_mcp_manager()
+            manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
+            manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected)
+
+        transaction.on_commit(refresh_owner_cache)
+
+    return {
+        "disabled_apps": [slug for slug in disabled if slug in set(prior_selected)],
+        "disabled_tools": disabled_tools,
+        "selected": selected,
+    }
 
 
 def set_owner_selected_app_slugs(owner_scope: str, selected_app_slugs: Iterable[object], owner_user=None, owner_org=None) -> list[str]:

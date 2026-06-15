@@ -2,11 +2,11 @@
 
 from typing import Iterable, Optional
 
-from django.db.models import F, Q
+from django.db.models import F
 from django.utils import timezone
 
 from api.models import PersistentAgent, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
-from api.services.pipedream_apps import PIPEDREAM_RUNTIME_NAME, enable_pipedream_apps_for_agent
+from api.services.pipedream_apps import enable_pipedream_apps_for_agent
 
 from .registry import (
     SystemSkillDefinition,
@@ -14,19 +14,7 @@ from .registry import (
     get_system_skill_definition,
     normalize_system_skill_key,
 )
-from .defaults import (
-    APOLLO_NATIVE_SYSTEM_SKILL_KEY,
-    DEFAULT_SYSTEM_SKILL_DEFINITIONS,
-    GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
-    HUBSPOT_NATIVE_SYSTEM_SKILL_KEY,
-)
-
-
-NATIVE_SYSTEM_SKILL_PIPEDREAM_APP_SLUGS = {
-    GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY: ("google_sheets", "google_drive"),
-    HUBSPOT_NATIVE_SYSTEM_SKILL_KEY: ("hubspot",),
-    APOLLO_NATIVE_SYSTEM_SKILL_KEY: ("apollo_io", "apollo_io_oauth"),
-}
+from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS
 
 
 def default_enabled_system_skill_keys() -> tuple[str, ...]:
@@ -155,33 +143,6 @@ def enable_and_refresh_system_skills_for_tool(agent: PersistentAgent, tool_name:
     return refreshed
 
 
-def _disable_overlapping_pipedream_tools(agent: PersistentAgent, skill_key: str) -> list[str]:
-    app_slugs = NATIVE_SYSTEM_SKILL_PIPEDREAM_APP_SLUGS.get(skill_key, ())
-    if not app_slugs:
-        return []
-
-    prefix_query = Q()
-    for app_slug in app_slugs:
-        prefix = f"{app_slug}-"
-        prefix_query |= Q(tool_full_name__startswith=prefix) | Q(tool_name__startswith=prefix)
-
-    if not prefix_query:
-        return []
-
-    queryset = (
-        PersistentAgentEnabledTool.objects
-        .filter(agent=agent)
-        .filter(Q(tool_server=PIPEDREAM_RUNTIME_NAME) | Q(server_config__name=PIPEDREAM_RUNTIME_NAME))
-        .filter(prefix_query)
-    )
-    disabled_tool_names = list(
-        queryset.order_by("tool_full_name").values_list("tool_full_name", flat=True)
-    )
-    if disabled_tool_names:
-        queryset.delete()
-    return disabled_tool_names
-
-
 def enable_system_skills(
     agent: PersistentAgent,
     skill_keys: Iterable[str],
@@ -220,7 +181,6 @@ def enable_system_skills(
     pipedream_apps_already_enabled: list[str] = []
     pipedream_apps_invalid: list[str] = []
     pipedream_effective_apps: list[str] = []
-    disabled_pipedream_tools: list[str] = []
 
     for skill_key in requested:
         definition = catalog.get(skill_key)
@@ -253,8 +213,6 @@ def enable_system_skills(
             if not set(tool_names).issubset(available_tool_names):
                 invalid.append(skill_key)
                 continue
-
-            disabled_pipedream_tools.extend(_disable_overlapping_pipedream_tools(agent, skill_key))
 
             static_tool_names = _static_system_skill_tool_names(agent)
 
@@ -301,16 +259,12 @@ def enable_system_skills(
         else:
             already_enabled.append(skill_key)
 
-        if not tool_names:
-            disabled_pipedream_tools.extend(_disable_overlapping_pipedream_tools(agent, skill_key))
-
     return {
         "status": "success",
         "enabled": enabled,
         "already_enabled": already_enabled,
         "invalid": invalid,
         "evicted": list(dict.fromkeys(evicted)),
-        "disabled_pipedream_tools": list(dict.fromkeys(disabled_pipedream_tools)),
         "pipedream_apps": {
             "enabled": list(dict.fromkeys(pipedream_apps_enabled)),
             "already_enabled": list(dict.fromkeys(pipedream_apps_already_enabled)),
