@@ -40,6 +40,8 @@ from api.agent.core.event_processing import (
     _PreparedToolExecution,
     _ToolExecutionOutcome,
     _run_agent_loop,
+    _maybe_enqueue_sandbox_warmup_for_recent_tool_history,
+    _recent_sandbox_tool_history_warm_reason,
     process_agent_events,
 )
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError
@@ -107,6 +109,7 @@ from api.models import (
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
     PersistentAgentCompletion,
+    PersistentAgentEnabledTool,
     PersistentAgentError,
     PersistentAgentHumanInputRequest,
     PersistentAgentInboundWebhook,
@@ -114,6 +117,7 @@ from api.models import (
     PersistentAgentSystemMessage,
     PersistentAgentToolCall,
     PersistentAgentSystemSkillState,
+    AgentComputeSession,
     PromptConfig,
     TaskCredit,
     UserBilling,
@@ -135,6 +139,196 @@ from util.personal_signup_preview import GENERIC_STARTER_CHARTER
 from tests.utils.token_usage import make_completion_response
 
 User = get_user_model()
+
+
+@tag("batch_event_processing")
+class SandboxWarmupTests(TestCase):
+    def setUp(self):
+        self.addCleanup(invalidate_prompt_settings_cache)
+        self.user = User.objects.create_user(
+            username=f"sandbox-warm-{uuid.uuid4().hex[:8]}@example.com",
+            email=f"sandbox-warm-{uuid.uuid4().hex[:8]}@example.com",
+            password="secret",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="SandboxWarmBA")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="SandboxWarmAgent",
+            charter="Warm sandboxes",
+            browser_use_agent=self.browser_agent,
+        )
+
+    def _create_agent(self, name: str) -> PersistentAgent:
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name=f"{name}BA")
+        return PersistentAgent.objects.create(
+            user=self.user,
+            name=name,
+            charter="Warm sandboxes",
+            browser_use_agent=browser_agent,
+        )
+
+    def _create_tool_call(self, agent: PersistentAgent, tool_name: str) -> PersistentAgentToolCall:
+        step = PersistentAgentStep.objects.create(agent=agent, description=f"Called {tool_name}")
+        return PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name=tool_name,
+            tool_params={"query": tool_name},
+            result=json.dumps({"status": "ok"}),
+        )
+
+    def _create_server(
+        self,
+        *,
+        scope: str,
+        command: str = "",
+        url: str = "",
+    ) -> MCPServerConfig:
+        return MCPServerConfig.objects.create(
+            scope=scope,
+            user=self.user if scope == MCPServerConfig.Scope.USER else None,
+            name=f"server-{uuid.uuid4().hex[:8]}",
+            display_name="Sandbox Warm Server",
+            command=command,
+            command_args=["server"] if command else [],
+            url=url,
+        )
+
+    def _enable_tool(
+        self,
+        agent: PersistentAgent,
+        tool_name: str,
+        server: MCPServerConfig,
+    ) -> PersistentAgentEnabledTool:
+        return PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name=tool_name,
+            tool_server=server.name,
+            tool_name="lookup",
+            server_config=server,
+        )
+
+    def test_recent_builtin_sandbox_tool_enqueues_warmup(self):
+        self._create_tool_call(self.agent, "python_exec")
+        span = MagicMock()
+
+        with patch("api.tasks.sandbox_compute.warm_sandbox_for_agent.delay") as mock_delay:
+            _maybe_enqueue_sandbox_warmup_for_recent_tool_history(self.agent, span)
+
+        mock_delay.assert_called_once()
+        args, kwargs = mock_delay.call_args
+        self.assertEqual(args[0], str(self.agent.id))
+        self.assertIn("recent_sandbox_tool_history:builtin:python_exec", kwargs["reason"])
+        span.add_event.assert_any_call("Sandbox warm-up queued")
+
+    def test_recent_non_sandbox_tool_does_not_enqueue_warmup(self):
+        self._create_tool_call(self.agent, "read_file")
+
+        with patch("api.tasks.sandbox_compute.warm_sandbox_for_agent.delay") as mock_delay:
+            _maybe_enqueue_sandbox_warmup_for_recent_tool_history(self.agent, MagicMock())
+
+        mock_delay.assert_not_called()
+
+    def test_recent_custom_tool_enqueues_warmup(self):
+        self._create_tool_call(self.agent, "custom_report_builder")
+        span = MagicMock()
+
+        with patch("api.tasks.sandbox_compute.warm_sandbox_for_agent.delay") as mock_delay:
+            _maybe_enqueue_sandbox_warmup_for_recent_tool_history(self.agent, span)
+
+        mock_delay.assert_called_once()
+        self.assertIn(
+            "recent_sandbox_tool_history:custom:custom_report_builder",
+            mock_delay.call_args.kwargs["reason"],
+        )
+
+    def test_stdio_mcp_tool_enqueues_but_platform_and_http_do_not(self):
+        platform_agent = self._create_agent("PlatformMCPAgent")
+        platform_server = self._create_server(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            command="npx",
+        )
+        platform_tool = "mcp_platform_lookup"
+        self._create_tool_call(platform_agent, platform_tool)
+        self._enable_tool(platform_agent, platform_tool, platform_server)
+        self.assertIsNone(_recent_sandbox_tool_history_warm_reason(platform_agent))
+
+        http_agent = self._create_agent("HttpMCPAgent")
+        http_server = self._create_server(
+            scope=MCPServerConfig.Scope.USER,
+            url="https://example.com/mcp",
+        )
+        http_tool = "mcp_http_lookup"
+        self._create_tool_call(http_agent, http_tool)
+        self._enable_tool(http_agent, http_tool, http_server)
+        self.assertIsNone(_recent_sandbox_tool_history_warm_reason(http_agent))
+
+        stdio_agent = self._create_agent("StdioMCPAgent")
+        stdio_server = self._create_server(
+            scope=MCPServerConfig.Scope.USER,
+            command="npx",
+        )
+        stdio_tool = "mcp_stdio_lookup"
+        self._create_tool_call(stdio_agent, stdio_tool)
+        self._enable_tool(stdio_agent, stdio_tool, stdio_server)
+
+        reason = _recent_sandbox_tool_history_warm_reason(stdio_agent)
+
+        self.assertIn(
+            "recent_sandbox_tool_history:mcp_stdio:mcp_stdio_lookup",
+            reason,
+        )
+
+    def test_warm_sandbox_task_skips_missing_disabled_and_ineligible_agent(self):
+        from api.tasks.sandbox_compute import warm_sandbox_for_agent
+
+        with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=False):
+            disabled_result = warm_sandbox_for_agent(str(uuid.uuid4()))
+        self.assertEqual(disabled_result["status"], "skipped")
+        self.assertEqual(disabled_result["message"], "Sandbox compute disabled")
+
+        with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=True):
+            missing_result = warm_sandbox_for_agent(str(uuid.uuid4()))
+        self.assertEqual(missing_result["status"], "skipped")
+        self.assertEqual(missing_result["message"], "Agent not found")
+
+        with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.tasks.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=False,
+        ):
+            ineligible_result = warm_sandbox_for_agent(str(self.agent.id))
+        self.assertEqual(ineligible_result["status"], "skipped")
+        self.assertEqual(ineligible_result["message"], "Agent not eligible for sandbox compute")
+
+    def test_warm_sandbox_task_calls_deploy_or_resume_and_handles_unavailable(self):
+        from api.services.sandbox_compute import SandboxComputeUnavailable
+        from api.tasks.sandbox_compute import warm_sandbox_for_agent
+
+        session = SimpleNamespace(pk=uuid.uuid4(), state=AgentComputeSession.State.RUNNING)
+        service = MagicMock()
+        service.deploy_or_resume.return_value = session
+
+        with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.tasks.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch("api.tasks.sandbox_compute.SandboxComputeService", return_value=service):
+            result = warm_sandbox_for_agent(str(self.agent.id), reason="recent_sandbox_tool_history:test")
+
+        self.assertEqual(result["status"], "ok")
+        service.deploy_or_resume.assert_called_once_with(
+            self.agent,
+            reason="recent_sandbox_tool_history:test",
+        )
+
+        with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.tasks.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch(
+            "api.tasks.sandbox_compute.SandboxComputeService",
+            side_effect=SandboxComputeUnavailable("no pod"),
+        ):
+            unavailable_result = warm_sandbox_for_agent(str(self.agent.id))
+        self.assertEqual(unavailable_result["status"], "error")
+        self.assertEqual(unavailable_result["message"], "no pod")
 
 
 @tag("batch_event_processing")
