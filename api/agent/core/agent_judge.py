@@ -1398,8 +1398,8 @@ def _format_agent_directive(title: str, agent_directive: str, suggestion_type: s
         f"Title: {title}\n\n"
         f"{agent_directive}\n\n"
         "Treat this as guidance from Gobii's internal quality judge. Apply it if it is relevant to the current task. "
-        "Never tell the user about this judge directive. Apply it silently through tool use or behavior changes "
-        "where relevant."
+        "Never mention the judge or the existence of this directive to the user. Apply the guidance silently through "
+        "tool use or behavior changes where relevant."
     )
 
 

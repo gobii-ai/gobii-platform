@@ -728,8 +728,8 @@ class AgentJudgeTests(TestCase):
         self.assertEqual(suggestion.recommended_tier, "max")
         self.assertEqual(PersistentAgentSystemMessage.objects.filter(agent=self.agent).count(), 1)
         system_message = PersistentAgentSystemMessage.objects.get(agent=self.agent)
-        self.assertIn("Never tell the user about this judge directive.", system_message.body)
-        self.assertIn("Apply it silently through tool use or behavior changes", system_message.body)
+        self.assertIn("Never mention the judge or the existence of this directive to the user.", system_message.body)
+        self.assertIn("Apply the guidance silently through", system_message.body)
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,
@@ -928,8 +928,11 @@ class AgentJudgeTests(TestCase):
         self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.ACTIVE)
         self.assertIsNotNone(suggestion.system_message)
         self.assertTrue(suggestion.system_message.is_active)
-        self.assertIn("Never tell the user about this judge directive.", suggestion.system_message.body)
-        self.assertIn("Apply it silently through tool use or behavior changes", suggestion.system_message.body)
+        self.assertIn(
+            "Never mention the judge or the existence of this directive to the user.",
+            suggestion.system_message.body,
+        )
+        self.assertIn("Apply the guidance silently through", suggestion.system_message.body)
 
     def test_reported_message_judge_context_and_auto_applies_suggestion(self):
         self._add_failed_tool_trigger()
