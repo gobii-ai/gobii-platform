@@ -22,6 +22,8 @@ from urllib.parse import unquote_plus
 from uuid import UUID
 
 import sqlparse
+from celery.exceptions import CeleryError
+from kombu.exceptions import OperationalError as KombuOperationalError
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
@@ -174,6 +176,7 @@ from ...models import (
     PersistentAgentPromptArchive,
     SmsContactPurpose,
 )
+from api.services.sandbox_warmup import recent_sandbox_tool_history_warm_reason
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
 from api.services.agent_error_logging import (
@@ -5139,6 +5142,32 @@ def process_agent_events(
             logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
 
 
+def _maybe_enqueue_sandbox_warmup_for_recent_tool_history(agent: PersistentAgent, span) -> None:
+    reason = recent_sandbox_tool_history_warm_reason(agent)
+    if not reason:
+        return
+
+    try:
+        from api.tasks.sandbox_compute import warm_sandbox_for_agent
+
+        warm_sandbox_for_agent.delay(str(agent.id), reason=reason)
+    except (CeleryError, KombuOperationalError) as exc:
+        logger.warning(
+            "Failed to enqueue sandbox warm-up agent=%s reason=%s: %s",
+            agent.id,
+            reason,
+            exc,
+        )
+        span.add_event("Sandbox warm-up enqueue failed")
+        span.set_attribute("sandbox_warmup.enqueue_error", type(exc).__name__)
+        return
+
+    logger.info("Queued sandbox warm-up agent=%s reason=%s", agent.id, reason)
+    span.add_event("Sandbox warm-up queued")
+    span.set_attribute("sandbox_warmup.queued", True)
+    span.set_attribute("sandbox_warmup.reason", reason)
+
+
 def _process_agent_events_locked(
     persistent_agent_id: Union[str, UUID],
     span,
@@ -5442,6 +5471,8 @@ def _process_agent_events_locked(
         span.set_attribute('processing_step.id', str(processing_step.id))
         span.set_attribute('processing.is_first_run', is_first_run)
         span.set_attribute('processing.run_sequence_number', run_sequence_number)
+
+        _maybe_enqueue_sandbox_warmup_for_recent_tool_history(agent, span)
 
         _run_agent_loop(
             agent,

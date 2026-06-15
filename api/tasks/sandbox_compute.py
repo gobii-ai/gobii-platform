@@ -1,6 +1,7 @@
 import logging
 
 from celery import shared_task
+from django.db import DatabaseError
 from redis.exceptions import RedisError
 
 from api.models import AgentComputeSession, PersistentAgent
@@ -9,10 +10,58 @@ from api.services.sandbox_compute import (
     SandboxComputeUnavailable,
     _post_sync_queue_key,
     sandbox_compute_enabled,
+    sandbox_compute_enabled_for_agent,
 )
 from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(name="api.tasks.sandbox_compute.warm_sandbox_for_agent", max_retries=0)
+def warm_sandbox_for_agent(agent_id: str, reason: str = "recent_sandbox_tool_history") -> dict:
+    if not sandbox_compute_enabled():
+        return {"status": "skipped", "message": "Sandbox compute disabled"}
+    if not agent_id:
+        return {"status": "error", "message": "Missing agent id"}
+
+    try:
+        agent = (
+            PersistentAgent.objects.alive()
+            .select_related("user", "organization")
+            .filter(id=agent_id, is_active=True)
+            .first()
+        )
+    except DatabaseError as exc:
+        logger.warning("Sandbox warm-up failed to load agent=%s: %s", agent_id, exc)
+        return {"status": "error", "message": "Failed to load agent"}
+
+    if not agent:
+        return {"status": "skipped", "message": "Agent not found or inactive"}
+    if not sandbox_compute_enabled_for_agent(agent):
+        return {"status": "skipped", "message": "Agent not eligible for sandbox compute"}
+
+    try:
+        service = SandboxComputeService()
+        session = service.deploy_or_resume(agent, reason=reason)
+    except SandboxComputeUnavailable as exc:
+        logger.info("Sandbox warm-up unavailable agent=%s reason=%s: %s", agent_id, reason, exc)
+        return {"status": "error", "message": str(exc)}
+    except DatabaseError as exc:
+        logger.warning("Sandbox warm-up database error agent=%s reason=%s: %s", agent_id, reason, exc)
+        return {"status": "error", "message": "Sandbox warm-up database error"}
+
+    logger.info(
+        "Sandbox warm-up completed agent=%s reason=%s session=%s state=%s",
+        agent_id,
+        reason,
+        session.pk,
+        session.state,
+    )
+    return {
+        "status": "ok",
+        "session_id": str(session.pk),
+        "state": session.state,
+    }
 
 
 @shared_task(name="api.tasks.sandbox_compute.discover_mcp_tools")
