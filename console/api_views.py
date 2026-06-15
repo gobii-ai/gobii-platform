@@ -9017,6 +9017,19 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                 shared_agent = PersistentAgent.objects.get(id=agent_id)
             except PersistentAgent.DoesNotExist:
                 return HttpResponseBadRequest("Agent not found")
+            if shared_agent.organization_id is not None:
+                personal_agent_scenarios = [
+                    scenario_slug
+                    for _suite_slug, scenario_slugs in suite_specs
+                    for scenario_slug in scenario_slugs
+                    if getattr(ScenarioRegistry.get(scenario_slug), "requires_personal_agent", False)
+                ]
+                if personal_agent_scenarios:
+                    scenario_list = ", ".join(dict.fromkeys(personal_agent_scenarios))
+                    return HttpResponseBadRequest(
+                        "agent_strategy=reuse_agent cannot use an organization-owned agent "
+                        f"for personal-agent scenario(s): {scenario_list}"
+                    )
 
         total_ephemeral_run_count = 0
         if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO:
@@ -9067,10 +9080,15 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                     run_agent = shared_agent
                     if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
                         suffix = f"{scenario.slug[:8]}-{iteration + 1}" if requested_runs > 1 else scenario.slug[:8]
+                        scenario_eval_organization = (
+                            None
+                            if getattr(scenario, "requires_personal_agent", False)
+                            else eval_organization
+                        )
                         run_agent = _create_eval_ephemeral_agent(
                             label_suffix=suffix,
                             eval_user=eval_user,
-                            eval_organization=eval_organization,
+                            eval_organization=scenario_eval_organization,
                         )
 
                     run = EvalRun.objects.create(

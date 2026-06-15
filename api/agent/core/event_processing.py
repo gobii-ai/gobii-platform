@@ -1951,6 +1951,13 @@ def _eval_mock_rule_matches(rule: Dict[str, Any], exec_params: Dict[str, Any]) -
         if not all(str(part).lower() in url for part in expected_parts):
             return False
 
+    url_not_contains = rule.get("url_not_contains")
+    if url_not_contains is not None:
+        url = str(exec_params.get("url") or "").lower()
+        blocked_parts = [url_not_contains] if isinstance(url_not_contains, str) else list(url_not_contains)
+        if any(str(part).lower() in url for part in blocked_parts):
+            return False
+
     url_decoded_contains = rule.get("url_decoded_contains")
     if url_decoded_contains is not None:
         url = unquote_plus(str(exec_params.get("url") or "")).lower()
@@ -1973,6 +1980,12 @@ def _eval_mock_rule_matches(rule: Dict[str, Any], exec_params: Dict[str, Any]) -
     param_equals = rule.get("param_equals")
     if param_equals:
         for key, expected in param_equals.items():
+            if key == "method":
+                actual_method = str(exec_params.get(key) or "GET").upper()
+                if actual_method != str(expected).upper():
+                    return False
+                continue
+
             if exec_params.get(key) != expected:
                 return False
 
@@ -2000,7 +2013,7 @@ def _resolve_eval_mock_result(
     return mock_result.get("default")
 
 
-_HTTP_URL_PREFIX_RE = re.compile(r"^(https?://[^\s<>'\"\uff5c]+)")
+_HTTP_URL_PREFIX_RE = re.compile(r"^(https?://[^\s<>\uff5c]+)")
 
 
 def _strip_linkified_url_artifact(value: str) -> str:

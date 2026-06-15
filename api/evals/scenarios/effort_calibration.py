@@ -269,6 +269,19 @@ def _outbound_messages_after(agent_id: str, after):
     )
 
 
+def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
+    if call.tool_name != "sqlite_batch":
+        return False
+    if str(call.status or "").lower() != "complete":
+        return False
+
+    sql = sqlite_batch_sql(call).lower()
+    if "remaining_work" not in sql or ("next_cursor" not in sql and "cursor" not in sql):
+        return False
+
+    return any(keyword in sql for keyword in ("insert", "update", "replace", "create table"))
+
+
 def _human_input_requests_for_run(run_id: str, *, after=None):
     queryset = PersistentAgentHumanInputRequest.objects.filter(originating_step__eval_run_id=run_id)
     if after is not None:
@@ -521,6 +534,22 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
                     f"after the first unfinished batch ({len(work_calls)} work calls)."
                 ),
                 artifacts={"step": work_calls[-1].step},
+            )
+            return True
+
+        resume_state_calls = [
+            call
+            for call in _tool_calls_for_run(run_id, after=after, tool_names=["sqlite_batch"])
+            if _sqlite_call_persists_resume_state(call)
+        ]
+        if resume_state_calls:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary="No schedule was set, but the agent persisted cursor/remaining-work resume state.",
+                artifacts={"step": resume_state_calls[-1].step},
             )
             return True
 

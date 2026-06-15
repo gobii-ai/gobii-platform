@@ -193,7 +193,11 @@ HUBSPOT_NATIVE_CASES = (
                 allowed_statuses=("error",),
             ),
         ),
-        response_term_groups=(("HubSpot",), ("/app/integrations",), ("connect", "connected")),
+        response_term_groups=(
+            ("HubSpot",),
+            ("/app/integrations", "Integrations page", "Integrations section", "Agent Settings"),
+            ("connect", "connected"),
+        ),
         tags=("missing_connection",),
     ),
     HubSpotNativeCase(
@@ -248,6 +252,7 @@ class HubSpotNativeScenario(NativeHttpScenarioBase):
     ]
     system_skill_key = HUBSPOT_NATIVE_SYSTEM_SKILL_KEY
     system_skill_name = "HubSpot"
+    native_provider_key = "hubspot"
     forbidden_tool_names = FORBIDDEN_HUBSPOT_DISCOVERY_TOOL_NAMES
     forbidden_tool_prefixes = ("hubspot-", "hubspot_")
     allowed_tool_names = ("http_request", "send_chat_message", "sqlite_batch")

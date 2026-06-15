@@ -58,6 +58,7 @@ class EvalScenario:
     supports_simulation: bool = False
     required_fixtures: tuple[str, ...] = ()
     required_secrets: tuple[str, ...] = ()
+    requires_personal_agent: bool = False
 
     def get_metadata(self) -> ScenarioMetadata:
         metadata = self.metadata or ScenarioMetadata(

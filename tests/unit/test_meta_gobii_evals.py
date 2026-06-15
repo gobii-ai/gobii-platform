@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings, tag
 from litellm.exceptions import APIError
 
@@ -1619,6 +1620,41 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
             .exclude(status=EvalRunTask.Status.PASSED)
             .exists()
         )
+
+    def test_run_evals_reuse_agent_rejects_organization_agent_for_personal_scenario(self):
+        user = get_user_model().objects.create_user(username="shared-eval-owner")
+        organization = Organization.objects.create(
+            name="Shared Eval Org",
+            slug="shared-eval-cli-org",
+            created_by=user,
+        )
+        organization.billing.purchased_seats = 1
+        organization.billing.save(update_fields=["purchased_seats"])
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Shared Eval Browser")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            organization=organization,
+            browser_use_agent=browser_agent,
+            name="Shared Eval Agent",
+            execution_environment="eval",
+        )
+
+        with self.assertRaisesMessage(CommandError, "personal-agent scenario"):
+            call_command(
+                "run_evals",
+                "--scenario",
+                "permit_followup_single_reply",
+                "--agent-strategy",
+                EvalSuiteRun.AgentStrategy.REUSE_AGENT,
+                "--agent-id",
+                str(agent.id),
+                "--sync",
+                "--n-runs",
+                "1",
+                stdout=StringIO(),
+            )
+
+        self.assertFalse(EvalSuiteRun.objects.exists())
 
     def test_run_evals_filters_scenarios_by_tag(self):
         stdout = StringIO()

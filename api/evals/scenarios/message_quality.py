@@ -365,6 +365,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         tool_names = ["update_plan", case.expected_tool]
         if case.channel == "email":
             tool_names.extend(sorted(EMAIL_ALLOWED_CONFIRMATION_TOOLS))
+            tool_names.append("sqlite_batch")
         return tool_names
 
     @staticmethod

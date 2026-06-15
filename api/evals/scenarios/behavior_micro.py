@@ -22,6 +22,7 @@ from api.evals.stop_policy import (
 )
 from api.models import (
     EvalRunTask,
+    CommsAllowlistEntry,
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -253,14 +254,14 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_058_sheets_get_by_id", "category": "sheets", "prompt": "Open spreadsheet sheet-123 by id and return its name.", "expected_tools": ["google_sheets-get-spreadsheet-by-id"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_059_sheets_current_user", "category": "sheets", "prompt": "Check the connected Google Sheets user before editing the tracker.", "expected_tools": ["google_sheets-get-current-user"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_060_sheets_append_rows", "category": "sheets", "prompt": "Append two new rows to the Research worksheet in spreadsheet sheet-123: company Vanta priority high owner Maya; company Notion priority medium owner Omar.", "expected_tools": ["google_sheets-add-rows"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-add-rows": ["google_sheets-add-multiple-rows"]}, "plan_expected": False},
-    {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test three sentences: Enterprise leads increased. Acme renewal moved to legal review. Globex needs a Friday follow-up.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test three sentences: Enterprise leads increased. Acme renewal moved to legal review. Globex needs a Friday follow-up.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_062_send_attachment_email", "category": "outbound", "prompt": "Email pat@example.test that the prepared report is attached at $[/exports/report.pdf].", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch", "read_file"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_063_send_followup_email", "category": "outbound", "prompt": "Send a polite follow-up email to lee@example.test about the demo times.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with bullets: API latency stayed under 120 ms; queue backlog cleared by 14:00 UTC; no Sev1 incidents opened.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["search_tools"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_067_request_contact_email_permission", "category": "outbound", "prompt": "Ask permission to email new-contact@example.test about the partnership intro.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_068_request_sms_permission", "category": "outbound", "prompt": "Create a contact-permission request for SMS +15555550123 so you can text that number about the urgent outage after approval.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_sms"], "plan_expected": False},
+    {"slug": "common_use_case_063_send_followup_email", "category": "outbound", "prompt": "Send a polite follow-up email to lee@example.test asking whether Tuesday 2pm ET or Wednesday 11am ET works for the product demo.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with bullets: API latency stayed under 120 ms; queue backlog cleared by 14:00 UTC; no Sev1 incidents opened.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["search_tools", "sqlite_batch"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "allowed_preamble_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "allowed_preamble_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_067_request_contact_email_permission", "category": "outbound", "prompt": "Ask permission to email new-contact@example.test about the partnership intro.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_email"], "allowed_preamble_tools": ["sqlite_batch"], "plan_expected": False},
+    {"slug": "common_use_case_068_request_sms_permission", "category": "outbound", "prompt": "Create a contact-permission request for SMS +15555550123 so you can text that number about the urgent outage after approval.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_069_secure_api_key_request", "category": "credentials", "prompt": "Request the missing STRIPE_API_KEY secret so you can call the Stripe API.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
     {"slug": "common_use_case_070_secure_login_request", "category": "credentials", "prompt": "Create a secure credential request for the portal password for https://vendor.example.test before logging in.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
     {"slug": "common_use_case_071_create_leads_csv", "category": "files", "prompt": "Create /exports/leads.csv with columns company,email,priority and two rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
@@ -553,6 +554,48 @@ def all_requests_have_options(requests):
     return all(_valid_human_input_options(request.options_json) for request in requests)
 
 
+def _delivered_tool_result(call):
+    result = call.result
+    if isinstance(result, dict):
+        payload = result
+    elif isinstance(result, str):
+        try:
+            payload = json.loads(result or "{}")
+        except json.JSONDecodeError:
+            return False
+    else:
+        return False
+    return isinstance(payload, dict) and payload.get("status") in {"ok", "sent", "success"}
+
+
+def _tool_call_body(call):
+    params = call.tool_params or {}
+    return str(params.get("body") or "")
+
+
+def _is_bounded_planning_chat_question(call):
+    if call.tool_name != "send_chat_message" or not _delivered_tool_result(call):
+        return False
+    body = _tool_call_body(call)
+    question_count = body.count("?")
+    if not 1 <= question_count <= 3:
+        return False
+    lowered = body.lower()
+    return any(
+        term in lowered
+        for term in (
+            "competitor",
+            "industry",
+            "space",
+            "updates",
+            "track",
+            "monitor",
+            "scope",
+            "business",
+        )
+    )
+
+
 class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
     tier = "core"
     category = "agent_behavior"
@@ -706,6 +749,11 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_bounded_questions")
         requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
+        chat_question_calls = [
+            call
+            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"send_chat_message"})
+            if _is_bounded_planning_chat_question(call)
+        ]
         if 1 <= len(requests) <= 3 and all_requests_have_options(requests):
             self.record_task_result(
                 run_id,
@@ -714,6 +762,15 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 task_name="verify_bounded_questions",
                 observed_summary=f"Agent asked {len(requests)} tracked planning question(s), each with options.",
             )
+        elif len(chat_question_calls) == 1:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_bounded_questions",
+                observed_summary="Agent asked a bounded planning clarification in chat.",
+                artifacts={"step": chat_question_calls[0].step},
+            )
         else:
             self.record_task_result(
                 run_id,
@@ -721,8 +778,9 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_bounded_questions",
                 observed_summary=(
-                    f"Expected 1-3 pending planning questions with options; found {len(requests)} "
-                    f"with options={all_requests_have_options(requests)}."
+                    f"Expected 1-3 pending planning questions with options or one bounded chat clarification; "
+                    f"found {len(requests)} pending request(s) with options={all_requests_have_options(requests)} "
+                    f"and {len(chat_question_calls)} bounded chat clarification(s)."
                 ),
             )
 
@@ -2504,7 +2562,9 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             *[
                 tool_name
                 for tool_name in case.allowed_preamble_tool_names()
-                if is_eval_synthetic_tool_name(tool_name) or tool_name in {"http_request", "read_file", "sqlite_batch"}
+                if is_eval_synthetic_tool_name(tool_name)
+                or tool_name in {"http_request", "read_file"}
+                or (tool_name == "sqlite_batch" and not self._uses_real_contact_sqlite())
             ],
         ]
         mock_config = {tool_name: self._mock_for_tool(tool_name) for tool_name in mocked_tools}
@@ -2520,6 +2580,43 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         for tool_name in self.case.expected_tool_names():
             accepted.extend(self.case.accepted_tool_names_for_expected_tool(tool_name))
         return list(dict.fromkeys(accepted))
+
+    def _tool_names_to_enable(self):
+        return list(dict.fromkeys([
+            *self._accepted_expected_tool_names(),
+            *self.case.forbidden_tool_names(),
+            *self.case.allowed_preamble_tool_names(),
+        ]))
+
+    def _uses_real_contact_sqlite(self):
+        return self.case.category == "outbound" and "sqlite_batch" in self.case.allowed_preamble_tool_names()
+
+    @staticmethod
+    def _outbound_allowed_contact_for_case(case):
+        return {
+            "common_use_case_061_send_summary_email": (CommsChannel.EMAIL, "ana@example.test"),
+            "common_use_case_062_send_attachment_email": (CommsChannel.EMAIL, "pat@example.test"),
+            "common_use_case_063_send_followup_email": (CommsChannel.EMAIL, "lee@example.test"),
+            "common_use_case_064_send_digest_email": (CommsChannel.EMAIL, "ops@example.test"),
+        }.get(case.slug)
+
+    def _seed_outbound_contact_context(self, agent_id):
+        target = self._outbound_allowed_contact_for_case(self.case)
+        if not target:
+            return
+        channel, address = target
+        CommsAllowlistEntry.objects.update_or_create(
+            agent_id=agent_id,
+            channel=channel,
+            address=address,
+            defaults={
+                "is_active": True,
+                "verified": True,
+                "allow_inbound": True,
+                "allow_outbound": True,
+                "can_configure": False,
+            },
+        )
 
     @staticmethod
     def _agent_config_field_for_expected_tool(tool_name):
@@ -2598,7 +2695,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         forbidden_tools = case.forbidden_tool_names()
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
         self._seed_prior_processing_run(agent_id)
-        tool_names = [*self._accepted_expected_tool_names(), *forbidden_tools]
+        self._seed_outbound_contact_context(agent_id)
+        tool_names = self._tool_names_to_enable()
         synthetic_tool_names = [
             tool_name
             for tool_name in [*tool_names, *case.allowed_preamble_tool_names(), *case.eval_synthetic_tools]

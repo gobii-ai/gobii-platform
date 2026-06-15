@@ -53,12 +53,15 @@ GOOGLE_DRIVE_COOKBOOK = NativeApiCookbook(
             request_shape=(
                 "Send `fields=files(id,name,mimeType,webViewLink)`, `pageSize=100`, and a complete `q` filter. "
                 "Canonical base query: `mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`; "
-                "add `and name contains 'text'` only when known."
+                "add `and name contains 'text'` only when known. If you do not know a name term, still send the "
+                "complete base query rather than a partial predicate. Put query params in the URL, not headers; "
+                "encode quotes as `%27`."
             ),
             response_shape="Use `files[]` entries with `id`, `name`, `mimeType`, and `webViewLink`.",
             guardrails=(
                 "Never call partial Drive URLs like `?q=mimeType%3D`, `?q=name%20%3D`, or "
-                "`?q=name%20contains%20`; omit the name predicate if unknown."
+                "`?q=name%20contains%20`; omit the name predicate if unknown. Do not use Drive discovery for a "
+                "known spreadsheet ID unless a Sheets endpoint returned missing or inaccessible."
             ),
         ),
         _recipe(
@@ -68,7 +71,10 @@ GOOGLE_DRIVE_COOKBOOK = NativeApiCookbook(
             use_when="The user gives a spreadsheet ID, asks for worksheets/tabs, or you need sheet IDs before formatting.",
             request_shape="No body. Use the concrete spreadsheet ID directly when supplied.",
             response_shape="Read `spreadsheetId`, `properties.title`, and `sheets[].properties` including `sheetId` and `title`.",
-            guardrails="Do not search Drive for a concrete spreadsheet ID unless Sheets says the file is missing or inaccessible.",
+            guardrails=(
+                "For a concrete spreadsheet ID, this should be the first call for read, append, update, format, "
+                "or chart tasks. Do not search Drive for that ID unless Sheets says the file is missing or inaccessible."
+            ),
         ),
         _recipe(
             title="Create a spreadsheet",

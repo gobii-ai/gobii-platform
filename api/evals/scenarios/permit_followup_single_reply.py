@@ -41,6 +41,7 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
     owner = "agent-platform"
     area = "agent_behavior"
     tags = ("conversation", "followup", "duplicate_reply", "long_horizon")
+    requires_personal_agent = True
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_single_reply", assertion_type="manual"),
