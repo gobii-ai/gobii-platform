@@ -17,6 +17,11 @@ from api.models import (
 logger = logging.getLogger(__name__)
 
 SANDBOX_WARM_REASON_PREFIX = "recent_sandbox_tool_history"
+SANDBOX_BUILTIN_TOOL_NAMES = frozenset(
+    name
+    for name, entry in BUILTIN_TOOL_REGISTRY.items()
+    if isinstance(entry, dict) and (entry.get("sandboxed") or entry.get("sandbox_only"))
+)
 
 
 def sandbox_warm_reason(tool_type: str, tool_name: str) -> str:
@@ -59,17 +64,6 @@ def recent_sandbox_tool_history_warm_reason(agent: PersistentAgent) -> Optional[
     if not recent_tool_names:
         return None
 
-    sandbox_builtin_names = {
-        name
-        for name, entry in BUILTIN_TOOL_REGISTRY.items()
-        if isinstance(entry, dict) and (entry.get("sandboxed") or entry.get("sandbox_only"))
-    }
-    for tool_name in recent_tool_names:
-        if tool_name in sandbox_builtin_names:
-            return sandbox_warm_reason("builtin", tool_name)
-        if tool_name.startswith(CUSTOM_TOOL_PREFIX):
-            return sandbox_warm_reason("custom", tool_name)
-
     unique_tool_names = list(dict.fromkeys(recent_tool_names))
     try:
         sandbox_mcp_tool_names = set(
@@ -93,6 +87,10 @@ def recent_sandbox_tool_history_warm_reason(agent: PersistentAgent) -> Optional[
         return None
 
     for tool_name in recent_tool_names:
+        if tool_name in SANDBOX_BUILTIN_TOOL_NAMES:
+            return sandbox_warm_reason("builtin", tool_name)
+        if tool_name.startswith(CUSTOM_TOOL_PREFIX):
+            return sandbox_warm_reason("custom", tool_name)
         if tool_name in sandbox_mcp_tool_names:
             return sandbox_warm_reason("mcp_stdio", tool_name)
     return None

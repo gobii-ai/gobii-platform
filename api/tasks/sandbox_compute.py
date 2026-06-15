@@ -26,8 +26,9 @@ def warm_sandbox_for_agent(agent_id: str, reason: str = "recent_sandbox_tool_his
 
     try:
         agent = (
-            PersistentAgent.objects.select_related("user", "organization")
-            .filter(id=agent_id)
+            PersistentAgent.objects.alive()
+            .select_related("user", "organization")
+            .filter(id=agent_id, is_active=True)
             .first()
         )
     except DatabaseError as exc:
@@ -35,7 +36,7 @@ def warm_sandbox_for_agent(agent_id: str, reason: str = "recent_sandbox_tool_his
         return {"status": "error", "message": "Failed to load agent"}
 
     if not agent:
-        return {"status": "skipped", "message": "Agent not found"}
+        return {"status": "skipped", "message": "Agent not found or inactive"}
     if not sandbox_compute_enabled_for_agent(agent):
         return {"status": "skipped", "message": "Agent not eligible for sandbox compute"}
 

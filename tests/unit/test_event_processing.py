@@ -167,14 +167,23 @@ class SandboxWarmupTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
-    def _create_tool_call(self, agent: PersistentAgent, tool_name: str) -> PersistentAgentToolCall:
+    def _create_tool_call(
+        self,
+        agent: PersistentAgent,
+        tool_name: str,
+        *,
+        created_at=None,
+    ) -> PersistentAgentToolCall:
         step = PersistentAgentStep.objects.create(agent=agent, description=f"Called {tool_name}")
-        return PersistentAgentToolCall.objects.create(
+        tool_call = PersistentAgentToolCall.objects.create(
             step=step,
             tool_name=tool_name,
             tool_params={"query": tool_name},
             result=json.dumps({"status": "ok"}),
         )
+        if created_at is not None:
+            PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=created_at)
+        return tool_call
 
     def _create_server(
         self,
@@ -278,6 +287,32 @@ class SandboxWarmupTests(TestCase):
             reason,
         )
 
+    def test_recent_sandbox_tool_reason_uses_most_recent_match_across_tool_types(self):
+        now = timezone.now()
+        stdio_server = self._create_server(
+            scope=MCPServerConfig.Scope.USER,
+            command="npx",
+        )
+        stdio_tool = "mcp_stdio_recent_lookup"
+        self._create_tool_call(
+            self.agent,
+            "python_exec",
+            created_at=now - timedelta(minutes=5),
+        )
+        self._create_tool_call(
+            self.agent,
+            stdio_tool,
+            created_at=now,
+        )
+        self._enable_tool(self.agent, stdio_tool, stdio_server)
+
+        reason = recent_sandbox_tool_history_warm_reason(self.agent)
+
+        self.assertIn(
+            "recent_sandbox_tool_history:mcp_stdio:mcp_stdio_recent_lookup",
+            reason,
+        )
+
     def test_warm_sandbox_task_skips_missing_disabled_and_ineligible_agent(self):
         from api.tasks.sandbox_compute import warm_sandbox_for_agent
 
@@ -289,7 +324,7 @@ class SandboxWarmupTests(TestCase):
         with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=True):
             missing_result = warm_sandbox_for_agent(str(uuid.uuid4()))
         self.assertEqual(missing_result["status"], "skipped")
-        self.assertEqual(missing_result["message"], "Agent not found")
+        self.assertEqual(missing_result["message"], "Agent not found or inactive")
 
         with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
             "api.tasks.sandbox_compute.sandbox_compute_enabled_for_agent",
@@ -298,6 +333,29 @@ class SandboxWarmupTests(TestCase):
             ineligible_result = warm_sandbox_for_agent(str(self.agent.id))
         self.assertEqual(ineligible_result["status"], "skipped")
         self.assertEqual(ineligible_result["message"], "Agent not eligible for sandbox compute")
+
+    def test_warm_sandbox_task_skips_inactive_and_deleted_agents(self):
+        from api.tasks.sandbox_compute import warm_sandbox_for_agent
+
+        inactive_agent = self._create_agent("InactiveWarmAgent")
+        inactive_agent.is_active = False
+        inactive_agent.save(update_fields=["is_active"])
+
+        deleted_agent = self._create_agent("DeletedWarmAgent")
+        deleted_agent.is_deleted = True
+        deleted_agent.save(update_fields=["is_deleted"])
+
+        with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.tasks.sandbox_compute.SandboxComputeService",
+        ) as mock_service:
+            inactive_result = warm_sandbox_for_agent(str(inactive_agent.id))
+            deleted_result = warm_sandbox_for_agent(str(deleted_agent.id))
+
+        self.assertEqual(inactive_result["status"], "skipped")
+        self.assertEqual(inactive_result["message"], "Agent not found or inactive")
+        self.assertEqual(deleted_result["status"], "skipped")
+        self.assertEqual(deleted_result["message"], "Agent not found or inactive")
+        mock_service.assert_not_called()
 
     def test_warm_sandbox_task_calls_deploy_or_resume_and_handles_unavailable(self):
         from api.services.sandbox_compute import SandboxComputeUnavailable
