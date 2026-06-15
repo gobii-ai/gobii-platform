@@ -33,7 +33,7 @@ from api.models import (
     LLMRoutingProfile,
     PersistentAgent,
 )
-from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
+from api.evals.llm_routing_profile_snapshot import create_eval_profile_snapshot
 
 
 @dataclass(frozen=True)
