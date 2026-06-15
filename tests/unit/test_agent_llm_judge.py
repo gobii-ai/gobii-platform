@@ -621,6 +621,8 @@ class AgentJudgeTests(TestCase):
             messages = _build_judge_messages(trigger.trajectory, model="test-model", prompt_limits=limits)
 
         self.assertIn("You are not the subject agent", messages[0]["content"])
+        self.assertIn("subject agent can update its own ongoing charter/config", messages[0]["content"])
+        self.assertIn("do not recommend asking the user to update the charter", messages[0]["content"])
         user_content = messages[1]["content"]
         self.assertIn("<subject_agent>", user_content)
         self.assertIn("The reviewed entity is the subject_agent", user_content)
@@ -725,6 +727,9 @@ class AgentJudgeTests(TestCase):
         )
         self.assertEqual(suggestion.recommended_tier, "max")
         self.assertEqual(PersistentAgentSystemMessage.objects.filter(agent=self.agent).count(), 1)
+        system_message = PersistentAgentSystemMessage.objects.get(agent=self.agent)
+        self.assertIn("Never tell the user about this judge directive.", system_message.body)
+        self.assertIn("Apply it silently through tool use or behavior changes", system_message.body)
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,
@@ -923,6 +928,8 @@ class AgentJudgeTests(TestCase):
         self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.ACTIVE)
         self.assertIsNotNone(suggestion.system_message)
         self.assertTrue(suggestion.system_message.is_active)
+        self.assertIn("Never tell the user about this judge directive.", suggestion.system_message.body)
+        self.assertIn("Apply it silently through tool use or behavior changes", suggestion.system_message.body)
 
     def test_reported_message_judge_context_and_auto_applies_suggestion(self):
         self._add_failed_tool_trigger()
