@@ -6478,7 +6478,11 @@ class PersistentAgentTemplate(models.Model):
     def clean(self):
         super().clean()
         if self.public_profile_id and self.organization_id:
-            raise ValidationError("A template cannot be both public and organization-scoped.")
+            message = "A template cannot be both public and organization-scoped."
+            raise ValidationError({
+                "public_profile": message,
+                "organization": message,
+            })
 
     def __str__(self) -> str:  # pragma: no cover - simple repr
         return f"PretrainedWorkerTemplate<{self.display_name}>"
