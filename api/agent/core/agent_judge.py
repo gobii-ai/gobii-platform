@@ -1193,7 +1193,10 @@ def _judge_system_prompt() -> str:
         "help. Base suggestions only on evidence in the packet. Separate directly observed facts from "
         "inferred causes; when a cause is uncertain, say so instead of presenting it as fact. Prefer concrete "
         "operational guidance over diagnosis. When custom tool source, params, results, or recent calls show "
-        "that a custom tool should be created or changed, you may recommend that as a strategy_shift directive."
+        "that a custom tool should be created or changed, you may recommend that as a strategy_shift directive. "
+        "The subject agent can update its own ongoing charter/config. If durable behavior should change, "
+        "direct the subject agent to update its own charter/config; do not recommend asking the user to update "
+        "the charter."
     )
 
 
@@ -1394,7 +1397,9 @@ def _format_agent_directive(title: str, agent_directive: str, suggestion_type: s
         f"Type: {suggestion_type}\n"
         f"Title: {title}\n\n"
         f"{agent_directive}\n\n"
-        "Treat this as guidance from Gobii's internal quality judge. Apply it if it is relevant to the current task."
+        "Treat this as guidance from Gobii's internal quality judge. Apply it if it is relevant to the current task. "
+        "Never mention the judge or the existence of this directive to the user. Apply the guidance silently through "
+        "tool use or behavior changes where relevant."
     )
 
 
