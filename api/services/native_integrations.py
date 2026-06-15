@@ -12,7 +12,8 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from api.models import GlobalSecret, PersistentAgent
+from api.models import GlobalSecret, MCPServerConfig, PersistentAgent
+from api.services.pipedream_apps import disable_pipedream_apps_for_owner
 from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
 
 logger = logging.getLogger(__name__)
@@ -446,6 +447,12 @@ NATIVE_INTEGRATION_CAPABILITIES: dict[str, tuple[NativeIntegrationCapability, ..
     ),
 }
 
+NATIVE_INTEGRATION_PIPEDREAM_APP_SLUGS = {
+    GOOGLE_DRIVE_PROVIDER.key: ("google_sheets", "google_drive"),
+    APOLLO_PROVIDER.key: ("apollo_io", "apollo_io_oauth"),
+    HUBSPOT_PROVIDER.key: ("hubspot",),
+}
+
 
 def list_native_integration_providers() -> list[NativeIntegrationProvider]:
     return list(NATIVE_INTEGRATION_PROVIDERS.values())
@@ -497,6 +504,29 @@ def native_integration_secret_queryset(owner_user, owner_org):
         secret_type=GlobalSecret.SecretType.INTEGRATION,
         domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
     )
+
+
+def disable_overlapping_pipedream_tools_for_native_integration(
+    provider_key: str,
+    owner_user,
+    owner_org,
+) -> list[str]:
+    provider = get_native_integration_provider(provider_key)
+    app_slugs = NATIVE_INTEGRATION_PIPEDREAM_APP_SLUGS.get(provider.key, ())
+    if not app_slugs:
+        return []
+
+    if owner_org is not None:
+        owner_scope = MCPServerConfig.Scope.ORGANIZATION
+    else:
+        owner_scope = MCPServerConfig.Scope.USER
+    result = disable_pipedream_apps_for_owner(
+        owner_scope,
+        app_slugs,
+        owner_user=owner_user,
+        owner_org=owner_org,
+    )
+    return result["disabled_tools"]
 
 
 def _native_integration_secret_keys(provider: NativeIntegrationProvider) -> list[str]:

@@ -32,6 +32,7 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
+    PipedreamAppSelection,
 )
 from api.services.native_integrations import (
     APOLLO_PROVIDER,
@@ -45,6 +46,7 @@ from api.services.native_integrations import (
     parse_native_integration_scopes,
     preflight_native_integration_capability,
 )
+from api.services.pipedream_apps import PIPEDREAM_RUNTIME_NAME
 
 
 User = get_user_model()
@@ -186,6 +188,14 @@ class NativeIntegrationTests(TestCase):
             data=json.dumps({"authorization_code": "auth-code", "state": state}),
             content_type="application/json",
             **kwargs,
+        )
+
+    def _enable_pipedream_tool(self, agent: PersistentAgent, tool_name: str):
+        return PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name=tool_name,
+            tool_name=tool_name,
+            tool_server=PIPEDREAM_RUNTIME_NAME,
         )
 
     def test_provider_registry_serializes_native_providers(self):
@@ -778,6 +788,74 @@ class NativeIntegrationTests(TestCase):
         )
 
     @patch("api.services.native_integrations.httpx.post")
+    def test_callback_disables_overlapping_pipedream_tools_after_connection(self, mock_post):
+        cases = (
+            (
+                GOOGLE_DRIVE_PROVIDER,
+                "google_drive",
+                {"google_sheets", "google_drive"},
+                {"google_sheets-add-row", "google_drive-upload-file"},
+                {"google_docs", "hubspot"},
+                {"google_docs-create-document", "hubspot-search-crm-objects"},
+            ),
+            (
+                APOLLO_PROVIDER,
+                "apollo",
+                {"apollo_io", "apollo_io_oauth"},
+                {"apollo_io-search-contacts", "apollo_io_oauth-search-contacts"},
+                {"hubspot"},
+                {"hubspot-search-crm-objects"},
+            ),
+            (
+                HUBSPOT_PROVIDER,
+                "hubspot",
+                {"hubspot"},
+                {"hubspot-search-crm-objects"},
+                {"slack"},
+                {"slack-post-message"},
+            ),
+        )
+        for (
+            provider_obj,
+            provider_key,
+            removed_app_slugs,
+            removed_tools,
+            preserved_app_slugs,
+            preserved_tools,
+        ) in cases:
+            with self.subTest(provider_key=provider_key):
+                GlobalSecret.objects.all().delete()
+                PipedreamAppSelection.objects.filter(user=self.user).delete()
+                PersistentAgentEnabledTool.objects.filter(agent=self.agent).delete()
+                PipedreamAppSelection.objects.create(
+                    user=self.user,
+                    selected_app_slugs=list(removed_app_slugs | preserved_app_slugs),
+                )
+                for tool_name in removed_tools | preserved_tools:
+                    self._enable_pipedream_tool(self.agent, tool_name)
+
+                state = self._start_oauth(provider_key=provider_key)
+                mock_post.return_value = self._token_response(
+                    access_token=f"{provider_key}-access-token",
+                    refresh_token=f"{provider_key}-refresh-token",
+                    provider=provider_obj,
+                )
+
+                response = self._post_oauth_callback(state, provider_key=provider_key)
+
+                self.assertEqual(response.status_code, 200, response.content)
+                enabled_tool_names = set(
+                    PersistentAgentEnabledTool.objects
+                    .filter(agent=self.agent)
+                    .values_list("tool_full_name", flat=True)
+                )
+                self.assertEqual(enabled_tool_names, preserved_tools)
+                selected_app_slugs = set(
+                    PipedreamAppSelection.objects.get(user=self.user).selected_app_slugs
+                )
+                self.assertFalse(selected_app_slugs & removed_app_slugs)
+
+    @patch("api.services.native_integrations.httpx.post")
     def test_callback_stores_hidden_apollo_integration_secret(self, mock_post):
         cases = (
             (APOLLO_PROVIDER, "apollo", "new-apollo-access-token", "new-apollo-refresh-token", "apollo-client-id", "apollo-client-secret"),
@@ -830,6 +908,22 @@ class NativeIntegrationTests(TestCase):
             "X-Gobii-Context-Type": "organization",
             "X-Gobii-Context-Id": str(self.org.id),
         }
+        self.org.billing.purchased_seats = 1
+        self.org.billing.save(update_fields=["purchased_seats"])
+        org_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Native Org Browser")
+        org_agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=self.org,
+            name="Native Org Agent",
+            charter="native org integrations",
+            browser_use_agent=org_browser_agent,
+        )
+        PipedreamAppSelection.objects.create(
+            organization=self.org,
+            selected_app_slugs=["google_drive", "hubspot"],
+        )
+        self._enable_pipedream_tool(org_agent, "google_drive-upload-file")
+        self._enable_pipedream_tool(self.agent, "google_drive-upload-file")
         state = self._start_oauth(headers=headers)
         mock_post.return_value = self._token_response(
             access_token="org-access-token",
@@ -842,6 +936,20 @@ class NativeIntegrationTests(TestCase):
         secret = GlobalSecret.objects.get(organization=self.org, secret_type=GlobalSecret.SecretType.INTEGRATION)
         stored = json.loads(secret.get_value())
         self.assertEqual(stored["access_token"], "org-access-token")
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=org_agent,
+                tool_full_name="google_drive-upload-file",
+            ).exists()
+        )
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent,
+                tool_full_name="google_drive-upload-file",
+            ).exists()
+        )
+        selected_app_slugs = PipedreamAppSelection.objects.get(organization=self.org).selected_app_slugs
+        self.assertNotIn("google_drive", selected_app_slugs)
 
     def test_revoke_deletes_only_provider_integration_secret(self):
         self._create_integration_secret(owner_user=self.user)

@@ -22,6 +22,7 @@ from api.services.native_integrations import (
     build_native_integration_permission_summary,
     build_oauth_credentials_bundle,
     delete_native_integration_credentials,
+    disable_overlapping_pipedream_tools_for_native_integration,
     get_native_integration_provider,
     get_native_integration_secret,
     list_native_integration_providers,
@@ -301,6 +302,7 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
 
         with transaction.atomic():
             secret = save_native_integration_credentials(provider, owner_user, owner_org, credentials)
+            disable_overlapping_pipedream_tools_for_native_integration(provider.key, owner_user, owner_org)
 
         return JsonResponse(
             {
