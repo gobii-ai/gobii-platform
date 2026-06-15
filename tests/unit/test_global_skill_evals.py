@@ -112,8 +112,8 @@ class GlobalSkillEvalAPITests(TestCase):
             ["Weather portal login [credential:portal_password @ https://weather.example.com]"],
         )
 
-    @patch("console.api_views.gc_eval_runs_task.delay")
-    @patch("console.api_views.run_eval_task.delay")
+    @patch("console.evals.api_views.gc_eval_runs_task.delay")
+    @patch("console.evals.api_views.run_eval_task.delay")
     def test_create_skill_eval_run_persists_suite_run_metadata(self, mock_run_eval_delay, mock_gc_delay):
         skill = GlobalAgentSkill.objects.create(
             name="check-weather",
@@ -186,8 +186,8 @@ class GlobalSkillEvalAPITests(TestCase):
         self.assertEqual(detail_payload["display_name"], "check-weather")
         self.assertEqual(detail_payload["skill_eval"]["rubric_version"], "v1")
 
-    @patch("console.api_views.gc_eval_runs_task.delay")
-    @patch("console.api_views.run_eval_task.delay")
+    @patch("console.evals.api_views.gc_eval_runs_task.delay")
+    @patch("console.evals.api_views.run_eval_task.delay")
     def test_create_skill_eval_defaults_to_single_run(self, mock_run_eval_delay, mock_gc_delay):
         skill = GlobalAgentSkill.objects.create(
             name="check-weather",
