@@ -6,24 +6,42 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
+processors:
+  batch:
+
 exporters:
   nop:
     # Keep the collector available for app OTLP exports after Grafana Cloud
     # was canceled, but avoid noisy permanent export failures.
+  otlphttp/azuremonitor:
+    traces_endpoint: ${env:AZURE_MONITOR_OTLP_TRACES_ENDPOINT}
+    logs_endpoint: ${env:AZURE_MONITOR_OTLP_LOGS_ENDPOINT}
+    metrics_endpoint: ${env:AZURE_MONITOR_OTLP_METRICS_ENDPOINT}
+    auth:
+      authenticator: azure_auth
 
 extensions:
-  zpages:
-    endpoint: "0.0.0.0:55679"
+  azure_auth:
+    service_principal:
+      tenant_id: ${env:AZURE_TENANT_ID}
+      client_id: ${env:AZURE_CLIENT_ID}
+      client_secret: ${env:AZURE_CLIENT_SECRET}
+    scopes:
+      - https://monitor.azure.com/.default
 
 service:
   extensions:
-    [
-      zpages
-    ]
+    - azure_auth
   pipelines:
     traces:
       receivers: [otlp]
-      exporters: [nop]
+      processors: [batch]
+      exporters: [otlphttp/azuremonitor]
     logs:
       receivers: [otlp]
-      exporters: [nop]
+      processors: [batch]
+      exporters: [otlphttp/azuremonitor]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/azuremonitor]
