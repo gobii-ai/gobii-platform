@@ -119,12 +119,11 @@ class ToolResultSchemaTests(SimpleTestCase):
 
         prompt_info = info.get("step-1")
         self.assertIsNotNone(prompt_info)
-        # Meta should contain rich analysis info
         self.assertIn("result_id=step-1", prompt_info.meta)
-        # Should have query pattern with path
-        self.assertIn("QUERY:", prompt_info.meta)
-        self.assertIn("PATH:", prompt_info.meta)
-        self.assertIn("items", prompt_info.meta.lower())
+        self.assertTrue(prompt_info.is_inline)
+        self.assertIn("First", prompt_info.preview_text)
+        self.assertNotIn("QUERY:", prompt_info.meta)
+        self.assertNotIn("PATH:", prompt_info.meta)
 
     def test_prompt_info_for_text_result(self):
         csv_data = """id,name,email
@@ -144,8 +143,9 @@ class ToolResultSchemaTests(SimpleTestCase):
 
         prompt_info = info.get("step-2")
         self.assertIsNotNone(prompt_info)
-        # Should have text analysis hints
-        self.assertIn("CSV", prompt_info.meta)
+        self.assertTrue(prompt_info.is_inline)
+        self.assertIn("alice@example.com", prompt_info.preview_text)
+        self.assertNotIn("QUERY:", prompt_info.meta)
 
     def test_fresh_text_result_adds_barbell_hint(self):
         long_text = (
@@ -221,7 +221,8 @@ class ToolResultSchemaTests(SimpleTestCase):
 
         prompt_info = info.get("step-7")
         self.assertIsNotNone(prompt_info)
-        self.assertIn("CSV", prompt_info.meta)
+        self.assertTrue(prompt_info.is_inline)
+        self.assertIn("Alice", prompt_info.preview_text)
         self.assertNotIn("FOCUS:", prompt_info.meta)
 
     def test_fresh_non_eligible_tool_skips_barbell_hint(self):
@@ -463,6 +464,40 @@ class MetaTextFormattingTests(SimpleTestCase):
         self.assertIn("json_each", result)
         self.assertIn("PATH:", result)
 
+    def test_meta_with_inline_result_suppresses_analysis_query_hints(self):
+        from api.agent.core.result_analysis import analyze_result
+
+        data = [{"id": 1, "name": "Test"}]
+        analysis = analyze_result(json.dumps(data), "test-id")
+
+        meta = {
+            "bytes": 500,
+            "line_count": 1,
+            "is_json": True,
+            "json_type": "array",
+            "top_keys": "id,name",
+            "is_binary": False,
+            "has_images": False,
+            "has_base64": False,
+            "is_truncated": False,
+            "truncated_bytes": 0,
+        }
+
+        result = tool_results._format_meta_text(
+            "test-id",
+            meta,
+            analysis=analysis,
+            stored_in_db=True,
+            result_is_inline=True,
+        )
+
+        self.assertIn("result_id=test-id", result)
+        self.assertIn("in_db=1", result)
+        self.assertNotIn("QUERY:", result)
+        self.assertNotIn("PATH:", result)
+        self.assertNotIn("SAMPLE:", result)
+        self.assertNotIn("JSON_DIGEST:", result)
+
     def test_meta_fallback_without_analysis(self):
         meta = {
             "bytes": 50000,  # Large enough to trigger hints
@@ -620,6 +655,55 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         self.assertTrue(is_inline)
         self.assertEqual(preview, small_text)
+
+    def test_small_inline_http_result_does_not_include_sql_affordances(self):
+        from api.agent.core.tool_results import (
+            ToolCallResultRecord,
+            prepare_tool_results_for_prompt,
+        )
+
+        payload = {
+            "status": "ok",
+            "status_code": 206,
+            "content": {
+                "date": "2026-05-17",
+                "provider_warnings": ["Prediction-market provider returned only partial odds."],
+                "items": [
+                    {
+                        "headline": "Central bank signals rate hold",
+                        "summary": "The policy committee signaled a wait-and-see stance.",
+                        "source_url": "https://news.example.test/rate-hold",
+                    },
+                    {
+                        "headline": "Election coalition talks continue",
+                        "summary": "Market odds were unavailable in this partial feed response.",
+                        "source_url": "https://news.example.test/coalition-talks",
+                    },
+                ],
+            },
+        }
+        record = ToolCallResultRecord(
+            step_id="step-http",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps(payload),
+        )
+
+        info = prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={"step-http": 0},
+            fresh_tool_call_step_id="step-http",
+        )["step-http"]
+
+        self.assertTrue(info.is_inline)
+        self.assertIn("result_id=step-http", info.meta)
+        self.assertIn("parsed_with=json", info.meta)
+        self.assertIn("Central bank signals rate hold", info.preview_text)
+        self.assertNotIn("QUERY:", info.meta)
+        self.assertNotIn("PATH:", info.meta)
+        self.assertNotIn("SAMPLE:", info.meta)
+        self.assertNotIn("JSON_DIGEST:", info.meta)
+        self.assertNotIn("__tool_results", info.meta)
 
     def test_fresh_tool_call_under_threshold_shown_inline(self):
         """Fresh tool calls under 40KB should be shown fully inline with SQLite wrapper."""

@@ -199,20 +199,6 @@ def prepare_tool_results_for_prompt(
             analysis_text = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
             context_hint = hint_from_unstructured_text(analysis_text)
 
-        meta_text = _format_meta_text(
-            result_id,
-            meta,
-            analysis=analysis if is_analysis_eligible else None,
-            stored_in_db=stored_in_db,
-            context_hint=context_hint,
-        )
-        if _is_scrape_as_markdown_tool(record.tool_name) and stored_in_db:
-            meta_text += (
-                f"\nSCRAPE MARKDOWN: result_text already contains the plain markdown body."
-                f"\nIf you need the original MCP envelope field, use "
-                f"json_extract(result_json,'$.result') FROM __tool_results WHERE result_id='{result_id}'"
-            )
-
         preview_source = (
             stored_text
             if stored_text is not None
@@ -226,6 +212,21 @@ def prepare_tool_results_for_prompt(
             tool_name=record.tool_name,
             is_fresh_tool_call=is_fresh_tool_call,
         )
+
+        meta_text = _format_meta_text(
+            result_id,
+            meta,
+            analysis=analysis if is_analysis_eligible else None,
+            stored_in_db=stored_in_db,
+            result_is_inline=is_inline,
+            context_hint=context_hint,
+        )
+        if _is_scrape_as_markdown_tool(record.tool_name) and stored_in_db:
+            meta_text += (
+                f"\nSCRAPE MARKDOWN: result_text already contains the plain markdown body."
+                f"\nIf you need the original MCP envelope field, use "
+                f"json_extract(result_json,'$.result') FROM __tool_results WHERE result_id='{result_id}'"
+            )
 
         prompt_info[record.step_id] = ToolResultPromptInfo(
             result_id=result_id,
@@ -769,6 +770,7 @@ def _format_meta_text(
     *,
     analysis: Optional[ResultAnalysis],
     stored_in_db: bool,
+    result_is_inline: bool = False,
     context_hint: Optional[str] = None,
 ) -> str:
     """Format metadata and analysis into actionable text for the prompt.
@@ -803,10 +805,13 @@ def _format_meta_text(
 
     meta_line = ", ".join(parts)
 
-    # If we have rich analysis, use the compact summary
-    if analysis and analysis.compact_summary and stored_in_db:
+    show_query_hints = stored_in_db and not result_is_inline
+
+    # If we have rich analysis, use the compact summary when the visible result
+    # is incomplete or absent. Inline results should be read directly.
+    if analysis and analysis.compact_summary and show_query_hints:
         meta_line += "\n" + analysis.compact_summary
-    elif stored_in_db and meta["bytes"] > PREVIEW_TIERS_EXTERNAL[0]:
+    elif show_query_hints and meta["bytes"] > PREVIEW_TIERS_EXTERNAL[0]:
         # Fallback: basic query hints for large results without analysis
         if meta.get("is_json"):
             meta_line += (
