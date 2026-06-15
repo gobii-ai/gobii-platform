@@ -16,6 +16,7 @@ from api.agent.core.event_processing import (
     _contact_permission_params_from_misrouted_human_input,
     _process_agent_events_locked,
     _is_warning_status,
+    _normalize_error_result,
     _normalize_tool_params,
     _parse_tool_call_params,
     _PreparedToolExecution,
@@ -121,6 +122,51 @@ class ImpliedContinuationDecisionTests(SimpleTestCase):
         )
 
         self.assertFalse(result)
+
+
+@tag('batch_event_processing')
+class ToolErrorNormalizationTests(SimpleTestCase):
+    def test_native_http_error_preserves_response_context(self):
+        result = _normalize_error_result(
+            {
+                "status": "error",
+                "message": "Google Drive API request failed with status 400.",
+                "status_code": 400,
+                "retryable": False,
+                "provider_key": "google_drive",
+                "provider_name": "Google Drive",
+                "method": "POST",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123:batchUpdate",
+                "guidance": "Check the Google Sheets or Drive API request shape.",
+                "headers": {"Content-Type": "application/json"},
+                "content": {
+                    "error": {
+                        "code": 400,
+                        "message": "Invalid JSON payload received.",
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["status_code"], 400)
+        self.assertEqual(result["provider_key"], "google_drive")
+        self.assertEqual(result["method"], "POST")
+        self.assertIn("sheets.googleapis.com", result["url"])
+        self.assertEqual(result["api_error_message"], "Invalid JSON payload received.")
+        self.assertEqual(result["content"]["error"]["message"], "Invalid JSON payload received.")
+        self.assertEqual(result["headers"]["Content-Type"], "application/json")
+
+    def test_non_native_error_uses_minimal_payload(self):
+        result = _normalize_error_result(
+            {
+                "status": "error",
+                "message": "Tool failed.",
+                "content": {"error": {"message": "Should not be persisted for generic errors."}},
+            }
+        )
+
+        self.assertEqual(result, {"status": "error", "message": "Tool failed.", "retryable": False})
 
 
 @tag('batch_event_processing')

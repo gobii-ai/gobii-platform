@@ -215,6 +215,8 @@ RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 TOOL_ERROR_MESSAGE_MAX_BYTES = 800
 TOOL_ERROR_DETAIL_MAX_BYTES = 1500
+TOOL_ERROR_NATIVE_CONTENT_MAX_BYTES = 6000
+TOOL_ERROR_NATIVE_HEADERS_MAX_BYTES = 2000
 _EMAIL_ADDRESS_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 _E164_PHONE_CANDIDATE_RE = re.compile(r"\+\d[\d\s().-]{6,}\d")
 _CONTACT_APPROVAL_TERMS = ("do you want", "want me", "should i", "may i", "can i", "ok to", "okay to", "permission", "approve", "confirm", "authorize")
@@ -520,6 +522,53 @@ def _build_safe_error_payload(
     return payload
 
 
+def _coerce_error_json_value(value: Any, max_bytes: int) -> Any:
+    try:
+        encoded = json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return _coerce_error_text(value, max_bytes)
+    if len(encoded.encode("utf-8")) <= max_bytes:
+        return value
+    return _truncate_text_bytes(encoded, max_bytes)
+
+
+def _native_api_error_message(content: Any) -> str:
+    if isinstance(content, dict):
+        error = content.get("error")
+        if isinstance(error, dict):
+            for key in ("message", "error_description", "status"):
+                value = error.get(key)
+                if value:
+                    return _coerce_error_text(value, TOOL_ERROR_MESSAGE_MAX_BYTES)
+        for key in ("message", "error_description", "error"):
+            value = content.get(key)
+            if isinstance(value, str) and value:
+                return _coerce_error_text(value, TOOL_ERROR_MESSAGE_MAX_BYTES)
+    if isinstance(content, str) and content:
+        return _coerce_error_text(content, TOOL_ERROR_MESSAGE_MAX_BYTES)
+    return ""
+
+
+def _copy_native_http_error_context(source: dict, payload: dict) -> None:
+    if source.get("provider_key") is None and source.get("provider_name") is None:
+        return
+
+    for key in ("provider_key", "provider_name", "method", "url", "guidance"):
+        value = source.get(key)
+        if value is not None:
+            payload[key] = _coerce_error_text(value, TOOL_ERROR_DETAIL_MAX_BYTES)
+
+    if "content" in source:
+        content = source.get("content")
+        api_error_message = _native_api_error_message(content)
+        if api_error_message:
+            payload["api_error_message"] = api_error_message
+        payload["content"] = _coerce_error_json_value(content, TOOL_ERROR_NATIVE_CONTENT_MAX_BYTES)
+
+    if "headers" in source:
+        payload["headers"] = _coerce_error_json_value(source.get("headers"), TOOL_ERROR_NATIVE_HEADERS_MAX_BYTES)
+
+
 def _normalize_error_result(result: dict) -> dict:
     message = result.get("message") or result.get("error") or result.get("detail") or "Tool returned an error."
     error_type = result.get("error_type") or result.get("type")
@@ -548,13 +597,15 @@ def _normalize_error_result(result: dict) -> dict:
     if retryable is None:
         retryable = _infer_retryable_from_text(safe_message)
 
-    return _build_safe_error_payload(
+    payload = _build_safe_error_payload(
         safe_message,
         error_type=error_type,
         retryable=retryable,
         detail=detail,
         status_code=status_code,
     )
+    _copy_native_http_error_context(result, payload)
+    return payload
 
 
 
