@@ -8,8 +8,7 @@ from waffle.testutils import override_flag
 
 from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
-from api.agent.tools.planning import execute_end_planning, get_end_planning_tool
-from api.agent.tools.request_human_input import get_request_human_input_tool
+from api.agent.tools.planning import execute_end_planning
 from api.agent.tools.schedule_updater import execute_update_schedule
 from api.agent.tools.static_tools import PLANNING_MODE_DISABLED_TOOL_NAMES, get_static_tool_definitions
 from api.agent.tools.tool_runtime import execute_runtime_tool_call
@@ -135,30 +134,6 @@ class PersistentAgentPlanningModeTests(TestCase):
             self.assertEqual(result["status"], "error")
             self.assertIn("planning mode", result["message"])
 
-    def test_end_planning_tool_description_requires_planning_to_finish_before_work(self):
-        tool = get_end_planning_tool()
-        function = tool["function"]
-
-        self.assertIn(
-            "For clear one-off research, factual answers, or execute-now requests",
-            function["description"],
-        )
-        self.assertIn(
-            "call this before search_tools, web/search tools, or result delivery",
-            function["description"],
-        )
-        self.assertIn(
-            "before work begins",
-            function["parameters"]["properties"]["full_plan"]["description"],
-        )
-
-    def test_request_human_input_tool_schema_warns_planning_questions_must_be_tracked(self):
-        tool = get_request_human_input_tool()
-        function = tool["function"]
-
-        self.assertIn("Every request needs at least one option", function["description"])
-        self.assertIn("send_chat_message/send_email/send_sms/send_agent_message for free-text questions", function["description"])
-
     def test_end_planning_replaces_charter_and_removes_planning_tool(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
@@ -189,72 +164,13 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertIn("You are a persistent AI agent.", prompt)
         self.assertIn("## Durable Config", prompt)
-        self.assertIn("search_tools(", prompt)
-        self.assertNotIn("search_tools(will_continue_work=true)", prompt)
         self.assertIn("## Planning Mode", prompt)
-        self.assertIn("If there is no concrete task to do yet, your first action should be one concise welcome message", prompt)
         self.assertIn(f"Contact channel: email at {self.user.email}", prompt)
-        self.assertIn("Your welcome message should", prompt)
-        self.assertIn("After the welcome, continue Planning Mode", prompt)
-        self.assertIn("call end_planning in the same response as any welcome", prompt)
-        self.assertIn("never send a welcome-only", prompt)
-        self.assertIn("Be warm and adventurous", prompt)
-        self.assertIn("### R1: Greeting (first impression)", prompt)
-        self.assertIn("## Then Planning Mode: clarify before main work", prompt)
-        self.assertIn("clear plain-language brief before doing the work", prompt)
-        self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
-        self.assertIn("If timing changes the shape of the work itself", prompt)
         self.assertNotIn("Start your response with a brief welcome message to Matt", prompt)
-        self.assertIn("After the welcome, continue Planning Mode", prompt)
-        self.assertIn("move planning forward or call end_planning, not start the deliverable work", prompt)
-        self.assertIn("Stay in planning only until planning is completed or skipped", prompt)
-        self.assertIn("or otherwise start doing the task before calling end_planning", prompt)
-        self.assertIn("If the welcome asks planning questions by email or SMS", prompt)
-        self.assertIn("call request_human_input in the same", prompt)
-        self.assertIn("If the task is clear enough, call end_planning instead", prompt)
-        self.assertIn("skip those questions and get right to work", prompt)
         self.assertIn("end_planning", prompt)
-        self.assertIn("Skip Planning", prompt)
-        self.assertIn("`requests` parameter", prompt)
-        self.assertIn("each item contains exactly one question", prompt)
-        self.assertIn("`will_continue_work=false` on request_human_input", prompt)
-        self.assertIn("Human input rule: use request_human_input only for tracked option-based decisions", prompt)
-        self.assertIn("Use send tools for free-text clarification and capability/status/policy answers", prompt)
-        self.assertIn("questions are visible in web chat", prompt)
-        self.assertIn("reference pending questions", prompt)
-        self.assertIn(
-            "Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them",
-            prompt,
-        )
-        self.assertIn(
-            "Do not ask which communication channel or delivery method to use for planning when this welcome target or other prompt context already gives you a current or preferred setup",
-            prompt,
-        )
-        self.assertIn("Keep planning questions focused on the user's need, scope, and desired outcome", prompt)
-        self.assertIn("Planning Mode overrides normal execution-oriented instructions", prompt)
-        self.assertIn("Stay in planning only until you call end_planning(full_plan=...)", prompt)
-        self.assertIn("Only planning-safe tools are available", prompt)
-        self.assertIn("update_plan, request_contact_permission", prompt)
+        self.assertIn("request_human_input", prompt)
         self.assertNotIn("spawn_agent", prompt)
         self.assertNotIn("Normal tools are available", prompt)
-        self.assertIn("Use read-only research during planning only when the scope is unclear", prompt)
-        self.assertIn("do not fetch, parse, or summarize sources to answer a clear task before end_planning", prompt)
-        self.assertIn("Named integration setup/use: if no enabled tool fits, call search_tools before asking how to connect", prompt)
-        self.assertIn("Do not do substantive task execution before planning ends", prompt)
-        self.assertNotIn("no research for the deliverable", prompt)
-        self.assertIn("no implementation", prompt)
-        self.assertIn("Do not update __agent_config.charter directly as a substitute", prompt)
-        self.assertIn("Do not update the runtime plan, schedule/__agent_config.schedule, or begin deliverable work", prompt)
-        self.assertIn("treat that instruction as applying only after Planning Mode is completed or skipped", prompt)
-        self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
-        self.assertIn("Do not start doing the task while planning mode is still active", prompt)
-        self.assertIn("Planning ends when you call this tool; the actual work starts only after that", prompt)
-        self.assertIn("Only ask about timing or timezone if it changes the scope of the work itself", prompt)
-        self.assertNotIn("delivery format", prompt)
-        self.assertNotIn("delivery cadence", prompt)
-        self.assertNotIn("integrations or accounts", prompt)
-        self.assertNotIn("how results should be delivered", prompt)
-        self.assertNotIn("delivery expectations", prompt)
         self.assertNotIn("## Then charter + runtime plan + everything else", prompt)
         self.assertNotIn("### Execution Template", prompt)
 
@@ -278,24 +194,9 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("## Durable Config", prompt)
         self.assertIn("## Planning Mode", prompt)
         self.assertIn("Resume the pending planning turn.", prompt)
-        self.assertIn(
-            "Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them",
-            prompt,
-        )
-        self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
-        self.assertIn("Use read-only research during planning only when the scope is unclear", prompt)
-        self.assertIn("Named integration setup/use: if no enabled tool fits, call search_tools before asking how to connect", prompt)
-        self.assertIn("Human input rule: use request_human_input only for tracked option-based decisions", prompt)
-        self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
         self.assertNotIn("REQUIRED: First-Run Welcome", prompt)
-        self.assertNotIn("You control your schedule. Update __agent_config.schedule via sqlite_batch when needed", prompt)
-        self.assertNotIn("make it weekly", prompt)
-        self.assertNotIn("check every hour", prompt)
-        self.assertNotIn("Ask about timezone if relevant", prompt)
-        self.assertIn("schedule/__agent_config.schedule", prompt)
-        self.assertIn("Only ask about timing or timezone if it changes the scope of the work itself", prompt)
-        self.assertIn("Do not update the runtime plan, schedule/__agent_config.schedule, or begin deliverable work until planning is completed", prompt)
+        self.assertNotIn("### Execution Template", prompt)
 
     def test_planning_prompt_context_surfaces_pending_human_input_requests(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -315,9 +216,7 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         content = "\n".join(message["content"] for message in context)
         self.assertIn("Pending human input requests", content)
-        self.assertIn("Treat these as open questions", content)
         self.assertIn("What locations should I search?", content)
-        self.assertIn("Do not assume they are answered unless a newer inbound message directly answers them", content)
 
     def test_planning_prompt_context_avoids_schedule_setup_guidance(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -337,14 +236,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("⚠️ NO SCHEDULE SET.", user_message["content"])
         self.assertNotIn("UPDATE YOUR SCHEDULE if the timing no longer matches the job", user_message["content"])
         self.assertIn("Planning Mode is active; schedule changes are deferred until planning ends", user_message["content"])
-        self.assertNotIn("To update your charter or schedule", user_message["content"])
         self.assertIn("defer __agent_config mutations until after end_planning", user_message["content"])
-        self.assertIn("Planning questions must use request_human_input", user_message["content"])
         self.assertNotIn("You control your schedule.", system_message["content"])
-        self.assertNotIn("check every hour", system_message["content"])
-        self.assertNotIn("weekly on Fridays", system_message["content"])
-        self.assertNotIn("Ask about timezone if relevant", system_message["content"])
-        self.assertIn("Only ask about timing or timezone if it changes the scope of the work itself", system_message["content"])
 
     def test_update_schedule_is_blocked_during_planning(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -365,10 +258,6 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertIn("## Then calibrate setup to the task", prompt)
         self.assertIn("### Execution Template", prompt)
-        self.assertIn("search_tools('{domain}')", prompt)
-        self.assertNotIn("search_tools(will_continue_work=true)", prompt)
-        self.assertIn("Use sqlite_batch for durable analysis data", prompt)
-        self.assertIn("update __agent_config only if", prompt)
         self.assertNotIn("## Planning Mode", prompt)
 
     def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):

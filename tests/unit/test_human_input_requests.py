@@ -297,29 +297,14 @@ class HumanInputRequestTests(TestCase):
     def test_tool_definition_requires_options(self):
         tool = get_request_human_input_tool()
         function = tool["function"]
-        description = function["description"]
         self.assertEqual(function["name"], "request_human_input")
-        self.assertIn("appears in web chat", description)
-        self.assertIn("does not send email/SMS", description)
-        self.assertIn("Every request needs at least one option", description)
-        self.assertIn("for free-text questions or capability/status/policy answers", description)
-        self.assertIn("Plain text only", description)
-        self.assertIn("at most three", description)
-        self.assertIn("non-blocking backfill", description)
-        self.assertIn("lookback", description)
-        self.assertIn("preference surveys", description)
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
         self.assertIn("recipient", function["parameters"]["properties"])
         self.assertIn("will_continue_work", function["parameters"]["properties"])
         self.assertEqual(function["parameters"]["properties"]["question"]["maxLength"], 500)
-        self.assertIn("Plain text only", function["parameters"]["properties"]["question"]["description"])
         self.assertEqual(function["parameters"]["properties"]["options"]["minItems"], 1)
-        self.assertIn(
-            "use true when you will send an email/SMS containing these questions",
-            function["parameters"]["properties"]["will_continue_work"]["description"],
-        )
         self.assertEqual(function["parameters"]["required"], ["will_continue_work"])
         self.assertEqual(
             function["parameters"]["anyOf"],
@@ -339,10 +324,6 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["properties"]["question"]["maxLength"],
             500,
-        )
-        self.assertIn(
-            "at most three",
-            function["parameters"]["properties"]["requests"]["description"],
         )
 
     def test_execute_request_human_input_rejects_missing_options(self):

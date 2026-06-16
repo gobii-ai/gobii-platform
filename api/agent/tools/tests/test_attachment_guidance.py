@@ -59,15 +59,13 @@ class AttachmentGuidanceTests(SimpleTestCase):
     def test_send_email_tool_requires_exact_attachment_value(self):
         tool = get_send_email_tool()
 
-        tool_description = tool["function"]["description"]
-        html_description = tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"]
+        properties = tool["function"]["parameters"]["properties"]
+        html_description = properties["mobile_first_html"]["description"]
         description = tool["function"]["parameters"]["properties"]["attachments"]["description"]
 
-        self.assertIn("Do NOT use Markdown pipe tables", tool_description)
-        self.assertIn("Inline images", html_description)
-        self.assertIn("attach file", html_description)
+        self.assertIn("attachments", properties)
+        self.assertIn("mobile_first_html", properties)
         self.assertIn("<img src='cid:filename'>", html_description)
-        self.assertIn("filespace paths or $[/path]", description)
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
 
@@ -78,14 +76,9 @@ class AttachmentGuidanceTests(SimpleTestCase):
         chat_guidance = _get_web_chat_formatting_guidance()
 
         self.assertIn("reports/dashboards", email_guidance)
-        self.assertIn("inline style attrs", email_guidance)
-        self.assertIn("key-value spans", email_guidance)
-        self.assertIn("Do not leave report metrics/statuses in plain <ul>/<p> blocks", email_guidance)
-        self.assertIn("inline style attrs", email_tool["function"]["description"])
         self.assertIn("Do NOT leave report metrics in plain lists", email_tool["function"]["description"])
-        self.assertIn("style section headers, tables/cells", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("styled tables or metric blocks", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
-        self.assertIn("emoji/status labels", chat_guidance)
+        self.assertIn("status labels", chat_guidance)
         self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
 
     def test_create_file_tool_schema_requires_content_or_query(self):

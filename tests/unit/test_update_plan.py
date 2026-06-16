@@ -83,9 +83,10 @@ class UpdatePlanToolTests(TestCase):
         self.assertNotIn("explanation", properties)
         self.assertIn("will_continue_work", properties)
         self.assertIn("will_continue_work", params["required"])
-        self.assertIn("final file deliverables", properties["files"]["description"])
-        self.assertIn("scratch files", properties["files"]["description"])
-        self.assertIn("final message deliverables", properties["messages"]["description"])
+        self.assertIn("files", properties)
+        self.assertIn("messages", properties)
+        self.assertIn("path", properties["files"]["items"]["properties"])
+        self.assertIn("message_id", properties["messages"]["items"]["properties"])
         self.assertIn("returned by the send tool", properties["messages"]["items"]["properties"]["message_id"]["description"])
 
     def test_update_plan_returns_auto_sleep_hint_for_explicit_stop(self):

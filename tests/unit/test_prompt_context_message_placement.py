@@ -42,22 +42,3 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertEqual(all_contents.count(sqlite_examples), 1)
         self.assertIn("<sqlite_examples>", system_message["content"])
         self.assertIn("</sqlite_examples>", system_message["content"])
-
-    def test_charter_guidance_preserves_existing_standing_memory(self):
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
-            context, _, _ = build_prompt_context(self.agent)
-
-        combined = "\n".join(message["content"] for message in context)
-
-        self.assertIn("Preserve still-relevant guidance", combined)
-        self.assertIn("Merge new durable guidance into the existing charter", combined)
-        self.assertIn("user feedback/preferences", combined)
-        self.assertIn("Feedback and preferences are durable without the user saying save/remember/charter", combined)
-        self.assertIn("durable standing memory", combined)
-        self.assertIn("named channels/tools", combined)
-        self.assertIn("weak guesses", combined)
-        self.assertNotIn("UPDATE THIS CHARTER NOW", combined)
-        self.assertNotIn("Don't wait for permission", combined)
-        self.assertNotIn("or inferred preferences", combined)

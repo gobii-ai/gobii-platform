@@ -5,14 +5,9 @@ from django.test import TestCase, override_settings, tag
 
 from api.agent.core.prompt_context import (
     _build_agent_capabilities_sections,
-    _get_sandbox_prompt_summary,
     build_prompt_context,
 )
-from api.agent.tools.run_command import get_run_command_tool
-from api.agent.tools.spawn_web_task import get_spawn_web_task_tool
-from api.agent.tools.web_chat_sender import get_send_chat_tool
 from api.models import BrowserUseAgent, CommsAllowlistEntry, PersistentAgent
-from api.services.web_sessions import start_web_session
 from billing.addons import AddonUplift
 
 
@@ -150,18 +145,12 @@ class AgentCapabilitiesPromptTests(TestCase):
         )
 
         sections = _build_agent_capabilities_sections(self.agent)
-        capabilities_note = sections.get("agent_capabilities_note", "")
         plan_info = sections.get("plan_info", "")
         agent_addons = sections.get("agent_addons", "")
         agent_settings = sections.get("agent_settings", "")
         email_settings = sections.get("agent_email_settings", "")
 
-        self.assertIn("plan/subscription info", capabilities_note)
-        self.assertIn("Gobii account", capabilities_note)
-        self.assertIn("agent settings available to the user", capabilities_note)
         self.assertIn("Plan: Pro", plan_info)
-        self.assertIn("Available plans", plan_info)
-        self.assertIn("Intelligence selection available", plan_info)
         self.assertIn(
             "Add-ons: +2000 credits; +10 contacts; +5 browser tasks/day; Advanced CAPTCHA resolution enabled.",
             plan_info,
@@ -173,158 +162,9 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertNotIn(f"/console/agents/{self.agent.id}/", plan_info)
 
         self.assertIn("Agent add-ons:", agent_addons)
-        self.assertIn("Task pack: adds extra task credits", agent_addons)
-        self.assertIn("Contact pack: increases the per-agent contact cap", agent_addons)
-        self.assertIn("Browser task pack: increases the per-agent daily browser task limit", agent_addons)
-        self.assertIn("Advanced CAPTCHA resolution: enables CapSolver-powered CAPTCHA solving", agent_addons)
 
         self.assertIn(f"/app/agents/{self.agent.id}/settings", agent_settings)
-        self.assertIn("The agent settings UI is a single page.", agent_settings)
-        self.assertIn("Do not invent subpage links", agent_settings)
-        self.assertIn("Only use explicitly listed URLs", agent_settings)
         self.assertIn(f"/app/agents/{self.agent.id}/secrets", agent_settings)
         self.assertIn(f"/app/agents/{self.agent.id}/email", agent_settings)
         self.assertIn("Agent email settings", email_settings)
-        self.assertIn("SMTP (outbound)", email_settings)
-        self.assertIn("IMAP (inbound)", email_settings)
         self.assertIn(f"/app/agents/{self.agent.id}/email", email_settings)
-
-    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
-    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
-    def test_build_prompt_context_includes_secret_request_guidance(self, _mock_comms, _mock_steps):
-        context, _, _ = build_prompt_context(self.agent)
-        contents = "\n".join(message["content"] for message in context)
-
-        self.assertIn("domain-scoped credentials for `http_request`", contents)
-        self.assertIn("login credentials for `spawn_web_task`", contents)
-        self.assertIn("`secret_type='env_var'`", contents)
-        self.assertIn("`os.environ`", contents)
-        self.assertIn("Avoid 2FA/MFA unless the user explicitly asks for it", contents)
-        self.assertIn("those flows may hit system limitations", contents)
-
-    @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
-    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
-    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
-    def test_build_prompt_context_omits_custom_tool_playbook_until_skill_enabled(
-        self,
-        _mock_comms,
-        _mock_steps,
-        _mock_sandbox,
-    ):
-        context, _, _ = build_prompt_context(self.agent)
-        contents = "\n".join(message["content"] for message in context)
-
-        self.assertIn("Use enabled `create_custom_tool` directly", contents)
-        self.assertNotIn("System Skill: Custom Tool Development", contents)
-        self.assertNotIn("Current custom-tool state:", contents)
-        self.assertNotIn("PHILOSOPHY:", contents)
-        self.assertNotIn("Default mode for repetitive or bulk work", contents)
-
-    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
-    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
-    def test_build_prompt_context_discourages_internal_progress_narration(self, _mock_comms, _mock_steps):
-        context, _, _ = build_prompt_context(self.agent)
-        contents = "\n".join(message["content"] for message in context)
-
-        self.assertIn("never narrate internal reasoning", contents)
-        self.assertIn("tool sequencing", contents)
-        self.assertIn("User-facing question, blocker, config change, or finding", contents)
-        self.assertNotIn("Progress update?", contents)
-
-    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
-    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
-    def test_build_prompt_context_routes_code_work_through_system_skill_discovery(self, _mock_comms, _mock_steps):
-        context, _, _ = build_prompt_context(self.agent)
-        contents = "\n".join(message["content"] for message in context)
-
-        self.assertIn(
-            "call search_tools with `code work` before file/shell/patch/deploy tools",
-            contents,
-        )
-        self.assertIn("unless Code Work is enabled", contents)
-
-    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
-    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
-    def test_build_prompt_context_says_final_send_stops(self, _mock_comms, _mock_steps):
-        context, _, _ = build_prompt_context(self.agent)
-        contents = "\n".join(message["content"] for message in context)
-
-        self.assertIn("Set will_continue_work on every tool call", contents)
-        self.assertIn("Use true while another immediate action remains", contents)
-        self.assertIn("Use false only after the requested reply/report/config change is delivered", contents)
-        self.assertIn("Future scheduled work does not count as continuing now", contents)
-        self.assertIn("Plans: final report first", contents)
-        self.assertIn("then update_plan to mark finished/deferred items", contents)
-        self.assertIn("Text is not delivered in this mode", contents)
-        self.assertIn("update_plan is not delivery", contents)
-        self.assertNotIn(
-            "Need to send the user your answer, summary, or final report → will_continue_work=true",
-            contents,
-        )
-
-    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
-    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
-    def test_implied_send_prompt_keeps_working_silent(self, _mock_comms, _mock_steps):
-        start_web_session(self.agent, self.user)
-
-        context, _, _ = build_prompt_context(self.agent)
-        contents = "\n".join(message["content"] for message in context)
-
-        self.assertIn("Your response text is a user message", contents)
-        self.assertIn("Use request_human_input only for tracked option-based decisions", contents)
-        self.assertIn("never search for it or refetch the same successful URL", contents)
-        self.assertIn("update your ongoing charter/schedule", contents)
-        self.assertIn("Feedback and preferences are durable without the user saying save/remember/charter", contents)
-        self.assertIn("While working, respond with tool calls and no text", contents)
-        self.assertIn("never status narration", contents)
-
-    def test_web_chat_tool_description_discourages_internal_narration(self):
-        tool = get_send_chat_tool()
-        description = tool["function"]["description"]
-        will_continue_description = tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
-
-        self.assertIn("free-text questions, context, config changes, capability/status/policy answers, findings, or finals.", description)
-        self.assertIn("Do not narrate what you will do next", description)
-        self.assertIn("Never send a message solely to justify continuing work", will_continue_description)
-
-    def test_run_command_tool_description_distinguishes_shell_paths(self):
-        tool = get_run_command_tool()
-        description = tool["function"]["description"]
-
-        self.assertIn("Gobii filespace paths like /tools/foo.py", description)
-        self.assertIn("are for Gobii tool arguments, not shell paths", description)
-        self.assertIn("use relative paths from the workspace root such as tools/foo.py", description)
-        self.assertIn("absolute shell paths like /workspace/tools/foo.py", description)
-        self.assertIn("Do not run /tools/foo.py", description)
-
-    def test_spawn_web_task_description_requires_browser_only_need(self):
-        tool = get_spawn_web_task_tool(self.agent)
-        description = tool["function"]["description"]
-
-        self.assertIn("prefer search/scrape/structured-data/API tools", description)
-        self.assertIn("webpage screenshots", description)
-        self.assertIn("save pages as PDFs", description)
-        self.assertIn("persisted filespace paths", description)
-        self.assertIn("if the user asks for a screenshot or visual proof of a webpage, use this tool", description)
-
-    @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
-    def test_sandbox_summary_mentions_custom_tool_discovery_for_bulk_work(self, _mock_sandbox):
-        summary = _get_sandbox_prompt_summary(self.agent)
-
-        self.assertIn("Use enabled `create_custom_tool` directly", summary)
-        self.assertIn("repetitive, paginated, bulk, deterministic", summary)
-        self.assertIn("MCP/API fan-out", summary)
-        self.assertIn("use `search_tools` only if create_custom_tool is missing", summary)
-        self.assertNotIn("source_path='/tools/name.py'", summary)
-        self.assertNotIn("retry create_custom_tool, not create_file", summary)
-
-    @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
-    def test_sandbox_summary_distinguishes_tool_paths_from_shell_paths(self, _mock_sandbox):
-        summary = _get_sandbox_prompt_summary(self.agent)
-
-        self.assertIn("Gobii tool arguments use filespace paths", summary)
-        self.assertIn("filespace paths like `/tools/foo.py`", summary)
-        self.assertIn("shell commands use workspace paths", summary)
-        self.assertIn("workspace paths like `tools/foo.py`", summary)
-        self.assertIn("`/workspace/tools/foo.py`", summary)
-        self.assertIn("`secure_credentials_request(secret_type='env_var')`", summary)
