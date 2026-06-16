@@ -3,7 +3,6 @@ from functools import lru_cache
 import json
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
-from types import SimpleNamespace
 import uuid
 
 from django.http.response import JsonResponse
@@ -153,7 +152,6 @@ from .utils_markdown import (
 )
 from .homepage_cache import (
     get_homepage_integrations_payload,
-    get_homepage_pretrained_payload,
 )
 from .public_template_urls import (
     public_template_category_label,
@@ -243,6 +241,7 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "trello": "images/integrations/pipedream/trello.svg",
 }
 HOMEPAGE_META_TITLE_SUFFIX = "AI Coworkers for Teams With Real Work to Do"
+HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX = "AI Agents for Recruiting Operations"
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
@@ -1037,18 +1036,27 @@ class HomePage(TemplateView):
         )
         home_brand_name = settings.PUBLIC_BRAND_NAME or "Gobii"
         context["home_brand_name"] = home_brand_name
-        context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
-        context["home_meta_description"] = (
-            f"{home_brand_name} agents are virtual coworkers with their own identity, "
-            "memory, and tools. Email them, text them — they browse the web, collect "
-            "data, and deliver reports 24/7."
-        )
+        if settings.GOBII_PROPRIETARY_MODE:
+            context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX}"
+            context["home_meta_description"] = (
+                f"{home_brand_name} helps recruiting teams automate repetitive sourcing, "
+                "candidate research, shortlist preparation, and workflow handoff across "
+                "the tools they already use."
+            )
+            context["home_social_image_alt"] = f"{home_brand_name} AI recruiting operations platform preview"
+        else:
+            context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
+            context["home_meta_description"] = (
+                f"{home_brand_name} agents are virtual coworkers with their own identity, "
+                "memory, and tools. Email them, text them — they browse the web, collect "
+                "data, and deliver reports 24/7."
+            )
+            context["home_social_image_alt"] = f"{home_brand_name} AI coworker platform preview"
         context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
         context["home_canonical_url"] = _public_site_absolute_url("/")
         context["home_social_image_url"] = _public_site_absolute_url(
             static(HOMEPAGE_SOCIAL_IMAGE_PATH)
         )
-        context["home_social_image_alt"] = f"{home_brand_name} AI coworker platform preview"
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 
@@ -1244,43 +1252,6 @@ class HomePage(TemplateView):
                     "isAuthenticated": self.request.user.is_authenticated,
                     "selectedFieldsContainerId": "homepage-integrations-selected-fields",
                 },
-            }
-        )
-
-        payload = get_homepage_pretrained_payload()
-        all_templates = list(payload.get("templates") or [])
-
-        category_filter = (self.request.GET.get("pretrained_category") or "").strip()
-        search_term = (self.request.GET.get("pretrained_search") or "").strip()
-
-        filtered_templates = list(all_templates)
-        if category_filter:
-            category_lower = category_filter.lower()
-            filtered_templates = [
-                template
-                for template in filtered_templates
-                if (template.get("category") or "").lower() == category_lower
-            ]
-
-        if search_term:
-            search_lower = search_term.lower()
-            filtered_templates = [
-                template
-                for template in filtered_templates
-                if search_lower in (template.get("display_name") or "").lower()
-                or search_lower in (template.get("tagline") or "").lower()
-                or search_lower in (template.get("description") or "").lower()
-            ]
-
-        filtered_workers = [SimpleNamespace(**template) for template in filtered_templates]
-        context.update(
-            {
-                "homepage_pretrained_workers": filtered_workers,
-                "homepage_pretrained_total": payload.get("total", len(all_templates)),
-                "homepage_pretrained_filtered_count": len(filtered_workers),
-                "homepage_pretrained_categories": payload.get("categories") or [],
-                "homepage_pretrained_selected_category": category_filter,
-                "homepage_pretrained_search_term": search_term,
             }
         )
 
@@ -3624,8 +3595,6 @@ class StaticViewSitemap(sitemaps.Sitemap):
         # List of all static view names that should be included in the sitemap
         items = [
             'pages:home',
-            'pages:solutions',
-            'pages:library',
         ]
         # Proprietary pages live behind the hosted marketing site; community builds expose docs instead.
         if settings.GOBII_PROPRIETARY_MODE:

@@ -27,74 +27,7 @@
         <!-- Main nav links in a colored pill -->
         <div class="flex items-center gap-x-0.5 p-1 rounded-xl bg-indigo-800/90 shadow-lg shadow-indigo-900/20">
           {% if settings.GOBII_PROPRIETARY_MODE %}
-          <!-- Solutions Dropdown -->
-          <div x-data="{ open: false }" class="relative" @mouseleave="open = false">
-            <button @mouseover="open = true" @click="open = !open"
-                    class="inline-flex items-center gap-x-1 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 focus:outline-none transition-all"
-                    :class="{ 'text-white bg-white/10': open }">
-              Solutions
-              <svg class="h-3 w-3 transform transition-transform duration-200" :class="{ 'rotate-180': open }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            <!-- Dropdown panel -->
-            <div x-cloak
-                 x-show="open"
-                 x-transition:enter="transition ease-out duration-150"
-                 x-transition:enter-start="opacity-0 -translate-y-1"
-                 x-transition:enter-end="opacity-100 translate-y-0"
-                 x-transition:leave="transition ease-in duration-100"
-                 x-transition:leave-start="opacity-100 translate-y-0"
-                 x-transition:leave-end="opacity-0 -translate-y-1"
-                 class="absolute left-1/2 -translate-x-1/2 top-full pt-3 w-56 z-50">
-              <div class="bg-white rounded-2xl shadow-xl shadow-violet-500/10 ring-1 ring-violet-100 p-2 overflow-hidden">
-                <div class="flex flex-col gap-0.5">
-                  <a href="{% url 'pages:solution' slug='recruiting' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="users" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Recruiting</span>
-                  </a>
-                  <a href="{% url 'pages:solution' slug='sales' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="briefcase" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Sales</span>
-                  </a>
-                  <a href="{% url 'pages:solution' slug='health-care' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="activity" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Health Care</span>
-                  </a>
-                  <a href="{% url 'pages:solution' slug='defense' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="shield" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Defense</span>
-                  </a>
-                  <a href="{% url 'pages:solution' slug='engineering' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="cpu" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Engineering</span>
-                  </a>
-                  <a href="{% url 'pages:solutions' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">All Solutions</span>
-                  </a>
-                </div>
-              </div>
-            </div>
-        </div>
-          {% endif %}
-
-          {% if settings.GOBII_PROPRIETARY_MODE %}
             <a href="{% url 'proprietary:pricing' %}" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Pricing</a>
-            <a href="{% url 'pages:solution' slug='engineering' %}" title="Gobii Developers - Build AI Agents on our Platform" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Developers</a>
           {% endif %}
 
           {% if request.user.is_authenticated %}
@@ -102,15 +35,7 @@
               <i data-lucide="bot" class="h-3.5 w-3.5"></i>
               My Agents
             </a>
-            <a href="{% url 'pages:library' %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
-              <i data-lucide="search" class="h-3.5 w-3.5"></i>
-              Discover
-            </a>
           {% else %}
-            <a href="{% url 'pages:library' %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
-              <i data-lucide="search" class="h-3.5 w-3.5"></i>
-              Discover
-            </a>
             {% with request.session.utm_querystring as utm_qs %}
             <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
               <i data-lucide="log-in" class="h-3.5 w-3.5"></i>
@@ -303,46 +228,7 @@
     <div class="py-4">
       <div class="px-4 space-y-3 text-sm font-medium">
         {% if settings.GOBII_PROPRIETARY_MODE %}
-        <!-- Mobile Solutions -->
-        <div x-data="{ expanded: false }">
-            <button @click="expanded = !expanded" class="flex w-full items-center justify-between py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
-                Solutions
-                <svg class="h-4 w-4 transform transition-transform" :class="{ 'rotate-180': expanded }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-            </button>
-            <div x-show="expanded" class="pl-4 space-y-1">
-                <a href="{% url 'pages:solution' slug='recruiting' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
-                    <i aria-hidden="true" data-lucide="users" class="h-4 w-4"></i>
-                    Recruiting
-                </a>
-                <a href="{% url 'pages:solution' slug='sales' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
-                    <i aria-hidden="true" data-lucide="briefcase" class="h-4 w-4"></i>
-                    Sales
-                </a>
-                <a href="{% url 'pages:solution' slug='health-care' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
-                    <i aria-hidden="true" data-lucide="activity" class="h-4 w-4"></i>
-                    Health Care
-                </a>
-                <a href="{% url 'pages:solution' slug='defense' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
-                    <i aria-hidden="true" data-lucide="shield" class="h-4 w-4"></i>
-                    Defense
-                </a>
-                <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
-                    <i aria-hidden="true" data-lucide="cpu" class="h-4 w-4"></i>
-                    Engineering
-                </a>
-                <a href="{% url 'pages:solutions' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
-                    <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
-                    All Solutions
-                </a>
-            </div>
-        </div>
-        {% endif %}
-
-        {% if settings.GOBII_PROPRIETARY_MODE %}
           <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
-          <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors" title="Build AI Agents on our Platform">Developers</a>
           <a href="{% url 'proprietary:support' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Support</a>
         {% endif %}
         
@@ -350,10 +236,6 @@
           <a href="/app/agents" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
             <i aria-hidden="true" data-lucide="bot" class="h-4 w-4"></i>
             My Agents
-          </a>
-          <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
-            <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
-            Discover
           </a>
           
           <div class="mt-4 pt-4 border-t border-gray-200">
@@ -433,10 +315,6 @@
           </div>
         {% else %}
           <div class="mt-4 pt-4 border-t border-gray-200 space-y-3">
-            <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
-              Discover
-            </a>
             {% with request.session.utm_querystring as utm_qs %}
             <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Login</a>
             {% if request.resolver_match.url_name != 'home' %}
