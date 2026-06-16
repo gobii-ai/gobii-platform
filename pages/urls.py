@@ -116,10 +116,6 @@ urlpatterns = [
 
     path('clear_signup_tracking', ClearSignupTrackingView.as_view(), name='clear_signup_tracking'),
 
-    path('<slug:handle>/<slug:template_slug>/', _home_redirect, name='public_template_legacy_detail'),
-    path('<slug:handle>/<slug:template_slug>/hire/', _home_redirect, name='public_template_legacy_hire'),
-    path('<slug:handle>/<slug:template_slug>/spawn/', _home_redirect, name='public_template_legacy_launch'),
-
 ]
 
 # Security.txt for vulnerability disclosure (RFC 9116) - proprietary mode only
