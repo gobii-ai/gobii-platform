@@ -1,5 +1,5 @@
 import type { FormEvent, ReactNode } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import { Loader2, type LucideIcon } from 'lucide-react'
 
 import { Modal } from './Modal'
 
@@ -26,7 +26,7 @@ type ModalFormProps = {
   formClassName?: string
 }
 
-const primaryButtonClassName = 'inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm'
+const primaryButtonClassName = 'inline-flex w-full items-center justify-center gap-2 rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm'
 const secondaryButtonClassName = 'inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm'
 
 export function ModalForm({
@@ -59,6 +59,7 @@ export function ModalForm({
         className={primaryButtonClassName}
         disabled={submitting || submitDisabled}
       >
+        {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
         {submitting ? submittingLabel : submitLabel}
       </button>
       <button

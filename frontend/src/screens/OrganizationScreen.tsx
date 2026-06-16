@@ -292,6 +292,11 @@ function CreateTemplateModal({
               <option key={agent.id} value={agent.id}>{agent.name}</option>
             ))}
           </select>
+          <span className="mt-2 block text-xs font-normal text-slate-500">
+            {busy
+              ? 'Generating the template from this agent. This can take up to a minute.'
+              : 'Template generation can take up to a minute.'}
+          </span>
         </label>
       ) : (
         <p className="text-sm text-slate-600">Create an organization-owned agent before turning it into a template.</p>
