@@ -152,6 +152,26 @@ class SandboxComputeProxySelectionTests(TestCase):
         self.assertEqual(session.proxy_server, self.active_proxy)
         self.assertFalse(getattr(session, _SANDBOX_PROXY_CLEARED_ATTR))
 
+    def test_inactive_agent_preferred_proxy_is_not_reused_for_session(self):
+        self.agent.browser_use_agent.preferred_proxy = self.inactive_proxy
+        self.agent.browser_use_agent.save(update_fields=["preferred_proxy"])
+        session = AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.RUNNING,
+            proxy_server=self.inactive_proxy,
+        )
+
+        with patch("api.services.sandbox_compute._proxy_required", return_value=False), patch(
+            "api.models.BrowserUseAgent.select_random_proxy",
+            return_value=self.active_proxy,
+        ):
+            result = _select_proxy_for_session(self.agent, session)
+
+        self.assertEqual(result, self.active_proxy)
+        session.refresh_from_db()
+        self.assertEqual(session.proxy_server, self.active_proxy)
+        self.assertFalse(getattr(session, _SANDBOX_PROXY_CLEARED_ATTR))
+
     def test_inactive_session_proxy_is_cleared_when_required_proxy_unavailable(self):
         session = AgentComputeSession.objects.create(
             agent=self.agent,
