@@ -3,7 +3,6 @@ from functools import lru_cache
 import json
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
-from types import SimpleNamespace
 import uuid
 
 from django.http.response import JsonResponse
@@ -153,7 +152,6 @@ from .utils_markdown import (
 )
 from .homepage_cache import (
     get_homepage_integrations_payload,
-    get_homepage_pretrained_payload,
 )
 from .public_template_urls import (
     public_template_category_label,
@@ -1253,57 +1251,6 @@ class HomePage(TemplateView):
                     "isAuthenticated": self.request.user.is_authenticated,
                     "selectedFieldsContainerId": "homepage-integrations-selected-fields",
                 },
-            }
-        )
-
-        payload = get_homepage_pretrained_payload()
-        all_templates = list(payload.get("templates") or [])
-
-        search_term = (self.request.GET.get("pretrained_search") or "").strip()
-        category_filter = (self.request.GET.get("pretrained_category") or "").strip()
-        category_filter_from_request = "pretrained_category" in self.request.GET
-        default_category_active = False
-        if (
-            settings.GOBII_PROPRIETARY_MODE
-            and not category_filter_from_request
-            and not search_term
-            and any((template.get("category") or "").lower() == "people" for template in all_templates)
-        ):
-            category_filter = "People"
-            default_category_active = True
-
-        filtered_templates = list(all_templates)
-        if category_filter:
-            category_lower = category_filter.lower()
-            filtered_templates = [
-                template
-                for template in filtered_templates
-                if (template.get("category") or "").lower() == category_lower
-            ]
-
-        if search_term:
-            search_lower = search_term.lower()
-            filtered_templates = [
-                template
-                for template in filtered_templates
-                if search_lower in (template.get("display_name") or "").lower()
-                or search_lower in (template.get("tagline") or "").lower()
-                or search_lower in (template.get("description") or "").lower()
-            ]
-
-        filtered_workers = [SimpleNamespace(**template) for template in filtered_templates]
-        context.update(
-            {
-                "homepage_pretrained_workers": filtered_workers,
-                "homepage_pretrained_total": payload.get("total", len(all_templates)),
-                "homepage_pretrained_filtered_count": len(filtered_workers),
-                "homepage_pretrained_categories": payload.get("categories") or [],
-                "homepage_pretrained_selected_category": category_filter,
-                "homepage_pretrained_search_term": search_term,
-                "homepage_pretrained_default_category_active": default_category_active,
-                "homepage_pretrained_has_active_filters": bool(
-                    search_term or (category_filter_from_request and category_filter)
-                ),
             }
         )
 
@@ -3647,8 +3594,6 @@ class StaticViewSitemap(sitemaps.Sitemap):
         # List of all static view names that should be included in the sitemap
         items = [
             'pages:home',
-            'pages:solutions',
-            'pages:library',
         ]
         # Proprietary pages live behind the hosted marketing site; community builds expose docs instead.
         if settings.GOBII_PROPRIETARY_MODE:

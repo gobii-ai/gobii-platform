@@ -4,41 +4,21 @@ from django.conf import settings
 from django.shortcuts import redirect
 
 from proprietary.views import BlogSitemap
-from .library_views import LibraryAgentLikeAPIView, LibraryAgentsAPIView, LibraryView
 from .views import (
     MarkdownPageView,
     DocsIndexRedirectView,
     HomePage,
     HomepageCsrfTokenView,
     HomeAgentSpawnView,
-    TermsOfServiceView,
-    PrivacyPolicyView,
     health_check,
-    AboutView,
-    CareersView,
     HomepageIntegrationsSearchView,
-    StartupCheckoutView,
     StaticViewSitemap,
     ComparisonsSitemap,
-    PretrainedWorkerTemplateSitemap,
     LandingRedirectView,
     LandingLaunchView,
     ClearSignupTrackingView,
-    PretrainedWorkerDirectoryRedirectView,
-    PretrainedWorkerDetailView,
-    PretrainedWorkerHireView,
-    PretrainedWorkerLaunchView,
-    PublicTemplateSitemap,
-    PublicTemplateCategorySitemap,
-    PublicTemplateDetailView,
-    PublicTemplateLegacyDetailRedirectView,
-    PublicTemplateHireView,
-    PublicTemplateLaunchView,
     EngineeringProSignupView,
-    SolutionsIndexView,
-    SolutionView,
     MarketingContactRequestView,
-    SolutionsSitemap,
     SpecialAccessStartView,
     SpecialAccessView,
     WebManifestView,
@@ -74,37 +54,34 @@ sitemaps = {
 if settings.GOBII_PROPRIETARY_MODE:
     sitemaps['blog'] = BlogSitemap
 
-sitemaps['pretrained_workers'] = PretrainedWorkerTemplateSitemap
-sitemaps['public_template_categories'] = PublicTemplateCategorySitemap
-sitemaps['public_templates'] = PublicTemplateSitemap
-sitemaps['solutions'] = SolutionsSitemap
 sitemaps['comparisons'] = ComparisonsSitemap
+
+_home_redirect = RedirectView.as_view(url="/", permanent=True)
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
     path("install.sh", InstallScriptView.as_view(), name="install_script"),
     path("manifest.json", WebManifestView.as_view(), name="web_manifest"),
-    path("libary/", RedirectView.as_view(pattern_name="pages:library", permanent=True)),
-    path("library/", LibraryView.as_view(), name="library"),
-    path("library/<slug:category_slug>/", LibraryView.as_view(), name="library_category"),
-    path("library/<slug:category_slug>/<slug:template_slug>/", PublicTemplateDetailView.as_view(), name="public_template_detail"),
-    path("library/<slug:category_slug>/<slug:template_slug>/hire/", PublicTemplateHireView.as_view(), name="public_template_hire"),
-    path("library/<slug:category_slug>/<slug:template_slug>/spawn/", PublicTemplateLaunchView.as_view(), name="public_template_launch"),
-    path("api/library/agents/", LibraryAgentsAPIView.as_view(), name="library_agents_api"),
-    path("api/library/agents/like/", LibraryAgentLikeAPIView.as_view(), name="library_agent_like_api"),
+    path("libary/", _home_redirect),
+    path("library/", _home_redirect, name="library"),
+    path("library/<slug:category_slug>/", _home_redirect, name="library_category"),
+    path("library/<slug:category_slug>/<slug:template_slug>/", _home_redirect, name="public_template_detail"),
+    path("library/<slug:category_slug>/<slug:template_slug>/hire/", _home_redirect, name="public_template_hire"),
+    path("library/<slug:category_slug>/<slug:template_slug>/spawn/", _home_redirect, name="public_template_launch"),
+    path("api/library/agents/", _home_redirect, name="library_agents_api"),
+    path("api/library/agents/like/", _home_redirect, name="library_agent_like_api"),
     path("api/homepage/csrf-token/", HomepageCsrfTokenView.as_view(), name="homepage_csrf_token"),
     path("api/homepage/integrations/search/", HomepageIntegrationsSearchView.as_view(), name="homepage_integrations_search"),
     path("spawn-agent/", HomeAgentSpawnView.as_view(), name="home_agent_spawn"),
-    path("pretrained-workers/", PretrainedWorkerDirectoryRedirectView.as_view(), name="pretrained_worker_directory"),
-    path("pretrained-workers/<slug:slug>/", PretrainedWorkerDetailView.as_view(), name="pretrained_worker_detail"),
-    path("pretrained-workers/<slug:slug>/hire/", PretrainedWorkerHireView.as_view(), name="pretrained_worker_hire"),
-    path("pretrained-workers/<slug:slug>/spawn/", PretrainedWorkerLaunchView.as_view(), name="pretrained_worker_launch"),
-    path("solutions/", SolutionsIndexView.as_view(), name="solutions"),
+    path("pretrained-workers/", _home_redirect, name="pretrained_worker_directory"),
+    path("pretrained-workers/<slug:slug>/", _home_redirect, name="pretrained_worker_detail"),
+    path("pretrained-workers/<slug:slug>/hire/", _home_redirect, name="pretrained_worker_hire"),
+    path("pretrained-workers/<slug:slug>/spawn/", _home_redirect, name="pretrained_worker_launch"),
+    path("solutions/", _home_redirect, name="solutions"),
     path("solutions/engineering/pro-signup/", EngineeringProSignupView.as_view(), name="engineering_pro_signup"),
     path(
         "solutions/recruiting/candidate-sourcing/",
-        SolutionView.as_view(),
-        {"slug": "recruiting/candidate-sourcing"},
+        _home_redirect,
         name="solution_recruiting_candidate_sourcing",
     ),
     path("special-access/", SpecialAccessView.as_view(), name="special_access"),
@@ -122,8 +99,8 @@ urlpatterns = [
     path("g/<slug:code>/spawn/", LandingLaunchView.as_view(), name="landing_launch"),
     path("g/<slug:code>/", LandingRedirectView.as_view(), name="landing_redirect"),
 
-    # Solutions
-    path("solutions/<slug:slug>/", SolutionView.as_view(), name="solution"),
+    # Removed public solution pages. Redirect old URLs to the single focused homepage.
+    path("solutions/<slug:slug>/", _home_redirect, name="solution"),
 
     # Stripe webhooks
     path("stripe/", include("djstripe.urls", namespace="djstripe")),
@@ -139,9 +116,9 @@ urlpatterns = [
 
     path('clear_signup_tracking', ClearSignupTrackingView.as_view(), name='clear_signup_tracking'),
 
-    path('<slug:handle>/<slug:template_slug>/', PublicTemplateLegacyDetailRedirectView.as_view(), name='public_template_legacy_detail'),
-    path('<slug:handle>/<slug:template_slug>/hire/', PublicTemplateHireView.as_view(), name='public_template_legacy_hire'),
-    path('<slug:handle>/<slug:template_slug>/spawn/', PublicTemplateLaunchView.as_view(), name='public_template_legacy_launch'),
+    path('<slug:handle>/<slug:template_slug>/', _home_redirect, name='public_template_legacy_detail'),
+    path('<slug:handle>/<slug:template_slug>/hire/', _home_redirect, name='public_template_legacy_hire'),
+    path('<slug:handle>/<slug:template_slug>/spawn/', _home_redirect, name='public_template_legacy_launch'),
 
 ]
 
