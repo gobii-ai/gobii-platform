@@ -492,7 +492,11 @@
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
                     <span>I want my Gobii to</span>
-                    <span id="charter-ghost-text"> find 75 senior backend engineers in Austin with Python and fintech experience.</span>
+                    {% if settings.GOBII_PROPRIETARY_MODE %}
+                    <span id="charter-ghost-text"> source qualified candidates from this senior backend engineer job description.</span>
+                    {% else %}
+                    <span id="charter-ghost-text"> find 200 ideal customers and their emails.</span>
+                    {% endif %}
                   </div>
                 </div>
 
@@ -639,7 +643,9 @@
                       type="submit"
                       class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
                     >
-                      {% if not user.is_authenticated or home_spawn_requires_trial %}
+                      {% if settings.GOBII_PROPRIETARY_MODE %}
+                        Source Qualified Candidates
+                      {% elif not user.is_authenticated or home_spawn_requires_trial %}
                         {% cta_text "cta_homepage_launch_btn_unauth" fallback="Start Free Trial" %}
                       {% else %}
                         {% cta_text "cta_homepage_launch_btn_auth" fallback="Spawn Agent" %}
@@ -876,7 +882,7 @@
       <div class="max-w-3xl mx-auto px-6 text-center">
         <h2 id="what-is-gobii-heading" class="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">What is Gobii?</h2>
         <p class="mt-4 text-base sm:text-lg leading-relaxed text-slate-600">
-          Gobii gives recruiting teams always-on AI agents for talent sourcing, candidate research, outreach, and pipeline follow-up across the web and your hiring stack.
+          Gobii turns a job description into a qualified candidate pipeline. Paste the role, and Gobii agents source, research, qualify, and organize candidates for recruiter review.
         </p>
       </div>
     </section>
@@ -1044,24 +1050,41 @@
       }
 
       const homePerf = window.GobiiHomePerf;
+      {% if settings.GOBII_PROPRIETARY_MODE %}
       const baseScenarios = [
-        ' find 75 senior backend engineers in Austin with Python and fintech experience.',
-        ' build a shortlist of founding account executives from Series B SaaS companies.',
-        ' research these 40 candidates and summarize career trajectory, projects, and fit.',
-        ' watch GitHub and LinkedIn for ML infrastructure candidates in New York.',
-        ' enrich this candidate spreadsheet with current role, location, and portfolio links.',
-        ' find recruiters at competitor companies who recently worked on developer tools roles.',
-        ' track new applicants in Greenhouse and draft hiring-manager-ready summaries.',
-        ' monitor job boards for companies hiring similar roles and surface talent-market signals.',
-        ' write personalized first-touch outreach for this shortlist of data engineers.',
-        ' follow up with warm candidates every 5 business days until they reply.',
-        ' find underrepresented talent communities relevant to our frontend engineering role.',
-        ' create a weekly talent map for staff product designers in healthtech.',
-        ' identify candidates open to relocation for a senior security engineering role.',
-        ' source 30 sales engineers with Kubernetes experience and strong public writing.',
-        ' compare this candidate slate against the job requirements and flag gaps.',
-        ' prepare interview prep briefs for tomorrow's onsite candidates.'
+        ' source qualified candidates from this senior backend engineer job description.',
+        ' parse this job description and find candidates who match the must-have requirements.',
+        ' build a qualified shortlist for this founding account executive role.',
+        ' turn this ML infrastructure role into a candidate slate with fit notes.',
+        ' source candidates for this product designer job description and rank them by fit.',
+        ' find qualified sales engineers from this Kubernetes-heavy job description.',
+        ' research each candidate against the required skills in this role.',
+        ' enrich qualified candidates with current role, location, and profile links.',
+        ' create a recruiter-ready shortlist from this job description.',
+        ' compare sourced candidates against the job requirements and flag gaps.',
+        ' find qualified candidates open to relocation for this security engineering role.',
+        ' prepare hiring-manager briefs for the best candidates for this role.'
       ];
+      {% else %}
+      const baseScenarios = [
+        ' find 200 ideal customers and their emails.',
+        ' keep my Salesforce pipeline clean every day.',
+        ' watch new YC and seed startups and add founders to my sheet weekly.',
+        ' track competitor pricing and plan changes daily.',
+        ' pull fresh contacts from company sites and press releases each night.',
+        ' monitor RFP portals for AI and automation opportunities to bid on.',
+        " watch job boards for 'Senior Data Engineer' roles and auto-apply with my profile.",
+        ' track vendor status pages and alert me when SLAs slip.',
+        ' collect buyer intent posts on LinkedIn and Reddit and draft outreach.',
+        ' watch competitor changelogs and docs and summarize product moves weekly.',
+        ' track ecommerce competitors for stock and price changes daily.',
+        ' monitor fintech and regulatory sites and summarize what affects us.',
+        ' help me find a new place to rent.',
+        ' help me find a vacation house.',
+        ' watch for price drops on my wishlist items.',
+        " track flights to my destination and alert me when they're cheap."
+      ];
+      {% endif %}
 
       function toggleGhostVisibility() {
         const hasValue = textarea.value.trim().length > 0;
@@ -1501,8 +1524,13 @@
   <section id="pretrained-workers" class="relative pt-0 pb-16 scroll-mt-32">
     <div class="max-w-6xl mx-auto px-6">
       <div class="text-center mb-8 sm:mb-12">
-        <h2 class="text-3xl sm:text-4xl font-light text-slate-900 tracking-tight">Launch a recruiting worker</h2>
-        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto leading-relaxed">Deploy a proven sourcing, research, or outreach agent in minutes.</p>
+        {% if settings.GOBII_PROPRIETARY_MODE %}
+        <h2 class="text-3xl sm:text-4xl font-light text-slate-900 tracking-tight">Start with a candidate sourcing workflow</h2>
+        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto leading-relaxed">Use a pretrained worker to source, research, qualify, or follow up with candidates for an open role.</p>
+        {% else %}
+        <h2 class="text-3xl sm:text-4xl font-light text-slate-900 tracking-tight">Spawn a Pretrained Worker</h2>
+        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto leading-relaxed">Deploy a proven worker in minutes &mdash; built for research, ops &amp; intelligence.</p>
+        {% endif %}
       </div>
 
       <div class="space-y-6 mt-12">
@@ -1531,7 +1559,7 @@
           <div class="w-full lg:flex-1 text-left">
             <label for="homepage-directory-search" class="block text-sm font-medium text-slate-500">Search</label>
             <div class="mt-2 relative">
-              <input id="homepage-directory-search" name="pretrained_search" type="search" value="{{ homepage_pretrained_search_term }}" placeholder="Search sourcing, screening, outreach..." class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" />
+              <input id="homepage-directory-search" name="pretrained_search" type="search" value="{{ homepage_pretrained_search_term }}" placeholder="{% if settings.GOBII_PROPRIETARY_MODE %}Search sourcing, qualification, outreach...{% else %}Search skills, focus areas, workflows...{% endif %}" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" />
               {% if homepage_pretrained_search_term %}
                 <a href="{% url 'pages:home' %}#pretrained-workers" class="absolute inset-y-0 right-3 flex items-center text-sm text-indigo-600 hover:text-indigo-700">Clear</a>
               {% endif %}
@@ -1564,13 +1592,18 @@
       {% if homepage_pretrained_workers %}
         <div class="mt-12 grid gap-8 md:grid-cols-2 xl:grid-cols-3">
           {% for worker in homepage_pretrained_workers %}
-            {% include "pretrained_workers/_card.html" with worker=worker lazy_csrf=True %}
+            {% include "pretrained_workers/_card.html" with worker=worker lazy_csrf=True home_pretrained_context=True %}
           {% endfor %}
         </div>
       {% else %}
         <div class="mt-12 rounded-2xl border border-dashed border-slate-200 bg-white/70 p-12 text-center shadow-sm">
+          {% if settings.GOBII_PROPRIETARY_MODE %}
           <h3 class="text-2xl font-medium text-slate-900">No recruiting workers match those filters yet.</h3>
           <p class="mt-3 text-slate-600">Reset your filters to explore recruiting templates or reach out to support for a tailored hiring playbook.</p>
+          {% else %}
+          <h3 class="text-2xl font-medium text-slate-900">No pretrained workers match those filters yet.</h3>
+          <p class="mt-3 text-slate-600">Reset your filters to explore the full directory or reach out to support for a tailored playbook.</p>
+          {% endif %}
           <a href="{% url 'pages:home' %}#pretrained-workers" class="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow hover:bg-indigo-500 transition">Clear filters</a>
         </div>
       {% endif %}

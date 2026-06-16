@@ -111,11 +111,10 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        title = "Acme - AI Recruiting Agents for Talent Sourcing Teams"
+        title = "Acme - Enter a Job Description. Get Qualified Candidates."
         description = (
-            "Acme gives recruiting teams always-on AI agents for talent sourcing, "
-            "candidate research, outreach, and pipeline follow-up across the web "
-            "and your hiring stack."
+            "Paste a job description into Acme and get qualified candidates sourced, "
+            "researched, and organized for recruiter review."
         )
         image_url = "https://gobii.ai/static/images/gobii_og_image_1200x630.png"
 
@@ -139,7 +138,7 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find("meta", property="og:image:height")["content"], "630")
         self.assertEqual(
             soup.find("meta", property="og:image:alt")["content"],
-            "Acme AI recruiting agent platform preview",
+            "Acme qualified candidate sourcing platform preview",
         )
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:card"})["content"],
@@ -153,7 +152,7 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find("meta", attrs={"name": "twitter:image"})["content"], image_url)
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],
-            "Acme AI recruiting agent platform preview",
+            "Acme qualified candidate sourcing platform preview",
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -371,7 +370,15 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme gives recruiting teams always-on AI agents for talent sourcing, candidate research, outreach, and pipeline follow-up across the web and your hiring stack.">',
+            '<meta name="description" content="Acme agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
+        )
+
+    @override_settings(PUBLIC_BRAND_NAME="Acme", GOBII_PROPRIETARY_MODE=True)
+    def test_home_page_has_proprietary_qualified_candidate_meta_description(self):
+        response = self.client.get("/")
+        self.assertContains(
+            response,
+            '<meta name="description" content="Paste a job description into Acme and get qualified candidates sourced, researched, and organized for recruiter review.">',
         )
 
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
@@ -850,6 +857,31 @@ class HomePageTests(TestCase):
         auth_card_button = auth_card_form.find("button", {"type": "submit"})
         self.assertIsNotNone(auth_card_button)
         self.assertEqual(self._normalized_button_text(auth_card_button), "Spawn This Worker")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    def test_home_cta_text_is_candidate_sourcing_specific_in_proprietary_mode(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertIn("Enter a job description.", soup.get_text(" "))
+        self.assertIn("Get qualified candidates.", soup.get_text(" "))
+        hero_form = soup.find("form", {"id": "create-agent-form"})
+        self.assertIsNotNone(hero_form)
+        hero_button = hero_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(hero_button)
+        self.assertEqual(self._normalized_button_text(hero_button), "Source Qualified Candidates")
+
+        card_source = soup.find(
+            "input",
+            {"name": "source_page", "value": "home_pretrained_workers"},
+        )
+        self.assertIsNotNone(card_source)
+        card_form = card_source.find_parent("form")
+        self.assertIsNotNone(card_form)
+        card_button = card_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(card_button)
+        self.assertEqual(self._normalized_button_text(card_button), "Source With This Workflow")
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     def test_home_cta_text_shows_trial_when_authenticated_user_requires_trial(self):

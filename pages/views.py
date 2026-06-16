@@ -242,7 +242,8 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "slack": "images/integrations/pipedream/slack.svg",
     "trello": "images/integrations/pipedream/trello.svg",
 }
-HOMEPAGE_META_TITLE_SUFFIX = "AI Recruiting Agents for Talent Sourcing Teams"
+HOMEPAGE_META_TITLE_SUFFIX = "AI Coworkers for Teams With Real Work to Do"
+HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX = "Enter a Job Description. Get Qualified Candidates."
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
@@ -1037,18 +1038,26 @@ class HomePage(TemplateView):
         )
         home_brand_name = settings.PUBLIC_BRAND_NAME or "Gobii"
         context["home_brand_name"] = home_brand_name
-        context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
-        context["home_meta_description"] = (
-            f"{home_brand_name} gives recruiting teams always-on AI agents for talent "
-            "sourcing, candidate research, outreach, and pipeline follow-up across the "
-            "web and your hiring stack."
-        )
+        if settings.GOBII_PROPRIETARY_MODE:
+            context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX}"
+            context["home_meta_description"] = (
+                f"Paste a job description into {home_brand_name} and get qualified "
+                "candidates sourced, researched, and organized for recruiter review."
+            )
+            context["home_social_image_alt"] = f"{home_brand_name} qualified candidate sourcing platform preview"
+        else:
+            context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
+            context["home_meta_description"] = (
+                f"{home_brand_name} agents are virtual coworkers with their own identity, "
+                "memory, and tools. Email them, text them — they browse the web, collect "
+                "data, and deliver reports 24/7."
+            )
+            context["home_social_image_alt"] = f"{home_brand_name} AI coworker platform preview"
         context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
         context["home_canonical_url"] = _public_site_absolute_url("/")
         context["home_social_image_url"] = _public_site_absolute_url(
             static(HOMEPAGE_SOCIAL_IMAGE_PATH)
         )
-        context["home_social_image_alt"] = f"{home_brand_name} AI recruiting agent platform preview"
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 

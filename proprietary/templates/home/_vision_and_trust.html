@@ -7,7 +7,7 @@
     <!-- Team illustration with human/AI badges overlaid -->
     <div class="flex justify-center mb-10">
       <div class="relative inline-block w-full max-w-xs sm:max-w-sm">
-        <img src="{% static 'images/undraw/team.svg' %}" alt="A recruiting team of humans and AI agents" width="776" height="764" class="block w-full" loading="lazy">
+        <img src="{% static 'images/undraw/team.svg' %}" alt="A recruiting team reviewing qualified candidates" width="776" height="764" class="block w-full" loading="lazy">
 
         <!-- Row 1 badges (3 avatars) -->
         <span class="absolute text-[10px] sm:text-[11px] font-bold text-white drop-shadow" style="top: 23.9%; left: 14.7%; transform: translate(-50%, -50%);">Human</span>
@@ -26,8 +26,8 @@
     </div>
 
     <span class="inline-flex items-center text-xs font-bold tracking-[0.25em] uppercase text-indigo-500">The vision</span>
-    <h2 class="mt-3 text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">The recruiting team of the&nbsp;future</h2>
-    <p class="mt-4 text-base text-slate-500 max-w-xl mx-auto leading-relaxed">Recruiters build relationships and make judgment calls. Gobii agents keep sourcing, research, outreach, and follow-up moving in the&nbsp;background.</p>
+    <h2 class="mt-3 text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">Every open role starts with qualified&nbsp;candidates</h2>
+    <p class="mt-4 text-base text-slate-500 max-w-xl mx-auto leading-relaxed">Recruiters should not start from a blank search tab. Paste the job description, review qualified candidates, and move the best people forward.</p>
     <div class="mt-8">
       {% if user.is_authenticated and account.usage.agents_unlimited is not True and account.usage.agents_available <= 0 %}
       <a href="{% url 'proprietary:startup_checkout' %}" class="inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-6 shadow-lg hover:shadow-xl transition-all duration-300">
@@ -36,7 +36,7 @@
       </a>
       {% else %}
       <a href="#create-agent-form" class="inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-6 shadow-lg hover:shadow-xl transition-all duration-300">
-        {% if user.is_authenticated %}Create a Recruiting Agent{% else %}Start Free Trial{% endif %}
+        Source Qualified Candidates
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7l7 7-7 7"></path></svg>
       </a>
       {% endif %}
