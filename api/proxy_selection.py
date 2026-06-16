@@ -27,6 +27,9 @@ def proxy_has_recent_health_pass(proxy_server, health_check_days: int = 45) -> b
     Returns:
         True if proxy has successful health check within the specified days
     """
+    if not proxy_server or not proxy_server.is_active:
+        return False
+
     recent_cutoff = timezone.now() - timedelta(days=health_check_days)
     return proxy_server.health_check_results.filter(
         status="PASSED", checked_at__gte=recent_cutoff
@@ -67,7 +70,13 @@ def select_proxy(
     
     # Priority 2: Preferred proxy (if healthy)
     if preferred_proxy:
-        if proxy_has_recent_health_pass(preferred_proxy, health_check_days):
+        if not preferred_proxy.is_active:
+            logger.info(
+                "Preferred proxy inactive%s, selecting alternative: %s",
+                context_desc,
+                preferred_proxy,
+            )
+        elif proxy_has_recent_health_pass(preferred_proxy, health_check_days):
             logger.info(
                 "Using preferred proxy (recently healthy)%s: %s",
                 context_desc,

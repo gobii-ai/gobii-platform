@@ -94,6 +94,15 @@ class ProxySelectionTests(TestCase):
             checked_at=timezone.now() - timedelta(hours=1)
         )
 
+        # Deactivated proxies can still have old successful checks; selection should
+        # rely on the active flag first.
+        ProxyHealthCheckResult.objects.create(
+            proxy_server=self.inactive_proxy,
+            health_check_spec=self.health_check_spec,
+            status=ProxyHealthCheckResult.Status.PASSED,
+            checked_at=timezone.now() - timedelta(days=1)
+        )
+
     @tag("batch_proxy_selection")
     def test_proxy_has_recent_health_pass_default_days(self):
         """Test proxy health check with default 45-day window."""
@@ -103,7 +112,7 @@ class ProxySelectionTests(TestCase):
         # Unhealthy proxy should fail (old success, recent failure)
         self.assertFalse(proxy_has_recent_health_pass(self.unhealthy_proxy))
         
-        # Inactive proxy should fail (no health checks)
+        # Inactive proxy should fail even with a recent successful health check
         self.assertFalse(proxy_has_recent_health_pass(self.inactive_proxy))
     
     def test_proxy_has_recent_health_pass_custom_days(self):
@@ -136,6 +145,26 @@ class ProxySelectionTests(TestCase):
         
         result = select_proxy(preferred_proxy=self.unhealthy_proxy)
         self.assertEqual(result, self.healthy_proxy)
+        mock_select_random.assert_called_once()
+
+    @patch('api.models.BrowserUseAgent.select_random_proxy')
+    def test_select_proxy_with_inactive_preferred_has_alternative(self, mock_select_random):
+        mock_select_random.return_value = self.healthy_proxy
+
+        result = select_proxy(preferred_proxy=self.inactive_proxy)
+
+        self.assertEqual(result, self.healthy_proxy)
+        mock_select_random.assert_called_once()
+
+    @patch('api.models.BrowserUseAgent.select_random_proxy')
+    @override_settings(GOBII_PROPRIETARY_MODE=True, DEBUG=False)
+    def test_select_proxy_with_inactive_preferred_no_alternative_raises(self, mock_select_random):
+        mock_select_random.return_value = None
+
+        with self.assertRaises(RuntimeError) as context:
+            select_proxy(preferred_proxy=self.inactive_proxy, allow_no_proxy_in_debug=False)
+
+        self.assertIn("No proxy available", str(context.exception))
         mock_select_random.assert_called_once()
     
     @patch('api.models.BrowserUseAgent.select_random_proxy')

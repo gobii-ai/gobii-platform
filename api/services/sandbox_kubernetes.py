@@ -17,6 +17,7 @@ from api.services.sandbox_compute import (
     SandboxComputeBackend,
     SandboxComputeUnavailable,
     SandboxSessionUpdate,
+    _SANDBOX_PROXY_CLEARED_ATTR,
     _requires_agent_pod_discovery,
 )
 from api.services.system_settings import (
@@ -274,6 +275,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         egress_service_name = None
         no_proxy = None
         workspace_reset = False
+        if not session.proxy_server and getattr(session, _SANDBOX_PROXY_CLEARED_ATTR, False):
+            self._delete_egress_proxy(agent)
         if session.proxy_server:
             if not self._egress_proxy_image:
                 raise SandboxComputeUnavailable(
@@ -377,6 +380,9 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             namespace=self._namespace,
             workspace_reset=workspace_reset,
         )
+
+    def cleanup_cleared_proxy(self, agent) -> None:
+        self._delete_egress_proxy(agent)
 
     def run_command(
         self,

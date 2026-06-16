@@ -53,6 +53,7 @@ _NO_PROXY_ENV_KEYS = (
     "NO_PROXY",
     "no_proxy",
 )
+_SANDBOX_PROXY_CLEARED_ATTR = "_sandbox_proxy_cleared"
 _CUSTOM_TOOL_SQLITE_MIME_TYPE = "application/vnd.sqlite3"
 _SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 _ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR = "_sandbox_active_conversation_channel"
@@ -313,6 +314,9 @@ class SandboxSessionUpdate:
 class SandboxComputeBackend:
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         raise NotImplementedError
+
+    def cleanup_cleared_proxy(self, agent) -> None:
+        return None
 
     def run_command(
         self,
@@ -953,34 +957,95 @@ def _restore_sqlite_file_content(db_path: str, content: bytes) -> None:
         _remove_sqlite_sidecars(db_path)
 
 
+def _proxy_id(proxy: Any) -> Optional[str]:
+    proxy_id = getattr(proxy, "id", proxy)
+    return str(proxy_id) if proxy_id else None
+
+
+def _safe_getattr(obj: Any, name: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    return getattr(obj, name, default)
+
+
+def _clear_proxy_for_session(agent, session: AgentComputeSession, *, reason: str) -> None:
+    old_proxy_id = _safe_getattr(session, "proxy_server_id", None)
+    if old_proxy_id is None:
+        old_proxy = _safe_getattr(session, "proxy_server", None)
+        old_proxy_id = _proxy_id(old_proxy)
+    else:
+        old_proxy_id = str(old_proxy_id)
+
+    if not old_proxy_id:
+        return
+
+    session.proxy_server = None
+    setattr(session, _SANDBOX_PROXY_CLEARED_ATTR, True)
+    session.save(update_fields=["proxy_server", "updated_at"])
+    logger.info(
+        "Cleared sandbox proxy for agent=%s old_proxy=%s new_proxy=None reason=%s",
+        agent.id,
+        old_proxy_id,
+        reason,
+    )
+
+
 def _select_proxy_for_session(agent, session: AgentComputeSession) -> Optional[Any]:
+    setattr(session, _SANDBOX_PROXY_CLEARED_ATTR, False)
+
     if not getattr(settings, "ENABLE_PROXY_ROUTING", True):
+        _clear_proxy_for_session(agent, session, reason="routing_disabled")
         return None
-    preferred_proxy = session.proxy_server if session.proxy_server and session.proxy_server.is_active else None
+
+    proxy_required = _proxy_required()
+    current_proxy = session.proxy_server
+    current_proxy_id = _proxy_id(current_proxy)
+    current_proxy_inactive = bool(current_proxy and not current_proxy.is_active)
+    preferred_proxy = current_proxy if current_proxy and current_proxy.is_active else None
+
     try:
         if preferred_proxy:
             proxy = select_proxy(
                 preferred_proxy=preferred_proxy,
-                allow_no_proxy_in_debug=not _proxy_required(),
+                allow_no_proxy_in_debug=not proxy_required,
                 context_id=f"sandbox_agent_{agent.id}",
             )
         else:
             proxy = select_proxy_for_persistent_agent(
                 agent,
-                allow_no_proxy_in_debug=not _proxy_required(),
+                allow_no_proxy_in_debug=not proxy_required,
             )
     except RuntimeError as exc:
-        if _proxy_required():
-            raise SandboxComputeUnavailable(str(exc)) from exc
+        if current_proxy_inactive:
+            _clear_proxy_for_session(agent, session, reason="inactive_proxy")
+        if proxy_required:
+            raise SandboxComputeUnavailable("No proxy server available for sandbox compute.") from exc
         logger.warning("Sandbox proxy selection failed for agent=%s: %s", agent.id, exc)
         proxy = None
 
-    if _proxy_required() and not proxy:
+    if proxy_required and not proxy:
+        if current_proxy_inactive:
+            _clear_proxy_for_session(agent, session, reason="inactive_proxy")
         raise SandboxComputeUnavailable("No proxy server available for sandbox compute.")
 
-    if proxy and proxy != session.proxy_server:
+    if not proxy:
+        _clear_proxy_for_session(
+            agent,
+            session,
+            reason="inactive_proxy" if current_proxy_inactive else "no_proxy_available",
+        )
+        return None
+
+    if proxy != session.proxy_server:
         session.proxy_server = proxy
         session.save(update_fields=["proxy_server", "updated_at"])
+        logger.info(
+            "Updated sandbox proxy for agent=%s old_proxy=%s new_proxy=%s reason=%s",
+            agent.id,
+            current_proxy_id,
+            _proxy_id(proxy),
+            "inactive_proxy" if current_proxy_inactive else "proxy_selected",
+        )
     return proxy
 
 
@@ -1309,7 +1374,12 @@ class SandboxComputeService:
             agent=agent,
             defaults={"state": AgentComputeSession.State.STOPPED},
         )
-        _select_proxy_for_session(agent, session)
+        try:
+            _select_proxy_for_session(agent, session)
+        except SandboxComputeUnavailable:
+            if getattr(session, _SANDBOX_PROXY_CLEARED_ATTR, False):
+                self._backend.cleanup_cleared_proxy(agent)
+            raise
         previous_state = session.state
         started = session.state != AgentComputeSession.State.RUNNING
         mode = "bootstrap" if started else "refresh"
