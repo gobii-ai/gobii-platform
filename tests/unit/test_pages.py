@@ -802,6 +802,24 @@ class HomePageTests(TestCase):
         self.assertNotContains(response, " parse this job description")
         self.assertNotContains(response, " build a qualified shortlist")
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_home_footer_cta_uses_header_aware_scroll(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        source_links = [
+            link
+            for link in soup.find_all("a", {"href": "#create-agent-form"})
+            if "Source Qualified Candidates" in link.get_text(" ", strip=True)
+        ]
+        self.assertGreaterEqual(len(source_links), 1)
+        self.assertContains(response, "#create-agent-form")
+        self.assertContains(response, "scroll-margin-top: 6rem")
+        self.assertContains(response, "getCreateAgentScrollTop")
+        self.assertContains(response, "header.hs-header")
+        self.assertContains(response, "breathingRoom = mobile ? 20 : 28")
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     def test_home_cta_text_shows_trial_when_authenticated_user_requires_trial(self):
         user = get_user_model().objects.create_user(

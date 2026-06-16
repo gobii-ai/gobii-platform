@@ -408,6 +408,16 @@
     }
     {% endif %}
 
+    #create-agent-form {
+      scroll-margin-top: 6rem;
+    }
+
+    @media (min-width: 768px) {
+      #create-agent-form {
+        scroll-margin-top: 7rem;
+      }
+    }
+
     /* Scroll-triggered fade-in animation */
     [data-animate] {
       opacity: 0;
@@ -1508,6 +1518,52 @@
 
       applySelection(input.value || 'standard')
     })
+  </script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const createAgentTarget = document.getElementById('create-agent-form');
+      const createAgentLinks = document.querySelectorAll('a[href="#create-agent-form"]');
+
+      if (!createAgentTarget || createAgentLinks.length === 0) {
+        return;
+      }
+
+      const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      function getCreateAgentScrollTop() {
+        const header = document.querySelector('header.hs-header');
+        const headerHeight = header ? header.getBoundingClientRect().height : 64;
+        const mobile = window.matchMedia && window.matchMedia('(max-width: 767px)').matches;
+        const breathingRoom = mobile ? 20 : 28;
+        const targetTop = createAgentTarget.getBoundingClientRect().top + window.scrollY;
+        return Math.max(0, Math.round(targetTop - headerHeight - breathingRoom));
+      }
+
+      function scrollToCreateAgent(updateHash) {
+        window.scrollTo({
+          top: getCreateAgentScrollTop(),
+          behavior: prefersReducedMotion ? 'auto' : 'smooth',
+        });
+
+        if (updateHash && window.history && window.history.pushState) {
+          window.history.pushState(null, '', '#create-agent-form');
+        }
+      }
+
+      createAgentLinks.forEach(function (link) {
+        link.addEventListener('click', function (event) {
+          event.preventDefault();
+          scrollToCreateAgent(true);
+        });
+      });
+
+      if (window.location.hash === '#create-agent-form') {
+        window.setTimeout(function () {
+          scrollToCreateAgent(false);
+        }, 80);
+      }
+    });
   </script>
 
     <script>
