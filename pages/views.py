@@ -242,7 +242,7 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "slack": "images/integrations/pipedream/slack.svg",
     "trello": "images/integrations/pipedream/trello.svg",
 }
-HOMEPAGE_META_TITLE_SUFFIX = "AI Coworkers for Teams With Real Work to Do"
+HOMEPAGE_META_TITLE_SUFFIX = "AI Recruiting Agents for Talent Sourcing Teams"
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
@@ -1039,16 +1039,16 @@ class HomePage(TemplateView):
         context["home_brand_name"] = home_brand_name
         context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
         context["home_meta_description"] = (
-            f"{home_brand_name} agents are virtual coworkers with their own identity, "
-            "memory, and tools. Email them, text them — they browse the web, collect "
-            "data, and deliver reports 24/7."
+            f"{home_brand_name} gives recruiting teams always-on AI agents for talent "
+            "sourcing, candidate research, outreach, and pipeline follow-up across the "
+            "web and your hiring stack."
         )
         context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
         context["home_canonical_url"] = _public_site_absolute_url("/")
         context["home_social_image_url"] = _public_site_absolute_url(
             static(HOMEPAGE_SOCIAL_IMAGE_PATH)
         )
-        context["home_social_image_alt"] = f"{home_brand_name} AI coworker platform preview"
+        context["home_social_image_alt"] = f"{home_brand_name} AI recruiting agent platform preview"
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 
@@ -1250,8 +1250,18 @@ class HomePage(TemplateView):
         payload = get_homepage_pretrained_payload()
         all_templates = list(payload.get("templates") or [])
 
-        category_filter = (self.request.GET.get("pretrained_category") or "").strip()
         search_term = (self.request.GET.get("pretrained_search") or "").strip()
+        category_filter = (self.request.GET.get("pretrained_category") or "").strip()
+        category_filter_from_request = "pretrained_category" in self.request.GET
+        default_category_active = False
+        if (
+            settings.GOBII_PROPRIETARY_MODE
+            and not category_filter_from_request
+            and not search_term
+            and any((template.get("category") or "").lower() == "people" for template in all_templates)
+        ):
+            category_filter = "People"
+            default_category_active = True
 
         filtered_templates = list(all_templates)
         if category_filter:
@@ -1281,6 +1291,10 @@ class HomePage(TemplateView):
                 "homepage_pretrained_categories": payload.get("categories") or [],
                 "homepage_pretrained_selected_category": category_filter,
                 "homepage_pretrained_search_term": search_term,
+                "homepage_pretrained_default_category_active": default_category_active,
+                "homepage_pretrained_has_active_filters": bool(
+                    search_term or (category_filter_from_request and category_filter)
+                ),
             }
         )
 

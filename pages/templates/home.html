@@ -492,7 +492,7 @@
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
                     <span>I want my Gobii to</span>
-                    <span id="charter-ghost-text"> find 200 ideal customers and their emails.</span>
+                    <span id="charter-ghost-text"> find 75 senior backend engineers in Austin with Python and fintech experience.</span>
                   </div>
                 </div>
 
@@ -876,7 +876,7 @@
       <div class="max-w-3xl mx-auto px-6 text-center">
         <h2 id="what-is-gobii-heading" class="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">What is Gobii?</h2>
         <p class="mt-4 text-base sm:text-lg leading-relaxed text-slate-600">
-          Gobii is an AI agent platform that gives businesses always-on virtual coworkers capable of browser automation, web research, data collection, and workflow execution.
+          Gobii gives recruiting teams always-on AI agents for talent sourcing, candidate research, outreach, and pipeline follow-up across the web and your hiring stack.
         </p>
       </div>
     </section>
@@ -1045,22 +1045,22 @@
 
       const homePerf = window.GobiiHomePerf;
       const baseScenarios = [
-        ' find 200 ideal customers and their emails.',
-        ' keep my Salesforce pipeline clean every day.',
-        ' watch new YC and seed startups and add founders to my sheet weekly.',
-        ' track competitor pricing and plan changes daily.',
-        ' pull fresh contacts from company sites and press releases each night.',
-        ' monitor RFP portals for AI and automation opportunities to bid on.',
-        " watch job boards for 'Senior Data Engineer' roles and auto-apply with my profile.",
-        ' track vendor status pages and alert me when SLAs slip.',
-        ' collect buyer intent posts on LinkedIn and Reddit and draft outreach.',
-        ' watch competitor changelogs and docs and summarize product moves weekly.',
-        ' track ecommerce competitors for stock and price changes daily.',
-        ' monitor fintech and regulatory sites and summarize what affects us.',
-        ' help me find a new place to rent.',
-        ' help me find a vacation house.',
-        ' watch for price drops on my wishlist items.',
-        " track flights to my destination and alert me when they're cheap."
+        ' find 75 senior backend engineers in Austin with Python and fintech experience.',
+        ' build a shortlist of founding account executives from Series B SaaS companies.',
+        ' research these 40 candidates and summarize career trajectory, projects, and fit.',
+        ' watch GitHub and LinkedIn for ML infrastructure candidates in New York.',
+        ' enrich this candidate spreadsheet with current role, location, and portfolio links.',
+        ' find recruiters at competitor companies who recently worked on developer tools roles.',
+        ' track new applicants in Greenhouse and draft hiring-manager-ready summaries.',
+        ' monitor job boards for companies hiring similar roles and surface talent-market signals.',
+        ' write personalized first-touch outreach for this shortlist of data engineers.',
+        ' follow up with warm candidates every 5 business days until they reply.',
+        ' find underrepresented talent communities relevant to our frontend engineering role.',
+        ' create a weekly talent map for staff product designers in healthtech.',
+        ' identify candidates open to relocation for a senior security engineering role.',
+        ' source 30 sales engineers with Kubernetes experience and strong public writing.',
+        ' compare this candidate slate against the job requirements and flag gaps.',
+        ' prepare interview prep briefs for tomorrow's onsite candidates.'
       ];
 
       function toggleGhostVisibility() {
@@ -1501,14 +1501,14 @@
   <section id="pretrained-workers" class="relative pt-0 pb-16 scroll-mt-32">
     <div class="max-w-6xl mx-auto px-6">
       <div class="text-center mb-8 sm:mb-12">
-        <h2 class="text-3xl sm:text-4xl font-light text-slate-900 tracking-tight">Spawn a Pretrained Worker</h2>
-        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto leading-relaxed">Deploy a proven worker in minutes &mdash; built for research, ops &amp; intelligence.</p>
+        <h2 class="text-3xl sm:text-4xl font-light text-slate-900 tracking-tight">Launch a recruiting worker</h2>
+        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto leading-relaxed">Deploy a proven sourcing, research, or outreach agent in minutes.</p>
       </div>
 
       <div class="space-y-6 mt-12">
         <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div class="text-left">
-            {% if homepage_pretrained_selected_category or homepage_pretrained_search_term %}
+            {% if homepage_pretrained_has_active_filters %}
               <p class="text-xs text-slate-400 mt-1">
                 Filters:
                 {% if homepage_pretrained_selected_category %}{{ homepage_pretrained_selected_category }}{% endif %}
@@ -1517,7 +1517,7 @@
               </p>
             {% endif %}
           </div>
-          {% if homepage_pretrained_selected_category or homepage_pretrained_search_term %}
+          {% if homepage_pretrained_has_active_filters %}
             <a href="{% url 'pages:home' %}#pretrained-workers" class="inline-flex items-center gap-2 self-start sm:self-auto px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition">
               Reset filters
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1531,7 +1531,7 @@
           <div class="w-full lg:flex-1 text-left">
             <label for="homepage-directory-search" class="block text-sm font-medium text-slate-500">Search</label>
             <div class="mt-2 relative">
-              <input id="homepage-directory-search" name="pretrained_search" type="search" value="{{ homepage_pretrained_search_term }}" placeholder="Search skills, focus areas, workflows..." class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" />
+              <input id="homepage-directory-search" name="pretrained_search" type="search" value="{{ homepage_pretrained_search_term }}" placeholder="Search sourcing, screening, outreach..." class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" />
               {% if homepage_pretrained_search_term %}
                 <a href="{% url 'pages:home' %}#pretrained-workers" class="absolute inset-y-0 right-3 flex items-center text-sm text-indigo-600 hover:text-indigo-700">Clear</a>
               {% endif %}
@@ -1569,8 +1569,8 @@
         </div>
       {% else %}
         <div class="mt-12 rounded-2xl border border-dashed border-slate-200 bg-white/70 p-12 text-center shadow-sm">
-          <h3 class="text-2xl font-medium text-slate-900">No pretrained workers match those filters yet.</h3>
-          <p class="mt-3 text-slate-600">Reset your filters to explore the full directory or reach out to support for a tailored playbook.</p>
+          <h3 class="text-2xl font-medium text-slate-900">No recruiting workers match those filters yet.</h3>
+          <p class="mt-3 text-slate-600">Reset your filters to explore recruiting templates or reach out to support for a tailored hiring playbook.</p>
           <a href="{% url 'pages:home' %}#pretrained-workers" class="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow hover:bg-indigo-500 transition">Clear filters</a>
         </div>
       {% endif %}

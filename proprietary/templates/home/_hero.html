@@ -8,11 +8,11 @@
       {% if landing_hero_text %}
         <span class="font-light">{{ landing_hero_text|safe }}</span>
       {% else %}
-        Your Gobii AI team,<br class="hidden sm:inline">
-        <span class="font-normal bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">always on</span>
+        AI recruiting agents,<br class="hidden sm:inline">
+        <span class="font-normal bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">always sourcing</span>
       {% endif %}
     </h1>
-    <p class="mt-4 text-lg text-gray-500 md:max-w-md">Email&nbsp;them <i data-lucide="mail" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>. Text&nbsp;them <i data-lucide="message-square" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>. They work <span class="font-medium text-violet-600">24/7</span>.</p>
+    <p class="mt-4 text-lg text-gray-500 md:max-w-md">Source candidates, research profiles, draft outreach, and keep your hiring pipeline moving <span class="font-medium text-violet-600">24/7</span>.</p>
   </div>
   <div class="flex justify-center md:block flex-shrink-0 order-first md:order-last">
     {% flag "fish_homepage" %}
@@ -29,13 +29,13 @@
 {% else %}
 <div class="text-center mb-8">
   <h1 class="text-4xl sm:text-5xl md:text-6xl tracking-tight font-light text-gray-900 max-w-3xl mx-auto leading-[1.15]">
-    {% if landing_hero_text %}
-      <span class="font-light">{{ landing_hero_text|safe }}</span>
-    {% else %}
-      <span class="font-light">Your AI team,</span>
-      <span class="font-normal bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">always on</span>
+      {% if landing_hero_text %}
+        <span class="font-light">{{ landing_hero_text|safe }}</span>
+      {% else %}
+      <span class="font-light">AI recruiting agents,</span>
+      <span class="font-normal bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">always sourcing</span>
     {% endif %}
   </h1>
-  <p class="mt-5 text-base sm:text-lg text-gray-500 max-w-2xl mx-auto leading-relaxed">Gobii agents are virtual coworkers with their own identity, memory, and&nbsp;tools. Email&nbsp;them <i data-lucide="mail" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>. Text&nbsp;them <i data-lucide="message-square" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>. They work <span class="font-medium text-violet-600">24/7</span>.</p>
+  <p class="mt-5 text-base sm:text-lg text-gray-500 max-w-2xl mx-auto leading-relaxed">Gobii agents source candidates, research profiles, draft outreach, and keep your hiring pipeline moving <span class="font-medium text-violet-600">24/7</span>.</p>
 </div>
 {% endif %}
