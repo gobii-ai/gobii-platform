@@ -790,6 +790,18 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(hero_button)
         self.assertEqual(self._normalized_button_text(hero_button), "Source Qualified Candidates")
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_home_auto_typed_text_matches_job_description_prefix(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Paste the job description")
+        self.assertContains(response, " for a senior backend engineer role.")
+        self.assertContains(response, " for a founding account executive role.")
+        self.assertNotContains(response, " source qualified candidates from this senior backend engineer job description.")
+        self.assertNotContains(response, " parse this job description")
+        self.assertNotContains(response, " build a qualified shortlist")
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     def test_home_cta_text_shows_trial_when_authenticated_user_requires_trial(self):
         user = get_user_model().objects.create_user(
