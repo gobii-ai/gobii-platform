@@ -291,10 +291,13 @@ class TokenUsageTrackingTest(TestCase):
         """Browser-use tasks should store the cost breakdown returned by the agent run."""
         from api.tasks.browser_agent_tasks import _process_browser_use_task_core
 
+        self.agent.execution_environment = "eval"
+        self.agent.save(update_fields=["execution_environment"])
         task = BrowserUseAgentTask.objects.create(
             agent=self.browser_agent,
             user=self.user,
             prompt="Track costs",
+            eval_run=self.eval_run,
         )
 
         token_usage = {
