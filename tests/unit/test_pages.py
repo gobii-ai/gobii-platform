@@ -108,10 +108,11 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        title = "Acme - Enter a Job Description. Get Qualified Candidates."
+        title = "Acme - AI Agents for Recruiting Operations"
         description = (
-            "Paste a job description into Acme and get qualified candidates sourced, "
-            "researched, and organized for recruiter review."
+            "Acme helps recruiting teams automate repetitive sourcing, candidate "
+            "research, shortlist preparation, and workflow handoff across the tools "
+            "they already use."
         )
         image_url = "https://gobii.ai/static/images/gobii_og_image_1200x630.png"
 
@@ -135,7 +136,7 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find("meta", property="og:image:height")["content"], "630")
         self.assertEqual(
             soup.find("meta", property="og:image:alt")["content"],
-            "Acme qualified candidate sourcing platform preview",
+            "Acme AI recruiting operations platform preview",
         )
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:card"})["content"],
@@ -149,7 +150,7 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find("meta", attrs={"name": "twitter:image"})["content"], image_url)
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],
-            "Acme qualified candidate sourcing platform preview",
+            "Acme AI recruiting operations platform preview",
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -371,11 +372,11 @@ class HomePageTests(TestCase):
         )
 
     @override_settings(PUBLIC_BRAND_NAME="Acme", GOBII_PROPRIETARY_MODE=True)
-    def test_home_page_has_proprietary_qualified_candidate_meta_description(self):
+    def test_home_page_has_proprietary_recruiting_ops_meta_description(self):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Paste a job description into Acme and get qualified candidates sourced, researched, and organized for recruiter review.">',
+            '<meta name="description" content="Acme helps recruiting teams automate repetitive sourcing, candidate research, shortlist preparation, and workflow handoff across the tools they already use.">',
         )
 
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
@@ -776,28 +777,40 @@ class HomePageTests(TestCase):
         self.assertEqual(self._normalized_button_text(auth_hero_button), "Spawn Agent")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    def test_home_cta_text_is_candidate_sourcing_specific_in_proprietary_mode(self):
+    def test_home_cta_text_is_recruiting_ops_specific_in_proprietary_mode(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
 
         soup = BeautifulSoup(response.content, "html.parser")
-        self.assertIn("Get qualified candidates.", soup.get_text(" "))
-        self.assertIn("Enter a job description.", soup.get_text(" "))
-        self.assertNotIn("Enter a job description. Get qualified candidates.", soup.get_text(" "))
+        page_text = soup.get_text(" ")
+        self.assertIn("AI agents for recruiting operations", page_text)
+        self.assertIn(
+            "Gobii helps recruiting teams automate repetitive sourcing, candidate research, "
+            "shortlist preparation, and workflow handoff across the tools they already use.",
+            page_text,
+        )
+        self.assertNotIn("Get qualified candidates.", page_text)
+        self.assertNotIn("Enter a job description. Gobii builds the shortlist.", page_text)
         hero_form = soup.find("form", {"id": "create-agent-form"})
         self.assertIsNotNone(hero_form)
+        hero_markup = str(hero_form)
+        self.assertNotIn("data-integrations-inline", hero_markup)
+        self.assertNotIn("LinkedIn", hero_markup)
         hero_button = hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(hero_button)
-        self.assertEqual(self._normalized_button_text(hero_button), "Source Qualified Candidates")
+        self.assertEqual(self._normalized_button_text(hero_button), "Automate recruiting ops")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_auto_typed_text_matches_job_description_prefix(self):
+    def test_home_prompt_placeholder_matches_recruiting_ops_copy(self):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Paste the job description")
-        self.assertContains(response, " for a senior backend engineer role.")
-        self.assertContains(response, " for a founding account executive role.")
+        self.assertContains(
+            response,
+            "Paste a job description. Gobii will research candidates, prepare a shortlist, and generate hiring-manager briefs.",
+        )
+        self.assertNotContains(response, " for a senior backend engineer role.")
+        self.assertNotContains(response, " for a founding account executive role.")
         self.assertNotContains(response, " source qualified candidates from this senior backend engineer job description.")
         self.assertNotContains(response, " parse this job description")
         self.assertNotContains(response, " build a qualified shortlist")
@@ -811,7 +824,7 @@ class HomePageTests(TestCase):
         source_links = [
             link
             for link in soup.find_all("a", {"href": "#create-agent-form"})
-            if "Source Qualified Candidates" in link.get_text(" ", strip=True)
+            if "Automate recruiting ops" in link.get_text(" ", strip=True)
         ]
         self.assertGreaterEqual(len(source_links), 1)
         self.assertContains(response, "#create-agent-form")
@@ -1481,12 +1494,13 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "http://testserver/llms-full.txt")
         self.assertContains(response, "https://docs.gobii.ai/")
-        self.assertContains(response, "Gobii solves one problem")
-        self.assertContains(response, "enter a job description, get qualified candidates")
-        self.assertContains(response, "## Candidate Sourcing")
+        self.assertContains(response, "Gobii is focused on recruiting operations")
+        self.assertContains(response, "AI agents for recruiting operations")
+        self.assertContains(response, "## Recruiting Operations")
         self.assertNotContains(response, "http://testserver/solutions/")
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
+        self.assertNotContains(response, "LinkedIn")
 
     def test_llms_full_txt_is_served_from_root(self):
         response = self.client.get("/llms-full.txt")
@@ -1495,12 +1509,13 @@ class LlmsTxtTests(TestCase):
         self.assertEqual(response["Content-Type"], "text/plain")
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "## Overview")
-        self.assertContains(response, "turn a job description into a recruiter-reviewed candidate shortlist")
-        self.assertContains(response, "## Candidate Sourcing")
+        self.assertContains(response, "automate repetitive sourcing, candidate research")
+        self.assertContains(response, "## Recruiting Operations")
         self.assertContains(response, "Public template and solution pages are no longer the primary product surface.")
         self.assertNotContains(response, "http://testserver/solutions/")
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
+        self.assertNotContains(response, "LinkedIn")
 
 
 @tag("batch_pages")

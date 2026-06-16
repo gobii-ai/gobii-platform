@@ -502,8 +502,7 @@
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
                     {% if settings.GOBII_PROPRIETARY_MODE %}
-                    <span>Paste the job description</span>
-                    <span id="charter-ghost-text"> for a senior backend engineer role.</span>
+                    <span id="charter-ghost-text">Paste a job description. Gobii will research candidates, prepare a shortlist, and generate hiring-manager briefs.</span>
                     {% else %}
                     <span>I want my Gobii to</span>
                     <span id="charter-ghost-text"> find 200 ideal customers and their emails.</span>
@@ -517,7 +516,7 @@
                 <!-- Button row -->
                 <div class="flex flex-col gap-3 p-3 relative z-[200] sm:flex-row sm:items-center sm:justify-between">
                   <div class="flex min-w-0 items-center gap-2">
-                    {% if homepage_integrations_enabled %}
+                    {% if homepage_integrations_enabled and not settings.GOBII_PROPRIETARY_MODE %}
                       <div class="flex items-center gap-2" data-integrations-inline>
                         {% if homepage_integrations_inline_builtins %}
                           <span class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Apps</span>
@@ -655,7 +654,7 @@
                       class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
                     >
                       {% if settings.GOBII_PROPRIETARY_MODE %}
-                        Source Qualified Candidates
+                        Automate recruiting ops
                       {% elif not user.is_authenticated or home_spawn_requires_trial %}
                         {% cta_text "cta_homepage_launch_btn_unauth" fallback="Start Free Trial" %}
                       {% else %}
@@ -893,7 +892,7 @@
       <div class="max-w-3xl mx-auto px-6 text-center">
         <h2 id="what-is-gobii-heading" class="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">What is Gobii?</h2>
         <p class="mt-4 text-base sm:text-lg leading-relaxed text-slate-600">
-          Paste the role. Gobii sources, researches, qualifies, and organizes candidates for review.
+          Gobii gives recruiting teams AI agents that operate real business software for sourcing, candidate research, shortlist preparation, and handoff work.
         </p>
       </div>
     </section>
@@ -1051,20 +1050,7 @@
 
       const homePerf = window.GobiiHomePerf;
       {% if settings.GOBII_PROPRIETARY_MODE %}
-      const baseScenarios = [
-        ' for a senior backend engineer role.',
-        ' for a founding account executive role.',
-        ' for an ML infrastructure engineer role.',
-        ' for a product designer role.',
-        ' for a Kubernetes-heavy sales engineer role.',
-        ' with must-have requirements for distributed systems experience.',
-        ' with location, compensation, and seniority requirements included.',
-        ' for a security engineering role open to relocation.',
-        ' for a recruiter-ready candidate shortlist.',
-        ' with required skills, nice-to-haves, and dealbreakers.',
-        ' for a go-to-market leader in New York.',
-        ' for a principal platform engineer role.'
-      ];
+      const baseScenarios = [];
       {% else %}
       const baseScenarios = [
         ' find 200 ideal customers and their emails.',
@@ -1098,6 +1084,10 @@
       textarea.addEventListener('blur', toggleGhostVisibility);
 
       toggleGhostVisibility();
+
+      {% if settings.GOBII_PROPRIETARY_MODE %}
+      return;
+      {% endif %}
 
       if (
         homePerf &&
