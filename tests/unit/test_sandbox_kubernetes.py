@@ -16,6 +16,7 @@ from api.services.sandbox_kubernetes import (
     _pod_readiness_summary,
     _pod_name,
 )
+from api.services.sandbox_compute import _SANDBOX_PROXY_CLEARED_ATTR
 
 SANDBOX_POD_RESOURCES = {
     "requests": {"cpu": "500m", "memory": "1Gi"},
@@ -606,6 +607,38 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             egress_service_name="sandbox-egress-agent-proxy-drift",
             no_proxy="localhost,127.0.0.1,.svc,.cluster.local",
         )
+
+    def test_deploy_or_resume_deletes_egress_proxy_when_session_proxy_was_cleared(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-proxy-cleared")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        setattr(session, _SANDBOX_PROXY_CLEARED_ATTR, True)
+        existing_pod = _build_pod_manifest(
+            pod_name="sandbox-agent-agent-proxy-cleared",
+            pvc_name="sandbox-workspace-agent-proxy-cleared",
+            namespace="default",
+            image="ghcr.io/example/sandbox:latest",
+            runtime_class="gvisor",
+            service_account="sandbox-sa",
+            configmap_name="sandbox-config",
+            secret_name="sandbox-secret",
+            agent_id="agent-proxy-cleared",
+            resources=SANDBOX_POD_RESOURCES,
+            workspace_volume_mode="pvc",
+        )
+        backend._delete_egress_proxy = Mock()
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(return_value=existing_pod)
+        backend._delete_pod = Mock()
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[True, True]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._delete_egress_proxy.assert_called_once_with(agent)
 
     def test_deploy_or_resume_recreates_sandbox_pod_when_resource_drifted(self):
         backend = self._backend()
