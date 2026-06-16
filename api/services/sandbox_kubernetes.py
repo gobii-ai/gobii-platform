@@ -381,6 +381,9 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             workspace_reset=workspace_reset,
         )
 
+    def cleanup_cleared_proxy(self, agent) -> None:
+        self._delete_egress_proxy(agent)
+
     def run_command(
         self,
         agent,

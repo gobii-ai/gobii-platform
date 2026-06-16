@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings, tag
@@ -13,10 +13,12 @@ from api.models import (
     ProxyServer,
 )
 from api.services.sandbox_compute import (
+    SandboxComputeService,
     SandboxComputeUnavailable,
     _SANDBOX_PROXY_CLEARED_ATTR,
     _active_conversation_channel,
     _allowed_env_keys,
+    _clear_proxy_for_session,
     _proxy_env_for_session,
     _select_proxy_for_session,
 )
@@ -192,6 +194,52 @@ class SandboxComputeProxySelectionTests(TestCase):
         session.refresh_from_db()
         self.assertIsNone(session.proxy_server)
         self.assertTrue(getattr(session, _SANDBOX_PROXY_CLEARED_ATTR))
+
+    def test_clear_proxy_for_session_uses_proxy_id_without_loading_relation(self):
+        session = AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.RUNNING,
+            proxy_server=self.inactive_proxy,
+        )
+        session = AgentComputeSession.objects.get(agent=self.agent)
+        self.assertNotIn("proxy_server", session._state.fields_cache)
+
+        with self.assertNumQueries(1):
+            _clear_proxy_for_session(self.agent, session, reason="inactive_proxy")
+
+        session.refresh_from_db()
+        self.assertIsNone(session.proxy_server)
+        self.assertTrue(getattr(session, _SANDBOX_PROXY_CLEARED_ATTR))
+
+    def test_required_proxy_failure_cleans_stale_egress_proxy(self):
+        session = AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.RUNNING,
+            proxy_server=self.inactive_proxy,
+        )
+        backend = Mock()
+
+        with patch("api.services.sandbox_compute._resolve_backend", return_value=backend), patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._proxy_required",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute.select_proxy_for_persistent_agent",
+            return_value=None,
+        ):
+            service = SandboxComputeService()
+            with self.assertRaisesMessage(
+                SandboxComputeUnavailable,
+                "No proxy server available for sandbox compute.",
+            ):
+                service._ensure_session(self.agent, source="test")
+
+        backend.cleanup_cleared_proxy.assert_called_once_with(self.agent)
+        backend.deploy_or_resume.assert_not_called()
+        session.refresh_from_db()
+        self.assertIsNone(session.proxy_server)
 
     def test_inactive_session_proxy_is_cleared_when_optional_proxy_unavailable(self):
         session = AgentComputeSession.objects.create(

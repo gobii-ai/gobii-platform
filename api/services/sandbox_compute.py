@@ -315,6 +315,9 @@ class SandboxComputeBackend:
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         raise NotImplementedError
 
+    def cleanup_cleared_proxy(self, agent) -> None:
+        return None
+
     def run_command(
         self,
         agent,
@@ -959,10 +962,21 @@ def _proxy_id(proxy: Any) -> Optional[str]:
     return str(proxy_id) if proxy_id else None
 
 
+def _safe_getattr(obj: Any, name: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    return getattr(obj, name, default)
+
+
 def _clear_proxy_for_session(agent, session: AgentComputeSession, *, reason: str) -> None:
-    old_proxy = getattr(session, "proxy_server", None)
-    old_proxy_id = _proxy_id(old_proxy) or _proxy_id(getattr(session, "proxy_server_id", None))
-    if old_proxy is None and not old_proxy_id:
+    old_proxy_id = _safe_getattr(session, "proxy_server_id", None)
+    if old_proxy_id is None:
+        old_proxy = _safe_getattr(session, "proxy_server", None)
+        old_proxy_id = _proxy_id(old_proxy)
+    else:
+        old_proxy_id = str(old_proxy_id)
+
+    if not old_proxy_id:
         return
 
     session.proxy_server = None
@@ -1360,7 +1374,12 @@ class SandboxComputeService:
             agent=agent,
             defaults={"state": AgentComputeSession.State.STOPPED},
         )
-        _select_proxy_for_session(agent, session)
+        try:
+            _select_proxy_for_session(agent, session)
+        except SandboxComputeUnavailable:
+            if getattr(session, _SANDBOX_PROXY_CLEARED_ATTR, False):
+                self._backend.cleanup_cleared_proxy(agent)
+            raise
         previous_state = session.state
         started = session.state != AgentComputeSession.State.RUNNING
         mode = "bootstrap" if started else "refresh"
