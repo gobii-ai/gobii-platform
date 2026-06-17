@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from api.models import (
     MCPServerConfig,
+    MCPServerOAuthCredential,
     MCPServerOAuthSession,
     PipedreamAppSelection,
     Organization,
@@ -289,6 +290,59 @@ class MCPServerCrudAPITests(TestCase):
         self.assertFalse(props["has_command"])
         self.assertTrue(props["is_active"])
         self.assertIsNone(track_kwargs.get("organization"))
+
+    @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
+    @patch("console.api_views._track_org_event_for_console")
+    @patch("console.api_views.get_mcp_manager")
+    def test_delete_org_oauth_server_does_not_schedule_discovery(
+        self,
+        mock_get_mcp_manager,
+        mock_track_event,
+        mock_schedule_discovery,
+    ):
+        org = Organization.objects.create(name="Delete Org", slug="delete-org", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(org.id)
+        session["context_name"] = org.name
+        session.save()
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.ORGANIZATION,
+            organization=org,
+            name="notion",
+            display_name="Notion",
+            url="https://mcp.notion.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+        )
+        credential = MCPServerOAuthCredential.objects.create(
+            server_config=server,
+            organization=org,
+            client_id="notion-client",
+            expires_at=timezone.now() - timedelta(minutes=5),
+        )
+        agent = _create_console_test_agent(user=self.user, organization=org, name="Notion Agent")
+        assignment = PersistentAgentMCPServer.objects.create(agent=agent, server_config=server)
+        mock_schedule_discovery.reset_mock()
+
+        response = self.client.delete(reverse("console-mcp-server-detail", args=[server.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(MCPServerConfig.objects.filter(id=server.id).exists())
+        self.assertFalse(MCPServerOAuthCredential.objects.filter(id=credential.id).exists())
+        self.assertFalse(PersistentAgentMCPServer.objects.filter(id=assignment.id).exists())
+        mock_schedule_discovery.assert_not_called()
+        mock_get_mcp_manager.return_value.remove_server.assert_called_once_with(str(server.id))
+        mock_track_event.assert_called_once()
+        track_args, track_kwargs = mock_track_event.call_args
+        self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_DELETED)
+        self.assertEqual(track_args[2]["server_id"], str(server.id))
+        self.assertEqual(track_args[2]["server_scope"], MCPServerConfig.Scope.ORGANIZATION)
+        self.assertEqual(track_kwargs.get("organization"), org)
 
     def test_create_server_validation_errors(self):
         response = self.client.post(
