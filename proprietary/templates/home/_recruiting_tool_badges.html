@@ -1,0 +1,18 @@
+{% load static %}
+<div class="flex flex-wrap items-center gap-2 {{ recruiting_tool_badges_class|default:'justify-center md:justify-start' }}" aria-label="Recruiting tools Gobii can work with">
+  <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Works with</span>
+  <span class="inline-flex items-center gap-1.5 rounded-full border border-blue-100 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm shadow-slate-900/5">
+    <img src="{% static 'images/integrations/pipedream/linkedin.svg' %}" alt="" width="20" height="20" class="h-5 w-5" loading="lazy" decoding="async">
+    <span>LinkedIn Recruiter</span>
+  </span>
+  <span class="inline-flex items-center gap-1.5 rounded-full border border-[#c9f0e6] bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm shadow-slate-900/5">
+    <span class="inline-flex h-5 w-5 items-center justify-center rounded-md bg-[#e6fff8] px-1" aria-hidden="true">
+      <img src="{% static 'images/integrations/proprietary/greenhouse.svg' %}" alt="" width="10" height="20" class="h-4 w-auto" loading="lazy" decoding="async">
+    </span>
+    <span>Greenhouse</span>
+  </span>
+  <span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-100 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm shadow-slate-900/5">
+    <img src="{% static 'images/integrations/pipedream/google_sheets.svg' %}" alt="" width="20" height="20" class="h-5 w-5" loading="lazy" decoding="async">
+    <span>Google Sheets</span>
+  </span>
+</div>

@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Recruiting Sourcing Automation for Teams and Agencies | Gobii{% endblock %}
+
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Talk to Gobii about AI agents for candidate sourcing, research, shortlist preparation, and recruiting workflow handoff across LinkedIn Recruiter, Greenhouse, Google Sheets, and your existing tools.">
+{% endblock %}
+
+{% block content %}
+<main id="main-content" class="relative overflow-hidden bg-white">
+  <section class="relative isolate pt-24 pb-20 sm:pt-32 lg:pb-28">
+    <div class="absolute inset-x-0 top-0 -z-10 h-[34rem] bg-[linear-gradient(180deg,rgba(124,58,237,0.16)_0%,rgba(255,255,255,0.92)_58%,#fff_100%)]" aria-hidden="true"></div>
+
+    <div class="mx-auto grid max-w-6xl grid-cols-1 gap-12 px-6 lg:grid-cols-2 lg:items-start">
+      <div class="max-w-2xl">
+        <span class="inline-flex items-center text-xs font-bold uppercase tracking-[0.24em] text-violet-600">For recruiting teams and agencies</span>
+        <h1 class="mt-5 text-4xl font-light leading-[1.08] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
+          Source more candidates without adding sourcing headcount.
+        </h1>
+        <p class="mt-6 text-lg leading-8 text-slate-600">
+          Give Gobii a role brief. We'll show you how AI agents can research candidates, prepare shortlists, write hiring-manager briefs, and hand off results in the recruiting software your team already uses.
+        </p>
+
+        <div class="mt-7">
+          {% include "home/_recruiting_tool_badges.html" %}
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-violet-100 bg-white/95 p-6 shadow-xl shadow-violet-950/10 sm:p-7 lg:ml-auto lg:max-w-md">
+        <div>
+          <h2 class="text-2xl font-light tracking-tight text-slate-950">Talk through your recruiting workflow</h2>
+          <p class="mt-3 text-sm leading-6 text-slate-600">
+            Tell us what you're hiring for, how sourcing works today, and whether you want managed <strong class="font-semibold text-slate-800">LinkedIn Recruiter</strong> automation.
+          </p>
+        </div>
+
+        <form
+          action="{% url 'pages:marketing_contact_request' %}"
+          method="post"
+          class="mt-7 space-y-4"
+          data-analytics-cta-id="recruiting_contact_form"
+          data-analytics-placement="recruiting_contact_page"
+          data-analytics-intent="contact_sales"
+          hx-post="{% url 'pages:marketing_contact_request' %}"
+          hx-target="#recruiting-contact-response"
+          hx-swap="innerHTML"
+        >
+          {% csrf_token %}
+          <input type="hidden" name="source" value="recruiting_contact_page">
+          <input type="hidden" name="source_page" value="recruiting_contact_form">
+
+          <div>
+            <label for="recruiting-contact-email" class="sr-only">Work email</label>
+            <input
+              id="recruiting-contact-email"
+              type="email"
+              name="email"
+              required
+              placeholder="Work email"
+              autocomplete="email"
+              class="w-full rounded-xl border border-violet-100 bg-white px-5 py-4 text-slate-900 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-200"
+            >
+          </div>
+
+          <div>
+            <label for="recruiting-contact-organization" class="sr-only">Company or agency</label>
+            <input
+              id="recruiting-contact-organization"
+              type="text"
+              name="organization"
+              placeholder="Company or agency"
+              autocomplete="organization"
+              class="w-full rounded-xl border border-violet-100 bg-white px-5 py-4 text-slate-900 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-200"
+            >
+          </div>
+
+          <div>
+            <label for="recruiting-contact-inquiry-type" class="sr-only">Recruiting team type</label>
+            <select
+              id="recruiting-contact-inquiry-type"
+              name="inquiry_type"
+              class="w-full rounded-xl border border-violet-100 bg-white px-5 py-4 text-slate-900 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-200"
+            >
+              <option value="">I am a...</option>
+              <option value="in_house_recruiting">In-house recruiting team</option>
+              <option value="recruiting_agency">Recruiting agency</option>
+              <option value="executive_search">Executive search firm</option>
+              <option value="independent_recruiter">Talent sourcer or independent recruiter</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="recruiting-contact-message" class="sr-only">Recruiting workflow details</label>
+            <textarea
+              id="recruiting-contact-message"
+              name="message"
+              rows="5"
+              placeholder="Tell us about your open roles, sourcing volume, current tools, and whether LinkedIn Recruiter is part of the workflow."
+              class="w-full rounded-xl border border-violet-100 bg-white px-5 py-4 text-slate-900 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-200"
+            ></textarea>
+          </div>
+
+          {% if settings.TURNSTILE_ENABLED and marketing_contact_form %}
+          <div class="flex justify-center">
+            {{ marketing_contact_form.turnstile }}
+          </div>
+          {% endif %}
+
+          <button
+            type="submit"
+            class="group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 px-8 py-4 text-sm font-semibold text-white shadow-lg shadow-violet-300/40 transition duration-200 hover:from-violet-700 hover:to-purple-600 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2"
+          >
+            Talk to Gobii
+            <svg class="h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+          </button>
+
+          <div id="recruiting-contact-response" class="text-left" aria-live="polite"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="mx-auto mt-12 grid max-w-6xl gap-4 px-6 sm:grid-cols-3">
+      <div class="rounded-xl border border-violet-100 bg-white p-4 shadow-sm shadow-violet-950/5">
+        <i data-lucide="search-check" class="h-5 w-5 text-violet-600" aria-hidden="true"></i>
+        <p class="mt-3 text-sm font-semibold text-slate-900">Candidate sourcing</p>
+        <p class="mt-1 text-sm leading-6 text-slate-600">Research role-fit candidates from your approved sources.</p>
+      </div>
+      <div class="rounded-xl border border-violet-100 bg-white p-4 shadow-sm shadow-violet-950/5">
+        <i data-lucide="clipboard-list" class="h-5 w-5 text-violet-600" aria-hidden="true"></i>
+        <p class="mt-3 text-sm font-semibold text-slate-900">Shortlist prep</p>
+        <p class="mt-1 text-sm leading-6 text-slate-600">Organize fit notes, profile links, and hiring-manager context.</p>
+      </div>
+      <div class="rounded-xl border border-violet-100 bg-white p-4 shadow-sm shadow-violet-950/5">
+        <i data-lucide="workflow" class="h-5 w-5 text-violet-600" aria-hidden="true"></i>
+        <p class="mt-3 text-sm font-semibold text-slate-900">Workflow handoff</p>
+        <p class="mt-1 text-sm leading-6 text-slate-600">Move results into LinkedIn Recruiter, Greenhouse, Sheets, or your process.</p>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

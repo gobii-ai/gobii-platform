@@ -6,11 +6,16 @@ class MarketingContactForm(forms.Form):
     SOURCE_CHOICES = (
         ("healthcare_landing_page", "Healthcare landing page"),
         ("defense_landing_page", "Defense landing page"),
+        ("recruiting_contact_page", "Recruiting contact page"),
     )
     INQUIRY_CHOICES = (
         ("", "I am a..."),
         ("agency", "Defense agency looking for integration partners"),
         ("contractor", "Defense contractor interested in partnership"),
+        ("in_house_recruiting", "In-house recruiting team"),
+        ("recruiting_agency", "Recruiting agency"),
+        ("executive_search", "Executive search firm"),
+        ("independent_recruiter", "Talent sourcer or independent recruiter"),
         ("other", "Other"),
     )
 

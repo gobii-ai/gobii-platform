@@ -109,11 +109,10 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        title = "Acme - AI Agents for Recruiting Operations"
+        title = "Acme - Source Candidates in the Tools Your Team Already Uses"
         description = (
-            "Acme helps recruiting teams automate repetitive sourcing, candidate "
-            "research, shortlist preparation, and workflow handoff across the tools "
-            "they already use."
+            "Give Acme a role brief. It researches candidates, prepares shortlists, "
+            "and hands off results in LinkedIn Recruiter, Greenhouse, and Google Sheets."
         )
         image_url = "https://gobii.ai/static/images/gobii_og_image_1200x630.png"
 
@@ -377,7 +376,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme helps recruiting teams automate repetitive sourcing, candidate research, shortlist preparation, and workflow handoff across the tools they already use.">',
+            '<meta name="description" content="Give Acme a role brief. It researches candidates, prepares shortlists, and hands off results in LinkedIn Recruiter, Greenhouse, and Google Sheets.">',
         )
 
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
@@ -778,28 +777,74 @@ class HomePageTests(TestCase):
         self.assertEqual(self._normalized_button_text(auth_hero_button), "Spawn Agent")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    def test_home_cta_text_is_recruiting_ops_specific_in_proprietary_mode(self):
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={
+            "enabled": True,
+            "builtins": [
+                {
+                    "slug": "linkedin",
+                    "name": "LinkedIn",
+                    "description": "Professional network",
+                    "icon_url": "https://example.com/linkedin.png",
+                },
+                {
+                    "slug": "google_sheets",
+                    "name": "Google Sheets",
+                    "description": "Spreadsheets",
+                    "icon_url": "https://example.com/sheets.png",
+                },
+                {
+                    "slug": "trello",
+                    "name": "Trello",
+                    "description": "Boards",
+                    "icon_url": "https://example.com/trello.png",
+                },
+            ],
+        },
+    )
+    def test_home_cta_text_is_recruiting_ops_specific_in_proprietary_mode(self, _mock_integrations):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
 
         soup = BeautifulSoup(response.content, "html.parser")
         page_text = soup.get_text(" ")
-        self.assertIn("AI agents for recruiting operations", page_text)
+        normalized_page_text = re.sub(r"\s+", " ", page_text)
+        normalized_page_text = normalized_page_text.replace(" ,", ",").replace(" ?", "?")
+        self.assertIn("Source candidates", normalized_page_text)
+        self.assertIn("in the tools your team already uses.", normalized_page_text)
         self.assertIn(
-            "Gobii helps recruiting teams automate repetitive sourcing, candidate research, "
-            "shortlist preparation, and workflow handoff across the tools they already use.",
-            page_text,
+            "Give Gobii a role brief. It researches candidates, prepares shortlists, "
+            "and hands off results in LinkedIn Recruiter, Greenhouse, and Google Sheets.",
+            normalized_page_text,
         )
-        self.assertNotIn("Get qualified candidates.", page_text)
-        self.assertNotIn("Enter a job description. Gobii builds the shortlist.", page_text)
+        self.assertIn("Need LinkedIn Recruiter?", normalized_page_text)
+        self.assertIn("Google Sheets", normalized_page_text)
+        self.assertNotIn("Get qualified candidates.", normalized_page_text)
+        self.assertNotIn("Enter a job description. Gobii builds the shortlist.", normalized_page_text)
         hero_form = soup.find("form", {"id": "create-agent-form"})
         self.assertIsNotNone(hero_form)
         hero_markup = str(hero_form)
-        self.assertNotIn("data-integrations-inline", hero_markup)
-        self.assertNotIn("LinkedIn", hero_markup)
+        self.assertIn("data-integrations-inline", hero_markup)
+        self.assertIn("data-integrations-open", hero_markup)
+        self.assertIn("Apps", hero_form.get_text(" ", strip=True))
+        self.assertEqual(hero_form.get("data-analytics-cta-id"), "home_hero")
+        self.assertEqual(hero_form.get("data-analytics-placement"), "hero")
+        self.assertEqual(hero_form.get("data-analytics-intent"), "spawn_agent")
         hero_button = hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(hero_button)
-        self.assertEqual(self._normalized_button_text(hero_button), "Automate recruiting ops")
+        self.assertEqual(self._normalized_button_text(hero_button), "Start sourcing")
+        self.assertIsNone(hero_form.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"}))
+        sales_link = soup.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"})
+        self.assertIsNotNone(sales_link)
+        self.assertEqual(sales_link.get("href"), reverse("pages:recruiting_contact"))
+        self.assertEqual(sales_link.get("data-analytics-placement"), "hero_below_form")
+        self.assertEqual(sales_link.get("data-analytics-intent"), "contact_sales")
+        self.assertIn("Talk to sales", sales_link.get_text(" ", strip=True))
+        response_text = response.content.decode("utf-8")
+        self.assertIn("images/integrations/pipedream/linkedin.svg", response_text)
+        self.assertIn("images/integrations/proprietary/greenhouse.svg", response_text)
+        self.assertIn("images/integrations/pipedream/google_sheets.svg", response_text)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_prompt_placeholder_matches_recruiting_ops_copy(self):
@@ -808,7 +853,7 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            "Paste a job description. Gobii will research candidates, prepare a shortlist, and generate hiring-manager briefs.",
+            "Paste a role brief. Gobii will source candidates, prepare a shortlist, and hand off results.",
         )
         self.assertNotContains(response, " for a senior backend engineer role.")
         self.assertNotContains(response, " for a founding account executive role.")
@@ -825,7 +870,7 @@ class HomePageTests(TestCase):
         source_links = [
             link
             for link in soup.find_all("a", {"href": "#create-agent-form"})
-            if "Automate recruiting ops" in link.get_text(" ", strip=True)
+            if "Start sourcing" in link.get_text(" ", strip=True)
         ]
         self.assertGreaterEqual(len(source_links), 1)
         self.assertContains(response, "#create-agent-form")
@@ -1170,6 +1215,88 @@ class HomePageTests(TestCase):
             owner_org=None,
         )
 
+
+@tag("batch_pages")
+class RecruitingContactPageTests(TestCase):
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_recruiting_contact_page_renders_dedicated_lead_form(self):
+        response = self.client.get(reverse("pages:recruiting_contact"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("marketing_contact_form", response.context)
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            "Talk to Gobii about AI agents for candidate sourcing, research, shortlist preparation, "
+            "and recruiting workflow handoff across LinkedIn Recruiter, Greenhouse, Google Sheets, "
+            "and your existing tools.",
+        )
+        page_text = soup.get_text(" ", strip=True)
+        self.assertIn("Source more candidates without adding sourcing headcount.", page_text)
+        self.assertIn("For recruiting teams and agencies", page_text)
+        self.assertIn("LinkedIn Recruiter", page_text)
+        self.assertIn("Greenhouse", page_text)
+        self.assertIn("Google Sheets", page_text)
+
+        form = soup.find("form", {"data-analytics-cta-id": "recruiting_contact_form"})
+        self.assertIsNotNone(form)
+        self.assertEqual(form.get("action"), reverse("pages:marketing_contact_request"))
+        self.assertEqual(form.get("data-analytics-placement"), "recruiting_contact_page")
+        self.assertEqual(form.find("input", {"name": "source"}).get("value"), "recruiting_contact_page")
+        self.assertEqual(form.find("input", {"name": "source_page"}).get("value"), "recruiting_contact_form")
+        self.assertIsNotNone(form.find("input", {"name": "email"}))
+        self.assertIsNotNone(form.find("input", {"name": "organization"}))
+        self.assertIsNotNone(form.find("textarea", {"name": "message"}))
+        inquiry_values = [
+            option.get("value")
+            for option in form.find("select", {"name": "inquiry_type"}).find_all("option")
+        ]
+        self.assertEqual(
+            inquiry_values,
+            ["", "in_house_recruiting", "recruiting_agency", "executive_search", "independent_recruiter", "other"],
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_recruiting_contact_page_redirects_in_community_mode(self):
+        response = self.client.get(reverse("pages:recruiting_contact"))
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/")
+
+    @override_settings(PUBLIC_CONTACT_EMAIL="hello@gobii.test", SUPPORT_EMAIL="support@gobii.test")
+    @patch("pages.views._track_web_event_for_request")
+    @patch("pages.views.send_mail")
+    def test_recruiting_contact_request_sends_distinct_lead_email(self, mock_send_mail, mock_track_event):
+        response = self.client.post(
+            reverse("pages:marketing_contact_request"),
+            {
+                "source": "recruiting_contact_page",
+                "email": "talent@example.com",
+                "organization": "Acme Recruiting",
+                "inquiry_type": "recruiting_agency",
+                "message": "We source 30 engineering roles per month and use LinkedIn Recruiter.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Thanks for reaching out. We will follow up shortly.")
+        mock_send_mail.assert_called_once()
+        send_mail_kwargs = mock_send_mail.call_args.kwargs
+        self.assertEqual(send_mail_kwargs["subject"], "Recruiting Contact Request")
+        self.assertEqual(send_mail_kwargs["recipient_list"], ["hello@gobii.test"])
+        self.assertIn("Recruiting contact request", send_mail_kwargs["html_message"])
+        self.assertIn("Recruiting agency", send_mail_kwargs["html_message"])
+        mock_track_event.assert_called_once()
+        self.assertEqual(mock_track_event.call_args.kwargs["event"], AnalyticsEvent.MARKETING_CONTACT_REQUEST_SUBMITTED)
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["properties"],
+            {
+                "source_page": "recruiting_contact_page",
+                "inquiry_type": "recruiting_agency",
+            },
+        )
+
+
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
     def test_landing_redirect(self):
@@ -1487,7 +1614,7 @@ class RobotsTxtTests(TestCase):
 
 @tag("batch_pages")
 class LlmsTxtTests(TestCase):
-    def test_llms_txt_is_served_from_root(self):
+    def test_llms_txt_is_served_from_root_in_community_mode(self):
         response = self.client.get("/llms.txt")
 
         self.assertEqual(response.status_code, 200)
@@ -1495,7 +1622,7 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "http://testserver/llms-full.txt")
         self.assertContains(response, "https://docs.gobii.ai/")
-        self.assertContains(response, "Gobii is focused on recruiting operations")
+        self.assertContains(response, "Gobii provides AI agents for recruiting operations")
         self.assertContains(response, "AI agents for recruiting operations")
         self.assertContains(response, "## Recruiting Operations")
         self.assertNotContains(response, "http://testserver/solutions/")
@@ -1503,7 +1630,21 @@ class LlmsTxtTests(TestCase):
         self.assertNotContains(response, "http://testserver/library/")
         self.assertNotContains(response, "LinkedIn")
 
-    def test_llms_full_txt_is_served_from_root(self):
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_llms_txt_uses_proprietary_sourcing_copy(self):
+        response = self.client.get("/llms.txt")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/plain")
+        self.assertContains(response, "Gobii helps recruiting teams source candidates in the tools they already use")
+        self.assertContains(response, "LinkedIn Recruiter, Greenhouse, and Google Sheets")
+        self.assertContains(response, "http://testserver/solutions/")
+        self.assertContains(response, "http://testserver/solutions/engineering/")
+        self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
+        self.assertNotContains(response, "http://testserver/pretrained-workers/")
+        self.assertNotContains(response, "http://testserver/library/")
+
+    def test_llms_full_txt_is_served_from_root_in_community_mode(self):
         response = self.client.get("/llms-full.txt")
 
         self.assertEqual(response.status_code, 200)
@@ -1517,6 +1658,21 @@ class LlmsTxtTests(TestCase):
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
         self.assertNotContains(response, "LinkedIn")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_llms_full_txt_uses_proprietary_sourcing_copy(self):
+        response = self.client.get("/llms-full.txt")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/plain")
+        self.assertContains(response, "turn role briefs into completed sourcing work")
+        self.assertContains(response, "LinkedIn Recruiter, Greenhouse, and Google Sheets")
+        self.assertContains(response, "## Recruiting Operations")
+        self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
+        self.assertContains(response, "Solutions: http://testserver/solutions/")
+        self.assertContains(response, "Developers: http://testserver/solutions/engineering/")
+        self.assertNotContains(response, "http://testserver/pretrained-workers/")
+        self.assertNotContains(response, "http://testserver/library/")
 
 
 @tag("batch_pages")
@@ -1587,7 +1743,7 @@ class CanonicalLinkTests(TestCase):
 @tag("batch_pages")
 class SitemapTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_sitemap_includes_template_detail_urls_but_not_library_indexes(self):
+    def test_sitemap_includes_template_and_solution_urls_but_not_library_indexes(self):
         PersistentAgentTemplate.objects.update_or_create(
             code="sitemap-project-manager",
             defaults={
@@ -1607,20 +1763,25 @@ class SitemapTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("<loc>http://example.com/</loc>", content)
+        self.assertIn("<loc>http://example.com/recruiting/contact/</loc>", content)
         self.assertIn(
             "<loc>http://example.com/library/team-ops/sitemap-project-manager/</loc>",
             content,
         )
-        self.assertNotIn("http://example.com/solutions/", content)
+        self.assertIn("<loc>http://example.com/solutions/recruiting/</loc>", content)
+        self.assertIn("<loc>http://example.com/solutions/engineering/</loc>", content)
         self.assertNotIn("<loc>http://example.com/library/</loc>", content)
         self.assertNotIn("<loc>http://example.com/library/team-ops/</loc>", content)
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
-    def test_removed_public_template_and_solution_urls_redirect_home(self):
+    def test_public_template_and_solution_urls_redirect_home_in_community_mode(self):
         for path in (
             "/solutions/",
             "/solutions/recruiting/",
             "/solutions/recruiting/candidate-sourcing/",
+            "/solutions/sales/",
+            "/solutions/operations/",
+            "/recruiting/contact/",
             "/library/",
             "/library/recruiting/",
             "/pretrained-workers/",
@@ -1630,6 +1791,19 @@ class SitemapTests(TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 301)
                 self.assertEqual(response["Location"], "/")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_solution_urls_render_again(self):
+        for path in (
+            "/solutions/",
+            "/solutions/recruiting/",
+            "/solutions/recruiting/candidate-sourcing/",
+            "/solutions/sales/",
+            "/solutions/engineering/",
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_proprietary_sitemap_excludes_redirects_and_checkout_start_urls(self):
@@ -1647,7 +1821,9 @@ class SitemapTests(TestCase):
     def test_community_sitemap_includes_local_docs(self):
         response = self.client.get("/sitemap.xml")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("http://example.com/docs/", response.content.decode())
+        content = response.content.decode()
+        self.assertIn("http://example.com/docs/", content)
+        self.assertNotIn("http://example.com/solutions/", content)
 
 
 @tag("batch_pages")
@@ -2457,35 +2633,59 @@ class RemovedPretrainedWorkerSurfaceTests(TestCase):
 
 
 @tag("batch_pages")
-class RemovedPublicMarketingSurfaceTests(TestCase):
+class RestoredPublicMarketingSurfaceTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_header_omits_solution_and_template_navigation(self):
+    def test_home_header_restores_solution_and_developer_navigation(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertIsNotNone(soup.find("a", {"href": reverse("pages:solutions")}))
+        self.assertIsNotNone(
+            soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "recruiting"})})
+        )
+        developer_links = soup.find_all(
+            "a",
+            {"href": reverse("pages:solution", kwargs={"slug": "engineering"})},
+        )
+        self.assertGreaterEqual(len(developer_links), 1)
+        self.assertIsNone(soup.find("a", {"href": reverse("pages:library")}))
+        self.assertIn("Solutions", soup.get_text(" ", strip=True))
+        self.assertNotIn("Discover", soup.get_text(" ", strip=True))
+        self.assertIn("Developers", soup.get_text(" ", strip=True))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_home_header_keeps_solution_and_developer_navigation_hidden_in_community_mode(self):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
         self.assertIsNone(soup.find("a", {"href": reverse("pages:solutions")}))
-        self.assertIsNone(soup.find("a", {"href": reverse("pages:library")}))
         self.assertIsNone(
             soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "engineering"})})
         )
+        self.assertIsNone(soup.find("a", {"href": reverse("pages:library")}))
         self.assertNotIn("Solutions", soup.get_text(" ", strip=True))
         self.assertNotIn("Discover", soup.get_text(" ", strip=True))
         self.assertNotIn("Developers", soup.get_text(" ", strip=True))
 
-    def test_removed_solution_urls_redirect_home(self):
-        for path in (
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_restored_solution_urls_render(self):
+        live_paths = (
             "/solutions/",
             "/solutions/recruiting/",
             "/solutions/recruiting/candidate-sourcing/",
             "/solutions/sales/",
-            "/solutions/operations/",
-        ):
+            "/solutions/engineering/",
+        )
+        for path in live_paths:
             with self.subTest(path=path):
                 response = self.client.get(path)
 
-                self.assertEqual(response.status_code, 301)
-                self.assertEqual(response["Location"], "/")
+                self.assertEqual(response.status_code, 200)
+
+        response = self.client.get("/solutions/operations/")
+        self.assertEqual(response.status_code, 404)
 
 
 @tag("batch_pages")

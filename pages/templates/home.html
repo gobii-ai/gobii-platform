@@ -502,7 +502,7 @@
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
                     {% if settings.GOBII_PROPRIETARY_MODE %}
-                    <span id="charter-ghost-text">Paste a job description. Gobii will research candidates, prepare a shortlist, and generate hiring-manager briefs.</span>
+                    <span id="charter-ghost-text">Paste a role brief. Gobii will source candidates, prepare a shortlist, and hand off results.</span>
                     {% else %}
                     <span>I want my Gobii to</span>
                     <span id="charter-ghost-text"> find 200 ideal customers and their emails.</span>
@@ -516,10 +516,10 @@
                 <!-- Button row -->
                 <div class="flex flex-col gap-3 p-3 relative z-[200] sm:flex-row sm:items-center sm:justify-between">
                   <div class="flex min-w-0 items-center gap-2">
-                    {% if homepage_integrations_enabled and not settings.GOBII_PROPRIETARY_MODE %}
+                    {% if homepage_integrations_enabled %}
                       <div class="flex items-center gap-2" data-integrations-inline>
+                        <span class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Apps</span>
                         {% if homepage_integrations_inline_builtins %}
-                          <span class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Apps</span>
                           <div class="flex items-center -space-x-1.5">
                             {% for app in homepage_integrations_inline_builtins %}
                               <span class="relative inline-flex h-7 w-7 items-center justify-center rounded-lg border-2 border-white bg-indigo-50 text-[9px] font-semibold uppercase text-indigo-700 shadow-sm" title="{{ app.name }}">
@@ -548,7 +548,7 @@
                     {% endif %}
                   </div>
 
-                  <div class="flex items-center justify-end gap-3">
+                  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
                     {% if llm_intelligence %}
                     <div
                       class="relative"
@@ -654,7 +654,7 @@
                       class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
                     >
                       {% if settings.GOBII_PROPRIETARY_MODE %}
-                        Automate recruiting ops
+                        Start sourcing
                       {% elif not user.is_authenticated or home_spawn_requires_trial %}
                         {% cta_text "cta_homepage_launch_btn_unauth" fallback="Start Free Trial" %}
                       {% else %}
@@ -680,6 +680,24 @@
 
             </div>
           </form>
+          {% if settings.GOBII_PROPRIETARY_MODE %}
+            <div class="mt-4 text-center text-sm text-slate-500">
+              <span>Need <strong class="font-semibold text-slate-700">LinkedIn Recruiter</strong>?</span>
+              <a
+                href="{% url 'pages:recruiting_contact' %}"
+                class="ml-1 inline-flex items-center gap-1 font-semibold text-violet-700 transition hover:text-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2"
+                data-analytics-cta-id="home_linkedin_recruiter_sales"
+                data-analytics-placement="hero_below_form"
+                data-analytics-intent="contact_sales"
+                data-analytics-label="Talk to sales for LinkedIn Recruiter"
+              >
+                Talk to sales
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
+                </svg>
+              </a>
+            </div>
+          {% endif %}
       </div>
 
       <div id="intelligence-gate-modal" class="fixed inset-0 z-[300] hidden" aria-hidden="true">
@@ -892,7 +910,7 @@
       <div class="max-w-3xl mx-auto px-6 text-center">
         <h2 id="what-is-gobii-heading" class="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">What is Gobii?</h2>
         <p class="mt-4 text-base sm:text-lg leading-relaxed text-slate-600">
-          Gobii gives recruiting teams AI agents that operate real business software for sourcing, candidate research, shortlist preparation, and handoff work.
+          Gobii gives recruiting teams AI agents for sourcing, candidate research, shortlist preparation, and handoff inside the software your team already uses.
         </p>
       </div>
     </section>

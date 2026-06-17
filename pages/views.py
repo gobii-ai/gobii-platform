@@ -242,7 +242,7 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "trello": "images/integrations/pipedream/trello.svg",
 }
 HOMEPAGE_META_TITLE_SUFFIX = "AI Coworkers for Teams With Real Work to Do"
-HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX = "AI Agents for Recruiting Operations"
+HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX = "Source Candidates in the Tools Your Team Already Uses"
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
@@ -1040,9 +1040,9 @@ class HomePage(TemplateView):
         if settings.GOBII_PROPRIETARY_MODE:
             context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX}"
             context["home_meta_description"] = (
-                f"{home_brand_name} helps recruiting teams automate repetitive sourcing, "
-                "candidate research, shortlist preparation, and workflow handoff across "
-                "the tools they already use."
+                f"Give {home_brand_name} a role brief. It researches candidates, prepares "
+                "shortlists, and hands off results in LinkedIn Recruiter, Greenhouse, "
+                "and Google Sheets."
             )
             context["home_social_image_alt"] = f"{home_brand_name} AI recruiting operations platform preview"
         else:
@@ -3678,6 +3678,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
             items.insert(6, 'proprietary:careers')
             items.insert(7, 'proprietary:blog_index')
             items.insert(8, 'proprietary:comparisons')
+            items.insert(9, 'pages:recruiting_contact')
         else:
             items.append('pages:docs_index')
         return items
@@ -3769,6 +3770,8 @@ class SolutionsSitemap(sitemaps.Sitemap):
     priority = 0.5
 
     def items(self):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return []
         try:
             return list(SolutionView.DEDICATED_TEMPLATES.keys())
         except Exception as e:
@@ -3783,6 +3786,22 @@ class SupportView(TemplateView):
     pass
 
 
+class RecruitingContactView(TemplateView):
+    template_name = "recruiting_contact.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("/", permanent=True)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["canonical_url"] = self.request.build_absolute_uri(reverse("pages:recruiting_contact"))
+        context["marketing_contact_form"] = MarketingContactForm()
+        context["suppress_preline"] = True
+        return context
+
+
 class MarketingContactRequestView(View):
     SOURCE_CONFIG = {
         "healthcare_landing_page": {
@@ -3792,6 +3811,10 @@ class MarketingContactRequestView(View):
         "defense_landing_page": {
             "subject": "Defense Contact Request",
             "label": "Defense contact request",
+        },
+        "recruiting_contact_page": {
+            "subject": "Recruiting Contact Request",
+            "label": "Recruiting contact request",
         },
     }
 
@@ -3937,6 +3960,11 @@ class ClearSignupTrackingView(View):
 class SolutionsIndexView(TemplateView):
     template_name = "solutions/index.html"
 
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("/", permanent=True)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["suppress_preline"] = True
@@ -4080,6 +4108,8 @@ class SolutionView(TemplateView):
         return reverse(route_name, kwargs=route_kwargs)
 
     def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("/", permanent=True)
         if kwargs.get('slug', '') not in self.DEDICATED_TEMPLATES:
             raise Http404("Solution not found")
         return super().dispatch(request, *args, **kwargs)

@@ -19,6 +19,10 @@ from .views import (
     LandingLaunchView,
     ClearSignupTrackingView,
     EngineeringProSignupView,
+    SolutionsIndexView,
+    SolutionView,
+    SolutionsSitemap,
+    RecruitingContactView,
     MarketingContactRequestView,
     SpecialAccessStartView,
     SpecialAccessView,
@@ -60,6 +64,7 @@ if settings.GOBII_PROPRIETARY_MODE:
 
 sitemaps['comparisons'] = ComparisonsSitemap
 sitemaps['public_templates'] = PublicTemplateSitemap
+sitemaps['solutions'] = SolutionsSitemap
 
 _home_redirect = RedirectView.as_view(url="/", permanent=True)
 
@@ -82,11 +87,13 @@ urlpatterns = [
     path("pretrained-workers/<slug:slug>/", _home_redirect, name="pretrained_worker_detail"),
     path("pretrained-workers/<slug:slug>/hire/", _home_redirect, name="pretrained_worker_hire"),
     path("pretrained-workers/<slug:slug>/spawn/", _home_redirect, name="pretrained_worker_launch"),
-    path("solutions/", _home_redirect, name="solutions"),
+    path("solutions/", SolutionsIndexView.as_view(), name="solutions"),
     path("solutions/engineering/pro-signup/", EngineeringProSignupView.as_view(), name="engineering_pro_signup"),
+    path("recruiting/contact/", RecruitingContactView.as_view(), name="recruiting_contact"),
     path(
         "solutions/recruiting/candidate-sourcing/",
-        _home_redirect,
+        SolutionView.as_view(),
+        {"slug": "recruiting/candidate-sourcing"},
         name="solution_recruiting_candidate_sourcing",
     ),
     path("special-access/", SpecialAccessView.as_view(), name="special_access"),
@@ -104,8 +111,8 @@ urlpatterns = [
     path("g/<slug:code>/spawn/", LandingLaunchView.as_view(), name="landing_launch"),
     path("g/<slug:code>/", LandingRedirectView.as_view(), name="landing_redirect"),
 
-    # Removed public solution pages. Redirect old URLs to the single focused homepage.
-    path("solutions/<slug:slug>/", _home_redirect, name="solution"),
+    # Solutions
+    path("solutions/<slug:slug>/", SolutionView.as_view(), name="solution"),
 
     # Stripe webhooks
     path("stripe/", include("djstripe.urls", namespace="djstripe")),
