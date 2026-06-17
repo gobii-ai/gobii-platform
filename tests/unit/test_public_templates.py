@@ -265,6 +265,64 @@ class PublicTemplateRouteTests(TestCase):
         )
 
     @tag("batch_public_templates")
+    def test_organization_scoped_template_is_not_publicly_accessible_by_code(self):
+        owner = get_user_model().objects.create_user(
+            username="private-template-owner",
+            email="private-template-owner@example.com",
+            password="pw",
+        )
+        organization = Organization.objects.create(
+            name="Private Template Org",
+            slug="private-template-org",
+            created_by=owner,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="private-project-manager",
+            organization=organization,
+            public_profile=None,
+            slug="",
+            display_name="Private Project Manager",
+            tagline="Private org-only template.",
+            description="Private org-only template.",
+            charter="Run the private org-only template.",
+            category="Team Ops",
+            is_active=True,
+        )
+
+        response = self.client.get("/library/team-ops/private-project-manager/")
+
+        self.assertEqual(response.status_code, 404)
+
+    @tag("batch_public_templates")
+    def test_organization_scoped_template_is_not_publicly_accessible_by_slug(self):
+        owner = get_user_model().objects.create_user(
+            username="private-template-slug-owner",
+            email="private-template-slug-owner@example.com",
+            password="pw",
+        )
+        organization = Organization.objects.create(
+            name="Private Template Slug Org",
+            slug="private-template-slug-org",
+            created_by=owner,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="private-project-manager-internal",
+            organization=organization,
+            public_profile=None,
+            slug="private-project-manager",
+            display_name="Private Project Manager",
+            tagline="Private org-only template.",
+            description="Private org-only template.",
+            charter="Run the private org-only template.",
+            category="Team Ops",
+            is_active=True,
+        )
+
+        response = self.client.get("/library/team-ops/private-project-manager/")
+
+        self.assertEqual(response.status_code, 404)
+
+    @tag("batch_public_templates")
     def test_curated_template_with_custom_slug_resolves_by_slug(self):
         PersistentAgentTemplate.objects.create(
             code="custom-slug-curated-template-code",

@@ -1878,17 +1878,23 @@ def _get_active_public_template_by_slug(template_slug: str | None):
     if not normalized_slug:
         return None
 
-    template = (
-        PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(slug=normalized_slug, is_active=True)
-        .first()
-    )
-    if template:
-        return template
-
     return (
         PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(code=normalized_slug, is_active=True)
+        .filter(
+            Q(slug=normalized_slug) | Q(code=normalized_slug),
+            organization__isnull=True,
+            is_active=True,
+        )
+        .order_by(
+            Case(
+                When(slug=normalized_slug, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField(),
+            ),
+            "priority",
+            Lower("display_name"),
+            "id",
+        )
         .first()
     )
 
@@ -1901,7 +1907,7 @@ def _get_active_public_template_by_category_route(category_slug: str | None, tem
 
     candidates = (
         PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(is_active=True)
+        .filter(organization__isnull=True, is_active=True)
         .filter(Q(slug=normalized_template_slug) | Q(code=normalized_template_slug))
         .order_by("priority", Lower("display_name"), "id")
     )
