@@ -192,7 +192,10 @@ class PersistentAgentProvisioningService:
                 persistent_agent.save(update_fields=["daily_credit_limit"])
 
             if template_code:
-                template = PretrainedWorkerTemplateService.get_template_by_code(template_code)
+                template = PretrainedWorkerTemplateService.get_template_by_code(
+                    template_code,
+                    organization=organization,
+                )
                 if template is None:
                     raise PersistentAgentProvisioningError(f"Unknown template code '{template_code}'.")
 

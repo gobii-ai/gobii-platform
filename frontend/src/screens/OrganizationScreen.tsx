@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Building2, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
+import { Bot, Building2, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
 import {
+  createOrganizationTemplate,
+  deactivateOrganizationTemplate,
   fetchCurrentOrganization,
+  fetchCurrentOrganizationTemplates,
   inviteOrganizationMember,
+  launchOrganizationTemplate,
   removeOrganizationMember,
   resendOrganizationInvite,
   revokeOrganizationInvite,
   updateCurrentOrganizationName,
   updateOrganizationMemberRole,
   type CurrentOrganizationPayload,
+  type CurrentOrganizationTemplatesPayload,
   type OrganizationInvite,
   type OrganizationMember,
+  type OrganizationTemplate,
 } from '../api/organization'
 import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
@@ -26,6 +32,9 @@ type ConfirmAction = {
 } | {
   kind: 'revoke-invite'
   invite: OrganizationInvite
+} | {
+  kind: 'deactivate-template'
+  template: OrganizationTemplate
 }
 
 const SOLUTIONS_PARTNER_ROLE = 'solutions_partner'
@@ -110,11 +119,14 @@ function ConfirmOrganizationActionModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isRemove = action.kind === 'remove-member'
-  const title = isRemove ? 'Remove Member' : 'Revoke Invite'
-  const subject = isRemove ? action.member.email : action.invite.email
-  const subtitle = isRemove
-    ? `${subject} will lose access to this organization.`
-    : `${subject} will no longer be able to accept this invitation.`
+  const isTemplateDeactivate = action.kind === 'deactivate-template'
+  const title = isTemplateDeactivate ? 'Deactivate Template' : isRemove ? 'Remove Member' : 'Revoke Invite'
+  const subject = isRemove ? action.member.email : isTemplateDeactivate ? action.template.name : action.invite.email
+  const subtitle = isTemplateDeactivate
+    ? `${subject} will no longer appear for this organization.`
+    : isRemove
+      ? `${subject} will lose access to this organization.`
+      : `${subject} will no longer be able to accept this invitation.`
 
   const handleConfirm = async () => {
     setBusy(true)
@@ -135,8 +147,8 @@ function ConfirmOrganizationActionModal({
       title={title}
       description={subtitle}
       onClose={onClose}
-      icon={isRemove ? UserMinus : ShieldAlert}
-      confirmLabel={isRemove ? 'Remove Member' : 'Revoke Invite'}
+      icon={isTemplateDeactivate ? Bot : isRemove ? UserMinus : ShieldAlert}
+      confirmLabel={isTemplateDeactivate ? 'Deactivate Template' : isRemove ? 'Remove Member' : 'Revoke Invite'}
       busy={busy}
       danger
       onConfirm={handleConfirm}
@@ -229,12 +241,86 @@ function AddMemberModal({
   )
 }
 
+function CreateTemplateModal({
+  sourceAgents,
+  sourceAgentId,
+  errors,
+  busy,
+  onSourceAgentChange,
+  onClose,
+  onSubmit,
+}: {
+  sourceAgents: CurrentOrganizationTemplatesPayload['sourceAgents']
+  sourceAgentId: string
+  errors: string[]
+  busy: boolean
+  onSourceAgentChange: (agentId: string) => void
+  onClose: () => void
+  onSubmit: (event: FormEvent) => void
+}) {
+  const hasSourceAgents = sourceAgents.length > 0
+
+  return (
+    <ModalForm
+      id="organization-create-template-form"
+      title="Create Template"
+      subtitle="Clone one of this organization's agents into a private template."
+      onClose={onClose}
+      onSubmit={onSubmit}
+      widthClass="sm:max-w-lg"
+      icon={Bot}
+      iconBgClass="bg-blue-100"
+      iconColorClass="text-blue-600"
+      dismissible={!busy}
+      submitLabel="Create Template"
+      submittingLabel="Creating..."
+      submitting={busy}
+      submitDisabled={!hasSourceAgents || !sourceAgentId}
+      errorMessages={errors}
+    >
+      {hasSourceAgents ? (
+        <label htmlFor="organization-template-source-agent" className="block text-sm font-medium text-slate-700">
+          Source Agent
+          <select
+            id="organization-template-source-agent"
+            value={sourceAgentId}
+            onChange={(event) => onSourceAgentChange(event.target.value)}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            disabled={busy}
+          >
+            {sourceAgents.map((agent) => (
+              <option key={agent.id} value={agent.id}>{agent.name}</option>
+            ))}
+          </select>
+          <span className="mt-2 block text-xs font-normal text-slate-500">
+            {busy
+              ? 'Generating the template from this agent. This can take up to a minute.'
+              : 'Template generation can take up to a minute.'}
+          </span>
+        </label>
+      ) : (
+        <p className="text-sm text-slate-600">Create an organization-owned agent before turning it into a template.</p>
+      )}
+    </ModalForm>
+  )
+}
+
 export function OrganizationScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['current-organization'] as const, [])
   const { data, error, isLoading } = useQuery({
     queryKey,
     queryFn: ({ signal }) => fetchCurrentOrganization(signal),
+  })
+  const templateQueryKey = useMemo(() => ['current-organization-templates'] as const, [])
+  const {
+    data: templateData,
+    error: templateQueryError,
+    isLoading: templatesLoading,
+  } = useQuery({
+    queryKey: templateQueryKey,
+    queryFn: ({ signal }) => fetchCurrentOrganizationTemplates(signal),
+    enabled: Boolean(data),
   })
 
   const [nameDraft, setNameDraft] = useState('')
@@ -251,6 +337,12 @@ export function OrganizationScreen() {
   const [memberError, setMemberError] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
   const [addMemberOpen, setAddMemberOpen] = useState(false)
+  const [createTemplateOpen, setCreateTemplateOpen] = useState(false)
+  const [templateSourceAgentId, setTemplateSourceAgentId] = useState('')
+  const [templateErrors, setTemplateErrors] = useState<string[]>([])
+  const [templateMessage, setTemplateMessage] = useState<string | null>(null)
+  const [templateBusy, setTemplateBusy] = useState(false)
+  const [templateLaunchBusyId, setTemplateLaunchBusyId] = useState<string | null>(null)
 
   useEffect(() => {
     if (data) {
@@ -261,9 +353,21 @@ export function OrganizationScreen() {
     }
   }, [data, inviteRole])
 
+  useEffect(() => {
+    const firstSourceAgent = templateData?.sourceAgents[0]
+    if (!firstSourceAgent || templateSourceAgentId) {
+      return
+    }
+    setTemplateSourceAgentId(firstSourceAgent.id)
+  }, [templateData, templateSourceAgentId])
+
   const updateCachedData = (nextData: CurrentOrganizationPayload) => {
     queryClient.setQueryData(queryKey, nextData)
     publishOrganizationContext(nextData)
+  }
+
+  const updateCachedTemplateData = (nextData: CurrentOrganizationTemplatesPayload) => {
+    queryClient.setQueryData(templateQueryKey, nextData)
   }
 
   const handleNameSubmit = async (event: FormEvent) => {
@@ -341,8 +445,51 @@ export function OrganizationScreen() {
       updateCachedData(nextData)
       return
     }
+    if (action.kind === 'deactivate-template') {
+      const nextData = await deactivateOrganizationTemplate(action.template.id)
+      updateCachedTemplateData(nextData)
+      setTemplateMessage(`${action.template.name} deactivated.`)
+      return
+    }
     const nextData = await revokeOrganizationInvite(action.invite.token)
     updateCachedData(nextData)
+  }
+
+  const handleCreateTemplateSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!templateSourceAgentId) {
+      setTemplateErrors(['Choose an agent to clone.'])
+      return
+    }
+    setTemplateBusy(true)
+    setTemplateErrors([])
+    setTemplateMessage(null)
+    try {
+      const nextData = await createOrganizationTemplate(templateSourceAgentId)
+      updateCachedTemplateData(nextData)
+      setCreateTemplateOpen(false)
+      setTemplateMessage(nextData.created ? 'Template created.' : 'Template already exists for that agent.')
+    } catch (err) {
+      setTemplateErrors(formatErrors(err, 'Unable to create template.'))
+    } finally {
+      setTemplateBusy(false)
+    }
+  }
+
+  const handleLaunchTemplate = async (template: OrganizationTemplate) => {
+    setTemplateLaunchBusyId(template.id)
+    setTemplateErrors([])
+    setTemplateMessage(null)
+    try {
+      const payload = await launchOrganizationTemplate(template.id)
+      if (!navigateWithinApp(payload.redirectUrl)) {
+        window.location.assign(payload.redirectUrl)
+      }
+    } catch (err) {
+      setTemplateErrors(formatErrors(err, 'Unable to use template.'))
+    } finally {
+      setTemplateLaunchBusyId(null)
+    }
   }
 
   const billingUrl = buildBillingPathForCurrentAppRoute()
@@ -379,6 +526,12 @@ export function OrganizationScreen() {
   const canInviteSolutionsPartnerWithoutSeats = data.roles.some((roleOption) => roleOption.value === SOLUTIONS_PARTNER_ROLE)
   const addMemberDisabled = noSeatsAvailable && !canInviteSolutionsPartnerWithoutSeats
   const addMemberDisabledLabel = addMemberDisabled ? 'No seats available' : undefined
+  const templates = templateData?.templates ?? []
+  const sourceAgents = templateData?.sourceAgents ?? []
+  const canManageTemplates = Boolean(templateData?.viewer.canManageTemplates)
+  const templateQueryErrorMessage = templateQueryError
+    ? formatErrors(templateQueryError, 'Unable to load organization templates.')[0]
+    : null
 
   return (
     <div className="profile-screen profile-screen--embedded organization-screen">
@@ -439,6 +592,99 @@ export function OrganizationScreen() {
             {nameMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{nameMessage}</p> : null}
           </div>
         </form>
+      </section>
+
+      <section className="profile-screen__section">
+        <div className="profile-screen__section-header organization-screen__section-header">
+          <div className="organization-screen__section-title">
+            <div className="profile-screen__section-icon" aria-hidden="true">
+              <Bot className="h-4 w-4" />
+            </div>
+            <div>
+              <h2>Templates</h2>
+              <p>{templates.length} organization template{templates.length === 1 ? '' : 's'}</p>
+            </div>
+          </div>
+          {canManageTemplates ? (
+            <button
+              type="button"
+              className="profile-screen__button profile-screen__button--primary"
+              onClick={() => {
+                setTemplateErrors([])
+                setTemplateMessage(null)
+                setTemplateSourceAgentId(sourceAgents[0]?.id ?? '')
+                setCreateTemplateOpen(true)
+              }}
+              disabled={!sourceAgents.length || templateBusy}
+              title={!sourceAgents.length ? 'Create an organization agent first' : undefined}
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Create Template
+            </button>
+          ) : null}
+        </div>
+        {templateMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{templateMessage}</p> : null}
+        {templateQueryErrorMessage ? <p className="profile-screen__feedback profile-screen__feedback--error">{templateQueryErrorMessage}</p> : null}
+        {templateErrors.map((message) => (
+          <p key={message} className="profile-screen__feedback profile-screen__feedback--error">{message}</p>
+        ))}
+        {templatesLoading ? (
+          <p className="profile-screen__muted">Loading templates...</p>
+        ) : templates.length > 0 ? (
+          <div className="organization-screen__table-wrap">
+            <table className="organization-screen__table">
+              <thead>
+                <tr>
+                  <th>Template</th>
+                  <th>Source</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {templates.map((template) => (
+                  <tr key={template.id}>
+                    <td>
+                      <p className="organization-screen__primary-text">{template.name}</p>
+                      <p className="profile-screen__muted">{template.category} - {template.tagline}</p>
+                      {template.scheduleDescription ? (
+                        <p className="profile-screen__muted">{template.scheduleDescription}</p>
+                      ) : null}
+                    </td>
+                    <td>
+                      <p className="organization-screen__primary-text">{template.sourceAgentName ?? '-'}</p>
+                      {template.createdBy ? <p className="profile-screen__muted">Created by {template.createdBy}</p> : null}
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          className="profile-screen__button profile-screen__button--primary"
+                          onClick={() => void handleLaunchTemplate(template)}
+                          disabled={templateLaunchBusyId === template.id}
+                        >
+                          <Play className="h-4 w-4" aria-hidden="true" />
+                          {templateLaunchBusyId === template.id ? 'Opening...' : 'Use Template'}
+                        </button>
+                        {canManageTemplates ? (
+                          <button
+                            type="button"
+                            className="profile-screen__button profile-screen__button--danger"
+                            onClick={() => setConfirmAction({ kind: 'deactivate-template', template })}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            Deactivate
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="profile-screen__muted">No organization templates yet.</p>
+        )}
       </section>
 
       <section className="profile-screen__section">
@@ -606,6 +852,21 @@ export function OrganizationScreen() {
             }
           }}
           onSubmit={handleInviteSubmit}
+        />
+      ) : null}
+      {createTemplateOpen ? (
+        <CreateTemplateModal
+          sourceAgents={sourceAgents}
+          sourceAgentId={templateSourceAgentId}
+          errors={templateErrors}
+          busy={templateBusy}
+          onSourceAgentChange={setTemplateSourceAgentId}
+          onClose={() => {
+            if (!templateBusy) {
+              setCreateTemplateOpen(false)
+            }
+          }}
+          onSubmit={handleCreateTemplateSubmit}
         />
       ) : null}
     </div>

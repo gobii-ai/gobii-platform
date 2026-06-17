@@ -1783,6 +1783,7 @@ class PretrainedWorkerHireView(View):
 def _active_public_template_queryset():
     return PersistentAgentTemplate.objects.select_related("public_profile").filter(
         public_profile__isnull=False,
+        organization__isnull=True,
         is_active=True,
     )
 
@@ -1890,6 +1891,7 @@ def _get_active_public_template_by_legacy_path(handle: str | None, template_slug
             slug=template_slug,
             template__is_active=True,
             template__public_profile__isnull=False,
+            template__organization__isnull=True,
         )
         .first()
     )
@@ -3652,7 +3654,7 @@ class PublicTemplateSitemap(sitemaps.Sitemap):
     def items(self):
         return (
             PersistentAgentTemplate.objects.select_related("public_profile")
-            .filter(public_profile__isnull=False, is_active=True)
+            .filter(public_profile__isnull=False, organization__isnull=True, is_active=True)
             .exclude(slug="")
         )
 
@@ -3671,6 +3673,7 @@ class PublicTemplateCategorySitemap(sitemaps.Sitemap):
         category_values = (
             PersistentAgentTemplate.objects.filter(
                 public_profile__isnull=False,
+                organization__isnull=True,
                 is_active=True,
             )
             .exclude(slug="")

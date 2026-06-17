@@ -279,7 +279,11 @@ class ReferralService:
                 try:
                     template = PersistentAgentTemplate.objects.select_related(
                         'created_by'
-                    ).get(code=attribution.signup_template_code)
+                    ).get(
+                        code=attribution.signup_template_code,
+                        public_profile__isnull=False,
+                        organization__isnull=True,
+                    )
                     referring_user = template.created_by
                     grant_type = GrantTypeChoices.REFERRAL_SHARED
                     template_code = attribution.signup_template_code
@@ -415,7 +419,11 @@ class ReferralService:
         try:
             template = PersistentAgentTemplate.objects.select_related(
                 'created_by'
-            ).get(code=template_code)
+            ).get(
+                code=template_code,
+                public_profile__isnull=False,
+                organization__isnull=True,
+            )
         except PersistentAgentTemplate.DoesNotExist:
             logger.warning(
                 "Template referral code not found: code=%s new_user=%s",
@@ -691,7 +699,11 @@ class ReferralService:
             try:
                 template = PersistentAgentTemplate.objects.select_related(
                     'created_by'
-                ).get(code=attribution.signup_template_code)
+                ).get(
+                    code=attribution.signup_template_code,
+                    public_profile__isnull=False,
+                    organization__isnull=True,
+                )
                 referring_user = template.created_by
                 grant_type = GrantTypeChoices.REFERRAL_SHARED
                 template_code = attribution.signup_template_code

@@ -243,6 +243,8 @@ from console.daily_credit import (
 )
 from console.agent_creation import (
     AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+    AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
     AGENT_TEMPLATE_SOURCE_SESSION_KEY,
     enable_agent_sms_contact,
 )
@@ -674,6 +676,7 @@ def _persist_quick_create_draft(
 ) -> None:
     template_code = request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
     template_source = (request.session.get(AGENT_TEMPLATE_SOURCE_SESSION_KEY) or "").strip()
+    template_organization_id = str(request.session.get(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY) or "").strip()
     preserve_template_attribution = (
         request.session.get("agent_charter_source") == "template" and bool(template_code)
     )
@@ -704,11 +707,16 @@ def _persist_quick_create_draft(
             request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = template_source
         else:
             request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
+        if template_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE and template_organization_id:
+            request.session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = template_organization_id
+        else:
+            request.session.pop(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, None)
     else:
         # Treat immersive quick-create as a fresh custom draft, not a continuation
         # of a previously selected template.
         request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
         request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
+        request.session.pop(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, None)
     request.session.modified = True
 
 
@@ -3436,7 +3444,7 @@ def _serialize_agent_template_share_state(request: HttpRequest, agent: Persisten
     if public_profile:
         template = (
             PersistentAgentTemplate.objects
-            .filter(public_profile=public_profile, source_agent=agent)
+            .filter(public_profile=public_profile, source_agent=agent, organization__isnull=True)
             .order_by("-created_at")
             .first()
         )
@@ -3489,7 +3497,7 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
             return JsonResponse({"error": "An unexpected error occurred."}, status=500)
 
         template = result.template
-        if not template.slug or not result.public_profile.handle:
+        if not template.slug or not result.public_profile or not result.public_profile.handle:
             return JsonResponse({"error": "Template URL could not be generated."}, status=500)
 
         if result.created:

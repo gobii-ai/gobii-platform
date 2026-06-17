@@ -35,7 +35,7 @@ def _normalize_category(value: str | None) -> str:
 def _library_queryset():
     return (
         PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(public_profile__isnull=False, is_active=True)
+        .filter(public_profile__isnull=False, organization__isnull=True, is_active=True)
         .exclude(slug="")
     )
 
@@ -156,6 +156,7 @@ def _get_legacy_library_handle_template(template_slug: str | None):
             slug=template_slug,
             template__is_active=True,
             template__public_profile__isnull=False,
+            template__organization__isnull=True,
         )
         .first()
     )
@@ -201,6 +202,7 @@ def _build_library_payload(
     library_total_likes = (
         PersistentAgentTemplateLike.objects.filter(
             template__public_profile__isnull=False,
+            template__organization__isnull=True,
             template__is_active=True,
         )
         .exclude(template__slug="")
@@ -209,6 +211,7 @@ def _build_library_payload(
     official_total_likes = (
         PersistentAgentTemplateLike.objects.filter(
             template__public_profile__isnull=False,
+            template__organization__isnull=True,
             template__is_active=True,
             template__is_official=True,
         )
@@ -401,6 +404,7 @@ class LibraryAgentLikeAPIView(View):
             .filter(
                 id=agent_uuid,
                 public_profile__isnull=False,
+                organization__isnull=True,
                 is_active=True,
             )
             .exclude(slug="")

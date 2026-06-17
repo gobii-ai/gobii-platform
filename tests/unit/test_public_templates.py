@@ -4,7 +4,13 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase, tag
 
 from agents.services import PretrainedWorkerTemplateService
-from api.models import PersistentAgentTemplate, PublicProfile
+from api.models import (
+    Organization,
+    PersistentAgentTemplate,
+    PersistentAgentTemplateLike,
+    PersistentAgentTemplateUrlAlias,
+    PublicProfile,
+)
 from api.public_profiles import validate_public_handle
 from api.services.template_clone import TemplateCloneService
 
@@ -102,3 +108,27 @@ class TemplateServiceDbTests(TestCase):
         resolved = PretrainedWorkerTemplateService.get_template_by_code("db-template")
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.display_name, template.display_name)
+
+    @tag("batch_public_templates")
+    def test_organization_template_requires_matching_organization(self):
+        owner = get_user_model().objects.create_user(username="org-template-owner", email="org-template-owner@example.com", password="pw")
+        org = Organization.objects.create(name="Template Org", slug="template-org", created_by=owner)
+        other_org = Organization.objects.create(name="Other Template Org", slug="other-template-org", created_by=owner)
+        template = PersistentAgentTemplate.objects.create(
+            code="org-scoped-template",
+            organization=org,
+            display_name="Org Scoped Template",
+            tagline="Org-only",
+            description="Only this organization can use it.",
+            charter="Use org context.",
+            category="Operations",
+            is_active=True,
+        )
+
+        self.assertIsNone(PretrainedWorkerTemplateService.get_template_by_code(template.code))
+        self.assertIsNone(PretrainedWorkerTemplateService.get_template_by_code(template.code, organization=other_org))
+
+        resolved = PretrainedWorkerTemplateService.get_template_by_code(template.code, organization=org)
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.display_name, template.display_name)
+        self.assertNotIn(template.code, [item.code for item in PretrainedWorkerTemplateService.get_active_templates()])

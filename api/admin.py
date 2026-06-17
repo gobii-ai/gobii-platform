@@ -6609,18 +6609,20 @@ class PublicProfileAdmin(admin.ModelAdmin):
 @admin.register(PersistentAgentTemplate)
 class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     list_display = (
-        'display_name', 'category', 'is_official', 'recommended_contact_channel', 'base_schedule',
+        'display_name', 'category', 'organization', 'is_official', 'recommended_contact_channel', 'base_schedule',
         'schedule_jitter_minutes', 'priority', 'is_active', 'updated_at'
     )
-    list_filter = ('category', 'is_official', 'recommended_contact_channel', 'is_active')
+    list_filter = ('category', 'organization', 'is_official', 'recommended_contact_channel', 'is_active')
     list_editable = ('is_official',)
     search_fields = (
         'display_name', 'tagline', 'seo_meta_description', 'description',
         'description_markdown', 'best_for', 'example_outputs', 'required_inputs',
-        'how_it_works', 'customization_notes', 'expected_tools_summary', 'code'
+        'how_it_works', 'customization_notes', 'expected_tools_summary', 'code',
+        'organization__name',
     )
     ordering = ('priority', 'display_name')
     readonly_fields = ('created_at', 'updated_at')
+    autocomplete_fields = ('organization', 'public_profile', 'source_agent', 'created_by')
     prepopulated_fields = {"code": ("display_name",)}
     fieldsets = (
         ('Identity', {
@@ -6628,6 +6630,9 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
         }),
         ('Public Template', {
             'fields': ('public_profile', 'slug', 'is_official', 'source_agent', 'created_by')
+        }),
+        ('Organization Template', {
+            'fields': ('organization',)
         }),
         ('Narrative', {
             'fields': ('description', 'description_markdown', 'charter')

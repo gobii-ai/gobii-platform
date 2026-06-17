@@ -262,7 +262,7 @@ class PretrainedWorkerTemplateService:
     @classmethod
     def _db_templates(cls, *, include_inactive: bool = False) -> list[PretrainedWorkerTemplateDefinition]:
         Template = apps.get_model("api", "PersistentAgentTemplate")
-        qs = Template.objects.filter(public_profile__isnull=True)
+        qs = Template.objects.filter(public_profile__isnull=True, organization__isnull=True)
         if not include_inactive:
             qs = qs.filter(is_active=True)
         qs = qs.order_by("priority", "display_name")
@@ -281,7 +281,7 @@ class PretrainedWorkerTemplateService:
         return templates
 
     @classmethod
-    def get_template_by_code(cls, code: str):
+    def get_template_by_code(cls, code: str, *, organization: Any = None):
         if not code:
             return None
         normalized = code.strip().lower()
@@ -289,7 +289,12 @@ class PretrainedWorkerTemplateService:
         Template = apps.get_model("api", "PersistentAgentTemplate")
         db_template = Template.objects.filter(code=normalized, is_active=True).first()
         if db_template:
-            return cls._template_from_model(db_template)
+            organization_id = getattr(organization, "id", organization)
+            if db_template.organization_id is None:
+                return cls._template_from_model(db_template)
+            if organization_id and str(db_template.organization_id) == str(organization_id):
+                return cls._template_from_model(db_template)
+            return None
         for template in cls._all_templates():
             if template.code == normalized and getattr(template, "is_active", True):
                 return template
