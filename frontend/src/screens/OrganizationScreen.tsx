@@ -264,7 +264,7 @@ function CreateTemplateModal({
     <ModalForm
       id="organization-create-template-form"
       title="Create Template"
-      subtitle="Clone one of this organization's agents into a private template."
+      subtitle="Snapshot one of this organization's agents into a private template."
       onClose={onClose}
       onSubmit={onSubmit}
       widthClass="sm:max-w-lg"
@@ -468,7 +468,7 @@ export function OrganizationScreen() {
       const nextData = await createOrganizationTemplate(templateSourceAgentId)
       updateCachedTemplateData(nextData)
       setCreateTemplateOpen(false)
-      setTemplateMessage(nextData.created ? 'Template created.' : 'Template already exists for that agent.')
+      setTemplateMessage('Template created.')
     } catch (err) {
       setTemplateErrors(formatErrors(err, 'Unable to create template.'))
     } finally {
@@ -653,6 +653,7 @@ export function OrganizationScreen() {
                     <td>
                       <p className="organization-screen__primary-text">{template.sourceAgentName ?? '-'}</p>
                       {template.createdBy ? <p className="profile-screen__muted">Created by {template.createdBy}</p> : null}
+                      {template.createdAt ? <p className="profile-screen__muted">Created {formatDate(template.createdAt)}</p> : null}
                     </td>
                     <td>
                       <div className="flex flex-wrap justify-end gap-2">

@@ -266,6 +266,59 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertEqual(resp.status_code, 403)
         self.assertFalse(PersistentAgentTemplate.objects.filter(source_agent=source_agent).exists())
 
+    @patch("api.services.template_clone.TemplateCloneService._generate_template")
+    def test_current_organization_templates_api_creates_new_snapshot_for_existing_source_agent(self, mock_generate_template):
+        source_agent = self._create_org_agent()
+
+        def build_generated_template(_agent, payload):
+            return {
+                "display_name": f"Snapshot for {payload['charter']}",
+                "tagline": "Reusable workflow",
+                "description": "A reusable private workflow.",
+                "charter": payload["charter"],
+                "base_schedule": "@daily",
+                "schedule_jitter_minutes": 0,
+                "default_tools": [],
+                "recommended_contact_channel": "email",
+                "category": "Operations",
+                "event_triggers": [],
+            }
+
+        mock_generate_template.side_effect = build_generated_template
+        self._login_in_org_context(self.admin)
+
+        first_resp = self.client.post(
+            reverse("console-current-organization-templates"),
+            data=json.dumps({"sourceAgentId": str(source_agent.id)}),
+            content_type="application/json",
+        )
+        self.assertEqual(first_resp.status_code, 201)
+        first_template_id = first_resp.json()["templateId"]
+
+        source_agent.charter = "Keep the org on track, with a sharper renewal process."
+        source_agent.save(update_fields=["charter"])
+
+        second_resp = self.client.post(
+            reverse("console-current-organization-templates"),
+            data=json.dumps({"sourceAgentId": str(source_agent.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(second_resp.status_code, 201)
+        self.assertTrue(second_resp.json()["created"])
+        second_template_id = second_resp.json()["templateId"]
+        self.assertNotEqual(first_template_id, second_template_id)
+        self.assertEqual(PersistentAgentTemplate.objects.filter(source_agent=source_agent, is_active=True).count(), 2)
+        self.assertEqual(mock_generate_template.call_count, 2)
+        self.assertEqual(
+            [item["id"] for item in second_resp.json()["templates"][:2]],
+            [second_template_id, first_template_id],
+        )
+        self.assertTrue(second_resp.json()["templates"][0]["createdAt"])
+
+        second_template = PersistentAgentTemplate.objects.get(id=second_template_id)
+        self.assertEqual(second_template.charter, source_agent.charter)
+
     def test_owner_can_update_organization_name(self):
         self._login_in_org_context(self.owner)
 

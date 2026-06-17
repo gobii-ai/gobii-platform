@@ -120,18 +120,6 @@ class TemplateCloneService:
         if agent.organization_id is None:
             raise TemplateCloneError("Only organization agents can be cloned into organization templates.")
 
-        existing = (
-            PersistentAgentTemplate.objects.filter(
-                source_agent=agent,
-                organization=agent.organization,
-                is_active=True,
-            )
-            .order_by("-created_at")
-            .first()
-        )
-        if existing:
-            return TemplateCloneResult(template=existing, created=False)
-
         payload = TemplateCloneService._build_template_payload(agent)
         generated = TemplateCloneService._generate_template(agent, payload)
         cleaned = TemplateCloneService._sanitize_template_payload(generated, payload)

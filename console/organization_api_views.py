@@ -179,6 +179,7 @@ def _serialize_organization_template(template: PersistentAgentTemplate) -> dict:
             if created_by
             else None
         ),
+        "createdAt": template.created_at.isoformat() if template.created_at else None,
         "scheduleDescription": PretrainedWorkerTemplateService.describe_schedule(template.base_schedule),
     }
 
@@ -192,7 +193,7 @@ def _organization_template_queryset(org: Organization):
             public_profile__isnull=True,
             is_active=True,
         )
-        .order_by("priority", "display_name")
+        .order_by("priority", "-created_at", "display_name")
     )
 
 

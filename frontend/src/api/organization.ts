@@ -33,6 +33,7 @@ export type OrganizationTemplate = {
   category: string
   sourceAgentName: string | null
   createdBy: string | null
+  createdAt: string | null
   scheduleDescription: string | null
 }
 
