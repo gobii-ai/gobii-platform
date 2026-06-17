@@ -1586,6 +1586,7 @@ class CanonicalLinkTests(TestCase):
 
 @tag("batch_pages")
 class SitemapTests(TestCase):
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_sitemap_includes_template_detail_urls_but_not_library_indexes(self):
         PersistentAgentTemplate.objects.update_or_create(
             code="sitemap-project-manager",

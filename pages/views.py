@@ -3716,10 +3716,12 @@ class PublicTemplateSitemap(sitemaps.Sitemap):
     priority = 0.7
 
     def items(self):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return []
         return (
             PersistentAgentTemplate.objects.select_related("public_profile")
-            .filter(public_profile__isnull=False, organization__isnull=True, is_active=True)
-            .exclude(slug="")
+            .filter(organization__isnull=True, is_active=True)
+            .exclude(code="")
             .order_by("priority", Lower("display_name"), "id")
         )
 
