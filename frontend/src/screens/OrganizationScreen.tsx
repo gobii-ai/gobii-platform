@@ -529,6 +529,7 @@ export function OrganizationScreen() {
   const templates = templateData?.templates ?? []
   const sourceAgents = templateData?.sourceAgents ?? []
   const canManageTemplates = Boolean(templateData?.viewer.canManageTemplates)
+  const canCreateTemplates = Boolean(templateData?.viewer.canCreateTemplates)
   const templateQueryErrorMessage = templateQueryError
     ? formatErrors(templateQueryError, 'Unable to load organization templates.')[0]
     : null
@@ -548,8 +549,8 @@ export function OrganizationScreen() {
       {!canEditOrganization && !canManageMembers ? (
         <SettingsBanner
           variant="embedded"
-          title="Read-Only Access"
-          subtitle={`Your ${data.viewer.roleLabel} role can view this organization, but cannot edit settings or membership.`}
+          title="Limited Access"
+          subtitle={`Your ${data.viewer.roleLabel} role cannot edit organization settings or membership.`}
         />
       ) : null}
 
@@ -605,7 +606,7 @@ export function OrganizationScreen() {
               <p>{templates.length} organization template{templates.length === 1 ? '' : 's'}</p>
             </div>
           </div>
-          {canManageTemplates ? (
+          {canCreateTemplates ? (
             <button
               type="button"
               className="profile-screen__button profile-screen__button--primary"

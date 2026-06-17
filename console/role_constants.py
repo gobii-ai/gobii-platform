@@ -18,3 +18,10 @@ MEMBER_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.ADMIN,
     OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
 }
+
+ORGANIZATION_TEMPLATE_CREATE_ROLES = {
+    OrganizationMembership.OrgRole.OWNER,
+    OrganizationMembership.OrgRole.ADMIN,
+    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+    OrganizationMembership.OrgRole.MEMBER,
+}

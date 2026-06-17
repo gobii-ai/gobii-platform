@@ -49,6 +49,7 @@ export type CurrentOrganizationTemplatesPayload = {
   }
   viewer: {
     canManageTemplates: boolean
+    canCreateTemplates: boolean
   }
   templates: OrganizationTemplate[]
   sourceAgents: OrganizationTemplateSourceAgent[]

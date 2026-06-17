@@ -27,7 +27,7 @@ from console.agent_creation import (
     AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
     AGENT_TEMPLATE_SOURCE_SESSION_KEY,
 )
-from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
+from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES, ORGANIZATION_TEMPLATE_CREATE_ROLES
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.urls import IMMERSIVE_APP_BASE_PATH
 
@@ -206,8 +206,9 @@ def _serialize_source_agent(agent: PersistentAgent) -> dict:
 
 def _serialize_organization_templates(org: Organization, membership: OrganizationMembership) -> dict:
     can_manage_templates = membership.role in MEMBER_MANAGE_ROLES
+    can_create_templates = membership.role in ORGANIZATION_TEMPLATE_CREATE_ROLES
     source_agents = []
-    if can_manage_templates:
+    if can_create_templates:
         source_agents = [
             _serialize_source_agent(agent)
             for agent in (
@@ -225,6 +226,7 @@ def _serialize_organization_templates(org: Organization, membership: Organizatio
         },
         "viewer": {
             "canManageTemplates": can_manage_templates,
+            "canCreateTemplates": can_create_templates,
         },
         "templates": [
             _serialize_organization_template(template)
@@ -354,8 +356,8 @@ class CurrentOrganizationTemplateAPIView(LoginRequiredMixin, View):
             return _json_error(str(exc), status=404)
         if error:
             return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage templates.", status=403)
+        if membership.role not in ORGANIZATION_TEMPLATE_CREATE_ROLES:
+            return _json_error("You do not have permission to create templates.", status=403)
 
         payload, error = _parse_json_body(request)
         if error:

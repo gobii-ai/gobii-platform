@@ -192,6 +192,7 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertFalse(payload["viewer"]["canManageTemplates"])
+        self.assertTrue(payload["viewer"]["canCreateTemplates"])
         self.assertEqual(payload["sourceAgents"], [])
         self.assertEqual([item["id"] for item in payload["templates"]], [str(template.id)])
 
@@ -253,8 +254,21 @@ class CurrentOrganizationAPITests(TestCase):
         template.refresh_from_db()
         self.assertFalse(template.is_active)
 
-    def test_current_organization_templates_api_rejects_create_for_member_role(self):
+    @patch("api.services.template_clone.TemplateCloneService._generate_template")
+    def test_current_organization_templates_api_allows_member_role_to_create_without_deactivate(self, mock_generate_template):
         source_agent = self._create_org_agent()
+        mock_generate_template.return_value = {
+            "display_name": "Member Generated Template",
+            "tagline": "Reusable workflow",
+            "description": "A reusable private workflow.",
+            "charter": "Run this reusable private workflow.",
+            "base_schedule": "@daily",
+            "schedule_jitter_minutes": 0,
+            "default_tools": [],
+            "recommended_contact_channel": "email",
+            "category": "Operations",
+            "event_triggers": [],
+        }
         self._login_in_org_context(self.member)
 
         resp = self.client.post(
@@ -263,8 +277,21 @@ class CurrentOrganizationAPITests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(resp.status_code, 403)
-        self.assertFalse(PersistentAgentTemplate.objects.filter(source_agent=source_agent).exists())
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertTrue(payload["created"])
+        self.assertFalse(payload["viewer"]["canManageTemplates"])
+        self.assertTrue(payload["viewer"]["canCreateTemplates"])
+        template = PersistentAgentTemplate.objects.get(source_agent=source_agent)
+        self.assertEqual(template.created_by, self.member)
+
+        delete_resp = self.client.delete(
+            reverse("console-current-organization-template-detail", kwargs={"template_id": template.id}),
+        )
+
+        self.assertEqual(delete_resp.status_code, 403)
+        template.refresh_from_db()
+        self.assertTrue(template.is_active)
 
     @patch("api.services.template_clone.TemplateCloneService._generate_template")
     def test_current_organization_templates_api_creates_new_snapshot_for_existing_source_agent(self, mock_generate_template):
