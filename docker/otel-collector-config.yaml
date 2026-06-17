@@ -10,9 +10,6 @@ processors:
   batch:
 
 exporters:
-  nop:
-    # Keep the collector available for app OTLP exports after Grafana Cloud
-    # was canceled, but avoid noisy permanent export failures.
   otlphttp/azuremonitor:
     traces_endpoint: ${env:AZURE_MONITOR_OTLP_TRACES_ENDPOINT}
     logs_endpoint: ${env:AZURE_MONITOR_OTLP_LOGS_ENDPOINT}
