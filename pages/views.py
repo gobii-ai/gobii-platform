@@ -161,6 +161,7 @@ from .public_template_urls import (
     public_template_detail_path,
     public_template_hire_path,
     public_template_launch_path,
+    public_template_route_slug,
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .comparisons import (
@@ -1873,7 +1874,19 @@ def _build_related_public_template_cards(
 
 
 def _get_active_public_template_by_slug(template_slug: str | None):
-    return _active_public_template_queryset().filter(slug=template_slug).first()
+    normalized_slug = str(template_slug or "").strip()
+    if not normalized_slug:
+        return None
+
+    template = _active_public_template_queryset().filter(slug=normalized_slug).first()
+    if template:
+        return template
+
+    return (
+        PersistentAgentTemplate.objects.select_related("public_profile")
+        .filter(code=normalized_slug, is_active=True)
+        .first()
+    )
 
 
 def _get_active_public_template_by_legacy_path(handle: str | None, template_slug: str | None):
@@ -2011,7 +2024,10 @@ class PublicTemplateDetailView(TemplateView):
         self.template = _get_active_public_template_by_slug(template_slug)
         if not self.template:
             raise Http404("This template is no longer available.")
-        if kwargs.get("category_slug") != public_template_category_slug(self.template):
+        if (
+            kwargs.get("category_slug") != public_template_category_slug(self.template)
+            or template_slug != public_template_route_slug(self.template)
+        ):
             return _canonical_public_template_redirect(self.template)
         return super().dispatch(request, *args, **kwargs)
 
@@ -2049,7 +2065,7 @@ class PublicTemplateDetailView(TemplateView):
                 "@type": "Organization",
                 "name": "Gobii",
             }
-            if self.template.is_official
+            if self.template.is_official or not self.template.public_profile_id
             else {
                 "@type": "Person",
                 "name": self.template.public_profile.handle,
@@ -2142,7 +2158,9 @@ class PublicTemplateDetailView(TemplateView):
         }
 
         context["template"] = self.template
-        context["public_profile_handle"] = self.template.public_profile.handle
+        public_profile_handle = self.template.public_profile.handle if self.template.public_profile_id else ""
+        context["public_profile_handle"] = public_profile_handle
+        context["template_is_gobii_owned"] = self.template.is_official or not public_profile_handle
         context["template_category_label"] = category_label
         context["template_category_url"] = category_url
         context["template_hire_url"] = public_template_hire_path(self.template)
@@ -2184,7 +2202,11 @@ class PublicTemplateLaunchView(View):
             raise Http404("This template is no longer available.")
 
         canonical_launch_path = public_template_launch_path(template)
-        if kwargs.get("handle") or kwargs.get("category_slug") != public_template_category_slug(template):
+        if (
+            kwargs.get("handle")
+            or kwargs.get("category_slug") != public_template_category_slug(template)
+            or kwargs.get("template_slug") != public_template_route_slug(template)
+        ):
             return _public_template_redirect_with_query(request, canonical_launch_path)
 
         previous_referrer_code = _seed_public_template_session(request, template)

@@ -35,6 +35,10 @@ def public_template_category_slug(template) -> str:
     return public_template_category_slug_from_label(public_template_category_label(template))
 
 
+def public_template_route_slug(template) -> str:
+    return str(getattr(template, "slug", "") or getattr(template, "code", "")).strip()
+
+
 def public_template_category_path(template) -> str:
     return reverse(
         "pages:library_category",
@@ -47,7 +51,7 @@ def public_template_detail_path(template) -> str:
         "pages:public_template_detail",
         kwargs={
             "category_slug": public_template_category_slug(template),
-            "template_slug": template.slug,
+            "template_slug": public_template_route_slug(template),
         },
     )
 
@@ -57,7 +61,7 @@ def public_template_hire_path(template) -> str:
         "pages:public_template_hire",
         kwargs={
             "category_slug": public_template_category_slug(template),
-            "template_slug": template.slug,
+            "template_slug": public_template_route_slug(template),
         },
     )
 
@@ -67,6 +71,6 @@ def public_template_launch_path(template) -> str:
         "pages:public_template_launch",
         kwargs={
             "category_slug": public_template_category_slug(template),
-            "template_slug": template.slug,
+            "template_slug": public_template_route_slug(template),
         },
     )

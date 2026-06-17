@@ -23,6 +23,9 @@ from .views import (
     SpecialAccessView,
     WebManifestView,
     InstallScriptView,
+    PublicTemplateDetailView,
+    PublicTemplateHireView,
+    PublicTemplateLaunchView,
 )
 
 from djstripe import views as djstripe_views
@@ -65,9 +68,9 @@ urlpatterns = [
     path("libary/", _home_redirect),
     path("library/", _home_redirect, name="library"),
     path("library/<slug:category_slug>/", _home_redirect, name="library_category"),
-    path("library/<slug:category_slug>/<slug:template_slug>/", _home_redirect, name="public_template_detail"),
-    path("library/<slug:category_slug>/<slug:template_slug>/hire/", _home_redirect, name="public_template_hire"),
-    path("library/<slug:category_slug>/<slug:template_slug>/spawn/", _home_redirect, name="public_template_launch"),
+    path("library/<slug:category_slug>/<slug:template_slug>/", PublicTemplateDetailView.as_view(), name="public_template_detail"),
+    path("library/<slug:category_slug>/<slug:template_slug>/hire/", PublicTemplateHireView.as_view(), name="public_template_hire"),
+    path("library/<slug:category_slug>/<slug:template_slug>/spawn/", PublicTemplateLaunchView.as_view(), name="public_template_launch"),
     path("api/library/agents/", _home_redirect, name="library_agents_api"),
     path("api/library/agents/like/", _home_redirect, name="library_agent_like_api"),
     path("api/homepage/csrf-token/", HomepageCsrfTokenView.as_view(), name="homepage_csrf_token"),

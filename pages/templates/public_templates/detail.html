@@ -45,7 +45,7 @@
       <div class="relative px-10 py-12">
         <div class="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-wide">
           <span class="rounded-full bg-indigo-100 px-3 py-1 text-indigo-700">AI Agent Template</span>
-          {% if template.is_official %}
+          {% if template_is_gobii_owned %}
           <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-emerald-800" title="Maintained by Gobii">
             <i aria-hidden="true" data-lucide="badge-check" class="size-3.5"></i>
             Official template
@@ -58,7 +58,7 @@
 
         <h1 class="mt-6 text-4xl sm:text-5xl font-semibold text-slate-900">{{ template.display_name }}</h1>
         <p class="mt-4 text-lg text-slate-600 max-w-3xl">{{ template.tagline }}</p>
-        {% if template.is_official %}
+        {% if template_is_gobii_owned %}
         <p class="mt-4 inline-flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
           <i aria-hidden="true" data-lucide="shield-check" class="size-4"></i>
           Maintained by Gobii for trusted, reusable workflows.

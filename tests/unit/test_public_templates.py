@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase, tag
+from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
 from api.models import (
@@ -108,6 +109,115 @@ class TemplateServiceDbTests(TestCase):
         resolved = PretrainedWorkerTemplateService.get_template_by_code("db-template")
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.display_name, template.display_name)
+
+
+class PublicTemplateRouteTests(TestCase):
+    @tag("batch_public_templates")
+    def test_code_only_curated_template_detail_renders_from_library_category_path(self):
+        PersistentAgentTemplate.objects.update_or_create(
+            code="project-manager",
+            defaults={
+                "public_profile": None,
+                "slug": "",
+                "display_name": "Project Manager",
+                "tagline": "Keep projects moving with a reusable project manager.",
+                "description": "Tracks project updates and flags blockers.",
+                "charter": "Coordinate project updates and flag blockers.",
+                "base_schedule": "@daily",
+                "recommended_contact_channel": "email",
+                "category": "Team Ops",
+                "is_active": True,
+            },
+        )
+
+        response = self.client.get("/library/team-ops/project-manager/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Project Manager")
+        self.assertContains(response, "Keep projects moving with a reusable project manager.")
+        self.assertContains(response, "Official template")
+
+    @tag("batch_public_templates")
+    def test_code_only_curated_template_redirects_mismatched_category_to_canonical_path(self):
+        PersistentAgentTemplate.objects.update_or_create(
+            code="project-manager",
+            defaults={
+                "public_profile": None,
+                "slug": "",
+                "display_name": "Project Manager",
+                "tagline": "Keep projects moving with a reusable project manager.",
+                "description": "Tracks project updates and flags blockers.",
+                "charter": "Coordinate project updates and flag blockers.",
+                "category": "Team Ops",
+                "is_active": True,
+            },
+        )
+
+        response = self.client.get("/library/ops/project-manager/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/library/team-ops/project-manager/")
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_renders_from_library_category_path(self):
+        user = get_user_model().objects.create_user(
+            username="finance-template-owner",
+            email="finance-template-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle="finance-team")
+        PersistentAgentTemplate.objects.create(
+            code="stripe-fraud-dispute-monitor",
+            public_profile=public_profile,
+            slug="stripe-fraud-dispute-monitor",
+            display_name="Stripe Fraud Dispute Monitor",
+            tagline="Monitor Stripe disputes and flag risky activity.",
+            description="Tracks Stripe dispute activity and prepares a review summary.",
+            charter="Review new Stripe disputes and summarize suspicious patterns.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Finance",
+            is_active=True,
+        )
+
+        path = reverse(
+            "pages:public_template_detail",
+            kwargs={
+                "category_slug": "finance",
+                "template_slug": "stripe-fraud-dispute-monitor",
+            },
+        )
+        response = self.client.get(path)
+
+        self.assertEqual(path, "/library/finance/stripe-fraud-dispute-monitor/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Stripe Fraud Dispute Monitor")
+        self.assertContains(response, "Monitor Stripe disputes and flag risky activity.")
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_redirects_mismatched_category_to_canonical_path(self):
+        user = get_user_model().objects.create_user(
+            username="canonical-template-owner",
+            email="canonical-template-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle="canonical-team")
+        PersistentAgentTemplate.objects.create(
+            code="canonical-finance-template",
+            public_profile=public_profile,
+            slug="canonical-finance-template",
+            display_name="Canonical Finance Template",
+            tagline="Keep finance template URLs canonical.",
+            description="Keeps finance template URLs canonical.",
+            charter="Keep finance template URLs canonical.",
+            category="Finance",
+            is_active=True,
+        )
+
+        response = self.client.get("/library/ops/canonical-finance-template/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/library/finance/canonical-finance-template/")
 
     @tag("batch_public_templates")
     def test_organization_template_requires_matching_organization(self):
