@@ -14,6 +14,7 @@ from .views import (
     HomepageIntegrationsSearchView,
     StaticViewSitemap,
     ComparisonsSitemap,
+    PublicTemplateSitemap,
     LandingRedirectView,
     LandingLaunchView,
     ClearSignupTrackingView,
@@ -58,6 +59,7 @@ if settings.GOBII_PROPRIETARY_MODE:
     sitemaps['blog'] = BlogSitemap
 
 sitemaps['comparisons'] = ComparisonsSitemap
+sitemaps['public_templates'] = PublicTemplateSitemap
 
 _home_redirect = RedirectView.as_view(url="/", permanent=True)
 

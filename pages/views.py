@@ -3678,6 +3678,7 @@ class PublicTemplateSitemap(sitemaps.Sitemap):
             PersistentAgentTemplate.objects.select_related("public_profile")
             .filter(public_profile__isnull=False, organization__isnull=True, is_active=True)
             .exclude(slug="")
+            .order_by("priority", Lower("display_name"), "id")
         )
 
     def location(self, template):
