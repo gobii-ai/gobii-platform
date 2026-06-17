@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, ChevronDown, ChevronRight, FileText, Loader2, Plug, Table2 } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, FileText, Loader2, Plug, Table2, type LucideIcon } from 'lucide-react'
 
 import type {
   NativeIntegrationAccessibleFile,
@@ -289,6 +289,93 @@ export function NativeConnectionStatusPill({
     }`}>
       {error ? 'Setup error' : disconnectedLabel}
     </span>
+  )
+}
+
+export function NativeIntegrationSummaryCell({ provider }: { provider: NativeIntegrationProvider }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <NativeProviderIconTile provider={provider} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-semibold text-slate-900">{provider.displayName}</p>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+            Native
+          </span>
+        </div>
+        {provider.description ? <p className="mt-1 line-clamp-2 text-sm text-slate-600">{provider.description}</p> : null}
+      </div>
+    </div>
+  )
+}
+
+export function NativeIntegrationActionButton({
+  label,
+  icon: Icon,
+  pending = false,
+  disabled = false,
+  tone = 'secondary',
+  minWidthClassName = 'min-w-28',
+  onClick,
+}: {
+  label: string
+  icon: LucideIcon
+  pending?: boolean
+  disabled?: boolean
+  tone?: 'primary' | 'secondary' | 'danger'
+  minWidthClassName?: string
+  onClick: () => void
+}) {
+  const toneClassName = tone === 'primary'
+    ? 'bg-blue-600 text-white hover:bg-blue-700'
+    : tone === 'danger'
+      ? 'border border-red-200 bg-white text-red-700 hover:bg-red-50'
+      : 'border border-blue-200 bg-white text-blue-700 hover:bg-blue-50'
+  return (
+    <button
+      type="button"
+      className={`inline-flex ${minWidthClassName} items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${toneClassName}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {pending ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      ) : (
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      )}
+      {label}
+    </button>
+  )
+}
+
+export function NativeIntegrationRow({
+  summary,
+  status,
+  actions,
+  children,
+  className = 'px-4 py-3',
+  gridClassName = 'grid gap-3 md:grid-cols-[minmax(0,1fr)_8rem_12rem_8rem] md:items-center',
+}: {
+  summary: ReactNode
+  status: ReactNode
+  actions?: Array<ReactNode | null>
+  children?: ReactNode
+  className?: string
+  gridClassName?: string
+}) {
+  return (
+    <div className={className}>
+      <div className={gridClassName}>
+        {summary}
+        <div>{status}</div>
+        {(actions ?? []).map((action, index) => (
+          <div key={index} className="flex justify-start md:justify-end">
+            {action}
+          </div>
+        ))}
+      </div>
+      {children}
+    </div>
   )
 }
 

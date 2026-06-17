@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, FolderOpen, Loader2, Plug, Unplug, Users } from 'lucide-react'
+import { ArrowLeft, FolderOpen, Plug, Unplug, Users } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
@@ -65,8 +65,11 @@ import {
 } from './PipedreamAppsShared'
 import {
   confirmNativeIntegrationDisconnect,
+  NativeIntegrationActionButton,
   NativeConnectionStatusPill,
   NativeIntegrationFilesDisclosure,
+  NativeIntegrationRow,
+  NativeIntegrationSummaryCell,
   NativeProviderIconTile,
   nativeIntegrationFilesQueryKey,
   nativeOAuthContextPayload,
@@ -629,37 +632,25 @@ export function PipedreamAppsModal({
     : null
   const body = activeDiscordAgentId ? (
     activeDiscordAppQuery.isError ? (
-      <div className="space-y-4 p-1">
-        <button
-          type="button"
-          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-          onClick={() => {
-            setActiveDiscordAgentId(null)
-            setStatusMessage(null)
-          }}
-          disabled={isBusy}
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Back
-        </button>
-        <PipedreamErrorState error={activeDiscordAppQuery.error} fallback="Unable to load Discord configuration." />
-      </div>
+      <ConfigureLoadState
+        disabled={isBusy}
+        error={activeDiscordAppQuery.error}
+        errorFallback="Unable to load Discord configuration."
+        loadingLabel="Loading Discord configuration…"
+        onBack={() => {
+          setActiveDiscordAgentId(null)
+          setStatusMessage(null)
+        }}
+      />
     ) : activeDiscordAppQuery.isLoading || !activeDiscordAppQuery.data ? (
-      <div className="space-y-4 p-1">
-        <button
-          type="button"
-          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-          onClick={() => {
-            setActiveDiscordAgentId(null)
-            setStatusMessage(null)
-          }}
-          disabled={isBusy}
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Back
-        </button>
-        <PipedreamLoadingState label="Loading Discord configuration…" />
-      </div>
+      <ConfigureLoadState
+        disabled={isBusy}
+        loadingLabel="Loading Discord configuration…"
+        onBack={() => {
+          setActiveDiscordAgentId(null)
+          setStatusMessage(null)
+        }}
+      />
     ) : (
       <DiscordConfigurationScreen
         agentId={activeDiscordAgentId}
@@ -676,37 +667,25 @@ export function PipedreamAppsModal({
     )
   ) : activeTelegramAgentId ? (
     activeTelegramAppQuery.isError ? (
-      <div className="space-y-4 p-1">
-        <button
-          type="button"
-          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-          onClick={() => {
-            setActiveTelegramAgentId(null)
-            setStatusMessage(null)
-          }}
-          disabled={isBusy}
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Back
-        </button>
-        <PipedreamErrorState error={activeTelegramAppQuery.error} fallback="Unable to load Telegram configuration." />
-      </div>
+      <ConfigureLoadState
+        disabled={isBusy}
+        error={activeTelegramAppQuery.error}
+        errorFallback="Unable to load Telegram configuration."
+        loadingLabel="Loading Telegram configuration…"
+        onBack={() => {
+          setActiveTelegramAgentId(null)
+          setStatusMessage(null)
+        }}
+      />
     ) : activeTelegramAppQuery.isLoading || !activeTelegramAppQuery.data ? (
-      <div className="space-y-4 p-1">
-        <button
-          type="button"
-          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-          onClick={() => {
-            setActiveTelegramAgentId(null)
-            setStatusMessage(null)
-          }}
-          disabled={isBusy}
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Back
-        </button>
-        <PipedreamLoadingState label="Loading Telegram configuration…" />
-      </div>
+      <ConfigureLoadState
+        disabled={isBusy}
+        loadingLabel="Loading Telegram configuration…"
+        onBack={() => {
+          setActiveTelegramAgentId(null)
+          setStatusMessage(null)
+        }}
+      />
     ) : (
       <TelegramConfigurationScreen
         app={activeTelegramAppQuery.data}
@@ -939,7 +918,7 @@ function AppListScreen({
               onPicker={() => onNativePicker(app)}
             />
           ) : app.kind === 'discord' ? (
-            <WorkspaceDiscordAppRowItem
+            <WorkspaceNativeAgentAppRowItem
               key="native-discord"
               provider={app}
               pendingNativeAction={pendingNativeAction}
@@ -948,7 +927,7 @@ function AppListScreen({
               onDisconnect={() => onDiscordDisconnect(app)}
             />
           ) : app.kind === 'telegram' ? (
-            <WorkspaceTelegramAppRowItem
+            <WorkspaceNativeAgentAppRowItem
               key="native-telegram"
               provider={app}
               pendingNativeAction={pendingNativeAction}
@@ -972,60 +951,40 @@ function AppListScreen({
   )
 }
 
-function WorkspaceDiscordAppRowItem({
-  provider,
-  pendingNativeAction,
+function ConfigureLoadState({
   disabled,
-  onManageConnections,
-  onDisconnect,
+  error = null,
+  errorFallback,
+  loadingLabel,
+  onBack,
 }: {
-  provider: NativeIntegrationProvider
-  pendingNativeAction: PendingNativeAction
   disabled: boolean
-  onManageConnections: () => void
-  onDisconnect: () => void
+  error?: unknown
+  errorFallback?: string
+  loadingLabel: string
+  onBack: () => void
 }) {
-  const isPendingDisconnect = pendingNativeAction?.providerKey === provider.providerKey && pendingNativeAction.kind === 'disconnect'
-
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_8rem_12rem_8rem] md:items-center">
-      <NativeIntegrationSummaryCell provider={provider} />
-      <div>
-        <NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Per-agent" />
-      </div>
-      <div className="flex justify-start md:justify-end">
-        <button
-          type="button"
-          className="inline-flex min-w-44 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-          onClick={onManageConnections}
-          disabled={disabled}
-        >
-          <Users className="h-4 w-4" aria-hidden="true" />
-          Manage Connections
-        </button>
-      </div>
-      <div className="flex justify-start md:justify-end">
-        {provider.connected ? (
-          <button
-            type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-            onClick={onDisconnect}
-            disabled={disabled}
-          >
-            {isPendingDisconnect ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Unplug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Disconnect
-          </button>
-        ) : null}
-      </div>
+    <div className="space-y-4 p-1">
+      <button
+        type="button"
+        className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+        onClick={onBack}
+        disabled={disabled}
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Back
+      </button>
+      {error ? (
+        <PipedreamErrorState error={error} fallback={errorFallback ?? 'Unable to load configuration.'} />
+      ) : (
+        <PipedreamLoadingState label={loadingLabel} />
+      )}
     </div>
   )
 }
 
-function WorkspaceTelegramAppRowItem({
+function WorkspaceNativeAgentAppRowItem({
   provider,
   pendingNativeAction,
   disabled,
@@ -1041,40 +1000,30 @@ function WorkspaceTelegramAppRowItem({
   const isPendingDisconnect = pendingNativeAction?.providerKey === provider.providerKey && pendingNativeAction.kind === 'disconnect'
 
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_8rem_12rem_8rem] md:items-center">
-      <NativeIntegrationSummaryCell provider={provider} />
-      <div>
-        <NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Per-agent" />
-      </div>
-      <div className="flex justify-start md:justify-end">
-        <button
-          type="button"
-          className="inline-flex min-w-44 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-          onClick={onManageConnections}
+    <NativeIntegrationRow
+      summary={<NativeIntegrationSummaryCell provider={provider} />}
+      status={<NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Per-agent" />}
+      actions={[
+        <NativeIntegrationActionButton
+          label="Manage Connections"
+          icon={Users}
           disabled={disabled}
-        >
-          <Users className="h-4 w-4" aria-hidden="true" />
-          Manage Connections
-        </button>
-      </div>
-      <div className="flex justify-start md:justify-end">
-        {provider.connected ? (
-          <button
-            type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-            onClick={onDisconnect}
+          tone="primary"
+          minWidthClassName="min-w-44"
+          onClick={onManageConnections}
+        />,
+        provider.connected ? (
+          <NativeIntegrationActionButton
+            label="Disconnect"
+            icon={Unplug}
+            pending={isPendingDisconnect}
             disabled={disabled}
-          >
-            {isPendingDisconnect ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Unplug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Disconnect
-          </button>
-        ) : null}
-      </div>
-    </div>
+            tone="danger"
+            onClick={onDisconnect}
+          />
+        ) : null,
+      ]}
+    />
   )
 }
 
@@ -1196,15 +1145,13 @@ function TelegramAgentConnectionRow({
         <NativeConnectionStatusPill connected={enabled} />
       </div>
       <div className="flex justify-start md:justify-end">
-        <button
-          type="button"
-          className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-          onClick={onConfigure}
+        <NativeIntegrationActionButton
+          label="Configure"
+          icon={Users}
+          pending={Boolean(pendingKind)}
           disabled={disabled}
-        >
-          {pendingKind ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Users className="h-4 w-4" aria-hidden="true" />}
-          Configure
-        </button>
+          onClick={onConfigure}
+        />
       </div>
     </div>
   )
@@ -1230,80 +1177,43 @@ function NativeAppRowItem({
   const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
 
   return (
-    <div className="px-4 py-3">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_12rem_8rem] sm:items-start">
-        <NativeIntegrationSummaryCell provider={provider} />
-        <div>
-          <NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Workspace" />
-        </div>
-        <div className="flex justify-start md:justify-end">
-          {pickerEnabled ? (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-              onClick={onPicker}
-              disabled={disabled}
-            >
-              {pendingKind === 'picker' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <FolderOpen className="h-4 w-4" aria-hidden="true" />
-              )}
-              Select Files
-            </button>
-          ) : null}
-        </div>
-        <div className="flex justify-start md:justify-end">
-          {provider.connected ? (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-              onClick={onDisconnect}
-              disabled={disabled}
-            >
-              {pendingKind === 'disconnect' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Unplug className="h-4 w-4" aria-hidden="true" />
-              )}
-              Disconnect
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-              onClick={onConnect}
-              disabled={disabled}
-            >
-              {pendingKind === 'connect' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Plug className="h-4 w-4" aria-hidden="true" />
-              )}
-              Connect
-            </button>
-          )}
-        </div>
-      </div>
+    <NativeIntegrationRow
+      summary={<NativeIntegrationSummaryCell provider={provider} />}
+      status={<NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Workspace" />}
+      gridClassName="grid gap-3 md:grid-cols-[minmax(0,1fr)_8rem_12rem_8rem] md:items-start"
+      actions={[
+        pickerEnabled ? (
+          <NativeIntegrationActionButton
+            label="Select Files"
+            icon={FolderOpen}
+            pending={pendingKind === 'picker'}
+            disabled={disabled}
+            onClick={onPicker}
+          />
+        ) : null,
+        provider.connected ? (
+          <NativeIntegrationActionButton
+            label="Disconnect"
+            icon={Unplug}
+            pending={pendingKind === 'disconnect'}
+            disabled={disabled}
+            tone="danger"
+            onClick={onDisconnect}
+          />
+        ) : (
+          <NativeIntegrationActionButton
+            label="Connect"
+            icon={Plug}
+            pending={pendingKind === 'connect'}
+            disabled={disabled}
+            tone="primary"
+            onClick={onConnect}
+          />
+        ),
+      ]}
+    >
       <NativeIntegrationFilesDisclosure provider={provider} />
-    </div>
-  )
-}
-
-function NativeIntegrationSummaryCell({ provider }: { provider: NativeIntegrationProvider }) {
-  return (
-    <div className="flex min-w-0 items-center gap-3">
-      <NativeProviderIconTile provider={provider} />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-semibold text-slate-900">{provider.displayName}</p>
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-            Native
-          </span>
-        </div>
-        {provider.description ? <p className="mt-1 line-clamp-2 text-sm text-slate-600">{provider.description}</p> : null}
-      </div>
-    </div>
+    </NativeIntegrationRow>
   )
 }
 

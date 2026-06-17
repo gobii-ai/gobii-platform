@@ -5,16 +5,13 @@ import hmac
 import io
 import logging
 import json
-import math
 import re
 import secrets
-import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Iterable, Mapping
 from urllib.parse import quote, urlencode
 
-import redis
 import requests
 from PIL import Image, UnidentifiedImageError
 from django.conf import settings
@@ -47,7 +44,7 @@ from api.models import (
     PersistentAgentTelegramUserLinkRequest,
 )
 from api.services.agent_avatar_public import build_public_agent_avatar_thumbnail_url
-from config.redis_client import get_redis_client
+from api.services.inbound_debounce import process_inbound_debounce, schedule_inbound_processing
 
 logger = logging.getLogger(__name__)
 
@@ -701,10 +698,6 @@ def _telegram_inbound_debounce_seconds() -> int:
     return max(0, int(settings.TELEGRAM_INBOUND_DEBOUNCE_SECONDS))
 
 
-def _telegram_inbound_debounce_ttl(delay_seconds: int) -> int:
-    return max(60, delay_seconds * 6)
-
-
 def _process_agent_events_after_telegram_debounce(agent_id: str, *, countdown: int = 0) -> None:
     from api.agent.tasks import process_agent_events_task
 
@@ -716,76 +709,46 @@ def _process_agent_events_after_telegram_debounce(agent_id: str, *, countdown: i
 
 def schedule_telegram_inbound_processing(agent_id: str) -> dict[str, object]:
     debounce_seconds = _telegram_inbound_debounce_seconds()
-    if debounce_seconds <= 0:
-        _process_agent_events_after_telegram_debounce(str(agent_id))
-        return {"debounced": False, "debounce_seconds": 0, "scheduled": True}
     normalized_agent_id = str(agent_id)
     deadline_key = TELEGRAM_INBOUND_DEBOUNCE_DEADLINE_KEY.format(agent_id=normalized_agent_id)
     scheduled_key = TELEGRAM_INBOUND_DEBOUNCE_SCHEDULED_KEY.format(agent_id=normalized_agent_id)
-    deadline = time.time() + debounce_seconds
-    ttl = _telegram_inbound_debounce_ttl(debounce_seconds)
-    try:
-        redis_client = get_redis_client()
-        pipeline = redis_client.pipeline(transaction=True)
-        pipeline.set(deadline_key, f"{deadline:.6f}", ex=ttl)
-        pipeline.set(scheduled_key, "1", ex=ttl, nx=True)
-        results = pipeline.execute()
-        scheduled = bool(results[1])
-    except redis.exceptions.RedisError:
-        logger.exception("Failed scheduling Telegram inbound debounce for agent %s.", normalized_agent_id)
-        _process_agent_events_after_telegram_debounce(normalized_agent_id, countdown=debounce_seconds)
-        return {"debounced": False, "debounce_seconds": debounce_seconds, "scheduled": True, "fallback": True}
-    if scheduled:
-        if settings.CELERY_TASK_ALWAYS_EAGER:
-            redis_client.delete(deadline_key, scheduled_key)
-            _process_agent_events_after_telegram_debounce(normalized_agent_id)
-            return {"debounced": False, "debounce_seconds": debounce_seconds, "scheduled": True, "eager": True}
+
+    def task_factory():
         from api.agent.tasks.process_events import process_telegram_inbound_debounce_task
 
-        process_telegram_inbound_debounce_task.apply_async(args=[normalized_agent_id], countdown=debounce_seconds)
-    return {"debounced": True, "debounce_seconds": debounce_seconds, "scheduled": scheduled}
+        return process_telegram_inbound_debounce_task
 
-
-def _coerce_redis_float(value: object) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, (bytes, bytearray)):
-        value = value.decode("utf-8", "ignore")
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    return schedule_inbound_processing(
+        normalized_agent_id,
+        debounce_seconds=debounce_seconds,
+        deadline_key=deadline_key,
+        scheduled_key=scheduled_key,
+        process_callback=_process_agent_events_after_telegram_debounce,
+        task_factory=task_factory,
+        log_label="Telegram",
+    )
 
 
 def process_telegram_inbound_debounce(agent_id: str) -> None:
     debounce_seconds = _telegram_inbound_debounce_seconds()
     normalized_agent_id = str(agent_id)
-    if debounce_seconds <= 0:
-        _process_agent_events_after_telegram_debounce(normalized_agent_id)
-        return
     deadline_key = TELEGRAM_INBOUND_DEBOUNCE_DEADLINE_KEY.format(agent_id=normalized_agent_id)
     scheduled_key = TELEGRAM_INBOUND_DEBOUNCE_SCHEDULED_KEY.format(agent_id=normalized_agent_id)
-    now = time.time()
-    try:
-        redis_client = get_redis_client()
-        deadline = _coerce_redis_float(redis_client.get(deadline_key))
-        if deadline is not None and deadline > now:
-            if settings.CELERY_TASK_ALWAYS_EAGER:
-                redis_client.delete(deadline_key, scheduled_key)
-                _process_agent_events_after_telegram_debounce(normalized_agent_id)
-                return
-            countdown = max(1, math.ceil(deadline - now))
-            ttl = _telegram_inbound_debounce_ttl(max(debounce_seconds, countdown))
-            redis_client.expire(deadline_key, ttl)
-            redis_client.expire(scheduled_key, ttl)
-            from api.agent.tasks.process_events import process_telegram_inbound_debounce_task
 
-            process_telegram_inbound_debounce_task.apply_async(args=[normalized_agent_id], countdown=countdown)
-            return
-        redis_client.delete(deadline_key, scheduled_key)
-    except redis.exceptions.RedisError:
-        logger.exception("Failed processing Telegram inbound debounce for agent %s.", normalized_agent_id)
-    _process_agent_events_after_telegram_debounce(normalized_agent_id)
+    def task_factory():
+        from api.agent.tasks.process_events import process_telegram_inbound_debounce_task
+
+        return process_telegram_inbound_debounce_task
+
+    process_inbound_debounce(
+        normalized_agent_id,
+        debounce_seconds=debounce_seconds,
+        deadline_key=deadline_key,
+        scheduled_key=scheduled_key,
+        process_callback=_process_agent_events_after_telegram_debounce,
+        task_factory=task_factory,
+        log_label="Telegram",
+    )
 
 
 def _attachment_downloads(message: Mapping[str, Any]) -> list[dict[str, str]]:

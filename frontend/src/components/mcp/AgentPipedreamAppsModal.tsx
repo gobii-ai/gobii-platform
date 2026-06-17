@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Check, Copy, ExternalLink, FolderOpen, Loader2, Plug, RefreshCw, Settings, Unplug } from 'lucide-react'
+import { ArrowLeft, Check, Copy, ExternalLink, FolderOpen, Plug, RefreshCw, Settings, Unplug } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
@@ -49,8 +49,11 @@ import {
 } from './PipedreamAppsShared'
 import {
   confirmNativeIntegrationDisconnect,
+  NativeIntegrationActionButton,
   NativeConnectionStatusPill,
   NativeIntegrationFilesDisclosure,
+  NativeIntegrationRow,
+  NativeIntegrationSummaryCell,
   NativeProviderIconTile,
   nativeIntegrationFilesQueryKey,
   nativeOAuthContextPayload,
@@ -508,80 +511,43 @@ function AgentNativeAppRowItem({
   const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
 
   return (
-    <div className="px-4 py-3">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] sm:items-start">
-        <NativeIntegrationSummaryCell provider={provider} />
-        <div>
-          <NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Workspace" />
-        </div>
-        <div className="flex justify-start md:justify-end">
-          {pickerEnabled ? (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-              onClick={onPicker}
-              disabled={disabled}
-            >
-              {pendingKind === 'picker' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <FolderOpen className="h-4 w-4" aria-hidden="true" />
-              )}
-              Select Files
-            </button>
-          ) : null}
-        </div>
-        <div className="flex justify-start md:justify-end">
-          {provider.connected ? (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-              onClick={onDisconnect}
-              disabled={disabled}
-            >
-              {pendingKind === 'disconnect' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Unplug className="h-4 w-4" aria-hidden="true" />
-              )}
-              Disconnect
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-              onClick={onConnect}
-              disabled={disabled}
-            >
-              {pendingKind === 'connect' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Plug className="h-4 w-4" aria-hidden="true" />
-              )}
-              Connect
-            </button>
-          )}
-        </div>
-      </div>
+    <NativeIntegrationRow
+      summary={<NativeIntegrationSummaryCell provider={provider} />}
+      status={<NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Workspace" />}
+      gridClassName="grid gap-3 md:grid-cols-[minmax(0,1fr)_8rem_12rem_8rem] md:items-start"
+      actions={[
+        pickerEnabled ? (
+          <NativeIntegrationActionButton
+            label="Select Files"
+            icon={FolderOpen}
+            pending={pendingKind === 'picker'}
+            disabled={disabled}
+            onClick={onPicker}
+          />
+        ) : null,
+        provider.connected ? (
+          <NativeIntegrationActionButton
+            label="Disconnect"
+            icon={Unplug}
+            pending={pendingKind === 'disconnect'}
+            disabled={disabled}
+            tone="danger"
+            onClick={onDisconnect}
+          />
+        ) : (
+          <NativeIntegrationActionButton
+            label="Connect"
+            icon={Plug}
+            pending={pendingKind === 'connect'}
+            disabled={disabled}
+            tone="primary"
+            onClick={onConnect}
+          />
+        ),
+      ]}
+    >
       <NativeIntegrationFilesDisclosure provider={provider} />
-    </div>
-  )
-}
-
-function NativeIntegrationSummaryCell({ provider }: { provider: NativeIntegrationProvider }) {
-  return (
-    <div className="flex min-w-0 items-center gap-3">
-      <NativeProviderIconTile provider={provider} />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-semibold text-slate-900">{provider.displayName}</p>
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-            Native
-          </span>
-        </div>
-        {provider.description ? <p className="mt-1 line-clamp-2 text-sm text-slate-600">{provider.description}</p> : null}
-      </div>
-    </div>
+    </NativeIntegrationRow>
   )
 }
 
@@ -601,41 +567,25 @@ function AgentDiscordAppRowItem({
   const isPendingConnect = pendingDiscordAction === 'connect'
 
   return (
-    <div className="px-4 py-3">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] md:items-center">
-        <DiscordSummaryCell app={app} />
-        <div>
-          <NativeConnectionStatusPill connected={app.connected} />
-        </div>
-        <div className="flex justify-start md:col-start-4 md:justify-end">
-          {app.connected ? (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-              onClick={onConfigure}
-              disabled={disabled}
-            >
-              <Settings className="h-4 w-4" aria-hidden="true" />
-              Configure
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-              onClick={onConnect}
-              disabled={disabled}
-            >
-              {isPendingConnect ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Plug className="h-4 w-4" aria-hidden="true" />
-              )}
-              Connect
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+    <NativeIntegrationRow
+      summary={<DiscordSummaryCell app={app} />}
+      status={<NativeConnectionStatusPill connected={app.connected} />}
+      actions={[
+        null,
+        app.connected ? (
+          <NativeIntegrationActionButton label="Configure" icon={Settings} disabled={disabled} onClick={onConfigure} />
+        ) : (
+          <NativeIntegrationActionButton
+            label="Connect"
+            icon={Plug}
+            pending={isPendingConnect}
+            disabled={disabled}
+            tone="primary"
+            onClick={onConnect}
+          />
+        ),
+      ]}
+    />
   )
 }
 
@@ -655,27 +605,20 @@ function AgentTelegramAppListRowItem({
         : 'Not connected'
 
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] md:items-center">
-      <TelegramSummaryCell app={app} />
-      <div>
+    <NativeIntegrationRow
+      summary={<TelegramSummaryCell app={app} />}
+      status={(
         <NativeConnectionStatusPill
           connected={app.connected}
           disconnectedLabel={statusLabel}
           error={app.status === 'configuration_error'}
         />
-      </div>
-      <div className="flex justify-start md:col-start-4 md:justify-end">
-        <button
-          type="button"
-          className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-          onClick={onConfigure}
-          disabled={disabled}
-        >
-          <Settings className="h-4 w-4" aria-hidden="true" />
-          Configure
-        </button>
-      </div>
-    </div>
+      )}
+      actions={[
+        null,
+        <NativeIntegrationActionButton label="Configure" icon={Settings} disabled={disabled} onClick={onConfigure} />,
+      ]}
+    />
   )
 }
 
@@ -748,67 +691,50 @@ export function AgentTelegramAppRowItem({
         : 'Not connected'
 
   return (
-    <div className="px-4 py-3">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_7rem_16rem] md:items-start">
-        <TelegramSummaryCell app={app} />
-        <div>
-          <NativeConnectionStatusPill
-            connected={app.connected}
-            disconnectedLabel={statusLabel}
-            error={app.status === 'configuration_error'}
+    <NativeIntegrationRow
+      summary={<TelegramSummaryCell app={app} />}
+      status={(
+        <NativeConnectionStatusPill
+          connected={app.connected}
+          disconnectedLabel={statusLabel}
+          error={app.status === 'configuration_error'}
+        />
+      )}
+      gridClassName="grid gap-3 md:grid-cols-[minmax(0,1fr)_8rem_16rem] md:items-start"
+      actions={[
+        app.connected ? (
+          <div className="flex flex-wrap justify-start gap-2 md:justify-end">
+            <NativeIntegrationActionButton
+              label="Sync"
+              icon={RefreshCw}
+              pending={pendingKind === 'sync'}
+              disabled={disabled}
+              minWidthClassName="min-w-24"
+              onClick={onSync}
+            />
+            <NativeIntegrationActionButton
+              label="Disconnect"
+              icon={Unplug}
+              pending={pendingKind === 'disconnect'}
+              disabled={disabled}
+              tone="danger"
+              onClick={onDisconnect}
+            />
+          </div>
+        ) : (
+          <NativeIntegrationActionButton
+            label={app.userLinked ? 'Create Bot' : 'Connect'}
+            icon={app.userLinked ? ExternalLink : Plug}
+            pending={pendingKind === 'connect'}
+            disabled={disabled || app.status === 'configuration_error'}
+            tone="primary"
+            onClick={onConnect}
           />
-        </div>
-        <div className="flex flex-wrap justify-start gap-2 md:justify-end">
-          {app.connected ? (
-            <>
-              <button
-                type="button"
-                className="inline-flex min-w-24 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-                onClick={onSync}
-                disabled={disabled}
-              >
-                {pendingKind === 'sync' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                )}
-                Sync
-              </button>
-              <button
-                type="button"
-                className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-                onClick={onDisconnect}
-                disabled={disabled}
-              >
-                {pendingKind === 'disconnect' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Unplug className="h-4 w-4" aria-hidden="true" />
-                )}
-                Disconnect
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-              onClick={onConnect}
-              disabled={disabled || app.status === 'configuration_error'}
-            >
-              {pendingKind === 'connect' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : app.userLinked ? (
-                <ExternalLink className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <Plug className="h-4 w-4" aria-hidden="true" />
-              )}
-              {app.userLinked ? 'Create Bot' : 'Connect'}
-            </button>
-          )}
-        </div>
-      </div>
+        ),
+      ]}
+    >
       <TelegramConnectFallback app={app} />
-    </div>
+    </NativeIntegrationRow>
   )
 }
 
