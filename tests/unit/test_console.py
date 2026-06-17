@@ -2231,6 +2231,61 @@ class ConsoleViewsTest(TestCase):
     @patch("console.agent_creation.process_agent_events_task.delay")
     @patch("console.agent_creation.Analytics.track_event")
     @tag("batch_console_agents_management")
+    def test_quick_create_rejects_member_org_template_session_without_org_template(
+        self,
+        _mock_track_event,
+        _mock_delay,
+    ):
+        from agents.services import PretrainedWorkerTemplateService
+        from api.models import Organization, OrganizationMembership, PersistentAgentTemplate, PersistentAgent
+
+        organization = Organization.objects.create(
+            name="Forged Template Org",
+            slug="forged-template-org",
+            created_by=self.user,
+        )
+        organization.billing.purchased_seats = 2
+        organization.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        template = PersistentAgentTemplate.objects.create(
+            code="global-template-with-org-session",
+            display_name="Global Template With Org Session",
+            tagline="Global workflow",
+            description="A global reusable workflow.",
+            charter="Run the global workflow.",
+            category="Operations",
+            is_active=True,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session["agent_charter"] = template.charter
+        session["agent_charter_source"] = "template"
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
+        session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(organization.id)
+        session.save()
+
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": template.charter}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("owner or admin", response.json()["error"])
+        self.assertFalse(PersistentAgent.objects.filter(organization=organization).exists())
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.Analytics.track_event")
+    @tag("batch_console_agents_management")
     def test_quick_create_rejects_organization_template_from_personal_context(
         self,
         _mock_track_event,

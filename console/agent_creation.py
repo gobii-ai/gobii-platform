@@ -29,6 +29,7 @@ from api.models import (
     PersistentAgentConversationParticipant,
     PersistentAgentMessage,
     PersistentAgentSmsEndpoint,
+    PersistentAgentTemplate,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -67,6 +68,28 @@ AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY = "agent_template_organization_id"
 AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER = "pretrained_worker"
 AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE = "public_template"
 AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE = "organization_template"
+
+
+def _session_points_to_current_org_template(
+    request: HttpRequest,
+    *,
+    template_code: str | None,
+    organization: Organization,
+) -> bool:
+    if not template_code:
+        return False
+    template_source = (request.session.get(AGENT_TEMPLATE_SOURCE_SESSION_KEY) or "").strip()
+    if template_source != AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE:
+        return False
+    template_organization_id = str(request.session.get(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY) or "").strip()
+    if template_organization_id != str(organization.id):
+        return False
+    return PersistentAgentTemplate.objects.filter(
+        code=template_code,
+        organization=organization,
+        public_profile__isnull=True,
+        is_active=True,
+    ).exists()
 
 
 def _customer_account_pause_creation_message(owner) -> str:
@@ -181,10 +204,10 @@ def create_persistent_agent_from_charter(
             )
         elif (
             not resolved_context.can_manage_org_agents
-            and not (
-                template_code
-                and template_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
-                and str(request.session.get(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY) or "").strip() == str(membership.org.id)
+            and not _session_points_to_current_org_template(
+                request,
+                template_code=template_code,
+                organization=membership.org,
             )
         ):
             raise ValidationError(
