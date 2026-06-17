@@ -8,7 +8,6 @@ from typing import Dict, Iterable, Sequence, Any
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.db import models
 
 from agents.pretrained_worker_definitions import (
     TEMPLATE_DEFINITIONS,
@@ -288,18 +287,13 @@ class PretrainedWorkerTemplateService:
         normalized = code.strip().lower()
         normalized = cls.CODE_ALIASES.get(normalized, normalized)
         Template = apps.get_model("api", "PersistentAgentTemplate")
-        db_queryset = Template.objects.filter(code=normalized, is_active=True)
-        organization_id = getattr(organization, "id", organization)
-        if organization_id:
-            db_queryset = db_queryset.filter(
-                models.Q(organization__isnull=True) | models.Q(organization_id=organization_id)
-            )
-        else:
-            db_queryset = db_queryset.filter(organization__isnull=True)
-        db_template = db_queryset.first()
+        db_template = Template.objects.filter(code=normalized, is_active=True).first()
         if db_template:
-            return cls._template_from_model(db_template)
-        if Template.objects.filter(code=normalized, is_active=True).exists():
+            organization_id = getattr(organization, "id", organization)
+            if db_template.organization_id is None:
+                return cls._template_from_model(db_template)
+            if organization_id and str(db_template.organization_id) == str(organization_id):
+                return cls._template_from_model(db_template)
             return None
         for template in cls._all_templates():
             if template.code == normalized and getattr(template, "is_active", True):
