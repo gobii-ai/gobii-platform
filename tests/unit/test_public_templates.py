@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -14,6 +16,7 @@ from api.models import (
 )
 from api.public_profiles import validate_public_handle
 from api.services.template_clone import TemplateCloneService
+from pages.public_template_urls import public_template_route_slug
 
 
 class PublicProfileHandleTests(TestCase):
@@ -111,6 +114,25 @@ class TemplateServiceDbTests(TestCase):
         self.assertEqual(resolved.display_name, template.display_name)
 
 
+class PublicTemplateUrlHelperTests(TestCase):
+    @tag("batch_public_templates")
+    def test_public_template_route_slug_prefers_slug_then_code(self):
+        self.assertEqual(
+            public_template_route_slug(SimpleNamespace(slug="custom-template-slug", code="template-code")),
+            "custom-template-slug",
+        )
+        self.assertEqual(
+            public_template_route_slug(SimpleNamespace(slug="", code="template-code")),
+            "template-code",
+        )
+
+    @tag("batch_public_templates")
+    def test_public_template_route_slug_returns_empty_string_without_slug_or_code(self):
+        self.assertEqual(public_template_route_slug(None), "")
+        self.assertEqual(public_template_route_slug(SimpleNamespace(slug=None, code=None)), "")
+        self.assertEqual(public_template_route_slug(SimpleNamespace(slug="", code="")), "")
+
+
 class PublicTemplateRouteTests(TestCase):
     @tag("batch_public_templates")
     def test_code_only_curated_template_detail_renders_from_library_category_path(self):
@@ -157,6 +179,45 @@ class PublicTemplateRouteTests(TestCase):
 
         self.assertEqual(response.status_code, 301)
         self.assertEqual(response["Location"], "/library/team-ops/project-manager/")
+
+    @tag("batch_public_templates")
+    def test_curated_template_with_custom_slug_resolves_by_slug(self):
+        PersistentAgentTemplate.objects.create(
+            code="custom-slug-curated-template-code",
+            public_profile=None,
+            slug="custom-slug-curated-template",
+            display_name="Custom Slug Curated Template",
+            tagline="A curated template with a custom slug.",
+            description="Verifies curated templates can resolve by slug.",
+            charter="Use the custom slug for this curated template.",
+            category="Team Ops",
+            is_active=True,
+        )
+
+        response = self.client.get("/library/team-ops/custom-slug-curated-template/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Custom Slug Curated Template")
+        self.assertContains(response, "A curated template with a custom slug.")
+
+    @tag("batch_public_templates")
+    def test_curated_template_with_custom_slug_redirects_code_path_to_canonical_slug(self):
+        PersistentAgentTemplate.objects.create(
+            code="custom-slug-curated-template-code",
+            public_profile=None,
+            slug="custom-slug-curated-template",
+            display_name="Custom Slug Curated Template",
+            tagline="A curated template with a custom slug.",
+            description="Verifies curated templates can resolve by slug.",
+            charter="Use the custom slug for this curated template.",
+            category="Team Ops",
+            is_active=True,
+        )
+
+        response = self.client.get("/library/team-ops/custom-slug-curated-template-code/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/library/team-ops/custom-slug-curated-template/")
 
     @tag("batch_public_templates")
     def test_public_template_detail_renders_from_library_category_path(self):

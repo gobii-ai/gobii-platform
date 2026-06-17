@@ -36,7 +36,8 @@ def public_template_category_slug(template) -> str:
 
 
 def public_template_route_slug(template) -> str:
-    return str(getattr(template, "slug", "") or getattr(template, "code", "")).strip()
+    route_slug = getattr(template, "slug", None) or getattr(template, "code", None)
+    return str(route_slug).strip() if route_slug else ""
 
 
 def public_template_category_path(template) -> str:

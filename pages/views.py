@@ -1878,7 +1878,11 @@ def _get_active_public_template_by_slug(template_slug: str | None):
     if not normalized_slug:
         return None
 
-    template = _active_public_template_queryset().filter(slug=normalized_slug).first()
+    template = (
+        PersistentAgentTemplate.objects.select_related("public_profile")
+        .filter(slug=normalized_slug, is_active=True)
+        .first()
+    )
     if template:
         return template
 
