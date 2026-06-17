@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -179,6 +180,89 @@ class PublicTemplateRouteTests(TestCase):
 
         self.assertEqual(response.status_code, 301)
         self.assertEqual(response["Location"], "/library/team-ops/project-manager/")
+
+    @tag("batch_public_templates")
+    def test_code_backed_curated_template_route_is_disambiguated_by_category(self):
+        user = get_user_model().objects.create_user(
+            username="public-project-manager-owner",
+            email="public-project-manager-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle="public-pm-owner")
+        PersistentAgentTemplate.objects.create(
+            code="public-project-manager",
+            public_profile=public_profile,
+            slug="project-manager",
+            display_name="Public Project Manager",
+            tagline="A public project manager template.",
+            description="A public project manager template.",
+            charter="Run the public project manager template.",
+            category="Finance",
+            is_active=True,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="project-manager",
+            public_profile=None,
+            slug="",
+            display_name="Gobii Project Manager",
+            tagline="A curated project manager template.",
+            description="A curated project manager template.",
+            charter="Run the curated project manager template.",
+            category="Team Ops",
+            is_active=True,
+        )
+
+        curated_response = self.client.get("/library/team-ops/project-manager/")
+        public_response = self.client.get("/library/finance/project-manager/")
+
+        self.assertEqual(curated_response.status_code, 200)
+        self.assertEqual(curated_response.context["template"].code, "project-manager")
+        self.assertContains(curated_response, "Gobii Project Manager")
+        self.assertEqual(public_response.status_code, 200)
+        self.assertEqual(public_response.context["template"].code, "public-project-manager")
+        self.assertContains(public_response, "Public Project Manager")
+
+    @tag("batch_public_templates")
+    @patch("pages.views._track_web_event_for_request")
+    @patch("pages.views.emit_configured_custom_capi_event")
+    @patch("pages.views.Analytics.track_event_anonymous")
+    def test_code_backed_curated_template_launch_is_disambiguated_by_category(self, *_mocks):
+        user = get_user_model().objects.create_user(
+            username="public-project-manager-launch-owner",
+            email="public-project-manager-launch-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle="public-pm-launch-owner")
+        PersistentAgentTemplate.objects.create(
+            code="public-project-manager",
+            public_profile=public_profile,
+            slug="project-manager",
+            display_name="Public Project Manager",
+            tagline="A public project manager template.",
+            description="A public project manager template.",
+            charter="Run the public project manager template.",
+            category="Finance",
+            is_active=True,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="project-manager",
+            public_profile=None,
+            slug="",
+            display_name="Gobii Project Manager",
+            tagline="A curated project manager template.",
+            description="A curated project manager template.",
+            charter="Run the curated project manager template.",
+            category="Team Ops",
+            is_active=True,
+        )
+
+        response = self.client.get("/library/team-ops/project-manager/spawn/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.client.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            "project-manager",
+        )
 
     @tag("batch_public_templates")
     def test_curated_template_with_custom_slug_resolves_by_slug(self):
