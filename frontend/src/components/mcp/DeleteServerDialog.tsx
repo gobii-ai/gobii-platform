@@ -56,7 +56,7 @@ export function DeleteServerDialog({ serverName, deleteUrl, onClose, onDeleted, 
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof HttpError) {
-    const bodyMessage = resolveBodyMessage(error.body, fallback)
+    const bodyMessage = resolveBodyMessage(error.body)
     if (bodyMessage) {
       return bodyMessage
     }
@@ -70,13 +70,13 @@ function resolveErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
-function resolveBodyMessage(body: unknown, fallback: string): string | null {
+function resolveBodyMessage(body: unknown): string | null {
   if (typeof body === 'string') {
     const trimmed = body.trim()
     if (!trimmed) {
       return null
     }
-    return isHtmlResponse(trimmed) ? fallback : trimmed
+    return isHtmlResponse(trimmed) ? null : trimmed
   }
   if (body && typeof body === 'object') {
     for (const key of ['message', 'detail', 'error']) {
