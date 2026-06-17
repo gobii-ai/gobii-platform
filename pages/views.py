@@ -242,7 +242,7 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "trello": "images/integrations/pipedream/trello.svg",
 }
 HOMEPAGE_META_TITLE_SUFFIX = "AI Coworkers for Teams With Real Work to Do"
-HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX = "AI Agents for Recruiting Operations"
+HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX = "Completed Sourcing Work Across Your Existing Recruiting Tools"
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
@@ -1040,9 +1040,9 @@ class HomePage(TemplateView):
         if settings.GOBII_PROPRIETARY_MODE:
             context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX}"
             context["home_meta_description"] = (
-                f"{home_brand_name} helps recruiting teams automate repetitive sourcing, "
-                "candidate research, shortlist preparation, and workflow handoff across "
-                "the tools they already use."
+                f"Give {home_brand_name} a role brief. It researches candidates, builds "
+                "shortlists, writes hiring-manager briefs, and hands off results across "
+                "your existing recruiting tools."
             )
             context["home_social_image_alt"] = f"{home_brand_name} AI recruiting operations platform preview"
         else:

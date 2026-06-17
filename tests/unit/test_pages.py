@@ -109,11 +109,11 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        title = "Acme - AI Agents for Recruiting Operations"
+        title = "Acme - Completed Sourcing Work Across Your Existing Recruiting Tools"
         description = (
-            "Acme helps recruiting teams automate repetitive sourcing, candidate "
-            "research, shortlist preparation, and workflow handoff across the tools "
-            "they already use."
+            "Give Acme a role brief. It researches candidates, builds shortlists, "
+            "writes hiring-manager briefs, and hands off results across your existing "
+            "recruiting tools."
         )
         image_url = "https://gobii.ai/static/images/gobii_og_image_1200x630.png"
 
@@ -377,7 +377,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme helps recruiting teams automate repetitive sourcing, candidate research, shortlist preparation, and workflow handoff across the tools they already use.">',
+            '<meta name="description" content="Give Acme a role brief. It researches candidates, builds shortlists, writes hiring-manager briefs, and hands off results across your existing recruiting tools.">',
         )
 
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
@@ -784,22 +784,31 @@ class HomePageTests(TestCase):
 
         soup = BeautifulSoup(response.content, "html.parser")
         page_text = soup.get_text(" ")
-        self.assertIn("AI agents for recruiting operations", page_text)
+        self.assertIn("Completed sourcing work across your existing recruiting tools.", page_text)
         self.assertIn(
-            "Gobii helps recruiting teams automate repetitive sourcing, candidate research, "
-            "shortlist preparation, and workflow handoff across the tools they already use.",
+            "Give Gobii a role brief. It researches candidates, builds shortlists, "
+            "writes hiring-manager briefs, and hands off results",
             page_text,
         )
+        self.assertIn("managed LinkedIn Recruiter automation available through sales", page_text)
         self.assertNotIn("Get qualified candidates.", page_text)
         self.assertNotIn("Enter a job description. Gobii builds the shortlist.", page_text)
         hero_form = soup.find("form", {"id": "create-agent-form"})
         self.assertIsNotNone(hero_form)
         hero_markup = str(hero_form)
         self.assertNotIn("data-integrations-inline", hero_markup)
-        self.assertNotIn("LinkedIn", hero_markup)
+        self.assertEqual(hero_form.get("data-analytics-cta-id"), "home_hero")
+        self.assertEqual(hero_form.get("data-analytics-placement"), "hero")
+        self.assertEqual(hero_form.get("data-analytics-intent"), "spawn_agent")
         hero_button = hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(hero_button)
-        self.assertEqual(self._normalized_button_text(hero_button), "Automate recruiting ops")
+        self.assertEqual(self._normalized_button_text(hero_button), "Start sourcing")
+        sales_link = soup.find("a", string=re.compile("Talk to sales for LinkedIn Recruiter"))
+        self.assertIsNotNone(sales_link)
+        self.assertEqual(sales_link.get("href"), reverse("proprietary:contact"))
+        self.assertEqual(sales_link.get("data-analytics-cta-id"), "home_linkedin_recruiter_sales")
+        self.assertEqual(sales_link.get("data-analytics-placement"), "hero")
+        self.assertEqual(sales_link.get("data-analytics-intent"), "contact_sales")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_prompt_placeholder_matches_recruiting_ops_copy(self):
@@ -808,7 +817,7 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            "Paste a job description. Gobii will research candidates, prepare a shortlist, and generate hiring-manager briefs.",
+            "Paste a role brief. Gobii will research candidates, build a shortlist, write hiring-manager briefs, and hand off results.",
         )
         self.assertNotContains(response, " for a senior backend engineer role.")
         self.assertNotContains(response, " for a founding account executive role.")
@@ -825,7 +834,7 @@ class HomePageTests(TestCase):
         source_links = [
             link
             for link in soup.find_all("a", {"href": "#create-agent-form"})
-            if "Automate recruiting ops" in link.get_text(" ", strip=True)
+            if "Start sourcing" in link.get_text(" ", strip=True)
         ]
         self.assertGreaterEqual(len(source_links), 1)
         self.assertContains(response, "#create-agent-form")
@@ -1495,13 +1504,13 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "http://testserver/llms-full.txt")
         self.assertContains(response, "https://docs.gobii.ai/")
-        self.assertContains(response, "Gobii is focused on recruiting operations")
-        self.assertContains(response, "AI agents for recruiting operations")
+        self.assertContains(response, "Gobii completes sourcing work across existing recruiting tools")
+        self.assertContains(response, "http://testserver/solutions/")
+        self.assertContains(response, "http://testserver/solutions/engineering/")
+        self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
         self.assertContains(response, "## Recruiting Operations")
-        self.assertNotContains(response, "http://testserver/solutions/")
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
-        self.assertNotContains(response, "LinkedIn")
 
     def test_llms_full_txt_is_served_from_root(self):
         response = self.client.get("/llms-full.txt")
@@ -1510,13 +1519,13 @@ class LlmsTxtTests(TestCase):
         self.assertEqual(response["Content-Type"], "text/plain")
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "## Overview")
-        self.assertContains(response, "automate repetitive sourcing, candidate research")
+        self.assertContains(response, "turn role briefs into completed sourcing work")
         self.assertContains(response, "## Recruiting Operations")
-        self.assertContains(response, "Public template and solution pages are no longer the primary product surface.")
-        self.assertNotContains(response, "http://testserver/solutions/")
+        self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
+        self.assertContains(response, "Solutions: http://testserver/solutions/")
+        self.assertContains(response, "Developers: http://testserver/solutions/engineering/")
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
-        self.assertNotContains(response, "LinkedIn")
 
 
 @tag("batch_pages")
@@ -1587,7 +1596,7 @@ class CanonicalLinkTests(TestCase):
 @tag("batch_pages")
 class SitemapTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_sitemap_includes_template_detail_urls_but_not_library_indexes(self):
+    def test_sitemap_includes_template_and_solution_urls_but_not_library_indexes(self):
         PersistentAgentTemplate.objects.update_or_create(
             code="sitemap-project-manager",
             defaults={
@@ -1611,16 +1620,14 @@ class SitemapTests(TestCase):
             "<loc>http://example.com/library/team-ops/sitemap-project-manager/</loc>",
             content,
         )
-        self.assertNotIn("http://example.com/solutions/", content)
+        self.assertIn("<loc>http://example.com/solutions/recruiting/</loc>", content)
+        self.assertIn("<loc>http://example.com/solutions/engineering/</loc>", content)
         self.assertNotIn("<loc>http://example.com/library/</loc>", content)
         self.assertNotIn("<loc>http://example.com/library/team-ops/</loc>", content)
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
-    def test_removed_public_template_and_solution_urls_redirect_home(self):
+    def test_public_template_urls_redirect_home(self):
         for path in (
-            "/solutions/",
-            "/solutions/recruiting/",
-            "/solutions/recruiting/candidate-sourcing/",
             "/library/",
             "/library/recruiting/",
             "/pretrained-workers/",
@@ -1630,6 +1637,19 @@ class SitemapTests(TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 301)
                 self.assertEqual(response["Location"], "/")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_solution_urls_render_again(self):
+        for path in (
+            "/solutions/",
+            "/solutions/recruiting/",
+            "/solutions/recruiting/candidate-sourcing/",
+            "/solutions/sales/",
+            "/solutions/engineering/",
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_proprietary_sitemap_excludes_redirects_and_checkout_start_urls(self):
@@ -2457,35 +2477,43 @@ class RemovedPretrainedWorkerSurfaceTests(TestCase):
 
 
 @tag("batch_pages")
-class RemovedPublicMarketingSurfaceTests(TestCase):
+class RestoredPublicMarketingSurfaceTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_header_omits_solution_and_template_navigation(self):
+    def test_home_header_restores_solution_and_developer_navigation(self):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
-        self.assertIsNone(soup.find("a", {"href": reverse("pages:solutions")}))
-        self.assertIsNone(soup.find("a", {"href": reverse("pages:library")}))
-        self.assertIsNone(
-            soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "engineering"})})
+        self.assertIsNotNone(soup.find("a", {"href": reverse("pages:solutions")}))
+        self.assertIsNotNone(
+            soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "recruiting"})})
         )
-        self.assertNotIn("Solutions", soup.get_text(" ", strip=True))
+        developer_links = soup.find_all(
+            "a",
+            {"href": reverse("pages:solution", kwargs={"slug": "engineering"})},
+        )
+        self.assertGreaterEqual(len(developer_links), 1)
+        self.assertIsNone(soup.find("a", {"href": reverse("pages:library")}))
+        self.assertIn("Solutions", soup.get_text(" ", strip=True))
         self.assertNotIn("Discover", soup.get_text(" ", strip=True))
-        self.assertNotIn("Developers", soup.get_text(" ", strip=True))
+        self.assertIn("Developers", soup.get_text(" ", strip=True))
 
-    def test_removed_solution_urls_redirect_home(self):
-        for path in (
+    def test_restored_solution_urls_render(self):
+        live_paths = (
             "/solutions/",
             "/solutions/recruiting/",
             "/solutions/recruiting/candidate-sourcing/",
             "/solutions/sales/",
-            "/solutions/operations/",
-        ):
+            "/solutions/engineering/",
+        )
+        for path in live_paths:
             with self.subTest(path=path):
                 response = self.client.get(path)
 
-                self.assertEqual(response.status_code, 301)
-                self.assertEqual(response["Location"], "/")
+                self.assertEqual(response.status_code, 200)
+
+        response = self.client.get("/solutions/operations/")
+        self.assertEqual(response.status_code, 404)
 
 
 @tag("batch_pages")

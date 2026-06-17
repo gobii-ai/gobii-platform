@@ -502,7 +502,7 @@
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
                     {% if settings.GOBII_PROPRIETARY_MODE %}
-                    <span id="charter-ghost-text">Paste a job description. Gobii will research candidates, prepare a shortlist, and generate hiring-manager briefs.</span>
+                    <span id="charter-ghost-text">Paste a role brief. Gobii will research candidates, build a shortlist, write hiring-manager briefs, and hand off results.</span>
                     {% else %}
                     <span>I want my Gobii to</span>
                     <span id="charter-ghost-text"> find 200 ideal customers and their emails.</span>
@@ -548,7 +548,7 @@
                     {% endif %}
                   </div>
 
-                  <div class="flex items-center justify-end gap-3">
+                  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
                     {% if llm_intelligence %}
                     <div
                       class="relative"
@@ -654,7 +654,7 @@
                       class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
                     >
                       {% if settings.GOBII_PROPRIETARY_MODE %}
-                        Automate recruiting ops
+                        Start sourcing
                       {% elif not user.is_authenticated or home_spawn_requires_trial %}
                         {% cta_text "cta_homepage_launch_btn_unauth" fallback="Start Free Trial" %}
                       {% else %}
@@ -664,6 +664,18 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
                       </svg>
                     </button>
+                    {% if settings.GOBII_PROPRIETARY_MODE %}
+                    <a
+                      href="{% url 'proprietary:contact' %}"
+                      class="inline-flex items-center justify-center gap-x-2 rounded-xl border border-violet-200 bg-white/80 px-4 py-3 text-sm font-semibold text-violet-700 shadow-sm transition-all duration-300 hover:border-violet-300 hover:bg-white hover:text-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2"
+                      data-analytics-cta-id="home_linkedin_recruiter_sales"
+                      data-analytics-placement="hero"
+                      data-analytics-intent="contact_sales"
+                      data-analytics-label="Talk to sales for LinkedIn Recruiter"
+                    >
+                      Talk to sales for LinkedIn Recruiter
+                    </a>
+                    {% endif %}
                   </div>
                 </div>
               </div>
