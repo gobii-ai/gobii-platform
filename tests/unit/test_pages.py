@@ -777,7 +777,33 @@ class HomePageTests(TestCase):
         self.assertEqual(self._normalized_button_text(auth_hero_button), "Spawn Agent")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    def test_home_cta_text_is_recruiting_ops_specific_in_proprietary_mode(self):
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={
+            "enabled": True,
+            "builtins": [
+                {
+                    "slug": "linkedin",
+                    "name": "LinkedIn",
+                    "description": "Professional network",
+                    "icon_url": "https://example.com/linkedin.png",
+                },
+                {
+                    "slug": "google_sheets",
+                    "name": "Google Sheets",
+                    "description": "Spreadsheets",
+                    "icon_url": "https://example.com/sheets.png",
+                },
+                {
+                    "slug": "trello",
+                    "name": "Trello",
+                    "description": "Boards",
+                    "icon_url": "https://example.com/trello.png",
+                },
+            ],
+        },
+    )
+    def test_home_cta_text_is_recruiting_ops_specific_in_proprietary_mode(self, _mock_integrations):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
 
@@ -799,7 +825,9 @@ class HomePageTests(TestCase):
         hero_form = soup.find("form", {"id": "create-agent-form"})
         self.assertIsNotNone(hero_form)
         hero_markup = str(hero_form)
-        self.assertNotIn("data-integrations-inline", hero_markup)
+        self.assertIn("data-integrations-inline", hero_markup)
+        self.assertIn("data-integrations-open", hero_markup)
+        self.assertIn("Apps", hero_form.get_text(" ", strip=True))
         self.assertEqual(hero_form.get("data-analytics-cta-id"), "home_hero")
         self.assertEqual(hero_form.get("data-analytics-placement"), "hero")
         self.assertEqual(hero_form.get("data-analytics-intent"), "spawn_agent")
@@ -809,7 +837,7 @@ class HomePageTests(TestCase):
         self.assertIsNone(hero_form.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"}))
         sales_link = soup.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"})
         self.assertIsNotNone(sales_link)
-        self.assertEqual(sales_link.get("href"), reverse("proprietary:contact"))
+        self.assertEqual(sales_link.get("href"), reverse("pages:recruiting_contact"))
         self.assertEqual(sales_link.get("data-analytics-placement"), "hero_below_form")
         self.assertEqual(sales_link.get("data-analytics-intent"), "contact_sales")
         self.assertIn("Talk to sales", sales_link.get_text(" ", strip=True))
@@ -1186,6 +1214,88 @@ class HomePageTests(TestCase):
             owner_user=user,
             owner_org=None,
         )
+
+
+@tag("batch_pages")
+class RecruitingContactPageTests(TestCase):
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_recruiting_contact_page_renders_dedicated_lead_form(self):
+        response = self.client.get(reverse("pages:recruiting_contact"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("marketing_contact_form", response.context)
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            "Talk to Gobii about AI agents for candidate sourcing, research, shortlist preparation, "
+            "and recruiting workflow handoff across LinkedIn Recruiter, Greenhouse, Google Sheets, "
+            "and your existing tools.",
+        )
+        page_text = soup.get_text(" ", strip=True)
+        self.assertIn("Source more candidates without adding sourcing headcount.", page_text)
+        self.assertIn("For recruiting teams and agencies", page_text)
+        self.assertIn("LinkedIn Recruiter", page_text)
+        self.assertIn("Greenhouse", page_text)
+        self.assertIn("Google Sheets", page_text)
+
+        form = soup.find("form", {"data-analytics-cta-id": "recruiting_contact_form"})
+        self.assertIsNotNone(form)
+        self.assertEqual(form.get("action"), reverse("pages:marketing_contact_request"))
+        self.assertEqual(form.get("data-analytics-placement"), "recruiting_contact_page")
+        self.assertEqual(form.find("input", {"name": "source"}).get("value"), "recruiting_contact_page")
+        self.assertEqual(form.find("input", {"name": "source_page"}).get("value"), "recruiting_contact_form")
+        self.assertIsNotNone(form.find("input", {"name": "email"}))
+        self.assertIsNotNone(form.find("input", {"name": "organization"}))
+        self.assertIsNotNone(form.find("textarea", {"name": "message"}))
+        inquiry_values = [
+            option.get("value")
+            for option in form.find("select", {"name": "inquiry_type"}).find_all("option")
+        ]
+        self.assertEqual(
+            inquiry_values,
+            ["", "in_house_recruiting", "recruiting_agency", "executive_search", "independent_recruiter", "other"],
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_recruiting_contact_page_redirects_in_community_mode(self):
+        response = self.client.get(reverse("pages:recruiting_contact"))
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/")
+
+    @override_settings(PUBLIC_CONTACT_EMAIL="hello@gobii.test", SUPPORT_EMAIL="support@gobii.test")
+    @patch("pages.views._track_web_event_for_request")
+    @patch("pages.views.send_mail")
+    def test_recruiting_contact_request_sends_distinct_lead_email(self, mock_send_mail, mock_track_event):
+        response = self.client.post(
+            reverse("pages:marketing_contact_request"),
+            {
+                "source": "recruiting_contact_page",
+                "email": "talent@example.com",
+                "organization": "Acme Recruiting",
+                "inquiry_type": "recruiting_agency",
+                "message": "We source 30 engineering roles per month and use LinkedIn Recruiter.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Thanks for reaching out. We will follow up shortly.")
+        mock_send_mail.assert_called_once()
+        send_mail_kwargs = mock_send_mail.call_args.kwargs
+        self.assertEqual(send_mail_kwargs["subject"], "Recruiting Contact Request")
+        self.assertEqual(send_mail_kwargs["recipient_list"], ["hello@gobii.test"])
+        self.assertIn("Recruiting contact request", send_mail_kwargs["html_message"])
+        self.assertIn("Recruiting agency", send_mail_kwargs["html_message"])
+        mock_track_event.assert_called_once()
+        self.assertEqual(mock_track_event.call_args.kwargs["event"], AnalyticsEvent.MARKETING_CONTACT_REQUEST_SUBMITTED)
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["properties"],
+            {
+                "source_page": "recruiting_contact_page",
+                "inquiry_type": "recruiting_agency",
+            },
+        )
+
 
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
@@ -1653,6 +1763,7 @@ class SitemapTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("<loc>http://example.com/</loc>", content)
+        self.assertIn("<loc>http://example.com/recruiting/contact/</loc>", content)
         self.assertIn(
             "<loc>http://example.com/library/team-ops/sitemap-project-manager/</loc>",
             content,
@@ -1670,6 +1781,7 @@ class SitemapTests(TestCase):
             "/solutions/recruiting/candidate-sourcing/",
             "/solutions/sales/",
             "/solutions/operations/",
+            "/recruiting/contact/",
             "/library/",
             "/library/recruiting/",
             "/pretrained-workers/",

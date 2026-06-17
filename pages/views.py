@@ -3678,6 +3678,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
             items.insert(6, 'proprietary:careers')
             items.insert(7, 'proprietary:blog_index')
             items.insert(8, 'proprietary:comparisons')
+            items.insert(9, 'pages:recruiting_contact')
         else:
             items.append('pages:docs_index')
         return items
@@ -3785,6 +3786,22 @@ class SupportView(TemplateView):
     pass
 
 
+class RecruitingContactView(TemplateView):
+    template_name = "recruiting_contact.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("/", permanent=True)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["canonical_url"] = self.request.build_absolute_uri(reverse("pages:recruiting_contact"))
+        context["marketing_contact_form"] = MarketingContactForm()
+        context["suppress_preline"] = True
+        return context
+
+
 class MarketingContactRequestView(View):
     SOURCE_CONFIG = {
         "healthcare_landing_page": {
@@ -3794,6 +3811,10 @@ class MarketingContactRequestView(View):
         "defense_landing_page": {
             "subject": "Defense Contact Request",
             "label": "Defense contact request",
+        },
+        "recruiting_contact_page": {
+            "subject": "Recruiting Contact Request",
+            "label": "Recruiting contact request",
         },
     }
 

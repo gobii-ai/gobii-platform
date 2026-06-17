@@ -22,6 +22,7 @@ from .views import (
     SolutionsIndexView,
     SolutionView,
     SolutionsSitemap,
+    RecruitingContactView,
     MarketingContactRequestView,
     SpecialAccessStartView,
     SpecialAccessView,
@@ -88,6 +89,7 @@ urlpatterns = [
     path("pretrained-workers/<slug:slug>/spawn/", _home_redirect, name="pretrained_worker_launch"),
     path("solutions/", SolutionsIndexView.as_view(), name="solutions"),
     path("solutions/engineering/pro-signup/", EngineeringProSignupView.as_view(), name="engineering_pro_signup"),
+    path("recruiting/contact/", RecruitingContactView.as_view(), name="recruiting_contact"),
     path(
         "solutions/recruiting/candidate-sourcing/",
         SolutionView.as_view(),
