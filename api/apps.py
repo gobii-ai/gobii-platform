@@ -44,6 +44,13 @@ class ApiConfig(AppConfig):
             logger.error(f"Failed to import system_setting_signals: {e}")
 
         try:
+            from . import telegram_signals  # noqa: F401  # pragma: no cover
+        except ImportError as e:  # pragma: no cover - optional dependency
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to import telegram_signals: {e}")
+
+        try:
             from . import task_credit_signals  # pragma: no cover
 
             task_credit_signals.register_task_credit_cache_invalidation()

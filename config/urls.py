@@ -219,6 +219,14 @@ from console.discord_api import (
     DiscordOAuthCallbackView,
     DiscordOAuthStartView,
 )
+from console.telegram_api import (
+    AgentTelegramAppView,
+    AgentTelegramConnectView,
+    AgentTelegramDisconnectView,
+    AgentTelegramSyncProfileView,
+    TelegramAgentBotWebhookView,
+    TelegramManagerWebhookView,
+)
 from console.usage_views import (
     UsageSummaryAPIView,
     UsageBurnRateSnapshotAPIView,
@@ -338,6 +346,8 @@ urlpatterns = [
     path("connect/pipedream/<uuid:agent_id>/<slug:app_slug>/", PipedreamConnectRedirectView.as_view(), name="pipedream_jit_connect"),
     path("console/api/discord/oauth/start/", DiscordOAuthStartView.as_view(), name="discord_oauth_start"),
     path("console/api/discord/oauth/callback/", DiscordOAuthCallbackView.as_view(), name="discord_oauth_callback"),
+    path("api/telegram/manager/webhook/", TelegramManagerWebhookView.as_view(), name="telegram_manager_webhook"),
+    path("api/telegram/bots/<uuid:identity_id>/webhook/", TelegramAgentBotWebhookView.as_view(), name="telegram_agent_bot_webhook"),
 
     # Plan landing pages (must be before console to avoid conflict)
     path("plans/<slug:plan>/", PaidPlanLanding.as_view(), name="plan_landing"),
@@ -585,6 +595,10 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/discord/guilds/<str:guild_id>/channels/", AgentDiscordChannelsView.as_view(), name="console-agent-discord-channels"),
     path("console/api/agents/<uuid:agent_id>/discord/subscriptions/", AgentDiscordSubscriptionsView.as_view(), name="console-agent-discord-subscriptions"),
     path("console/api/discord/disconnect/", DiscordDisconnectView.as_view(), name="console-discord-disconnect"),
+    path("console/api/agents/<uuid:agent_id>/telegram/app/", AgentTelegramAppView.as_view(), name="console-agent-telegram-app"),
+    path("console/api/agents/<uuid:agent_id>/telegram/connect/", AgentTelegramConnectView.as_view(), name="console-agent-telegram-connect"),
+    path("console/api/agents/<uuid:agent_id>/telegram/sync-profile/", AgentTelegramSyncProfileView.as_view(), name="console-agent-telegram-sync-profile"),
+    path("console/api/agents/<uuid:agent_id>/telegram/disconnect/", AgentTelegramDisconnectView.as_view(), name="console-agent-telegram-disconnect"),
     path("console/api/session/", ConsoleSessionAPIView.as_view(), name="console_session"),
     path("console/api/support/request/", AppSupportRequestAPIView.as_view(), name="console_app_support_request"),
     path("console/api/billing/initial/", BillingInitialDataAPIView.as_view(), name="console_billing_initial_data"),

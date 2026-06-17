@@ -402,6 +402,7 @@ class CommsChannel(models.TextChoices):
     SMS = "sms", "SMS"
     SLACK = "slack", "Slack"
     DISCORD = "discord", "Discord"
+    TELEGRAM = "telegram", "Telegram"
     WEB = "web", "Web Chat"
     OTHER = "other", "Other"
 
@@ -9943,6 +9944,373 @@ class PersistentAgentDiscordWebhookEcho(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - display helper
         return f"DiscordWebhookEcho<{self.agent_id}:{self.channel_id}:{self.discord_message_id or self.signature_hash}>"
+
+
+class PersistentAgentTelegramUserLink(models.Model):
+    """Telegram user authorized to provision managed bot identities for a Gobii owner."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    telegram_user_id = models.CharField(max_length=32)
+    username = models.CharField(max_length=255, blank=True)
+    first_name = models.CharField(max_length=255, blank=True)
+    last_name = models.CharField(max_length=255, blank=True)
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="telegram_user_links",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="telegram_user_links",
+    )
+    linked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="linked_telegram_users",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner_user", "telegram_user_id"],
+                condition=Q(organization__isnull=True, is_active=True),
+                name="uniq_active_tg_user_link_user",
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "telegram_user_id"],
+                condition=Q(owner_user__isnull=True, is_active=True),
+                name="uniq_active_tg_user_link_org",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(owner_user__isnull=False, organization__isnull=True)
+                    | Q(owner_user__isnull=True, organization__isnull=False)
+                ),
+                name="pa_tg_user_link_one_owner",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["owner_user", "is_active"], name="pa_tg_user_link_user_idx"),
+            models.Index(fields=["organization", "is_active"], name="pa_tg_user_link_org_idx"),
+            models.Index(fields=["telegram_user_id"], name="pa_tg_user_link_tgid_idx"),
+        ]
+        ordering = ["-updated_at", "-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"TelegramUserLink<{self.telegram_user_id}>"
+
+
+class PersistentAgentTelegramUserLinkRequest(models.Model):
+    """Short-lived Telegram deep-link token for linking a Telegram user to a Gobii owner."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    token = models.CharField(max_length=64, unique=True, db_index=True)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="telegram_user_link_requests",
+    )
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="telegram_user_link_requests",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="telegram_user_link_requests",
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="initiated_telegram_user_link_requests",
+    )
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(owner_user__isnull=False, organization__isnull=True)
+                    | Q(owner_user__isnull=True, organization__isnull=False)
+                ),
+                name="pa_tg_link_req_one_owner",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "expires_at"], name="pa_tg_link_req_agent_idx"),
+            models.Index(fields=["expires_at"], name="pa_tg_link_req_exp_idx"),
+        ]
+        ordering = ["-created_at"]
+
+
+class PersistentAgentTelegramProvisioningSession(models.Model):
+    """Pending Telegram managed-bot creation request for an agent."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        COMPLETED = "completed", "Completed"
+        EXPIRED = "expired", "Expired"
+        ERROR = "error", "Error"
+        CANCELED = "canceled", "Canceled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="telegram_provisioning_sessions",
+    )
+    user_link = models.ForeignKey(
+        PersistentAgentTelegramUserLink,
+        on_delete=models.CASCADE,
+        related_name="provisioning_sessions",
+    )
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="telegram_provisioning_sessions",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="telegram_provisioning_sessions",
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="initiated_telegram_provisioning_sessions",
+    )
+    suggested_username = models.CharField(max_length=64)
+    suggested_name = models.CharField(max_length=255)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    expires_at = models.DateTimeField()
+    completed_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user_link"],
+                condition=Q(status="pending"),
+                name="uniq_pending_tg_session_link",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(owner_user__isnull=False, organization__isnull=True)
+                    | Q(owner_user__isnull=True, organization__isnull=False)
+                ),
+                name="pa_tg_session_one_owner",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "status"], name="pa_tg_session_agent_idx"),
+            models.Index(fields=["user_link", "status"], name="pa_tg_session_link_idx"),
+            models.Index(fields=["expires_at"], name="pa_tg_session_exp_idx"),
+        ]
+        ordering = ["-created_at"]
+
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+
+class PersistentAgentTelegramBotIdentity(models.Model):
+    """Telegram managed bot identity owned by a single Gobii agent."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISCONNECTED = "disconnected", "Disconnected"
+        ERROR = "error", "Error"
+
+    class SyncStatus(models.TextChoices):
+        NEVER = "never", "Never synced"
+        SYNCED = "synced", "Synced"
+        ERROR = "error", "Error"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.OneToOneField(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="telegram_bot_identity",
+    )
+    provisioning_session = models.ForeignKey(
+        PersistentAgentTelegramProvisioningSession,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bot_identities",
+    )
+    telegram_bot_id = models.CharField(max_length=32, unique=True)
+    username = models.CharField(max_length=64, unique=True)
+    display_name = models.CharField(max_length=255, blank=True)
+    token_encrypted = models.BinaryField(blank=True, null=True)
+    webhook_secret_encrypted = models.BinaryField(blank=True, null=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE, db_index=True)
+    profile_sync_status = models.CharField(
+        max_length=16,
+        choices=SyncStatus.choices,
+        default=SyncStatus.NEVER,
+        db_index=True,
+    )
+    profile_synced_at = models.DateTimeField(null=True, blank=True)
+    profile_sync_error = models.TextField(blank=True)
+    last_update_id = models.BigIntegerField(null=True, blank=True)
+    connected_at = models.DateTimeField(null=True, blank=True)
+    disconnected_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["agent", "status"], name="pa_tg_bot_agent_status_idx"),
+            models.Index(fields=["username"], name="pa_tg_bot_username_idx"),
+        ]
+        ordering = ["username"]
+
+    @staticmethod
+    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @staticmethod
+    def _decrypt_text(payload: Optional[bytes]) -> str:
+        if not payload:
+            return ""
+        from .encryption import SecretsEncryption
+
+        try:
+            return SecretsEncryption.decrypt_value(payload)
+        except ValueError:
+            logger.exception("Failed to decrypt Telegram bot secret")
+            return ""
+
+    @property
+    def token(self) -> str:
+        return self._decrypt_text(self.token_encrypted)
+
+    @token.setter
+    def token(self, value: Optional[str]) -> None:
+        self.token_encrypted = self._encrypt_text(value)
+
+    @property
+    def webhook_secret(self) -> str:
+        return self._decrypt_text(self.webhook_secret_encrypted)
+
+    @webhook_secret.setter
+    def webhook_secret(self, value: Optional[str]) -> None:
+        self.webhook_secret_encrypted = self._encrypt_text(value)
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"TelegramBotIdentity<{self.username}:{self.agent_id}>"
+
+
+class PersistentAgentTelegramChatBinding(models.Model):
+    """Telegram chat or topic where an agent bot has received or can send messages."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+        ERROR = "error", "Error"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    bot_identity = models.ForeignKey(
+        PersistentAgentTelegramBotIdentity,
+        on_delete=models.CASCADE,
+        related_name="chat_bindings",
+    )
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="telegram_chat_bindings",
+    )
+    chat_id = models.CharField(max_length=64)
+    chat_type = models.CharField(max_length=32, blank=True)
+    message_thread_id = models.CharField(max_length=64, blank=True)
+    title = models.CharField(max_length=255, blank=True)
+    username = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE, db_index=True)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bot_identity", "chat_id", "message_thread_id"],
+                condition=Q(status="active"),
+                name="uniq_active_tg_chat_binding",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "status"], name="pa_tg_chat_agent_idx"),
+            models.Index(fields=["bot_identity", "chat_id"], name="pa_tg_chat_lookup_idx"),
+        ]
+        ordering = ["title", "chat_id", "message_thread_id"]
+
+    def record_message(self) -> None:
+        self.last_message_at = timezone.now()
+        self.last_error = ""
+        self.save(update_fields=["last_message_at", "last_error", "updated_at"])
+
+    def record_error(self, message: str) -> None:
+        self.last_error = (message or "")[:2000]
+        self.status = self.Status.ERROR
+        self.save(update_fields=["last_error", "status", "updated_at"])
+
+
+class PersistentAgentTelegramUpdateReceipt(models.Model):
+    """Deduplication record for Telegram update ids delivered to an agent bot."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    bot_identity = models.ForeignKey(
+        PersistentAgentTelegramBotIdentity,
+        on_delete=models.CASCADE,
+        related_name="update_receipts",
+    )
+    update_id = models.BigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["bot_identity", "update_id"], name="uniq_tg_bot_update_receipt"),
+        ]
+        indexes = [
+            models.Index(fields=["bot_identity", "-update_id"], name="pa_tg_update_bot_idx"),
+            models.Index(fields=["created_at"], name="pa_tg_update_created_idx"),
+        ]
+        ordering = ["-update_id"]
 
 
 class PersistentAgentCommsEndpoint(models.Model):

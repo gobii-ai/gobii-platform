@@ -432,6 +432,17 @@ def process_discord_inbound_debounce_task(
     process_discord_inbound_debounce(persistent_agent_id)
 
 
+@shared_task(bind=True, name="api.agent.tasks.process_telegram_inbound_debounce")
+def process_telegram_inbound_debounce_task(
+    self,
+    persistent_agent_id: str,
+) -> None:  # noqa: D401, ANN001
+    """Wake an agent after Telegram inbound messages have been quiet long enough."""
+    from api.services.telegram_bot import process_telegram_inbound_debounce
+
+    process_telegram_inbound_debounce(persistent_agent_id)
+
+
 def _remove_orphaned_celery_beat_task(agent_id: str) -> None:
     """Remove the associated Celery Beat schedule task for a non-existent agent."""
     from celery import current_app as celery_app

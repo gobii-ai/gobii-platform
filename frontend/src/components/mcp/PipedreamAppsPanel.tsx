@@ -1,8 +1,9 @@
 import { useCallback, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { CheckCircle2, Loader2, Plus, Sparkles } from 'lucide-react'
 
 import { fetchAgentRoster } from '../../api/agents'
+import { agentTelegramAppQueryKey, fetchAgentTelegramApp } from '../../api/telegramNative'
 import { fetchPipedreamAppSettings, type PipedreamAppSummary } from '../../api/mcp'
 import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import { InlineStatusBanner } from '../common/InlineStatusBanner'
@@ -10,6 +11,7 @@ import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { useModal } from '../../hooks/useModal'
 import { agentHasDiscordNative } from './DiscordNativeAppModal'
 import { withDiscordNativeProviderConnection } from './DiscordNativeShared'
+import { withTelegramNativeProviderConnection } from './TelegramNativeShared'
 import { NativeProviderIcon } from './NativeIntegrationShared'
 import { PipedreamAppsModal } from './PipedreamAppsModal'
 import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from './PipedreamAppsShared'
@@ -50,6 +52,14 @@ export function PipedreamAppsPanel({
     queryFn: () => fetchAgentRoster(),
     enabled: Boolean(nativeIntegrationsUrl),
   })
+  const rosterAgents = agentRosterQuery.data?.agents ?? []
+  const telegramAgentAppQueries = useQueries({
+    queries: rosterAgents.map((agent) => ({
+      queryKey: agentTelegramAppQueryKey(agent.id),
+      queryFn: () => fetchAgentTelegramApp(agent.id),
+      enabled: Boolean(nativeIntegrationsUrl),
+    })),
+  })
 
   const emptySettings = useMemo(() => ({
     ownerScope: '',
@@ -63,9 +73,15 @@ export function PipedreamAppsPanel({
     () => (agentRosterQuery.data?.agents ?? []).some(agentHasDiscordNative),
     [agentRosterQuery.data?.agents],
   )
+  const telegramConnected = telegramAgentAppQueries.some((query) => Boolean(query.data?.connected))
+  const telegramAppsLoading = telegramAgentAppQueries.some((query) => query.isLoading)
+  const telegramAppsError = telegramAgentAppQueries.find((query) => query.isError)?.error ?? null
   const nativeProviders = useMemo(() => {
-    return withDiscordNativeProviderConnection(nativeIntegrationsQuery.data?.providers ?? [], discordConnected)
-  }, [discordConnected, nativeIntegrationsQuery.data?.providers])
+    return withTelegramNativeProviderConnection(
+      withDiscordNativeProviderConnection(nativeIntegrationsQuery.data?.providers ?? [], discordConnected),
+      telegramConnected,
+    )
+  }, [discordConnected, nativeIntegrationsQuery.data?.providers, telegramConnected])
   const hasPipedreamApps = Boolean(settingsUrl && searchUrl)
   const canOpenModal = hasPipedreamApps ? Boolean(settingsQuery.data) : Boolean(nativeIntegrationsUrl)
 
@@ -131,22 +147,22 @@ export function PipedreamAppsPanel({
             type="button"
             className={buttonClassName}
             onClick={openModal}
-            disabled={!canOpenModal || settingsQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading}
+            disabled={!canOpenModal || settingsQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading || telegramAppsLoading}
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             Add Apps
           </button>
         </div>
 
-        {(hasPipedreamApps && settingsQuery.isLoading) || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading ? (
+        {(hasPipedreamApps && settingsQuery.isLoading) || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading || telegramAppsLoading ? (
           <div className={loadingClassName}>
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading apps…
           </div>
-        ) : (hasPipedreamApps && settingsQuery.isError) || nativeIntegrationsQuery.isError || agentRosterQuery.isError ? (
+        ) : (hasPipedreamApps && settingsQuery.isError) || nativeIntegrationsQuery.isError || agentRosterQuery.isError || Boolean(telegramAppsError) ? (
           <div className="px-6 py-5">
             <InlineStatusBanner variant="error" surface={embedded ? 'embedded' : 'standalone'}>
-              {resolvePipedreamAppsErrorMessage(settingsQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error, 'Unable to load apps right now.')}
+              {resolvePipedreamAppsErrorMessage(settingsQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error ?? telegramAppsError, 'Unable to load apps right now.')}
             </InlineStatusBanner>
           </div>
         ) : (

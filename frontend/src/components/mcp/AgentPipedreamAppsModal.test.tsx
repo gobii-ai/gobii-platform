@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentPipedreamAppsModal } from './AgentPipedreamAppsModal'
@@ -10,6 +10,10 @@ import {
   updateAgentDiscordSubscriptions,
   type AgentDiscordApp,
 } from '../../api/discordNative'
+import {
+  fetchAgentTelegramApp,
+  type AgentTelegramApp,
+} from '../../api/telegramNative'
 
 vi.mock('../../api/discordNative', () => ({
   agentDiscordAppQueryKey: (agentId: string) => ['agent-discord-app', agentId],
@@ -18,6 +22,14 @@ vi.mock('../../api/discordNative', () => ({
   fetchAgentDiscordGuildChannels: vi.fn(),
   startAgentDiscordConnect: vi.fn(),
   updateAgentDiscordSubscriptions: vi.fn(),
+}))
+
+vi.mock('../../api/telegramNative', () => ({
+  agentTelegramAppQueryKey: (agentId: string) => ['agent-telegram-app', agentId],
+  disconnectAgentTelegram: vi.fn(),
+  fetchAgentTelegramApp: vi.fn(),
+  startAgentTelegramConnect: vi.fn(),
+  syncAgentTelegramProfile: vi.fn(),
 }))
 
 const disconnectedDiscordApp: AgentDiscordApp = {
@@ -34,6 +46,27 @@ const disconnectedDiscordApp: AgentDiscordApp = {
   guildCount: 0,
   connectUrl: '/console/api/discord/oauth/start/?agent_id=agent-1',
   botInviteUrl: 'https://discord.com/oauth2/authorize?client_id=bot',
+}
+
+const disconnectedTelegramApp: AgentTelegramApp = {
+  providerKey: 'telegram',
+  displayName: 'Telegram',
+  description: 'Create a managed Telegram bot identity for this agent.',
+  icon: 'telegram',
+  connected: false,
+  subscribed: false,
+  skillEnabled: false,
+  userLinked: false,
+  status: 'disconnected',
+  error: '',
+  botUsername: '',
+  botDisplayName: '',
+  profileSyncStatus: '',
+  profileSyncError: '',
+  managerLinkUrl: '',
+  createBotUrl: '',
+  chats: [],
+  activeChatCount: 0,
 }
 
 const connectedDiscordApp: AgentDiscordApp = {
@@ -75,6 +108,8 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
     vi.mocked(fetchAgentDiscordGuildChannels).mockReset()
     vi.mocked(startAgentDiscordConnect).mockReset()
     vi.mocked(updateAgentDiscordSubscriptions).mockReset()
+    vi.mocked(fetchAgentTelegramApp).mockReset()
+    vi.mocked(fetchAgentTelegramApp).mockResolvedValue(disconnectedTelegramApp)
     vi.spyOn(window, 'open').mockImplementation(() => null)
   })
 
@@ -89,9 +124,11 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
     renderModal()
 
     expect(await screen.findByText('Discord')).toBeInTheDocument()
-    expect(screen.getByText('Native')).toBeInTheDocument()
+    const discordRow = screen.getByText('Discord').closest('.grid')
+    expect(discordRow).not.toBeNull()
+    expect(within(discordRow as HTMLElement).getByText('Native')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    fireEvent.click(within(discordRow as HTMLElement).getByRole('button', { name: 'Connect' }))
 
     await waitFor(() => {
       expect(startAgentDiscordConnect).toHaveBeenCalledWith('agent-1')
@@ -127,7 +164,10 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
 
     renderModal()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Configure' }))
+    await screen.findByText('Discord')
+    const discordRow = screen.getByText('Discord').closest('.grid')
+    expect(discordRow).not.toBeNull()
+    fireEvent.click(within(discordRow as HTMLElement).getByRole('button', { name: 'Configure' }))
     expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
 
     const generalChannel = await screen.findByRole('checkbox', { name: /general/i })

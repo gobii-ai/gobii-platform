@@ -14,6 +14,7 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
 APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
 HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
+TELEGRAM_NATIVE_SYSTEM_SKILL_KEY = "telegram_native"
 CODE_WORK_SYSTEM_SKILL_KEY = "code_work"
 
 
@@ -731,6 +732,43 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     ),
 )
 
+TELEGRAM_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=TELEGRAM_NATIVE_SYSTEM_SKILL_KEY,
+    name="Telegram",
+    search_summary="Use native Telegram managed bots for per-agent Telegram DMs and group interactions.",
+    tool_names=("telegram_chats", "send_telegram_message"),
+    enables=(
+        "receive Telegram DMs through this agent's own managed Telegram bot",
+        "receive Telegram group commands, mentions, and replies delivered to the agent bot",
+        "send Telegram replies from the agent bot's own Telegram identity",
+        "inspect and disable known Telegram chat bindings",
+    ),
+    use_when=(
+        "the user wants the agent to receive Telegram messages",
+        "the user wants this agent to have its own Telegram bot identity",
+        "the user asks to message a Telegram chat from this agent",
+        "the user asks whether Telegram is connected",
+    ),
+    query_aliases=(
+        "telegram",
+        "telegram bot",
+        "telegram dm",
+        "telegram group",
+    ),
+    prompt_instructions=(
+        "Use the native Gobii Telegram managed-bot tools for Telegram setup status and replies.\n"
+        "V1 gives each Gobii agent its own Telegram bot identity. Do not suggest using one shared Telegram bot, "
+        "manual BotFather tokens, full passive group monitoring, Telegram Business/Secretary mode, inline mode, or bot-to-bot loops.\n"
+        "Use `telegram_chats` with `action=\"status\"` before assuming Telegram is connected. If it returns `action_required`, "
+        "tell the user to connect Telegram from the app integration panel; do not ask for raw Telegram bot tokens.\n"
+        "Telegram group messages wake this agent only when Telegram delivers them to the bot, such as commands, mentions, or replies. "
+        "Do not claim the agent can read every group message unless the user explicitly configures Telegram privacy/admin behavior outside Gobii.\n"
+        "Use `telegram_chats` with `action=\"list\"` to inspect known chats. Use `disable` only when the user asks to stop using a known chat.\n"
+        "Use `send_telegram_message` for outbound Telegram replies to known chats. Prefer `chat_binding_id` from `telegram_chats`. "
+        f"To attach Gobii files to the recorded message context: {SEND_TOOL_ATTACHMENTS_DESCRIPTION}"
+    ),
+)
+
 META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=META_GOBII_SYSTEM_SKILL_KEY,
     name="Meta Gobii",
@@ -862,5 +900,6 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     HUBSPOT_NATIVE_SYSTEM_SKILL.skill_key: HUBSPOT_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     DISCORD_NATIVE_SYSTEM_SKILL.skill_key: DISCORD_NATIVE_SYSTEM_SKILL,
+    TELEGRAM_NATIVE_SYSTEM_SKILL.skill_key: TELEGRAM_NATIVE_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,
 }

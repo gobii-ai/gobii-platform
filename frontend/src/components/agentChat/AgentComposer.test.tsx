@@ -55,6 +55,12 @@ vi.mock('./insights/DiscordInsightPanel', () => ({
   ),
 }))
 
+vi.mock('./insights/TelegramInsightPanel', () => ({
+  TelegramInsightPanel: () => (
+    <div data-testid="telegram-panel">Telegram panel</div>
+  ),
+}))
+
 vi.mock('./AgentIntelligenceSelector', () => ({
   AgentIntelligenceSelector: () => null,
 }))
@@ -597,6 +603,13 @@ describe('AgentComposer pending action insights panel', () => {
       panelTestId: 'discord-panel',
       enabledProps: { discordNativeTabEnabled: true },
       disabledProps: { discordNativeTabEnabled: false },
+    },
+    {
+      name: 'Telegram',
+      ariaLabel: 'View Telegram connection',
+      panelTestId: 'telegram-panel',
+      enabledProps: { telegramNativeTabEnabled: true },
+      disabledProps: { telegramNativeTabEnabled: false },
     },
   ] as const
 

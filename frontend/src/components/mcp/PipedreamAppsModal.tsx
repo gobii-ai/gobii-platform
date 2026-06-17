@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, FolderOpen, Loader2, Plug, Unplug, Users } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
   fetchAgentDiscordApp,
 } from '../../api/discordNative'
+import {
+  agentTelegramAppQueryKey,
+  disconnectAgentTelegram,
+  fetchAgentTelegramApp,
+  startAgentTelegramConnect,
+  syncAgentTelegramProfile,
+  type AgentTelegramApp,
+} from '../../api/telegramNative'
 import { fetchAgentRoster } from '../../api/agents'
+import type { AgentRosterEntry } from '../../types/agentRoster'
 import {
   disconnectAgentPipedreamApp,
   fetchPipedreamAppAgentConnections,
@@ -30,6 +39,10 @@ import {
   DISCORD_NATIVE_PROVIDER_KEY,
   withDiscordNativeProvider,
 } from './DiscordNativeShared'
+import {
+  TELEGRAM_NATIVE_PROVIDER_KEY,
+  withTelegramNativeProvider,
+} from './TelegramNativeShared'
 import {
   AgentConnectionAvatar,
   PipedreamAppIcon,
@@ -62,6 +75,10 @@ import {
   useNativeIntegrationRefreshEffects,
 } from './NativeIntegrationShared'
 import {
+  TelegramConfigurationScreen,
+  type PendingNativeAction as AgentTelegramPendingNativeAction,
+} from './AgentPipedreamAppsModal'
+import {
   agentHasDiscordNative,
   DiscordAgentConnectionsScreen,
   DiscordConfigurationScreen,
@@ -87,6 +104,7 @@ type WorkspaceAppRow =
   | (WorkspacePipedreamAppRow & { kind: 'pipedream' })
   | (NativeIntegrationProvider & { kind: 'native' })
   | (NativeIntegrationProvider & { kind: 'discord' })
+  | (NativeIntegrationProvider & { kind: 'telegram' })
 
 type PendingAppAction = {
   slug: string
@@ -102,6 +120,29 @@ type PendingAgentAction = {
   agentId: string
   kind: 'connect' | 'disconnect'
 } | null
+
+type PendingTelegramAgentAction = {
+  agentId: string
+  kind: 'connect' | 'sync' | 'disconnect'
+} | null
+
+const TELEGRAM_ROW_PROVIDER: NativeIntegrationProvider = {
+  providerKey: TELEGRAM_NATIVE_PROVIDER_KEY,
+  displayName: 'Telegram',
+  description: 'Create a managed Telegram bot identity for each agent.',
+  authType: 'custom',
+  icon: 'telegram',
+  apiHosts: ['telegram.org'],
+  scopes: [],
+  connected: false,
+  scope: 'personal',
+  expiresAt: null,
+  connectUrl: '',
+  filesUrl: '',
+  pickerTokenUrl: '',
+  agentEventUrl: '',
+  revokeUrl: '',
+}
 
 export function PipedreamAppsModal({
   settingsUrl,
@@ -120,9 +161,12 @@ export function PipedreamAppsModal({
   const [activeApp, setActiveApp] = useState<WorkspacePipedreamAppRow | null>(null)
   const [discordConnectionsOpen, setDiscordConnectionsOpen] = useState(false)
   const [activeDiscordAgentId, setActiveDiscordAgentId] = useState<string | null>(null)
+  const [telegramConnectionsOpen, setTelegramConnectionsOpen] = useState(false)
+  const [activeTelegramAgentId, setActiveTelegramAgentId] = useState<string | null>(null)
   const [pendingAppAction, setPendingAppAction] = useState<PendingAppAction>(null)
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction>(null)
+  const [pendingTelegramAgentAction, setPendingTelegramAgentAction] = useState<PendingTelegramAgentAction>(null)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
@@ -152,6 +196,8 @@ export function PipedreamAppsModal({
     setActiveApp(null)
     setDiscordConnectionsOpen(false)
     setActiveDiscordAgentId(null)
+    setTelegramConnectionsOpen(false)
+    setActiveTelegramAgentId(null)
     setStatusMessage(null)
   }, [settingsUrl])
 
@@ -183,7 +229,16 @@ export function PipedreamAppsModal({
     queryFn: () => fetchAgentRoster(),
     enabled: Boolean(nativeIntegrationsUrl) && activeApp === null,
   })
+  const rosterAgents = agentRosterQuery.data?.agents ?? []
+  const telegramAgentAppQueries = useQueries({
+    queries: rosterAgents.map((agent) => ({
+      queryKey: agentTelegramAppQueryKey(agent.id),
+      queryFn: () => fetchAgentTelegramApp(agent.id),
+      enabled: Boolean(nativeIntegrationsUrl) && activeApp === null,
+    })),
+  })
   useWindowFocusRefetch(agentRosterQuery.refetch, discordConnectionsOpen && activeDiscordAgentId === null)
+  useWindowFocusRefetch(agentRosterQuery.refetch, telegramConnectionsOpen && activeTelegramAgentId === null)
   const activeDiscordAppQueryKey = useMemo(
     () => activeDiscordAgentId ? agentDiscordAppQueryKey(activeDiscordAgentId) : ['agent-discord-app', null] as const,
     [activeDiscordAgentId],
@@ -192,6 +247,15 @@ export function PipedreamAppsModal({
     queryKey: activeDiscordAppQueryKey,
     queryFn: () => fetchAgentDiscordApp(activeDiscordAgentId as string),
     enabled: Boolean(activeDiscordAgentId),
+  })
+  const activeTelegramAppQueryKey = useMemo(
+    () => activeTelegramAgentId ? agentTelegramAppQueryKey(activeTelegramAgentId) : ['agent-telegram-app', null] as const,
+    [activeTelegramAgentId],
+  )
+  const activeTelegramAppQuery = useQuery({
+    queryKey: activeTelegramAppQueryKey,
+    queryFn: () => fetchAgentTelegramApp(activeTelegramAgentId as string),
+    enabled: Boolean(activeTelegramAgentId),
   })
 
   const platformSlugSet = useMemo(
@@ -206,11 +270,30 @@ export function PipedreamAppsModal({
     () => (agentRosterQuery.data?.agents ?? []).some(agentHasDiscordNative),
     [agentRosterQuery.data?.agents],
   )
+  const telegramAppsByAgentId = useMemo(() => {
+    const apps = new Map<string, AgentTelegramApp>()
+    rosterAgents.forEach((agent, index) => {
+      const app = telegramAgentAppQueries[index]?.data
+      if (app) {
+        apps.set(agent.id, app)
+      }
+    })
+    return apps
+  }, [rosterAgents, telegramAgentAppQueries])
+  const telegramConnectedAgentIds = useMemo(() => (
+    rosterAgents
+      .filter((agent) => Boolean(telegramAppsByAgentId.get(agent.id)?.connected))
+      .map((agent) => agent.id)
+  ), [rosterAgents, telegramAppsByAgentId])
+  const telegramConnected = telegramConnectedAgentIds.length > 0
+  const telegramAppsLoading = telegramAgentAppQueries.some((query) => query.isLoading)
+  const telegramAppsFetching = telegramAgentAppQueries.some((query) => query.isFetching)
+  const telegramAppsError = telegramAgentAppQueries.find((query) => query.isError)?.error ?? null
 
   const rows = useMemo<WorkspaceAppRow[]>(() => {
     const visibleApps = debouncedSearchTerm ? (searchQuery.data ?? []) : settings.effectiveApps
     const normalizedSearch = debouncedSearchTerm.toLowerCase()
-    const nativeRows = withDiscordNativeProvider(nativeIntegrationsQuery.data?.providers ?? [])
+    const nativeRows = withTelegramNativeProvider(withDiscordNativeProvider(nativeIntegrationsQuery.data?.providers ?? []))
       .filter((provider) => {
         if (!normalizedSearch) {
           return true
@@ -223,8 +306,16 @@ export function PipedreamAppsModal({
       })
       .map((provider) => ({
         ...provider,
-        connected: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY ? discordConnected : provider.connected,
-        kind: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY ? 'discord' as const : 'native' as const,
+        connected: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY
+          ? discordConnected
+          : provider.providerKey === TELEGRAM_NATIVE_PROVIDER_KEY
+            ? telegramConnected
+            : provider.connected,
+        kind: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY
+          ? 'discord' as const
+          : provider.providerKey === TELEGRAM_NATIVE_PROVIDER_KEY
+            ? 'telegram' as const
+            : 'native' as const,
       }))
     const pipedreamRows = visibleApps.map((app) => {
       const source: AgentPipedreamAppSource = platformSlugSet.has(app.slug)
@@ -247,6 +338,7 @@ export function PipedreamAppsModal({
     searchQuery.data,
     selectedSlugSet,
     settings.effectiveApps,
+    telegramConnected,
   ])
 
   const removeMutation = useMutation({
@@ -390,6 +482,93 @@ export function PipedreamAppsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
+  const telegramConnectMutation = useMutation({
+    mutationFn: (agentId: string) => startAgentTelegramConnect(agentId),
+    onMutate: (agentId) => {
+      setPendingTelegramAgentAction({ agentId, kind: 'connect' })
+      setStatusMessage(null)
+    },
+    onSuccess: (payload, agentId) => {
+      queryClient.setQueryData(agentTelegramAppQueryKey(agentId), payload.app)
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      const url = payload.userLinked ? payload.createBotUrl : payload.managerLinkUrl
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
+      setStatusMessage({
+        text: payload.userLinked
+          ? 'Telegram bot creation opened. Return here after Telegram finishes creating the agent bot.'
+          : 'Telegram account linking opened. After linking, click Connect again to create the agent bot.',
+      })
+    },
+    onError: (error) => {
+      const message = safeErrorMessage(error)
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingTelegramAgentAction(null),
+  })
+
+  const telegramSyncMutation = useMutation({
+    mutationFn: (agentId: string) => syncAgentTelegramProfile(agentId),
+    onMutate: (agentId) => {
+      setPendingTelegramAgentAction({ agentId, kind: 'sync' })
+      setStatusMessage(null)
+    },
+    onSuccess: (app, agentId) => {
+      queryClient.setQueryData(agentTelegramAppQueryKey(agentId), app)
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+    },
+    onError: (error) => {
+      const message = safeErrorMessage(error)
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingTelegramAgentAction(null),
+  })
+
+  const telegramDisconnectMutation = useMutation({
+    mutationFn: (agentId: string) => disconnectAgentTelegram(agentId),
+    onMutate: (agentId) => {
+      setPendingTelegramAgentAction({ agentId, kind: 'disconnect' })
+      setStatusMessage(null)
+    },
+    onSuccess: (app, agentId) => {
+      queryClient.setQueryData(agentTelegramAppQueryKey(agentId), app)
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+    },
+    onError: (error) => {
+      const message = safeErrorMessage(error)
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingTelegramAgentAction(null),
+  })
+
+  const telegramWorkspaceDisconnectMutation = useMutation({
+    mutationFn: async (agentIds: string[]) => {
+      await Promise.all(agentIds.map((agentId) => disconnectAgentTelegram(agentId)))
+      return agentIds
+    },
+    onMutate: () => {
+      setPendingNativeAction({ providerKey: TELEGRAM_NATIVE_PROVIDER_KEY, kind: 'disconnect' })
+      setStatusMessage(null)
+    },
+    onSuccess: (agentIds) => {
+      agentIds.forEach((agentId) => {
+        void queryClient.invalidateQueries({ queryKey: agentTelegramAppQueryKey(agentId) })
+      })
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      setStatusMessage({ text: 'Telegram disconnected from all active agent bots.' })
+    },
+    onError: (error) => {
+      const message = safeErrorMessage(error)
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
+
   const nativePickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
       const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
@@ -419,8 +598,18 @@ export function PipedreamAppsModal({
     || nativePickerMutation.isPending
     || discordDisconnectMutation.isPending
     || isDiscordAgentActionPending
+    || telegramConnectMutation.isPending
+    || telegramSyncMutation.isPending
+    || telegramDisconnectMutation.isPending
+    || telegramWorkspaceDisconnectMutation.isPending
   const activeDiscordAgent = activeDiscordAgentId
     ? (agentRosterQuery.data?.agents ?? []).find((agent) => agent.id === activeDiscordAgentId) ?? null
+    : null
+  const activeTelegramAgent = activeTelegramAgentId
+    ? (agentRosterQuery.data?.agents ?? []).find((agent) => agent.id === activeTelegramAgentId) ?? null
+    : null
+  const activeTelegramPendingAction: AgentTelegramPendingNativeAction = pendingTelegramAgentAction?.agentId === activeTelegramAgentId
+    ? { providerKey: TELEGRAM_NATIVE_PROVIDER_KEY, kind: pendingTelegramAgentAction.kind }
     : null
   const body = activeDiscordAgentId ? (
     activeDiscordAppQuery.isError ? (
@@ -469,6 +658,58 @@ export function PipedreamAppsModal({
         onSave={(subscriptions) => saveDiscordAgentSubscriptions(activeDiscordAgentId, subscriptions)}
       />
     )
+  ) : activeTelegramAgentId ? (
+    activeTelegramAppQuery.isError ? (
+      <div className="space-y-4 p-1">
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+          onClick={() => {
+            setActiveTelegramAgentId(null)
+            setStatusMessage(null)
+          }}
+          disabled={isBusy}
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Back
+        </button>
+        <PipedreamErrorState error={activeTelegramAppQuery.error} fallback="Unable to load Telegram configuration." />
+      </div>
+    ) : activeTelegramAppQuery.isLoading || !activeTelegramAppQuery.data ? (
+      <div className="space-y-4 p-1">
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+          onClick={() => {
+            setActiveTelegramAgentId(null)
+            setStatusMessage(null)
+          }}
+          disabled={isBusy}
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Back
+        </button>
+        <PipedreamLoadingState label="Loading Telegram configuration…" />
+      </div>
+    ) : (
+      <TelegramConfigurationScreen
+        app={activeTelegramAppQuery.data}
+        disabled={isBusy}
+        pendingNativeAction={activeTelegramPendingAction}
+        statusMessage={statusMessage}
+        onBack={() => {
+          setActiveTelegramAgentId(null)
+          setStatusMessage(null)
+        }}
+        onConnect={() => telegramConnectMutation.mutate(activeTelegramAgentId)}
+        onSync={() => telegramSyncMutation.mutate(activeTelegramAgentId)}
+        onDisconnect={() => {
+          if (window.confirm('Disconnect Telegram for this agent? The agent bot will stop receiving Telegram messages.')) {
+            telegramDisconnectMutation.mutate(activeTelegramAgentId)
+          }
+        }}
+      />
+    )
   ) : discordConnectionsOpen ? (
     <DiscordAgentConnectionsScreen
       agents={agentRosterQuery.data?.agents ?? []}
@@ -486,6 +727,26 @@ export function PipedreamAppsModal({
       onConnect={(agent) => connectDiscordAgent(agent.id)}
       onConfigure={(agent) => {
         setActiveDiscordAgentId(agent.id)
+        setStatusMessage(null)
+      }}
+    />
+  ) : telegramConnectionsOpen ? (
+    <TelegramAgentConnectionsScreen
+      agents={agentRosterQuery.data?.agents ?? []}
+      telegramAppsByAgentId={telegramAppsByAgentId}
+      isLoading={agentRosterQuery.isLoading || telegramAppsLoading}
+      isFetching={agentRosterQuery.isFetching || telegramAppsFetching}
+      isError={agentRosterQuery.isError || Boolean(telegramAppsError)}
+      error={agentRosterQuery.error ?? telegramAppsError}
+      isBusy={isBusy || agentRosterQuery.isFetching || telegramAppsFetching}
+      pendingTelegramAgentAction={pendingTelegramAgentAction}
+      statusMessage={statusMessage}
+      onBack={() => {
+        setTelegramConnectionsOpen(false)
+        setStatusMessage(null)
+      }}
+      onConfigure={(agent) => {
+        setActiveTelegramAgentId(agent.id)
         setStatusMessage(null)
       }}
     />
@@ -511,10 +772,10 @@ export function PipedreamAppsModal({
     <AppListScreen
       apps={rows}
       searchTerm={searchTerm}
-      isLoading={searchQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading}
-      isFetching={searchQuery.isFetching || nativeIntegrationsQuery.isFetching || agentRosterQuery.isFetching}
-      isError={searchQuery.isError || nativeIntegrationsQuery.isError || agentRosterQuery.isError}
-      error={searchQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error}
+      isLoading={searchQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading || telegramAppsLoading}
+      isFetching={searchQuery.isFetching || nativeIntegrationsQuery.isFetching || agentRosterQuery.isFetching || telegramAppsFetching}
+      isError={searchQuery.isError || nativeIntegrationsQuery.isError || agentRosterQuery.isError || Boolean(telegramAppsError)}
+      error={searchQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error ?? telegramAppsError}
       isBusy={isBusy}
       isMobile={isMobile}
       pendingAppAction={pendingAppAction}
@@ -529,6 +790,10 @@ export function PipedreamAppsModal({
         setDiscordConnectionsOpen(true)
         setStatusMessage(null)
       }}
+      onManageTelegramConnections={() => {
+        setTelegramConnectionsOpen(true)
+        setStatusMessage(null)
+      }}
       onRemove={(app) => removeMutation.mutate(app)}
       onNativeConnect={(provider) => nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })}
       onNativeDisconnect={(provider) => {
@@ -541,18 +806,38 @@ export function PipedreamAppsModal({
           discordDisconnectMutation.mutate()
         }
       }}
+      onTelegramDisconnect={(provider) => {
+        if (!telegramConnectedAgentIds.length) {
+          return
+        }
+        if (confirmNativeIntegrationDisconnect(provider)) {
+          telegramWorkspaceDisconnectMutation.mutate(telegramConnectedAgentIds)
+        }
+      }}
       onNativePicker={(provider) => nativePickerMutation.mutate(provider)}
     />
   )
 
   return (
     <PipedreamModalShell
-      title={activeDiscordAgentId ? 'Configure Discord' : discordConnectionsOpen || activeApp ? 'Manage connections' : 'Manage integrations'}
+      title={
+        activeDiscordAgentId
+          ? 'Configure Discord'
+          : activeTelegramAgentId
+            ? 'Configure Telegram'
+            : discordConnectionsOpen || telegramConnectionsOpen || activeApp
+              ? 'Manage connections'
+              : 'Manage integrations'
+      }
       subtitle={
         activeDiscordAgentId
           ? `Choose Discord channels for ${activeDiscordAgent?.name ?? 'this agent'}.`
+          : activeTelegramAgentId
+            ? `Create and manage Telegram for ${activeTelegramAgent?.name ?? 'this agent'}.`
           : discordConnectionsOpen
             ? 'Configure Discord for each agent.'
+            : telegramConnectionsOpen
+              ? 'Configure Telegram bot identities for each agent.'
             : activeApp
               ? `${activeApp.name} connections across agents.`
               : 'Search apps and manage agent connections.'
@@ -579,10 +864,12 @@ function AppListScreen({
   onSearchTermChange,
   onManageConnections,
   onManageDiscordConnections,
+  onManageTelegramConnections,
   onRemove,
   onNativeConnect,
   onNativeDisconnect,
   onDiscordDisconnect,
+  onTelegramDisconnect,
   onNativePicker,
 }: {
   apps: WorkspaceAppRow[]
@@ -599,10 +886,12 @@ function AppListScreen({
   onSearchTermChange: (term: string) => void
   onManageConnections: (app: WorkspacePipedreamAppRow) => void
   onManageDiscordConnections: () => void
+  onManageTelegramConnections: () => void
   onRemove: (app: WorkspacePipedreamAppRow) => void
   onNativeConnect: (provider: NativeIntegrationProvider) => void
   onNativeDisconnect: (provider: NativeIntegrationProvider) => void
   onDiscordDisconnect: (provider: NativeIntegrationProvider) => void
+  onTelegramDisconnect: (provider: NativeIntegrationProvider) => void
   onNativePicker: (provider: NativeIntegrationProvider) => void
 }) {
   return (
@@ -641,6 +930,15 @@ function AppListScreen({
               disabled={isBusy}
               onManageConnections={onManageDiscordConnections}
               onDisconnect={() => onDiscordDisconnect(app)}
+            />
+          ) : app.kind === 'telegram' ? (
+            <WorkspaceTelegramAppRowItem
+              key="native-telegram"
+              provider={app}
+              pendingNativeAction={pendingNativeAction}
+              disabled={isBusy}
+              onManageConnections={onManageTelegramConnections}
+              onDisconnect={() => onTelegramDisconnect(app)}
             />
           ) : (
             <PipedreamAppRowItem
@@ -703,6 +1001,201 @@ function WorkspaceDiscordAppRowItem({
             Disconnect
           </button>
         ) : null}
+      </div>
+    </div>
+  )
+}
+
+function WorkspaceTelegramAppRowItem({
+  provider,
+  pendingNativeAction,
+  disabled,
+  onManageConnections,
+  onDisconnect,
+}: {
+  provider: NativeIntegrationProvider
+  pendingNativeAction: PendingNativeAction
+  disabled: boolean
+  onManageConnections: () => void
+  onDisconnect: () => void
+}) {
+  const isPendingDisconnect = pendingNativeAction?.providerKey === provider.providerKey && pendingNativeAction.kind === 'disconnect'
+
+  return (
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_8rem] md:items-center">
+      <NativeIntegrationSummaryCell provider={provider} />
+      <div className="flex justify-start md:justify-end">
+        <button
+          type="button"
+          className="inline-flex min-w-44 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+          onClick={onManageConnections}
+          disabled={disabled}
+        >
+          <Users className="h-4 w-4" aria-hidden="true" />
+          Manage Connections
+        </button>
+      </div>
+      <div className="flex justify-start md:justify-end">
+        {provider.connected ? (
+          <button
+            type="button"
+            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+            onClick={onDisconnect}
+            disabled={disabled}
+          >
+            {isPendingDisconnect ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Unplug className="h-4 w-4" aria-hidden="true" />
+            )}
+            Disconnect
+          </button>
+        ) : (
+          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
+            Per-agent setup
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TelegramAgentConnectionsScreen({
+  agents,
+  telegramAppsByAgentId,
+  isLoading,
+  isFetching,
+  isError,
+  error,
+  isBusy,
+  pendingTelegramAgentAction,
+  statusMessage,
+  onBack,
+  onConfigure,
+}: {
+  agents: AgentRosterEntry[]
+  telegramAppsByAgentId: Map<string, AgentTelegramApp>
+  isLoading: boolean
+  isFetching: boolean
+  isError: boolean
+  error: unknown
+  isBusy: boolean
+  pendingTelegramAgentAction: PendingTelegramAgentAction
+  statusMessage: PipedreamStatusMessage
+  onBack: () => void
+  onConfigure: (agent: AgentRosterEntry) => void
+}) {
+  const sortedAgents = useMemo(() => (
+    [...agents].sort((a, b) => {
+      const aConnected = Boolean(telegramAppsByAgentId.get(a.id)?.connected)
+      const bConnected = Boolean(telegramAppsByAgentId.get(b.id)?.connected)
+      return Number(!aConnected) - Number(!bConnected) || a.name.localeCompare(b.name)
+    })
+  ), [agents, telegramAppsByAgentId])
+
+  return (
+    <div className="space-y-4 p-1">
+      <button
+        type="button"
+        className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+        onClick={onBack}
+        disabled={isBusy}
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Back
+      </button>
+
+      <div className="flex items-center gap-3">
+        <NativeProviderIconTile provider={TELEGRAM_ROW_PROVIDER} />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-900">Telegram</p>
+          <p className="text-sm text-slate-600">{isFetching ? 'Refreshing connections…' : 'Each agent gets its own managed Telegram bot.'}</p>
+        </div>
+      </div>
+
+      <PipedreamStatusBanner statusMessage={statusMessage} />
+
+      {isError ? (
+        <PipedreamErrorState error={error} fallback="Unable to load agents." />
+      ) : isLoading ? (
+        <PipedreamLoadingState label="Loading agents…" />
+      ) : sortedAgents.length === 0 ? (
+        <PipedreamEmptyState label="No agents found." />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="divide-y divide-slate-200">
+            {sortedAgents.map((agent) => (
+              <TelegramAgentConnectionRow
+                key={agent.id}
+                agent={agent}
+                app={telegramAppsByAgentId.get(agent.id) ?? null}
+                pendingTelegramAgentAction={pendingTelegramAgentAction}
+                disabled={isBusy}
+                onConfigure={() => onConfigure(agent)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TelegramAgentConnectionRow({
+  agent,
+  app,
+  pendingTelegramAgentAction,
+  disabled,
+  onConfigure,
+}: {
+  agent: AgentRosterEntry
+  app: AgentTelegramApp | null
+  pendingTelegramAgentAction: PendingTelegramAgentAction
+  disabled: boolean
+  onConfigure: () => void
+}) {
+  const enabled = Boolean(app?.connected)
+  const pendingKind = pendingTelegramAgentAction?.agentId === agent.id ? pendingTelegramAgentAction.kind : null
+
+  return (
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_8rem_9rem] md:items-center">
+      <div className="flex min-w-0 items-center gap-3">
+        <AgentConnectionAvatar agent={{
+          agentId: agent.id,
+          name: agent.name,
+          avatarUrl: agent.avatarUrl ?? '',
+          connected: enabled,
+          accountIds: [],
+        }} />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-900">{agent.name}</p>
+          <p className="truncate text-sm text-slate-600">
+            {enabled ? 'Telegram bot is active for this agent.' : 'Create a managed Telegram bot for this agent.'}
+          </p>
+        </div>
+      </div>
+      <div>
+        {enabled ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+            Connected
+          </span>
+        ) : (
+          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
+            Not connected
+          </span>
+        )}
+      </div>
+      <div className="flex justify-start md:justify-end">
+        <button
+          type="button"
+          className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
+          onClick={onConfigure}
+          disabled={disabled}
+        >
+          {pendingKind ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Users className="h-4 w-4" aria-hidden="true" />}
+          Configure
+        </button>
       </div>
     </div>
   )
