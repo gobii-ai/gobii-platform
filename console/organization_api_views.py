@@ -168,12 +168,9 @@ def _serialize_organization_template(template: PersistentAgentTemplate) -> dict:
     created_by = getattr(template, "created_by", None)
     return {
         "id": str(template.id),
-        "code": template.code,
         "name": template.display_name,
         "tagline": template.tagline,
-        "description": template.description,
         "category": template.category or "Custom",
-        "sourceAgentId": str(template.source_agent_id) if template.source_agent_id else None,
         "sourceAgentName": source_agent.name if source_agent else None,
         "createdBy": (
             created_by.get_full_name()
@@ -182,10 +179,7 @@ def _serialize_organization_template(template: PersistentAgentTemplate) -> dict:
             if created_by
             else None
         ),
-        "baseSchedule": template.base_schedule or "",
         "scheduleDescription": PretrainedWorkerTemplateService.describe_schedule(template.base_schedule),
-        "defaultTools": list(template.default_tools or []),
-        "updatedAt": template.updated_at.isoformat() if template.updated_at else None,
     }
 
 

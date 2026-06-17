@@ -28,18 +28,12 @@ export type OrganizationInvite = {
 
 export type OrganizationTemplate = {
   id: string
-  code: string
   name: string
   tagline: string
-  description: string
   category: string
-  sourceAgentId: string | null
   sourceAgentName: string | null
   createdBy: string | null
-  baseSchedule: string
   scheduleDescription: string | null
-  defaultTools: string[]
-  updatedAt: string | null
 }
 
 export type OrganizationTemplateSourceAgent = {
