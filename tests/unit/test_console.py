@@ -104,6 +104,81 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(script.string, "Agent list payload script is empty")
         return json.loads(script.string)
 
+    def _create_organization(self, *, name, slug, role=None, purchased_seats=2):
+        from api.models import Organization, OrganizationMembership
+
+        organization = Organization.objects.create(
+            name=name,
+            slug=slug,
+            created_by=self.user,
+        )
+        if purchased_seats is not None:
+            organization.billing.purchased_seats = purchased_seats
+            organization.billing.save(update_fields=["purchased_seats"])
+        if role:
+            OrganizationMembership.objects.create(
+                org=organization,
+                user=self.user,
+                role=role,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            )
+        return organization
+
+    def _create_persistent_agent_template(
+        self,
+        *,
+        code,
+        organization=None,
+        display_name,
+        charter,
+        tagline="Private workflow",
+        description="Private reusable workflow.",
+        base_schedule="",
+        category="Operations",
+    ):
+        from api.models import PersistentAgentTemplate
+
+        return PersistentAgentTemplate.objects.create(
+            code=code,
+            organization=organization,
+            display_name=display_name,
+            tagline=tagline,
+            description=description,
+            charter=charter,
+            base_schedule=base_schedule,
+            category=category,
+            is_active=True,
+        )
+
+    def _seed_org_template_spawn_session(
+        self,
+        *,
+        template,
+        template_organization=None,
+        context_organization=None,
+    ):
+        from agents.services import PretrainedWorkerTemplateService
+
+        template_organization = template_organization or getattr(template, "organization", None)
+        if template_organization is None:
+            raise AssertionError("template_organization is required for org-template session setup.")
+
+        session = self.client.session
+        if context_organization is None:
+            session["context_type"] = "personal"
+            session["context_id"] = str(self.user.id)
+            session.pop("context_name", None)
+        else:
+            session["context_type"] = "organization"
+            session["context_id"] = str(context_organization.id)
+            session["context_name"] = context_organization.name
+        session["agent_charter"] = template.charter
+        session["agent_charter_source"] = "template"
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
+        session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(template_organization.id)
+        session.save()
+
     @tag("batch_console_agents")
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_staff_agent_audit_page_exposes_admin_settings_url(self):
@@ -2111,46 +2186,28 @@ class ConsoleViewsTest(TestCase):
         _mock_delay,
     ):
         from agents.services import PretrainedWorkerTemplateService
-        from api.models import Organization, OrganizationMembership, PersistentAgentTemplate, PersistentAgent
+        from api.models import OrganizationMembership, PersistentAgent
 
-        organization = Organization.objects.create(
+        organization = self._create_organization(
             name="Template Create Org",
             slug="template-create-org",
-            created_by=self.user,
-        )
-        organization.billing.purchased_seats = 2
-        organization.billing.save(update_fields=["purchased_seats"])
-        OrganizationMembership.objects.create(
-            org=organization,
-            user=self.user,
             role=OrganizationMembership.OrgRole.MEMBER,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
         )
         PipedreamAppSelection.objects.create(
             organization=organization,
             selected_app_slugs=["notion"],
         )
-        template = PersistentAgentTemplate.objects.create(
+        template = self._create_persistent_agent_template(
             code="console-org-template",
             organization=organization,
             display_name="Console Org Template",
-            tagline="Private workflow",
-            description="Private reusable workflow.",
             charter="Run the organization workflow.",
             base_schedule="@daily",
-            category="Operations",
-            is_active=True,
         )
-        session = self.client.session
-        session["context_type"] = "organization"
-        session["context_id"] = str(organization.id)
-        session["context_name"] = organization.name
-        session["agent_charter"] = template.charter
-        session["agent_charter_source"] = "template"
-        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
-        session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(organization.id)
-        session.save()
+        self._seed_org_template_spawn_session(
+            template=template,
+            context_organization=organization,
+        )
 
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(
@@ -2183,39 +2240,28 @@ class ConsoleViewsTest(TestCase):
         _mock_track_event,
         _mock_delay,
     ):
-        from agents.services import PretrainedWorkerTemplateService
-        from api.models import Organization, OrganizationMembership, PersistentAgentTemplate, PersistentAgent
+        from api.models import OrganizationMembership, PersistentAgent
 
-        source_org = Organization.objects.create(name="Source Org", slug="source-org", created_by=self.user)
-        target_org = Organization.objects.create(name="Target Org", slug="target-org", created_by=self.user)
-        target_org.billing.purchased_seats = 2
-        target_org.billing.save(update_fields=["purchased_seats"])
-        OrganizationMembership.objects.create(
-            org=target_org,
-            user=self.user,
-            role=OrganizationMembership.OrgRole.OWNER,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
+        source_org = self._create_organization(
+            name="Source Org",
+            slug="source-org",
+            purchased_seats=None,
         )
-        template = PersistentAgentTemplate.objects.create(
+        target_org = self._create_organization(
+            name="Target Org",
+            slug="target-org",
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        template = self._create_persistent_agent_template(
             code="wrong-org-template",
             organization=source_org,
             display_name="Wrong Org Template",
-            tagline="Private workflow",
-            description="Private reusable workflow.",
             charter="Run the source org workflow.",
-            category="Operations",
-            is_active=True,
         )
-        session = self.client.session
-        session["context_type"] = "organization"
-        session["context_id"] = str(target_org.id)
-        session["context_name"] = target_org.name
-        session["agent_charter"] = template.charter
-        session["agent_charter_source"] = "template"
-        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
-        session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(source_org.id)
-        session.save()
+        self._seed_org_template_spawn_session(
+            template=template,
+            context_organization=target_org,
+        )
 
         response = self.client.post(
             "/console/api/agents/create/",
@@ -2236,41 +2282,25 @@ class ConsoleViewsTest(TestCase):
         _mock_track_event,
         _mock_delay,
     ):
-        from agents.services import PretrainedWorkerTemplateService
-        from api.models import Organization, OrganizationMembership, PersistentAgentTemplate, PersistentAgent
+        from api.models import OrganizationMembership, PersistentAgent
 
-        organization = Organization.objects.create(
+        organization = self._create_organization(
             name="Forged Template Org",
             slug="forged-template-org",
-            created_by=self.user,
-        )
-        organization.billing.purchased_seats = 2
-        organization.billing.save(update_fields=["purchased_seats"])
-        OrganizationMembership.objects.create(
-            org=organization,
-            user=self.user,
             role=OrganizationMembership.OrgRole.MEMBER,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
         )
-        template = PersistentAgentTemplate.objects.create(
+        template = self._create_persistent_agent_template(
             code="global-template-with-org-session",
             display_name="Global Template With Org Session",
             tagline="Global workflow",
             description="A global reusable workflow.",
             charter="Run the global workflow.",
-            category="Operations",
-            is_active=True,
         )
-        session = self.client.session
-        session["context_type"] = "organization"
-        session["context_id"] = str(organization.id)
-        session["context_name"] = organization.name
-        session["agent_charter"] = template.charter
-        session["agent_charter_source"] = "template"
-        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
-        session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(organization.id)
-        session.save()
+        self._seed_org_template_spawn_session(
+            template=template,
+            template_organization=organization,
+            context_organization=organization,
+        )
 
         response = self.client.post(
             "/console/api/agents/create/",
@@ -2291,29 +2321,20 @@ class ConsoleViewsTest(TestCase):
         _mock_track_event,
         _mock_delay,
     ):
-        from agents.services import PretrainedWorkerTemplateService
-        from api.models import Organization, PersistentAgentTemplate, PersistentAgent
+        from api.models import PersistentAgent
 
-        organization = Organization.objects.create(name="Personal Block Org", slug="personal-block-org", created_by=self.user)
-        template = PersistentAgentTemplate.objects.create(
+        organization = self._create_organization(
+            name="Personal Block Org",
+            slug="personal-block-org",
+            purchased_seats=None,
+        )
+        template = self._create_persistent_agent_template(
             code="personal-block-org-template",
             organization=organization,
             display_name="Personal Block Template",
-            tagline="Private workflow",
-            description="Private reusable workflow.",
             charter="Run the private workflow.",
-            category="Operations",
-            is_active=True,
         )
-        session = self.client.session
-        session["context_type"] = "personal"
-        session["context_id"] = str(self.user.id)
-        session["agent_charter"] = template.charter
-        session["agent_charter_source"] = "template"
-        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
-        session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(organization.id)
-        session.save()
+        self._seed_org_template_spawn_session(template=template)
 
         response = self.client.post(
             "/console/api/agents/create/",
