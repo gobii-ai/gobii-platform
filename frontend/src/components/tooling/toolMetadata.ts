@@ -65,6 +65,8 @@ const APOLLO_ICON_SRC = '/static/images/integrations/native/apollo.svg'
 const GOOGLE_SHEETS_ICON_SRC = '/static/images/integrations/pipedream/google_sheets.svg'
 const GOOGLE_DRIVE_ICON_SRC = '/static/images/integrations/native/google_drive.svg'
 const HUBSPOT_ICON_SRC = '/static/images/integrations/native/hubspot.svg'
+const DISCORD_ICON_SRC = '/static/images/integrations/native/discord.svg'
+const TELEGRAM_ICON_SRC = '/static/images/integrations/native/telegram.svg'
 
 export type ToolMetadataConfig = {
   name: string
@@ -320,6 +322,152 @@ function deriveHubSpotApiRequest(parameters: Record<string, unknown> | null): To
     iconSrc: HUBSPOT_ICON_SRC,
     iconBgClass: 'bg-orange-100',
     iconColorClass: 'text-orange-700',
+  }
+}
+
+function countArrayField(record: Record<string, unknown> | null | undefined, field: string): number | null {
+  const value = record?.[field]
+  return Array.isArray(value) ? value.length : null
+}
+
+function describeCount(count: number | null, singular: string, plural = `${singular}s`): string | null {
+  if (count === null) return null
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+function normalizeToolAction(parameters: Record<string, unknown> | null): string {
+  return (coerceString(parameters?.action) || '').toLowerCase()
+}
+
+function deriveDiscordSubscriptionsTool(
+  entry: ToolCallEntry,
+  parameters: Record<string, unknown> | null,
+): ToolDescriptorTransform {
+  const action = normalizeToolAction(parameters)
+  const result = parseResultObject(entry.result)
+  const resultStatus = coerceString(result?.['status'])
+  const isError = resultStatus?.toLowerCase() === 'error'
+  const guildId = coerceString(parameters?.guild_id)
+  const channelId = coerceString(parameters?.channel_id)
+  const channelName = coerceString(parameters?.channel_name)
+  const query = coerceString(parameters?.query)
+  const subscriptionId = coerceString(parameters?.subscription_id)
+  const labelByAction: Record<string, string> = {
+    list_guilds: 'Check Discord servers',
+    discover_channels: 'Discover Discord channels',
+    ensure: 'Subscribe Discord channel',
+    list: 'List Discord subscriptions',
+    disable: 'Disable Discord subscription',
+  }
+  const countCaption =
+    describeCount(countArrayField(result, 'guilds'), 'server') ||
+    describeCount(countArrayField(result, 'channels'), 'channel') ||
+    describeCount(countArrayField(result, 'subscriptions'), 'subscription')
+  const subject =
+    channelName ||
+    query ||
+    channelId ||
+    guildId ||
+    subscriptionId ||
+    countCaption ||
+    coerceString(result?.['message'])
+
+  return {
+    label: isError ? 'Discord action failed' : labelByAction[action] ?? 'Manage Discord channels',
+    caption: subject ? truncate(subject, 56) : 'Discord channels',
+    summary: countCaption ?? coerceString(result?.['message']) ?? entry.summary ?? null,
+    icon: Network,
+    iconSrc: DISCORD_ICON_SRC,
+    iconBgClass: 'bg-indigo-100',
+    iconColorClass: 'text-indigo-700',
+  }
+}
+
+function deriveDiscordSendTool(
+  entry: ToolCallEntry,
+  parameters: Record<string, unknown> | null,
+): ToolDescriptorTransform {
+  const result = parseResultObject(entry.result)
+  const resultStatus = coerceString(result?.['status'])
+  const isError = resultStatus?.toLowerCase() === 'error'
+  const body = coerceString(parameters?.message)
+  const channelId = coerceString(parameters?.channel_id)
+  const attachmentCount = coerceNumber(result?.['attachment_count']) ?? (
+    Array.isArray(parameters?.attachments) ? parameters.attachments.length : null
+  )
+  const summaryParts = [
+    channelId ? `Channel ${channelId}` : null,
+    attachmentCount && attachmentCount > 0 ? describeCount(attachmentCount, 'attachment') : null,
+  ].filter(Boolean)
+
+  return {
+    label: isError ? 'Discord message failed' : 'Send Discord message',
+    caption: body ? truncate(body, 72) : channelId ? `Channel ${truncate(channelId, 42)}` : 'Discord message',
+    summary: summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null,
+    icon: MessageSquareText,
+    iconSrc: DISCORD_ICON_SRC,
+    iconBgClass: 'bg-indigo-100',
+    iconColorClass: 'text-indigo-700',
+  }
+}
+
+function deriveTelegramChatsTool(
+  entry: ToolCallEntry,
+  parameters: Record<string, unknown> | null,
+): ToolDescriptorTransform {
+  const action = normalizeToolAction(parameters)
+  const result = parseResultObject(entry.result)
+  const resultStatus = coerceString(result?.['status'])
+  const isError = resultStatus?.toLowerCase() === 'error'
+  const botUsername = coerceString(result?.['bot_username'])
+  const chatBindingId = coerceString(parameters?.chat_binding_id)
+  const countCaption = describeCount(countArrayField(result, 'chats'), 'chat')
+  const labelByAction: Record<string, string> = {
+    status: 'Check Telegram status',
+    list: 'List Telegram chats',
+    disable: 'Disable Telegram chat',
+  }
+  const subject = botUsername ? `@${botUsername.replace(/^@/, '')}` : chatBindingId || countCaption || coerceString(result?.['message'])
+
+  return {
+    label: isError ? 'Telegram action failed' : labelByAction[action] ?? 'Manage Telegram chats',
+    caption: subject ? truncate(subject, 56) : 'Telegram chats',
+    summary: countCaption ?? coerceString(result?.['message']) ?? entry.summary ?? null,
+    icon: MessageCircle,
+    iconSrc: TELEGRAM_ICON_SRC,
+    iconBgClass: 'bg-sky-100',
+    iconColorClass: 'text-sky-700',
+  }
+}
+
+function deriveTelegramSendTool(
+  entry: ToolCallEntry,
+  parameters: Record<string, unknown> | null,
+): ToolDescriptorTransform {
+  const result = parseResultObject(entry.result)
+  const resultStatus = coerceString(result?.['status'])
+  const isError = resultStatus?.toLowerCase() === 'error'
+  const body = coerceString(parameters?.message)
+  const chatBindingId = coerceString(parameters?.chat_binding_id)
+  const chatId = coerceString(parameters?.chat_id)
+  const threadId = coerceString(parameters?.message_thread_id)
+  const attachmentCount = coerceNumber(result?.['attachment_count']) ?? (
+    Array.isArray(parameters?.attachments) ? parameters.attachments.length : null
+  )
+  const summaryParts = [
+    chatBindingId ? `Binding ${chatBindingId}` : chatId ? `Chat ${chatId}` : null,
+    threadId ? `Thread ${threadId}` : null,
+    attachmentCount && attachmentCount > 0 ? describeCount(attachmentCount, 'attachment') : null,
+  ].filter(Boolean)
+
+  return {
+    label: isError ? 'Telegram message failed' : 'Send Telegram message',
+    caption: body ? truncate(body, 72) : chatId ? `Chat ${truncate(chatId, 42)}` : 'Telegram message',
+    summary: summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null,
+    icon: MessageCircle,
+    iconSrc: TELEGRAM_ICON_SRC,
+    iconBgClass: 'bg-sky-100',
+    iconColorClass: 'text-sky-700',
   }
 }
 
@@ -989,6 +1137,42 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         summary,
       }
     },
+  },
+  {
+    name: 'discord_channel_subscriptions',
+    label: 'Manage Discord channels',
+    icon: Network,
+    iconBgClass: 'bg-indigo-100',
+    iconColorClass: 'text-indigo-700',
+    detailKind: 'default',
+    derive: deriveDiscordSubscriptionsTool,
+  },
+  {
+    name: 'send_discord_message',
+    label: 'Send Discord message',
+    icon: MessageSquareText,
+    iconBgClass: 'bg-indigo-100',
+    iconColorClass: 'text-indigo-700',
+    detailKind: 'default',
+    derive: deriveDiscordSendTool,
+  },
+  {
+    name: 'telegram_chats',
+    label: 'Manage Telegram chats',
+    icon: MessageCircle,
+    iconBgClass: 'bg-sky-100',
+    iconColorClass: 'text-sky-700',
+    detailKind: 'default',
+    derive: deriveTelegramChatsTool,
+  },
+  {
+    name: 'send_telegram_message',
+    label: 'Send Telegram message',
+    icon: MessageCircle,
+    iconBgClass: 'bg-sky-100',
+    iconColorClass: 'text-sky-700',
+    detailKind: 'default',
+    derive: deriveTelegramSendTool,
   },
   {
     name: 'send_webhook_event',

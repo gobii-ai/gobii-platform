@@ -74,4 +74,36 @@ describe('ToolIconSlot', () => {
     )
     expect(document.querySelector('.tool-chip-spinner--icon')).not.toBeInTheDocument()
   })
+
+  it('keeps the Discord branded icon visible while a tool call is pending', () => {
+    const { container } = render(<ToolIconSlot entry={entry({
+      label: 'Send Discord message',
+      caption: 'Shipping the report now.',
+      iconSrc: '/static/images/integrations/native/discord.svg',
+      iconBgClass: 'bg-indigo-100',
+      iconColorClass: 'text-indigo-700',
+    })} />)
+
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      '/static/images/integrations/native/discord.svg',
+    )
+    expect(document.querySelector('.tool-chip-spinner--icon')).not.toBeInTheDocument()
+  })
+
+  it('keeps the Telegram branded icon visible while a tool call is pending', () => {
+    const { container } = render(<ToolIconSlot entry={entry({
+      label: 'Send Telegram message',
+      caption: 'I posted the update.',
+      iconSrc: '/static/images/integrations/native/telegram.svg',
+      iconBgClass: 'bg-sky-100',
+      iconColorClass: 'text-sky-700',
+    })} />)
+
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      '/static/images/integrations/native/telegram.svg',
+    )
+    expect(document.querySelector('.tool-chip-spinner--icon')).not.toBeInTheDocument()
+  })
 })

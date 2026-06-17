@@ -82,8 +82,11 @@ const MAX_SCRAPE_TARGETS = 15
 const TOOL_SEARCH_TOOL_NAMES = new Set(['search_tools', 'search_web', 'web_search', 'search'])
 const BRANDED_API_ICON_SRCS = new Set([
   '/static/images/integrations/native/apollo.svg',
+  '/static/images/integrations/native/discord.svg',
   '/static/images/integrations/pipedream/google_sheets.svg',
   '/static/images/integrations/native/google_drive.svg',
+  '/static/images/integrations/native/hubspot.svg',
+  '/static/images/integrations/native/telegram.svg',
 ])
 
 function clampText(value: string, maxLength: number = MAX_DETAIL_LENGTH): string {
@@ -944,6 +947,15 @@ const ACTIVE_LABEL_MAP: Record<string, string> = {
   'Web message sent': 'Sending web message',
   'Chat message sent': 'Sending chat message',
   'Peer message sent': 'Sending peer message',
+  'Discover Discord channels': 'Discovering Discord channels',
+  'Subscribe Discord channel': 'Subscribing Discord channel',
+  'List Discord subscriptions': 'Listing Discord subscriptions',
+  'Disable Discord subscription': 'Disabling Discord subscription',
+  'Send Discord message': 'Sending Discord message',
+  'Check Telegram status': 'Checking Telegram status',
+  'List Telegram chats': 'Listing Telegram chats',
+  'Disable Telegram chat': 'Disabling Telegram chat',
+  'Send Telegram message': 'Sending Telegram message',
   'Webhook sent': 'Sending webhook',
 }
 

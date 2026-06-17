@@ -70,6 +70,39 @@ function clusterForApplyPatch(): ToolClusterEvent {
   }
 }
 
+function clusterForToolCall(
+  toolName: string,
+  parameters: Record<string, unknown>,
+  result = '{}',
+): ToolClusterEvent {
+  return {
+    kind: 'steps',
+    cursor: 'step:1',
+    entryCount: 1,
+    collapsible: false,
+    collapseThreshold: 4,
+    earliestTimestamp: '2026-01-01T00:00:00Z',
+    latestTimestamp: '2026-01-01T00:00:00Z',
+    entries: [
+      {
+        id: 'tool-call-1',
+        cursor: 'step:1',
+        timestamp: '2026-01-01T00:00:00Z',
+        toolName,
+        meta: {
+          label: toolName,
+          iconPaths: [],
+          iconBg: '',
+          iconColor: '',
+        },
+        parameters,
+        result,
+        status: 'complete',
+      },
+    ],
+  }
+}
+
 describe('transformToolCluster Google API display', () => {
   it('labels apply_patch previews with the target file path', () => {
     const transformed = transformToolCluster(clusterForApplyPatch())
@@ -211,6 +244,74 @@ describe('transformToolCluster Google API display', () => {
       label: 'Update HubSpot deal',
       caption: 'PATCH • deal_123',
       iconSrc: '/static/images/integrations/native/hubspot.svg',
+    })
+  })
+
+  it('labels Discord channel subscription actions with the official Discord icon', () => {
+    const transformed = transformToolCluster(
+      clusterForToolCall(
+        'discord_channel_subscriptions',
+        { action: 'discover_channels', guild_id: 'guild-1', query: 'support' },
+        JSON.stringify({ status: 'success', channels: [{ id: 'channel-1' }, { id: 'channel-2' }] }),
+      ),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Discover Discord channels',
+      caption: 'support',
+      summary: '2 channels',
+      iconSrc: '/static/images/integrations/native/discord.svg',
+    })
+  })
+
+  it('labels Discord outbound messages with the official Discord icon', () => {
+    const transformed = transformToolCluster(
+      clusterForToolCall(
+        'send_discord_message',
+        { channel_id: 'channel-1', message: 'Shipping the report now.' },
+        JSON.stringify({ status: 'success', attachment_count: 1 }),
+      ),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Send Discord message',
+      caption: 'Shipping the report now.',
+      summary: 'Channel channel-1 • 1 attachment',
+      iconSrc: '/static/images/integrations/native/discord.svg',
+    })
+  })
+
+  it('labels Telegram chat management with the official Telegram icon', () => {
+    const transformed = transformToolCluster(
+      clusterForToolCall(
+        'telegram_chats',
+        { action: 'status' },
+        JSON.stringify({ status: 'success', bot_username: 'agent_bot', chats: [{ id: 'chat-1' }] }),
+      ),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Check Telegram status',
+      caption: '@agent_bot',
+      summary: '1 chat',
+      iconSrc: '/static/images/integrations/native/telegram.svg',
+    })
+  })
+
+  it('labels Telegram outbound messages with the official Telegram icon', () => {
+    const transformed = transformToolCluster(
+      clusterForToolCall(
+        'send_telegram_message',
+        { chat_id: '-100123', message: 'I posted the update.' },
+        JSON.stringify({ status: 'success', attachment_count: 0 }),
+      ),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Send Telegram message',
+      caption: 'I posted the update.',
+      summary: 'Chat -100123',
+      iconSrc: '/static/images/integrations/native/telegram.svg',
     })
   })
 })

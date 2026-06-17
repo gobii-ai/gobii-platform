@@ -76,6 +76,39 @@ function clusterForApplyPatch(): ToolClusterEvent {
   }
 }
 
+function clusterForToolCall(
+  toolName: string,
+  parameters: Record<string, unknown>,
+  result = '{}',
+): ToolClusterEvent {
+  return {
+    kind: 'steps',
+    cursor: 'step:1',
+    entryCount: 1,
+    collapsible: false,
+    collapseThreshold: 4,
+    earliestTimestamp: '2026-01-01T00:00:00Z',
+    latestTimestamp: '2026-01-01T00:00:00Z',
+    entries: [
+      {
+        id: 'tool-call-1',
+        cursor: 'step:1',
+        timestamp: '2026-01-01T00:00:00Z',
+        toolName,
+        meta: {
+          label: toolName,
+          iconPaths: [],
+          iconBg: '',
+          iconColor: '',
+        },
+        parameters,
+        result,
+        status: 'pending',
+      },
+    ],
+  }
+}
+
 function renderPreview(cluster: ToolClusterEvent) {
   return render(
     <ToolClusterLivePreview
@@ -124,5 +157,33 @@ describe('ToolClusterLivePreview Google API display', () => {
     expect(screen.getByText('Search Apollo people')).toBeInTheDocument()
     expect(screen.queryByText('Browsing')).not.toBeInTheDocument()
     expect(screen.queryByText('api.apollo.io')).not.toBeInTheDocument()
+  })
+
+  it('renders Discord native tools with provider-specific activity text', () => {
+    renderPreview(
+      clusterForToolCall(
+        'send_discord_message',
+        { channel_id: 'channel-1', message: 'Shipping the report now.' },
+        JSON.stringify({ status: 'success', attachment_count: 1 }),
+      ),
+    )
+
+    expect(screen.getByText('Sending Discord message')).toBeInTheDocument()
+    expect(screen.getByText('Shipping the report now.')).toBeInTheDocument()
+    expect(screen.queryByText('Agent action')).not.toBeInTheDocument()
+  })
+
+  it('renders Telegram native tools with provider-specific activity text', () => {
+    renderPreview(
+      clusterForToolCall(
+        'telegram_chats',
+        { action: 'status' },
+        JSON.stringify({ status: 'success', bot_username: 'agent_bot', chats: [{ id: 'chat-1' }] }),
+      ),
+    )
+
+    expect(screen.getByText('Checking Telegram status')).toBeInTheDocument()
+    expect(screen.getByText('@agent_bot')).toBeInTheDocument()
+    expect(screen.queryByText('Agent action')).not.toBeInTheDocument()
   })
 })
