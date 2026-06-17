@@ -1496,7 +1496,7 @@ class RobotsTxtTests(TestCase):
 
 @tag("batch_pages")
 class LlmsTxtTests(TestCase):
-    def test_llms_txt_is_served_from_root(self):
+    def test_llms_txt_is_served_from_root_in_community_mode(self):
         response = self.client.get("/llms.txt")
 
         self.assertEqual(response.status_code, 200)
@@ -1504,21 +1504,48 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "http://testserver/llms-full.txt")
         self.assertContains(response, "https://docs.gobii.ai/")
+        self.assertContains(response, "Gobii provides AI agents for recruiting operations")
+        self.assertContains(response, "AI agents for recruiting operations")
+        self.assertContains(response, "## Recruiting Operations")
+        self.assertNotContains(response, "http://testserver/solutions/")
+        self.assertNotContains(response, "http://testserver/pretrained-workers/")
+        self.assertNotContains(response, "http://testserver/library/")
+        self.assertNotContains(response, "LinkedIn")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_llms_txt_uses_proprietary_sourcing_copy(self):
+        response = self.client.get("/llms.txt")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/plain")
         self.assertContains(response, "Gobii completes sourcing work across existing recruiting tools")
         self.assertContains(response, "http://testserver/solutions/")
         self.assertContains(response, "http://testserver/solutions/engineering/")
         self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
-        self.assertContains(response, "## Recruiting Operations")
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
 
-    def test_llms_full_txt_is_served_from_root(self):
+    def test_llms_full_txt_is_served_from_root_in_community_mode(self):
         response = self.client.get("/llms-full.txt")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/plain")
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "## Overview")
+        self.assertContains(response, "automate repetitive sourcing, candidate research")
+        self.assertContains(response, "## Recruiting Operations")
+        self.assertContains(response, "Public template and solution pages are no longer the primary product surface.")
+        self.assertNotContains(response, "http://testserver/solutions/")
+        self.assertNotContains(response, "http://testserver/pretrained-workers/")
+        self.assertNotContains(response, "http://testserver/library/")
+        self.assertNotContains(response, "LinkedIn")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_llms_full_txt_uses_proprietary_sourcing_copy(self):
+        response = self.client.get("/llms-full.txt")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/plain")
         self.assertContains(response, "turn role briefs into completed sourcing work")
         self.assertContains(response, "## Recruiting Operations")
         self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
@@ -1626,8 +1653,13 @@ class SitemapTests(TestCase):
         self.assertNotIn("<loc>http://example.com/library/team-ops/</loc>", content)
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
-    def test_public_template_urls_redirect_home(self):
+    def test_public_template_and_solution_urls_redirect_home_in_community_mode(self):
         for path in (
+            "/solutions/",
+            "/solutions/recruiting/",
+            "/solutions/recruiting/candidate-sourcing/",
+            "/solutions/sales/",
+            "/solutions/operations/",
             "/library/",
             "/library/recruiting/",
             "/pretrained-workers/",
@@ -1667,7 +1699,9 @@ class SitemapTests(TestCase):
     def test_community_sitemap_includes_local_docs(self):
         response = self.client.get("/sitemap.xml")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("http://example.com/docs/", response.content.decode())
+        content = response.content.decode()
+        self.assertIn("http://example.com/docs/", content)
+        self.assertNotIn("http://example.com/solutions/", content)
 
 
 @tag("batch_pages")
@@ -2498,6 +2532,22 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertNotIn("Discover", soup.get_text(" ", strip=True))
         self.assertIn("Developers", soup.get_text(" ", strip=True))
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_home_header_keeps_solution_and_developer_navigation_hidden_in_community_mode(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertIsNone(soup.find("a", {"href": reverse("pages:solutions")}))
+        self.assertIsNone(
+            soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "engineering"})})
+        )
+        self.assertIsNone(soup.find("a", {"href": reverse("pages:library")}))
+        self.assertNotIn("Solutions", soup.get_text(" ", strip=True))
+        self.assertNotIn("Discover", soup.get_text(" ", strip=True))
+        self.assertNotIn("Developers", soup.get_text(" ", strip=True))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_restored_solution_urls_render(self):
         live_paths = (
             "/solutions/",

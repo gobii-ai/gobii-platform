@@ -3769,6 +3769,8 @@ class SolutionsSitemap(sitemaps.Sitemap):
     priority = 0.5
 
     def items(self):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return []
         try:
             return list(SolutionView.DEDICATED_TEMPLATES.keys())
         except Exception as e:
@@ -3937,6 +3939,11 @@ class ClearSignupTrackingView(View):
 class SolutionsIndexView(TemplateView):
     template_name = "solutions/index.html"
 
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("/", permanent=True)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["suppress_preline"] = True
@@ -4080,6 +4087,8 @@ class SolutionView(TemplateView):
         return reverse(route_name, kwargs=route_kwargs)
 
     def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("/", permanent=True)
         if kwargs.get('slug', '') not in self.DEDICATED_TEMPLATES:
             raise Http404("Solution not found")
         return super().dispatch(request, *args, **kwargs)
