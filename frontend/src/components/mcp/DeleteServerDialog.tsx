@@ -56,8 +56,9 @@ export function DeleteServerDialog({ serverName, deleteUrl, onClose, onDeleted, 
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof HttpError) {
-    if (typeof error.body === 'string' && error.body) {
-      return error.body
+    const bodyMessage = resolveBodyMessage(error.body, fallback)
+    if (bodyMessage) {
+      return bodyMessage
     }
     if (typeof error.statusText === 'string' && error.statusText) {
       return error.statusText
@@ -67,4 +68,28 @@ function resolveErrorMessage(error: unknown, fallback: string): string {
     return (error as { message: string }).message
   }
   return fallback
+}
+
+function resolveBodyMessage(body: unknown, fallback: string): string | null {
+  if (typeof body === 'string') {
+    const trimmed = body.trim()
+    if (!trimmed) {
+      return null
+    }
+    return isHtmlResponse(trimmed) ? fallback : trimmed
+  }
+  if (body && typeof body === 'object') {
+    for (const key of ['message', 'detail', 'error']) {
+      const value = (body as Record<string, unknown>)[key]
+      if (typeof value === 'string' && value.trim()) {
+        return value
+      }
+    }
+  }
+  return null
+}
+
+function isHtmlResponse(body: string): boolean {
+  const normalized = body.slice(0, 200).toLowerCase()
+  return normalized.includes('<!doctype') || normalized.includes('<html') || normalized.includes('<body')
 }

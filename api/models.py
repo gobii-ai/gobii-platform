@@ -14021,8 +14021,7 @@ def touch_profile_on_embeddings_tier_endpoint_change(sender, instance, **kwargs)
 
 
 @receiver(post_save, sender=MCPServerConfig)
-@receiver(post_delete, sender=MCPServerConfig)
-def invalidate_mcp_tool_cache_for_server(sender, instance, **kwargs):
+def refresh_mcp_tool_cache_for_server(sender, instance, **kwargs):
     server_id = getattr(instance, "id", None)
     if server_id:
         invalidate_mcp_tool_cache(str(server_id))
@@ -14034,9 +14033,22 @@ def invalidate_mcp_tool_cache_for_server(sender, instance, **kwargs):
             schedule_mcp_tool_discovery(str(server_id), reason="config_changed")
 
 
-@receiver(post_save, sender=MCPServerOAuthCredential)
 @receiver(post_delete, sender=MCPServerOAuthCredential)
-def invalidate_mcp_tool_cache_for_credentials(sender, instance, **kwargs):
+def invalidate_mcp_tool_cache_for_deleted_credentials(sender, instance, **kwargs):
+    server_id = getattr(instance, "server_config_id", None)
+    if server_id:
+        invalidate_mcp_tool_cache(str(server_id))
+
+
+@receiver(post_delete, sender=MCPServerConfig)
+def invalidate_mcp_tool_cache_for_deleted_server(sender, instance, **kwargs):
+    server_id = getattr(instance, "id", None)
+    if server_id:
+        invalidate_mcp_tool_cache(str(server_id))
+
+
+@receiver(post_save, sender=MCPServerOAuthCredential)
+def refresh_mcp_tool_cache_for_credentials(sender, instance, **kwargs):
     server_id = getattr(instance, "server_config_id", None)
     if server_id:
         invalidate_mcp_tool_cache(str(server_id))
