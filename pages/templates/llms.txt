@@ -2,15 +2,15 @@
 {% if settings.GOBII_PROPRIETARY_MODE %}
 # Gobii
 
-> Gobii completes sourcing work across existing recruiting tools.
+> Gobii helps recruiting teams source candidates in the tools they already use.
 
-Gobii helps recruiting teams turn role briefs into completed sourcing work. It researches candidates, builds shortlists, writes hiring-manager briefs, and hands off results across existing recruiting tools.
+Gobii helps recruiting teams turn role briefs into completed sourcing work. It researches candidates, prepares shortlists, writes hiring-manager briefs, and hands off results in tools like LinkedIn Recruiter, Greenhouse, and Google Sheets.
 
 Managed LinkedIn Recruiter automation is available through sales.
 
 ## Core Pages
 
-- [Gobii homepage]({{ base_url }}/): Completed sourcing work across existing recruiting tools.
+- [Gobii homepage]({{ base_url }}/): Source candidates in the tools recruiting teams already use.
 - [Solutions]({{ base_url }}/solutions/): AI agent solution pages for teams.
 - [Developers]({{ base_url }}/solutions/engineering/): Gobii developer platform and API overview.
 - [Pricing]({{ base_url }}/pricing/): Self-serve pricing plans, including Pro and Scale.
@@ -24,7 +24,7 @@ Managed LinkedIn Recruiter automation is available through sales.
 - Candidate profile research
 - Shortlist preparation for recruiter review
 - Hiring-manager brief generation
-- Hiring pipeline exports and workflow handoff
+- Hiring pipeline exports and workflow handoff in Greenhouse and Google Sheets
 
 ## Integrations
 
@@ -42,13 +42,14 @@ Managed LinkedIn Recruiter automation is available through sales.
 
 ## Product Positioning
 
-Gobii is not a generic template directory or chatbot-only interface. It is a focused recruiting operations product that uses AI agents to perform sourcing, candidate research, shortlist preparation, and handoff work across existing recruiting tools.
+Gobii is not a generic template directory or chatbot-only interface. It is a focused recruiting operations product that uses AI agents to perform sourcing, candidate research, shortlist preparation, and handoff work inside the software recruiting teams already use.
 
 
 ## Recruiting Operations
 
-- Gobii recruiting agents are persistent digital workers that can search web sources, operate business software, and deliver organized candidate research.
+- Gobii recruiting agents are persistent digital workers that can search web sources, work inside recruiting software, and deliver organized candidate research.
 - Gobii recruiting operations workflows can turn a role brief into a source-linked shortlist with fit notes, profile links, work-history context, and hiring-manager briefs.
+- Gobii can hand off results in LinkedIn Recruiter, Greenhouse, Google Sheets, and configured recruiting workflows.
 - Managed LinkedIn Recruiter automation is available through sales.
 - Recruiting workflows can export to Google Sheets, CSV, webhooks, and enterprise ATS integrations where configured.
 - Gobii is best described as a recruiting operations platform for delegated sourcing, research, shortlist preparation, and workflow handoff, not as a replacement for recruiter judgment or hiring compliance review.

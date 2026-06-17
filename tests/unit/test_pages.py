@@ -109,11 +109,10 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        title = "Acme - Completed Sourcing Work Across Your Existing Recruiting Tools"
+        title = "Acme - Source Candidates in the Tools Your Team Already Uses"
         description = (
-            "Give Acme a role brief. It researches candidates, builds shortlists, "
-            "writes hiring-manager briefs, and hands off results across your existing "
-            "recruiting tools."
+            "Give Acme a role brief. It researches candidates, prepares shortlists, "
+            "and hands off results in LinkedIn Recruiter, Greenhouse, and Google Sheets."
         )
         image_url = "https://gobii.ai/static/images/gobii_og_image_1200x630.png"
 
@@ -377,7 +376,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Give Acme a role brief. It researches candidates, builds shortlists, writes hiring-manager briefs, and hands off results across your existing recruiting tools.">',
+            '<meta name="description" content="Give Acme a role brief. It researches candidates, prepares shortlists, and hands off results in LinkedIn Recruiter, Greenhouse, and Google Sheets.">',
         )
 
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
@@ -784,15 +783,19 @@ class HomePageTests(TestCase):
 
         soup = BeautifulSoup(response.content, "html.parser")
         page_text = soup.get_text(" ")
-        self.assertIn("Completed sourcing work across your existing recruiting tools.", page_text)
+        normalized_page_text = re.sub(r"\s+", " ", page_text)
+        normalized_page_text = normalized_page_text.replace(" ,", ",").replace(" ?", "?")
+        self.assertIn("Source candidates", normalized_page_text)
+        self.assertIn("in the tools your team already uses.", normalized_page_text)
         self.assertIn(
-            "Give Gobii a role brief. It researches candidates, builds shortlists, "
-            "writes hiring-manager briefs, and hands off results",
-            page_text,
+            "Give Gobii a role brief. It researches candidates, prepares shortlists, "
+            "and hands off results in LinkedIn Recruiter, Greenhouse, and Google Sheets.",
+            normalized_page_text,
         )
-        self.assertIn("managed LinkedIn Recruiter automation available through sales", page_text)
-        self.assertNotIn("Get qualified candidates.", page_text)
-        self.assertNotIn("Enter a job description. Gobii builds the shortlist.", page_text)
+        self.assertIn("Need LinkedIn Recruiter?", normalized_page_text)
+        self.assertIn("Google Sheets", normalized_page_text)
+        self.assertNotIn("Get qualified candidates.", normalized_page_text)
+        self.assertNotIn("Enter a job description. Gobii builds the shortlist.", normalized_page_text)
         hero_form = soup.find("form", {"id": "create-agent-form"})
         self.assertIsNotNone(hero_form)
         hero_markup = str(hero_form)
@@ -803,12 +806,17 @@ class HomePageTests(TestCase):
         hero_button = hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(hero_button)
         self.assertEqual(self._normalized_button_text(hero_button), "Start sourcing")
-        sales_link = soup.find("a", string=re.compile("Talk to sales for LinkedIn Recruiter"))
+        self.assertIsNone(hero_form.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"}))
+        sales_link = soup.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"})
         self.assertIsNotNone(sales_link)
         self.assertEqual(sales_link.get("href"), reverse("proprietary:contact"))
-        self.assertEqual(sales_link.get("data-analytics-cta-id"), "home_linkedin_recruiter_sales")
-        self.assertEqual(sales_link.get("data-analytics-placement"), "hero")
+        self.assertEqual(sales_link.get("data-analytics-placement"), "hero_below_form")
         self.assertEqual(sales_link.get("data-analytics-intent"), "contact_sales")
+        self.assertIn("Talk to sales", sales_link.get_text(" ", strip=True))
+        response_text = response.content.decode("utf-8")
+        self.assertIn("images/integrations/pipedream/linkedin.svg", response_text)
+        self.assertIn("images/integrations/proprietary/greenhouse.svg", response_text)
+        self.assertIn("images/integrations/pipedream/google_sheets.svg", response_text)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_prompt_placeholder_matches_recruiting_ops_copy(self):
@@ -817,7 +825,7 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            "Paste a role brief. Gobii will research candidates, build a shortlist, write hiring-manager briefs, and hand off results.",
+            "Paste a role brief. Gobii will source candidates, prepare a shortlist, and hand off results.",
         )
         self.assertNotContains(response, " for a senior backend engineer role.")
         self.assertNotContains(response, " for a founding account executive role.")
@@ -1518,7 +1526,8 @@ class LlmsTxtTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/plain")
-        self.assertContains(response, "Gobii completes sourcing work across existing recruiting tools")
+        self.assertContains(response, "Gobii helps recruiting teams source candidates in the tools they already use")
+        self.assertContains(response, "LinkedIn Recruiter, Greenhouse, and Google Sheets")
         self.assertContains(response, "http://testserver/solutions/")
         self.assertContains(response, "http://testserver/solutions/engineering/")
         self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
@@ -1547,6 +1556,7 @@ class LlmsTxtTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/plain")
         self.assertContains(response, "turn role briefs into completed sourcing work")
+        self.assertContains(response, "LinkedIn Recruiter, Greenhouse, and Google Sheets")
         self.assertContains(response, "## Recruiting Operations")
         self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
         self.assertContains(response, "Solutions: http://testserver/solutions/")
