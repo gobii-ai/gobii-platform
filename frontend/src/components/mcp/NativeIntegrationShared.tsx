@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, FileText, Loader2, Plug, Table2 } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, FileText, Loader2, Plug, Table2 } from 'lucide-react'
 
 import type {
   NativeIntegrationAccessibleFile,
@@ -257,6 +257,37 @@ export function NativeProviderIconTile({ provider }: { provider: NativeIntegrati
   return (
     <span className={icon?.tileClassName ?? DEFAULT_NATIVE_PROVIDER_TILE_CLASS_NAME}>
       <NativeProviderIcon provider={provider} framed />
+    </span>
+  )
+}
+
+export function NativeConnectionStatusPill({
+  connected,
+  label = 'Connected',
+  disconnectedLabel = 'Not connected',
+  error = false,
+}: {
+  connected: boolean
+  label?: string
+  disconnectedLabel?: string
+  error?: boolean
+}) {
+  if (connected) {
+    return (
+      <span className="inline-flex whitespace-nowrap items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+        {label}
+      </span>
+    )
+  }
+
+  return (
+    <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${
+      error
+        ? 'border-red-200 bg-red-50 text-red-700'
+        : 'border-slate-200 text-slate-500'
+    }`}>
+      {error ? 'Setup error' : disconnectedLabel}
     </span>
   )
 }

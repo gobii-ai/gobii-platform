@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, CheckCircle2, Hash, Loader2, Plug, Save, Settings } from 'lucide-react'
+import { ArrowLeft, Hash, Loader2, Plug, Save, Settings } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
@@ -23,6 +23,7 @@ import {
   PipedreamStatusBanner,
   type PipedreamStatusMessage,
 } from './PipedreamAppsShared'
+import { NativeConnectionStatusPill } from './NativeIntegrationShared'
 
 export type PendingDiscordAction = 'connect' | 'save' | null
 
@@ -365,16 +366,7 @@ function DiscordAgentConnectionRow({
         </div>
       </div>
       <div>
-        {enabled ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Enabled
-          </span>
-        ) : (
-          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-            Not enabled
-          </span>
-        )}
+        <NativeConnectionStatusPill connected={enabled} disconnectedLabel="Not enabled" />
       </div>
       <div className="flex justify-start md:justify-end">
         {enabled ? (

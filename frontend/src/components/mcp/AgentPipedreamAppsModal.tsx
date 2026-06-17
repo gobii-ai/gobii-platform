@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, FolderOpen, Loader2, Plug, RefreshCw, Settings, Unplug } from 'lucide-react'
+import { ArrowLeft, Check, Copy, ExternalLink, FolderOpen, Loader2, Plug, RefreshCw, Settings, Unplug } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
@@ -49,6 +49,7 @@ import {
 } from './PipedreamAppsShared'
 import {
   confirmNativeIntegrationDisconnect,
+  NativeConnectionStatusPill,
   NativeIntegrationFilesDisclosure,
   NativeProviderIconTile,
   nativeIntegrationFilesQueryKey,
@@ -65,6 +66,7 @@ import {
   useDiscordNativeAgentActions,
   useDiscordOAuthCompleteRefetch,
 } from './DiscordNativeAppModal'
+import { openTelegramHandoff, telegramAppUrlForWebUrl } from './TelegramNativeShared'
 
 type AgentPipedreamAppsModalProps = {
   agentId: string
@@ -103,6 +105,7 @@ export function AgentPipedreamAppsModal({
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [discordConfigureOpen, setDiscordConfigureOpen] = useState(false)
   const [telegramConfigureOpen, setTelegramConfigureOpen] = useState(false)
+  const [telegramProvisioningPending, setTelegramProvisioningPending] = useState(false)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
@@ -143,7 +146,16 @@ export function AgentPipedreamAppsModal({
   const telegramAppQuery = useQuery({
     queryKey: telegramQueryKey,
     queryFn: () => fetchAgentTelegramApp(agentId),
+    refetchInterval: telegramProvisioningPending ? 2000 : false,
   })
+
+  useEffect(() => {
+    if (!telegramProvisioningPending || !telegramAppQuery.data?.connected) {
+      return
+    }
+    setTelegramProvisioningPending(false)
+    setStatusMessage(null)
+  }, [telegramAppQuery.data?.connected, telegramProvisioningPending])
 
   const telegramConnectMutation = useMutation({
     mutationFn: () => startAgentTelegramConnect(agentId),
@@ -155,12 +167,14 @@ export function AgentPipedreamAppsModal({
       void queryClient.setQueryData(telegramQueryKey, payload.app)
       const url = payload.userLinked ? payload.createBotUrl : payload.managerLinkUrl
       if (url) {
-        window.open(url, '_blank', 'noopener,noreferrer')
+        openTelegramHandoff(url)
       }
+      setTelegramProvisioningPending(payload.userLinked)
       setStatusMessage({
         text: payload.userLinked
-          ? 'Telegram bot creation opened. Return here after Telegram finishes creating the agent bot.'
+          ? 'Waiting for Telegram to finish creating this agent bot. Gobii will update this screen automatically.'
           : 'Telegram account linking opened. After linking, click Connect again to create the agent bot.',
+        tone: 'info',
       })
     },
     onError: (error) => {
@@ -498,16 +512,7 @@ function AgentNativeAppRowItem({
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] sm:items-start">
         <NativeIntegrationSummaryCell provider={provider} />
         <div>
-          {provider.connected ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-              Connected
-            </span>
-          ) : (
-            <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-              Workspace
-            </span>
-          )}
+          <NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Workspace" />
         </div>
         <div className="flex justify-start md:justify-end">
           {pickerEnabled ? (
@@ -597,26 +602,12 @@ function AgentDiscordAppRowItem({
 
   return (
     <div className="px-4 py-3">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem] md:items-start">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] md:items-center">
         <DiscordSummaryCell app={app} />
         <div>
-          {app.subscribed ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-              Subscribed
-            </span>
-          ) : app.connected ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-              Connected
-            </span>
-          ) : (
-            <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-              Not connected
-            </span>
-          )}
+          <NativeConnectionStatusPill connected={app.connected} />
         </div>
-        <div className="flex justify-start md:justify-end">
+        <div className="flex justify-start md:col-start-4 md:justify-end">
           {app.connected ? (
             <button
               type="button"
@@ -657,36 +648,23 @@ function AgentTelegramAppListRowItem({
   disabled: boolean
   onConfigure: () => void
 }) {
-  const statusLabel = app.connected
-    ? app.subscribed
-      ? 'Active chats'
-      : 'Connected'
-    : app.status === 'pending'
+  const statusLabel = app.status === 'pending'
       ? 'Pending'
       : app.status === 'configuration_error'
         ? 'Setup error'
         : 'Not connected'
 
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem] md:items-start">
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] md:items-center">
       <TelegramSummaryCell app={app} />
       <div>
-        {app.connected ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            {statusLabel}
-          </span>
-        ) : app.status === 'configuration_error' ? (
-          <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
-            Setup error
-          </span>
-        ) : (
-          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-            {statusLabel}
-          </span>
-        )}
+        <NativeConnectionStatusPill
+          connected={app.connected}
+          disconnectedLabel={statusLabel}
+          error={app.status === 'configuration_error'}
+        />
       </div>
-      <div className="flex justify-start md:justify-end">
+      <div className="flex justify-start md:col-start-4 md:justify-end">
         <button
           type="button"
           className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
@@ -763,11 +741,7 @@ export function AgentTelegramAppRowItem({
 }) {
   const isPending = pendingNativeAction?.providerKey === app.providerKey
   const pendingKind = isPending ? pendingNativeAction?.kind : null
-  const statusLabel = app.connected
-    ? app.subscribed
-      ? 'Active chats'
-      : 'Connected'
-    : app.status === 'pending'
+  const statusLabel = app.status === 'pending'
       ? 'Pending'
       : app.status === 'configuration_error'
         ? 'Setup error'
@@ -778,20 +752,11 @@ export function AgentTelegramAppRowItem({
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_7rem_16rem] md:items-start">
         <TelegramSummaryCell app={app} />
         <div>
-          {app.connected ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-              {statusLabel}
-            </span>
-          ) : app.status === 'configuration_error' ? (
-            <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
-              Setup error
-            </span>
-          ) : (
-            <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-              {statusLabel}
-            </span>
-          )}
+          <NativeConnectionStatusPill
+            connected={app.connected}
+            disconnectedLabel={statusLabel}
+            error={app.status === 'configuration_error'}
+          />
         </div>
         <div className="flex flex-wrap justify-start gap-2 md:justify-end">
           {app.connected ? (
@@ -882,6 +847,7 @@ async function copyTelegramFallbackText(value: string): Promise<void> {
 function TelegramConnectFallback({ app }: { app: AgentTelegramApp }) {
   const [copied, setCopied] = useState<'command' | 'link' | null>(null)
   const linkUrl = app.userLinked ? app.createBotUrl : app.managerLinkUrl
+  const appUrl = telegramAppUrlForWebUrl(linkUrl)
   const command = app.userLinked ? '' : telegramStartCommand(app.managerLinkUrl)
   if (app.connected || app.status === 'configuration_error' || !linkUrl) {
     return null
@@ -900,6 +866,16 @@ function TelegramConnectFallback({ app }: { app: AgentTelegramApp }) {
           {app.userLinked ? 'Create the managed bot' : 'Telegram Web fallback'}
         </p>
         <div className="flex flex-wrap gap-2">
+          {appUrl ? (
+            <a
+              className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+              href={appUrl}
+              rel="noreferrer"
+            >
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+              Open App
+            </a>
+          ) : null}
           <a
             className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
             href={linkUrl}
@@ -907,7 +883,7 @@ function TelegramConnectFallback({ app }: { app: AgentTelegramApp }) {
             rel="noreferrer"
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-            Open Link
+            Open Web
           </a>
           <button
             type="button"
@@ -1010,19 +986,10 @@ function AgentPipedreamAppRowItem({
       : 'Remove app'
 
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_7rem] md:items-center">
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] md:items-center">
       <PipedreamAppSummaryCell app={app} />
       <div>
-        {app.connected ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Connected
-          </span>
-        ) : (
-          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-            Not connected
-          </span>
-        )}
+        <NativeConnectionStatusPill connected={app.connected} />
       </div>
       <div className="flex justify-start md:justify-end">
         <PipedreamConnectionButton

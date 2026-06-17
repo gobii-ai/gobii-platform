@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, CheckCircle2, FolderOpen, Loader2, Plug, Unplug, Users } from 'lucide-react'
+import { ArrowLeft, FolderOpen, Loader2, Plug, Unplug, Users } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
@@ -41,6 +41,7 @@ import {
 } from './DiscordNativeShared'
 import {
   TELEGRAM_NATIVE_PROVIDER_KEY,
+  openTelegramHandoff,
   withTelegramNativeProvider,
 } from './TelegramNativeShared'
 import {
@@ -64,6 +65,7 @@ import {
 } from './PipedreamAppsShared'
 import {
   confirmNativeIntegrationDisconnect,
+  NativeConnectionStatusPill,
   NativeIntegrationFilesDisclosure,
   NativeProviderIconTile,
   nativeIntegrationFilesQueryKey,
@@ -167,6 +169,7 @@ export function PipedreamAppsModal({
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction>(null)
   const [pendingTelegramAgentAction, setPendingTelegramAgentAction] = useState<PendingTelegramAgentAction>(null)
+  const [telegramProvisioningAgentId, setTelegramProvisioningAgentId] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
@@ -256,7 +259,18 @@ export function PipedreamAppsModal({
     queryKey: activeTelegramAppQueryKey,
     queryFn: () => fetchAgentTelegramApp(activeTelegramAgentId as string),
     enabled: Boolean(activeTelegramAgentId),
+    refetchInterval: telegramProvisioningAgentId && telegramProvisioningAgentId === activeTelegramAgentId ? 2000 : false,
   })
+
+  useEffect(() => {
+    if (!telegramProvisioningAgentId || activeTelegramAgentId !== telegramProvisioningAgentId || !activeTelegramAppQuery.data?.connected) {
+      return
+    }
+    setTelegramProvisioningAgentId(null)
+    setStatusMessage(null)
+    void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+    void queryClient.invalidateQueries({ queryKey: ['agent-telegram-app'], exact: false })
+  }, [activeTelegramAgentId, activeTelegramAppQuery.data?.connected, queryClient, telegramProvisioningAgentId])
 
   const platformSlugSet = useMemo(
     () => new Set(settings.platformApps.map((app) => app.slug)),
@@ -493,12 +507,14 @@ export function PipedreamAppsModal({
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
       const url = payload.userLinked ? payload.createBotUrl : payload.managerLinkUrl
       if (url) {
-        window.open(url, '_blank', 'noopener,noreferrer')
+        openTelegramHandoff(url)
       }
+      setTelegramProvisioningAgentId(payload.userLinked ? agentId : null)
       setStatusMessage({
         text: payload.userLinked
-          ? 'Telegram bot creation opened. Return here after Telegram finishes creating the agent bot.'
+          ? 'Waiting for Telegram to finish creating this agent bot. Gobii will update this screen automatically.'
           : 'Telegram account linking opened. After linking, click Connect again to create the agent bot.',
+        tone: 'info',
       })
     },
     onError: (error) => {
@@ -972,8 +988,11 @@ function WorkspaceDiscordAppRowItem({
   const isPendingDisconnect = pendingNativeAction?.providerKey === provider.providerKey && pendingNativeAction.kind === 'disconnect'
 
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_8rem] md:items-center">
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_8rem_12rem_8rem] md:items-center">
       <NativeIntegrationSummaryCell provider={provider} />
+      <div>
+        <NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Per-agent" />
+      </div>
       <div className="flex justify-start md:justify-end">
         <button
           type="button"
@@ -1022,8 +1041,11 @@ function WorkspaceTelegramAppRowItem({
   const isPendingDisconnect = pendingNativeAction?.providerKey === provider.providerKey && pendingNativeAction.kind === 'disconnect'
 
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_8rem] md:items-center">
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_8rem_12rem_8rem] md:items-center">
       <NativeIntegrationSummaryCell provider={provider} />
+      <div>
+        <NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Per-agent" />
+      </div>
       <div className="flex justify-start md:justify-end">
         <button
           type="button"
@@ -1050,11 +1072,7 @@ function WorkspaceTelegramAppRowItem({
             )}
             Disconnect
           </button>
-        ) : (
-          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-            Per-agent setup
-          </span>
-        )}
+        ) : null}
       </div>
     </div>
   )
@@ -1175,16 +1193,7 @@ function TelegramAgentConnectionRow({
         </div>
       </div>
       <div>
-        {enabled ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Connected
-          </span>
-        ) : (
-          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-            Not connected
-          </span>
-        )}
+        <NativeConnectionStatusPill connected={enabled} />
       </div>
       <div className="flex justify-start md:justify-end">
         <button
@@ -1222,19 +1231,10 @@ function NativeAppRowItem({
 
   return (
     <div className="px-4 py-3">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_8rem_8rem] sm:items-start">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_12rem_8rem] sm:items-start">
         <NativeIntegrationSummaryCell provider={provider} />
         <div>
-          {provider.connected ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-              Connected
-            </span>
-          ) : (
-            <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-              Workspace
-            </span>
-          )}
+          <NativeConnectionStatusPill connected={provider.connected} disconnectedLabel="Workspace" />
         </div>
         <div className="flex justify-start md:justify-end">
           {pickerEnabled ? (

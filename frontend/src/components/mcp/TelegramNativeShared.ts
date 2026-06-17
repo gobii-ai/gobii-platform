@@ -38,3 +38,46 @@ export function withTelegramNativeProviderConnection(
       : provider
   ))
 }
+
+function isTelegramWebHost(hostname: string): boolean {
+  return ['t.me', 'telegram.me', 'telegram.dog'].includes(hostname.toLowerCase())
+}
+
+export function telegramAppUrlForWebUrl(webUrl: string): string {
+  try {
+    const parsed = new URL(webUrl)
+    if (!isTelegramWebHost(parsed.hostname)) {
+      return ''
+    }
+    const pathParts = parsed.pathname.split('/').filter(Boolean)
+    const firstPathPart = pathParts[0] ?? ''
+    if (!firstPathPart) {
+      return ''
+    }
+
+    if (firstPathPart.toLowerCase() === 'newbot') {
+      const encodedPath = pathParts.map((part) => encodeURIComponent(part)).join('/')
+      return `tg://${encodedPath}${parsed.search}`
+    }
+
+    const params = new URLSearchParams({ domain: firstPathPart })
+    parsed.searchParams.forEach((value, key) => {
+      if (key !== 'domain') {
+        params.append(key, value)
+      }
+    })
+    const query = params.toString()
+    return query ? `tg://resolve?${query}` : `tg://resolve?domain=${encodeURIComponent(firstPathPart)}`
+  } catch {
+    return ''
+  }
+}
+
+export function openTelegramHandoff(webUrl: string): { appUrl: string; webUrl: string } {
+  const appUrl = telegramAppUrlForWebUrl(webUrl)
+  const urlToOpen = appUrl || webUrl
+  if (urlToOpen) {
+    window.open(urlToOpen, '_blank', 'noopener,noreferrer')
+  }
+  return { appUrl, webUrl }
+}
