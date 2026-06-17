@@ -21,6 +21,7 @@ from api.models import (
     BrowserUseAgent,
     MCPServerConfig,
     PersistentAgent,
+    PersistentAgentTemplate,
     UserBilling,
     UserFingerprintVisit,
     UserFingerprintVisitFetchStatusChoices,
@@ -1585,15 +1586,35 @@ class CanonicalLinkTests(TestCase):
 
 @tag("batch_pages")
 class SitemapTests(TestCase):
-    def test_removed_public_template_and_solution_urls_are_excluded(self):
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_sitemap_includes_template_detail_urls_but_not_library_indexes(self):
+        PersistentAgentTemplate.objects.update_or_create(
+            code="sitemap-project-manager",
+            defaults={
+                "public_profile": None,
+                "slug": "",
+                "display_name": "Sitemap Project Manager",
+                "tagline": "Keep sitemap projects moving.",
+                "description": "Tracks sitemap project updates.",
+                "charter": "Coordinate sitemap project updates.",
+                "category": "Team Ops",
+                "is_active": True,
+            },
+        )
+
         response = self.client.get("/sitemap.xml")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("<loc>http://example.com/</loc>", content)
+        self.assertIn(
+            "<loc>http://example.com/library/team-ops/sitemap-project-manager/</loc>",
+            content,
+        )
         self.assertNotIn("http://example.com/solutions/", content)
-        self.assertNotIn("http://example.com/library/", content)
-        self.assertNotIn("http://example.com/pretrained-workers/", content)
+        self.assertNotIn("<loc>http://example.com/library/</loc>", content)
+        self.assertNotIn("<loc>http://example.com/library/team-ops/</loc>", content)
+        self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
     def test_removed_public_template_and_solution_urls_redirect_home(self):
         for path in (

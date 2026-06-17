@@ -27,7 +27,7 @@ from django.template.defaultfilters import linebreaksbr
 from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.db import DatabaseError
-from django.db.models import Case, Count, IntegerField, Value, When
+from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.db.models.functions import Lower
 from api.models import (
     MCPServerConfig,
@@ -161,6 +161,7 @@ from .public_template_urls import (
     public_template_detail_path,
     public_template_hire_path,
     public_template_launch_path,
+    public_template_route_slug,
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .comparisons import (
@@ -1873,7 +1874,50 @@ def _build_related_public_template_cards(
 
 
 def _get_active_public_template_by_slug(template_slug: str | None):
-    return _active_public_template_queryset().filter(slug=template_slug).first()
+    normalized_slug = str(template_slug or "").strip()
+    if not normalized_slug:
+        return None
+
+    return (
+        PersistentAgentTemplate.objects.select_related("public_profile")
+        .filter(
+            Q(slug=normalized_slug) | Q(code=normalized_slug),
+            organization__isnull=True,
+            is_active=True,
+        )
+        .order_by(
+            Case(
+                When(slug=normalized_slug, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField(),
+            ),
+            "priority",
+            Lower("display_name"),
+            "id",
+        )
+        .first()
+    )
+
+
+def _get_active_public_template_by_category_route(category_slug: str | None, template_slug: str | None):
+    normalized_category_slug = str(category_slug or "").strip().lower()
+    normalized_template_slug = str(template_slug or "").strip()
+    if not normalized_category_slug or not normalized_template_slug:
+        return None
+
+    candidates = (
+        PersistentAgentTemplate.objects.select_related("public_profile")
+        .filter(organization__isnull=True, is_active=True)
+        .filter(Q(slug=normalized_template_slug) | Q(code=normalized_template_slug))
+        .order_by("priority", Lower("display_name"), "id")
+    )
+    for template in candidates:
+        if (
+            public_template_route_slug(template) == normalized_template_slug
+            and public_template_category_slug(template) == normalized_category_slug
+        ):
+            return template
+    return None
 
 
 def _get_active_public_template_by_legacy_path(handle: str | None, template_slug: str | None):
@@ -1910,10 +1954,18 @@ def _public_template_redirect_with_query(request, target_path: str):
     return redirect(target_url, permanent=True)
 
 
-def _resolve_public_template_for_route(*, handle: str | None, template_slug: str | None):
+def _resolve_public_template_for_route(
+    *,
+    category_slug: str | None = None,
+    handle: str | None = None,
+    template_slug: str | None = None,
+):
     if handle:
         return _get_active_public_template_by_legacy_path(handle, template_slug)
-    return _get_active_public_template_by_slug(template_slug)
+    return (
+        _get_active_public_template_by_category_route(category_slug, template_slug)
+        or _get_active_public_template_by_slug(template_slug)
+    )
 
 
 def _seed_public_template_session(request, template: PersistentAgentTemplate) -> str | None:
@@ -2008,10 +2060,17 @@ class PublicTemplateDetailView(TemplateView):
 
     def dispatch(self, request, *args, **kwargs):
         template_slug = kwargs.get("template_slug")
-        self.template = _get_active_public_template_by_slug(template_slug)
+        self.template = _resolve_public_template_for_route(
+            category_slug=kwargs.get("category_slug"),
+            handle=kwargs.get("handle"),
+            template_slug=template_slug,
+        )
         if not self.template:
             raise Http404("This template is no longer available.")
-        if kwargs.get("category_slug") != public_template_category_slug(self.template):
+        if (
+            kwargs.get("category_slug") != public_template_category_slug(self.template)
+            or template_slug != public_template_route_slug(self.template)
+        ):
             return _canonical_public_template_redirect(self.template)
         return super().dispatch(request, *args, **kwargs)
 
@@ -2049,7 +2108,7 @@ class PublicTemplateDetailView(TemplateView):
                 "@type": "Organization",
                 "name": "Gobii",
             }
-            if self.template.is_official
+            if self.template.is_official or not self.template.public_profile_id
             else {
                 "@type": "Person",
                 "name": self.template.public_profile.handle,
@@ -2142,7 +2201,9 @@ class PublicTemplateDetailView(TemplateView):
         }
 
         context["template"] = self.template
-        context["public_profile_handle"] = self.template.public_profile.handle
+        public_profile_handle = self.template.public_profile.handle if self.template.public_profile_id else ""
+        context["public_profile_handle"] = public_profile_handle
+        context["template_is_gobii_owned"] = self.template.is_official or not public_profile_handle
         context["template_category_label"] = category_label
         context["template_category_url"] = category_url
         context["template_hire_url"] = public_template_hire_path(self.template)
@@ -2177,6 +2238,7 @@ class PublicTemplateDetailView(TemplateView):
 class PublicTemplateLaunchView(View):
     def get(self, request, *args, **kwargs):
         template = _resolve_public_template_for_route(
+            category_slug=kwargs.get("category_slug"),
             handle=kwargs.get("handle"),
             template_slug=kwargs.get("template_slug"),
         )
@@ -2184,7 +2246,11 @@ class PublicTemplateLaunchView(View):
             raise Http404("This template is no longer available.")
 
         canonical_launch_path = public_template_launch_path(template)
-        if kwargs.get("handle") or kwargs.get("category_slug") != public_template_category_slug(template):
+        if (
+            kwargs.get("handle")
+            or kwargs.get("category_slug") != public_template_category_slug(template)
+            or kwargs.get("template_slug") != public_template_route_slug(template)
+        ):
             return _public_template_redirect_with_query(request, canonical_launch_path)
 
         previous_referrer_code = _seed_public_template_session(request, template)
@@ -2241,7 +2307,11 @@ class PublicTemplateHireView(View):
     def post(self, request, *args, **kwargs):
         template_slug = kwargs.get("template_slug")
         handle = kwargs.get("handle")
-        template = _resolve_public_template_for_route(handle=handle, template_slug=template_slug)
+        template = _resolve_public_template_for_route(
+            category_slug=kwargs.get("category_slug"),
+            handle=handle,
+            template_slug=template_slug,
+        )
         if not template:
             raise Http404("This template is no longer available.")
 
@@ -3652,10 +3722,13 @@ class PublicTemplateSitemap(sitemaps.Sitemap):
     priority = 0.7
 
     def items(self):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return []
         return (
             PersistentAgentTemplate.objects.select_related("public_profile")
-            .filter(public_profile__isnull=False, organization__isnull=True, is_active=True)
-            .exclude(slug="")
+            .filter(organization__isnull=True, is_active=True)
+            .exclude(code="")
+            .order_by("priority", Lower("display_name"), "id")
         )
 
     def location(self, template):
