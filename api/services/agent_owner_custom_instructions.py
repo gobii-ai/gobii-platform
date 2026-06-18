@@ -59,7 +59,18 @@ def save_custom_instructions_for_user_id(user_id, *, instructions: str, updated_
     _save_custom_instructions({"user_id": user_id}, instructions=instructions, updated_by=updated_by)
 
 
+def _validate_owner_filter(owner_filter: dict) -> None:
+    if set(owner_filter) not in ({"user_id"}, {"organization_id"}):
+        raise ValueError("A valid organization_id or user_id must be provided.")
+
+    owner_id = next(iter(owner_filter.values()))
+    if not owner_id:
+        raise ValueError("A valid organization_id or user_id must be provided.")
+
+
 def _save_custom_instructions(owner_filter: dict, *, instructions: str, updated_by) -> None:
+    _validate_owner_filter(owner_filter)
+
     if instructions:
         AgentOwnerCustomInstructions.objects.update_or_create(
             **owner_filter,

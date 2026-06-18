@@ -8,7 +8,11 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
-from api.models import AgentOwnerCustomInstructions, UserPhoneNumber, UserPreference
+from api.models import AgentOwnerCustomInstructions, Organization, UserPhoneNumber, UserPreference
+from api.services.agent_owner_custom_instructions import (
+    save_custom_instructions_for_organization_id,
+    save_custom_instructions_for_user_id,
+)
 
 
 @tag("batch_console_api")
@@ -173,6 +177,47 @@ class ConsoleUserProfileApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("timezone", response.json()["errors"])
+
+
+@tag("batch_console_api")
+class AgentOwnerCustomInstructionsServiceTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="instructions-owner",
+            email="instructions-owner@example.com",
+            password="password123",
+        )
+        self.other_user = user_model.objects.create_user(
+            username="instructions-other",
+            email="instructions-other@example.com",
+            password="password123",
+        )
+        self.org = Organization.objects.create(
+            name="Instructions Org",
+            slug="instructions-org",
+            created_by=self.user,
+        )
+
+    def test_save_requires_valid_owner_id_before_delete(self):
+        personal_instructions = AgentOwnerCustomInstructions.objects.create(
+            user=self.other_user,
+            instructions="Keep my personal instructions.",
+            updated_by=self.other_user,
+        )
+        org_instructions = AgentOwnerCustomInstructions.objects.create(
+            organization=self.org,
+            instructions="Keep the org instructions.",
+            updated_by=self.user,
+        )
+
+        with self.assertRaises(ValueError):
+            save_custom_instructions_for_organization_id(None, instructions="", updated_by=self.user)
+        with self.assertRaises(ValueError):
+            save_custom_instructions_for_user_id(None, instructions="", updated_by=self.user)
+
+        self.assertTrue(AgentOwnerCustomInstructions.objects.filter(pk=personal_instructions.pk).exists())
+        self.assertTrue(AgentOwnerCustomInstructions.objects.filter(pk=org_instructions.pk).exists())
 
 
 @tag("batch_console_api")
