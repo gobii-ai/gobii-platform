@@ -86,3 +86,8 @@ from .hubspot_native import (
     HUBSPOT_NATIVE_SUITE_SLUG,
     HubSpotNativeScenario,
 )
+from .telegram_native import (
+    TELEGRAM_NATIVE_SCENARIO_SLUGS,
+    TELEGRAM_NATIVE_SUITE_SLUG,
+    TelegramNativeScenario,
+)

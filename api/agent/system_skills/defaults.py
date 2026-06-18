@@ -758,7 +758,8 @@ TELEGRAM_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     prompt_instructions=(
         "Use the native Gobii Telegram managed-bot tools for Telegram setup status and replies.\n"
         "V1 gives each Gobii agent its own Telegram bot identity. Do not suggest using one shared Telegram bot, "
-        "manual BotFather tokens, full passive group monitoring, Telegram Business/Secretary mode, inline mode, or bot-to-bot loops.\n"
+        "manual BotFather tokens, direct calls to api.telegram.org, getUpdates polling, Pipedream/legacy Telegram apps, "
+        "full passive group monitoring, Telegram Business/Secretary mode, inline mode, or bot-to-bot loops.\n"
         "Use `telegram_chats` with `action=\"status\"` before assuming Telegram is connected. If it returns `action_required`, "
         "tell the user to connect Telegram from the app integration panel; do not ask for raw Telegram bot tokens.\n"
         "Telegram group messages wake this agent only when Telegram delivers them to the bot, such as commands, mentions, or replies. "

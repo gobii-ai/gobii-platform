@@ -37,6 +37,10 @@ from api.evals.scenarios.hubspot_native import (
     HUBSPOT_NATIVE_SCENARIO_SLUGS,
     HUBSPOT_NATIVE_SUITE_SLUG,
 )
+from api.evals.scenarios.telegram_native import (
+    TELEGRAM_NATIVE_SCENARIO_SLUGS,
+    TELEGRAM_NATIVE_SUITE_SLUG,
+)
 from api.evals.scenarios.meta_gobii import (
     META_GOBII_REAL_HARNESS_SCENARIO_SLUGS,
     META_GOBII_REAL_HARNESS_SUITE_SLUG,
@@ -126,6 +130,11 @@ register_builtin_suites(
             slug=HUBSPOT_NATIVE_SUITE_SLUG,
             description="Native HubSpot system-skill evals over mocked HubSpot REST APIs.",
             scenario_slugs=HUBSPOT_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=TELEGRAM_NATIVE_SUITE_SLUG,
+            description="Native Telegram managed-bot system-skill evals over mocked Telegram tool results.",
+            scenario_slugs=TELEGRAM_NATIVE_SCENARIO_SLUGS,
         ),
     ]
 )
