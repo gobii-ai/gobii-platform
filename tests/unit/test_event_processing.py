@@ -90,6 +90,7 @@ from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
+    AgentOwnerCustomInstructions,
     AgentPeerLink,
     MCPServerConfig,
     Organization,
@@ -857,6 +858,96 @@ class PromptContextBuilderTests(TestCase):
             can_configure=False,
             is_active=True,
         )
+
+    def test_org_custom_instructions_append_to_system_prompt(self):
+        org_agent, _, _, _, _ = self._build_org_prompt_agent("custom-instructions-org")
+        AgentOwnerCustomInstructions.objects.create(
+            organization=org_agent.organization,
+            instructions="Always follow the Acme escalation policy.",
+            updated_by=self.user,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(org_agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        self.assertIsNotNone(system_message)
+        self.assertTrue(
+            system_message["content"].endswith(
+                "## Organization Custom Instructions\n\nAlways follow the Acme escalation policy."
+            )
+        )
+
+    def test_org_custom_instructions_count_toward_fitted_tokens(self):
+        org_agent, _, _, _, _ = self._build_org_prompt_agent("custom-instructions-token-count-org")
+        AgentOwnerCustomInstructions.objects.create(
+            organization=org_agent.organization,
+            instructions="Route based on the full organization instruction payload.",
+            updated_by=self.user,
+        )
+
+        with patch('api.agent.core.prompt_context._create_token_estimator', return_value=len), \
+             patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, fitted_token_count, _ = build_prompt_context(org_agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(system_message)
+        self.assertIsNotNone(user_message)
+        self.assertIn("Organization Custom Instructions", system_message["content"])
+        self.assertEqual(
+            fitted_token_count,
+            len(system_message["content"]) + len(user_message["content"]),
+        )
+
+    def test_personal_agent_does_not_receive_org_custom_instructions(self):
+        org = Organization.objects.create(
+            name="Unrelated instructions org",
+            slug="unrelated-instructions-org",
+            plan="free",
+            created_by=self.user,
+        )
+        AgentOwnerCustomInstructions.objects.create(
+            organization=org,
+            instructions="Only org agents should see this.",
+            updated_by=self.user,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        self.assertIsNotNone(system_message)
+        self.assertNotIn("Organization Custom Instructions", system_message["content"])
+        self.assertNotIn("Only org agents should see this.", system_message["content"])
+
+    def test_empty_or_missing_org_custom_instructions_adds_no_heading(self):
+        org_agent, _, _, _, _ = self._build_org_prompt_agent("empty-custom-instructions-org")
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(org_agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        self.assertIsNotNone(system_message)
+        self.assertNotIn("Organization Custom Instructions", system_message["content"])
+
+        AgentOwnerCustomInstructions.objects.create(
+            organization=org_agent.organization,
+            instructions="  ",
+            updated_by=self.user,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(org_agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        self.assertIsNotNone(system_message)
+        self.assertNotIn("Organization Custom Instructions", system_message["content"])
 
     def test_org_manage_role_members_are_marked_config_authorized(self):
         org_agent, _, admin, solutions_partner, member = self._build_org_prompt_agent("config-auth-org")

@@ -43,6 +43,7 @@ from ...models import (
     AgentCommPeerState,
     AgentFileSpaceAccess,
     AgentFsNode,
+    AgentOwnerCustomInstructions,
     AgentPeerLink,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
@@ -1301,6 +1302,25 @@ def _build_owner_identity_prompt(user: Any) -> str:
     )
 
 
+def _get_agent_owner_custom_instructions(agent: PersistentAgent) -> str:
+    if not agent.organization_id:
+        return ""
+    instructions = (
+        AgentOwnerCustomInstructions.objects
+        .filter(organization_id=agent.organization_id)
+        .values_list("instructions", flat=True)
+        .first()
+    )
+    return (instructions or "").strip()
+
+
+def _append_agent_owner_custom_instructions(system_prompt: str, agent: PersistentAgent) -> str:
+    custom_instructions = _get_agent_owner_custom_instructions(agent)
+    if not custom_instructions:
+        return system_prompt
+    return f"{system_prompt}\n\n## Organization Custom Instructions\n\n{custom_instructions}"
+
+
 def _render_prompt_context_once(
     agent: PersistentAgent,
     current_iteration: int = 1,
@@ -1364,6 +1384,7 @@ def _render_prompt_context_once(
         continuation_notice=continuation_notice,
         system_directive_block=system_directive_block,
     )
+    system_prompt = _append_agent_owner_custom_instructions(system_prompt, agent)
 
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
@@ -1742,13 +1763,16 @@ def _render_prompt_context_once(
         if agent.preferred_contact_endpoint.channel == CommsChannel.SMS:
             prompt.section_text("sms_guidelines", _get_sms_prompt_addendum(agent), weight=2, non_shrinkable=True)
     
-    # Render the prompt within the token budget
+    # Render non-system prompt sections within the remaining input budget after
+    # fixed system instructions, including org-level custom instructions.
     token_budget = get_prompt_token_budget(agent)
-    user_content = prompt.render(token_budget)
+    system_tokens = token_estimator(system_prompt)
+    user_token_budget = max(1, token_budget - system_tokens)
+    user_content = prompt.render(user_token_budget)
 
     # Get token counts before and after fitting
-    tokens_before = prompt.get_tokens_before_fitting()
-    tokens_after = prompt.get_tokens_after_fitting()
+    tokens_before = prompt.get_tokens_before_fitting() + system_tokens
+    tokens_after = prompt.get_tokens_after_fitting() + system_tokens
     tokens_saved = tokens_before - tokens_after
 
     # Log token usage for monitoring
@@ -1756,7 +1780,7 @@ def _render_prompt_context_once(
         logger.info(
             f"Prompt rendered for agent {agent.id}: {tokens_before} tokens before fitting, "
             f"{tokens_after} tokens after fitting (saved {tokens_saved} tokens, "
-            f"budget was {token_budget} tokens)"
+            f"budget was {token_budget} tokens, system prompt used {system_tokens} tokens)"
         )
 
     archive_id = None
@@ -1782,6 +1806,8 @@ def _render_prompt_context_once(
 
     if record_span:
         span.set_attribute("prompt.token_budget", token_budget)
+        span.set_attribute("prompt.system_tokens", system_tokens)
+        span.set_attribute("prompt.user_token_budget", user_token_budget)
         span.set_attribute("prompt.tokens_before_fitting", tokens_before)
         span.set_attribute("prompt.tokens_after_fitting", tokens_after)
         span.set_attribute("prompt.tokens_saved", tokens_saved)

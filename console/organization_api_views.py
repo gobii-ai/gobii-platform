@@ -3,6 +3,7 @@ import smtplib
 import uuid
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import send_mail
@@ -17,7 +18,8 @@ from anymail.exceptions import AnymailError
 from waffle import flag_is_active
 
 from agents.services import PretrainedWorkerTemplateService
-from api.models import Organization, OrganizationInvite, OrganizationMembership, PersistentAgent, PersistentAgentTemplate
+from api.models import AgentOwnerCustomInstructions, Organization, OrganizationInvite, OrganizationMembership, PersistentAgent, PersistentAgentTemplate
+from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from console.api_helpers import _parse_json_body as _parse_json_body_or_raise
 from console.context_helpers import build_console_context
@@ -37,6 +39,7 @@ OWNER_EQUIVALENT_ROLES = (
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
 )
+ORG_CUSTOM_INSTRUCTIONS_FIELD = "customInstructions"
 
 
 def _json_error(message: str, *, status: int = 400):
@@ -126,17 +129,26 @@ def _serialize_invite(invite: OrganizationInvite) -> dict:
 def _serialize_organization(org: Organization, membership: OrganizationMembership) -> dict:
     role_choices = _resolve_allowed_role_choices_for_role(membership.role)
     billing = getattr(org, "billing", None)
+    custom_instructions = (
+        AgentOwnerCustomInstructions.objects
+        .filter(organization=org)
+        .values_list("instructions", flat=True)
+        .first()
+    ) or ""
     return {
         "organization": {
             "id": str(org.id),
             "name": org.name,
             "slug": org.slug,
             "plan": org.plan,
+            "customInstructions": custom_instructions,
+            "customInstructionsMaxChars": settings.ORGANIZATION_CUSTOM_INSTRUCTIONS_MAX_CHARS,
         },
         "viewer": {
             "role": membership.role,
             "roleLabel": membership.get_role_display(),
             "canEditOrganization": membership.role in OWNER_EQUIVALENT_ROLES,
+            "canEditCustomInstructions": membership.role in ORG_AGENT_CONFIG_AUTHORITY_ROLES,
             "canManageMembers": membership.role in MEMBER_MANAGE_ROLES,
             "canManageBilling": membership.role in BILLING_MANAGE_ROLES,
         },
@@ -253,6 +265,34 @@ def _lock_organization(org: Organization) -> Organization:
     return Organization.objects.select_for_update().get(pk=org.pk)
 
 
+def _normalize_custom_instructions_payload(payload: dict) -> tuple[str | None, JsonResponse | None]:
+    raw_instructions = payload.get(ORG_CUSTOM_INSTRUCTIONS_FIELD)
+    if not isinstance(raw_instructions, str):
+        return None, _json_field_errors({ORG_CUSTOM_INSTRUCTIONS_FIELD: ["Custom instructions must be text."]})
+
+    normalized = raw_instructions.replace("\r\n", "\n").replace("\r", "\n").strip()
+    max_chars = settings.ORGANIZATION_CUSTOM_INSTRUCTIONS_MAX_CHARS
+    if len(normalized) > max_chars:
+        return None, _json_field_errors(
+            {ORG_CUSTOM_INSTRUCTIONS_FIELD: [f"Custom instructions must be {max_chars} characters or fewer."]}
+        )
+    return normalized, None
+
+
+def _save_custom_instructions(org: Organization, *, instructions: str, updated_by) -> None:
+    if instructions:
+        AgentOwnerCustomInstructions.objects.update_or_create(
+            organization=org,
+            defaults={
+                "instructions": instructions,
+                "updated_by": updated_by,
+            },
+        )
+        return
+
+    AgentOwnerCustomInstructions.objects.filter(organization=org).delete()
+
+
 def _send_invitation_email(request, org: Organization, invite: OrganizationInvite) -> None:
     accept_url = request.build_absolute_uri(
         f"/app/organizations/invites/{invite.token}/accept"
@@ -300,36 +340,60 @@ class CurrentOrganizationAPIView(LoginRequiredMixin, View):
             return _json_error(str(exc), status=404)
         if error:
             return error
-        if membership.role not in OWNER_EQUIVALENT_ROLES:
-            return _json_error("You do not have permission to edit this organization.", status=403)
 
         payload, error = _parse_json_body(request)
         if error:
             return error
-        form = OrganizationForm(data={"name": payload.get("name", "")}, instance=org)
-        if not form.is_valid():
-            return _json_field_errors(form.errors)
 
+        name_supplied = "name" in payload
+        custom_instructions_supplied = ORG_CUSTOM_INSTRUCTIONS_FIELD in payload
+        if not name_supplied and not custom_instructions_supplied:
+            return _json_error("No organization updates were provided.", status=400)
+
+        if name_supplied and membership.role not in OWNER_EQUIVALENT_ROLES:
+            return _json_error("You do not have permission to edit this organization.", status=403)
+        if custom_instructions_supplied and membership.role not in ORG_AGENT_CONFIG_AUTHORITY_ROLES:
+            return _json_error("You do not have permission to edit custom instructions.", status=403)
+
+        normalized_instructions = None
+        if custom_instructions_supplied:
+            normalized_instructions, error = _normalize_custom_instructions_payload(payload)
+            if error:
+                return error
+
+        org = _lock_organization(org)
         previous_name = org.name
-        org = form.save()
-        request.session["context_type"] = "organization"
-        request.session["context_id"] = str(org.id)
-        request.session["context_name"] = org.name
+        if name_supplied:
+            form = OrganizationForm(data={"name": payload.get("name", "")}, instance=org)
+            if not form.is_valid():
+                return _json_field_errors(form.errors)
+            org = form.save()
+            request.session["context_type"] = "organization"
+            request.session["context_id"] = str(org.id)
+            request.session["context_name"] = org.name
 
-        props = Analytics.with_org_properties(
-            {
-                "actor_id": str(request.user.id),
-                "old_name": previous_name,
-                "new_name": org.name,
-            },
-            organization=org,
-        )
-        transaction.on_commit(lambda: Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.ORGANIZATION_UPDATED,
-            source=AnalyticsSource.WEB,
-            properties=props.copy(),
-        ))
+        if custom_instructions_supplied and normalized_instructions is not None:
+            _save_custom_instructions(
+                org,
+                instructions=normalized_instructions,
+                updated_by=request.user,
+            )
+
+        if name_supplied and previous_name != org.name:
+            props = Analytics.with_org_properties(
+                {
+                    "actor_id": str(request.user.id),
+                    "old_name": previous_name,
+                    "new_name": org.name,
+                },
+                organization=org,
+            )
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_UPDATED,
+                source=AnalyticsSource.WEB,
+                properties=props.copy(),
+            ))
         return JsonResponse(_serialize_organization(org, membership))
 
 
