@@ -419,7 +419,7 @@ export function OrganizationScreen() {
     setCustomInstructionsErrors([])
     setCustomInstructionsMessage(null)
     try {
-      const nextData = await updateCurrentOrganizationCustomInstructions(customInstructionsDraft)
+      const nextData = await updateCurrentOrganizationCustomInstructions(normalizedInstructions)
       updateCachedData(nextData)
       setCustomInstructionsMessage('Custom instructions updated.')
     } catch (err) {
