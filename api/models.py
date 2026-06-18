@@ -13699,12 +13699,12 @@ class AgentOwnerCustomInstructions(models.Model):
                 ),
                 name="agent_owner_ci_exactly_one_owner",
             ),
-            UniqueConstraint(
+            models.UniqueConstraint(
                 fields=["user"],
                 condition=models.Q(user__isnull=False),
                 name="unique_agent_owner_ci_user",
             ),
-            UniqueConstraint(
+            models.UniqueConstraint(
                 fields=["organization"],
                 condition=models.Q(organization__isnull=False),
                 name="unique_agent_owner_ci_org",
