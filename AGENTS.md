@@ -20,6 +20,19 @@ Writing evals:
 - Do not over-optimize for a specific use case.
 - In general, try to avoid gearing prompts towards a highly specific use case.
 
+Native integration checklist:
+- Research the provider API first and use that as the reference for the system skill instructions, cookbook examples, scopes, endpoint hints, pagination, write risks, and common error cases.
+- Add the integration secret/OAuth path: settings, provider registration, credentials storage, scope/capability checks, refresh/reconnect behavior, and any Pipedream overlap disabling.
+- Add the system skill: search aliases, use cases, tool names, setup guidance, native-over-legacy guardrails, and concise API usage guidance.
+- Add `http_request` native auth and provider-specific error guidance when the integration uses OAuth-over-HTTP.
+- Add UI visibility in `/app/integrations`, the MCP/integrations page, apps modal, homepage integration selection if relevant, icons, and any connect/revoke/file-picker affordances.
+- Add per-agent configuration affordances when needed, like Discord channel/server subscriptions, bot install/repair links, and agent-specific setup state.
+- When setup completes, trigger/resume agents that have the integration's system skill enabled so blocked work can continue without the user sending another message.
+- Add the agent chat working/insights panel tab when relevant, including its panel component, availability gating, and icon/label.
+- Make live chat tool metadata support it: roster `enabled_system_skills`, `search_tools` `system_skills.enabled` / `already_enabled`, and frontend parsing so the tab appears before a roster refresh.
+- Add evals in the real harness for core read/use, write if applicable, missing connection/setup guidance, forbidden legacy path behavior, and at least one provider-specific regression.
+- Add focused tests for secrets/OAuth, connection/revoke, auth injection or dedicated tools, permissions/scopes, disconnect cleanup, UI metadata, and eval registration. Tag tests and register the tag in `.github/workflows/ci.yml`.
+
 Python:
 - Do NOT do annotations imports like `from __future__ import annotations`
 
