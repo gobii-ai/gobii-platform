@@ -879,6 +879,29 @@ class PromptContextBuilderTests(TestCase):
             )
         )
 
+    def test_org_custom_instructions_count_toward_fitted_tokens(self):
+        org_agent, _, _, _, _ = self._build_org_prompt_agent("custom-instructions-token-count-org")
+        AgentOwnerCustomInstructions.objects.create(
+            organization=org_agent.organization,
+            instructions="Route based on the full organization instruction payload.",
+            updated_by=self.user,
+        )
+
+        with patch('api.agent.core.prompt_context._create_token_estimator', return_value=len), \
+             patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, fitted_token_count, _ = build_prompt_context(org_agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(system_message)
+        self.assertIsNotNone(user_message)
+        self.assertIn("Organization Custom Instructions", system_message["content"])
+        self.assertEqual(
+            fitted_token_count,
+            len(system_message["content"]) + len(user_message["content"]),
+        )
+
     def test_personal_agent_does_not_receive_org_custom_instructions(self):
         org = Organization.objects.create(
             name="Unrelated instructions org",
