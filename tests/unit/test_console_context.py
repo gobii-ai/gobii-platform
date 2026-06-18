@@ -184,7 +184,7 @@ class CurrentOrganizationAPITests(TestCase):
 
         self.assertEqual(resp.status_code, 404)
 
-    @override_settings(ORGANIZATION_CUSTOM_INSTRUCTIONS_MAX_CHARS=123)
+    @override_settings(AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS=123)
     def test_current_organization_api_includes_custom_instructions_settings(self):
         AgentOwnerCustomInstructions.objects.create(
             organization=self.org,
@@ -254,7 +254,7 @@ class CurrentOrganizationAPITests(TestCase):
                 self.assertEqual(resp.status_code, 403)
                 self.assertFalse(AgentOwnerCustomInstructions.objects.filter(organization=self.org).exists())
 
-    @override_settings(ORGANIZATION_CUSTOM_INSTRUCTIONS_MAX_CHARS=5)
+    @override_settings(AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS=5)
     def test_custom_instructions_rejects_over_limit_text(self):
         self._login_in_org_context(self.admin)
 

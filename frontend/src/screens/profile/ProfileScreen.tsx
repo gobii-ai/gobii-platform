@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2,
   Copy,
+  FileText,
   Mail,
   Phone,
   RefreshCcw,
@@ -22,14 +23,14 @@ import {
 import type { PhoneState } from '../../api/agentSetup'
 import { HttpError } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
-import { updateUserProfile } from '../../api/userProfile'
+import { updateUserCustomInstructions, updateUserProfile } from '../../api/userProfile'
 import type { UserProfileFormState, UserProfilePayload } from '../../api/userProfile'
 
 type ProfileScreenProps = {
   initialData: UserProfilePayload
 }
 
-type ProfileFieldErrors = Partial<Record<keyof UserProfileFormState | 'profile' | 'nonFieldErrors', string[]>>
+type ProfileFieldErrors = Partial<Record<keyof UserProfileFormState | 'profile' | 'customInstructions' | 'nonFieldErrors', string[]>>
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null
@@ -304,6 +305,10 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [customInstructionsDraft, setCustomInstructionsDraft] = useState(initialData.customInstructions)
+  const [customInstructionsErrors, setCustomInstructionsErrors] = useState<string[]>([])
+  const [customInstructionsMessage, setCustomInstructionsMessage] = useState<string | null>(null)
+  const [savingCustomInstructions, setSavingCustomInstructions] = useState(false)
   const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const referralInputRef = useRef<HTMLInputElement | null>(null)
   const isDirty = useMemo(() => (
@@ -311,10 +316,19 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
     || draft.lastName !== data.profile.lastName
     || draft.timezone !== data.profile.timezone
   ), [data.profile, draft])
+  const normalizedCustomInstructionsDraft = useMemo(
+    () => customInstructionsDraft.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim(),
+    [customInstructionsDraft],
+  )
+  const customInstructionsChanged = normalizedCustomInstructionsDraft !== data.customInstructions
+  const customInstructionsOverLimit = normalizedCustomInstructionsDraft.length > data.customInstructionsMaxChars
 
   useEffect(() => {
     setData(initialData)
     setDraft(initialData.profile)
+    setCustomInstructionsDraft(initialData.customInstructions)
+    setCustomInstructionsErrors([])
+    setCustomInstructionsMessage(null)
     setErrors({})
     setSaveError(null)
     setSaveMessage(null)
@@ -345,6 +359,31 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
       setSaving(false)
     }
   }, [draft])
+
+  const handleCustomInstructionsSave = useCallback(async () => {
+    if (normalizedCustomInstructionsDraft.length > data.customInstructionsMaxChars) {
+      setCustomInstructionsErrors([
+        `Custom instructions must be ${data.customInstructionsMaxChars} characters or fewer.`,
+      ])
+      return
+    }
+
+    setSavingCustomInstructions(true)
+    setCustomInstructionsErrors([])
+    setCustomInstructionsMessage(null)
+    try {
+      const nextData = await updateUserCustomInstructions(normalizedCustomInstructionsDraft)
+      setData(nextData)
+      setCustomInstructionsDraft(nextData.customInstructions)
+      setCustomInstructionsMessage('Custom instructions saved.')
+    } catch (err) {
+      const fieldErrors = extractProfileErrors(err)
+      const customError = firstError(fieldErrors, 'customInstructions')
+      setCustomInstructionsErrors([customError || safeErrorMessage(err)])
+    } finally {
+      setSavingCustomInstructions(false)
+    }
+  }, [data.customInstructionsMaxChars, normalizedCustomInstructionsDraft])
 
   const handleCopyReferral = useCallback(async () => {
     setCopyMessage(null)
@@ -426,6 +465,61 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
           {saveMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{saveMessage}</p> : null}
           {saveError ? <p className="profile-screen__feedback profile-screen__feedback--error">{saveError}</p> : null}
         </div>
+      </section>
+
+      <section className="profile-screen__section">
+        <div className="profile-screen__section-header">
+          <div className="profile-screen__section-icon" aria-hidden="true">
+            <FileText className="h-4 w-4" />
+          </div>
+          <div>
+            <h2>Custom Instructions</h2>
+            <p>{normalizedCustomInstructionsDraft.length}/{data.customInstructionsMaxChars} characters</p>
+          </div>
+        </div>
+        <form
+          className="profile-screen__custom-instructions-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void handleCustomInstructionsSave()
+          }}
+        >
+          <div className="profile-screen__form-grid">
+            <label className="profile-screen__field profile-screen__field--wide">
+              <span>Instructions</span>
+              <textarea
+                value={customInstructionsDraft}
+                onChange={(event) => {
+                  setCustomInstructionsDraft(event.target.value)
+                  if (customInstructionsErrors.length) {
+                    setCustomInstructionsErrors([])
+                  }
+                  if (customInstructionsMessage) {
+                    setCustomInstructionsMessage(null)
+                  }
+                }}
+                className="profile-screen__custom-instructions-textarea"
+                placeholder="Follow my tone, preferences, and operating style."
+              />
+              {customInstructionsErrors.map((message) => (
+                <em key={message}>{message}</em>
+              ))}
+            </label>
+          </div>
+          <div className="profile-screen__actions">
+            <button
+              type="submit"
+              className="profile-screen__button profile-screen__button--primary"
+              disabled={savingCustomInstructions || !customInstructionsChanged || customInstructionsOverLimit}
+            >
+              <Save className="h-4 w-4" aria-hidden="true" />
+              {savingCustomInstructions ? 'Saving...' : 'Save Instructions'}
+            </button>
+            {customInstructionsMessage ? (
+              <p className="profile-screen__feedback profile-screen__feedback--success">{customInstructionsMessage}</p>
+            ) : null}
+          </div>
+        </form>
       </section>
 
       <section className="profile-screen__section">

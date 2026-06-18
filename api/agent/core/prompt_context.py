@@ -38,12 +38,15 @@ from api.services.daily_credit_settings import get_daily_credit_settings_for_own
 from api.services.prompt_settings import get_prompt_settings
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time
+from api.services.agent_owner_custom_instructions import (
+    get_custom_instructions_for_organization_id,
+    get_custom_instructions_for_user_id,
+)
 
 from ...models import (
     AgentCommPeerState,
     AgentFileSpaceAccess,
     AgentFsNode,
-    AgentOwnerCustomInstructions,
     AgentPeerLink,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
@@ -1302,23 +1305,26 @@ def _build_owner_identity_prompt(user: Any) -> str:
     )
 
 
-def _get_agent_owner_custom_instructions(agent: PersistentAgent) -> str:
-    if not agent.organization_id:
-        return ""
-    instructions = (
-        AgentOwnerCustomInstructions.objects
-        .filter(organization_id=agent.organization_id)
-        .values_list("instructions", flat=True)
-        .first()
-    )
-    return (instructions or "").strip()
+def _get_agent_owner_custom_instructions(agent: PersistentAgent) -> tuple[str, str]:
+    if agent.organization_id:
+        instructions = get_custom_instructions_for_organization_id(agent.organization_id).strip()
+        if instructions:
+            return "Organization Custom Instructions", instructions
+        return "", ""
+
+    if agent.user_id:
+        instructions = get_custom_instructions_for_user_id(agent.user_id).strip()
+        if instructions:
+            return "Personal Custom Instructions", instructions
+
+    return "", ""
 
 
 def _append_agent_owner_custom_instructions(system_prompt: str, agent: PersistentAgent) -> str:
-    custom_instructions = _get_agent_owner_custom_instructions(agent)
+    heading, custom_instructions = _get_agent_owner_custom_instructions(agent)
     if not custom_instructions:
         return system_prompt
-    return f"{system_prompt}\n\n## Organization Custom Instructions\n\n{custom_instructions}"
+    return f"{system_prompt}\n\n## {heading}\n\n{custom_instructions}"
 
 
 def _render_prompt_context_once(

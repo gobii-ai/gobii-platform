@@ -20,13 +20,15 @@ export type EmailVerificationState = {
 export type UserProfilePayload = {
   profile: UserProfileFormState
   timezoneOptions: TimezoneOption[]
+  customInstructions: string
+  customInstructionsMaxChars: number
   referralLink: string
   emailVerification: EmailVerificationState
   phone: PhoneState | null
 }
 
 export type UserProfileErrorPayload = {
-  errors?: Partial<Record<keyof UserProfileFormState | 'profile' | 'nonFieldErrors', string[]>>
+  errors?: Partial<Record<keyof UserProfileFormState | 'profile' | 'customInstructions' | 'nonFieldErrors', string[]>>
 }
 
 export function fetchUserProfile(signal?: AbortSignal): Promise<UserProfilePayload> {
@@ -37,6 +39,14 @@ export function updateUserProfile(profile: UserProfileFormState): Promise<UserPr
   return jsonRequest<UserProfilePayload>('/console/api/user/profile/', {
     method: 'PATCH',
     json: { profile },
+    includeCsrf: true,
+  })
+}
+
+export function updateUserCustomInstructions(customInstructions: string): Promise<UserProfilePayload> {
+  return jsonRequest<UserProfilePayload>('/console/api/user/profile/', {
+    method: 'PATCH',
+    json: { customInstructions },
     includeCsrf: true,
   })
 }

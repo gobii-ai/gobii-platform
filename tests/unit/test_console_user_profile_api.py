@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
-from api.models import UserPhoneNumber, UserPreference
+from api.models import AgentOwnerCustomInstructions, UserPhoneNumber, UserPreference
 
 
 @tag("batch_console_api")
@@ -73,6 +73,21 @@ class ConsoleUserProfileApiTests(TestCase):
         self.assertTrue(payload["phone"]["isVerified"])
         self.assertIsNotNone(payload["phone"]["verifiedAt"])
 
+    @override_settings(AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS=123)
+    def test_get_returns_custom_instructions_settings(self):
+        AgentOwnerCustomInstructions.objects.create(
+            user=self.user,
+            instructions="Use my concise operating style.",
+            updated_by=self.user,
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["customInstructions"], "Use my concise operating style.")
+        self.assertEqual(payload["customInstructionsMaxChars"], 123)
+
     def test_patch_updates_profile_and_timezone(self):
         response = self.client.patch(
             self.url,
@@ -98,6 +113,48 @@ class ConsoleUserProfileApiTests(TestCase):
             "Europe/London",
         )
         self.assertEqual(response.json()["profile"]["timezone"], "Europe/London")
+
+    def test_patch_updates_custom_instructions(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"customInstructions": "  Prefer short weekly summaries.\r\nInclude blockers.  "}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        instructions = AgentOwnerCustomInstructions.objects.get(user=self.user)
+        self.assertEqual(instructions.instructions, "Prefer short weekly summaries.\nInclude blockers.")
+        self.assertEqual(instructions.updated_by, self.user)
+        self.assertEqual(response.json()["customInstructions"], "Prefer short weekly summaries.\nInclude blockers.")
+
+    @override_settings(AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS=5)
+    def test_patch_rejects_over_limit_custom_instructions(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"customInstructions": "123456"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("customInstructions", response.json()["errors"])
+        self.assertFalse(AgentOwnerCustomInstructions.objects.filter(user=self.user).exists())
+
+    def test_patch_empty_custom_instructions_clears_existing_row(self):
+        AgentOwnerCustomInstructions.objects.create(
+            user=self.user,
+            instructions="Existing personal instructions",
+            updated_by=self.user,
+        )
+
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"customInstructions": " \r\n "}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(AgentOwnerCustomInstructions.objects.filter(user=self.user).exists())
+        self.assertEqual(response.json()["customInstructions"], "")
 
     def test_patch_rejects_invalid_timezone(self):
         response = self.client.patch(

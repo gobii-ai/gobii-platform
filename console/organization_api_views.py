@@ -18,7 +18,14 @@ from anymail.exceptions import AnymailError
 from waffle import flag_is_active
 
 from agents.services import PretrainedWorkerTemplateService
-from api.models import AgentOwnerCustomInstructions, Organization, OrganizationInvite, OrganizationMembership, PersistentAgent, PersistentAgentTemplate
+from api.models import Organization, OrganizationInvite, OrganizationMembership, PersistentAgent, PersistentAgentTemplate
+from api.services.agent_owner_custom_instructions import (
+    CUSTOM_INSTRUCTIONS_FIELD,
+    CustomInstructionsValidationError,
+    get_custom_instructions_for_organization_id,
+    normalize_custom_instructions,
+    save_custom_instructions_for_organization_id,
+)
 from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from console.api_helpers import _parse_json_body as _parse_json_body_or_raise
@@ -39,7 +46,7 @@ OWNER_EQUIVALENT_ROLES = (
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
 )
-ORG_CUSTOM_INSTRUCTIONS_FIELD = "customInstructions"
+ORG_CUSTOM_INSTRUCTIONS_FIELD = CUSTOM_INSTRUCTIONS_FIELD
 
 
 def _json_error(message: str, *, status: int = 400):
@@ -129,12 +136,7 @@ def _serialize_invite(invite: OrganizationInvite) -> dict:
 def _serialize_organization(org: Organization, membership: OrganizationMembership) -> dict:
     role_choices = _resolve_allowed_role_choices_for_role(membership.role)
     billing = getattr(org, "billing", None)
-    custom_instructions = (
-        AgentOwnerCustomInstructions.objects
-        .filter(organization=org)
-        .values_list("instructions", flat=True)
-        .first()
-    ) or ""
+    custom_instructions = get_custom_instructions_for_organization_id(org.id)
     return {
         "organization": {
             "id": str(org.id),
@@ -142,7 +144,7 @@ def _serialize_organization(org: Organization, membership: OrganizationMembershi
             "slug": org.slug,
             "plan": org.plan,
             "customInstructions": custom_instructions,
-            "customInstructionsMaxChars": settings.ORGANIZATION_CUSTOM_INSTRUCTIONS_MAX_CHARS,
+            "customInstructionsMaxChars": settings.AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS,
         },
         "viewer": {
             "role": membership.role,
@@ -266,31 +268,10 @@ def _lock_organization(org: Organization) -> Organization:
 
 
 def _normalize_custom_instructions_payload(payload: dict) -> tuple[str | None, JsonResponse | None]:
-    raw_instructions = payload.get(ORG_CUSTOM_INSTRUCTIONS_FIELD)
-    if not isinstance(raw_instructions, str):
-        return None, _json_field_errors({ORG_CUSTOM_INSTRUCTIONS_FIELD: ["Custom instructions must be text."]})
-
-    normalized = raw_instructions.replace("\r\n", "\n").replace("\r", "\n").strip()
-    max_chars = settings.ORGANIZATION_CUSTOM_INSTRUCTIONS_MAX_CHARS
-    if len(normalized) > max_chars:
-        return None, _json_field_errors(
-            {ORG_CUSTOM_INSTRUCTIONS_FIELD: [f"Custom instructions must be {max_chars} characters or fewer."]}
-        )
-    return normalized, None
-
-
-def _save_custom_instructions(org: Organization, *, instructions: str, updated_by) -> None:
-    if instructions:
-        AgentOwnerCustomInstructions.objects.update_or_create(
-            organization=org,
-            defaults={
-                "instructions": instructions,
-                "updated_by": updated_by,
-            },
-        )
-        return
-
-    AgentOwnerCustomInstructions.objects.filter(organization=org).delete()
+    try:
+        return normalize_custom_instructions(payload.get(ORG_CUSTOM_INSTRUCTIONS_FIELD)), None
+    except CustomInstructionsValidationError as exc:
+        return None, _json_field_errors({ORG_CUSTOM_INSTRUCTIONS_FIELD: [str(exc)]})
 
 
 def _send_invitation_email(request, org: Organization, invite: OrganizationInvite) -> None:
@@ -373,8 +354,8 @@ class CurrentOrganizationAPIView(LoginRequiredMixin, View):
             request.session["context_name"] = org.name
 
         if custom_instructions_supplied and normalized_instructions is not None:
-            _save_custom_instructions(
-                org,
+            save_custom_instructions_for_organization_id(
+                org.id,
                 instructions=normalized_instructions,
                 updated_by=request.user,
             )

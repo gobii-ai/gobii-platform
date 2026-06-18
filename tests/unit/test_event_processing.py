@@ -902,6 +902,42 @@ class PromptContextBuilderTests(TestCase):
             len(system_message["content"]) + len(user_message["content"]),
         )
 
+    def test_personal_custom_instructions_append_to_system_prompt(self):
+        AgentOwnerCustomInstructions.objects.create(
+            user=self.user,
+            instructions="Always answer with my preferred concise style.",
+            updated_by=self.user,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        self.assertIsNotNone(system_message)
+        self.assertTrue(
+            system_message["content"].endswith(
+                "## Personal Custom Instructions\n\nAlways answer with my preferred concise style."
+            )
+        )
+
+    def test_org_agent_does_not_receive_creator_personal_custom_instructions(self):
+        org_agent, _, _, _, _ = self._build_org_prompt_agent("personal-instructions-skipped-for-org")
+        AgentOwnerCustomInstructions.objects.create(
+            user=org_agent.user,
+            instructions="Only personal agents should see this.",
+            updated_by=org_agent.user,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(org_agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        self.assertIsNotNone(system_message)
+        self.assertNotIn("Personal Custom Instructions", system_message["content"])
+        self.assertNotIn("Only personal agents should see this.", system_message["content"])
+
     def test_personal_agent_does_not_receive_org_custom_instructions(self):
         org = Organization.objects.create(
             name="Unrelated instructions org",
