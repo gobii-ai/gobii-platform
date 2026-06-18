@@ -31,6 +31,24 @@ _tracer_provider: Optional[TracerProvider] = None
 # Local tests disable tracing; in that case we suppress noisy INFO logs.
 _TRACING_ACTIVE: bool = False
 
+
+def _optional_int_env(*names: str) -> Optional[int]:
+    """Return the first set integer environment variable from names."""
+    for name in names:
+        raw_value = os.getenv(name)
+        if raw_value in (None, ""):
+            continue
+        try:
+            return int(raw_value)
+        except ValueError:
+            logger.warning(
+                "OpenTelemetry: ignoring invalid integer env var %s=%r",
+                name,
+                raw_value,
+            )
+    return None
+
+
 class DaemonOTLPSpanExporter(OTLPSpanExporter):
     """
     Custom OTLPSpanExporter that ensures the BatchSpanProcessor's worker thread
@@ -178,7 +196,40 @@ def init_tracing(service_name: GobiiService) -> None:
             endpoint=settings.OTEL_EXPORTER_OTLP_LOG_ENDPOINT,  # Adjust endpoint as needed
         )
 
-        logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
+        log_schedule_delay_ms = _optional_int_env(
+            "OTEL_BLRP_SCHEDULE_DELAY",
+            "OTEL_BSP_SCHEDULE_DELAY",
+        )
+        log_export_timeout_ms = _optional_int_env(
+            "OTEL_BLRP_EXPORT_TIMEOUT",
+            "OTEL_BSP_EXPORT_TIMEOUT",
+        )
+        log_max_queue_size = _optional_int_env(
+            "OTEL_BLRP_MAX_QUEUE_SIZE",
+            "OTEL_BSP_MAX_QUEUE_SIZE",
+        )
+        log_max_batch_size = _optional_int_env(
+            "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE",
+            "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+        )
+
+        logger_provider.add_log_record_processor(
+            BatchLogRecordProcessor(
+                exporter,
+                schedule_delay_millis=log_schedule_delay_ms,
+                export_timeout_millis=log_export_timeout_ms,
+                max_queue_size=log_max_queue_size,
+                max_export_batch_size=log_max_batch_size,
+            )
+        )
+        logger.debug(
+            "OpenTelemetry: BatchLogRecordProcessor configured with schedule_delay=%s, "
+            "export_timeout=%s, max_queue_size=%s, max_batch_size=%s",
+            log_schedule_delay_ms,
+            log_export_timeout_ms,
+            log_max_queue_size,
+            log_max_batch_size,
+        )
 
         # Create and attach an OpenTelemetry handler to the Python root logger
         handler = LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
