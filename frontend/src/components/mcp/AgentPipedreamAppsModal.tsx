@@ -181,7 +181,11 @@ export function AgentPipedreamAppsModal({
       void queryClient.setQueryData(telegramQueryKey, payload.app)
       const url = payload.userLinked ? payload.createBotUrl : payload.managerLinkUrl
       if (url) {
-        openTelegramHandoff(url)
+        if (payload.userLinked) {
+          window.open(url, '_blank', 'noopener,noreferrer')
+        } else {
+          openTelegramHandoff(url)
+        }
       }
       setTelegramProvisioningPending(payload.userLinked)
       setStatusMessage({
