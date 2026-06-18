@@ -64,7 +64,7 @@ from .models import (
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSkill, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     GlobalAgentSkill, GlobalAgentSkillCustomTool,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
-    AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, OrganizationMembership, OrganizationInvite, CommsAllowlistEntry,
+    AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, AgentOwnerCustomInstructions, OrganizationMembership, OrganizationInvite, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ReferralIncentiveConfig, ReferralGrant, Plan, PlanVersion, PlanVersionPrice,
     EntitlementDefinition, PlanVersionEntitlement, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
     StripeConfig, ToolConfig, ToolRateLimit, AddonEntitlement,
@@ -1726,6 +1726,18 @@ class OrganizationAdmin(admin.ModelAdmin):
     list_display = ("name", "slug", "is_active", "created_at")
     list_filter = ("is_active", "plan")
     inlines = (OrganizationMembershipInline, OrganizationInviteInline)
+
+
+@admin.register(AgentOwnerCustomInstructions)
+class AgentOwnerCustomInstructionsAdmin(admin.ModelAdmin):
+    autocomplete_fields = ("user", "organization", "updated_by")
+    list_display = ("owner_label", "updated_by", "updated_at")
+    search_fields = ("user__email", "user__username", "organization__name", "organization__slug", "instructions")
+    readonly_fields = ("created_at", "updated_at")
+
+    @admin.display(description="Owner")
+    def owner_label(self, obj):
+        return obj.organization or obj.user
 
 
 @admin.register(OrganizationMembership)

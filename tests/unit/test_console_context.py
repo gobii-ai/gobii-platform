@@ -17,6 +17,7 @@ from agents.services import PretrainedWorkerTemplateService
 from api.models import (
     Organization,
     OrganizationMembership,
+    AgentOwnerCustomInstructions,
     AgentCollaborator,
     BrowserUseAgent,
     PersistentAgent,
@@ -182,6 +183,108 @@ class CurrentOrganizationAPITests(TestCase):
         resp = self.client.get(reverse("console-current-organization"))
 
         self.assertEqual(resp.status_code, 404)
+
+    @override_settings(ORGANIZATION_CUSTOM_INSTRUCTIONS_MAX_CHARS=123)
+    def test_current_organization_api_includes_custom_instructions_settings(self):
+        AgentOwnerCustomInstructions.objects.create(
+            organization=self.org,
+            instructions="Use Acme's support voice.",
+            updated_by=self.owner,
+        )
+        self._login_in_org_context(self.owner)
+
+        resp = self.client.get(reverse("console-current-organization"))
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["organization"]["customInstructions"], "Use Acme's support voice.")
+        self.assertEqual(payload["organization"]["customInstructionsMaxChars"], 123)
+        self.assertTrue(payload["viewer"]["canEditCustomInstructions"])
+
+    def test_config_authority_roles_can_update_custom_instructions(self):
+        solutions_partner = User.objects.create_user(
+            username="org-solutions",
+            email="solutions@example.com",
+            password="pw",
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=solutions_partner,
+            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        for user, label in (
+            (self.owner, "owner"),
+            (self.admin, "admin"),
+            (solutions_partner, "solutions"),
+        ):
+            with self.subTest(role=label):
+                self._login_in_org_context(user)
+                resp = self.client.patch(
+                    reverse("console-current-organization"),
+                    data=json.dumps({"customInstructions": f"  {label} line\r\nSecond line  "}),
+                    content_type="application/json",
+                )
+
+                self.assertEqual(resp.status_code, 200)
+                instructions = AgentOwnerCustomInstructions.objects.get(organization=self.org)
+                self.assertEqual(instructions.instructions, f"{label} line\nSecond line")
+                self.assertEqual(instructions.updated_by, user)
+                self.assertEqual(resp.json()["organization"]["customInstructions"], f"{label} line\nSecond line")
+
+    def test_member_and_viewer_cannot_update_custom_instructions(self):
+        viewer = User.objects.create_user(username="org-viewer", email="viewer@example.com", password="pw")
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=viewer,
+            role=OrganizationMembership.OrgRole.VIEWER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        for user, label in ((self.member, "member"), (viewer, "viewer")):
+            with self.subTest(role=label):
+                self._login_in_org_context(user)
+                resp = self.client.patch(
+                    reverse("console-current-organization"),
+                    data=json.dumps({"customInstructions": "Blocked"}),
+                    content_type="application/json",
+                )
+
+                self.assertEqual(resp.status_code, 403)
+                self.assertFalse(AgentOwnerCustomInstructions.objects.filter(organization=self.org).exists())
+
+    @override_settings(ORGANIZATION_CUSTOM_INSTRUCTIONS_MAX_CHARS=5)
+    def test_custom_instructions_rejects_over_limit_text(self):
+        self._login_in_org_context(self.admin)
+
+        resp = self.client.patch(
+            reverse("console-current-organization"),
+            data=json.dumps({"customInstructions": "123456"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("customInstructions", resp.json()["errors"])
+        self.assertFalse(AgentOwnerCustomInstructions.objects.filter(organization=self.org).exists())
+
+    def test_empty_custom_instructions_clears_existing_row(self):
+        AgentOwnerCustomInstructions.objects.create(
+            organization=self.org,
+            instructions="Existing instructions",
+            updated_by=self.owner,
+        )
+        self._login_in_org_context(self.admin)
+
+        resp = self.client.patch(
+            reverse("console-current-organization"),
+            data=json.dumps({"customInstructions": " \r\n "}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(AgentOwnerCustomInstructions.objects.filter(organization=self.org).exists())
+        self.assertEqual(resp.json()["organization"]["customInstructions"], "")
 
     def test_current_organization_templates_api_lists_templates_for_active_members(self):
         template = self._create_org_template()

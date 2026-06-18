@@ -66,11 +66,14 @@ export type CurrentOrganizationPayload = {
     name: string
     slug: string
     plan: string
+    customInstructions: string
+    customInstructionsMaxChars: number
   }
   viewer: {
     role: string
     roleLabel: string
     canEditOrganization: boolean
+    canEditCustomInstructions: boolean
     canManageMembers: boolean
     canManageBilling: boolean
   }
@@ -110,6 +113,14 @@ export function updateCurrentOrganizationName(name: string): Promise<CurrentOrga
   return jsonRequest<CurrentOrganizationPayload>(CURRENT_ORGANIZATION_URL, {
     method: 'PATCH',
     json: { name },
+    includeCsrf: true,
+  })
+}
+
+export function updateCurrentOrganizationCustomInstructions(customInstructions: string): Promise<CurrentOrganizationPayload> {
+  return jsonRequest<CurrentOrganizationPayload>(CURRENT_ORGANIZATION_URL, {
+    method: 'PATCH',
+    json: { customInstructions },
     includeCsrf: true,
   })
 }

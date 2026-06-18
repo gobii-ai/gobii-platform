@@ -13664,6 +13664,60 @@ class Organization(models.Model):
         return f"{self.name} ({self.id})"
 
 
+class AgentOwnerCustomInstructions(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="agent_owner_custom_instructions",
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="agent_owner_custom_instructions",
+    )
+    instructions = models.TextField(blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_agent_owner_custom_instructions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(user__isnull=False, organization__isnull=True)
+                    | models.Q(user__isnull=True, organization__isnull=False)
+                ),
+                name="agent_owner_ci_exactly_one_owner",
+            ),
+            UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(user__isnull=False),
+                name="unique_agent_owner_ci_user",
+            ),
+            UniqueConstraint(
+                fields=["organization"],
+                condition=models.Q(organization__isnull=False),
+                name="unique_agent_owner_ci_org",
+            ),
+        ]
+        verbose_name = "agent owner custom instructions"
+        verbose_name_plural = "agent owner custom instructions"
+
+    def __str__(self) -> str:
+        owner = self.organization or self.user
+        return f"Custom instructions for {owner}"
+
+
 @receiver(post_save, sender=Organization)
 def initialize_organization_billing(sender, instance, created, **kwargs):
     if created:

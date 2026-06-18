@@ -9352,7 +9352,8 @@
 }
 
 .profile-screen input,
-.profile-screen select {
+.profile-screen select,
+.profile-screen textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid rgba(196, 181, 253, 0.18);
@@ -9366,12 +9367,18 @@
   transition: border-color 160ms ease, background-color 160ms ease;
 }
 
-.profile-screen input::placeholder {
+.profile-screen textarea {
+  resize: vertical;
+}
+
+.profile-screen input::placeholder,
+.profile-screen textarea::placeholder {
   color: rgba(196, 181, 253, 0.56);
 }
 
 .profile-screen input:focus,
-.profile-screen select:focus {
+.profile-screen select:focus,
+.profile-screen textarea:focus {
   border-color: rgba(125, 211, 252, 0.54);
   background: rgba(20, 16, 45, 0.86);
 }
@@ -9541,6 +9548,15 @@
 .organization-screen__name-form {
   display: grid;
   gap: 0.85rem;
+}
+
+.organization-screen__custom-instructions-form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.organization-screen__custom-instructions-textarea {
+  min-height: 9rem;
 }
 
 .organization-screen__name-grid {

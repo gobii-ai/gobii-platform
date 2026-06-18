@@ -43,6 +43,7 @@ from ...models import (
     AgentCommPeerState,
     AgentFileSpaceAccess,
     AgentFsNode,
+    AgentOwnerCustomInstructions,
     AgentPeerLink,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
@@ -1301,6 +1302,25 @@ def _build_owner_identity_prompt(user: Any) -> str:
     )
 
 
+def _get_agent_owner_custom_instructions(agent: PersistentAgent) -> str:
+    if not agent.organization_id:
+        return ""
+    instructions = (
+        AgentOwnerCustomInstructions.objects
+        .filter(organization_id=agent.organization_id)
+        .values_list("instructions", flat=True)
+        .first()
+    )
+    return (instructions or "").strip()
+
+
+def _append_agent_owner_custom_instructions(system_prompt: str, agent: PersistentAgent) -> str:
+    custom_instructions = _get_agent_owner_custom_instructions(agent)
+    if not custom_instructions:
+        return system_prompt
+    return f"{system_prompt}\n\n## Organization Custom Instructions\n\n{custom_instructions}"
+
+
 def _render_prompt_context_once(
     agent: PersistentAgent,
     current_iteration: int = 1,
@@ -1364,6 +1384,7 @@ def _render_prompt_context_once(
         continuation_notice=continuation_notice,
         system_directive_block=system_directive_block,
     )
+    system_prompt = _append_agent_owner_custom_instructions(system_prompt, agent)
 
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
