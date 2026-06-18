@@ -3,14 +3,18 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.http import HttpResponseRedirect
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 
 from api.models import (
     TrialPromo,
+    TrialPromoAllowedEmail,
     TrialPromoNoPaymentMethodEndBehaviorChoices,
     TrialPromoRedemption,
     TrialPromoRedemptionStatusChoices,
+    UserTrialEligibility,
+    UserTrialEligibilityManualActionChoices,
 )
 from api.admin_forms import TrialPromoAdminForm
 from api.services.trial_promos import (
@@ -18,6 +22,7 @@ from api.services.trial_promos import (
     TRIAL_PROMO_META_ID,
     TRIAL_PROMO_META_PAYMENT_REQUIRED,
     TRIAL_PROMO_META_REDEMPTION_ID,
+    TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
     TrialPromoError,
     can_user_start_trial_promo,
     find_active_trial_promo_by_code,
@@ -105,6 +110,82 @@ class TrialPromoServiceTests(TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason, "prior_trial_or_subscription")
         mock_prior_history.assert_called_once_with(self.user)
+
+    def test_email_allowlist_blocks_user_not_on_campaign(self):
+        promo = _create_promo(
+            code="EMAIL-GATED",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        TrialPromoAllowedEmail.objects.create(
+            promo=promo,
+            normalized_email="someone-else@example.com",
+        )
+
+        decision = can_user_start_trial_promo(user=self.user, promo=promo)
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED)
+
+    def test_email_allowlist_allows_normalized_user_email(self):
+        promo = _create_promo(
+            code="EMAIL-OK",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        TrialPromoAllowedEmail.objects.create(
+            promo=promo,
+            normalized_email="TRIAL-PROMO@EXAMPLE.COM",
+        )
+
+        decision = can_user_start_trial_promo(user=self.user, promo=promo)
+
+        self.assertTrue(decision.allowed)
+
+    def test_email_allowlist_is_scoped_per_campaign(self):
+        first_promo = _create_promo(
+            code="FIRST-LIST",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        second_promo = _create_promo(
+            code="SECOND-LIST",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+
+        TrialPromoAllowedEmail.objects.create(
+            promo=first_promo,
+            normalized_email=self.user.email,
+        )
+        TrialPromoAllowedEmail.objects.create(
+            promo=second_promo,
+            normalized_email=self.user.email,
+        )
+
+        self.assertTrue(can_user_start_trial_promo(user=self.user, promo=first_promo).allowed)
+        self.assertTrue(can_user_start_trial_promo(user=self.user, promo=second_promo).allowed)
+
+    def test_manual_allow_does_not_bypass_email_allowlist(self):
+        promo = _create_promo(
+            code="MANUAL-NOT-LISTED",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            manual_action=UserTrialEligibilityManualActionChoices.ALLOW_TRIAL,
+        )
+
+        decision = can_user_start_trial_promo(user=self.user, promo=promo)
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED)
 
     def test_redemption_capacity_counts_completed_only(self):
         promo = _create_promo(code="CAP-ONE", max_redemptions=1)
@@ -216,6 +297,36 @@ class TrialPromoAdminFormTests(TestCase):
         self.assertEqual(updated.code_label, "SAME-CODE")
         self.assertEqual(updated.name, "Updated conference special")
 
+    def test_bulk_allowed_emails_are_normalized_and_deduped(self):
+        form = TrialPromoAdminForm(
+            data=_trial_promo_form_data(
+                "ALLOWLIST-CODE",
+                email_allowlist_enabled="on",
+                allowed_emails_bulk=" One@Example.com, two@example.com\none@example.com ",
+            )
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        promo = form.save()
+
+        self.assertTrue(promo.email_allowlist_enabled)
+        self.assertEqual(
+            list(promo.allowed_emails.values_list("normalized_email", flat=True)),
+            ["one@example.com", "two@example.com"],
+        )
+
+    def test_bulk_allowed_emails_reject_invalid_email(self):
+        form = TrialPromoAdminForm(
+            data=_trial_promo_form_data(
+                "ALLOWLIST-BAD",
+                email_allowlist_enabled="on",
+                allowed_emails_bulk="valid@example.com not-an-email",
+            )
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("allowed_emails_bulk", form.errors)
+
 
 @tag("batch_pages")
 @override_settings(GOBII_PROPRIETARY_MODE=True)
@@ -235,6 +346,34 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["plan_label"], promo.get_plan_display())
         self.assertContains(response, "Scale")
+
+    @patch(
+        "pages.views._start_trial_promo_checkout",
+        return_value=HttpResponseRedirect("https://stripe.test/special"),
+    )
+    def test_special_access_start_accepts_code_query_without_entry_step(self, mock_start_checkout):
+        promo = _create_promo(
+            code="DIRECT-START",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        TrialPromoAllowedEmail.objects.create(
+            promo=promo,
+            normalized_email=self.user.email,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("pages:special_access_start"),
+            {"code": "direct-start"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://stripe.test/special")
+        mock_start_checkout.assert_called_once()
+        _request, resolved_promo = mock_start_checkout.call_args.args
+        self.assertEqual(resolved_promo, promo)
 
     @patch("pages.views._track_web_event_for_request")
     @patch("pages.views._emit_checkout_initiated_event")

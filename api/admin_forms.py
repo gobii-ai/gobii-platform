@@ -4,6 +4,7 @@ from decimal import Decimal
 import phonenumbers
 from django import forms
 from django.contrib.admin.widgets import AdminSplitDateTime
+from django.core.validators import validate_email
 from django.forms import ModelForm
 from django.utils import timezone
 
@@ -16,6 +17,7 @@ from .models import (
     MCPServerConfig,
     StripeConfig,
     TrialPromo,
+    TrialPromoAllowedEmail,
     UserFlagDefinition,
 )
 from .services.mcp_config_validation import (
@@ -230,6 +232,17 @@ class TrialPromoAdminForm(forms.ModelForm):
         required=False,
         help_text="Set a new code. Leave blank when editing to keep the existing code.",
     )
+    allowed_emails_bulk = forms.CharField(
+        label="Add allowed emails",
+        required=False,
+        widget=forms.Textarea(
+            attrs={
+                "rows": 8,
+                "placeholder": "Paste one email per line, comma-separated, or space-separated",
+            }
+        ),
+        help_text="Appends normalized emails to this promo's allowlist. Leave blank to keep existing entries.",
+    )
 
     class Meta:
         model = TrialPromo
@@ -241,6 +254,7 @@ class TrialPromoAdminForm(forms.ModelForm):
             "payment_method_required",
             "no_payment_method_end_behavior",
             "repeat_trials_allowed",
+            "email_allowlist_enabled",
             "trial_abuse_filtering_enabled",
             "trial_credit_amount",
             "max_redemptions",
@@ -249,7 +263,34 @@ class TrialPromoAdminForm(forms.ModelForm):
             "is_active",
             "headline",
             "description",
+            "allowed_emails_bulk",
         )
+
+    def clean_allowed_emails_bulk(self) -> list[str]:
+        raw_value = self.cleaned_data.get("allowed_emails_bulk") or ""
+        normalized_emails: list[str] = []
+        invalid_entries: list[str] = []
+
+        for token in re.split(r"[\s,;]+", raw_value):
+            candidate = token.strip()
+            if not candidate:
+                continue
+
+            normalized = TrialPromo.normalize_allowed_email(candidate)
+            try:
+                validate_email(normalized)
+            except forms.ValidationError:
+                invalid_entries.append(candidate)
+                continue
+
+            normalized_emails.append(normalized)
+
+        if invalid_entries:
+            preview = ", ".join(invalid_entries[:5])
+            suffix = "..." if len(invalid_entries) > 5 else ""
+            raise forms.ValidationError(f"Invalid email address(es): {preview}{suffix}")
+
+        return list(dict.fromkeys(normalized_emails))
 
     def clean_code(self) -> str:
         code = TrialPromo.normalize_code(self.cleaned_data.get("code"))
@@ -279,6 +320,18 @@ class TrialPromoAdminForm(forms.ModelForm):
         if commit:
             instance.save()
             self.save_m2m()
+            allowed_emails = self.cleaned_data.get("allowed_emails_bulk") or []
+            if allowed_emails:
+                TrialPromoAllowedEmail.objects.bulk_create(
+                    [
+                        TrialPromoAllowedEmail(
+                            promo=instance,
+                            normalized_email=email,
+                        )
+                        for email in allowed_emails
+                    ],
+                    ignore_conflicts=True,
+                )
         return instance
 
 

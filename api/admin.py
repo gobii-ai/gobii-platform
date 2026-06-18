@@ -88,6 +88,7 @@ from .models import (
     UserTrialEligibility,
     UserTrialActivation,
     TrialPromo,
+    TrialPromoAllowedEmail,
     TrialPromoRedemption,
     ExecutionPauseReasonChoices,
 )
@@ -401,6 +402,8 @@ class TrialPromoAdmin(admin.ModelAdmin):
         "trial_days",
         "payment_method_required",
         "repeat_trials_allowed",
+        "email_allowlist_enabled",
+        "allowed_email_count",
         "trial_abuse_filtering_enabled",
         "max_redemptions",
         "is_active",
@@ -411,11 +414,12 @@ class TrialPromoAdmin(admin.ModelAdmin):
         "plan",
         "payment_method_required",
         "repeat_trials_allowed",
+        "email_allowlist_enabled",
         "trial_abuse_filtering_enabled",
         "is_active",
     )
-    search_fields = ("name", "code_label", "headline", "description")
-    readonly_fields = ("code_digest", "created_at", "updated_at")
+    search_fields = ("name", "code_label", "headline", "description", "allowed_emails__normalized_email")
+    readonly_fields = ("code_digest", "allowed_email_count", "created_at", "updated_at")
     fields = (
         "name",
         "code",
@@ -426,6 +430,9 @@ class TrialPromoAdmin(admin.ModelAdmin):
         "payment_method_required",
         "no_payment_method_end_behavior",
         "repeat_trials_allowed",
+        "email_allowlist_enabled",
+        "allowed_email_count",
+        "allowed_emails_bulk",
         "trial_abuse_filtering_enabled",
         "trial_credit_amount",
         "max_redemptions",
@@ -437,6 +444,20 @@ class TrialPromoAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+    @admin.display(description="Allowed emails")
+    def allowed_email_count(self, obj):
+        if obj is None or not getattr(obj, "pk", None):
+            return 0
+        return obj.allowed_emails.count()
+
+
+@admin.register(TrialPromoAllowedEmail)
+class TrialPromoAllowedEmailAdmin(admin.ModelAdmin):
+    list_display = ("normalized_email", "promo", "created_at")
+    list_filter = ("promo", "created_at")
+    search_fields = ("normalized_email", "promo__name", "promo__code_label")
+    readonly_fields = ("created_at",)
 
 
 @admin.register(TrialPromoRedemption)

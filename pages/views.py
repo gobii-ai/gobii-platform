@@ -47,6 +47,7 @@ from api.services.trial_abuse import (
     user_has_prior_individual_history,
 )
 from api.services.trial_promos import (
+    TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
     TrialPromoError,
     build_trial_promo_checkout_metadata,
     build_trial_promo_metadata,
@@ -2737,14 +2738,22 @@ class SpecialAccessStartView(View):
         return self._handle(request)
 
     def _handle(self, request):
-        promo = get_session_trial_promo(request)
+        code = (request.GET.get("code") or request.POST.get("code") or "").strip()
+        if code:
+            promo = find_active_trial_promo_by_code(code)
+            if promo is None:
+                messages.error(request, "That special access code is not active.")
+                return redirect("pages:special_access")
+            store_trial_promo_in_session(request, promo)
+        else:
+            promo = get_session_trial_promo(request)
         if promo is None:
             messages.error(request, "Enter your special access code to continue.")
             return redirect("pages:special_access")
 
         if not request.user.is_authenticated:
             return redirect_to_login(
-                next=reverse("pages:special_access_start"),
+                next=request.get_full_path(),
                 login_url=_cta_auth_url_with_utms(request),
             )
 
@@ -2766,9 +2775,12 @@ def _start_trial_promo_checkout(request, promo: TrialPromo):
 
     decision = can_user_start_trial_promo(user=user, promo=promo, request=request)
     if not decision.allowed:
+        message = "This account is not eligible for this special trial."
+        if decision.reason == TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED:
+            message = "This invitation is tied to a different email address."
         raise TrialPromoError(
             decision.reason or "trial_unavailable",
-            "This account is not eligible for this special trial.",
+            message,
         )
 
     _prepare_stripe_or_404()
