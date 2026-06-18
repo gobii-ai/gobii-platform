@@ -13,7 +13,10 @@ import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
 import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
-import { AgentPipedreamAppsModal } from '../mcp/AgentPipedreamAppsModal'
+import {
+  AgentPipedreamAppsModal,
+  type AgentPipedreamAppsInitialTarget,
+} from '../mcp/AgentPipedreamAppsModal'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
@@ -1704,7 +1707,7 @@ export const AgentComposer = memo(function AgentComposer({
       : ''
   }`
   const composerActionsDisabled = disabled || isSending
-  const handleOpenAppsModal = useCallback(() => {
+  const handleOpenAppsModal = useCallback((initialTarget: AgentPipedreamAppsInitialTarget | null = null) => {
     if (!showAppsControl || !agentId) {
       return
     }
@@ -1713,6 +1716,7 @@ export const AgentComposer = memo(function AgentComposer({
         agentId={agentId}
         enablePipedreamApps={hasPipedreamApps}
         nativeIntegrationsUrl={nativeIntegrationsUrl}
+        initialTarget={initialTarget}
         onClose={onClose}
       />
     ))
@@ -2078,7 +2082,13 @@ export const AgentComposer = memo(function AgentComposer({
                       <ActiveNativePanel
                         agentId={agentId}
                         nativeIntegrationsUrl={nativeIntegrationsUrl}
-                        onOpenApps={handleOpenAppsModal}
+                        onOpenApps={() => {
+                          if (activeWorkingTab?.kind === 'discord' || activeWorkingTab?.kind === 'telegram') {
+                            handleOpenAppsModal({ kind: 'native', providerKey: activeWorkingTab.kind })
+                            return
+                          }
+                          handleOpenAppsModal()
+                        }}
                       />
                     ) : visibleInsight ? (
                       <InsightEventCard

@@ -75,7 +75,13 @@ type AgentPipedreamAppsModalProps = {
   agentId: string
   enablePipedreamApps?: boolean
   nativeIntegrationsUrl?: string | null
+  initialTarget?: AgentPipedreamAppsInitialTarget | null
   onClose: () => void
+}
+
+export type AgentPipedreamAppsInitialTarget = {
+  kind: 'native'
+  providerKey: string
 }
 
 type AgentAppRow =
@@ -98,6 +104,7 @@ export function AgentPipedreamAppsModal({
   agentId,
   enablePipedreamApps = true,
   nativeIntegrationsUrl = null,
+  initialTarget = null,
   onClose,
 }: AgentPipedreamAppsModalProps) {
   const queryClient = useQueryClient()
@@ -106,8 +113,12 @@ export function AgentPipedreamAppsModal({
   const debouncedSearchTerm = useDebouncedValue(searchTerm)
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
-  const [discordConfigureOpen, setDiscordConfigureOpen] = useState(false)
-  const [telegramConfigureOpen, setTelegramConfigureOpen] = useState(false)
+  const [discordConfigureOpen, setDiscordConfigureOpen] = useState(
+    initialTarget?.kind === 'native' && initialTarget.providerKey === 'discord',
+  )
+  const [telegramConfigureOpen, setTelegramConfigureOpen] = useState(
+    initialTarget?.kind === 'native' && initialTarget.providerKey === 'telegram',
+  )
   const [telegramProvisioningPending, setTelegramProvisioningPending] = useState(false)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const nativeQueryKey = useMemo(
@@ -372,37 +383,81 @@ export function AgentPipedreamAppsModal({
   const activeTelegramApp = telegramConfigureOpen ? (telegramAppQuery.data ?? telegramRow) : null
   const pendingDiscordAction = pendingDiscordAgentAction?.agentId === agentId ? pendingDiscordAgentAction.kind : null
 
-  const body = activeDiscordApp ? (
-    <DiscordConfigurationScreen
-      agentId={agentId}
-      app={activeDiscordApp}
-      disabled={isBusy}
-      pendingDiscordAction={pendingDiscordAction}
-      statusMessage={statusMessage}
-      onBack={() => {
-        setDiscordConfigureOpen(false)
-        setStatusMessage(null)
-      }}
-      onSave={(subscriptions) => saveDiscordAgentSubscriptions(agentId, subscriptions)}
-    />
-  ) : activeTelegramApp ? (
-    <TelegramConfigurationScreen
-      app={activeTelegramApp}
-      disabled={isBusy}
-      pendingNativeAction={pendingNativeAction}
-      statusMessage={statusMessage}
-      onBack={() => {
-        setTelegramConfigureOpen(false)
-        setStatusMessage(null)
-      }}
-      onConnect={() => telegramConnectMutation.mutate()}
-      onSync={() => telegramSyncMutation.mutate()}
-      onDisconnect={() => {
-        if (window.confirm('Disconnect Telegram for this agent? The agent bot will stop receiving Telegram messages.')) {
-          telegramDisconnectMutation.mutate()
-        }
-      }}
-    />
+  const body = discordConfigureOpen ? (
+    discordAppQuery.isError ? (
+      <ConfigureLoadState
+        disabled={isBusy}
+        error={discordAppQuery.error}
+        errorFallback="Unable to load Discord configuration."
+        loadingLabel="Loading Discord configuration..."
+        onBack={() => {
+          setDiscordConfigureOpen(false)
+          setStatusMessage(null)
+        }}
+      />
+    ) : !activeDiscordApp ? (
+      <ConfigureLoadState
+        disabled={isBusy}
+        loadingLabel="Loading Discord configuration..."
+        onBack={() => {
+          setDiscordConfigureOpen(false)
+          setStatusMessage(null)
+        }}
+      />
+    ) : (
+      <DiscordConfigurationScreen
+        agentId={agentId}
+        app={activeDiscordApp}
+        disabled={isBusy}
+        pendingDiscordAction={pendingDiscordAction}
+        statusMessage={statusMessage}
+        onBack={() => {
+          setDiscordConfigureOpen(false)
+          setStatusMessage(null)
+        }}
+        onSave={(subscriptions) => saveDiscordAgentSubscriptions(agentId, subscriptions)}
+      />
+    )
+  ) : telegramConfigureOpen ? (
+    telegramAppQuery.isError ? (
+      <ConfigureLoadState
+        disabled={isBusy}
+        error={telegramAppQuery.error}
+        errorFallback="Unable to load Telegram configuration."
+        loadingLabel="Loading Telegram configuration..."
+        onBack={() => {
+          setTelegramConfigureOpen(false)
+          setStatusMessage(null)
+        }}
+      />
+    ) : !activeTelegramApp ? (
+      <ConfigureLoadState
+        disabled={isBusy}
+        loadingLabel="Loading Telegram configuration..."
+        onBack={() => {
+          setTelegramConfigureOpen(false)
+          setStatusMessage(null)
+        }}
+      />
+    ) : (
+      <TelegramConfigurationScreen
+        app={activeTelegramApp}
+        disabled={isBusy}
+        pendingNativeAction={pendingNativeAction}
+        statusMessage={statusMessage}
+        onBack={() => {
+          setTelegramConfigureOpen(false)
+          setStatusMessage(null)
+        }}
+        onConnect={() => telegramConnectMutation.mutate()}
+        onSync={() => telegramSyncMutation.mutate()}
+        onDisconnect={() => {
+          if (window.confirm('Disconnect Telegram for this agent? The agent bot will stop receiving Telegram messages.')) {
+            telegramDisconnectMutation.mutate()
+          }
+        }}
+      />
+    )
   ) : (
       <div className="space-y-4 p-1">
         <PipedreamStatusBanner statusMessage={statusMessage} />
@@ -488,6 +543,39 @@ export function AgentPipedreamAppsModal({
     >
       {body}
     </PipedreamModalShell>
+  )
+}
+
+function ConfigureLoadState({
+  disabled,
+  error = null,
+  errorFallback,
+  loadingLabel,
+  onBack,
+}: {
+  disabled: boolean
+  error?: unknown
+  errorFallback?: string
+  loadingLabel: string
+  onBack: () => void
+}) {
+  return (
+    <div className="space-y-4 p-1">
+      <button
+        type="button"
+        className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+        onClick={onBack}
+        disabled={disabled}
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Back
+      </button>
+      {error ? (
+        <PipedreamErrorState error={error} fallback={errorFallback ?? 'Unable to load configuration.'} />
+      ) : (
+        <PipedreamLoadingState label={loadingLabel} />
+      )}
+    </div>
   )
 }
 
