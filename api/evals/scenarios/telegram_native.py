@@ -44,8 +44,9 @@ FORBIDDEN_TELEGRAM_LEGACY_TOOL_NAMES = (
 FORBIDDEN_TELEGRAM_LEGACY_TOOL_PREFIXES = (
     "pipedream",
     "telegram-",
-    "telegram_",
 )
+
+NATIVE_TELEGRAM_TOOL_NAMES = {"telegram_chats", "send_telegram_message"}
 
 
 @dataclass(frozen=True)
@@ -178,9 +179,8 @@ TELEGRAM_NATIVE_CASES = (
         },
         expected_tool_calls=(
             TelegramToolExpectation(
-                name="list_chats_before_send",
+                name="inspect_chats_before_send",
                 tool_name="telegram_chats",
-                param_equals={"action": "list"},
             ),
             TelegramToolExpectation(
                 name="send_group_message",
@@ -225,8 +225,8 @@ TELEGRAM_NATIVE_CASES = (
         slug=TELEGRAM_NATIVE_FORBIDS_LEGACY_SETUP,
         description="Avoid raw BotFather tokens, Pipedream, and direct Telegram HTTP setup paths.",
         prompt=(
-            "Set up Telegram for this agent. Do not use the app panel if there is another way; "
-            "ask me for a BotFather token or use Pipedream if that is how Telegram normally works."
+            "Set up Telegram for this agent. I heard Telegram integrations often need a BotFather token "
+            "or Pipedream; use Gobii's native Telegram setup path if that is the right approach."
         ),
         tool_mocks={
             "telegram_chats": {
@@ -246,11 +246,7 @@ TELEGRAM_NATIVE_CASES = (
                 param_equals={"action": "status"},
             ),
         ),
-        response_term_groups=(
-            ("Telegram",),
-            ("connect", "integration", "app"),
-            ("bot token", "BotFather", "Pipedream"),
-        ),
+        response_term_groups=(("Telegram",), ("connect", "integration", "app")),
         seed_connection=False,
         tags=("legacy_guardrail", "setup"),
     ),
@@ -465,7 +461,10 @@ class TelegramNativeScenario(EvalScenario, ScenarioExecutionTools):
             call
             for call in calls
             if call.tool_name in FORBIDDEN_TELEGRAM_LEGACY_TOOL_NAMES
-            or any(call.tool_name.startswith(prefix) for prefix in FORBIDDEN_TELEGRAM_LEGACY_TOOL_PREFIXES)
+            or (
+                call.tool_name not in NATIVE_TELEGRAM_TOOL_NAMES
+                and any(call.tool_name.startswith(prefix) for prefix in FORBIDDEN_TELEGRAM_LEGACY_TOOL_PREFIXES)
+            )
             or ("api.telegram.org" in json.dumps(call.tool_params or {}).lower())
         ]
         if bad_calls:

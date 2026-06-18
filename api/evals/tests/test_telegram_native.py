@@ -6,6 +6,8 @@ from django.test import SimpleTestCase, TestCase, tag
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.scenarios.telegram_native import (
     FORBIDDEN_TELEGRAM_LEGACY_TOOL_NAMES,
+    FORBIDDEN_TELEGRAM_LEGACY_TOOL_PREFIXES,
+    NATIVE_TELEGRAM_TOOL_NAMES,
     TELEGRAM_CHAT_BINDING_ID,
     TELEGRAM_NATIVE_CASES,
     TELEGRAM_NATIVE_FORBIDS_LEGACY_SETUP,
@@ -90,6 +92,18 @@ class TelegramNativeScenarioTests(SimpleTestCase):
         self.assertNotIn("http_request", policy["allowed_tool_names"])
         for tool_name in FORBIDDEN_TELEGRAM_LEGACY_TOOL_NAMES:
             self.assertIn(tool_name, policy["stop_on_tool_names"])
+
+    def test_legacy_prefix_guard_does_not_match_native_telegram_tools(self):
+        def legacy_prefix_match(tool_name: str) -> bool:
+            return tool_name not in NATIVE_TELEGRAM_TOOL_NAMES and any(
+                tool_name.startswith(prefix)
+                for prefix in FORBIDDEN_TELEGRAM_LEGACY_TOOL_PREFIXES
+            )
+
+        self.assertFalse(legacy_prefix_match("telegram_chats"))
+        self.assertFalse(legacy_prefix_match("send_telegram_message"))
+        self.assertTrue(legacy_prefix_match("telegram-send-message"))
+        self.assertTrue(legacy_prefix_match("pipedream_telegram"))
 
     def test_expected_tool_call_requires_completed_status_and_params(self):
         expectation = TelegramToolExpectation(
