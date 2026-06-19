@@ -28,23 +28,18 @@ def normalize_custom_instructions(raw_instructions: Any) -> str:
 
 
 def get_custom_instructions_for_organization_id(organization_id) -> str:
-    if not organization_id:
-        return ""
-    instructions = (
-        AgentOwnerCustomInstructions.objects
-        .filter(organization_id=organization_id)
-        .values_list("instructions", flat=True)
-        .first()
-    )
-    return instructions or ""
+    return _get_custom_instructions({"organization_id": organization_id})
 
 
 def get_custom_instructions_for_user_id(user_id) -> str:
-    if not user_id:
-        return ""
+    return _get_custom_instructions({"user_id": user_id})
+
+
+def _get_custom_instructions(owner_filter: dict) -> str:
+    _validate_owner_filter(owner_filter)
     instructions = (
         AgentOwnerCustomInstructions.objects
-        .filter(user_id=user_id)
+        .filter(**owner_filter)
         .values_list("instructions", flat=True)
         .first()
     )
