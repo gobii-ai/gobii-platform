@@ -1,7 +1,9 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase, tag
@@ -17,6 +19,7 @@ from api.models import (
 )
 from api.public_profiles import validate_public_handle
 from api.services.template_clone import TemplateCloneService
+from pages.library_views import LIBRARY_CACHE_KEY, LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY, LIBRARY_OFFICIAL_CACHE_KEY
 from pages.public_template_urls import public_template_route_slug
 
 
@@ -445,3 +448,234 @@ class PublicTemplateRouteTests(TestCase):
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.display_name, template.display_name)
         self.assertNotIn(template.code, [item.code for item in PretrainedWorkerTemplateService.get_active_templates()])
+
+
+class LibraryViewTests(TestCase):
+    def setUp(self):
+        cache.delete_many([LIBRARY_CACHE_KEY, LIBRARY_OFFICIAL_CACHE_KEY, LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY])
+
+    def create_public_template(
+        self,
+        *,
+        code: str = "library-public-template",
+        slug: str = "library-public-template",
+        category: str = "Operations",
+        display_name: str = "Library Public Template",
+        is_official: bool = False,
+        handle: str = "library-owner",
+    ):
+        user = get_user_model().objects.create_user(
+            username=f"{code}-owner",
+            email=f"{code}-owner@example.com",
+            password="pw",
+        )
+        profile = PublicProfile.objects.create(user=user, handle=handle)
+        return PersistentAgentTemplate.objects.create(
+            code=code,
+            public_profile=profile,
+            slug=slug,
+            display_name=display_name,
+            tagline=f"{display_name} tagline",
+            description=f"{display_name} description.",
+            charter=f"{display_name} charter.",
+            category=category,
+            is_official=is_official,
+            is_active=True,
+        )
+
+    def create_curated_template(
+        self,
+        *,
+        code: str = "library-curated-template",
+        slug: str = "",
+        category: str = "Team Ops",
+        display_name: str = "Library Curated Template",
+    ):
+        return PersistentAgentTemplate.objects.create(
+            code=code,
+            public_profile=None,
+            slug=slug,
+            display_name=display_name,
+            tagline=f"{display_name} tagline",
+            description=f"{display_name} description.",
+            charter=f"{display_name} charter.",
+            category=category,
+            is_active=True,
+        )
+
+    @tag("batch_public_templates")
+    def test_library_index_renders_public_and_curated_templates(self):
+        public_template = self.create_public_template()
+        curated_template = self.create_curated_template(
+            code="gobii-project-manager",
+            display_name="Gobii Project Manager",
+        )
+        PersistentAgentTemplate.objects.create(
+            code="library-private-template",
+            organization=Organization.objects.create(
+                name="Private Library Org",
+                slug="private-library-org",
+                created_by=get_user_model().objects.create_user(
+                    username="private-library-owner",
+                    email="private-library-owner@example.com",
+                    password="pw",
+                ),
+            ),
+            display_name="Private Library Template",
+            tagline="Private",
+            description="Private.",
+            charter="Private.",
+            category="Operations",
+            is_active=True,
+        )
+
+        response = self.client.get(reverse("pages:library"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.context["library_initial_payload"]
+        self.assertEqual(payload["libraryTotalAgents"], 2)
+        self.assertEqual({agent["name"] for agent in payload["agents"]}, {public_template.display_name, curated_template.display_name})
+        curated_agent = next(agent for agent in payload["agents"] if agent["id"] == str(curated_template.id))
+        self.assertEqual(curated_agent["templateSlug"], curated_template.code)
+        self.assertEqual(curated_agent["templateUrl"], "/library/team-ops/gobii-project-manager/")
+        self.assertEqual(curated_agent["publicProfileHandle"], "")
+        self.assertTrue(curated_agent["isOfficial"])
+        self.assertContains(response, "Most popular shared Gobii agents")
+        self.assertContains(response, public_template.display_name)
+        self.assertContains(response, curated_template.display_name)
+        self.assertNotContains(response, "Private Library Template")
+
+    @tag("batch_public_templates")
+    def test_library_category_renders_and_redirects_alias_to_canonical_slug(self):
+        template = self.create_public_template(
+            code="recruiting-template",
+            slug="recruiting-template",
+            category="HR & Recruiting",
+            display_name="Recruiting Template",
+        )
+
+        response = self.client.get(reverse("pages:library_category", kwargs={"category_slug": "recruiting"}))
+        alias_response = self.client.get("/library/hr-recruiting/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["library_initial_category"], "HR & Recruiting")
+        self.assertEqual(response.context["library_initial_payload"]["totalAgents"], 1)
+        self.assertContains(response, template.display_name)
+        self.assertEqual(alias_response.status_code, 301)
+        self.assertEqual(alias_response["Location"], "/library/recruiting/")
+
+    @tag("batch_public_templates")
+    def test_libary_typo_redirects_to_library(self):
+        response = self.client.get("/libary/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/library/")
+
+    @tag("batch_public_templates")
+    def test_library_api_supports_filters_search_and_official_counts(self):
+        public_template = self.create_public_template(
+            code="budget-beacon",
+            slug="budget-beacon",
+            category="Finance",
+            display_name="Budget Beacon",
+            handle="finance-owner",
+        )
+        curated_template = self.create_curated_template(
+            code="ops-briefing",
+            category="Operations",
+            display_name="Ops Briefing",
+        )
+        self.create_public_template(
+            code="research-scout",
+            slug="research-scout",
+            category="Research",
+            display_name="Research Scout",
+            handle="research-owner",
+        )
+
+        response = self.client.get(reverse("pages:library_agents_api"))
+        official_response = self.client.get(reverse("pages:library_agents_api"), data={"official": "true"})
+        category_response = self.client.get(reverse("pages:library_agents_api"), data={"category": "finance"})
+        search_response = self.client.get(reverse("pages:library_agents_api"), data={"q": "finance-owner"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["libraryTotalAgents"], 3)
+        self.assertEqual(payload["officialTotalAgents"], 1)
+        self.assertEqual(payload["libraryTotalLikes"], 0)
+        curated_agent = next(agent for agent in payload["agents"] if agent["id"] == str(curated_template.id))
+        self.assertEqual(curated_agent["templateUrl"], "/library/operations/ops-briefing/")
+        self.assertTrue(curated_agent["isOfficial"])
+
+        self.assertEqual(official_response.status_code, 200)
+        official_payload = official_response.json()
+        self.assertTrue(official_payload["officialOnly"])
+        self.assertEqual(official_payload["totalAgents"], 1)
+        self.assertEqual([agent["id"] for agent in official_payload["agents"]], [str(curated_template.id)])
+
+        self.assertEqual(category_response.status_code, 200)
+        category_payload = category_response.json()
+        self.assertEqual(category_payload["totalAgents"], 1)
+        self.assertEqual([agent["id"] for agent in category_payload["agents"]], [str(public_template.id)])
+
+        self.assertEqual(search_response.status_code, 200)
+        search_payload = search_response.json()
+        self.assertEqual(search_payload["totalAgents"], 1)
+        self.assertEqual([agent["id"] for agent in search_payload["agents"]], [str(public_template.id)])
+
+    @tag("batch_public_templates")
+    def test_library_api_supports_pagination(self):
+        for index in range(3):
+            self.create_public_template(
+                code=f"paged-template-{index}",
+                slug=f"paged-template-{index}",
+                display_name=f"Paged Template {index}",
+                handle=f"paged-owner-{index}",
+            )
+
+        response = self.client.get(reverse("pages:library_agents_api"), data={"limit": 2, "offset": 1})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["totalAgents"], 3)
+        self.assertEqual(payload["offset"], 1)
+        self.assertEqual(payload["limit"], 2)
+        self.assertEqual(len(payload["agents"]), 2)
+        self.assertFalse(payload["hasMore"])
+
+    @tag("batch_public_templates")
+    def test_library_like_api_requires_authentication(self):
+        template = self.create_public_template()
+
+        response = self.client.post(
+            reverse("pages:library_agent_like_api"),
+            data=json.dumps({"agentId": str(template.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(PersistentAgentTemplateLike.objects.filter(template=template).exists())
+
+    @tag("batch_public_templates")
+    def test_library_like_api_toggles_curated_template_like(self):
+        template = self.create_curated_template()
+        liker = get_user_model().objects.create_user(username="library-liker", email="library-liker@example.com", password="pw")
+        self.client.force_login(liker)
+
+        first_response = self.client.post(
+            reverse("pages:library_agent_like_api"),
+            data=json.dumps({"agentId": str(template.id)}),
+            content_type="application/json",
+        )
+        second_response = self.client.post(
+            reverse("pages:library_agent_like_api"),
+            data=json.dumps({"agentId": str(template.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertTrue(first_response.json()["isLiked"])
+        self.assertEqual(first_response.json()["likeCount"], 1)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertFalse(second_response.json()["isLiked"])
+        self.assertEqual(second_response.json()["likeCount"], 0)

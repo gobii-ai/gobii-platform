@@ -544,7 +544,6 @@ class HomePageTests(TestCase):
         self.assertNotContains(response, "Spawn a Pretrained Worker")
         self.assertNotContains(response, "Start with a candidate sourcing workflow")
         self.assertNotContains(response, 'name="source_page" value="home_pretrained_workers"')
-        self.assertNotContains(response, 'href="/library/')
         self.assertNotContains(response, 'href="/pretrained-workers/')
 
     @patch("pages.views.get_homepage_integrations_payload", return_value={"enabled": False, "builtins": []})
@@ -1743,7 +1742,7 @@ class CanonicalLinkTests(TestCase):
 @tag("batch_pages")
 class SitemapTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_sitemap_includes_template_and_solution_urls_but_not_library_indexes(self):
+    def test_sitemap_includes_library_category_template_and_solution_urls(self):
         PersistentAgentTemplate.objects.update_or_create(
             code="sitemap-project-manager",
             defaults={
@@ -1764,16 +1763,17 @@ class SitemapTests(TestCase):
         content = response.content.decode()
         self.assertIn("<loc>http://example.com/</loc>", content)
         self.assertIn("<loc>http://example.com/recruiting/contact/</loc>", content)
+        self.assertIn("<loc>http://example.com/library/</loc>", content)
+        self.assertIn("<loc>http://example.com/library/team-ops/</loc>", content)
         self.assertIn(
             "<loc>http://example.com/library/team-ops/sitemap-project-manager/</loc>",
             content,
         )
         self.assertIn("<loc>http://example.com/solutions/recruiting/</loc>", content)
         self.assertIn("<loc>http://example.com/solutions/engineering/</loc>", content)
-        self.assertNotIn("<loc>http://example.com/library/</loc>", content)
-        self.assertNotIn("<loc>http://example.com/library/team-ops/</loc>", content)
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_public_template_and_solution_urls_redirect_home_in_community_mode(self):
         for path in (
             "/solutions/",
@@ -1782,8 +1782,6 @@ class SitemapTests(TestCase):
             "/solutions/sales/",
             "/solutions/operations/",
             "/recruiting/contact/",
-            "/library/",
-            "/library/recruiting/",
             "/pretrained-workers/",
             "/pretrained-workers/talent-scout/",
         ):
@@ -2649,9 +2647,9 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             {"href": reverse("pages:solution", kwargs={"slug": "engineering"})},
         )
         self.assertGreaterEqual(len(developer_links), 1)
-        self.assertIsNone(soup.find("a", {"href": reverse("pages:library")}))
+        self.assertIsNotNone(soup.find("a", {"href": reverse("pages:library")}))
         self.assertIn("Solutions", soup.get_text(" ", strip=True))
-        self.assertNotIn("Discover", soup.get_text(" ", strip=True))
+        self.assertIn("Discover", soup.get_text(" ", strip=True))
         self.assertIn("Developers", soup.get_text(" ", strip=True))
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -2664,9 +2662,9 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertIsNone(
             soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "engineering"})})
         )
-        self.assertIsNone(soup.find("a", {"href": reverse("pages:library")}))
+        self.assertIsNotNone(soup.find("a", {"href": reverse("pages:library")}))
         self.assertNotIn("Solutions", soup.get_text(" ", strip=True))
-        self.assertNotIn("Discover", soup.get_text(" ", strip=True))
+        self.assertIn("Discover", soup.get_text(" ", strip=True))
         self.assertNotIn("Developers", soup.get_text(" ", strip=True))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)

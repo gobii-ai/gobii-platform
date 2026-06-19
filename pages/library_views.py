@@ -18,6 +18,7 @@ from pages.public_template_urls import (
     public_template_category_slug_aliases_from_label,
     public_template_category_slug_from_label,
     public_template_detail_path,
+    public_template_route_slug,
 )
 
 LIBRARY_CACHE_KEY = "pages:library:payload:v1"
@@ -35,9 +36,13 @@ def _normalize_category(value: str | None) -> str:
 def _library_queryset():
     return (
         PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(public_profile__isnull=False, organization__isnull=True, is_active=True)
-        .exclude(slug="")
+        .filter(organization__isnull=True, is_active=True)
+        .filter(Q(slug__gt="") | Q(code__gt=""))
     )
+
+
+def _official_template_filter():
+    return Q(is_official=True) | Q(public_profile__isnull=True)
 
 
 def _normalized_category_expression():
@@ -72,7 +77,7 @@ def _parse_query_bool(value: str | None) -> bool:
 def _build_top_categories(*, official_only: bool = False) -> list[dict[str, Any]]:
     queryset = _library_queryset()
     if official_only:
-        queryset = queryset.filter(is_official=True)
+        queryset = queryset.filter(_official_template_filter())
     category_rows = (
         queryset.annotate(normalized_category=_normalized_category_expression())
         .values("normalized_category")
@@ -198,30 +203,28 @@ def _build_library_payload(
         normalized_category=_normalized_category_expression(),
     )
     library_total_agents = library_queryset.count()
-    official_total_agents = library_queryset.filter(is_official=True).count()
+    official_total_agents = library_queryset.filter(_official_template_filter()).count()
     library_total_likes = (
         PersistentAgentTemplateLike.objects.filter(
-            template__public_profile__isnull=False,
             template__organization__isnull=True,
             template__is_active=True,
         )
-        .exclude(template__slug="")
+        .filter(Q(template__slug__gt="") | Q(template__code__gt=""))
         .count()
     )
     official_total_likes = (
         PersistentAgentTemplateLike.objects.filter(
-            template__public_profile__isnull=False,
             template__organization__isnull=True,
             template__is_active=True,
-            template__is_official=True,
         )
-        .exclude(template__slug="")
+        .filter(Q(template__slug__gt="") | Q(template__code__gt=""))
+        .filter(Q(template__is_official=True) | Q(template__public_profile__isnull=True))
         .count()
     )
 
     filtered_queryset = library_queryset
     if official_only:
-        filtered_queryset = filtered_queryset.filter(is_official=True)
+        filtered_queryset = filtered_queryset.filter(_official_template_filter())
 
     if normalized_category:
         filtered_queryset = filtered_queryset.filter(
@@ -270,10 +273,10 @@ def _build_library_payload(
             "description": template.description,
             "category": template.normalized_category,
             "categorySlug": public_template_category_slug(template),
-            "publicProfileHandle": template.public_profile.handle,
-            "templateSlug": template.slug,
+            "publicProfileHandle": template.public_profile.handle if template.public_profile_id else "",
+            "templateSlug": public_template_route_slug(template),
             "templateUrl": public_template_detail_path(template),
-            "isOfficial": template.is_official,
+            "isOfficial": template.is_official or not template.public_profile_id,
             "likeCount": template.like_count,
             "isLiked": template.is_liked,
         }
@@ -400,14 +403,8 @@ class LibraryAgentLikeAPIView(View):
             return JsonResponse({"error": "agentId must be a valid UUID."}, status=400)
 
         template = (
-            PersistentAgentTemplate.objects
-            .filter(
-                id=agent_uuid,
-                public_profile__isnull=False,
-                organization__isnull=True,
-                is_active=True,
-            )
-            .exclude(slug="")
+            _library_queryset()
+            .filter(id=agent_uuid)
             .first()
         )
         if template is None:
