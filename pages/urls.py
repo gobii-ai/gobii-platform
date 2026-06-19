@@ -4,6 +4,7 @@ from django.conf import settings
 from django.shortcuts import redirect
 
 from proprietary.views import BlogSitemap
+from .library_views import LibraryAgentLikeAPIView, LibraryAgentsAPIView, LibraryView
 from .views import (
     MarkdownPageView,
     DocsIndexRedirectView,
@@ -15,6 +16,7 @@ from .views import (
     StaticViewSitemap,
     ComparisonsSitemap,
     PublicTemplateSitemap,
+    PublicTemplateCategorySitemap,
     LandingRedirectView,
     LandingLaunchView,
     ClearSignupTrackingView,
@@ -63,6 +65,7 @@ if settings.GOBII_PROPRIETARY_MODE:
     sitemaps['blog'] = BlogSitemap
 
 sitemaps['comparisons'] = ComparisonsSitemap
+sitemaps['public_template_categories'] = PublicTemplateCategorySitemap
 sitemaps['public_templates'] = PublicTemplateSitemap
 sitemaps['solutions'] = SolutionsSitemap
 
@@ -72,14 +75,14 @@ urlpatterns = [
     path("", HomePage.as_view(), name="home"),
     path("install.sh", InstallScriptView.as_view(), name="install_script"),
     path("manifest.json", WebManifestView.as_view(), name="web_manifest"),
-    path("libary/", _home_redirect),
-    path("library/", _home_redirect, name="library"),
-    path("library/<slug:category_slug>/", _home_redirect, name="library_category"),
+    path("libary/", RedirectView.as_view(pattern_name="pages:library", permanent=True)),
+    path("library/", LibraryView.as_view(), name="library"),
+    path("library/<slug:category_slug>/", LibraryView.as_view(), name="library_category"),
     path("library/<slug:category_slug>/<slug:template_slug>/", PublicTemplateDetailView.as_view(), name="public_template_detail"),
     path("library/<slug:category_slug>/<slug:template_slug>/hire/", PublicTemplateHireView.as_view(), name="public_template_hire"),
     path("library/<slug:category_slug>/<slug:template_slug>/spawn/", PublicTemplateLaunchView.as_view(), name="public_template_launch"),
-    path("api/library/agents/", _home_redirect, name="library_agents_api"),
-    path("api/library/agents/like/", _home_redirect, name="library_agent_like_api"),
+    path("api/library/agents/", LibraryAgentsAPIView.as_view(), name="library_agents_api"),
+    path("api/library/agents/like/", LibraryAgentLikeAPIView.as_view(), name="library_agent_like_api"),
     path("api/homepage/csrf-token/", HomepageCsrfTokenView.as_view(), name="homepage_csrf_token"),
     path("api/homepage/integrations/search/", HomepageIntegrationsSearchView.as_view(), name="homepage_integrations_search"),
     path("spawn-agent/", HomeAgentSpawnView.as_view(), name="home_agent_spawn"),

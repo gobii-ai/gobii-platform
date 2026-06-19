@@ -3667,6 +3667,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
         # List of all static view names that should be included in the sitemap
         items = [
             'pages:home',
+            'pages:library',
         ]
         # Proprietary pages live behind the hosted marketing site; community builds expose docs instead.
         if settings.GOBII_PROPRIETARY_MODE:
@@ -3744,13 +3745,14 @@ class PublicTemplateCategorySitemap(sitemaps.Sitemap):
     priority = 0.65
 
     def items(self):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return []
         category_values = (
             PersistentAgentTemplate.objects.filter(
-                public_profile__isnull=False,
                 organization__isnull=True,
                 is_active=True,
             )
-            .exclude(slug="")
+            .filter(Q(slug__gt="") | Q(code__gt=""))
             .values_list("category", flat=True)
         )
         return sorted({
