@@ -202,24 +202,14 @@ def _build_library_payload(
     library_queryset = _library_queryset().annotate(
         normalized_category=_normalized_category_expression(),
     )
+    official_queryset = library_queryset.filter(_official_template_filter())
     library_total_agents = library_queryset.count()
-    official_total_agents = library_queryset.filter(_official_template_filter()).count()
+    official_total_agents = official_queryset.count()
     library_total_likes = (
-        PersistentAgentTemplateLike.objects.filter(
-            template__organization__isnull=True,
-            template__is_active=True,
-        )
-        .filter(Q(template__slug__gt="") | Q(template__code__gt=""))
-        .count()
+        PersistentAgentTemplateLike.objects.filter(template__in=library_queryset).count()
     )
     official_total_likes = (
-        PersistentAgentTemplateLike.objects.filter(
-            template__organization__isnull=True,
-            template__is_active=True,
-        )
-        .filter(Q(template__slug__gt="") | Q(template__code__gt=""))
-        .filter(Q(template__is_official=True) | Q(template__public_profile__isnull=True))
-        .count()
+        PersistentAgentTemplateLike.objects.filter(template__in=official_queryset).count()
     )
 
     filtered_queryset = library_queryset
