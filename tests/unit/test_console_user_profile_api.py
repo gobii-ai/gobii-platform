@@ -118,6 +118,28 @@ class ConsoleUserProfileApiTests(TestCase):
         )
         self.assertEqual(response.json()["profile"]["timezone"], "Europe/London")
 
+    def test_patch_rejects_empty_payload(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("nonFieldErrors", response.json()["errors"])
+
+    def test_patch_rejects_top_level_profile_fields(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"firstName": "Updated"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("nonFieldErrors", response.json()["errors"])
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Profile")
+
     def test_patch_updates_custom_instructions(self):
         response = self.client.patch(
             self.url,

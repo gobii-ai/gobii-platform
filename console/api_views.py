@@ -607,11 +607,18 @@ class UserProfileAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest(str(exc))
 
         custom_instructions_supplied = CUSTOM_INSTRUCTIONS_FIELD in payload
-        profile_supplied = (
-            "profile" in payload
-            or any(field in payload for field in ("firstName", "first_name", "lastName", "last_name", "timezone"))
-            or not custom_instructions_supplied
-        )
+        profile_supplied = "profile" in payload
+        unknown_fields = sorted(key for key in payload if key not in {"profile", CUSTOM_INSTRUCTIONS_FIELD})
+        if unknown_fields:
+            return JsonResponse(
+                {"errors": {"nonFieldErrors": [f"Unsupported top-level fields: {', '.join(unknown_fields)}"]}},
+                status=400,
+            )
+        if not profile_supplied and not custom_instructions_supplied:
+            return JsonResponse(
+                {"errors": {"nonFieldErrors": ["Provide profile or customInstructions."]}},
+                status=400,
+            )
 
         normalized_instructions = None
         if custom_instructions_supplied:
@@ -621,7 +628,7 @@ class UserProfileAPIView(ApiLoginRequiredMixin, View):
                 return JsonResponse({"errors": {CUSTOM_INSTRUCTIONS_FIELD: [str(exc)]}}, status=400)
 
         if profile_supplied:
-            raw_profile = payload.get("profile", payload)
+            raw_profile = payload["profile"]
             if not isinstance(raw_profile, dict):
                 return JsonResponse({"errors": {"profile": ["Profile must be an object."]}}, status=400)
 
