@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Building2, FileText, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
+import { Bot, Building2, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
 import {
   createOrganizationTemplate,
@@ -25,6 +25,7 @@ import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { ModalForm } from '../components/common/ModalForm'
+import { CustomInstructionsSection } from '../components/settings/CustomInstructionsSection'
 import { navigateWithinApp } from '../util/appNavigation'
 
 type ConfirmAction = {
@@ -328,10 +329,6 @@ export function OrganizationScreen() {
   const [nameMessage, setNameMessage] = useState<string | null>(null)
   const [nameErrors, setNameErrors] = useState<string[]>([])
   const [savingName, setSavingName] = useState(false)
-  const [customInstructionsDraft, setCustomInstructionsDraft] = useState('')
-  const [customInstructionsMessage, setCustomInstructionsMessage] = useState<string | null>(null)
-  const [customInstructionsErrors, setCustomInstructionsErrors] = useState<string[]>([])
-  const [savingCustomInstructions, setSavingCustomInstructions] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('')
   const [inviteErrors, setInviteErrors] = useState<string[]>([])
@@ -352,9 +349,8 @@ export function OrganizationScreen() {
   useEffect(() => {
     if (data) {
       setNameDraft(data.organization.name)
-      setCustomInstructionsDraft(data.organization.customInstructions)
     }
-  }, [data?.organization.name, data?.organization.customInstructions])
+  }, [data?.organization.name])
 
   useEffect(() => {
     if (!inviteRole && data?.roles[0]) {
@@ -403,30 +399,10 @@ export function OrganizationScreen() {
     }
   }
 
-  const handleCustomInstructionsSubmit = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!data) {
-      return
-    }
-    const normalizedInstructions = customInstructionsDraft.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
-    if (normalizedInstructions.length > data.organization.customInstructionsMaxChars) {
-      setCustomInstructionsErrors([
-        `Custom instructions must be ${data.organization.customInstructionsMaxChars} characters or fewer.`,
-      ])
-      return
-    }
-    setSavingCustomInstructions(true)
-    setCustomInstructionsErrors([])
-    setCustomInstructionsMessage(null)
-    try {
-      const nextData = await updateCurrentOrganizationCustomInstructions(normalizedInstructions)
-      updateCachedData(nextData)
-      setCustomInstructionsMessage('Custom instructions updated.')
-    } catch (err) {
-      setCustomInstructionsErrors(formatErrors(err, 'Unable to update custom instructions.'))
-    } finally {
-      setSavingCustomInstructions(false)
-    }
+  const handleCustomInstructionsSave = async (normalizedInstructions: string) => {
+    const nextData = await updateCurrentOrganizationCustomInstructions(normalizedInstructions)
+    updateCachedData(nextData)
+    return nextData.organization.customInstructions
   }
 
   const handleInviteSubmit = async (event: FormEvent) => {
@@ -557,9 +533,6 @@ export function OrganizationScreen() {
   const canManageMembers = data.viewer.canManageMembers
   const canEditOrganization = data.viewer.canEditOrganization
   const canEditCustomInstructions = data.viewer.canEditCustomInstructions
-  const normalizedCustomInstructionsDraft = customInstructionsDraft.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
-  const customInstructionsChanged = normalizedCustomInstructionsDraft !== data.organization.customInstructions
-  const customInstructionsOverLimit = normalizedCustomInstructionsDraft.length > data.organization.customInstructionsMaxChars
   const availableSeats = data.billing?.seatsAvailable ?? null
   const noSeatsAvailable = availableSeats !== null && availableSeats <= 0
   const canInviteSolutionsPartnerWithoutSeats = data.roles.some((roleOption) => roleOption.value === SOLUTIONS_PARTNER_ROLE)
@@ -633,57 +606,15 @@ export function OrganizationScreen() {
         </form>
       </section>
 
-      <section className="profile-screen__section">
-        <div className="profile-screen__section-header">
-          <div className="profile-screen__section-icon" aria-hidden="true">
-            <FileText className="h-4 w-4" />
-          </div>
-          <div>
-            <h2>Custom Instructions</h2>
-            <p>{normalizedCustomInstructionsDraft.length}/{data.organization.customInstructionsMaxChars} characters</p>
-          </div>
-        </div>
-        <form onSubmit={handleCustomInstructionsSubmit} className="organization-screen__custom-instructions-form">
-          <div className="profile-screen__form-grid">
-            <label className="profile-screen__field profile-screen__field--wide">
-              <span>Instructions</span>
-              <textarea
-                value={customInstructionsDraft}
-                onChange={(event) => {
-                  setCustomInstructionsDraft(event.target.value)
-                  if (customInstructionsErrors.length) {
-                    setCustomInstructionsErrors([])
-                  }
-                  if (customInstructionsMessage) {
-                    setCustomInstructionsMessage(null)
-                  }
-                }}
-                disabled={!canEditCustomInstructions || savingCustomInstructions}
-                className="organization-screen__custom-instructions-textarea"
-                placeholder="Follow the organization's tone, policies, and operating preferences."
-              />
-              {customInstructionsErrors.map((message) => (
-                <em key={message}>{message}</em>
-              ))}
-            </label>
-          </div>
-          <div className="profile-screen__actions">
-            {canEditCustomInstructions ? (
-              <button
-                type="submit"
-                className="profile-screen__button profile-screen__button--primary"
-                disabled={savingCustomInstructions || !customInstructionsChanged || customInstructionsOverLimit}
-              >
-                <Save className="h-4 w-4" aria-hidden="true" />
-                {savingCustomInstructions ? 'Saving...' : 'Save Instructions'}
-              </button>
-            ) : null}
-            {customInstructionsMessage ? (
-              <p className="profile-screen__feedback profile-screen__feedback--success">{customInstructionsMessage}</p>
-            ) : null}
-          </div>
-        </form>
-      </section>
+      <CustomInstructionsSection
+        value={data.organization.customInstructions}
+        maxChars={data.organization.customInstructionsMaxChars}
+        canEdit={canEditCustomInstructions}
+        placeholder="Follow the organization's tone, policies, and operating preferences."
+        successMessage="Custom instructions updated."
+        onSave={handleCustomInstructionsSave}
+        formatErrorMessages={(err) => formatErrors(err, 'Unable to update custom instructions.')}
+      />
 
       <section className="profile-screen__section">
         <div className="profile-screen__section-header organization-screen__section-header">

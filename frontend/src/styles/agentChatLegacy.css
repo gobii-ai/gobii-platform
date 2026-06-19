@@ -9550,14 +9550,12 @@
   gap: 0.85rem;
 }
 
-.profile-screen__custom-instructions-form,
-.organization-screen__custom-instructions-form {
+.profile-screen__custom-instructions-form {
   display: grid;
   gap: 0.85rem;
 }
 
-.profile-screen__custom-instructions-textarea,
-.organization-screen__custom-instructions-textarea {
+.profile-screen__custom-instructions-textarea {
   min-height: 9rem;
 }
 
