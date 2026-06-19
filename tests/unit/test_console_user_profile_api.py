@@ -8,7 +8,11 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
-from api.models import UserPhoneNumber, UserPreference
+from api.models import AgentOwnerCustomInstructions, Organization, UserPhoneNumber, UserPreference
+from api.services.agent_owner_custom_instructions import (
+    save_custom_instructions_for_organization_id,
+    save_custom_instructions_for_user_id,
+)
 
 
 @tag("batch_console_api")
@@ -73,6 +77,21 @@ class ConsoleUserProfileApiTests(TestCase):
         self.assertTrue(payload["phone"]["isVerified"])
         self.assertIsNotNone(payload["phone"]["verifiedAt"])
 
+    @override_settings(AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS=123)
+    def test_get_returns_custom_instructions_settings(self):
+        AgentOwnerCustomInstructions.objects.create(
+            user=self.user,
+            instructions="Use my concise operating style.",
+            updated_by=self.user,
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["customInstructions"], "Use my concise operating style.")
+        self.assertEqual(payload["customInstructionsMaxChars"], 123)
+
     def test_patch_updates_profile_and_timezone(self):
         response = self.client.patch(
             self.url,
@@ -99,6 +118,70 @@ class ConsoleUserProfileApiTests(TestCase):
         )
         self.assertEqual(response.json()["profile"]["timezone"], "Europe/London")
 
+    def test_patch_rejects_empty_payload(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("nonFieldErrors", response.json()["errors"])
+
+    def test_patch_rejects_top_level_profile_fields(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"firstName": "Updated"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("nonFieldErrors", response.json()["errors"])
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Profile")
+
+    def test_patch_updates_custom_instructions(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"customInstructions": "  Prefer short weekly summaries.\r\nInclude blockers.  "}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        instructions = AgentOwnerCustomInstructions.objects.get(user=self.user)
+        self.assertEqual(instructions.instructions, "Prefer short weekly summaries.\nInclude blockers.")
+        self.assertEqual(instructions.updated_by, self.user)
+        self.assertEqual(response.json()["customInstructions"], "Prefer short weekly summaries.\nInclude blockers.")
+
+    @override_settings(AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS=5)
+    def test_patch_rejects_over_limit_custom_instructions(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"customInstructions": "123456"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("customInstructions", response.json()["errors"])
+        self.assertFalse(AgentOwnerCustomInstructions.objects.filter(user=self.user).exists())
+
+    def test_patch_empty_custom_instructions_clears_existing_row(self):
+        AgentOwnerCustomInstructions.objects.create(
+            user=self.user,
+            instructions="Existing personal instructions",
+            updated_by=self.user,
+        )
+
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"customInstructions": " \r\n "}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(AgentOwnerCustomInstructions.objects.filter(user=self.user).exists())
+        self.assertEqual(response.json()["customInstructions"], "")
+
     def test_patch_rejects_invalid_timezone(self):
         response = self.client.patch(
             self.url,
@@ -116,6 +199,47 @@ class ConsoleUserProfileApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("timezone", response.json()["errors"])
+
+
+@tag("batch_console_api")
+class AgentOwnerCustomInstructionsServiceTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="instructions-owner",
+            email="instructions-owner@example.com",
+            password="password123",
+        )
+        self.other_user = user_model.objects.create_user(
+            username="instructions-other",
+            email="instructions-other@example.com",
+            password="password123",
+        )
+        self.org = Organization.objects.create(
+            name="Instructions Org",
+            slug="instructions-org",
+            created_by=self.user,
+        )
+
+    def test_save_requires_valid_owner_id_before_delete(self):
+        personal_instructions = AgentOwnerCustomInstructions.objects.create(
+            user=self.other_user,
+            instructions="Keep my personal instructions.",
+            updated_by=self.other_user,
+        )
+        org_instructions = AgentOwnerCustomInstructions.objects.create(
+            organization=self.org,
+            instructions="Keep the org instructions.",
+            updated_by=self.user,
+        )
+
+        with self.assertRaises(ValueError):
+            save_custom_instructions_for_organization_id(None, instructions="", updated_by=self.user)
+        with self.assertRaises(ValueError):
+            save_custom_instructions_for_user_id(None, instructions="", updated_by=self.user)
+
+        self.assertTrue(AgentOwnerCustomInstructions.objects.filter(pk=personal_instructions.pk).exists())
+        self.assertTrue(AgentOwnerCustomInstructions.objects.filter(pk=org_instructions.pk).exists())
 
 
 @tag("batch_console_api")

@@ -151,6 +151,13 @@ from api.encryption import SecretsEncryption
 from api.agent.tasks import process_agent_events_task
 from api.services.system_settings import get_max_file_size
 from api.services.owner_execution_pause import get_owner_account_pause_state
+from api.services.agent_owner_custom_instructions import (
+    CUSTOM_INSTRUCTIONS_FIELD,
+    CustomInstructionsValidationError,
+    get_custom_instructions_for_user_id,
+    normalize_custom_instructions,
+    save_custom_instructions_for_user_id,
+)
 from api.services.signup_preview import (
     resume_signup_preview_agent_if_eligible,
 )
@@ -561,6 +568,8 @@ def _serialize_user_profile_payload(request: HttpRequest) -> dict[str, Any]:
             "timezone": form.fields["timezone"].initial or "",
         },
         "timezoneOptions": _serialize_user_profile_options(form),
+        "customInstructions": get_custom_instructions_for_user_id(user.id),
+        "customInstructionsMaxChars": settings.AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS,
         "referralLink": ReferralService.get_referral_link(
             user,
             base_url=base_url,
@@ -590,27 +599,56 @@ class UserProfileAPIView(ApiLoginRequiredMixin, View):
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         return JsonResponse(_serialize_user_profile_payload(request))
 
+    @transaction.atomic
     def patch(self, request: HttpRequest, *args: Any, **kwargs: Any):
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        raw_profile = payload.get("profile", payload)
-        if not isinstance(raw_profile, dict):
-            return JsonResponse({"errors": {"profile": ["Profile must be an object."]}}, status=400)
+        custom_instructions_supplied = CUSTOM_INSTRUCTIONS_FIELD in payload
+        profile_supplied = "profile" in payload
+        unknown_fields = sorted(key for key in payload if key not in {"profile", CUSTOM_INSTRUCTIONS_FIELD})
+        if unknown_fields:
+            return JsonResponse(
+                {"errors": {"nonFieldErrors": [f"Unsupported top-level fields: {', '.join(unknown_fields)}"]}},
+                status=400,
+            )
+        if not profile_supplied and not custom_instructions_supplied:
+            return JsonResponse(
+                {"errors": {"nonFieldErrors": ["Provide profile or customInstructions."]}},
+                status=400,
+            )
 
-        current_form = UserProfileForm(instance=request.user)
-        form_data = {
-            "first_name": raw_profile.get("firstName", raw_profile.get("first_name", request.user.first_name or "")),
-            "last_name": raw_profile.get("lastName", raw_profile.get("last_name", request.user.last_name or "")),
-            "timezone": raw_profile.get("timezone", current_form.fields["timezone"].initial or ""),
-        }
-        form = UserProfileForm(form_data, instance=request.user)
-        if not form.is_valid():
-            return JsonResponse({"errors": _serialize_profile_form_errors(form)}, status=400)
+        normalized_instructions = None
+        if custom_instructions_supplied:
+            try:
+                normalized_instructions = normalize_custom_instructions(payload.get(CUSTOM_INSTRUCTIONS_FIELD))
+            except CustomInstructionsValidationError as exc:
+                return JsonResponse({"errors": {CUSTOM_INSTRUCTIONS_FIELD: [str(exc)]}}, status=400)
 
-        form.save()
+        if profile_supplied:
+            raw_profile = payload["profile"]
+            if not isinstance(raw_profile, dict):
+                return JsonResponse({"errors": {"profile": ["Profile must be an object."]}}, status=400)
+
+            current_form = UserProfileForm(instance=request.user)
+            form_data = {
+                "first_name": raw_profile.get("firstName", raw_profile.get("first_name", request.user.first_name or "")),
+                "last_name": raw_profile.get("lastName", raw_profile.get("last_name", request.user.last_name or "")),
+                "timezone": raw_profile.get("timezone", current_form.fields["timezone"].initial or ""),
+            }
+            form = UserProfileForm(form_data, instance=request.user)
+            if not form.is_valid():
+                return JsonResponse({"errors": _serialize_profile_form_errors(form)}, status=400)
+            form.save()
+
+        if custom_instructions_supplied and normalized_instructions is not None:
+            save_custom_instructions_for_user_id(
+                request.user.id,
+                instructions=normalized_instructions,
+                updated_by=request.user,
+            )
         return JsonResponse(_serialize_user_profile_payload(request))
 
 
@@ -8519,4 +8557,3 @@ class AgentWebSessionEndAPIView(ApiLoginRequiredMixin, View):
         )
 
         return _session_response(result)
-

@@ -22,14 +22,15 @@ import {
 import type { PhoneState } from '../../api/agentSetup'
 import { HttpError } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
-import { updateUserProfile } from '../../api/userProfile'
+import { updateUserCustomInstructions, updateUserProfile } from '../../api/userProfile'
 import type { UserProfileFormState, UserProfilePayload } from '../../api/userProfile'
+import { CustomInstructionsSection } from '../../components/settings/CustomInstructionsSection'
 
 type ProfileScreenProps = {
   initialData: UserProfilePayload
 }
 
-type ProfileFieldErrors = Partial<Record<keyof UserProfileFormState | 'profile' | 'nonFieldErrors', string[]>>
+type ProfileFieldErrors = Partial<Record<keyof UserProfileFormState | 'profile' | 'customInstructions' | 'nonFieldErrors', string[]>>
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null
@@ -54,6 +55,12 @@ function extractProfileErrors(error: unknown): ProfileFieldErrors {
 function firstError(errors: ProfileFieldErrors, field: keyof ProfileFieldErrors): string | null {
   const value = errors[field]
   return value?.[0] ?? null
+}
+
+function formatCustomInstructionsErrors(error: unknown): string[] {
+  const fieldErrors = extractProfileErrors(error)
+  const customError = firstError(fieldErrors, 'customInstructions')
+  return [customError || safeErrorMessage(error)]
 }
 
 function formatDateTime(value: string | null): string | null {
@@ -346,6 +353,12 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
     }
   }, [draft])
 
+  const handleCustomInstructionsSave = useCallback(async (normalizedInstructions: string) => {
+    const nextData = await updateUserCustomInstructions(normalizedInstructions)
+    setData(nextData)
+    return nextData.customInstructions
+  }, [])
+
   const handleCopyReferral = useCallback(async () => {
     setCopyMessage(null)
     try {
@@ -427,6 +440,14 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
           {saveError ? <p className="profile-screen__feedback profile-screen__feedback--error">{saveError}</p> : null}
         </div>
       </section>
+
+      <CustomInstructionsSection
+        value={data.customInstructions}
+        maxChars={data.customInstructionsMaxChars}
+        placeholder="Follow my tone, preferences, and operating style."
+        onSave={handleCustomInstructionsSave}
+        formatErrorMessages={formatCustomInstructionsErrors}
+      />
 
       <section className="profile-screen__section">
         <div className="profile-screen__section-header">
