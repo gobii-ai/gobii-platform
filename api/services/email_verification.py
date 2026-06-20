@@ -47,12 +47,51 @@ def has_verified_email(user) -> bool:
     return EmailAddress.objects.filter(user=user, verified=True).exists()
 
 
+def has_verified_email_address(user, email: str | None) -> bool:
+    normalized_email = str(email or "").strip()
+    if not normalized_email:
+        return False
+    if user is None:
+        return False
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    return EmailAddress.objects.filter(
+        user=user,
+        email__iexact=normalized_email,
+        verified=True,
+    ).exists()
+
+
 def get_email_address_for_verification(user) -> EmailAddress | None:
     from allauth.account.internal.flows.email_verification import (
         get_address_for_user,
     )
 
     return get_address_for_user(user)
+
+
+def get_user_email_address_for_verification(user) -> EmailAddress | None:
+    email = str(getattr(user, "email", "") or "").strip()
+    if not email:
+        return None
+
+    address = (
+        EmailAddress.objects.filter(user=user, email__iexact=email)
+        .order_by("-primary", "-verified")
+        .first()
+    )
+    if address is not None:
+        return address
+
+    primary_exists = EmailAddress.objects.filter(user=user, primary=True).exists()
+    return EmailAddress.objects.create(
+        user=user,
+        email=email,
+        verified=False,
+        primary=not primary_exists,
+    )
 
 
 def send_email_verification(request, email_address: EmailAddress) -> bool:

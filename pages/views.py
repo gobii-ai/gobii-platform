@@ -48,12 +48,15 @@ from api.services.trial_abuse import (
 )
 from api.services.trial_promos import (
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
+    TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
     TrialPromoError,
     build_trial_promo_checkout_metadata,
     build_trial_promo_metadata,
     can_user_start_trial_promo,
     find_active_trial_promo_by_code,
     get_session_trial_promo,
+    is_user_email_allowed_for_trial_promo,
+    is_user_email_verified_for_trial_promo,
     mark_trial_promo_redemption_checkout_started,
     mark_trial_promo_redemption_failed,
     reserve_trial_promo_redemption,
@@ -2711,6 +2714,19 @@ class SpecialAccessView(TemplateView):
                     status__in=promo.redemptions.model.COUNTED_STATUSES,
                 ).count()
                 redemptions_remaining = max(promo.max_redemptions - used_count, 0)
+        email_verification_required = False
+        email_verification_address = ""
+        if (
+            promo is not None
+            and promo.email_allowlist_enabled
+            and self.request.user.is_authenticated
+            and is_user_email_allowed_for_trial_promo(user=self.request.user, promo=promo)
+            and not is_user_email_verified_for_trial_promo(user=self.request.user, promo=promo)
+        ):
+            email_verification_required = True
+            email_verification_address = TrialPromo.normalize_allowed_email(
+                self.request.user.email,
+            )
         context.update(
             {
                 "promo": promo,
@@ -2718,9 +2734,14 @@ class SpecialAccessView(TemplateView):
                 "plan_label": plan_label,
                 "redemptions_remaining": redemptions_remaining,
                 "start_url": reverse("pages:special_access_start"),
+                "email_verification_required": email_verification_required,
+                "email_verification_address": email_verification_address,
             }
         )
         return context
+
+
+TRIAL_PROMO_RESEND_VERIFICATION_ACTION = "resend_email_verification"
 
 
 class SpecialAccessStartView(View):
@@ -2757,11 +2778,77 @@ class SpecialAccessStartView(View):
                 login_url=_cta_auth_url_with_utms(request),
             )
 
+        if request.POST.get("action") == TRIAL_PROMO_RESEND_VERIFICATION_ACTION:
+            return _resend_special_access_email_verification(request, promo)
+
         try:
             return _start_trial_promo_checkout(request, promo)
         except TrialPromoError as exc:
             messages.error(request, exc.message)
             return redirect("pages:special_access")
+
+
+def _resend_special_access_email_verification(request, promo: TrialPromo):
+    from smtplib import SMTPException
+
+    from allauth.core.exceptions import ImmediateHttpResponse
+    from anymail.exceptions import AnymailError
+
+    from api.services.email_verification import (
+        get_user_email_address_for_verification,
+        send_email_verification,
+    )
+
+    if not promo.email_allowlist_enabled:
+        messages.info(request, "This special trial does not require email verification.")
+        return redirect("pages:special_access")
+    if not is_user_email_allowed_for_trial_promo(user=request.user, promo=promo):
+        messages.error(request, "This invitation is tied to a different email address.")
+        return redirect("pages:special_access")
+    if is_user_email_verified_for_trial_promo(user=request.user, promo=promo):
+        messages.success(request, "Your email is already verified. You can start your trial now.")
+        return redirect("pages:special_access")
+
+    email_address = get_user_email_address_for_verification(request.user)
+    normalized_user_email = TrialPromo.normalize_allowed_email(request.user.email)
+    if (
+        email_address is None
+        or TrialPromo.normalize_allowed_email(email_address.email) != normalized_user_email
+    ):
+        messages.error(
+            request,
+            "We couldn't find this email address on your account. Please update your account email and try again.",
+        )
+        return redirect("pages:special_access")
+
+    try:
+        sent = send_email_verification(request, email_address)
+    except ImmediateHttpResponse as exc:
+        response = exc.response
+        if response.status_code == 429:
+            messages.warning(
+                request,
+                "Too many verification email requests. Please try again later.",
+            )
+            return redirect("pages:special_access")
+        raise
+    except (AnymailError, OSError, SMTPException):
+        logger.exception(
+            "Failed to send special access email verification for user %s",
+            request.user.id,
+        )
+        messages.error(request, "Failed to send verification email. Please try again later.")
+        return redirect("pages:special_access")
+
+    if not sent:
+        messages.warning(
+            request,
+            "A verification email was already sent recently. Please check your inbox or try again later.",
+        )
+        return redirect("pages:special_access")
+
+    messages.success(request, f"Verification email sent to {email_address.email}.")
+    return redirect("pages:special_access")
 
 
 def _start_trial_promo_checkout(request, promo: TrialPromo):
@@ -2778,6 +2865,11 @@ def _start_trial_promo_checkout(request, promo: TrialPromo):
         message = "This account is not eligible for this special trial."
         if decision.reason == TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED:
             message = "This invitation is tied to a different email address."
+        elif decision.reason == TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED:
+            message = (
+                "Please verify your email address to start this special trial. "
+                "You can resend the verification email from this page."
+            )
         raise TrialPromoError(
             decision.reason or "trial_unavailable",
             message,

@@ -2,7 +2,9 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.http import HttpResponseRedirect
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -23,6 +25,7 @@ from api.services.trial_promos import (
     TRIAL_PROMO_META_PAYMENT_REQUIRED,
     TRIAL_PROMO_META_REDEMPTION_ID,
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
+    TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
     TrialPromoError,
     can_user_start_trial_promo,
     find_active_trial_promo_by_code,
@@ -139,10 +142,39 @@ class TrialPromoServiceTests(TestCase):
             promo=promo,
             normalized_email="TRIAL-PROMO@EXAMPLE.COM",
         )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
 
         decision = can_user_start_trial_promo(user=self.user, promo=promo)
 
         self.assertTrue(decision.allowed)
+
+    def test_email_allowlist_requires_matching_verified_email(self):
+        promo = _create_promo(
+            code="EMAIL-UNVERIFIED",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        TrialPromoAllowedEmail.objects.create(
+            promo=promo,
+            normalized_email=self.user.email,
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=False,
+            primary=True,
+        )
+
+        decision = can_user_start_trial_promo(user=self.user, promo=promo)
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED)
 
     def test_email_allowlist_is_scoped_per_campaign(self):
         first_promo = _create_promo(
@@ -165,6 +197,12 @@ class TrialPromoServiceTests(TestCase):
         TrialPromoAllowedEmail.objects.create(
             promo=second_promo,
             normalized_email=self.user.email,
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
         )
 
         self.assertTrue(can_user_start_trial_promo(user=self.user, promo=first_promo).allowed)
@@ -396,6 +434,103 @@ class SpecialAccessCheckoutTests(TestCase):
         mock_start_checkout.assert_called_once()
         _request, resolved_promo = mock_start_checkout.call_args.args
         self.assertEqual(resolved_promo, promo)
+
+    def test_email_allowlist_checkout_prompts_unverified_user_to_resend(self):
+        promo = _create_promo(
+            code="VERIFY-FIRST",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        TrialPromoAllowedEmail.objects.create(
+            promo=promo,
+            normalized_email=self.user.email,
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=False,
+            primary=True,
+        )
+        self.client.force_login(self.user)
+        self.client.post(reverse("pages:special_access"), {"code": "verify-first"})
+
+        response = self.client.post(reverse("pages:special_access_start"), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please verify your email address to start this special trial.")
+        self.assertContains(response, "Send verification email")
+        self.assertContains(response, self.user.email)
+
+    def test_special_access_resend_verification_sends_email_for_allowlisted_user(self):
+        promo = _create_promo(
+            code="VERIFY-RESEND",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        TrialPromoAllowedEmail.objects.create(
+            promo=promo,
+            normalized_email=self.user.email,
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=False,
+            primary=True,
+        )
+        self.client.force_login(self.user)
+        self.client.post(reverse("pages:special_access"), {"code": "verify-resend"})
+
+        response = self.client.post(
+            reverse("pages:special_access_start"),
+            {"action": "resend_email_verification"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f"Verification email sent to {self.user.email}.")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [self.user.email])
+
+    def test_special_access_resend_verification_targets_current_account_email(self):
+        self.user.email = "special-access-current@example.com"
+        self.user.save(update_fields=["email"])
+        promo = _create_promo(
+            code="VERIFY-CURRENT",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        TrialPromoAllowedEmail.objects.create(
+            promo=promo,
+            normalized_email=self.user.email,
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email="old-primary@example.com",
+            verified=True,
+            primary=True,
+        )
+        self.client.force_login(self.user)
+        self.client.post(reverse("pages:special_access"), {"code": "verify-current"})
+
+        response = self.client.post(
+            reverse("pages:special_access_start"),
+            {"action": "resend_email_verification"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [self.user.email])
+        self.assertTrue(
+            EmailAddress.objects.filter(
+                user=self.user,
+                email=self.user.email,
+                verified=False,
+            ).exists()
+        )
 
     @patch("pages.views._track_web_event_for_request")
     @patch("pages.views._emit_checkout_initiated_event")
