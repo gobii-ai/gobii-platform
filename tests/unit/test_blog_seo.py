@@ -67,6 +67,74 @@ class BlogSeoTests(TestCase):
         self.assertEqual(structured_data["image"], structured_data["thumbnailUrl"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_always_on_ai_agents_article_renders_with_local_svg(self):
+        response = self.client.get("/blog/what-are-always-on-ai-agents/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        title = soup.find("title").get_text(strip=True)
+        meta_description = soup.find("meta", attrs={"name": "description"})["content"]
+        first_image = soup.find("img", src="/static/images/blog/always-on-ai-agents-workflow.svg")
+
+        self.assertEqual(
+            title,
+            "Always-On AI Agents: Persistent AI Explained - Gobii",
+        )
+        self.assertLessEqual(len(title), 60)
+        self.assertEqual(len(meta_description), 155)
+        self.assertEqual(
+            [heading.get_text(" ", strip=True) for heading in soup.find_all("h1")],
+            ["What Are Always-On AI Agents?"],
+        )
+        self.assertIsNotNone(first_image)
+        self.assertEqual(first_image["width"], "1200")
+        self.assertEqual(first_image["height"], "630")
+        self.assertEqual(first_image["loading"], "eager")
+        self.assertEqual(first_image["fetchpriority"], "high")
+        self.assertContains(response, "Key Takeaways")
+        self.assertContains(response, "/blog/how-we-sandbox-ai-agents-in-production/")
+        self.assertNotContains(response, "lightbox2/2.11.5")
+        self.assertNotContains(response, "citation capsule")
+        self.assertIsNotNone(
+            soup.find("a", href="https://hai.stanford.edu/ai-index/2025-ai-index-report")
+        )
+
+        structured_data_scripts = [
+            json.loads(script.string)
+            for script in soup.find_all("script", type="application/ld+json")
+        ]
+        structured_data = structured_data_scripts[0]
+        self.assertEqual(structured_data["@type"], "BlogPosting")
+        self.assertEqual(structured_data["author"]["@type"], "Person")
+        self.assertEqual(structured_data["author"]["name"], "Andrew I. Christianson")
+        self.assertEqual(
+            structured_data["keywords"],
+            ["ai agents", "persistent agents", "automation", "memory", "webhooks"],
+        )
+        self.assertGreater(structured_data["wordCount"], 1800)
+
+        faq_schema = next(
+            script for script in structured_data_scripts if script.get("@type") == "FAQPage"
+        )
+        self.assertEqual(len(faq_schema["mainEntity"]), 5)
+        self.assertEqual(
+            faq_schema["mainEntity"][0]["name"],
+            "Are always-on AI agents autonomous?",
+        )
+        self.assertIn(
+            "scoped tools",
+            faq_schema["mainEntity"][0]["acceptedAnswer"]["text"],
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_blog_detail_only_loads_lightbox_when_content_uses_it(self):
+        response = self.client.get("/blog/project-management-test-case/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-lightbox="gobii-case"')
+        self.assertContains(response, "lightbox2/2.11.5")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_blog_post_uses_default_social_alt_for_default_social_image(self):
         response = self.client.get("/blog/how-we-sandbox-ai-agents-in-production/")
 
