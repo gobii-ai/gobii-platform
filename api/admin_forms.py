@@ -312,26 +312,40 @@ class TrialPromoAdminForm(forms.ModelForm):
             raise forms.ValidationError("Active until must be after active from.")
         return cleaned
 
+    def _append_allowed_emails(self, instance: TrialPromo) -> None:
+        allowed_emails = self.cleaned_data.get("allowed_emails_bulk") or []
+        if not allowed_emails:
+            return
+
+        TrialPromoAllowedEmail.objects.bulk_create(
+            [
+                TrialPromoAllowedEmail(
+                    promo=instance,
+                    normalized_email=email,
+                )
+                for email in allowed_emails
+            ],
+            ignore_conflicts=True,
+        )
+
     def save(self, commit: bool = True):
         instance: TrialPromo = super().save(commit=False)
         code = self.cleaned_data.get("code")
         if code:
             instance.set_code(code)
-        if commit:
-            instance.save()
-            self.save_m2m()
-            allowed_emails = self.cleaned_data.get("allowed_emails_bulk") or []
-            if allowed_emails:
-                TrialPromoAllowedEmail.objects.bulk_create(
-                    [
-                        TrialPromoAllowedEmail(
-                            promo=instance,
-                            normalized_email=email,
-                        )
-                        for email in allowed_emails
-                    ],
-                    ignore_conflicts=True,
-                )
+        if not commit:
+            save_m2m = self.save_m2m
+
+            def save_m2m_with_allowed_emails():
+                save_m2m()
+                self._append_allowed_emails(instance)
+
+            self.save_m2m = save_m2m_with_allowed_emails
+            return instance
+
+        instance.save()
+        self.save_m2m()
+        self._append_allowed_emails(instance)
         return instance
 
 
