@@ -1,10 +1,10 @@
 ---
 title: "Gobii Becomes the #1 Application on OpenRouter for DeepSeek V3.2 Within 72 Hours of Model Release"
 date: 2025-12-05
-description: "Gobii's AI agent platform becomes the #1 application on OpenRouter for DeepSeek V3.2 within 72 hours of model release."
+description: "Gobii became the top OpenRouter application for DeepSeek V3.2 within 72 hours, showing demand for cost-effective AI agent infrastructure."
 author: "The Gobii Team"
-seo_title: "Gobii Becomes the #1 Application on OpenRouter for DeepSeek V3.2 Within 72 Hours of Model Release"
-seo_description: "Gobii Becomes the #1 Application on OpenRouter for DeepSeek V3.2 Within 72 Hours of Model Release, powering agents with the most cost-effective high intelligence AI model."
+seo_title: "Gobii Tops OpenRouter for DeepSeek V3.2 Agents"
+seo_description: "Gobii became the top OpenRouter application for DeepSeek V3.2 within 72 hours, showing demand for cost-effective AI agent infrastructure."
 tags:
   - ai agents
   - deepseek
@@ -24,7 +24,7 @@ Gobii also became the **\#1 application for Mistral Large 3** in December. These
 
 "Teams are moving from experimentation toward operational adoption," said Andrew I. Christianson, founder of Gobii. "It's becoming feasible to do real-world work with fully open-source software paired with open-weights models, and enterprises are beginning to run these systems themselves."
 
-### **Why Gobii Is Different**
+## **Why Gobii Is Different**
 
 * **Open-core and self-hosted:** Fully inspectable, modifiable, and deployed inside private or regulated environments.
 
@@ -34,13 +34,13 @@ Gobii also became the **\#1 application for Mistral Large 3** in December. These
 
 * **High-assurance architecture:** Kubernetes-native, encrypted at rest, with strict access controls and human-in-the-loop oversight. For guidance on using DeepSeek securely in production, see [Turning DeepSeek 3.2 into Real Work, Not a New Attack Surface](/blog/turning-deepseek-into-real-work).
 
-### **How Gobii Began**
+## **How Gobii Began**
 
 Gobii was created to meet rising demand for AI systems that operate securely inside existing infrastructure and remain fully auditable. Christianson, a former DoD contractor who contributed to Apache NiFi, designed the platform to provide transparency, reliability, and predictable behavior.
 
 "In environments where correctness and traceability matter, black-box AI is a liability," Christianson said. "Gobii gives organizations full visibility into how their agents work and confidence that they'll behave consistently."
 
-### **About Gobii**
+## **About Gobii**
 
 Gobii is the open-core AI workforce platform that delivers autonomous, always-on AI agents for regulated and high-assurance environments. Built for transparency and control, Gobii can be deployed on-premise, in the cloud, or fully air-gapped. Backed by Open Core Ventures, Gobii provides organizations with AI systems that are auditable, secure, and aligned with their internal standards.
 

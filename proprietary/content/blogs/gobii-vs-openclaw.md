@@ -1,10 +1,10 @@
 ---
 title: "Gobii vs OpenClaw: Timeline, Architecture, and Always-On Agents"
 date: 2026-02-16
-description: "A deep technical comparison of Gobii and OpenClaw across always-on runtime design, webhooks, orchestration, memory, channels, browser execution, and security posture."
+description: "Compare Gobii and OpenClaw across always-on runtime design, webhooks, orchestration, memory, browser execution, and security architecture."
 author: "Andrew I. Christianson"
-seo_title: "Gobii vs OpenClaw: Architecture and Timeline Comparison"
-seo_description: "Detailed code-level comparison of Gobii and OpenClaw with commit timestamps, runtime model analysis, webhook architecture, orchestration patterns, and cloud-native security."
+seo_title: "Gobii vs OpenClaw: Architecture and Timeline"
+seo_description: "Compare Gobii and OpenClaw across always-on runtime design, webhooks, orchestration, memory, browser execution, and security architecture."
 image: "/static/images/blog/gobii-vs-openclaw-hero.jpg"
 tags:
   - gobii

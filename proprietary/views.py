@@ -47,6 +47,14 @@ from waffle import flag_is_active, get_waffle_flag_model
 logger = logging.getLogger(__name__)
 
 
+def _keyword_list(value):
+    if isinstance(value, str):
+        return [keyword.strip() for keyword in value.split(",") if keyword.strip()]
+    if isinstance(value, (list, tuple)):
+        return [str(keyword).strip() for keyword in value if str(keyword).strip()]
+    return []
+
+
 class ProprietaryModeRequiredMixin:
     """Raise 404 when proprietary mode is disabled."""
 
@@ -775,6 +783,7 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
                 "seo_description": seo_description,
                 "canonical_url": canonical_url,
                 "og_image_url": default_image_url,
+                "og_image_alt": "Gobii Blog",
                 "structured_data_json": json.dumps(structured_data, ensure_ascii=False),
             }
         )
@@ -815,9 +824,13 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             or post.get("summary")
             or "Read the latest update from the Gobii team."
         )
+        og_image_alt = post.get("image_alt") or f"{seo_title} image"
+        keywords = _keyword_list(post["meta"].get("keywords")) or _keyword_list(post["meta"].get("tags"))
 
         published_at = post.get("published_at")
         published_iso = published_at.isoformat() if published_at else None
+        updated_at = post.get("updated_at") or published_at
+        updated_iso = updated_at.isoformat() if updated_at else None
         author_name = post["meta"].get("author")
         if author_name:
             author_type = post["meta"].get("author_type")
@@ -850,12 +863,24 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                 "@id": canonical_url,
             },
             "image": og_image_url,
+            "thumbnailUrl": og_image_url,
             "url": canonical_url,
+            "inLanguage": "en-US",
+            "isPartOf": {
+                "@type": "Blog",
+                "name": "Gobii Blog",
+                "url": self.request.build_absolute_uri(reverse("proprietary:blog_index")),
+            },
         }
 
         if published_iso:
             structured_data["datePublished"] = published_iso
-            structured_data["dateModified"] = published_iso
+        if updated_iso:
+            structured_data["dateModified"] = updated_iso
+        if post.get("word_count"):
+            structured_data["wordCount"] = post["word_count"]
+        if keywords:
+            structured_data["keywords"] = keywords
 
         recent_posts = [p for p in get_all_blog_posts() if p["slug"] != post["slug"]][:3]
 
@@ -866,6 +891,7 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                 "seo_description": seo_description,
                 "canonical_url": canonical_url,
                 "og_image_url": og_image_url,
+                "og_image_alt": og_image_alt,
                 "recent_posts": recent_posts,
                 "structured_data_json": json.dumps(structured_data, ensure_ascii=False),
             }
