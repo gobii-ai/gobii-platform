@@ -182,6 +182,7 @@ def get_all_blog_posts():
             "title": title,
             "summary": post.get("summary"),
             "published_at": post.get("published_at"),
+            "updated_at": post.get("updated_at"),
             "meta": post["meta"],
             "url": f"/blog/{post['slug'].strip('/')}/",
         })

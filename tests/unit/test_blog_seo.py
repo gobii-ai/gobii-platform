@@ -53,3 +53,36 @@ class BlogSeoTests(TestCase):
         self.assertEqual(structured_data["keywords"], ["newsletter", "weekly", "product-updates"])
         self.assertGreater(structured_data["wordCount"], 0)
         self.assertEqual(structured_data["image"], structured_data["thumbnailUrl"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_blog_index_renders_topic_hub_metadata_and_structured_data(self):
+        response = self.client.get("/blog/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        title = soup.find("title").get_text(strip=True)
+        meta_description = soup.find("meta", attrs={"name": "description"})["content"]
+
+        self.assertEqual(
+            title,
+            "AI Agent Automation, Browser Agents, and MCP Blog - Gobii",
+        )
+        self.assertEqual(len(title), 57)
+        self.assertEqual(len(meta_description), 149)
+        self.assertEqual(
+            [heading.get_text(" ", strip=True) for heading in soup.find_all("h1")],
+            ["AI Agent Automation Blog"],
+        )
+        self.assertContains(response, "Explore by topic")
+        self.assertContains(response, "Production safety")
+        self.assertContains(response, "/blog/how-we-sandbox-ai-agents-in-production/")
+
+        structured_data = json.loads(soup.find("script", type="application/ld+json").string)
+        self.assertEqual(structured_data["@type"], "Blog")
+        self.assertEqual(structured_data["name"], "Gobii AI Agent Automation Blog")
+        self.assertEqual(structured_data["inLanguage"], "en-US")
+        self.assertIn("AI agent automation", structured_data["keywords"])
+        self.assertGreaterEqual(len(structured_data["about"]), 5)
+        self.assertGreaterEqual(len(structured_data["blogPost"]), 40)
+        self.assertIn("description", structured_data["blogPost"][0])
+        self.assertIn("author", structured_data["blogPost"][0])
