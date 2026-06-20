@@ -24,11 +24,11 @@
 {% endblock %}
 
 {% block content %}
-<section class="bg-[#183b57] text-white">
-  <div class="mx-auto max-w-5xl px-6 py-16 sm:py-20">
-    <p class="text-sm font-semibold uppercase text-teal-100">Insights</p>
+<section class="bg-sky-950 text-white">
+  <div class="mx-auto max-w-5xl px-6 py-12 sm:py-16">
+    <p class="text-sm font-semibold uppercase text-cyan-50">Insights</p>
     <h1 class="mt-4 max-w-3xl text-4xl font-semibold sm:text-5xl">{{ blog_heading }}</h1>
-    <p class="mt-6 max-w-3xl text-lg leading-relaxed text-cyan-50/85">
+    <p class="mt-6 max-w-3xl text-lg leading-relaxed text-cyan-50">
       {{ blog_intro }}
     </p>
   </div>
@@ -36,7 +36,7 @@
 
 {% if featured_posts %}
 <section class="bg-white py-12">
-  <div class="mx-auto grid max-w-5xl gap-8 px-6 lg:grid-cols-[0.8fr_1.2fr]">
+  <div class="mx-auto grid max-w-5xl gap-8 px-6 lg:grid-cols-2">
     <div>
       <p class="text-sm font-semibold uppercase text-teal-700">Start here</p>
       <h2 class="mt-3 text-3xl font-semibold text-slate-950">Foundational guides for production agents</h2>
@@ -62,7 +62,7 @@
 {% endif %}
 
 {% if topic_sections %}
-<section class="bg-[#f6fbf8] py-14">
+<section class="bg-emerald-50 py-12">
   <div class="mx-auto max-w-5xl px-6">
     <div class="max-w-3xl">
       <p class="text-sm font-semibold uppercase text-teal-700">Explore by topic</p>
