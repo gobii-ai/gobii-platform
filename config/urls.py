@@ -301,6 +301,10 @@ from api.views import LinkShortenerRedirectView, PipedreamConnectRedirectView
 API_REFERENCE_DOCS_URL = "https://docs.gobii.ai/api-reference"
 BELUGA_TRACKING_REDIRECT_URL = "https://go.trybeluga.ai/%(code)s"
 
+handler403 = "config.error_views.permission_denied"
+handler404 = "config.error_views.page_not_found"
+handler500 = "config.error_views.server_error"
+
 _schema_swagger_view = SpectacularSwaggerView.as_view(url_name="schema")
 _schema_redoc_view = SpectacularRedocView.as_view(url_name="schema")
 _beluga_tracking_redirect_view = RedirectView.as_view(

@@ -1,0 +1,15 @@
+{% extends "errors/base.html" %}
+
+{% block title %}Internal server error - Gobii{% endblock %}
+{% block status_code %}500{% endblock %}
+{% block headline %}We hit an internal error.{% endblock %}
+{% block message %}
+  Something failed on our side. Try again in a minute, or contact support if it keeps happening.
+{% endblock %}
+{% block actions %}
+  <a class="button button-primary" href="/">Go home</a>
+  <a class="button button-secondary" href="mailto:support@gobii.ai">Contact support</a>
+{% endblock %}
+{% block note %}
+  <p class="error-note">The detailed error is kept out of the page response for security.</p>
+{% endblock %}
