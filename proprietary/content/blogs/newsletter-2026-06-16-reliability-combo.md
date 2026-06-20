@@ -1,10 +1,10 @@
 ---
 title: "The improvements you don't see"
 date: 2026-06-16
-description: "Faster starts, smoother runs, and more dependable agent delivery and file handling."
+description: "Gobii reliability updates make AI agents launch faster, run more smoothly, pause gracefully, and deliver files, messages, exports, and reports more dependably."
 author: "The Gobii Team"
-seo_title: "The improvements you don't see"
-seo_description: "Faster starts, smoother runs, and more dependable agent delivery and file handling."
+seo_title: "Reliable Gobii Agents: Faster Starts and Delivery"
+seo_description: "Gobii reliability updates make AI agents launch faster, run more smoothly, pause gracefully, and deliver files, messages, exports, and reports more dependably."
 image: "/static/images/blog/newsletters/newsletter-2026-06-16-reliability-combo-hero.png"
 tags:
   - newsletter
@@ -33,6 +33,8 @@ Check on your agents from your phone without the lag. Review long conversations 
 Agents now handle limits more gracefully. They pause when needed, resume on schedule, and send one clear update when they are ready.
 
 That means fewer repeat notifications and less noise when an agent is waiting for its next run.
+
+This builds on the same reliability work behind [Gobii Agent Pacing](/blog/newsletter-2025-12-02-your-gobii-agent-now-lasts-longer/), which helps longer-running agents preserve task budgets without losing momentum.
 
 ## More Dependable Delivery And File Handling
 
