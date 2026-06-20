@@ -62,6 +62,22 @@ class BlogSeoTests(TestCase):
         self.assertEqual(structured_data["image"], structured_data["thumbnailUrl"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_blog_post_uses_default_social_alt_for_default_social_image(self):
+        response = self.client.get("/blog/how-we-sandbox-ai-agents-in-production/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        og_image = soup.find("meta", property="og:image")["content"]
+        og_image_alt = soup.find("meta", property="og:image:alt")["content"]
+
+        self.assertTrue(og_image.endswith("/static/images/noBgBlue.png"))
+        self.assertEqual(og_image_alt, "Gobii logo")
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],
+            "Gobii logo",
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_blog_index_renders_topic_hub_metadata_and_structured_data(self):
         response = self.client.get("/blog/")
 

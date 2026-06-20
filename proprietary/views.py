@@ -959,14 +959,9 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         else:
             brand_logo_path = "images/noBgBlue.png"
             default_image_path = "images/noBgBlue.png"
+        default_image_alt = "Gobii logo"
         brand_logo_url = self.request.build_absolute_uri(static(brand_logo_path))
         default_image_url = self.request.build_absolute_uri(static(default_image_path))
-
-        image_path = post["meta"].get("image")
-        if image_path:
-            og_image_url = image_path if image_path.startswith("http") else self.request.build_absolute_uri(image_path)
-        else:
-            og_image_url = default_image_url
 
         seo_title = post["meta"].get("seo_title") or post["meta"].get("title") or slug.replace("-", " ").title()
         seo_description = (
@@ -975,7 +970,15 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             or post.get("summary")
             or "Read the latest update from the Gobii team."
         )
-        og_image_alt = post.get("image_alt") or f"{seo_title} image"
+
+        image_path = post["meta"].get("image")
+        if image_path:
+            og_image_url = image_path if image_path.startswith("http") else self.request.build_absolute_uri(image_path)
+            og_image_alt = post.get("image_alt") or f"{seo_title} image"
+        else:
+            og_image_url = default_image_url
+            og_image_alt = default_image_alt
+
         keywords = _keyword_list(post["meta"].get("keywords")) or _keyword_list(post["meta"].get("tags"))
 
         published_at = post.get("published_at")
