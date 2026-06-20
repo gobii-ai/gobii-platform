@@ -1,10 +1,10 @@
 ---
 title: "Bring Gobii agents into Discord"
 date: 2026-06-02
-description: "Gobii agents can now join Discord channels, respond in context, and work with images, files, and links where your team already collaborates."
+description: "Gobii agents can now join Discord channels, keep conversation context, and work with shared images, files, and links where teams already collaborate."
 author: "The Gobii Team"
-seo_title: "Bring Gobii agents into Discord"
-seo_description: "Gobii agents can now join Discord channels, respond in context, and work with images, files, and links where your team already collaborates."
+seo_title: "Discord Channel Integration for Gobii AI Agents"
+seo_description: "Gobii agents can now join Discord channels, keep conversation context, and work with shared images, files, and links where teams already collaborate."
 image: "/static/images/blog/newsletters/newsletter-2026-06-02-discord-integration-hero.png"
 tags:
   - newsletter

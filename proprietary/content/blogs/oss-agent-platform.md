@@ -1,10 +1,10 @@
 ---
 title: "Gobii Open Source: A Production-Ready, No-Code Platform for Browser-Use"
 date: 2025-10-16
-description: "Run browser-use agents in production — no custom infra, no headaches. Deploy Gobii Open Source anywhere for full control, scalability, and transparency."
+description: "Deploy browser-use automation at scale with Gobii Open Source, a production-ready platform for AI browser agents on your own infrastructure."
 author: "The Gobii Team"
-seo_title: "Gobii Open Source: The Production Platform for Browser-Use"
-seo_description: "Deploy browser-use at scale with Gobii Open Source — a production-ready, no-code platform for AI browser agents that runs entirely on your own infrastructure."
+seo_title: "Gobii Open Source Platform for Browser-Use Agents"
+seo_description: "Deploy browser-use automation at scale with Gobii Open Source, a production-ready platform for AI browser agents on your own infrastructure."
 tags:
   - open source
   - browser-use

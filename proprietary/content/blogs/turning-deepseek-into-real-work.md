@@ -1,10 +1,10 @@
 ---
 title: "Turning DeepSeek 3.2 into Real Work, Not a New Attack Surface"
 date: 2025-12-10
-description: "Security, open weights, and what actually matters when you put DeepSeek 3.2 to work in production."
+description: "How to put DeepSeek 3.2 to work in production while managing model trust, open weights, data risk, behavioral risk, and deployment security."
 author: "Andrew I. Christianson, Founder of Gobii"
-seo_title: "Turning DeepSeek 3.2 into Real Work, Not a New Attack Surface"
-seo_description: "How to use DeepSeek 3.2 in production without relying on blind trust—security, open weights, and practical deployment strategies for enterprise AI."
+seo_title: "DeepSeek 3.2 AI Agents Without New Security Risk"
+seo_description: "How to put DeepSeek 3.2 to work in production while managing model trust, open weights, data risk, behavioral risk, and deployment security."
 tags:
   - ai agents
   - deepseek

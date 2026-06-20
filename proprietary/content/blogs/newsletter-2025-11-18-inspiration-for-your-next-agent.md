@@ -1,10 +1,10 @@
 ---
 title: "Inspiration for your next agent"
 date: 2025-11-18
-description: "Two inspiring real-world use cases, faster agents, smoother performance"
+description: "Explore Gobii AI agent workflow ideas for creator autopilots and inventory monitors, plus platform improvements for faster automation."
 author: "The Gobii Team"
-seo_title: "Inspiration for your next agent"
-seo_description: "Two inspiring real-world use cases, faster agents, smoother performance"
+seo_title: "Gobii Agent Workflow Ideas and Platform Updates"
+seo_description: "Explore Gobii AI agent workflow ideas for creator autopilots and inventory monitors, plus platform improvements for faster automation."
 tags:
   - newsletter
   - weekly

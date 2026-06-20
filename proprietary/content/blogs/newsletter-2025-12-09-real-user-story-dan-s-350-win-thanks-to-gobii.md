@@ -1,10 +1,10 @@
 ---
 title: "Real user story: Dan's $350 win thanks to Gobii"
 date: 2025-12-09
-description: "Plus: smarter agent pacing + upgraded intelligence for all plans."
+description: "A real Gobii customer story shows how an AI agent helped recover $350, alongside updates to agent pacing and intelligence for every plan."
 author: "The Gobii Team"
-seo_title: "Real user story: Dan's $350 win thanks to Gobii"
-seo_description: "Plus: smarter agent pacing + upgraded intelligence for all plans."
+seo_title: "Gobii Agent Customer Story: $350 Refrigerator Win"
+seo_description: "A real Gobii customer story shows how an AI agent helped recover $350, alongside updates to agent pacing and intelligence for every plan."
 image: "/static/images/blog/newsletters/newsletter-2025-12-09-real-user-story-dan-s-350-win-thanks-to-gobii-hero.jpg"
 tags:
   - newsletter
@@ -14,11 +14,11 @@ tags:
 
 <img src="/static/images/blog/newsletters/newsletter-2025-12-09-real-user-story-dan-s-350-win-thanks-to-gobii-hero.jpg" alt="Dan standing next to the refrigerator Gobii helped him find" style="max-width: 100%; border-radius: 10px;">
 
-- Real Gobii Story of the Week: Dan's $350 Refrigerator Win -
+## Real Gobii Story: Dan's $350 Refrigerator Win
 
 When we talk about Gobii agents being your “AI teammates,” this is exactly what we mean.
 
-Meet Dan
+## Meet Dan
 
 Dan and his wife are renovating their kitchen and were hunting for a very specific refrigerator:
 
@@ -28,7 +28,7 @@ Dan and his wife are renovating their kitchen and were hunting for a very specif
 
 Instead of refreshing product pages for weeks, Dan spun up a Gobii agent to keep watch for him.
 
-- What happened made us smile -
+## What Happened
 
 One morning, his Gobii pinged him:
 
@@ -45,7 +45,7 @@ Want to build your own "Gobii that pays for itself"?
 
 [Try creating a watcher agent this week](https://gobii.ai/g/w2w/)
 
-- 🛠️ Product Update: Smarter, Smoother Agents -
+## Product Update: Smarter, Smoother Agents
 
 We rolled out two improvements this week:
 

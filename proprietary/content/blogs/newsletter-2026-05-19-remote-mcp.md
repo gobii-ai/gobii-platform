@@ -1,10 +1,10 @@
 ---
 title: "Bring Gobii into your tools via MCP"
 date: 2026-05-19
-description: "Use Gobii agents from MCP-compatible tools like Claude Desktop, Codex, Hermes, and custom internal workflows."
+description: "Connect Gobii agents to MCP-compatible tools like Claude Desktop, Codex, Hermes, and internal workflows with authenticated Remote MCP access."
 author: "The Gobii Team"
-seo_title: "Bring Gobii into your tools via MCP"
-seo_description: "Use Gobii agents from MCP-compatible tools like Claude Desktop, Codex, Hermes, and custom internal workflows."
+seo_title: "Remote MCP Access for Gobii AI Agents and Tools"
+seo_description: "Connect Gobii agents to MCP-compatible tools like Claude Desktop, Codex, Hermes, and internal workflows with authenticated Remote MCP access."
 image: "/static/images/blog/newsletters/newsletter-2026-05-19-remote-mcp-hero.png"
 tags:
   - newsletter

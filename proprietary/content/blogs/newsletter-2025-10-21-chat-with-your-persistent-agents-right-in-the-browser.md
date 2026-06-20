@@ -1,10 +1,10 @@
 ---
 title: "Chat with your persistent agents - right in the browser"
 date: 2025-10-21
-description: "Meet Gobii’s new Web Chat UI: faster, simpler, and built for your workflow."
+description: "Gobii Web Chat lets teams talk to persistent AI agents in the browser, view tool activity in real time, and manage work from mobile."
 author: "The Gobii Team"
-seo_title: "Chat with your persistent agents - right in the browser"
-seo_description: "Meet Gobii’s new Web Chat UI: faster, simpler, and built for your workflow."
+seo_title: "Persistent Agent Web Chat in Gobii Browser"
+seo_description: "Gobii Web Chat lets teams talk to persistent AI agents in the browser, view tool activity in real time, and manage work from mobile."
 image: "/static/images/blog/newsletters/newsletter-2025-10-21-chat-with-your-persistent-agents-right-in-the-browser-hero.png"
 tags:
   - newsletter

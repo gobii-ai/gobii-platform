@@ -1,10 +1,10 @@
 ---
 title: "Gobii now plays nice with Google Sheets"
 date: 2025-09-23
-description: "Connect Gobii agents directly with Google Sheets—no more copy-paste."
+description: "Gobii agents now connect directly with Google Sheets, reducing copy-paste work and keeping task results, reports, and dashboards updated."
 author: "The Gobii Team"
-seo_title: "Gobii now plays nice with Google Sheets"
-seo_description: "Connect Gobii agents directly with Google Sheets—no more copy-paste."
+seo_title: "Google Sheets Integration for Gobii AI Agents"
+seo_description: "Gobii agents now connect directly with Google Sheets, reducing copy-paste work and keeping task results, reports, and dashboards updated."
 tags:
   - newsletter
   - weekly

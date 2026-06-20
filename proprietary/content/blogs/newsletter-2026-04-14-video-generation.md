@@ -1,10 +1,10 @@
 ---
 title: "Agent-driven video generation is here"
 date: 2026-04-14
-description: "Create video content directly from your agent workflows."
+description: "Gobii agents can now create video content directly inside automated workflows, turning prompts and collected context into generated video assets."
 author: "The Gobii Team"
-seo_title: "Agent-driven video generation is here"
-seo_description: "Create video content directly from your agent workflows."
+seo_title: "AI Agent Video Generation in Gobii Workflows"
+seo_description: "Gobii agents can now create video content directly inside automated workflows, turning prompts and collected context into generated video assets."
 image: "/static/images/blog/newsletters/newsletter-2026-04-14-video-generation.png"
 tags:
   - newsletter

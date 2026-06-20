@@ -1,10 +1,10 @@
 ---
 title: "Gobii on the Go: Meet SMS-Powered Agents"
 date: 2025-08-05
-description: "We’ve just made staying in touch with your Gobii agents even easier -"
+description: "Gobii SMS-powered agents let users start tasks, check status, forward context, and adjust work from a text message without opening the app."
 author: "The Gobii Team"
-seo_title: "Gobii on the Go: Meet SMS-Powered Agents"
-seo_description: "We’ve just made staying in touch with your Gobii agents even easier -"
+seo_title: "SMS-Powered Gobii Agents for Work on the Go"
+seo_description: "Gobii SMS-powered agents let users start tasks, check status, forward context, and adjust work from a text message without opening the app."
 tags:
   - newsletter
   - weekly

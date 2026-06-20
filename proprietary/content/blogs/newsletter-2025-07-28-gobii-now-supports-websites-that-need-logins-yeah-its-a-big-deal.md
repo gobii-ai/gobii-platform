@@ -1,10 +1,10 @@
 ---
 title: "Gobii now supports websites that need logins. Yeah, it’s a big deal."
 date: 2025-07-28
-description: "Your most‑requested feature just landed: Gobii’s always‑on agents can now work inside logged‑in sites."
+description: "Gobii agents can now work inside logged-in websites, using saved sessions to automate dashboards, job boards, SaaS tools, and forums."
 author: "The Gobii Team"
-seo_title: "Gobii now supports websites that need logins. Yeah, it’s a big deal."
-seo_description: "Your most‑requested feature just landed: Gobii’s always‑on agents can now work inside logged‑in sites."
+seo_title: "Logged-In Website Automation for Gobii Agents"
+seo_description: "Gobii agents can now work inside logged-in websites, using saved sessions to automate dashboards, job boards, SaaS tools, and forums."
 tags:
   - newsletter
   - weekly

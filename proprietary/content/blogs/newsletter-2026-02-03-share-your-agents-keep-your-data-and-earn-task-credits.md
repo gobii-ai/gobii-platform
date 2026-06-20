@@ -1,10 +1,10 @@
 ---
 title: "Share your agents without sharing your data"
 date: 2026-02-03
-description: "Agent sharing lets someone spawn their own copy of your agent while your private data stays private."
+description: "Gobii agent sharing lets others spawn their own copy of your workflow while private data, credentials, and context stay protected."
 author: "The Gobii Team"
-seo_title: "Share your agents without sharing your data"
-seo_description: "Agent sharing lets someone spawn their own copy of your agent while your private data stays private."
+seo_title: "Share Gobii Agents Without Sharing Private Data"
+seo_description: "Gobii agent sharing lets others spawn their own copy of your workflow while private data, credentials, and context stay protected."
 image: "/static/images/blog/newsletters/newsletter-2026-02-03-share-your-agents-keep-your-data-and-earn-task-credits-hero.gif"
 tags:
   - newsletter

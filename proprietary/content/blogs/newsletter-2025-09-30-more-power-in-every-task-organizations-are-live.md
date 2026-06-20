@@ -1,10 +1,10 @@
 ---
 title: "Lower tool costs and organizations are live"
 date: 2025-09-30
-description: "Gobii tasks now use fewer credits, and teams can manage billing and permissions in one organization."
+description: "Gobii lowers tool task credit costs and adds Organizations so teams can manage billing, permissions, and AI agent workflows in one place."
 author: "The Gobii Team"
-seo_title: "Lower tool costs and organizations are live"
-seo_description: "Gobii tasks now use fewer credits, and teams can manage billing and permissions in one organization."
+seo_title: "Lower Tool Costs and Organizations for Gobii Agents"
+seo_description: "Gobii lowers tool task credit costs and adds Organizations so teams can manage billing, permissions, and AI agent workflows in one place."
 tags:
   - newsletter
   - weekly

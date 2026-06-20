@@ -1,10 +1,10 @@
 ---
 title: "Your agents just learned data visualization"
 date: 2026-01-13
-description: "How Gobii agents turn collected data into charts for emails, reports, and PDFs."
+description: "Gobii agents can turn collected data into charts for emails, reports, PDFs, recruiting workflows, sales research, and operations tracking."
 author: "The Gobii Team"
-seo_title: "Your agents just learned data visualization"
-seo_description: "How Gobii agents turn collected data into charts for emails, reports, and PDFs."
+seo_title: "Data Visualization for Gobii AI Agent Reports"
+seo_description: "Gobii agents can turn collected data into charts for emails, reports, PDFs, recruiting workflows, sales research, and operations tracking."
 image: "/static/images/blog/newsletters/newsletter-2026-01-13-your-agents-just-learned-data-visualization-hero.png"
 tags:
   - newsletter

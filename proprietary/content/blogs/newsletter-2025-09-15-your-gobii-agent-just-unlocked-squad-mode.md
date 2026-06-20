@@ -1,10 +1,10 @@
 ---
 title: "Your Gobii agent just unlocked squad mode"
 date: 2025-09-15
-description: "Introducing Multiplayer Agents — bring your team into AI-powered conversations with approval-based connections."
+description: "Gobii Multiplayer Agents let teams join AI-powered conversations with approval-based connections for smoother collaborative workflows."
 author: "The Gobii Team"
-seo_title: "Your Gobii agent just unlocked squad mode"
-seo_description: "Introducing Multiplayer Agents — bring your team into AI-powered conversations with approval-based connections."
+seo_title: "Multiplayer Gobii Agents for Team Collaboration"
+seo_description: "Gobii Multiplayer Agents let teams join AI-powered conversations with approval-based connections for smoother collaborative workflows."
 tags:
   - newsletter
   - weekly

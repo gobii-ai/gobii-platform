@@ -1,10 +1,10 @@
 ---
 title: "Little updates that save a lot of time - we listened"
 date: 2026-04-21
-description: "Inline approvals, bulk contact management, and other agent-management improvements shaped by customer feedback."
+description: "Gobii adds inline approvals, bulk contact management, and other agent-management improvements shaped by customer feedback and daily workflows."
 author: "The Gobii Team"
-seo_title: "Little updates that save a lot of time - we listened"
-seo_description: "Inline approvals, bulk contact management, and other agent-management improvements shaped by customer feedback."
+seo_title: "Gobii Agent UX Updates: Approvals and Contacts"
+seo_description: "Gobii adds inline approvals, bulk contact management, and other agent-management improvements shaped by customer feedback and daily workflows."
 image: "/static/images/blog/newsletters/newsletter-2026-04-21-inline-approvals.png"
 tags:
   - newsletter

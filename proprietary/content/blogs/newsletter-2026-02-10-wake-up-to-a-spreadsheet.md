@@ -1,10 +1,10 @@
 ---
 title: "Wake up to a spreadsheet"
 date: 2026-02-10
-description: "Your Gobii agent now researches and delivers structured data for you"
+description: "Gobii agents can research leads, competitors, markets, or recurring data needs and deliver structured CSV spreadsheets directly to your inbox."
 author: "The Gobii Team"
-seo_title: "Wake up to a spreadsheet"
-seo_description: "Your Gobii agent now researches and delivers structured data for you"
+seo_title: "AI Spreadsheet Research Delivered by Gobii Agents"
+seo_description: "Gobii agents can research leads, competitors, markets, or recurring data needs and deliver structured CSV spreadsheets directly to your inbox."
 tags:
   - newsletter
   - weekly

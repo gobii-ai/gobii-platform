@@ -1,10 +1,10 @@
 ---
 title: "Overhauled: The improved Sheets engine"
 date: 2026-04-28
-description: "Blazing fast and highly accurate interactions with spreadsheets."
+description: "Gobii rebuilt its Google Sheets engine for faster, more accurate spreadsheet automation across large sheets, bulk updates, and structured data tasks."
 author: "The Gobii Team"
-seo_title: "Overhauled: The improved Sheets engine"
-seo_description: "Blazing fast and highly accurate interactions with spreadsheets."
+seo_title: "Faster Google Sheets Automation for Gobii Agents"
+seo_description: "Gobii rebuilt its Google Sheets engine for faster, more accurate spreadsheet automation across large sheets, bulk updates, and structured data tasks."
 image: "/static/images/blog/newsletters/newsletter-2026-04-28-sheets-engine.png"
 tags:
   - newsletter

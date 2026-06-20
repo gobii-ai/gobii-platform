@@ -1,10 +1,10 @@
 ---
 title: "How to Get 20–60x More Work Per Dollar — Securely — With Gobii and DeepSeek V3.2"
 date: 2025-12-09
-description: "What changes when intelligence becomes a commodity—and how to build on it without betting the company"
+description: "How Gobii turns DeepSeek V3.2 into production AI agent work at lower token cost while keeping workflows secure, portable, and auditable."
 author: "Andrew I. Christianson, Founder of Gobii"
-seo_title: "How to Get 20–60x More Work Per Dollar — Securely — With Gobii and DeepSeek V3.2"
-seo_description: "How Gobii turns DeepSeek V3.2 into real work at 20-60x lower cost, while keeping your data secure and your workflows portable."
+seo_title: "DeepSeek V3.2 Cost Savings with Secure Gobii Agents"
+seo_description: "How Gobii turns DeepSeek V3.2 into production AI agent work at lower token cost while keeping workflows secure, portable, and auditable."
 tags:
   - deepseek
   - open source

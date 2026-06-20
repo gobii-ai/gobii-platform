@@ -1,10 +1,10 @@
 ---
 title: "Your agents can show their work now"
 date: 2026-03-10
-description: "See results as your agent runs"
+description: "Gobii inline artifacts show agent outputs like charts, search results, CSV exports, and tool activity directly inside the conversation."
 author: "The Gobii Team"
-seo_title: "Your agents can show their work now"
-seo_description: "See results as your agent runs"
+seo_title: "Inline Artifacts That Show Gobii Agent Work"
+seo_description: "Gobii inline artifacts show agent outputs like charts, search results, CSV exports, and tool activity directly inside the conversation."
 image: "/static/images/blog/newsletters/newsletter-2026-03-10-your-agents-can-show-their-work-now-hero.png"
 tags:
   - newsletter

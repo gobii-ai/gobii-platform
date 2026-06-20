@@ -1,10 +1,10 @@
 ---
 title: "New ways to scale your Gobii agents + Just for Fun"
 date: 2025-12-23
-description: "Optional add-ons for more tasks, contacts, and browser capacity"
+description: "Gobii add-ons let teams scale AI agents with more task credits, contact capacity, and browser task headroom without changing plans."
 author: "The Gobii Team"
-seo_title: "New ways to scale your Gobii agents + Just for Fun"
-seo_description: "Optional add-ons for more tasks, contacts, and browser capacity"
+seo_title: "Scale Gobii Agents with Task and Contact Add-Ons"
+seo_description: "Gobii add-ons let teams scale AI agents with more task credits, contact capacity, and browser task headroom without changing plans."
 tags:
   - newsletter
   - weekly

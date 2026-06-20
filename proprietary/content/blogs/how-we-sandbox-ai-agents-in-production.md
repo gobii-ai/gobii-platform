@@ -1,11 +1,11 @@
 ---
 title: "How We Sandbox AI Agents in Production"
 date: 2026-01-28
-description: "A production-grade, security-first system for running AI agents: per-agent isolation, proxy-only egress, deterministic filespace sync, and auditable execution."
+description: "A technical walkthrough of Gobii agent sandboxing with gVisor isolation, NetworkPolicy egress, filespace sync, timeouts, and audit trails."
 author: "Matt Greathouse / A.I. Christianson"
 author_type: "Person"
-seo_title: "How We Sandbox AI Agents in Production"
-seo_description: "A deep technical walkthrough of how we run AI agents safely in production: gVisor isolation, NetworkPolicy-enforced egress, deterministic filespace sync, and full auditability."
+seo_title: "Sandboxing AI Agents in Production with Gobii"
+seo_description: "A technical walkthrough of Gobii agent sandboxing with gVisor isolation, NetworkPolicy egress, filespace sync, timeouts, and audit trails."
 tags:
   - ai agents
   - security

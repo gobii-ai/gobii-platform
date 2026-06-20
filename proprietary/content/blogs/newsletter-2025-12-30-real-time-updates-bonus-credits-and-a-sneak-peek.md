@@ -1,10 +1,10 @@
 ---
 title: "Real-time agent updates and bonus credits"
 date: 2025-12-30
-description: "Live agent progress updates make Gobii tasks easier to follow as they run."
+description: "Gobii adds live agent progress updates, bonus task credits, and a preview of upcoming agent improvements for more transparent automation."
 author: "The Gobii Team"
-seo_title: "Real-time agent updates and bonus credits"
-seo_description: "Live agent progress updates make Gobii tasks easier to follow as they run."
+seo_title: "Real-Time Gobii Agent Updates and Bonus Credits"
+seo_description: "Gobii adds live agent progress updates, bonus task credits, and a preview of upcoming agent improvements for more transparent automation."
 tags:
   - newsletter
   - weekly

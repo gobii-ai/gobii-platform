@@ -1,10 +1,10 @@
 ---
 title: "Never lose context in an email thread again"
 date: 2026-03-31
-description: "No more digging through emails to find context"
+description: "Gobii agents now keep email replies attached to the right thread, preserving context across longer conversations and deeper agent-assisted work."
 author: "The Gobii Team"
-seo_title: "Never lose context in an email thread again"
-seo_description: "No more digging through emails to find context"
+seo_title: "Threaded Email Context for Gobii AI Agents"
+seo_description: "Gobii agents now keep email replies attached to the right thread, preserving context across longer conversations and deeper agent-assisted work."
 image: "/static/images/blog/newsletters/newsletter-2026-03-31-never-lose-context-in-an-email-thread-again-hero.png"
 tags:
   - newsletter
