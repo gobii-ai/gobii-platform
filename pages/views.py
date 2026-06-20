@@ -2822,7 +2822,11 @@ def _resend_special_access_email_verification(request, promo: TrialPromo):
         return redirect("pages:special_access")
 
     try:
-        sent = send_email_verification(request, email_address)
+        sent = send_email_verification(
+            request,
+            email_address,
+            redirect_url=reverse("pages:special_access"),
+        )
     except ImmediateHttpResponse as exc:
         response = exc.response
         if response.status_code == 429:

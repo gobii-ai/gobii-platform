@@ -1,6 +1,8 @@
+import re
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlsplit
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
@@ -492,6 +494,41 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertContains(response, f"Verification email sent to {self.user.email}.")
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, [self.user.email])
+        self.assertIn("next=%2Fspecial-access%2F", mail.outbox[0].body)
+
+    def test_special_access_verification_link_redirects_back_to_access_page(self):
+        self.user.email = "special-access-return@example.com"
+        self.user.save(update_fields=["email"])
+        promo = _create_promo(
+            code="VERIFY-RETURN",
+            email_allowlist_enabled=True,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        TrialPromoAllowedEmail.objects.create(
+            promo=promo,
+            normalized_email=self.user.email,
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=False,
+            primary=True,
+        )
+        self.client.force_login(self.user)
+        self.client.post(reverse("pages:special_access"), {"code": "verify-return"})
+        self.client.post(
+            reverse("pages:special_access_start"),
+            {"action": "resend_email_verification"},
+        )
+        match = re.search(r"https?://\S+/accounts/confirm-email/\S+", mail.outbox[0].body)
+
+        self.assertIsNotNone(match)
+        url_parts = urlsplit(match.group(0))
+        response = self.client.get(f"{url_parts.path}?{url_parts.query}")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("pages:special_access"))
 
     def test_special_access_resend_verification_targets_current_account_email(self):
         self.user.email = "special-access-current@example.com"

@@ -8,6 +8,9 @@ used to gate external communications (email, SMS, webhooks) until verified.
 from allauth.account.models import EmailAddress
 
 
+EMAIL_VERIFICATION_REDIRECT_URL_SESSION_KEY = "email_verification_redirect_url"
+
+
 class EmailVerificationError(Exception):
     """Raised when an action requires email verification."""
 
@@ -94,12 +97,25 @@ def get_user_email_address_for_verification(user) -> EmailAddress | None:
     )
 
 
-def send_email_verification(request, email_address: EmailAddress) -> bool:
+def send_email_verification(
+    request,
+    email_address: EmailAddress,
+    *,
+    redirect_url: str | None = None,
+) -> bool:
     from allauth.account.internal.flows.email_verification import (
         send_verification_email_to_address,
     )
 
-    return send_verification_email_to_address(request, email_address)
+    if redirect_url:
+        request.session[EMAIL_VERIFICATION_REDIRECT_URL_SESSION_KEY] = redirect_url
+        request.session.modified = True
+    try:
+        return send_verification_email_to_address(request, email_address)
+    finally:
+        if redirect_url:
+            request.session.pop(EMAIL_VERIFICATION_REDIRECT_URL_SESSION_KEY, None)
+            request.session.modified = True
 
 
 def require_verified_email(user, *, action_description: str = "perform this action") -> None:

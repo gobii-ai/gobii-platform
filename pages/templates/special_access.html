@@ -74,7 +74,7 @@
               <form method="post" action="{{ start_url }}" class="mt-4">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="resend_email_verification">
-                <button type="submit" class="w-full rounded-xl bg-amber-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-800">
+                <button type="submit" class="w-full rounded-xl bg-[#081f2d] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#0c3443]">
                   Send verification email
                 </button>
               </form>
@@ -82,7 +82,7 @@
           {% endif %}
           <form method="post" action="{{ start_url }}">
             {% csrf_token %}
-            <button type="submit" {% if email_verification_required %}disabled{% endif %} class="group flex w-full items-center justify-center gap-3 rounded-2xl bg-[#081f2d] px-6 py-4 text-base font-bold text-white transition hover:bg-[#0c3443] disabled:cursor-not-allowed disabled:bg-amber-900 disabled:hover:bg-amber-900">
+            <button type="submit" {% if email_verification_required %}disabled{% endif %} class="group flex w-full items-center justify-center gap-3 rounded-2xl bg-[#081f2d] px-6 py-4 text-base font-bold text-white transition hover:bg-[#0c3443] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:hover:bg-slate-200">
             {% if email_verification_required %}Verify email to start{% else %}Start special trial{% endif %}
             <span class="transition group-hover:translate-x-1">&rarr;</span>
             </button>
