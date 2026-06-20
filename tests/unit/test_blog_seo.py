@@ -76,7 +76,9 @@ class BlogSeoTests(TestCase):
         self.assertContains(response, "Explore by topic")
         self.assertContains(response, "Production safety")
         self.assertContains(response, "/blog/how-we-sandbox-ai-agents-in-production/")
-        self.assertContains(response, "bg-sky-950")
+        self.assertContains(response, "bg-white py-12")
+        self.assertNotContains(response, "bg-sky-950")
+        self.assertNotContains(response, "text-cyan-50")
         self.assertNotContains(response, "bg-[#")
 
         structured_data = json.loads(soup.find("script", type="application/ld+json").string)
