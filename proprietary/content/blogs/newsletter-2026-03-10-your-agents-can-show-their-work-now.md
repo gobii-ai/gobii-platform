@@ -18,6 +18,8 @@ AI feels a lot more useful when you can actually see what it’s doing.
 
 With Gobii’s new inline work artifacts, agents can now render the outputs of their work directly inside the conversation — including charts, search results, CSV exports, tool activity, and more.
 
+It pairs especially well with Gobii's [data visualization for AI agent reports](/blog/newsletter-2026-01-13-your-agents-just-learned-data-visualization/) and the [real-time agent work streaming](/blog/newsletter-2026-01-20-watch-your-agents-work-in-real-time/) that makes long-running tasks easier to follow.
+
 ## Why Inline Artifacts Matter
 
 Instead of a black-box answer, you get a visible trail of how the result was produced. That means more trust, easier debugging, and a much better collaboration loop between the user and the agent.

@@ -15,6 +15,8 @@ Real-time agent updates make Gobii tasks easier to follow while they run.
 
 Instead of waiting for a finished response, you can now see more of what an agent is doing as the work unfolds. It is a small shift that makes long-running tasks feel more transparent and easier to trust.
 
+That visibility became the foundation for later [real-time AI agent work streaming](/blog/newsletter-2026-01-20-watch-your-agents-work-in-real-time/) and [inline artifacts that show agent work](/blog/newsletter-2026-03-10-your-agents-can-show-their-work-now/).
+
 ## Real-Time Agent Updates
 
 You can now see agents update live as they work.

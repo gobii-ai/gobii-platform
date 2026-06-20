@@ -17,6 +17,8 @@ Big news - Gobii now supports MCP (Model Context Protocol)!
 
 Your agents can now plug directly into MCP-compatible tools and ecosystems, unlocking richer context, smarter actions, and tighter integrations than ever before.
 
+This first MCP release set up later [Remote MCP access for Gobii agents](/blog/newsletter-2026-05-19-remote-mcp/) and the [one-click integrations library](/blog/newsletter-2026-03-17-one-click-integrations-for-your-agents/).
+
 This is our first release, and we'd love for you to try it out and share feedback. Your input will help guide where we take it next.
 
 ## Dashboard Improvements

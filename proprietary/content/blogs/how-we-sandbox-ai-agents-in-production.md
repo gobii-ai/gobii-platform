@@ -61,6 +61,8 @@ If you get one of these wrong, the system becomes unsafe or unusable. The diffic
 
 We don’t grant these capabilities for novelty. We grant them because real work requires them, then we put them inside a sandbox by default.
 
+For a product-level example of why browser, file, and vision capabilities need this boundary, see [browser intelligence for Gobii AI agent workflows](/blog/newsletter-2026-06-09-browser-intelligence/).
+
 <figure>
   <img src="/static/images/blog/sandbox-capabilities.svg" alt="Flowchart showing production tasks requiring browser, MCP, files, and code capabilities that route into a sandbox with guardrails." style="max-width: 100%;">
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Capabilities are powerful by necessity; safety comes from the sandboxed boundary and guardrails.</figcaption>
@@ -90,6 +92,8 @@ The security model therefore focuses on:
 - **Auditability**: every tool call is logged with a params hash
 
 These risks are documented in LLM security frameworks. OWASP's LLM Top 10 lists prompt injection and excessive agency, and MITRE ATLAS highlights real-world prompt injection and data exfiltration patterns. That is the exact surface we constrain. [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/), [MITRE ATLAS](https://www.mitre.org/news-insights/news-release/mitre-and-microsoft-collaborate-address-generative-ai-security-risks).
+
+The same model-risk distinction shows up in our DeepSeek security analysis, [Turning DeepSeek 3.2 into Real Work, Not a New Attack Surface](/blog/turning-deepseek-into-real-work/).
 
 ## 5) Architecture overview
 
@@ -181,6 +185,8 @@ Because egress is default‑deny, direct access to metadata endpoints is blocked
 ## 9) MCP servers run inside the sandbox
 
 User/org MCP servers run inside the sandbox pod alongside sandboxed tools. Platform MCP servers remain in the trusted worker process. This cleanly splits the untrusted extension surface from the trusted core.
+
+That split matters more as agents connect through [Remote MCP access for Gobii agents](/blog/newsletter-2026-05-19-remote-mcp/).
 
 ## 10) Filespace sync: deterministic, conflict‑safe
 

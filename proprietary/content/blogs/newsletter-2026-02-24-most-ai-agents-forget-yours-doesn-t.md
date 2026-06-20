@@ -22,6 +22,8 @@ It's called context rot — and it's the reason most AI agents feel dumber the l
 
 Your Gobii doesn't have this problem anymore.
 
+The same long-memory foundation helps with [threaded email context](/blog/newsletter-2026-03-31-never-lose-context-in-an-email-thread-again/) and [shared agent collaboration](/blog/newsletter-2026-01-27-collaboration-just-got-a-lot-easier/), where old instructions and decisions need to stay available.
+
 ## Infinite Context Recall
 
 With Infinite Context Recall, your agent can reach back to the very first message you ever sent it — and everything in between. Every instruction. Every preference. Every correction. Every conversation.

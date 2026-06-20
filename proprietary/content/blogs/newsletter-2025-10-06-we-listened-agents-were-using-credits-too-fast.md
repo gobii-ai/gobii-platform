@@ -32,4 +32,6 @@ Here's what's happening:
 
 These updates should make it much easier to manage usage and prevent surprise “out of credits” moments.
 
+That work continued with [usage reports and agent budgeting](/blog/newsletter-2025-10-12-by-popular-request-usage-reports-and-agent-budgeting-are-here/) and later [Gobii Agent Pacing](/blog/newsletter-2025-12-02-your-gobii-agent-now-lasts-longer/), which helps agents preserve daily task budgets during longer workflows.
+
 Thanks for calling it out early — your feedback directly shapes Gobii as we continue to grow.

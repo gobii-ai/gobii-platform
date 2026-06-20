@@ -26,6 +26,8 @@ Gobii agents can monitor operations, draft emails, manage pipelines, and run lon
 
 Remote MCP changes that. It gives other MCP-compatible tools a secure way to talk to your Gobii agents directly.
 
+This builds on Gobii's earlier [MCP support for agents and the dashboard](/blog/newsletter-2025-11-11-agents-just-got-way-more-connected-mcp-support-is-here/) and the newer [one-click integrations for agents](/blog/newsletter-2026-03-17-one-click-integrations-for-your-agents/).
+
 ## What You Can Do With It
 
 ### Bring agents to your tools
