@@ -3,7 +3,7 @@ import json
 from bs4 import BeautifulSoup
 from django.test import TestCase, override_settings, tag
 
-from proprietary.utils_blog import load_blog_post
+from proprietary.utils_blog import _parse_svg_length, load_blog_post
 
 
 @tag("batch_pages")
@@ -30,6 +30,13 @@ class BlogSeoTests(TestCase):
         self.assertTrue(second_image.get("height", "").isdigit())
         self.assertEqual(second_image.get("loading"), "lazy")
         self.assertEqual(second_image.get("decoding"), "async")
+
+    def test_svg_length_parser_ignores_relative_units(self):
+        self.assertEqual(_parse_svg_length("100"), 100)
+        self.assertEqual(_parse_svg_length("100px"), 100)
+        self.assertIsNone(_parse_svg_length("100%"))
+        self.assertIsNone(_parse_svg_length("10em"))
+        self.assertIsNone(_parse_svg_length("50vw"))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_blog_post_renders_social_alt_and_structured_data(self):

@@ -43,7 +43,7 @@ def _local_static_path(src: str) -> Path | None:
 def _parse_svg_length(value: str | None) -> int | None:
     if not value:
         return None
-    match = re.match(r"^\s*(\d+(?:\.\d+)?)", value)
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*", value)
     if not match:
         return None
     return round(float(match.group(1)))
