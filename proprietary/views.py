@@ -16,7 +16,7 @@ from django.views.generic import TemplateView
 from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
 from proprietary.forms import SupportForm, PrequalifyForm
-from proprietary.utils_blog import load_blog_post, get_all_blog_posts
+from proprietary.utils_blog import load_blog_post, get_all_blog_posts, is_blog_post_published
 from util.waffle_flags import is_waffle_flag_active
 from util.subscription_helper import (
     get_user_plan,
@@ -53,6 +53,77 @@ def _keyword_list(value):
     if isinstance(value, (list, tuple)):
         return [str(keyword).strip() for keyword in value if str(keyword).strip()]
     return []
+
+
+def _meta_text(meta, key):
+    value = meta.get(key)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _absolute_meta_url(request, value):
+    url = str(value or "").strip()
+    if not url:
+        return ""
+    if url.startswith(("http://", "https://")):
+        return url
+    if url.startswith("/"):
+        return request.build_absolute_uri(url)
+    return ""
+
+
+def _blog_author_schema(request, meta):
+    author_name = meta.get("author")
+    if author_name:
+        author_type = meta.get("author_type")
+        if not author_type:
+            lowered = str(author_name).lower()
+            author_type = "Organization" if "team" in lowered or "gobii" in lowered else "Person"
+    else:
+        author_name = "Gobii"
+        author_type = "Organization"
+
+    author = {
+        "@type": author_type,
+        "name": author_name,
+    }
+
+    if author_type != "Person":
+        return author
+
+    author_url = _absolute_meta_url(request, meta.get("author_url"))
+    author_image = _absolute_meta_url(request, meta.get("author_image"))
+    author_bio = _meta_text(meta, "author_bio")
+    author_job_title = _meta_text(meta, "author_job_title")
+    same_as = [
+        url
+        for url in _keyword_list(meta.get("author_same_as"))
+        if url.startswith(("http://", "https://"))
+    ]
+    knows_about = _keyword_list(meta.get("author_knows_about"))
+
+    if author_url:
+        author["url"] = author_url
+        author["@id"] = f"{author_url.rstrip('/')}#person"
+    if author_job_title:
+        author["jobTitle"] = author_job_title
+    if author_bio:
+        author["description"] = author_bio
+    if author_image:
+        author["image"] = author_image
+    if same_as:
+        author["sameAs"] = same_as
+    if knows_about:
+        author["knowsAbout"] = knows_about
+
+    author["worksFor"] = {
+        "@type": "Organization",
+        "name": "Gobii",
+        "url": request.build_absolute_uri("/"),
+    }
+
+    return author
 
 
 BLOG_INDEX_KEYWORDS = (
@@ -950,6 +1021,8 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             post = load_blog_post(slug)
         except FileNotFoundError:
             raise Http404(f"Blog post not found: {slug}")
+        if not is_blog_post_published(post):
+            raise Http404(f"Blog post not found: {slug}")
 
         context = super().get_context_data(**kwargs)
         canonical_url = self.request.build_absolute_uri(self.request.path)
@@ -985,25 +1058,13 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         published_iso = published_at.isoformat() if published_at else None
         updated_at = post.get("updated_at") or published_at
         updated_iso = updated_at.isoformat() if updated_at else None
-        author_name = post["meta"].get("author")
-        if author_name:
-            author_type = post["meta"].get("author_type")
-            if not author_type:
-                lowered = str(author_name).lower()
-                author_type = "Organization" if "team" in lowered or "gobii" in lowered else "Person"
-        else:
-            author_name = "Gobii"
-            author_type = "Organization"
 
         structured_data = {
             "@context": "https://schema.org",
             "@type": "BlogPosting",
             "headline": seo_title,
             "description": seo_description,
-            "author": {
-                "@type": author_type,
-                "name": author_name,
-            },
+            "author": _blog_author_schema(self.request, post["meta"]),
             "publisher": {
                 "@type": "Organization",
                 "name": "Gobii",
@@ -1036,6 +1097,25 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         if keywords:
             structured_data["keywords"] = keywords
 
+        faq_structured_data = None
+        faq_items = post.get("faq_items") or []
+        if faq_items:
+            faq_structured_data = {
+                "@context": "https://schema.org",
+                "@type": "FAQPage",
+                "mainEntity": [
+                    {
+                        "@type": "Question",
+                        "name": item["question"],
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": item["answer"],
+                        },
+                    }
+                    for item in faq_items
+                ],
+            }
+
         recent_posts = [p for p in get_all_blog_posts() if p["slug"] != post["slug"]][:3]
 
         context.update(
@@ -1048,6 +1128,9 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                 "og_image_alt": og_image_alt,
                 "recent_posts": recent_posts,
                 "structured_data_json": json.dumps(structured_data, ensure_ascii=False),
+                "faq_structured_data_json": json.dumps(faq_structured_data, ensure_ascii=False)
+                if faq_structured_data
+                else None,
             }
         )
 

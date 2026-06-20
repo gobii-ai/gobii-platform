@@ -7,6 +7,7 @@ from xml.etree import ElementTree
 from bs4 import BeautifulSoup
 import frontmatter
 from PIL import Image, UnidentifiedImageError
+from django.utils import timezone
 from django.utils.html import strip_tags
 
 from config import settings
@@ -89,6 +90,67 @@ def _first_image_alt(html: str) -> str | None:
     return alt.strip() if alt else None
 
 
+def _extract_faq_items(html: str) -> list[dict[str, str]]:
+    soup = BeautifulSoup(html, "html.parser")
+    faq_heading = None
+    for heading in soup.find_all(["h2", "h3"]):
+        heading_text = heading.get_text(" ", strip=True).lower()
+        if heading_text in {"faq", "faqs", "frequently asked questions"}:
+            faq_heading = heading
+            break
+
+    if faq_heading is None:
+        return []
+
+    items = []
+    current_question = None
+    current_answer_parts = []
+
+    def flush_current_item():
+        if current_question and current_answer_parts:
+            answer = " ".join(part for part in current_answer_parts if part).strip()
+            if answer:
+                items.append({"question": current_question, "answer": answer})
+
+    for sibling in faq_heading.find_next_siblings():
+        if sibling.name in {"h1", "h2"}:
+            break
+
+        if sibling.name in {"h3", "h4"}:
+            flush_current_item()
+            question = sibling.get_text(" ", strip=True)
+            current_question = question if question.endswith("?") else None
+            current_answer_parts = []
+            continue
+
+        if current_question:
+            answer_part = sibling.get_text(" ", strip=True)
+            if answer_part:
+                current_answer_parts.append(answer_part)
+
+    flush_current_item()
+    return items
+
+
+def _uses_lightbox(html: str) -> bool:
+    soup = BeautifulSoup(html, "html.parser")
+    return bool(soup.select("[data-lightbox]"))
+
+
+def is_blog_post_published(post: dict, *, now=None) -> bool:
+    published_at = post.get("published_at")
+    if published_at is None:
+        return True
+
+    current_time = now or timezone.now()
+    if timezone.is_naive(published_at):
+        published_at = timezone.make_aware(published_at)
+    if timezone.is_naive(current_time):
+        current_time = timezone.make_aware(current_time)
+
+    return published_at <= current_time
+
+
 def _enrich_blog_html(html: str, fallback_alt: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     images = soup.find_all("img")
@@ -158,6 +220,8 @@ def load_blog_post(slug: str):
         "updated_at": updated_at,
         "word_count": _word_count(text_content),
         "image_alt": meta.get("image_alt") or _first_image_alt(html) or f"{title} image",
+        "faq_items": _extract_faq_items(html),
+        "uses_lightbox": _uses_lightbox(html),
     }
 
 @lru_cache(maxsize=1)
@@ -174,6 +238,8 @@ def get_all_blog_posts():
         try:
             post = load_blog_post(slug)
         except FileNotFoundError:
+            continue
+        if not is_blog_post_published(post):
             continue
 
         title = post["meta"].get("title", slug.replace('-', ' ').replace('_', ' ').capitalize())

@@ -27,8 +27,13 @@
   <meta name="twitter:image" content="{{ og_image_url }}">
   <meta name="twitter:image:alt" content="{{ og_image_alt }}">
   <script type="application/ld+json">{{ structured_data_json|safe }}</script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.5/css/lightbox.min.css" rel="stylesheet" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.5/js/lightbox-plus-jquery.min.js" integrity="sha512-/IJVg2oav2TggiFftaMSPgttHNmgu/0RSGP64Nm7wqYwjkxj4hAHLRMJi3QNTa22f4pIkvTsCpB848HEilV6MA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  {% if faq_structured_data_json %}
+    <script type="application/ld+json">{{ faq_structured_data_json|safe }}</script>
+  {% endif %}
+  {% if post.uses_lightbox %}
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.5/css/lightbox.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lightbox2/2.11.5/js/lightbox-plus-jquery.min.js" integrity="sha512-/IJVg2oav2TggiFftaMSPgttHNmgu/0RSGP64Nm7wqYwjkxj4hAHLRMJi3QNTa22f4pIkvTsCpB848HEilV6MA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -60,6 +65,23 @@
     <div class="prose prose-slate prose-headings:font-normal mt-10 max-w-none lg:prose-lg">
       {{ post.html|safe }}
     </div>
+
+    {% if post.meta.author_bio %}
+      <aside class="mt-12 border-l-2 border-blue-200 pl-5 text-sm leading-relaxed text-slate-600">
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">About the author</p>
+        <p class="mt-2">
+          <span class="font-medium text-slate-900">{{ post.meta.author }}</span>{% if post.meta.author_job_title %}
+            <span>, {{ post.meta.author_job_title }}</span>
+          {% endif %}
+        </p>
+        <p class="mt-2">{{ post.meta.author_bio }}</p>
+        {% if post.meta.author_url %}
+          <a href="{{ post.meta.author_url }}" class="mt-3 inline-flex text-blue-600 hover:text-blue-700">
+            Author profile
+          </a>
+        {% endif %}
+      </aside>
+    {% endif %}
   </div>
 </article>
 

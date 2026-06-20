@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Always-on AI agent workflow</title>
+  <desc id="desc">Diagram showing schedules, webhooks, and messages waking an always-on AI agent that uses memory, tools, controls, and delivery channels.</desc>
+  <rect width="1200" height="630" fill="#ffffff"/>
+  <rect x="48" y="48" width="1104" height="534" rx="34" fill="#0f172a"/>
+  <text x="92" y="118" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="42" font-weight="700">Always-on AI agents</text>
+  <text x="92" y="158" fill="#c7d2fe" font-family="Inter, Arial, sans-serif" font-size="22">Persistent workers that wake, remember, act, and report back.</text>
+
+  <g font-family="Inter, Arial, sans-serif">
+    <rect x="92" y="220" width="190" height="94" rx="18" fill="#0ea5e9"/>
+    <text x="187" y="258" fill="#ffffff" font-size="22" font-weight="700" text-anchor="middle">Schedule</text>
+    <text x="187" y="290" fill="#e0f2fe" font-size="16" text-anchor="middle">daily or weekly</text>
+
+    <rect x="92" y="350" width="190" height="94" rx="18" fill="#f97316"/>
+    <text x="187" y="388" fill="#ffffff" font-size="22" font-weight="700" text-anchor="middle">Event</text>
+    <text x="187" y="420" fill="#ffedd5" font-size="16" text-anchor="middle">webhook or email</text>
+
+    <rect x="380" y="254" width="260" height="156" rx="26" fill="#22c55e"/>
+    <text x="510" y="304" fill="#052e16" font-size="26" font-weight="800" text-anchor="middle">Agent wakes</text>
+    <text x="510" y="342" fill="#14532d" font-size="18" text-anchor="middle">loads task state</text>
+    <text x="510" y="372" fill="#14532d" font-size="18" text-anchor="middle">checks memory</text>
+
+    <rect x="742" y="200" width="166" height="86" rx="18" fill="#a78bfa"/>
+    <text x="825" y="235" fill="#ffffff" font-size="21" font-weight="700" text-anchor="middle">Memory</text>
+    <text x="825" y="264" fill="#f5f3ff" font-size="15" text-anchor="middle">preferences</text>
+
+    <rect x="742" y="322" width="166" height="86" rx="18" fill="#38bdf8"/>
+    <text x="825" y="357" fill="#082f49" font-size="21" font-weight="800" text-anchor="middle">Tools</text>
+    <text x="825" y="386" fill="#0c4a6e" font-size="15" text-anchor="middle">browser + APIs</text>
+
+    <rect x="942" y="260" width="150" height="86" rx="18" fill="#facc15"/>
+    <text x="1017" y="295" fill="#422006" font-size="21" font-weight="800" text-anchor="middle">Controls</text>
+    <text x="1017" y="324" fill="#713f12" font-size="15" text-anchor="middle">limits + audit</text>
+
+    <rect x="844" y="454" width="248" height="78" rx="18" fill="#14b8a6"/>
+    <text x="968" y="486" fill="#042f2e" font-size="22" font-weight="800" text-anchor="middle">Work delivered</text>
+    <text x="968" y="514" fill="#134e4a" font-size="15" text-anchor="middle">report, file, message, update</text>
+  </g>
+
+  <g fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.82">
+    <path d="M282 267 H360"/>
+    <path d="M282 397 H330 C352 397 352 332 380 332"/>
+    <path d="M640 332 H716"/>
+    <path d="M908 243 H962 C986 243 986 260 1000 260"/>
+    <path d="M908 365 H942"/>
+    <path d="M640 382 C700 470 760 493 844 493"/>
+  </g>
+
+  <g fill="#ffffff">
+    <path d="M360 267 l-14 -9 v18 z"/>
+    <path d="M380 332 l-14 -9 v18 z"/>
+    <path d="M716 332 l-14 -9 v18 z"/>
+    <path d="M1000 260 l-14 -9 v18 z"/>
+    <path d="M942 365 l-14 -9 v18 z"/>
+    <path d="M844 493 l-14 -9 v18 z"/>
+  </g>
+</svg>
