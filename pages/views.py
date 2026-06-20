@@ -2048,6 +2048,19 @@ def _public_site_absolute_url(path_or_url: str) -> str:
     return f"{settings.PUBLIC_SITE_URL.rstrip('/')}{path}"
 
 
+def _optional_static_public_url(path: str) -> str:
+    asset_path = str(path or "").strip()
+    if not asset_path:
+        return ""
+    if asset_path.startswith(("http://", "https://")):
+        return asset_path
+    try:
+        return _public_site_absolute_url(static(asset_path))
+    except ValueError:
+        logger.warning("Skipping missing public static asset: %s", asset_path)
+        return ""
+
+
 class PublicTemplateLegacyDetailRedirectView(View):
     def get(self, request, *args, **kwargs):
         template = _get_active_public_template_by_legacy_path(
@@ -2093,7 +2106,7 @@ class PublicTemplateDetailView(TemplateView):
             if self.template.hero_image_path
             else "images/gobii_fish_social_1280x640.png"
         )
-        social_image_url = _public_site_absolute_url(static(social_image_path))
+        social_image_url = _optional_static_public_url(social_image_path)
         seo_description = (self.template.seo_meta_description or "").strip() or Truncator(
             (self.template.description or self.template.tagline or "").strip()
         ).chars(160)
@@ -2128,7 +2141,6 @@ class PublicTemplateDetailView(TemplateView):
             "applicationSubCategory": category_label,
             "operatingSystem": "Web",
             "url": canonical_detail_url,
-            "image": social_image_url,
             "creator": creator_data,
             "mainEntityOfPage": {
                 "@id": webpage_schema_id,
@@ -2149,6 +2161,8 @@ class PublicTemplateDetailView(TemplateView):
                 },
             },
         }
+        if social_image_url:
+            structured_data["image"] = social_image_url
         webpage_data = {
             "@context": "https://schema.org",
             "@type": "WebPage",

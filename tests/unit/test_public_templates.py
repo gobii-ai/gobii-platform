@@ -401,6 +401,76 @@ class PublicTemplateRouteTests(TestCase):
         self.assertContains(response, "Monitor Stripe disputes and flag risky activity.")
 
     @tag("batch_public_templates")
+    def test_public_template_detail_omits_missing_social_image(self):
+        user = get_user_model().objects.create_user(
+            username="missing-image-template-owner",
+            email="missing-image-template-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle="missing-image-team")
+        PersistentAgentTemplate.objects.create(
+            code="missing-social-image-template",
+            public_profile=public_profile,
+            slug="missing-social-image-template",
+            display_name="Missing Social Image Template",
+            tagline="Render even when static metadata is stale.",
+            description="Render even when static metadata is stale.",
+            charter="Keep the public page available.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Finance",
+            hero_image_path="images/ai-directory/missing.svg",
+            is_active=True,
+        )
+
+        with patch("pages.views.static", side_effect=ValueError("Missing staticfiles manifest entry")):
+            response = self.client.get("/library/finance/missing-social-image-template/")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        structured_data = json.loads(response.context["template_structured_data_json"])
+
+        self.assertContains(response, "Missing Social Image Template")
+        self.assertNotIn('property="og:image"', content)
+        self.assertNotIn('name="twitter:image"', content)
+        self.assertNotIn("images/ai-directory/missing.svg", content)
+        self.assertNotIn("image", structured_data)
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_preserves_absolute_social_image_url(self):
+        user = get_user_model().objects.create_user(
+            username="absolute-image-template-owner",
+            email="absolute-image-template-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle="absolute-image-team")
+        image_url = "https://cdn.example.com/templates/absolute-social-image.png"
+        PersistentAgentTemplate.objects.create(
+            code="absolute-social-image-template",
+            public_profile=public_profile,
+            slug="absolute-social-image-template",
+            display_name="Absolute Social Image Template",
+            tagline="Keep remote social images intact.",
+            description="Keep remote social images intact.",
+            charter="Use the configured remote image URL.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Finance",
+            hero_image_path=image_url,
+            is_active=True,
+        )
+
+        with patch("pages.views.static", side_effect=AssertionError("static() should not resolve absolute URLs")):
+            response = self.client.get("/library/finance/absolute-social-image-template/")
+
+        self.assertEqual(response.status_code, 200)
+        structured_data = json.loads(response.context["template_structured_data_json"])
+
+        self.assertContains(response, f'<meta property="og:image" content="{image_url}">')
+        self.assertContains(response, f'<meta name="twitter:image" content="{image_url}">')
+        self.assertEqual(structured_data["image"], image_url)
+
+    @tag("batch_public_templates")
     def test_public_template_detail_redirects_mismatched_category_to_canonical_path(self):
         user = get_user_model().objects.create_user(
             username="canonical-template-owner",

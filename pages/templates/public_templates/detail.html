@@ -8,11 +8,15 @@
   <meta property="og:description" content="{{ template_seo_description }}">
   <meta property="og:url" content="{{ template_canonical_url }}">
   <meta property="og:site_name" content="Gobii">
+  {% if template_social_image_url %}
   <meta property="og:image" content="{{ template_social_image_url }}">
+  {% endif %}
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ template_social_title }}">
   <meta name="twitter:description" content="{{ template_seo_description }}">
+  {% if template_social_image_url %}
   <meta name="twitter:image" content="{{ template_social_image_url }}">
+  {% endif %}
   <script type="application/ld+json">{{ template_structured_data_json }}</script>
   <script type="application/ld+json">{{ template_webpage_structured_data_json }}</script>
   <script type="application/ld+json">{{ template_breadcrumb_json }}</script>
