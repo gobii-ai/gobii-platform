@@ -2052,6 +2052,8 @@ def _optional_static_public_url(path: str) -> str:
     asset_path = str(path or "").strip()
     if not asset_path:
         return ""
+    if asset_path.startswith(("http://", "https://")):
+        return asset_path
     try:
         return _public_site_absolute_url(static(asset_path))
     except ValueError:

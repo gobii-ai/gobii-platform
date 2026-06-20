@@ -437,6 +437,40 @@ class PublicTemplateRouteTests(TestCase):
         self.assertNotIn("image", structured_data)
 
     @tag("batch_public_templates")
+    def test_public_template_detail_preserves_absolute_social_image_url(self):
+        user = get_user_model().objects.create_user(
+            username="absolute-image-template-owner",
+            email="absolute-image-template-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle="absolute-image-team")
+        image_url = "https://cdn.example.com/templates/absolute-social-image.png"
+        PersistentAgentTemplate.objects.create(
+            code="absolute-social-image-template",
+            public_profile=public_profile,
+            slug="absolute-social-image-template",
+            display_name="Absolute Social Image Template",
+            tagline="Keep remote social images intact.",
+            description="Keep remote social images intact.",
+            charter="Use the configured remote image URL.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Finance",
+            hero_image_path=image_url,
+            is_active=True,
+        )
+
+        with patch("pages.views.static", side_effect=AssertionError("static() should not resolve absolute URLs")):
+            response = self.client.get("/library/finance/absolute-social-image-template/")
+
+        self.assertEqual(response.status_code, 200)
+        structured_data = json.loads(response.context["template_structured_data_json"])
+
+        self.assertContains(response, f'<meta property="og:image" content="{image_url}">')
+        self.assertContains(response, f'<meta name="twitter:image" content="{image_url}">')
+        self.assertEqual(structured_data["image"], image_url)
+
+    @tag("batch_public_templates")
     def test_public_template_detail_redirects_mismatched_category_to_canonical_path(self):
         user = get_user_model().objects.create_user(
             username="canonical-template-owner",
