@@ -94,14 +94,15 @@ def _blog_author_schema(request, meta):
 
     author_url = _absolute_meta_url(request, meta.get("author_url"))
     author_image = _absolute_meta_url(request, meta.get("author_image"))
-    author_bio = _meta_text(meta, "author_bio")
     author_job_title = _meta_text(meta, "author_job_title")
-    same_as = [
-        url
-        for url in _keyword_list(meta.get("author_same_as"))
-        if url.startswith(("http://", "https://"))
+    author_bio = _meta_text(meta, "author_bio")
+    author_same_as = [
+        same_as
+        for same_as in (_absolute_meta_url(request, url) for url in _keyword_list(meta.get("author_same_as")))
+        if same_as
     ]
-    knows_about = _keyword_list(meta.get("author_knows_about"))
+    author_knows_about = _keyword_list(meta.get("author_knows_about"))
+    author_works_for = _meta_text(meta, "author_works_for") or "Gobii"
 
     if author_url:
         author["url"] = author_url
@@ -112,16 +113,16 @@ def _blog_author_schema(request, meta):
         author["description"] = author_bio
     if author_image:
         author["image"] = author_image
-    if same_as:
-        author["sameAs"] = same_as
-    if knows_about:
-        author["knowsAbout"] = knows_about
-
-    author["worksFor"] = {
-        "@type": "Organization",
-        "name": "Gobii",
-        "url": request.build_absolute_uri("/"),
-    }
+    if author_same_as:
+        author["sameAs"] = author_same_as
+    if author_knows_about:
+        author["knowsAbout"] = author_knows_about
+    if author_works_for:
+        author["worksFor"] = {
+            "@type": "Organization",
+            "name": author_works_for,
+            "url": request.build_absolute_uri("/"),
+        }
 
     return author
 
@@ -1058,6 +1059,15 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         published_iso = published_at.isoformat() if published_at else None
         updated_at = post.get("updated_at") or published_at
         updated_iso = updated_at.isoformat() if updated_at else None
+        author_name = post["meta"].get("author")
+        if author_name:
+            author_type = post["meta"].get("author_type")
+            if not author_type:
+                lowered = str(author_name).lower()
+                author_type = "Organization" if "team" in lowered or "gobii" in lowered else "Person"
+        else:
+            author_name = "Gobii"
+            author_type = "Organization"
 
         structured_data = {
             "@context": "https://schema.org",
