@@ -14,6 +14,7 @@ from api.models import (
     UserTrialEligibilityAutoStatusChoices,
     UserTrialEligibilityManualActionChoices,
 )
+from api.services.email_verification import has_verified_email_address
 from api.services.trial_abuse import (
     SIGNAL_SOURCE_CHECKOUT,
     evaluate_user_trial_identity_abuse,
@@ -35,6 +36,10 @@ TRIAL_PROMO_META_REPEAT_ALLOWED = "trial_promo_repeat_allowed"
 TRIAL_PROMO_META_ABUSE_FILTERING = "trial_promo_abuse_filtering"
 TRIAL_PROMO_META_CREDIT_AMOUNT = "trial_promo_credit_amount"
 TRIAL_PROMO_META_REDEMPTION_ID = "trial_promo_redemption_id"
+
+
+TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED = "email_not_allowlisted"
+TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED = "email_not_verified"
 
 
 class TrialPromoError(Exception):
@@ -99,6 +104,32 @@ def get_trial_promo_manual_action(user) -> str:
     return eligibility.manual_action
 
 
+def is_user_email_allowed_for_trial_promo(*, user, promo: TrialPromo) -> bool:
+    if not promo.email_allowlist_enabled:
+        return True
+    if not user or not getattr(user, "pk", None):
+        return False
+
+    normalized_email = TrialPromo.normalize_allowed_email(getattr(user, "email", ""))
+    if not normalized_email:
+        return False
+
+    return promo.allowed_emails.filter(normalized_email=normalized_email).exists()
+
+
+def is_user_email_verified_for_trial_promo(*, user, promo: TrialPromo) -> bool:
+    if not promo.email_allowlist_enabled:
+        return True
+    if not user or not getattr(user, "pk", None):
+        return False
+
+    normalized_email = TrialPromo.normalize_allowed_email(getattr(user, "email", ""))
+    if not normalized_email:
+        return False
+
+    return has_verified_email_address(user, normalized_email)
+
+
 def can_user_start_trial_promo(
     *,
     user,
@@ -108,6 +139,10 @@ def can_user_start_trial_promo(
     manual_action = get_trial_promo_manual_action(user)
     if manual_action == UserTrialEligibilityManualActionChoices.DENY_TRIAL:
         return TrialPromoStartDecision(False, "trial_denied")
+    if not is_user_email_allowed_for_trial_promo(user=user, promo=promo):
+        return TrialPromoStartDecision(False, TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED)
+    if not is_user_email_verified_for_trial_promo(user=user, promo=promo):
+        return TrialPromoStartDecision(False, TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED)
     if manual_action == UserTrialEligibilityManualActionChoices.ALLOW_TRIAL:
         return TrialPromoStartDecision(True)
 

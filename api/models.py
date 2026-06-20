@@ -4601,6 +4601,10 @@ class TrialPromo(models.Model):
         default=False,
         help_text="When enabled, this promo can ignore same-user prior trial/subscription history.",
     )
+    email_allowlist_enabled = models.BooleanField(
+        default=False,
+        help_text="When enabled, only users whose email is on this promo's allowlist can redeem it.",
+    )
     trial_abuse_filtering_enabled = models.BooleanField(default=True)
     trial_credit_amount = models.DecimalField(
         max_digits=12,
@@ -4639,6 +4643,10 @@ class TrialPromo(models.Model):
     def normalize_code(code: str | None) -> str:
         return str(code or "").strip().upper()
 
+    @staticmethod
+    def normalize_allowed_email(email: str | None) -> str:
+        return str(email or "").strip().lower()
+
     @classmethod
     def digest_code(cls, code: str | None) -> str:
         normalized = cls.normalize_code(code)
@@ -4664,6 +4672,40 @@ class TrialPromo(models.Model):
     def __str__(self):
         label = self.code_label or self.name
         return f"{self.name} ({label})"
+
+
+class TrialPromoAllowedEmail(models.Model):
+    """Email address allowed to redeem one specific trial promo."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    promo = models.ForeignKey(
+        TrialPromo,
+        on_delete=models.CASCADE,
+        related_name="allowed_emails",
+    )
+    normalized_email = models.EmailField(max_length=254)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["normalized_email"]
+        constraints = [
+            UniqueConstraint(
+                fields=["promo", "normalized_email"],
+                name="uniq_trialpromo_allowed_email",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["normalized_email"], name="trialpromo_email_idx"),
+        ]
+        verbose_name = "Trial promo allowed email"
+        verbose_name_plural = "Trial promo allowed emails"
+
+    def save(self, *args, **kwargs):
+        self.normalized_email = TrialPromo.normalize_allowed_email(self.normalized_email)
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.normalized_email} for {self.promo_id}"
 
 
 class TrialPromoRedemptionStatusChoices(models.TextChoices):

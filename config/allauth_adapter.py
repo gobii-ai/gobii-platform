@@ -19,11 +19,13 @@ from api.services.system_settings import (
     get_account_allow_social_login,
     get_account_allow_social_signup,
 )
+from api.services.email_verification import EMAIL_VERIFICATION_REDIRECT_URL_SESSION_KEY
 from util.onboarding import set_trial_onboarding_requires_plan_selection
 from util.personal_signup_preview import (
     get_personal_signup_preview_signup_redirect_url,
     resolve_personal_signup_preview,
 )
+from util.urls import append_query_params
 
 try:
     from MailChecker import MailChecker as _MailChecker
@@ -153,6 +155,17 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
     def get_reset_password_from_key_url(self, key: str) -> str:
         path = reverse("account_reset_password_bridge_start", kwargs={"key": key})
         return build_absolute_uri(self.request, path)
+
+    def get_email_confirmation_url(self, request, emailconfirmation):
+        url = super().get_email_confirmation_url(request, emailconfirmation)
+        if request is None:
+            return url
+
+        redirect_url = request.session.get(EMAIL_VERIFICATION_REDIRECT_URL_SESSION_KEY)
+        if not redirect_url:
+            return url
+
+        return append_query_params(url, {"next": redirect_url})
 
     @staticmethod
     def _extract_domain(email: str) -> str:
