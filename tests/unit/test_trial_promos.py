@@ -315,6 +315,28 @@ class TrialPromoAdminFormTests(TestCase):
             ["one@example.com", "two@example.com"],
         )
 
+    def test_bulk_allowed_emails_save_after_admin_commit_false_lifecycle(self):
+        promo = _create_promo(code="ALLOWLIST-EDIT")
+        form = TrialPromoAdminForm(
+            instance=promo,
+            data=_trial_promo_form_data(
+                "",
+                email_allowlist_enabled="on",
+                allowed_emails_bulk=" AdminUser@Example.com ",
+            ),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        updated = form.save(commit=False)
+        updated.save()
+        form.save_m2m()
+
+        self.assertEqual(updated.code_label, "ALLOWLIST-EDIT")
+        self.assertEqual(
+            list(updated.allowed_emails.values_list("normalized_email", flat=True)),
+            ["adminuser@example.com"],
+        )
+
     def test_bulk_allowed_emails_reject_invalid_email(self):
         form = TrialPromoAdminForm(
             data=_trial_promo_form_data(
