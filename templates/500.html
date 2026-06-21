@@ -8,7 +8,9 @@
 {% endblock %}
 {% block actions %}
   <a class="button button-primary" href="/">Go home</a>
-  <a class="button button-secondary" href="mailto:support@gobii.ai">Contact support</a>
+  {% if support_email %}
+    <a class="button button-secondary" href="mailto:{{ support_email }}">Contact support</a>
+  {% endif %}
 {% endblock %}
 {% block note %}
   <p class="error-note">The detailed error is kept out of the page response for security.</p>

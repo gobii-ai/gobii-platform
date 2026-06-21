@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, follow">
   <title>{% block title %}Gobii{% endblock %}</title>
-  <link rel="icon" href="{% static 'images/gobii_fish_favicon.ico' %}?v=5" sizes="any">
-  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'images/gobii_fish_favicon_32.png' %}?v=5">
+  <link rel="icon" href="{% static 'images/gobii_fish_favicon.ico' %}" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'images/gobii_fish_favicon_32.png' %}">
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
   <style>
     :root {
@@ -211,7 +211,9 @@
            width="108"
            height="40">
     </a>
-    <a class="support-link" href="mailto:support@gobii.ai">Contact support</a>
+    {% if support_email %}
+      <a class="support-link" href="mailto:{{ support_email }}">Contact support</a>
+    {% endif %}
   </header>
 
   <main class="error-main">

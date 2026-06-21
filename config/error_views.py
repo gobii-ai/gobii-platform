@@ -1,9 +1,11 @@
+from django.conf import settings
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 
 
 def _render_error_response(template_name, status):
-    response = HttpResponse(render_to_string(template_name), status=status)
+    context = {"support_email": settings.PUBLIC_SUPPORT_EMAIL}
+    response = HttpResponse(render_to_string(template_name, context), status=status)
     response["X-Robots-Tag"] = "noindex, follow"
     return response
 

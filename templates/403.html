@@ -7,6 +7,6 @@
   The page exists, but this account does not have permission to view it. If that seems wrong, try signing in with the right account or contact support.
 {% endblock %}
 {% block actions %}
-  <a class="button button-primary" href="/accounts/login/">Sign in</a>
+  <a class="button button-primary" href="{% url 'account_login' %}">Sign in</a>
   <a class="button button-secondary" href="/">Go home</a>
 {% endblock %}
