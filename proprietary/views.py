@@ -1059,15 +1059,6 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         published_iso = published_at.isoformat() if published_at else None
         updated_at = post.get("updated_at") or published_at
         updated_iso = updated_at.isoformat() if updated_at else None
-        author_name = post["meta"].get("author")
-        if author_name:
-            author_type = post["meta"].get("author_type")
-            if not author_type:
-                lowered = str(author_name).lower()
-                author_type = "Organization" if "team" in lowered or "gobii" in lowered else "Person"
-        else:
-            author_name = "Gobii"
-            author_type = "Organization"
 
         structured_data = {
             "@context": "https://schema.org",
