@@ -1,0 +1,12 @@
+{% extends "errors/base.html" %}
+
+{% block title %}Page not found - Gobii{% endblock %}
+{% block status_code %}404{% endblock %}
+{% block headline %}That page is not here.{% endblock %}
+{% block message %}
+  The link may be old, private, or mistyped. You can head home, or browse agent templates if you were looking for something to launch.
+{% endblock %}
+{% block actions %}
+  <a class="button button-primary" href="/">Go home</a>
+  <a class="button button-secondary" href="/library/">Browse templates</a>
+{% endblock %}

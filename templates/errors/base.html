@@ -1,0 +1,233 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, follow">
+  <title>{% block title %}Gobii{% endblock %}</title>
+  <link rel="icon" href="{% static 'images/gobii_fish_favicon.ico' %}" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'images/gobii_fish_favicon_32.png' %}">
+  <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: InterVariable, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      --blue: #2563eb;
+      --blue-dark: #1d4ed8;
+      --ink: #0f172a;
+      --muted: #475569;
+      --teal: #0f766e;
+      --amber: #b45309;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background:
+        linear-gradient(120deg, rgba(37, 99, 235, 0.08), transparent 34rem),
+        linear-gradient(300deg, rgba(15, 118, 110, 0.08), transparent 30rem),
+        #ffffff;
+      color: var(--ink);
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .site-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: min(100%, 72rem);
+      margin: 0 auto;
+      padding: 1.25rem clamp(1rem, 3vw, 2rem);
+    }
+
+    .brand-link {
+      display: inline-flex;
+      align-items: center;
+      height: 2.5rem;
+      text-decoration: none;
+    }
+
+    .brand-link img {
+      width: auto;
+      height: 2.5rem;
+      display: block;
+    }
+
+    .support-link {
+      color: var(--muted);
+      font-size: 0.875rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    .support-link:hover {
+      color: var(--blue);
+    }
+
+    .error-main {
+      display: grid;
+      min-height: calc(100vh - 5rem);
+      align-items: center;
+      padding: 2rem clamp(1rem, 5vw, 3rem) 5rem;
+    }
+
+    .error-panel {
+      width: min(100%, 48rem);
+      margin: 0 auto;
+    }
+
+    .status-mark {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 1.5rem;
+      color: var(--teal);
+      font-size: 0.9rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .status-mark::before {
+      content: "";
+      width: 0.75rem;
+      height: 0.75rem;
+      border-radius: 999px;
+      background: var(--teal);
+      box-shadow: 0 0 0 0.35rem rgba(15, 118, 110, 0.14);
+    }
+
+    h1 {
+      max-width: 13ch;
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(3.5rem, 12vw, 7rem);
+      line-height: 0.92;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .message {
+      max-width: 40rem;
+      margin: 1.5rem 0 0;
+      color: var(--muted);
+      font-size: clamp(1.1rem, 2vw, 1.35rem);
+      line-height: 1.65;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 2rem;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.75rem;
+      padding: 0.7rem 1rem;
+      border: 1px solid transparent;
+      border-radius: 0.5rem;
+      font-size: 0.95rem;
+      font-weight: 750;
+      line-height: 1.2;
+      text-decoration: none;
+      transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+    }
+
+    .button-primary {
+      background: var(--blue);
+      color: #ffffff;
+    }
+
+    .button-primary:hover {
+      background: var(--blue-dark);
+    }
+
+    .button-secondary {
+      background: #ffffff;
+      border-color: #bfdbfe;
+      color: var(--blue-dark);
+    }
+
+    .button-secondary:hover {
+      border-color: #93c5fd;
+      color: var(--blue);
+    }
+
+    .error-note {
+      max-width: 37rem;
+      margin-top: 2rem;
+      color: var(--amber);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 640px) {
+      .site-header {
+        padding-top: 1rem;
+      }
+
+      .support-link {
+        display: none;
+      }
+
+      .error-main {
+        align-items: start;
+        padding-top: 4rem;
+      }
+
+      .actions {
+        flex-direction: column;
+      }
+
+      .button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand-link" href="/" aria-label="Gobii home">
+      <img src="{% static 'images/gobii_fish_with_text_purple_nav_2x.webp' %}"
+           srcset="{% static 'images/gobii_fish_with_text_purple_nav_1x.webp' %} 1x, {% static 'images/gobii_fish_with_text_purple_nav_2x.webp' %} 2x, {% static 'images/gobii_fish_with_text_purple_nav_3x.webp' %} 3x"
+           alt="Gobii"
+           width="108"
+           height="40">
+    </a>
+    {% if support_email %}
+      <a class="support-link" href="mailto:{{ support_email }}">Contact support</a>
+    {% endif %}
+  </header>
+
+  <main class="error-main">
+    <section class="error-panel" aria-labelledby="error-title">
+      <div class="status-mark">{% block status_code %}{% endblock %}</div>
+      <h1 id="error-title">{% block headline %}{% endblock %}</h1>
+      <p class="message">{% block message %}{% endblock %}</p>
+
+      <div class="actions">
+        {% block actions %}{% endblock %}
+      </div>
+
+      {% block note %}{% endblock %}
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{% extends "errors/base.html" %}
+
+{% block title %}Access denied - Gobii{% endblock %}
+{% block status_code %}403{% endblock %}
+{% block headline %}You do not have access to this page.{% endblock %}
+{% block message %}
+  The page exists, but this account does not have permission to view it. If that seems wrong, try signing in with the right account or contact support.
+{% endblock %}
+{% block actions %}
+  <a class="button button-primary" href="{% url 'account_login' %}">Sign in</a>
+  <a class="button button-secondary" href="/">Go home</a>
+{% endblock %}
