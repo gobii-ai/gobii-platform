@@ -1,0 +1,159 @@
+---
+title: "Apollo.io"
+description: "Connect Apollo so a Gobii can search prospects, enrich people and organizations, and work with Apollo contacts."
+sidebar_label: "Apollo"
+---
+
+Apollo support lets a Gobii work with Apollo data directly for lead sourcing, enrichment, and sales operations. Use it when you want a Gobii to find prospects, research accounts, enrich people or organizations, inspect saved contacts, or help prepare Apollo contact and sequence workflows.
+
+Apollo connects as a native workspace app through OAuth. You authorize Apollo, return to Gobii, and the Apollo row shows as connected. After that, ask the Gobii for the lead sourcing or enrichment task you want.
+
+The examples below focus on common Apollo workflows, but the connection uses Apollo's API rather than a narrow form-based integration. That means a Gobii can help across the broader Apollo API surface your account, plan, scopes, and permissions allow. If you are not sure whether a workflow is supported, ask the Gobii for the Apollo action you want and it will try the right API path or tell you what access is missing.
+
+## When To Use It
+
+Use Apollo when you want a Gobii to:
+
+- Search Apollo for people who match specific prospect criteria.
+- Search Apollo for organizations and accounts by firmographic filters.
+- Enrich known people, contacts, accounts, or organizations.
+- Inspect contacts and accounts already saved in your Apollo workspace.
+- Create or update Apollo contacts after you approve the write.
+- Work with Apollo sequences, tasks, calls, conversations, deals, analytics, users, usage stats, and rate-limit information when your Apollo permissions allow it.
+
+If you only need general web research, Apollo may be unnecessary. Use Apollo when the workflow depends on Apollo's sales intelligence data or should update your Apollo workspace.
+
+## Connect Apollo
+
+You can start from chat or go straight to integrations. If you ask a Gobii to connect Apollo before access is available, it can point you to the integrations page. To open integrations yourself, click **Settings** in the bottom-left navigation, then choose **Integrations & MCP**.
+
+<Screenshot
+  src="/images/product/apollo-connect-from-chat.png"
+  alt="Gobii chat showing a user asking to connect Apollo.io and an agent response linking to the integrations page."
+  caption="A Gobii can guide you to the integrations page when an Apollo workflow needs account access."
+/>
+
+<Screenshot
+  src="/images/product/apollo-integrations-workspace.png"
+  alt="Gobii workspace integrations page showing Apollo as a native app alongside other integrations."
+  caption="Apollo appears in the workspace integrations area with the other native apps."
+/>
+
+Open **Add Apps**, find **Apollo**, and click **Connect**.
+
+<Screenshot
+  src="/images/product/apollo-connect-modal.png"
+  alt="Manage integrations modal showing Apollo with a Connect button."
+  caption="Connect Apollo from the app list. Apollo is a workspace-level native app connection."
+/>
+
+Apollo will open an authorization screen. Review the requested access, then choose **Authorize** to continue.
+
+<Screenshot
+  src="/images/product/apollo-oauth-redacted.png"
+  alt="Apollo OAuth screen asking the user to authorize Gobii access."
+  caption="Apollo asks you to authorize Gobii before returning to the integration modal. Account details are redacted here for privacy."
+/>
+
+After authorization, return to Gobii. Apollo should show as **Connected**.
+
+<Screenshot
+  src="/images/product/apollo-connected.png"
+  alt="Manage integrations modal showing Apollo connected."
+  caption="After OAuth completes, the Apollo row shows as connected and is ready for Apollo-backed requests."
+/>
+
+Then:
+
+1. Open the Gobii that should use Apollo.
+2. Ask it to connect Apollo, follow its integrations link, or open **Settings** -> **Integrations & MCP** directly.
+3. Click **Add Apps**.
+4. Find **Apollo** and click **Connect**.
+5. Review the Apollo authorization screen and click **Authorize**.
+6. Confirm that Apollo shows **Connected** in Gobii.
+7. Return to chat and send a small test request, such as:
+
+> Search Apollo for five VP Sales prospects at healthcare SaaS companies in Boston, then summarize the matches without creating contacts.
+
+## Give A Good Apollo Request
+
+Apollo works best when you give the Gobii tight prospecting criteria and clear write boundaries.
+
+For people search, include:
+
+- Job titles or seniorities.
+- Company type, industry, geography, or employee range.
+- Domains, company names, or account lists when you have them.
+- How many results you want.
+- Whether similar titles are acceptable.
+- Whether the Gobii should only report results or also enrich and save contacts.
+
+Examples:
+
+> Search Apollo for 25 RevOps leaders at logistics companies with 200 to 1,000 employees in Texas. Dedupe by email and report the best matches before creating any contacts.
+
+> Enrich these ten people by email, then return title, company, LinkedIn URL, location, and whether Apollo found an email. Do not reveal phone numbers.
+
+> Find cybersecurity companies in Austin with 50 to 200 employees. Return company name, domain, employee range, industry, and Apollo organization ID.
+
+> Search our existing Apollo contacts for people in the demo-request stage at Acme. Summarize what you find before updating any stages.
+
+For contact or sequence work, be explicit:
+
+> If any of these prospects are not already contacts, propose the exact contacts you would create. Wait for my approval before writing to Apollo.
+
+> Find the sequence named `Q3 Midmarket Follow-up`, list the available sending inboxes, and ask me which mailbox to use before adding contacts.
+
+## Read Versus Write Workflows
+
+Apollo read workflows include search, enrichment, contact inspection, account inspection, profile checks, usage stats, and rate-limit checks. These are good first steps when you are exploring a market or building a lead list.
+
+Apollo write workflows can create or update records in your Apollo workspace. Treat writes more carefully:
+
+- Ask for a preview before creating contacts.
+- Require approval before changing contact stages, adding contacts to sequences, or updating saved Apollo records.
+- Include dedupe instructions when creating contacts from search results.
+- Ask the Gobii to summarize changed records after a write.
+- Keep prospecting requests narrow enough to review.
+
+Example:
+
+> Search Apollo for ten target prospects, enrich them, and show me the proposed contact records. Do not create or update anything until I approve the exact list.
+
+## Safety Boundaries
+
+Apollo can contain sensitive sales and prospecting data. Keep the Gobii's role and instructions specific.
+
+- Connect Apollo only when the workflow needs Apollo data.
+- Review OAuth access before authorizing.
+- Give precise filters so the Gobii does not over-collect broad prospect lists.
+- Require approval before outreach, sequence changes, bulk enrichment, broad contact creation, or stage updates.
+- Follow your team's compliance, privacy, and prospecting rules.
+- Disconnect Apollo if the workspace no longer needs it.
+
+## Troubleshooting
+
+**Apollo does not show as connected.**
+Return to **Settings** -> **Integrations & MCP**, open **Add Apps**, and connect Apollo again. Make sure the Apollo row shows **Connected**.
+
+**The Gobii says Apollo is not connected.**
+Confirm the workspace integration is connected, then ask the Gobii to retry the Apollo request. If the connection expired or scopes changed, reconnect Apollo.
+
+**Search results are too broad or irrelevant.**
+Add stricter titles, seniorities, locations, company domains, industries, employee ranges, or exclusions. Ask the Gobii to show the filters it used.
+
+**Search results are empty.**
+Loosen one filter at a time. For example, broaden geography, allow similar titles, remove a narrow company-size filter, or provide known company domains.
+
+**Enrichment did not return an email or phone.**
+Apollo may not have enough matching data, the available record may not include the requested field, or the request may require additional Apollo permissions or credits.
+
+**A write failed.**
+Ask the Gobii to inspect the Apollo response, confirm required fields and IDs, and retry only after you approve the corrected write.
+
+## Related Guides
+
+- [Connect Apps](/using-gobii/connect-apps)
+- [Google Sheets](/using-gobii/google-sheets)
+- [Approvals And Requests](/using-gobii/approvals-and-requests)
+- [Usage, Credits, And Limits](/using-gobii/usage-credits-and-limits)
