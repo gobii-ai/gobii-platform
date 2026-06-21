@@ -29,6 +29,7 @@ const sidebars = {
       items: [
         'using-gobii/chat-and-timeline',
         'using-gobii/planning-and-deliverables',
+        'using-gobii/peer-linking',
         'using-gobii/approvals-and-requests',
         'using-gobii/template-library',
         'using-gobii/share-template',

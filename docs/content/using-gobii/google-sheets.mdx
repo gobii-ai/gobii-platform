@@ -6,7 +6,7 @@ sidebar_label: "Google Sheets"
 
 Google Sheets support lets a Gobii work directly with spreadsheets instead of asking you to copy rows in and out of chat. Use it when a workflow needs structured data, recurring reports, CRM-style cleanup, lead lists, dashboards, or spreadsheet outputs your team can keep using.
 
-Gobii connects through Google Drive. You authorize Google, choose the spreadsheet files this Gobii may access, then ask the Gobii to read, write, append, format, or chart those sheets.
+Gobii connects through Google Drive. You authorize Google, choose the existing spreadsheet files this Gobii may access, then ask the Gobii to read, write, append, format, or chart those sheets. A Gobii can also create a new spreadsheet when you ask. It cannot browse your whole Drive or discover unselected files; existing files must be granted before the Gobii can find, read, or update them.
 
 ## When to use it
 
@@ -24,16 +24,62 @@ If you only need a one-time file output, a CSV in the Gobii filespace may be eno
 
 ## Connect Google Drive
 
+You can start from chat or go straight to integrations. If you ask a Gobii to help with a Google Sheet before access is connected, it can point you to the integrations page. To open integrations yourself, click **Settings** in the bottom-left navigation, then choose **Integrations & MCP**.
+
+<Screenshot
+  src="/images/product/google-sheets-connect-from-chat.png"
+  alt="Gobii chat showing a request to connect Google Sheets and an agent response linking to the integrations page."
+  caption="A Gobii can guide you to the integrations page when a Sheets workflow needs Google Drive access."
+/>
+
+<Screenshot
+  src="/images/product/google-sheets-integrations-menu.png"
+  alt="Gobii settings menu showing the Integrations and MCP option."
+  caption="You can also open Settings from the bottom-left navigation and choose Integrations & MCP directly."
+/>
+
+<Screenshot
+  src="/images/product/google-sheets-integrations-workspace.png"
+  alt="Gobii workspace integrations page showing native apps, included apps, user apps, and an Add Apps button."
+  caption="On the workspace integrations page, use Add Apps to open the app connection list."
+/>
+
+<Screenshot
+  src="/images/product/google-sheets-manage-integrations.png"
+  alt="Manage integrations modal showing Google Drive with a Connect button."
+  caption="Connect Google Drive from the app list so Gobii can work with selected Google Sheets."
+/>
+
+<Screenshot
+  src="/images/product/google-sheets-google-consent.png"
+  alt="Google consent screen asking the user to confirm Gobii access to their Google account."
+  caption="Google asks you to confirm access before returning you to Gobii. Account details are redacted here for privacy."
+/>
+
+<Screenshot
+  src="/images/product/google-sheets-select-files.png"
+  alt="Manage integrations modal showing Google Drive connected with a Select Files button."
+  caption="After Google Drive is connected, use Select Files to choose the spreadsheets the Gobii can access."
+/>
+
+<Screenshot
+  src="/images/product/google-sheets-file-picker.png"
+  alt="Google Drive file picker showing spreadsheet files that can be selected for Gobii access."
+  caption="Select the Google Sheets files you want this Gobii to use. Unselected Drive files stay out of reach."
+/>
+
 1. Open the Gobii that should work with the spreadsheet.
-2. Ask for the Sheets task, or open the Gobii's tools, apps, or integrations area.
-3. Connect **Google Drive** when prompted.
-4. Complete the Google authorization flow.
-5. Choose the spreadsheet files this Gobii should be allowed to access.
-6. Return to chat and send a small test request, such as:
+2. Ask for the Sheets task, follow the Gobii's integrations link, or open **Settings** → **Integrations & MCP** directly.
+3. Click **Add Apps**.
+4. Find **Google Drive** and click **Connect**.
+5. Complete the Google authorization flow.
+6. Back in **Manage integrations**, click **Select Files** on the Google Drive row.
+7. Choose the spreadsheet files this Gobii should be allowed to access, or skip file selection if you want the Gobii to create a new spreadsheet.
+8. Return to chat and send a small test request, such as:
 
 > List the tabs in the selected Q2 sales tracker.
 
-The connection uses selected Google Drive files. If the Gobii cannot see a spreadsheet, choose that spreadsheet through the Google Drive picker before asking it to read or update the file.
+The connection uses selected Google Drive files. If the Gobii cannot see a spreadsheet, choose that spreadsheet through the Google Drive picker before asking it to read or update the file. Gobii cannot search across your Drive for files you have not selected.
 
 ## Give a good Sheets request
 
@@ -57,9 +103,9 @@ Examples:
 
 ## Existing sheets versus new sheets
 
-For an existing spreadsheet, select it through Google Drive first or provide a concrete spreadsheet URL or ID. If the file is not available to Gobii, it will need you to select it before it can continue.
+For an existing spreadsheet, select it through Google Drive first or provide a concrete spreadsheet URL or ID for a file you have granted. If the file is not available to Gobii, it will need you to select it before it can continue. Gobii cannot browse Drive to discover files that have not been granted.
 
-For a new spreadsheet, give the title and the data you want included. If you do not specify columns, Gobii can choose safe, obvious defaults for the workflow and then polish the sheet with baseline formatting.
+For a new spreadsheet, ask Gobii to create one and give the title and data you want included. If you do not specify columns, Gobii can choose safe, obvious defaults for the workflow and then polish the sheet with baseline formatting.
 
 ## Safer write workflows
 
