@@ -1,10 +1,10 @@
 ---
 title: "Your AI agent's browser just learned files"
 date: 2026-06-09
-description: "Screenshots, file capture, and vision AI give Gobii agents a fuller browser intelligence loop."
+description: "Gobii agents can now capture webpage screenshots, save browser files, and analyze visual content with vision AI for QA, research, and design review tasks."
 author: "The Gobii Team"
-seo_title: "Your AI agent's browser just learned files"
-seo_description: "Screenshots, file capture, and vision AI give Gobii agents a fuller browser intelligence loop."
+seo_title: "Browser Intelligence for Gobii AI Agent Workflows"
+seo_description: "Gobii agents can now capture webpage screenshots, save browser files, and analyze visual content with vision AI for QA, research, and design review tasks."
 image: "/static/images/blog/newsletters/newsletter-2026-06-09-browser-intelligence-hero.png"
 tags:
   - newsletter
@@ -45,6 +45,8 @@ No more "here is a binary file, good luck." Your agent can describe, compare, an
 These features landed together because they are most powerful as a loop.
 
 Agents can now capture the web, save what they capture, and understand it visually.
+
+For the production safety model behind browser-capable agents, see [how we sandbox AI agents in production](/blog/how-we-sandbox-ai-agents-in-production/).
 
 ## What You Can Build Today
 

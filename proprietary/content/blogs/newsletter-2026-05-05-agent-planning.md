@@ -1,10 +1,10 @@
 ---
 title: "Your agents now think out loud"
 date: 2026-05-05
-description: "See every step before it happens. Edit on the fly."
+description: "Gobii agents now plan before they act, showing upcoming steps so teams can review, edit, and steer complex AI agent workflows in real time."
 author: "The Gobii Team"
-seo_title: "Your agents now think out loud"
-seo_description: "See every step before it happens. Edit on the fly."
+seo_title: "AI Agent Planning: Preview and Edit Gobii Steps"
+seo_description: "Gobii agents now plan before they act, showing upcoming steps so teams can review, edit, and steer complex AI agent workflows in real time."
 image: "/static/images/blog/newsletters/newsletter-2026-05-05-agent-planning.jpg"
 tags:
   - newsletter

@@ -1,10 +1,10 @@
 ---
 title: "Your agents can now read and create files"
 date: 2026-01-08
-description: "PDFs, images, spreadsheets, and more"
+description: "Gobii agents can read PDFs, CSVs, images, and office documents, then analyze, transform, and return new files as part of automated work."
 author: "The Gobii Team"
-seo_title: "Your agents can now read and create files"
-seo_description: "PDFs, images, spreadsheets, and more"
+seo_title: "Read and Create Files with Gobii AI Agents"
+seo_description: "Gobii agents can read PDFs, CSVs, images, and office documents, then analyze, transform, and return new files as part of automated work."
 tags:
   - newsletter
   - weekly

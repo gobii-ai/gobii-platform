@@ -1,10 +1,10 @@
 ---
 title: "One-click integrations for your agents"
 date: 2026-03-17
-description: "Your agents just got a lot more powerful with our new library of pre-configured integrations."
+description: "Gobii one-click integrations help AI agents connect to everyday tools without custom OAuth setup, API key wrangling, or brittle glue code."
 author: "The Gobii Team"
-seo_title: "One-click integrations for your agents"
-seo_description: "Your agents just got a lot more powerful with our new library of pre-configured integrations."
+seo_title: "One-Click Integrations for Gobii AI Agents"
+seo_description: "Gobii one-click integrations help AI agents connect to everyday tools without custom OAuth setup, API key wrangling, or brittle glue code."
 image: "/static/images/blog/newsletters/newsletter-2026-03-17-one-click-integrations-for-your-agents-hero.png"
 tags:
   - newsletter

@@ -1,10 +1,10 @@
 ---
 title: "We fixed the little things that were driving you crazy"
 date: 2026-05-12
-description: "Quality-of-life improvements for chat, planning, unread messages, and agent configuration."
+description: "Gobii improves agent chat with pasted files, clearer planning, unread indicators, in-chat configuration, and better completion alerts."
 author: "The Gobii Team"
-seo_title: "We fixed the little things that were driving you crazy"
-seo_description: "Quality-of-life improvements for chat, planning, unread messages, and agent configuration."
+seo_title: "Gobii Web Chat, Planning, and Agent UX Updates"
+seo_description: "Gobii improves agent chat with pasted files, clearer planning, unread indicators, in-chat configuration, and better completion alerts."
 image: "/static/images/blog/newsletters/newsletter-2026-05-12-we-fixed-the-little-things-that-were-driving-you-crazy-hero.png"
 tags:
   - newsletter

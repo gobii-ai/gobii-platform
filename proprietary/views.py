@@ -47,6 +47,127 @@ from waffle import flag_is_active, get_waffle_flag_model
 logger = logging.getLogger(__name__)
 
 
+def _keyword_list(value):
+    if isinstance(value, str):
+        return [keyword.strip() for keyword in value.split(",") if keyword.strip()]
+    if isinstance(value, (list, tuple)):
+        return [str(keyword).strip() for keyword in value if str(keyword).strip()]
+    return []
+
+
+BLOG_INDEX_KEYWORDS = (
+    "AI agent automation",
+    "browser agents",
+    "MCP integrations",
+    "production AI safety",
+    "persistent AI agents",
+    "agent workflows",
+)
+
+BLOG_INDEX_FEATURED_POSTS = (
+    ("how-we-sandbox-ai-agents-in-production", "Production safety"),
+    ("newsletter-2026-06-09-browser-intelligence", "Browser agents"),
+    ("newsletter-2026-05-19-remote-mcp", "MCP integrations"),
+)
+
+BLOG_INDEX_TOPIC_SECTIONS = (
+    {
+        "name": "Production safety",
+        "description": (
+            "Sandboxing, isolation, cost controls, and reliability patterns for agents "
+            "that touch real systems."
+        ),
+        "slugs": (
+            "how-we-sandbox-ai-agents-in-production",
+            "turning-deepseek-into-real-work",
+            "gobii-vs-openclaw",
+        ),
+    },
+    {
+        "name": "Browser agents and files",
+        "description": (
+            "How Gobii agents use browsers, logged-in sites, files, spreadsheets, and "
+            "documents to finish work."
+        ),
+        "slugs": (
+            "newsletter-2026-06-09-browser-intelligence",
+            "newsletter-2025-07-28-gobii-now-supports-websites-that-need-logins-yeah-its-a-big-deal",
+            "newsletter-2026-01-08-your-agents-can-now-read-and-create-files",
+        ),
+    },
+    {
+        "name": "MCP and integrations",
+        "description": (
+            "Connect Gobii to developer tools, SaaS apps, webhooks, Discord, email, and "
+            "MCP-compatible workflows."
+        ),
+        "slugs": (
+            "newsletter-2026-05-19-remote-mcp",
+            "newsletter-2025-11-11-agents-just-got-way-more-connected-mcp-support-is-here",
+            "newsletter-2026-03-17-one-click-integrations-for-your-agents",
+        ),
+    },
+    {
+        "name": "Reliability and operations",
+        "description": (
+            "Runtime reliability, usage controls, memory, reporting, and other details "
+            "that make agent work predictable."
+        ),
+        "slugs": (
+            "newsletter-2026-06-16-reliability-combo",
+            "newsletter-2025-12-02-your-gobii-agent-now-lasts-longer",
+            "newsletter-2025-10-12-by-popular-request-usage-reports-and-agent-budgeting-are-here",
+        ),
+    },
+    {
+        "name": "Collaboration and multi-agent work",
+        "description": (
+            "Agent handoffs, shared workspaces, team workflows, and ways to manage a "
+            "fleet of always-on agents."
+        ),
+        "slugs": (
+            "newsletter-2026-05-26-meta-gobii",
+            "newsletter-2026-03-24-let-your-agents-pass-the-baton",
+            "newsletter-2025-09-15-your-gobii-agent-just-unlocked-squad-mode",
+        ),
+    },
+)
+
+
+def _posts_by_slug(posts):
+    return {post["slug"]: post for post in posts}
+
+
+def _blog_index_featured_posts(posts):
+    posts_by_slug = _posts_by_slug(posts)
+    featured_posts = []
+    for slug, label in BLOG_INDEX_FEATURED_POSTS:
+        post = posts_by_slug.get(slug)
+        if post:
+            featured_posts.append({**post, "topic_label": label})
+    return featured_posts
+
+
+def _blog_index_topic_sections(posts):
+    posts_by_slug = _posts_by_slug(posts)
+    sections = []
+    for section in BLOG_INDEX_TOPIC_SECTIONS:
+        section_posts = [
+            posts_by_slug[slug]
+            for slug in section["slugs"]
+            if slug in posts_by_slug
+        ]
+        if section_posts:
+            sections.append(
+                {
+                    "name": section["name"],
+                    "description": section["description"],
+                    "posts": section_posts,
+                }
+            )
+    return sections
+
+
 class ProprietaryModeRequiredMixin:
     """Raise 404 when proprietary mode is disabled."""
 
@@ -722,10 +843,19 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         posts = get_all_blog_posts()
         context["posts"] = posts
+        context["featured_posts"] = _blog_index_featured_posts(posts)
+        context["topic_sections"] = _blog_index_topic_sections(posts)
 
-        seo_title = "Gobii Blog"
+        blog_name = "Gobii AI Agent Automation Blog"
+        seo_title = "AI Agent Automation, Browser Agents, and MCP Blog"
         seo_description = (
-            "Updates from the Gobii team on pretrained workers, automation strategies, and product releases."
+            "Read Gobii articles on always-on AI agents, browser automation, production safety, "
+            "MCP integrations, persistent memory, and reliable agent workflows."
+        )
+        blog_intro = (
+            "Guides, release notes, and engineering lessons for teams building with "
+            "always-on AI agents, browser automation, MCP integrations, and production "
+            "safety controls."
         )
 
         canonical_url = self.request.build_absolute_uri(self.request.path)
@@ -739,25 +869,52 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
         default_image_url = self.request.build_absolute_uri(static(default_image_path))
 
         blog_posts_schema = []
-        for post in posts[:10]:
+        for post in posts:
             entry = {
                 "@type": "BlogPosting",
                 "headline": post["title"],
                 "url": self.request.build_absolute_uri(post["url"]),
+                "author": {
+                    "@type": "Organization",
+                    "name": "Gobii",
+                },
+                "isPartOf": {
+                    "@type": "Blog",
+                    "name": blog_name,
+                    "url": canonical_url,
+                },
             }
+            if post.get("summary"):
+                entry["description"] = post["summary"]
             published_at = post.get("published_at")
             if published_at:
-                iso_value = published_at.isoformat()
-                entry["datePublished"] = iso_value
-                entry["dateModified"] = iso_value
+                entry["datePublished"] = published_at.isoformat()
+            updated_at = post.get("updated_at") or published_at
+            if updated_at:
+                entry["dateModified"] = updated_at.isoformat()
+            keywords = _keyword_list(post["meta"].get("keywords")) or _keyword_list(
+                post["meta"].get("tags")
+            )
+            if keywords:
+                entry["keywords"] = keywords
             blog_posts_schema.append(entry)
 
         structured_data = {
             "@context": "https://schema.org",
             "@type": "Blog",
-            "name": seo_title,
+            "name": blog_name,
+            "headline": seo_title,
             "description": seo_description,
             "url": canonical_url,
+            "inLanguage": "en-US",
+            "keywords": list(BLOG_INDEX_KEYWORDS),
+            "about": [
+                {
+                    "@type": "Thing",
+                    "name": keyword,
+                }
+                for keyword in BLOG_INDEX_KEYWORDS
+            ],
             "publisher": {
                 "@type": "Organization",
                 "name": "Gobii",
@@ -773,8 +930,11 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
             {
                 "seo_title": seo_title,
                 "seo_description": seo_description,
+                "blog_heading": "AI Agent Automation Blog",
+                "blog_intro": blog_intro,
                 "canonical_url": canonical_url,
                 "og_image_url": default_image_url,
+                "og_image_alt": "Gobii AI agent automation blog",
                 "structured_data_json": json.dumps(structured_data, ensure_ascii=False),
             }
         )
@@ -799,14 +959,9 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         else:
             brand_logo_path = "images/noBgBlue.png"
             default_image_path = "images/noBgBlue.png"
+        default_image_alt = "Gobii logo"
         brand_logo_url = self.request.build_absolute_uri(static(brand_logo_path))
         default_image_url = self.request.build_absolute_uri(static(default_image_path))
-
-        image_path = post["meta"].get("image")
-        if image_path:
-            og_image_url = image_path if image_path.startswith("http") else self.request.build_absolute_uri(image_path)
-        else:
-            og_image_url = default_image_url
 
         seo_title = post["meta"].get("seo_title") or post["meta"].get("title") or slug.replace("-", " ").title()
         seo_description = (
@@ -816,8 +971,20 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             or "Read the latest update from the Gobii team."
         )
 
+        image_path = post["meta"].get("image")
+        if image_path:
+            og_image_url = image_path if image_path.startswith("http") else self.request.build_absolute_uri(image_path)
+            og_image_alt = post.get("image_alt") or f"{seo_title} image"
+        else:
+            og_image_url = default_image_url
+            og_image_alt = default_image_alt
+
+        keywords = _keyword_list(post["meta"].get("keywords")) or _keyword_list(post["meta"].get("tags"))
+
         published_at = post.get("published_at")
         published_iso = published_at.isoformat() if published_at else None
+        updated_at = post.get("updated_at") or published_at
+        updated_iso = updated_at.isoformat() if updated_at else None
         author_name = post["meta"].get("author")
         if author_name:
             author_type = post["meta"].get("author_type")
@@ -850,12 +1017,24 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                 "@id": canonical_url,
             },
             "image": og_image_url,
+            "thumbnailUrl": og_image_url,
             "url": canonical_url,
+            "inLanguage": "en-US",
+            "isPartOf": {
+                "@type": "Blog",
+                "name": "Gobii Blog",
+                "url": self.request.build_absolute_uri(reverse("proprietary:blog_index")),
+            },
         }
 
         if published_iso:
             structured_data["datePublished"] = published_iso
-            structured_data["dateModified"] = published_iso
+        if updated_iso:
+            structured_data["dateModified"] = updated_iso
+        if post.get("word_count"):
+            structured_data["wordCount"] = post["word_count"]
+        if keywords:
+            structured_data["keywords"] = keywords
 
         recent_posts = [p for p in get_all_blog_posts() if p["slug"] != post["slug"]][:3]
 
@@ -866,6 +1045,7 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                 "seo_description": seo_description,
                 "canonical_url": canonical_url,
                 "og_image_url": og_image_url,
+                "og_image_alt": og_image_alt,
                 "recent_posts": recent_posts,
                 "structured_data_json": json.dumps(structured_data, ensure_ascii=False),
             }

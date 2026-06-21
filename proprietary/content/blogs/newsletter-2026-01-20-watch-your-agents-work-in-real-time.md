@@ -1,10 +1,10 @@
 ---
 title: "Watch your agents work in real time"
 date: 2026-01-20
-description: "See research, extraction, and analysis unfold live"
+description: "Gobii streams AI agent activity in real time so teams can watch research, extraction, analysis, and writing unfold as tasks run."
 author: "The Gobii Team"
-seo_title: "Watch your agents work in real time"
-seo_description: "See research, extraction, and analysis unfold live"
+seo_title: "Real-Time AI Agent Work Streaming in Gobii"
+seo_description: "Gobii streams AI agent activity in real time so teams can watch research, extraction, analysis, and writing unfold as tasks run."
 image: "/static/images/blog/newsletters/newsletter-2026-01-20-watch-your-agents-work-in-real-time-hero.png"
 tags:
   - newsletter

@@ -1,10 +1,10 @@
 ---
 title: "Bring Gobii into your tools via MCP"
 date: 2026-05-19
-description: "Use Gobii agents from MCP-compatible tools like Claude Desktop, Codex, Hermes, and custom internal workflows."
+description: "Connect Gobii agents to MCP-compatible tools like Claude Desktop, Codex, Hermes, and internal workflows with authenticated Remote MCP access."
 author: "The Gobii Team"
-seo_title: "Bring Gobii into your tools via MCP"
-seo_description: "Use Gobii agents from MCP-compatible tools like Claude Desktop, Codex, Hermes, and custom internal workflows."
+seo_title: "Remote MCP Access for Gobii AI Agents and Tools"
+seo_description: "Connect Gobii agents to MCP-compatible tools like Claude Desktop, Codex, Hermes, and internal workflows with authenticated Remote MCP access."
 image: "/static/images/blog/newsletters/newsletter-2026-05-19-remote-mcp-hero.png"
 tags:
   - newsletter
@@ -25,6 +25,8 @@ That means your agents are no longer confined to one tab. You can bring them int
 Gobii agents can monitor operations, draft emails, manage pipelines, and run long agentic tasks in the cloud. But until now, interacting with them usually meant opening the Gobii console.
 
 Remote MCP changes that. It gives other MCP-compatible tools a secure way to talk to your Gobii agents directly.
+
+This builds on Gobii's earlier [MCP support for agents and the dashboard](/blog/newsletter-2025-11-11-agents-just-got-way-more-connected-mcp-support-is-here/) and the newer [one-click integrations for agents](/blog/newsletter-2026-03-17-one-click-integrations-for-your-agents/).
 
 ## What You Can Do With It
 

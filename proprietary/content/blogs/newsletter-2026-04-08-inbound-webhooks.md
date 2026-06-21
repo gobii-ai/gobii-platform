@@ -1,10 +1,10 @@
 ---
 title: "Make your agents reactive with inbound webhooks"
 date: 2026-04-08
-description: "Connect Gobii to your existing stack and build truly event-driven automation."
+description: "Gobii inbound webhooks trigger AI agents from external tools, making it easier to build event-driven automation across your existing software stack."
 author: "The Gobii Team"
-seo_title: "Make your agents reactive with inbound webhooks"
-seo_description: "Connect Gobii to your existing stack and build truly event-driven automation."
+seo_title: "Inbound Webhooks for Event-Driven AI Agents"
+seo_description: "Gobii inbound webhooks trigger AI agents from external tools, making it easier to build event-driven automation across your existing software stack."
 image: "/static/images/blog/newsletters/newsletter-2026-04-08-inbound-webhooks.png"
 tags:
   - newsletter

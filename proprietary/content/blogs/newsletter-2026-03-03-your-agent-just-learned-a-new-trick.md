@@ -1,10 +1,10 @@
 ---
 title: "Your agent just learned a new trick"
 date: 2026-03-03
-description: "The best employees learn on the job. Now your AI agents do too."
+description: "Gobii agents can now recognize repeated workflows and save them as reusable Agent Skills, reducing repeated instructions for recurring tasks."
 author: "The Gobii Team"
-seo_title: "Your agent just learned a new trick"
-seo_description: "The best employees learn on the job. Now your AI agents do too."
+seo_title: "Reusable Agent Skills for Gobii AI Workflows"
+seo_description: "Gobii agents can now recognize repeated workflows and save them as reusable Agent Skills, reducing repeated instructions for recurring tasks."
 image: "/static/images/blog/newsletters/newsletter-2026-03-03-your-agent-just-learned-a-new-trick-hero.png"
 tags:
   - newsletter

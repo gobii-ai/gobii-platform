@@ -1,10 +1,10 @@
 ---
 title: "Let your agents pass the baton"
 date: 2026-03-24
-description: "Build a true multi-agent team that shares the workload."
+description: "Gobii Agent Peer File Sharing lets specialist AI agents securely pass files, documents, and datasets to each other without manual re-uploading."
 author: "The Gobii Team"
-seo_title: "Let your agents pass the baton"
-seo_description: "Build a true multi-agent team that shares the workload."
+seo_title: "Multi-Agent File Handoffs for Gobii Agents"
+seo_description: "Gobii Agent Peer File Sharing lets specialist AI agents securely pass files, documents, and datasets to each other without manual re-uploading."
 image: "/static/images/blog/newsletters/newsletter-2026-03-24-let-your-agents-pass-the-baton-hero.png"
 tags:
   - newsletter

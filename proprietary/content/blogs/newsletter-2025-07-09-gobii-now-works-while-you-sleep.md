@@ -1,10 +1,10 @@
 ---
 title: "Gobii now works while you sleep"
 date: 2025-07-09
-description: "We're thrilled to announce a major upgrade: Gobii agents now run persistently, 24/7, and have their own identities (name and email). Even better, they're fully accessible via em..."
+description: "Gobii agents now run persistently, work 24/7, use their own identities, and handle email-driven tasks while users focus elsewhere."
 author: "The Gobii Team"
-seo_title: "Gobii now works while you sleep"
-seo_description: "We're thrilled to announce a major upgrade: Gobii agents now run persistently, 24/7, and have their own identities (name and email). Even better, they're fully accessible via em..."
+seo_title: "Always-On Gobii Agents That Work While You Sleep"
+seo_description: "Gobii agents now run persistently, work 24/7, use their own identities, and handle email-driven tasks while users focus elsewhere."
 tags:
   - newsletter
   - weekly

@@ -1,10 +1,10 @@
 ---
 title: "Manage your AI fleet by talking to it"
 date: 2026-05-26
-description: "Meta Gobii lets you create, connect, and manage Gobii agents through natural conversation."
+description: "Meta Gobii lets teams create, connect, and manage AI agents through natural conversation, reducing setup work for multi-agent workflows."
 author: "The Gobii Team"
-seo_title: "Manage your AI fleet by talking to it"
-seo_description: "Meta Gobii lets you create, connect, and manage Gobii agents through natural conversation."
+seo_title: "Meta Gobii AI Agent Management by Conversation"
+seo_description: "Meta Gobii lets teams create, connect, and manage AI agents through natural conversation, reducing setup work for multi-agent workflows."
 image: "/static/images/blog/newsletters/newsletter-2026-05-26-meta-gobii-hero.png"
 tags:
   - newsletter

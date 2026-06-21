@@ -1,10 +1,10 @@
 ---
 title: "Your Gobii agent now lasts longer"
 date: 2025-12-02
-description: "A quiet upgrade with a big quality-of-life payoff."
+description: "Gobii Agent Pacing helps AI agents slow down during credit spikes, preserving daily task budgets and keeping complex workflows moving longer."
 author: "The Gobii Team"
-seo_title: "Your Gobii agent now lasts longer"
-seo_description: "A quiet upgrade with a big quality-of-life payoff."
+seo_title: "Gobii Agent Pacing for Longer-Running Workflows"
+seo_description: "Gobii Agent Pacing helps AI agents slow down during credit spikes, preserving daily task budgets and keeping complex workflows moving longer."
 tags:
   - newsletter
   - weekly

@@ -1,10 +1,10 @@
 ---
 title: "Your agents can show their work now"
 date: 2026-03-10
-description: "See results as your agent runs"
+description: "Gobii inline artifacts show agent outputs like charts, search results, CSV exports, and tool activity directly inside the conversation."
 author: "The Gobii Team"
-seo_title: "Your agents can show their work now"
-seo_description: "See results as your agent runs"
+seo_title: "Inline Artifacts That Show Gobii Agent Work"
+seo_description: "Gobii inline artifacts show agent outputs like charts, search results, CSV exports, and tool activity directly inside the conversation."
 image: "/static/images/blog/newsletters/newsletter-2026-03-10-your-agents-can-show-their-work-now-hero.png"
 tags:
   - newsletter
@@ -17,6 +17,8 @@ tags:
 AI feels a lot more useful when you can actually see what it’s doing.
 
 With Gobii’s new inline work artifacts, agents can now render the outputs of their work directly inside the conversation — including charts, search results, CSV exports, tool activity, and more.
+
+It pairs especially well with Gobii's [data visualization for AI agent reports](/blog/newsletter-2026-01-13-your-agents-just-learned-data-visualization/) and the [real-time agent work streaming](/blog/newsletter-2026-01-20-watch-your-agents-work-in-real-time/) that makes long-running tasks easier to follow.
 
 ## Why Inline Artifacts Matter
 

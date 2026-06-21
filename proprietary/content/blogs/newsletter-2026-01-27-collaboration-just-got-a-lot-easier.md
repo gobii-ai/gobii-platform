@@ -1,10 +1,10 @@
 ---
 title: "Collaboration just got a lot easier"
 date: 2026-01-27
-description: "Add collaborators to your agent like a group chat"
+description: "Gobii makes AI agent collaboration feel like a group chat, letting teams invite the right people into agent conversations at the right time."
 author: "The Gobii Team"
-seo_title: "Collaboration just got a lot easier"
-seo_description: "Add collaborators to your agent like a group chat"
+seo_title: "Shared Chat Collaboration for Gobii AI Agents"
+seo_description: "Gobii makes AI agent collaboration feel like a group chat, letting teams invite the right people into agent conversations at the right time."
 image: "/static/images/blog/newsletters/newsletter-2026-01-27-collaboration-just-got-a-lot-easier-hero.gif"
 tags:
   - newsletter

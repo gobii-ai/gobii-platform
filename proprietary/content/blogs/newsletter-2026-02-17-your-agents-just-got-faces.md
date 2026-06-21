@@ -1,10 +1,10 @@
 ---
 title: "Your agents now have unique avatars"
 date: 2026-02-17
-description: "Auto-generated avatars for every agent"
+description: "Gobii now gives every AI agent a unique generated avatar, making it easier to identify agents across busy teams and multi-agent workspaces."
 author: "The Gobii Team"
-seo_title: "Your agents now have unique avatars"
-seo_description: "Auto-generated avatars for every agent"
+seo_title: "Unique AI Agent Avatars for Gobii Workspaces"
+seo_description: "Gobii now gives every AI agent a unique generated avatar, making it easier to identify agents across busy teams and multi-agent workspaces."
 image: "/static/images/blog/newsletters/newsletter-2026-02-17-your-agents-just-got-faces-hero.png"
 tags:
   - newsletter

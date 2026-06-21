@@ -1,10 +1,10 @@
 ---
 title: "Most AI agents forget. Yours doesn't."
 date: 2026-02-24
-description: "Every message. Every preference. Every correction. From day one to day one thousand."
+description: "Gobii Infinite Context Recall helps persistent AI agents remember messages, preferences, and corrections across long-running work."
 author: "The Gobii Team"
-seo_title: "Most AI agents forget. Yours doesn't."
-seo_description: "Every message. Every preference. Every correction. From day one to day one thousand."
+seo_title: "Infinite Context Recall for Persistent AI Agents"
+seo_description: "Gobii Infinite Context Recall helps persistent AI agents remember messages, preferences, and corrections across long-running work."
 image: "/static/images/blog/newsletters/newsletter-2026-02-24-most-ai-agents-forget-yours-doesn-t-hero.png"
 tags:
   - newsletter
@@ -21,6 +21,8 @@ Send 100 messages. By message 50, the early ones may be gone. By message 80, the
 It's called context rot — and it's the reason most AI agents feel dumber the longer you use them.
 
 Your Gobii doesn't have this problem anymore.
+
+The same long-memory foundation helps with [threaded email context](/blog/newsletter-2026-03-31-never-lose-context-in-an-email-thread-again/) and [shared agent collaboration](/blog/newsletter-2026-01-27-collaboration-just-got-a-lot-easier/), where old instructions and decisions need to stay available.
 
 ## Infinite Context Recall
 

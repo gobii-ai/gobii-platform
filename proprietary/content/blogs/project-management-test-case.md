@@ -1,10 +1,10 @@
 ---
 title: "How a Home Renovation Project Became the Perfect Test Case for Pretrained Workers"
 date: 2025-10-03
-description: "AI Project Management in Action: Lessons from a Home Renovation."
+description: "See how a Gobii pretrained worker helped manage a complex home renovation project with research, decision support, rebates, and communication."
 author: "The Gobii Team"
-seo_title: "How Pretrained Workers Simplified a Complex Home Renovation Project"
-seo_description: "AI project management in action: Discover how Gobii’s pretrained worker turned a stressful home renovation into a smooth, organized process."
+seo_title: "AI Project Management with Gobii Pretrained Workers"
+seo_description: "See how a Gobii pretrained worker helped manage a complex home renovation project with research, decision support, rebates, and communication."
 tags:
   - case study
   - project management

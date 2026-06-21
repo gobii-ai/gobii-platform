@@ -1,10 +1,10 @@
 ---
 title: "Your agents now come with a “brain dial”"
 date: 2025-11-25
-description: "Pick the intelligence level that fits the job."
+description: "Gobii adds an intelligence selector and daily usage insights so teams can tune AI agent reasoning, accuracy, and task-credit burn."
 author: "The Gobii Team"
-seo_title: "Your agents now come with a “brain dial”"
-seo_description: "Pick the intelligence level that fits the job."
+seo_title: "AI Agent Intelligence Controls and Usage in Gobii"
+seo_description: "Gobii adds an intelligence selector and daily usage insights so teams can tune AI agent reasoning, accuracy, and task-credit burn."
 image: "/static/images/blog/newsletters/newsletter-2025-11-25-your-agents-now-come-with-a-brain-dial-image-1.png"
 tags:
   - newsletter

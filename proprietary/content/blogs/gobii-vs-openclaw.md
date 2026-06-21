@@ -1,10 +1,10 @@
 ---
 title: "Gobii vs OpenClaw: Timeline, Architecture, and Always-On Agents"
 date: 2026-02-16
-description: "A deep technical comparison of Gobii and OpenClaw across always-on runtime design, webhooks, orchestration, memory, channels, browser execution, and security posture."
+description: "Compare Gobii and OpenClaw across always-on runtime design, webhooks, orchestration, memory, browser execution, and security architecture."
 author: "Andrew I. Christianson"
-seo_title: "Gobii vs OpenClaw: Architecture and Timeline Comparison"
-seo_description: "Detailed code-level comparison of Gobii and OpenClaw with commit timestamps, runtime model analysis, webhook architecture, orchestration patterns, and cloud-native security."
+seo_title: "Gobii vs OpenClaw: Architecture and Timeline"
+seo_description: "Compare Gobii and OpenClaw across always-on runtime design, webhooks, orchestration, memory, browser execution, and security architecture."
 image: "/static/images/blog/gobii-vs-openclaw-hero.jpg"
 tags:
   - gobii
@@ -24,6 +24,8 @@ tags:
 OpenClaw is good software. The adoption curve reflects that.
 
 If you look closely at the technical shape of both systems, though, you can see that many of the patterns people now associate with OpenClaw were already present in Gobii months earlier: persistent always-on agents, schedule and event trigger loops, webhook-driven integrations, memory-backed automation, browser control, and multi-agent coordination.
+
+For deeper context on Gobii's production runtime, see our walkthrough of [sandboxing AI agents in production](/blog/how-we-sandbox-ai-agents-in-production/) and the launch note on [always-on Gobii agents](/blog/newsletter-2025-07-09-gobii-now-works-while-you-sleep/).
 
 The interesting part is not "who has feature X" in isolation. The interesting part is the implementation style and operational assumptions underneath each feature.
 
@@ -132,6 +134,8 @@ Gobii treats webhooks as part of the agent toolchain, not only ingress:
 
 That outbound piece landed in public Gobii on `2025-10-17` (`39bfb8d4`), well before OpenClaw's gateway webhook commit on `2025-12-24` (`1ed5ca3fd`).
 
+The product-facing side of that architecture is covered in our update on [inbound webhooks for event-driven AI agents](/blog/newsletter-2026-04-08-inbound-webhooks/).
+
 ## Orchestration: Explicit Nested Subagents vs Native A2A
 
 OpenClaw has a very clear orchestrator pattern and deserves credit there.
@@ -170,6 +174,8 @@ Gobii memory model:
 
 OpenClaw's approach is very legible to users. Gobii's approach is very strong for agentic state mutation and structured tool workflows.
 
+That memory model is also what powers [Infinite Context Recall for persistent AI agents](/blog/newsletter-2026-02-24-most-ai-agents-forget-yours-doesn-t/).
+
 ## Browser Runtime, State, Proxies, and Secrets
 
 Both projects do real browser work, not toy wrappers, and both can run headed sessions.
@@ -188,6 +194,8 @@ Gobii headed/browser control path:
 - browser profile injected directly into runtime session: `api/tasks/browser_agent_tasks.py:1024`, `api/tasks/browser_agent_tasks.py:1027`
 
 The timeline is clear in git history: Gobii's headed cloud-worker architecture is already present in public commit `f596424e` on `2025-08-30`; OpenClaw's browser control lands later in `208ba02a4` on `2025-12-13`, sandbox browser support in `d8a417f7f` on `2026-01-03`, and node browser proxy routing in `c3cb26f7c` on `2026-01-24`.
+
+For a more recent product-level view, see [browser intelligence for Gobii AI agent workflows](/blog/newsletter-2026-06-09-browser-intelligence/).
 
 ### Proxy Rotation: Transport Proxy vs Browser Control Proxy
 
