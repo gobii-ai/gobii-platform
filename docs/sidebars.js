@@ -36,6 +36,7 @@ const sidebars = {
         'using-gobii/tools-and-apps',
         'using-gobii/connect-apps',
         'using-gobii/google-sheets',
+        'using-gobii/discord',
         'using-gobii/mcp-servers',
         'using-gobii/channels-and-contacts',
         'using-gobii/email-and-sms',
