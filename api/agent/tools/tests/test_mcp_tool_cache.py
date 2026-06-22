@@ -293,6 +293,22 @@ class MCPToolCacheTests(SimpleTestCase):
 
         self.assertEqual(asyncio.run(build_client()), 9.0)
 
+    @override_settings(MCP_HTTP_REQUEST_TIMEOUT_SECONDS=9.0)
+    def test_http_client_factory_respects_context_var_timeout(self):
+        from api.agent.tools.mcp_manager import _use_mcp_http_timeout
+
+        manager = MCPToolManager()
+
+        async def build_client():
+            client = manager._httpx_client_factory()
+            try:
+                return client.timeout.connect
+            finally:
+                await client.aclose()
+
+        with _use_mcp_http_timeout(12.34):
+            self.assertEqual(asyncio.run(build_client()), 12.34)
+
     def test_ensure_runtime_registered_reregisters_when_pipedream_apps_change_for_same_owner(self):
         manager = MCPToolManager()
         runtime = replace(self._runtime(), name="pipedream", config_id="pd-config")

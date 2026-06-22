@@ -2671,7 +2671,8 @@ class MCPToolManager:
                 else None,
             )
             timeout_seconds = self._get_timeout_for_runtime(runtime)
-            with _use_mcp_proxy(proxy_url):
+            http_timeout_seconds = timeout_seconds if runtime.url else None
+            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
                 def run_once(attempt_params: Dict[str, Any]) -> Any:
                     return self._run_coroutine_isolated(
                         self._execute_async(
