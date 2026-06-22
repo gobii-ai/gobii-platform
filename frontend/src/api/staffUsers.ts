@@ -38,6 +38,12 @@ export type StaffTaskCredits = {
   recentGrants: StaffTaskCreditGrant[]
 }
 
+export type StaffTaskCreditGrantPayload = {
+  credits: string
+  grantType: 'Compensation' | 'Promo'
+  expirationPreset: 'one_month' | 'one_year'
+}
+
 export type StaffUserDetail = {
   user: {
     id: number
@@ -114,7 +120,6 @@ export type StaffSearchResults = {
 
 export type StaffUserEmailVerification = StaffUserDetail['emailVerification']
 export type StaffUserEmailTrigger = StaffUserDetail['userEmails']['triggers'][number]
-export type StaffUserTaskCreditGrant = StaffTaskCreditGrant
 
 export async function searchStaffUsers(query: string, limit = 8, signal?: AbortSignal): Promise<StaffSearchResults> {
   const params = new URLSearchParams()
@@ -142,26 +147,20 @@ export async function markStaffUserEmailVerified(userId: number): Promise<{ ok: 
   })
 }
 
-export async function createStaffUserTaskCreditGrant(
-  userId: number,
-  payload: { credits: string; grantType: 'Compensation' | 'Promo'; expirationPreset: 'one_month' | 'one_year' },
-): Promise<{ ok: boolean; taskCredit: StaffUserTaskCreditGrant }> {
-  return jsonRequest<{ ok: boolean; taskCredit: StaffUserTaskCreditGrant }>(`/console/api/staff/users/${userId}/task-credits/`, {
+function createStaffTaskCreditGrant(url: string, payload: StaffTaskCreditGrantPayload): Promise<{ ok: boolean; taskCredit: StaffTaskCreditGrant }> {
+  return jsonRequest<{ ok: boolean; taskCredit: StaffTaskCreditGrant }>(url, {
     method: 'POST',
     includeCsrf: true,
     json: payload,
   })
 }
 
-export async function createStaffOrgTaskCreditGrant(
-  orgId: string,
-  payload: { credits: string; grantType: 'Compensation' | 'Promo'; expirationPreset: 'one_month' | 'one_year' },
-): Promise<{ ok: boolean; taskCredit: StaffTaskCreditGrant }> {
-  return jsonRequest<{ ok: boolean; taskCredit: StaffTaskCreditGrant }>(`/console/api/staff/orgs/${orgId}/task-credits/`, {
-    method: 'POST',
-    includeCsrf: true,
-    json: payload,
-  })
+export function createStaffUserTaskCreditGrant(userId: number, payload: StaffTaskCreditGrantPayload) {
+  return createStaffTaskCreditGrant(`/console/api/staff/users/${userId}/task-credits/`, payload)
+}
+
+export function createStaffOrgTaskCreditGrant(orgId: string, payload: StaffTaskCreditGrantPayload) {
+  return createStaffTaskCreditGrant(`/console/api/staff/orgs/${orgId}/task-credits/`, payload)
 }
 
 export async function sendStaffUserEmailTrigger(

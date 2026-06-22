@@ -2196,6 +2196,20 @@ def _serialize_staff_agent_summary(agent: PersistentAgent) -> dict[str, Any]:
     }
 
 
+def _serialize_staff_agent_summaries(**filters) -> list[dict[str, Any]]:
+    return [
+        _serialize_staff_agent_summary(agent)
+        for agent in (
+            PersistentAgent.objects
+            .non_eval()
+            .alive()
+            .filter(**filters)
+            .select_related("organization")
+            .order_by(models.F("last_interaction_at").desc(nulls_last=True), "-created_at")
+        )
+    ]
+
+
 def _staff_stripe_customer_dashboard_url(customer) -> str | None:
     customer_id = getattr(customer, "id", "") or ""
     if not customer_id:
@@ -2318,17 +2332,6 @@ def _serialize_staff_user_detail(user) -> dict[str, Any]:
         _serialize_staff_addon(entitlement)
         for entitlement in AddonEntitlement.objects.for_owner(user).active().order_by("-created_at")
     ]
-    agents = [
-        _serialize_staff_agent_summary(agent)
-        for agent in (
-            PersistentAgent.objects
-            .non_eval()
-            .alive()
-            .filter(user=user)
-            .select_related("organization")
-            .order_by(models.F("last_interaction_at").desc(nulls_last=True), "-created_at")
-        )
-    ]
 
     return {
         "user": {
@@ -2347,7 +2350,7 @@ def _serialize_staff_user_detail(user) -> dict[str, Any]:
             "stripeCustomerUrl": _staff_stripe_customer_dashboard_url(stripe_customer),
             "addons": addons,
         },
-        "agents": agents,
+        "agents": _serialize_staff_agent_summaries(user=user),
         "taskCredits": _serialize_staff_task_credits(user),
         "userEmails": {
             "triggers": [
@@ -2372,17 +2375,6 @@ def _serialize_staff_org_member(membership: OrganizationMembership) -> dict[str,
 
 def _serialize_staff_org_detail(org: Organization) -> dict[str, Any]:
     billing = getattr(org, "billing", None)
-    agents = [
-        _serialize_staff_agent_summary(agent)
-        for agent in (
-            PersistentAgent.objects
-            .non_eval()
-            .alive()
-            .filter(organization=org)
-            .select_related("organization")
-            .order_by(models.F("last_interaction_at").desc(nulls_last=True), "-created_at")
-        )
-    ]
     members = [
         _serialize_staff_org_member(membership)
         for membership in (
@@ -2410,7 +2402,7 @@ def _serialize_staff_org_detail(org: Organization) -> dict[str, Any]:
             "seatsAvailable": billing.seats_available if billing else None,
         },
         "members": members,
-        "agents": agents,
+        "agents": _serialize_staff_agent_summaries(organization=org),
         "taskCredits": _serialize_staff_task_credits(org),
     }
 
@@ -2589,6 +2581,25 @@ def _parse_staff_task_credit_grant_payload(request: HttpRequest) -> tuple[dict[s
     }, None
 
 
+def _create_staff_task_credit_grant(owner, payload: dict[str, Any]) -> TaskCredit:
+    granted_at = timezone.now()
+    fields: dict[str, Any] = {
+        "credits": payload["credits"],
+        "credits_used": Decimal("0"),
+        "granted_date": granted_at,
+        "expiration_date": granted_at + payload["expiration_delta"],
+        "grant_type": payload["grant_type"],
+        "additional_task": False,
+        "voided": False,
+    }
+    if isinstance(owner, Organization):
+        billing = getattr(owner, "billing", None)
+        fields.update(organization=owner, plan=billing.subscription if billing else PlanNamesChoices.FREE)
+    else:
+        fields.update(user=owner, plan=PlanNamesChoices.FREE)
+    return TaskCredit.objects.create(**fields)
+
+
 class StaffUserTaskCreditGrantAPIView(SystemAdminAPIView):
     """Create a manual personal task-credit grant for a selected user."""
 
@@ -2600,19 +2611,7 @@ class StaffUserTaskCreditGrantAPIView(SystemAdminAPIView):
         if error_response is not None:
             return error_response
 
-        granted_at = timezone.now()
-        task_credit = TaskCredit.objects.create(
-            user=user,
-            credits=payload["credits"],
-            credits_used=Decimal("0"),
-            granted_date=granted_at,
-            expiration_date=granted_at + payload["expiration_delta"],
-            plan=PlanNamesChoices.FREE,
-            grant_type=payload["grant_type"],
-            additional_task=False,
-            voided=False,
-        )
-
+        task_credit = _create_staff_task_credit_grant(user, payload)
         return JsonResponse({"ok": True, "taskCredit": _serialize_task_credit(task_credit)}, status=201)
 
 
@@ -2627,20 +2626,7 @@ class StaffOrgTaskCreditGrantAPIView(SystemAdminAPIView):
         if error_response is not None:
             return error_response
 
-        granted_at = timezone.now()
-        billing = getattr(org, "billing", None)
-        task_credit = TaskCredit.objects.create(
-            organization=org,
-            credits=payload["credits"],
-            credits_used=Decimal("0"),
-            granted_date=granted_at,
-            expiration_date=granted_at + payload["expiration_delta"],
-            plan=billing.subscription if billing else PlanNamesChoices.FREE,
-            grant_type=payload["grant_type"],
-            additional_task=False,
-            voided=False,
-        )
-
+        task_credit = _create_staff_task_credit_grant(org, payload)
         return JsonResponse({"ok": True, "taskCredit": _serialize_task_credit(task_credit)}, status=201)
 
 

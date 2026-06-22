@@ -1,4 +1,4 @@
-import { useDeferredValue, useState, type FormEvent } from 'react'
+import { useDeferredValue, useState, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, Building2, CheckCircle2, Clock3, ExternalLink, Loader2, Mail, Search, Send, ShieldCheck, UsersRound } from 'lucide-react'
 
@@ -13,6 +13,7 @@ import {
   type StaffAgentSummary,
   type StaffOrgDetail,
   type StaffTaskCredits,
+  type StaffTaskCreditGrantPayload,
   type StaffUserDetail,
   type StaffUserEmailTrigger,
 } from '../api/staffUsers'
@@ -36,16 +37,89 @@ function formatDateTime(value: string | null | undefined): string {
   }
 }
 
-function formatGrantType(value: string): string {
-  return value === 'Promo' ? 'Promo' : value === 'Compensation' ? 'Compensation' : value
-}
-
 function navigateToUser(userId: number): void {
   window.location.assign(`/staff/users/${userId}/`)
 }
 
 function navigateToOrg(orgId: string): void {
   window.location.assign(`/staff/orgs/${orgId}/`)
+}
+
+type DetailField = {
+  label: string
+  value: ReactNode
+  description?: ReactNode
+}
+
+function AdminLink({ href, label = 'Django Admin', target, compact = false }: { href: string; label?: string; target?: string; compact?: boolean }) {
+  return (
+    <a
+      href={href}
+      className={`inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:text-sky-700 ${compact ? 'px-3 py-2' : 'px-4 py-2'}`}
+      target={target}
+      rel={target === '_blank' ? 'noreferrer' : undefined}
+    >
+      {label}
+      {compact ? null : <ExternalLink className="size-4" />}
+    </a>
+  )
+}
+
+function CardHeader({ title, subtitle, action, status }: { title: string; subtitle: string; action?: ReactNode; status?: ReactNode }) {
+  return (
+    <div className="card__header">
+      <div>
+        <h2 className="card__title">{title}</h2>
+        <p className="app-subtitle">{subtitle}</p>
+      </div>
+      {action ?? status}
+    </div>
+  )
+}
+
+function FieldGrid({ items, columns = 'md:grid-cols-3' }: { items: DetailField[]; columns?: string }) {
+  return (
+    <div className={`grid gap-4 ${columns}`}>
+      {items.map((item) => (
+        <div key={item.label}>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">{item.label}</p>
+          <div className="mt-2 text-lg font-semibold text-slate-900">{item.value}</div>
+          {item.description ? <p className="mt-1 text-sm text-slate-500">{item.description}</p> : null}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RowCard({ children }: { children: ReactNode }) {
+  return <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">{children}</div>
+}
+
+function SearchResultGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-2">
+      <p className="px-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">{title}</p>
+      {children}
+    </div>
+  )
+}
+
+function SearchResultButton({ title, subtitle, badge, onClick }: { title: string; subtitle: string; badge: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-sky-200 hover:shadow-[0_12px_24px_rgba(14,165,233,0.14)]"
+    >
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-slate-900">{title}</p>
+        <p className="truncate text-sm text-slate-600">{subtitle}</p>
+      </div>
+      <span className="ml-4 shrink-0 rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+        {badge}
+      </span>
+    </button>
+  )
 }
 
 function SearchResults({
@@ -75,46 +149,30 @@ function SearchResults({
       ) : hasResults ? (
         <div className="grid gap-2">
           {users.length ? (
-            <div className="grid gap-2">
-              <p className="px-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Users</p>
+            <SearchResultGroup title="Users">
               {users.map((result) => (
-                <button
+                <SearchResultButton
                   key={result.id}
-                  type="button"
+                  title={result.name}
+                  subtitle={result.email || 'No email on file'}
+                  badge={`#${result.id}`}
                   onClick={() => navigateToUser(result.id)}
-                  className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-sky-200 hover:shadow-[0_12px_24px_rgba(14,165,233,0.14)]"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-900">{result.name}</p>
-                    <p className="truncate text-sm text-slate-600">{result.email || 'No email on file'}</p>
-                  </div>
-                  <span className="ml-4 shrink-0 rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
-                    #{result.id}
-                  </span>
-                </button>
+                />
               ))}
-            </div>
+            </SearchResultGroup>
           ) : null}
           {organizations.length ? (
-            <div className="grid gap-2">
-              <p className="px-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Organizations</p>
+            <SearchResultGroup title="Organizations">
               {organizations.map((result) => (
-                <button
+                <SearchResultButton
                   key={result.id}
-                  type="button"
+                  title={result.name}
+                  subtitle={result.slug}
+                  badge="Org"
                   onClick={() => navigateToOrg(result.id)}
-                  className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-sky-200 hover:shadow-[0_12px_24px_rgba(14,165,233,0.14)]"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-900">{result.name}</p>
-                    <p className="truncate text-sm text-slate-600">{result.slug}</p>
-                  </div>
-                  <span className="ml-4 shrink-0 rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
-                    Org
-                  </span>
-                </button>
+                />
               ))}
-            </div>
+            </SearchResultGroup>
           ) : null}
         </div>
       ) : (
@@ -137,50 +195,39 @@ function OverviewCard({
 
   return (
     <section className="card">
-      <div className="card__header">
-        <div>
-          <h2 className="card__title">Overview</h2>
-          <p className="app-subtitle">Identity, account reference, and fast admin access.</p>
-        </div>
-        <a
-          href={detail.user.adminUrl}
-          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:text-sky-700"
-        >
-          Django Admin
-          <ExternalLink className="size-4" />
-        </a>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">User ID</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.user.id}</p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Name</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.user.name}</p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Email</p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <p className="text-lg font-semibold text-slate-900">{detail.user.email || 'No email on file'}</p>
-            {detail.emailVerification.email ? (
-              <span className={`app-status-indicator ${verified ? 'app-status-indicator--success' : 'app-status-indicator--error'}`}>
-                {verified ? 'Verified' : 'Unverified'}
-              </span>
-            ) : null}
-            <button
-              type="button"
-              onClick={onVerify}
-              disabled={verified || isVerifying || !detail.emailVerification.email}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isVerifying ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
-              Mark Verified
-            </button>
-          </div>
-        </div>
-      </div>
+      <CardHeader
+        title="Overview"
+        subtitle="Identity, account reference, and fast admin access."
+        action={<AdminLink href={detail.user.adminUrl} />}
+      />
+      <FieldGrid
+        items={[
+          { label: 'User ID', value: detail.user.id },
+          { label: 'Name', value: detail.user.name },
+          {
+            label: 'Email',
+            value: (
+              <div className="flex flex-wrap items-center gap-2">
+                <span>{detail.user.email || 'No email on file'}</span>
+                {detail.emailVerification.email ? (
+                  <span className={`app-status-indicator ${verified ? 'app-status-indicator--success' : 'app-status-indicator--error'}`}>
+                    {verified ? 'Verified' : 'Unverified'}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={onVerify}
+                  disabled={verified || isVerifying || !detail.emailVerification.email}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isVerifying ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+                  Mark Verified
+                </button>
+              </div>
+            ),
+          },
+        ]}
+      />
     </section>
   )
 }
@@ -188,41 +235,28 @@ function OverviewCard({
 function BillingCard({ detail }: { detail: StaffUserDetail }) {
   return (
     <section className="card">
-      <div className="card__header">
-        <div>
-          <h2 className="card__title">Billing</h2>
-          <p className="app-subtitle">Plan, Stripe customer record, and active personal add-ons.</p>
-        </div>
-        {detail.billing.stripeCustomerUrl ? (
-          <a
-            href={detail.billing.stripeCustomerUrl}
-            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:text-sky-700"
-            target="_blank"
-            rel="noreferrer"
-          >
-            View in Stripe
-            <ExternalLink className="size-4" />
-          </a>
-        ) : null}
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Plan</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.billing.plan.name}</p>
-          <p className="mt-1 text-sm text-slate-500">{detail.billing.plan.id}</p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Stripe Customer</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.billing.stripeCustomerId || 'No Stripe customer'}</p>
-        </div>
-      </div>
+      <CardHeader
+        title="Billing"
+        subtitle="Plan, Stripe customer record, and active personal add-ons."
+        action={
+          detail.billing.stripeCustomerUrl ? (
+            <AdminLink href={detail.billing.stripeCustomerUrl} label="View in Stripe" target="_blank" />
+          ) : null
+        }
+      />
+      <FieldGrid
+        columns="md:grid-cols-2"
+        items={[
+          { label: 'Plan', value: detail.billing.plan.name, description: detail.billing.plan.id },
+          { label: 'Stripe Customer', value: detail.billing.stripeCustomerId || 'No Stripe customer' },
+        ]}
+      />
 
       <div className="grid gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Current Add-ons</p>
         {detail.billing.addons.length ? (
           detail.billing.addons.map((addon) => (
-            <div key={addon.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <RowCard key={addon.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-slate-900">{addon.label}</p>
                 <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
@@ -233,7 +267,7 @@ function BillingCard({ detail }: { detail: StaffUserDetail }) {
               <p className="mt-1 text-xs text-slate-500">
                 Starts {formatDateTime(addon.startsAt)} · Expires {formatDateTime(addon.expiresAt)}
               </p>
-            </div>
+            </RowCard>
           ))
         ) : (
           <p className="text-sm text-slate-600">No active personal add-ons.</p>
@@ -256,18 +290,12 @@ function AgentsCard({
 }) {
   return (
     <section className="card">
-      <div className="card__header">
-        <div>
-          <h2 className="card__title">{title}</h2>
-          <p className="app-subtitle">{subtitle}</p>
-        </div>
-        <span className="app-status-indicator">{agents.length} total</span>
-      </div>
+      <CardHeader title={title} subtitle={subtitle} status={<span className="app-status-indicator">{agents.length} total</span>} />
 
       {agents.length ? (
         <div className="grid gap-3">
           {agents.map((agent) => (
-            <div key={agent.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <RowCard key={agent.id}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">{agent.name || 'Untitled agent'}</p>
@@ -286,15 +314,10 @@ function AgentsCard({
                   >
                     Audit
                   </a>
-                  <a
-                    href={agent.adminUrl}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:text-sky-700"
-                  >
-                    Admin
-                  </a>
+                  <AdminLink href={agent.adminUrl} label="Admin" compact />
                 </div>
               </div>
-            </div>
+            </RowCard>
           ))}
         </div>
       ) : (
@@ -307,54 +330,27 @@ function AgentsCard({
 function OrganizationOverviewCard({ detail }: { detail: StaffOrgDetail }) {
   return (
     <section className="card">
-      <div className="card__header">
-        <div>
-          <h2 className="card__title">Overview</h2>
-          <p className="app-subtitle">Organization identity, status, and admin reference.</p>
-        </div>
-        <a
-          href={detail.organization.adminUrl}
-          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:text-sky-700"
-        >
-          Django Admin
-          <ExternalLink className="size-4" />
-        </a>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Organization</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.organization.name}</p>
-          <p className="mt-1 text-sm text-slate-500">{detail.organization.slug}</p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Status</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.organization.isActive ? 'Active' : 'Inactive'}</p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Plan</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.billing.subscription || detail.organization.plan}</p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Created</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{formatDateTime(detail.organization.createdAt)}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Purchased Seats</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.billing.purchasedSeats ?? 'Not set'}</p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Reserved Seats</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.billing.seatsReserved ?? 'Not set'}</p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Available Seats</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{detail.billing.seatsAvailable ?? 'Not set'}</p>
-        </div>
-      </div>
+      <CardHeader
+        title="Overview"
+        subtitle="Organization identity, status, and admin reference."
+        action={<AdminLink href={detail.organization.adminUrl} />}
+      />
+      <FieldGrid
+        columns="md:grid-cols-4"
+        items={[
+          { label: 'Organization', value: detail.organization.name, description: detail.organization.slug },
+          { label: 'Status', value: detail.organization.isActive ? 'Active' : 'Inactive' },
+          { label: 'Plan', value: detail.billing.subscription || detail.organization.plan },
+          { label: 'Created', value: formatDateTime(detail.organization.createdAt) },
+        ]}
+      />
+      <FieldGrid
+        items={[
+          { label: 'Purchased Seats', value: detail.billing.purchasedSeats ?? 'Not set' },
+          { label: 'Reserved Seats', value: detail.billing.seatsReserved ?? 'Not set' },
+          { label: 'Available Seats', value: detail.billing.seatsAvailable ?? 'Not set' },
+        ]}
+      />
     </section>
   )
 }
@@ -362,32 +358,25 @@ function OrganizationOverviewCard({ detail }: { detail: StaffOrgDetail }) {
 function OrganizationMembersCard({ detail }: { detail: StaffOrgDetail }) {
   return (
     <section className="card">
-      <div className="card__header">
-        <div>
-          <h2 className="card__title">Members</h2>
-          <p className="app-subtitle">Active members currently attached to this organization.</p>
-        </div>
-        <span className="app-status-indicator">{detail.members.length} active</span>
-      </div>
+      <CardHeader
+        title="Members"
+        subtitle="Active members currently attached to this organization."
+        status={<span className="app-status-indicator">{detail.members.length} active</span>}
+      />
 
       {detail.members.length ? (
         <div className="grid gap-3">
           {detail.members.map((member) => (
-            <div key={member.userId} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <RowCard key={member.userId}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-slate-900">{member.name}</p>
                   <p className="mt-1 truncate text-sm text-slate-600">{member.email || 'No email on file'}</p>
                   <p className="mt-1 text-xs font-medium text-slate-500">{member.roleLabel}</p>
                 </div>
-                <a
-                  href={member.adminUrl}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:text-sky-700"
-                >
-                  Admin
-                </a>
+                <AdminLink href={member.adminUrl} label="Admin" compact />
               </div>
-            </div>
+            </RowCard>
           ))}
         </div>
       ) : (
@@ -408,20 +397,18 @@ function UserEmailsCard({
 }) {
   return (
     <section className="card">
-      <div className="card__header">
-        <div>
-          <h2 className="card__title">User Emails</h2>
-          <p className="app-subtitle">Send configured Customer.io launch events through Analytics.</p>
-        </div>
-        <span className="app-status-indicator">{detail.userEmails.triggers.length} active</span>
-      </div>
+      <CardHeader
+        title="User Emails"
+        subtitle="Send configured Customer.io launch events through Analytics."
+        status={<span className="app-status-indicator">{detail.userEmails.triggers.length} active</span>}
+      />
 
       {detail.userEmails.triggers.length ? (
         <div className="grid gap-3 md:grid-cols-2">
           {detail.userEmails.triggers.map((trigger) => {
             const isSending = sendingTriggerId === trigger.id
             return (
-              <div key={trigger.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <RowCard key={trigger.id}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-900">{trigger.name}</p>
@@ -437,7 +424,7 @@ function UserEmailsCard({
                     Send
                   </button>
                 </div>
-              </div>
+              </RowCard>
             )
           })}
         </div>
@@ -455,12 +442,12 @@ function TaskCreditsCard({
   taskCredits,
   onSubmit,
   submitting,
-  subtitle = 'Current balance, recent grants, and a fast manual grant form.',
+  subtitle,
 }: {
   taskCredits: StaffTaskCredits
-  onSubmit: (payload: { credits: string; grantType: 'Compensation' | 'Promo'; expirationPreset: 'one_month' | 'one_year' }) => void
+  onSubmit: (payload: StaffTaskCreditGrantPayload) => void
   submitting: boolean
-  subtitle?: string
+  subtitle: string
 }) {
   const [credits, setCredits] = useState('25')
   const [grantType, setGrantType] = useState<'Compensation' | 'Promo'>('Compensation')
@@ -468,24 +455,24 @@ function TaskCreditsCard({
 
   return (
     <section className="card">
-      <div className="card__header">
-        <div>
-          <h2 className="card__title">Task Credits</h2>
-          <p className="app-subtitle">{subtitle}</p>
-        </div>
-        <span className="app-status-indicator app-status-indicator--success">
-          {taskCredits.unlimited ? 'Unlimited' : `${taskCredits.available ?? 0} available`}
-        </span>
-      </div>
+      <CardHeader
+        title="Task Credits"
+        subtitle={subtitle}
+        status={
+          <span className="app-status-indicator app-status-indicator--success">
+            {taskCredits.unlimited ? 'Unlimited' : `${taskCredits.available ?? 0} available`}
+          </span>
+        }
+      />
 
       <div className="grid gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Current Grants</p>
         {taskCredits.recentGrants.length ? (
           taskCredits.recentGrants.map((grant) => (
-            <div key={grant.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <RowCard key={grant.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-slate-900">
-                  {grant.credits} credits · {formatGrantType(grant.grantType)}
+                  {grant.credits} credits · {grant.grantType}
                 </p>
                 <p className="text-xs font-medium text-slate-500">{grant.available} remaining in block</p>
               </div>
@@ -493,7 +480,7 @@ function TaskCreditsCard({
                 Granted {formatDateTime(grant.grantedAt)} · Expires {formatDateTime(grant.expiresAt)}
               </p>
               {grant.comments ? <p className="mt-2 text-sm text-slate-600">{grant.comments}</p> : null}
-            </div>
+            </RowCard>
           ))
         ) : (
           <p className="text-sm text-slate-600">No current task-credit grants found.</p>
@@ -597,8 +584,7 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
   })
 
   const grantMutation = useMutation({
-    mutationFn: (payload: { credits: string; grantType: 'Compensation' | 'Promo'; expirationPreset: 'one_month' | 'one_year' }) =>
-      createStaffUserTaskCreditGrant(selectedUserId as number, payload),
+    mutationFn: (payload: StaffTaskCreditGrantPayload) => createStaffUserTaskCreditGrant(selectedUserId as number, payload),
     onSuccess: async () => {
       setFeedback('Task-credit grant created.')
       await queryClient.invalidateQueries({ queryKey: ['staff-user-detail', selectedUserId] })
@@ -606,8 +592,7 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
   })
 
   const orgGrantMutation = useMutation({
-    mutationFn: (payload: { credits: string; grantType: 'Compensation' | 'Promo'; expirationPreset: 'one_month' | 'one_year' }) =>
-      createStaffOrgTaskCreditGrant(selectedOrgId as string, payload),
+    mutationFn: (payload: StaffTaskCreditGrantPayload) => createStaffOrgTaskCreditGrant(selectedOrgId as string, payload),
     onSuccess: async () => {
       setFeedback('Organization task-credit grant created.')
       await queryClient.invalidateQueries({ queryKey: ['staff-org-detail', selectedOrgId] })
@@ -630,6 +615,7 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
 
   const userDetail = detailQuery.data
   const orgDetail = orgDetailQuery.data
+  const adminUrl = userDetail?.user.adminUrl ?? orgDetail?.organization.adminUrl
   const searchUsers = searchQuery.data?.users ?? []
   const searchOrganizations = searchQuery.data?.organizations ?? []
   const searchError = searchQuery.error instanceof Error ? searchQuery.error.message : null
@@ -670,10 +656,6 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
     }
   }
 
-  const handleGrantSubmit = (payload: { credits: string; grantType: 'Compensation' | 'Promo'; expirationPreset: 'one_month' | 'one_year' }) => {
-    grantMutation.mutate(payload)
-  }
-
   const handleVerify = () => {
     if (selectedUserId === null) {
       return
@@ -707,18 +689,9 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
                 <p className="app-subtitle">{pageSubtitle}</p>
                 <p className="app-context">Staff tools for fast account and organization triage.</p>
               </div>
-              {userDetail ? (
+              {adminUrl ? (
                 <a
-                  href={userDetail.user.adminUrl}
-                  className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:text-sky-700 md:self-center"
-                >
-                  <Activity className="size-4" />
-                  Open Admin
-                </a>
-              ) : null}
-              {orgDetail ? (
-                <a
-                  href={orgDetail.organization.adminUrl}
+                  href={adminUrl}
                   className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:text-sky-700 md:self-center"
                 >
                   <Activity className="size-4" />
@@ -804,7 +777,7 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
             <TaskCreditsCard
               taskCredits={userDetail.taskCredits}
               subtitle="Personal balance, current grants, and a fast manual grant form."
-              onSubmit={handleGrantSubmit}
+              onSubmit={(payload) => grantMutation.mutate(payload)}
               submitting={grantMutation.isPending}
             />
           </>
@@ -813,17 +786,17 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
         {orgDetail ? (
           <>
             <OrganizationOverviewCard detail={orgDetail} />
-            <TaskCreditsCard
-              taskCredits={orgDetail.taskCredits}
-              subtitle="Organization balance, current grants, and a fast manual grant form."
-              onSubmit={(payload) => orgGrantMutation.mutate(payload)}
-              submitting={orgGrantMutation.isPending}
-            />
             <OrganizationMembersCard detail={orgDetail} />
             <AgentsCard
               agents={orgDetail.agents}
               subtitle="All persistent agents assigned to this organization."
               emptyText="This organization does not currently own any persistent agents."
+            />
+            <TaskCreditsCard
+              taskCredits={orgDetail.taskCredits}
+              subtitle="Organization balance, current grants, and a fast manual grant form."
+              onSubmit={(payload) => orgGrantMutation.mutate(payload)}
+              submitting={orgGrantMutation.isPending}
             />
           </>
         ) : null}
