@@ -26,7 +26,11 @@ from api.services.agent_owner_custom_instructions import (
     normalize_custom_instructions,
     save_custom_instructions_for_organization_id,
 )
-from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
+from api.services.organization_permissions import (
+    ORG_AGENT_CONFIG_AUTHORITY_ROLES,
+    ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS,
+    organization_members_can_create_agents,
+)
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from console.api_helpers import _parse_json_body as _parse_json_body_or_raise
 from console.context_helpers import build_console_context
@@ -47,6 +51,7 @@ OWNER_EQUIVALENT_ROLES = (
     OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
 )
 ORG_CUSTOM_INSTRUCTIONS_FIELD = CUSTOM_INSTRUCTIONS_FIELD
+ORG_MEMBERS_CAN_CREATE_AGENTS_FIELD = "membersCanCreateAgents"
 
 
 def _json_error(message: str, *, status: int = 400):
@@ -145,12 +150,14 @@ def _serialize_organization(org: Organization, membership: OrganizationMembershi
             "plan": org.plan,
             "customInstructions": custom_instructions,
             "customInstructionsMaxChars": settings.AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS,
+            "membersCanCreateAgents": organization_members_can_create_agents(org),
         },
         "viewer": {
             "role": membership.role,
             "roleLabel": membership.get_role_display(),
             "canEditOrganization": membership.role in OWNER_EQUIVALENT_ROLES,
             "canEditCustomInstructions": membership.role in ORG_AGENT_CONFIG_AUTHORITY_ROLES,
+            "canEditMemberAgentCreation": membership.role in ORG_AGENT_CONFIG_AUTHORITY_ROLES,
             "canManageMembers": membership.role in MEMBER_MANAGE_ROLES,
             "canManageBilling": membership.role in BILLING_MANAGE_ROLES,
         },
@@ -274,6 +281,26 @@ def _normalize_custom_instructions_payload(payload: dict) -> tuple[str | None, J
         return None, _json_field_errors({ORG_CUSTOM_INSTRUCTIONS_FIELD: [str(exc)]})
 
 
+def _normalize_members_can_create_agents_payload(payload: dict) -> tuple[bool | None, JsonResponse | None]:
+    if ORG_MEMBERS_CAN_CREATE_AGENTS_FIELD not in payload:
+        return None, None
+    value = payload.get(ORG_MEMBERS_CAN_CREATE_AGENTS_FIELD)
+    if isinstance(value, bool):
+        return value, None
+    return None, _json_field_errors({ORG_MEMBERS_CAN_CREATE_AGENTS_FIELD: ["Use true or false."]})
+
+
+def _save_members_can_create_agents_setting(org: Organization, enabled: bool) -> None:
+    org_settings = org.org_settings if isinstance(org.org_settings, dict) else {}
+    next_settings = dict(org_settings)
+    if enabled:
+        next_settings[ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS] = True
+    else:
+        next_settings.pop(ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS, None)
+    org.org_settings = next_settings
+    org.save(update_fields=["org_settings", "updated_at"])
+
+
 def _send_invitation_email(request, org: Organization, invite: OrganizationInvite) -> None:
     accept_url = request.build_absolute_uri(
         f"/app/organizations/invites/{invite.token}/accept"
@@ -328,17 +355,25 @@ class CurrentOrganizationAPIView(LoginRequiredMixin, View):
 
         name_supplied = "name" in payload
         custom_instructions_supplied = ORG_CUSTOM_INSTRUCTIONS_FIELD in payload
-        if not name_supplied and not custom_instructions_supplied:
+        members_can_create_agents_supplied = ORG_MEMBERS_CAN_CREATE_AGENTS_FIELD in payload
+        if not name_supplied and not custom_instructions_supplied and not members_can_create_agents_supplied:
             return _json_error("No organization updates were provided.", status=400)
 
         if name_supplied and membership.role not in OWNER_EQUIVALENT_ROLES:
             return _json_error("You do not have permission to edit this organization.", status=403)
         if custom_instructions_supplied and membership.role not in ORG_AGENT_CONFIG_AUTHORITY_ROLES:
             return _json_error("You do not have permission to edit custom instructions.", status=403)
+        if members_can_create_agents_supplied and membership.role not in ORG_AGENT_CONFIG_AUTHORITY_ROLES:
+            return _json_error("You do not have permission to edit agent creation settings.", status=403)
 
         normalized_instructions = None
         if custom_instructions_supplied:
             normalized_instructions, error = _normalize_custom_instructions_payload(payload)
+            if error:
+                return error
+        members_can_create_agents = None
+        if members_can_create_agents_supplied:
+            members_can_create_agents, error = _normalize_members_can_create_agents_payload(payload)
             if error:
                 return error
 
@@ -359,6 +394,8 @@ class CurrentOrganizationAPIView(LoginRequiredMixin, View):
                 instructions=normalized_instructions,
                 updated_by=request.user,
             )
+        if members_can_create_agents is not None:
+            _save_members_can_create_agents_setting(org, members_can_create_agents)
 
         if name_supplied and previous_name != org.name:
             props = Analytics.with_org_properties(

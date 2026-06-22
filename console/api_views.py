@@ -3406,6 +3406,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "type": context_info.current_context.type,
                     "id": context_info.current_context.id,
                     "name": context_info.current_context.name,
+                    "canCreateAgents": context_info.can_create_org_agents,
                 },
                 "requested_agent_status": requested_agent_status,
                 "agent_roster_sort_mode": agent_roster_sort_mode,

@@ -8,6 +8,7 @@ from django.utils.text import slugify
 from waffle import flag_is_active
 
 from api.models import Organization, OrganizationMembership
+from api.services.organization_permissions import user_role_can_create_org_agents
 from console.forms import OrganizationForm
 from console.agent_context import resolve_context_override_for_agent
 from console.context_helpers import build_console_context, resolve_console_context
@@ -25,11 +26,18 @@ def _unique_organization_slug(name: str) -> str:
     return slug
 
 
-def _serialize_context(context_type: str, context_id: str, context_name: str) -> dict:
+def _serialize_context(
+    context_type: str,
+    context_id: str,
+    context_name: str,
+    *,
+    can_create_agents: bool = True,
+) -> dict:
     return {
         "type": context_type,
         "id": str(context_id),
         "name": context_name,
+        "canCreateAgents": can_create_agents,
     }
 
 
@@ -89,6 +97,7 @@ class SwitchContextView(LoginRequiredMixin, View):
                     "id": str(membership.org.id),
                     "name": membership.org.name,
                     "role": membership.get_role_display(),
+                    "canCreateAgents": user_role_can_create_org_agents(membership.role, membership.org),
                 }
                 for membership in memberships
             ]
@@ -100,6 +109,7 @@ class SwitchContextView(LoginRequiredMixin, View):
                     "type": current_context.type,
                     "id": current_context.id,
                     "name": current_context.name,
+                    "canCreateAgents": resolved.can_create_org_agents,
                 },
                 "personal": {"id": str(request.user.id), "name": personal_name},
                 "organizations": organizations,
@@ -125,6 +135,7 @@ class SwitchContextView(LoginRequiredMixin, View):
             
             # If personal context, validate it's the current user
             if context_type == 'personal':
+                can_create_agents = True
                 if str(request.user.id) != context_id:
                     return JsonResponse({'error': 'Invalid personal context'}, status=403)
                 context_name = request.user.get_full_name() or request.user.username or request.user.email or "Personal"
@@ -143,6 +154,7 @@ class SwitchContextView(LoginRequiredMixin, View):
                         status=OrganizationMembership.OrgStatus.ACTIVE
                     )
                     context_name = membership.org.name
+                    can_create_agents = user_role_can_create_org_agents(membership.role, membership.org)
                     if persist:
                         # Store in session
                         request.session['context_type'] = 'organization'
@@ -154,7 +166,12 @@ class SwitchContextView(LoginRequiredMixin, View):
             
             return JsonResponse({
                 'success': True,
-                'context': _serialize_context(context_type, str(context_id), context_name),
+                'context': _serialize_context(
+                    context_type,
+                    str(context_id),
+                    context_name,
+                    can_create_agents=can_create_agents,
+                ),
             })
             
         except Exception as e:

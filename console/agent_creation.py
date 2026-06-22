@@ -200,7 +200,7 @@ def create_persistent_agent_from_charter(
                 "You no longer have access to that organization. Creating a personal agent instead.",
             )
         elif (
-            not resolved_context.can_manage_org_agents
+            not resolved_context.can_create_org_agents
             and not _session_points_to_current_org_template(
                 request,
                 template_code=template_code,
@@ -208,7 +208,7 @@ def create_persistent_agent_from_charter(
             )
         ):
             raise ValidationError(
-                "You need to be an organization owner or admin to create agents for this organization."
+                "You do not have permission to create agents for this organization."
             )
         else:
             organization = membership.org

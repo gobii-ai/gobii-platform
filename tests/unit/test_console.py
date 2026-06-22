@@ -36,6 +36,7 @@ from console.agent_creation import (
     AGENT_TEMPLATE_SOURCE_SESSION_KEY,
 )
 from api.services.pipedream_apps import get_owner_apps_state
+from api.services.organization_permissions import ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS
 from util.analytics import AnalyticsEvent
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 
@@ -2724,6 +2725,49 @@ class ConsoleViewsTest(TestCase):
         selection = PipedreamAppSelection.objects.get(organization=organization)
         self.assertEqual(selection.selected_app_slugs, ["notion"])
 
+    @override_settings(
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
+        SEGMENT_WRITE_KEY="",
+        SEGMENT_WEB_WRITE_KEY="",
+        GOBII_PROPRIETARY_MODE=False,
+    )
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.emit_configured_custom_capi_event")
+    @patch("console.agent_creation.Analytics.track_event")
+    @tag("batch_console_agents_management")
+    def test_quick_create_allows_member_when_org_setting_enabled(
+        self,
+        _mock_track_event,
+        _mock_capi_event,
+        _mock_delay,
+    ):
+        from api.models import OrganizationMembership, PersistentAgent
+
+        organization = self._create_organization(
+            name="Member Create Org",
+            slug="member-create-org",
+            role=OrganizationMembership.OrgRole.MEMBER,
+        )
+        organization.org_settings = {ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS: True}
+        organization.save(update_fields=["org_settings"])
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/console/api/agents/create/",
+                data=json.dumps({"message": "Coordinate weekly operations updates."}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        created_agent = PersistentAgent.objects.get(id=response.json()["agent_id"])
+        self.assertEqual(created_agent.organization, organization)
+        self.assertEqual(created_agent.user, self.user)
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     @patch("console.agent_creation.process_agent_events_task.delay")
     @patch("console.agent_creation.Analytics.track_event")
@@ -2802,7 +2846,7 @@ class ConsoleViewsTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("owner or admin", response.json()["error"])
+        self.assertIn("permission to create agents", response.json()["error"])
         self.assertFalse(PersistentAgent.objects.filter(organization=organization).exists())
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)

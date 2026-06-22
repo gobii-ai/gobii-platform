@@ -13,6 +13,7 @@ from django.contrib.auth.models import AbstractBaseUser
 from django.core.exceptions import PermissionDenied, ValidationError
 
 from api.models import OrganizationMembership
+from api.services.organization_permissions import user_role_can_create_org_agents
 from console.context_overrides import get_context_override
 
 
@@ -28,6 +29,7 @@ class ConsoleContextInfo:
     current_context: ConsoleContext
     current_membership: Optional[OrganizationMembership]
     can_manage_org_agents: bool
+    can_create_org_agents: bool
 
 
 _ALLOWED_MANAGE_ROLES = {
@@ -70,6 +72,7 @@ def resolve_console_context(
                 current_context=context,
                 current_membership=None,
                 can_manage_org_agents=True,
+                can_create_org_agents=True,
             )
         if context_type == "organization":
             membership = _get_active_membership(user, context_id)
@@ -84,6 +87,7 @@ def resolve_console_context(
                 current_context=context,
                 current_membership=membership,
                 can_manage_org_agents=membership.role in _ALLOWED_MANAGE_ROLES,
+                can_create_org_agents=user_role_can_create_org_agents(membership.role, membership.org),
             )
         raise PermissionDenied("Invalid context override.")
 
@@ -93,6 +97,7 @@ def resolve_console_context(
 
     membership: Optional[OrganizationMembership] = None
     can_manage_org_agents = True
+    can_create_org_agents = True
 
     if context_type == "organization":
         membership = _get_active_membership(user, context_id)
@@ -100,12 +105,14 @@ def resolve_console_context(
             context_name = membership.org.name
             context_id = str(membership.org.id)
             can_manage_org_agents = membership.role in _ALLOWED_MANAGE_ROLES
+            can_create_org_agents = user_role_can_create_org_agents(membership.role, membership.org)
         else:
             context_type = "personal"
             context_id = str(user.id)
             context_name = default_name
             membership = None
             can_manage_org_agents = True
+            can_create_org_agents = True
 
     current_context = ConsoleContext(
         type=context_type,
@@ -117,6 +124,7 @@ def resolve_console_context(
         current_context=current_context,
         current_membership=membership,
         can_manage_org_agents=can_manage_org_agents,
+        can_create_org_agents=can_create_org_agents,
     )
 
 

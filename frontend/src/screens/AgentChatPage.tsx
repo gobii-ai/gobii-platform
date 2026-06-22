@@ -2680,6 +2680,11 @@ export function AgentChatPage({
   const selectedAgentAccountPause = addonsPayload?.status?.accountPause ?? null
   const currentContextBillingStatus = rosterQuery.data?.billingStatus ?? null
   const currentContextAccountPause = rosterQuery.data?.accountPause ?? null
+  const currentContextCanCreateAgents = (
+    rosterQuery.data?.context.canCreateAgents
+    ?? effectiveContext?.canCreateAgents
+    ?? true
+  )
   const sendMessageDisabledReason = !isNewAgent && selectedAgentAccountPause?.paused
     ? resolveSendMessagePausedMessage(selectedAgentAccountPause.resumeAt)
     : (!isNewAgent && selectedAgentBillingStatus?.delinquent
@@ -2688,16 +2693,18 @@ export function AgentChatPage({
   const previewCreateAgentBlocked = !currentContextBillingStatus?.delinquent
     && !currentContextAccountPause?.paused
     && personalSignupPreviewAvailable
-  const createAgentDisabledReason = currentContextAccountPause?.paused
-    ? resolveCreateAgentPausedMessage(currentContextAccountPause.resumeAt)
-    : currentContextBillingStatus?.delinquent
-    ? resolveCreateAgentDisabledMessage(
-      currentContextBillingStatus.reason,
-      currentContextBillingStatus.actionable,
-    )
-    : previewCreateAgentBlocked
-      ? 'Finish signup to create another agent. Your preview can continue once you start a plan.'
-      : null
+  const createAgentDisabledReason = !currentContextCanCreateAgents
+    ? 'You do not have permission to create agents in this organization.'
+    : currentContextAccountPause?.paused
+      ? resolveCreateAgentPausedMessage(currentContextAccountPause.resumeAt)
+      : currentContextBillingStatus?.delinquent
+      ? resolveCreateAgentDisabledMessage(
+        currentContextBillingStatus.reason,
+        currentContextBillingStatus.actionable,
+      )
+      : previewCreateAgentBlocked
+        ? 'Finish signup to create another agent. Your preview can continue once you start a plan.'
+        : null
 
   const trackSignupPreviewActionBlocked = useCallback((
     action: 'new_agent' | 'settings' | 'collaborate',
