@@ -65,7 +65,7 @@ export default function SearchBar() {
 
       // Pagefind assets are generated after production builds, so local dev may
       // serve the Docusaurus HTML fallback at this path.
-      const response = await fetch(PAGEFIND_JS_PATH, {method: 'HEAD', cache: 'no-store'});
+      const response = await fetch(PAGEFIND_JS_PATH, {method: 'GET', cache: 'no-store'});
       if (disposed || !isJavaScriptResponse(response)) return;
 
       ensurePagefindCss();
