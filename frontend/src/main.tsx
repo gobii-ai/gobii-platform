@@ -55,6 +55,7 @@ const maxChatUploadSizeBytes =
 const selectedUserIdRaw = mountNode.dataset.userId
 const selectedUserIdValue = selectedUserIdRaw ? Number.parseInt(selectedUserIdRaw, 10) : null
 const selectedUserId = typeof selectedUserIdValue === 'number' && Number.isFinite(selectedUserIdValue) ? selectedUserIdValue : null
+const selectedOrgId = mountNode.dataset.orgId || null
 
 let screen: ReactElement | Promise<ReactElement>
 
@@ -82,7 +83,7 @@ switch (appName) {
     screen = <SystemStatusScreen />
     break
   case 'staff-users':
-    screen = <StaffUsersScreen selectedUserId={selectedUserId} />
+    screen = <StaffUsersScreen selectedUserId={selectedUserId} selectedOrgId={selectedOrgId} />
     break
   case 'library': {
     const listUrl = mountNode.dataset.libraryListUrl

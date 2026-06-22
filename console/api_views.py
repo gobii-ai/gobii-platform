@@ -2181,6 +2181,21 @@ def _staff_user_admin_url(user) -> str:
     return reverse(f"admin:{user._meta.app_label}_{user._meta.model_name}_change", args=[user.pk])
 
 
+def _staff_org_admin_url(org: Organization) -> str:
+    return reverse("admin:api_organization_change", args=[org.pk])
+
+
+def _serialize_staff_agent_summary(agent: PersistentAgent) -> dict[str, Any]:
+    return {
+        "id": str(agent.id),
+        "name": agent.name or "",
+        "organizationName": agent.organization.name if agent.organization_id else None,
+        "adminUrl": reverse("admin:api_persistentagent_change", args=[agent.id]),
+        "auditUrl": reverse("console-agent-audit", kwargs={"agent_id": agent.id}),
+        "lastInteractionAt": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
+    }
+
+
 def _staff_stripe_customer_dashboard_url(customer) -> str | None:
     customer_id = getattr(customer, "id", "") or ""
     if not customer_id:
@@ -2277,29 +2292,40 @@ def _serialize_task_credit(task_credit: TaskCredit) -> dict[str, Any]:
     }
 
 
+def _serialize_staff_task_credits(owner) -> dict[str, Any]:
+    current_credits = TaskCreditService.get_current_task_credit_for_owner(owner)
+    available_credits = TaskCreditService.calculate_available_tasks_for_owner(
+        owner,
+        task_credits=current_credits,
+    )
+    unlimited_credits = available_credits == Decimal(TASKS_UNLIMITED)
+    recent_grants = [
+        _serialize_task_credit(task_credit)
+        for task_credit in current_credits.order_by("-granted_date", "-id")[:5]
+    ]
+    return {
+        "available": None if unlimited_credits else _serialize_decimal(available_credits),
+        "unlimited": bool(unlimited_credits),
+        "recentGrants": recent_grants,
+    }
+
+
 def _serialize_staff_user_detail(user) -> dict[str, Any]:
     plan_payload = get_user_plan(user) or {}
     stripe_customer = get_stripe_customer(user)
-    available_credits = TaskCreditService.calculate_available_tasks(user)
-    unlimited_credits = available_credits == TASKS_UNLIMITED
 
     addons = [
         _serialize_staff_addon(entitlement)
         for entitlement in AddonEntitlement.objects.for_owner(user).active().order_by("-created_at")
     ]
     agents = [
-        {
-            "id": str(agent.id),
-            "name": agent.name or "",
-            "organizationName": agent.organization.name if agent.organization_id else None,
-            "adminUrl": reverse("admin:api_persistentagent_change", args=[agent.id]),
-            "auditUrl": reverse("console-agent-audit", kwargs={"agent_id": agent.id}),
-        }
-        for agent in PersistentAgent.objects.filter(user=user).select_related("organization").order_by("-created_at")
-    ]
-    recent_grants = [
-        _serialize_task_credit(task_credit)
-        for task_credit in TaskCredit.objects.filter(user=user, voided=False).order_by("-granted_date")[:5]
+        _serialize_staff_agent_summary(agent)
+        for agent in (
+            PersistentAgent.objects
+            .filter(user=user)
+            .select_related("organization")
+            .order_by(models.F("last_interaction_at").desc(nulls_last=True), "-created_at")
+        )
     ]
 
     return {
@@ -2320,17 +2346,68 @@ def _serialize_staff_user_detail(user) -> dict[str, Any]:
             "addons": addons,
         },
         "agents": agents,
-        "taskCredits": {
-            "available": None if unlimited_credits else _serialize_decimal(available_credits),
-            "unlimited": bool(unlimited_credits),
-            "recentGrants": recent_grants,
-        },
+        "taskCredits": _serialize_staff_task_credits(user),
         "userEmails": {
             "triggers": [
                 _serialize_staff_user_email(user_email)
                 for user_email in UserEmail.objects.filter(is_active=True).order_by("name", "event_name")
             ],
         },
+    }
+
+
+def _serialize_staff_org_member(membership: OrganizationMembership) -> dict[str, Any]:
+    user = membership.user
+    return {
+        "userId": user.id,
+        "name": _staff_user_display_name(user),
+        "email": user.email or "",
+        "role": membership.role,
+        "roleLabel": membership.get_role_display(),
+        "adminUrl": _staff_user_admin_url(user),
+    }
+
+
+def _serialize_staff_org_detail(org: Organization) -> dict[str, Any]:
+    billing = getattr(org, "billing", None)
+    agents = [
+        _serialize_staff_agent_summary(agent)
+        for agent in (
+            PersistentAgent.objects
+            .filter(organization=org)
+            .select_related("organization")
+            .order_by(models.F("last_interaction_at").desc(nulls_last=True), "-created_at")
+        )
+    ]
+    members = [
+        _serialize_staff_org_member(membership)
+        for membership in (
+            OrganizationMembership.objects
+            .filter(org=org, status=OrganizationMembership.OrgStatus.ACTIVE)
+            .select_related("user")
+            .order_by("user__email", "user__id")
+        )
+    ]
+
+    return {
+        "organization": {
+            "id": str(org.id),
+            "name": org.name,
+            "slug": org.slug,
+            "plan": org.plan,
+            "isActive": bool(org.is_active),
+            "adminUrl": _staff_org_admin_url(org),
+            "createdAt": org.created_at.isoformat() if org.created_at else None,
+        },
+        "billing": {
+            "subscription": billing.subscription if billing else None,
+            "purchasedSeats": billing.purchased_seats if billing else None,
+            "seatsReserved": billing.seats_reserved if billing else None,
+            "seatsAvailable": billing.seats_available if billing else None,
+        },
+        "members": members,
+        "agents": agents,
+        "taskCredits": _serialize_staff_task_credits(org),
     }
 
 
@@ -2343,7 +2420,7 @@ def _serialize_staff_user_email(user_email: UserEmail) -> dict[str, Any]:
 
 
 class StaffUserSearchAPIView(SystemAdminAPIView):
-    """Search users by name, email, or exact numeric identifier."""
+    """Search users and organizations for staff account triage."""
 
     http_method_names = ["get"]
 
@@ -2356,7 +2433,7 @@ class StaffUserSearchAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("limit must be an integer")
         limit = max(1, min(limit, 25))
         if not query:
-            return JsonResponse({"users": []})
+            return JsonResponse({"users": [], "organizations": []})
 
         filters = (
             Q(email__icontains=query)
@@ -2372,7 +2449,7 @@ class StaffUserSearchAPIView(SystemAdminAPIView):
             filters |= Q(id=int(query))
 
         matches = User.objects.filter(filters).order_by("first_name", "last_name", "email", "id")[:limit]
-        payload = [
+        user_payload = [
             {
                 "id": user.id,
                 "name": _staff_user_display_name(user),
@@ -2380,7 +2457,23 @@ class StaffUserSearchAPIView(SystemAdminAPIView):
             }
             for user in matches
         ]
-        return JsonResponse({"users": payload})
+
+        org_filters = Q(name__icontains=query) | Q(slug__icontains=query)
+        try:
+            org_filters |= Q(id=uuid.UUID(query))
+        except (TypeError, ValueError):
+            pass
+
+        org_matches = Organization.objects.filter(org_filters).order_by("name", "slug", "id")[:limit]
+        org_payload = [
+            {
+                "id": str(org.id),
+                "name": org.name,
+                "slug": org.slug,
+            }
+            for org in org_matches
+        ]
+        return JsonResponse({"users": user_payload, "organizations": org_payload})
 
 
 class StaffUserDetailAPIView(SystemAdminAPIView):
@@ -2391,6 +2484,16 @@ class StaffUserDetailAPIView(SystemAdminAPIView):
     def get(self, request: HttpRequest, user_id: int, *args: Any, **kwargs: Any):
         user = get_object_or_404(User, pk=user_id)
         return JsonResponse(_serialize_staff_user_detail(user))
+
+
+class StaffOrgDetailAPIView(SystemAdminAPIView):
+    """Return the staff organization-management payload for one organization."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, org_id: uuid.UUID, *args: Any, **kwargs: Any):
+        org = get_object_or_404(Organization.objects.select_related("billing"), pk=org_id)
+        return JsonResponse(_serialize_staff_org_detail(org))
 
 
 class StaffUserEmailVerifyAPIView(SystemAdminAPIView):
@@ -2450,6 +2553,38 @@ class StaffUserEmailVerifyAPIView(SystemAdminAPIView):
         )
 
 
+def _parse_staff_task_credit_grant_payload(request: HttpRequest) -> tuple[dict[str, Any] | None, JsonResponse | None]:
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return None, JsonResponse({"error": "invalid_json"}, status=400)
+
+    credits = _coerce_decimal_payload(payload.get("credits"))
+    if not credits.is_finite():
+        return None, JsonResponse({"error": "credits_must_be_finite"}, status=400)
+    if credits <= Decimal("0"):
+        return None, JsonResponse({"error": "credits_must_be_positive"}, status=400)
+
+    grant_type = str(payload.get("grantType") or "").strip()
+    if grant_type not in {GrantTypeChoices.COMPENSATION, GrantTypeChoices.PROMO}:
+        return None, JsonResponse({"error": "invalid_grant_type"}, status=400)
+
+    expiration_presets = {
+        "one_month": relativedelta(months=1),
+        "one_year": relativedelta(years=1),
+    }
+    expiration_preset = str(payload.get("expirationPreset") or "").strip()
+    expiration_delta = expiration_presets.get(expiration_preset)
+    if expiration_delta is None:
+        return None, JsonResponse({"error": "invalid_expiration_preset"}, status=400)
+
+    return {
+        "credits": credits,
+        "grant_type": grant_type,
+        "expiration_delta": expiration_delta,
+    }, None
+
+
 class StaffUserTaskCreditGrantAPIView(SystemAdminAPIView):
     """Create a manual personal task-credit grant for a selected user."""
 
@@ -2457,39 +2592,47 @@ class StaffUserTaskCreditGrantAPIView(SystemAdminAPIView):
 
     def post(self, request: HttpRequest, user_id: int, *args: Any, **kwargs: Any):
         user = get_object_or_404(User, pk=user_id)
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "invalid_json"}, status=400)
-
-        credits = _coerce_decimal_payload(payload.get("credits"))
-        if not credits.is_finite():
-            return JsonResponse({"error": "credits_must_be_finite"}, status=400)
-        if credits <= Decimal("0"):
-            return JsonResponse({"error": "credits_must_be_positive"}, status=400)
-
-        grant_type = str(payload.get("grantType") or "").strip()
-        if grant_type not in {GrantTypeChoices.COMPENSATION, GrantTypeChoices.PROMO}:
-            return JsonResponse({"error": "invalid_grant_type"}, status=400)
-
-        expiration_presets = {
-            "one_month": relativedelta(months=1),
-            "one_year": relativedelta(years=1),
-        }
-        expiration_preset = str(payload.get("expirationPreset") or "").strip()
-        expiration_delta = expiration_presets.get(expiration_preset)
-        if expiration_delta is None:
-            return JsonResponse({"error": "invalid_expiration_preset"}, status=400)
+        payload, error_response = _parse_staff_task_credit_grant_payload(request)
+        if error_response is not None:
+            return error_response
 
         granted_at = timezone.now()
         task_credit = TaskCredit.objects.create(
             user=user,
-            credits=credits,
+            credits=payload["credits"],
             credits_used=Decimal("0"),
             granted_date=granted_at,
-            expiration_date=granted_at + expiration_delta,
+            expiration_date=granted_at + payload["expiration_delta"],
             plan=PlanNamesChoices.FREE,
-            grant_type=grant_type,
+            grant_type=payload["grant_type"],
+            additional_task=False,
+            voided=False,
+        )
+
+        return JsonResponse({"ok": True, "taskCredit": _serialize_task_credit(task_credit)}, status=201)
+
+
+class StaffOrgTaskCreditGrantAPIView(SystemAdminAPIView):
+    """Create a manual organization task-credit grant for a selected organization."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, org_id: uuid.UUID, *args: Any, **kwargs: Any):
+        org = get_object_or_404(Organization.objects.select_related("billing"), pk=org_id)
+        payload, error_response = _parse_staff_task_credit_grant_payload(request)
+        if error_response is not None:
+            return error_response
+
+        granted_at = timezone.now()
+        billing = getattr(org, "billing", None)
+        task_credit = TaskCredit.objects.create(
+            organization=org,
+            credits=payload["credits"],
+            credits_used=Decimal("0"),
+            granted_date=granted_at,
+            expiration_date=granted_at + payload["expiration_delta"],
+            plan=billing.subscription if billing else PlanNamesChoices.FREE,
+            grant_type=payload["grant_type"],
             additional_task=False,
             voided=False,
         )

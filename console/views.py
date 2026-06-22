@@ -4180,7 +4180,9 @@ class StaffUsersView(SystemAdminRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         user_id = kwargs.get("user_id")
+        org_id = kwargs.get("org_id")
         context["selected_user_id"] = str(user_id) if user_id is not None else ""
+        context["selected_org_id"] = str(org_id) if org_id is not None else ""
         return context
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only

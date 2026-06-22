@@ -6,6 +6,38 @@ export type StaffUserSearchResult = {
   email: string
 }
 
+export type StaffOrganizationSearchResult = {
+  id: string
+  name: string
+  slug: string
+}
+
+export type StaffAgentSummary = {
+  id: string
+  name: string
+  organizationName: string | null
+  adminUrl: string
+  auditUrl: string
+  lastInteractionAt: string | null
+}
+
+export type StaffTaskCreditGrant = {
+  id: string
+  credits: string
+  used: string
+  available: string
+  grantType: string
+  grantedAt: string
+  expiresAt: string
+  comments: string
+}
+
+export type StaffTaskCredits = {
+  available: string | null
+  unlimited: boolean
+  recentGrants: StaffTaskCreditGrant[]
+}
+
 export type StaffUserDetail = {
   user: {
     id: number
@@ -36,13 +68,7 @@ export type StaffUserDetail = {
       isRecurring: boolean
     }>
   }
-  agents: Array<{
-    id: string
-    name: string
-    organizationName: string | null
-    adminUrl: string
-    auditUrl: string
-  }>
+  agents: StaffAgentSummary[]
   userEmails: {
     triggers: Array<{
       id: number
@@ -50,35 +76,63 @@ export type StaffUserDetail = {
       eventName: string
     }>
   }
-  taskCredits: {
-    available: string | null
-    unlimited: boolean
-    recentGrants: Array<{
-      id: string
-      credits: string
-      used: string
-      available: string
-      grantType: string
-      grantedAt: string
-      expiresAt: string
-      comments: string
-    }>
+  taskCredits: StaffTaskCredits
+}
+
+export type StaffOrgDetail = {
+  organization: {
+    id: string
+    name: string
+    slug: string
+    plan: string
+    isActive: boolean
+    adminUrl: string
+    createdAt: string | null
   }
+  billing: {
+    subscription: string | null
+    purchasedSeats: number | null
+    seatsReserved: number | null
+    seatsAvailable: number | null
+  }
+  members: Array<{
+    userId: number
+    name: string
+    email: string
+    role: string
+    roleLabel: string
+    adminUrl: string
+  }>
+  agents: StaffAgentSummary[]
+  taskCredits: StaffTaskCredits
+}
+
+export type StaffSearchResults = {
+  users: StaffUserSearchResult[]
+  organizations: StaffOrganizationSearchResult[]
 }
 
 export type StaffUserEmailVerification = StaffUserDetail['emailVerification']
 export type StaffUserEmailTrigger = StaffUserDetail['userEmails']['triggers'][number]
-export type StaffUserTaskCreditGrant = StaffUserDetail['taskCredits']['recentGrants'][number]
+export type StaffUserTaskCreditGrant = StaffTaskCreditGrant
 
-export async function searchStaffUsers(query: string, limit = 8, signal?: AbortSignal): Promise<{ users: StaffUserSearchResult[] }> {
+export async function searchStaffUsers(query: string, limit = 8, signal?: AbortSignal): Promise<StaffSearchResults> {
   const params = new URLSearchParams()
   params.set('q', query)
   params.set('limit', String(limit))
-  return jsonFetch<{ users: StaffUserSearchResult[] }>(`/console/api/staff/users/search/?${params.toString()}`, { signal })
+  const payload = await jsonFetch<Partial<StaffSearchResults>>(`/console/api/staff/users/search/?${params.toString()}`, { signal })
+  return {
+    users: payload.users ?? [],
+    organizations: payload.organizations ?? [],
+  }
 }
 
 export async function fetchStaffUserDetail(userId: number, signal?: AbortSignal): Promise<StaffUserDetail> {
   return jsonFetch<StaffUserDetail>(`/console/api/staff/users/${userId}/`, { signal })
+}
+
+export async function fetchStaffOrgDetail(orgId: string, signal?: AbortSignal): Promise<StaffOrgDetail> {
+  return jsonFetch<StaffOrgDetail>(`/console/api/staff/orgs/${orgId}/`, { signal })
 }
 
 export async function markStaffUserEmailVerified(userId: number): Promise<{ ok: boolean; emailVerification: StaffUserEmailVerification }> {
@@ -93,6 +147,17 @@ export async function createStaffUserTaskCreditGrant(
   payload: { credits: string; grantType: 'Compensation' | 'Promo'; expirationPreset: 'one_month' | 'one_year' },
 ): Promise<{ ok: boolean; taskCredit: StaffUserTaskCreditGrant }> {
   return jsonRequest<{ ok: boolean; taskCredit: StaffUserTaskCreditGrant }>(`/console/api/staff/users/${userId}/task-credits/`, {
+    method: 'POST',
+    includeCsrf: true,
+    json: payload,
+  })
+}
+
+export async function createStaffOrgTaskCreditGrant(
+  orgId: string,
+  payload: { credits: string; grantType: 'Compensation' | 'Promo'; expirationPreset: 'one_month' | 'one_year' },
+): Promise<{ ok: boolean; taskCredit: StaffTaskCreditGrant }> {
+  return jsonRequest<{ ok: boolean; taskCredit: StaffTaskCreditGrant }>(`/console/api/staff/orgs/${orgId}/task-credits/`, {
     method: 'POST',
     includeCsrf: true,
     json: payload,
