@@ -2322,6 +2322,8 @@ def _serialize_staff_user_detail(user) -> dict[str, Any]:
         _serialize_staff_agent_summary(agent)
         for agent in (
             PersistentAgent.objects
+            .non_eval()
+            .alive()
             .filter(user=user)
             .select_related("organization")
             .order_by(models.F("last_interaction_at").desc(nulls_last=True), "-created_at")
@@ -2374,6 +2376,8 @@ def _serialize_staff_org_detail(org: Organization) -> dict[str, Any]:
         _serialize_staff_agent_summary(agent)
         for agent in (
             PersistentAgent.objects
+            .non_eval()
+            .alive()
             .filter(organization=org)
             .select_related("organization")
             .order_by(models.F("last_interaction_at").desc(nulls_last=True), "-created_at")

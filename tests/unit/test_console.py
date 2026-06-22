@@ -525,6 +525,22 @@ class ConsoleViewsTest(TestCase):
             browser_use_agent=org_browser_agent,
             last_interaction_at=newer_interaction,
         )
+        deleted_agent = PersistentAgent.objects.create(
+            user=target_user,
+            name="Deleted Agent",
+            charter="Deleted",
+            browser_use_agent=BrowserUseAgent.objects.create(user=target_user, name="Deleted Browser"),
+            last_interaction_at=timezone.now(),
+        )
+        deleted_agent.soft_delete()
+        eval_agent = PersistentAgent.objects.create(
+            user=target_user,
+            name="Eval Agent",
+            charter="Eval",
+            browser_use_agent=BrowserUseAgent.objects.create(user=target_user, name="Eval Browser"),
+            execution_environment="eval",
+            last_interaction_at=timezone.now(),
+        )
         AddonEntitlement.objects.create(
             user=target_user,
             price_id="price_task_pack",
@@ -578,7 +594,10 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(len(payload["billing"]["addons"]), 1)
         self.assertEqual(payload["billing"]["addons"][0]["label"], "Task Pack")
         self.assertEqual(len(payload["agents"]), 2)
-        self.assertEqual([entry["id"] for entry in payload["agents"]], [str(org_agent.id), str(personal_agent.id)])
+        agent_ids = [entry["id"] for entry in payload["agents"]]
+        self.assertEqual(agent_ids, [str(org_agent.id), str(personal_agent.id)])
+        self.assertNotIn(str(deleted_agent.id), agent_ids)
+        self.assertNotIn(str(eval_agent.id), agent_ids)
         self.assertEqual(payload["agents"][0]["lastInteractionAt"], org_agent.last_interaction_at.isoformat())
         org_entry = next(entry for entry in payload["agents"] if entry["id"] == str(org_agent.id))
         self.assertEqual(org_entry["organizationName"], "Ops Team")
@@ -650,6 +669,24 @@ class ConsoleViewsTest(TestCase):
             browser_use_agent=BrowserUseAgent.objects.create(user=admin_user, name="Newer Browser"),
             last_interaction_at=timezone.now() - timedelta(hours=1),
         )
+        deleted_agent = PersistentAgent.objects.create(
+            user=admin_user,
+            organization=organization,
+            name="Deleted Org Agent",
+            charter="Deleted",
+            browser_use_agent=BrowserUseAgent.objects.create(user=admin_user, name="Deleted Org Browser"),
+            last_interaction_at=timezone.now(),
+        )
+        deleted_agent.soft_delete()
+        eval_agent = PersistentAgent.objects.create(
+            user=admin_user,
+            organization=organization,
+            name="Eval Org Agent",
+            charter="Eval",
+            browser_use_agent=BrowserUseAgent.objects.create(user=admin_user, name="Eval Org Browser"),
+            execution_environment="eval",
+            last_interaction_at=timezone.now(),
+        )
         current_credit = TaskCredit.objects.create(
             organization=organization,
             credits=Decimal("20"),
@@ -683,7 +720,10 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(payload["billing"]["purchasedSeats"], 2)
         self.assertEqual(payload["billing"]["seatsReserved"], 1)
         self.assertEqual([member["userId"] for member in payload["members"]], [admin_user.id, member_user.id])
-        self.assertEqual([agent["id"] for agent in payload["agents"]], [str(newer_agent.id), str(older_agent.id)])
+        agent_ids = [agent["id"] for agent in payload["agents"]]
+        self.assertEqual(agent_ids, [str(newer_agent.id), str(older_agent.id)])
+        self.assertNotIn(str(deleted_agent.id), agent_ids)
+        self.assertNotIn(str(eval_agent.id), agent_ids)
         self.assertEqual(payload["agents"][0]["lastInteractionAt"], newer_agent.last_interaction_at.isoformat())
         self.assertEqual(Decimal(payload["taskCredits"]["available"]), Decimal("17"))
         self.assertEqual([grant["id"] for grant in payload["taskCredits"]["recentGrants"]], [str(current_credit.id)])
