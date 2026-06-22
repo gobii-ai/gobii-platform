@@ -2594,7 +2594,7 @@ def _create_staff_task_credit_grant(owner, payload: dict[str, Any]) -> TaskCredi
     }
     if isinstance(owner, Organization):
         billing = getattr(owner, "billing", None)
-        fields.update(organization=owner, plan=billing.subscription if billing else PlanNamesChoices.FREE)
+        fields.update(organization=owner, plan=(billing.subscription if billing and billing.subscription else PlanNamesChoices.FREE))
     else:
         fields.update(user=owner, plan=PlanNamesChoices.FREE)
     return TaskCredit.objects.create(**fields)
