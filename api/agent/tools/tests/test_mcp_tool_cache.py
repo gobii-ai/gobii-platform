@@ -276,6 +276,23 @@ class MCPToolCacheTests(SimpleTestCase):
 
         self.assertNotEqual(first, second)
 
+    @override_settings(MCP_HTTP_REQUEST_TIMEOUT_SECONDS=9.0)
+    def test_http_client_factory_does_not_load_dynamic_settings_in_async_context(self):
+        manager = MCPToolManager()
+
+        async def build_client():
+            with patch(
+                "api.agent.tools.mcp_manager.get_mcp_http_timeout_seconds",
+                side_effect=AssertionError("dynamic timeout lookup should stay outside async transport setup"),
+            ):
+                client = manager._httpx_client_factory()
+                try:
+                    return client.timeout.connect
+                finally:
+                    await client.aclose()
+
+        self.assertEqual(asyncio.run(build_client()), 9.0)
+
     def test_ensure_runtime_registered_reregisters_when_pipedream_apps_change_for_same_owner(self):
         manager = MCPToolManager()
         runtime = replace(self._runtime(), name="pipedream", config_id="pd-config")

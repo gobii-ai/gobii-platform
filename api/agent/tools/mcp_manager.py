@@ -86,6 +86,9 @@ _MCP_SYNC_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mcp-s
 _proxy_url_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "mcp_http_proxy_url", default=None
 )
+_http_timeout_seconds_var: contextvars.ContextVar[Optional[float]] = contextvars.ContextVar(
+    "mcp_http_timeout_seconds", default=None
+)
 
 
 @contextlib.contextmanager
@@ -99,6 +102,19 @@ def _use_mcp_proxy(proxy_url: Optional[str]):
             _proxy_url_var.reset(token)
     else:
         yield
+
+
+@contextlib.contextmanager
+def _use_mcp_http_timeout(timeout_seconds: Optional[float]):
+    """Bind the HTTP timeout before FastMCP enters its async transport setup."""
+    if timeout_seconds is None:
+        yield
+        return
+    token = _http_timeout_seconds_var.set(float(timeout_seconds))
+    try:
+        yield
+    finally:
+        _http_timeout_seconds_var.reset(token)
 
 
 def _sandbox_mcp_fallback_enabled() -> bool:
@@ -405,7 +421,8 @@ class MCPToolManager:
         if (running_loop and running_loop.is_running()) or cached_loop_running:
             # Python disallows nesting run_until_complete in a thread that is
             # already running an event loop, including one cached on the manager.
-            return _MCP_SYNC_EXECUTOR.submit(self._run_coroutine_isolated, coroutine).result()
+            context = contextvars.copy_context()
+            return _MCP_SYNC_EXECUTOR.submit(context.run, self._run_coroutine_isolated, coroutine).result()
 
         loop = self._ensure_event_loop()
         return loop.run_until_complete(coroutine)
@@ -1151,7 +1168,9 @@ class MCPToolManager:
             follow_redirects: Optional[bool] = None,
             **extra_client_kwargs: Any,
         ) -> httpx.AsyncClient:
-            default_timeout_seconds = get_mcp_http_timeout_seconds()
+            default_timeout_seconds = _http_timeout_seconds_var.get()
+            if default_timeout_seconds is None:
+                default_timeout_seconds = settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS
             client_kwargs: Dict[str, Any] = {
                 "headers": headers,
                 "timeout": timeout or httpx.Timeout(default_timeout_seconds),
@@ -1587,7 +1606,8 @@ class MCPToolManager:
             return
 
         http_proxy_url = discovery_proxy_url if server.url else None
-        with _use_mcp_proxy(http_proxy_url):
+        http_timeout_seconds = get_mcp_http_timeout_seconds() if server.url else None
+        with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(http_proxy_url):
             tools = self._run_coroutine_sync(
                 self._fetch_server_tools(client, server, pipedream_context=pipedream_context)
             )
@@ -2173,7 +2193,8 @@ class MCPToolManager:
                 return {"status": "error", "message": f"MCP server '{info.server_name}' not available"}
 
             timeout_seconds = self._get_timeout_for_runtime(runtime)
-            with _use_mcp_proxy(proxy_url):
+            http_timeout_seconds = timeout_seconds if runtime.url else None
+            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
                 def run_once(attempt_params: Dict[str, Any]) -> Any:
                     return self._run_coroutine_sync(
                         self._execute_async(
@@ -2400,7 +2421,8 @@ class MCPToolManager:
         
         try:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
-            with _use_mcp_proxy(proxy_url):
+            http_timeout_seconds = timeout_seconds if runtime and runtime.url else None
+            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
                 def run_once(attempt_params: Dict[str, Any]) -> Any:
                     return self._run_coroutine_sync(
                         self._execute_async(
