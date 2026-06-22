@@ -5,6 +5,22 @@ const siteUrl = process.env.DOCS_SITE_URL || 'https://docs.gobii.ai';
 const socialImage = `${siteUrl}/images/gobii-fish-with-text-dark-purple.png`;
 const gtagTrackingId = process.env.DOCS_GTAG_TRACKING_ID;
 
+function localDevServerHygienePlugin() {
+  return {
+    name: 'local-dev-server-hygiene',
+    configureWebpack() {
+      return {
+        devServer: {
+          headers: {
+            'access-control-allow-origin': '*',
+            'cache-control': 'no-store',
+          },
+        },
+      };
+    },
+  };
+}
+
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'Gobii',
@@ -28,6 +44,7 @@ const config = {
   },
 
   plugins: [
+    localDevServerHygienePlugin,
     [
       'docusaurus-plugin-openapi-docs',
       {

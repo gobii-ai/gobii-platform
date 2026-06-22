@@ -1,4 +1,13 @@
-import ApiItem from '@theme-original/ApiItem';
+import DocItem from '@theme/DocItem';
+
+let ApiItem;
+
+function getApiItem() {
+  if (!ApiItem) {
+    ApiItem = require('@theme-original/ApiItem').default;
+  }
+  return ApiItem;
+}
 
 export default function ApiItemWrapper(props) {
   const Content = props.content;
@@ -7,8 +16,10 @@ export default function ApiItemWrapper(props) {
     : Content.metadata?.frontMatter ?? Content.frontMatter;
 
   if (!frontMatter?.api) {
-    return <ApiItem {...props} />;
+    return <DocItem {...props} />;
   }
+
+  const OpenApiItem = getApiItem();
 
   function ContentWithFrontMatter(contentProps) {
     return <Content {...contentProps} />;
@@ -16,5 +27,5 @@ export default function ApiItemWrapper(props) {
 
   Object.assign(ContentWithFrontMatter, Content, { frontMatter });
 
-  return <ApiItem {...props} content={ContentWithFrontMatter} />;
+  return <OpenApiItem {...props} content={ContentWithFrontMatter} />;
 }
