@@ -1797,9 +1797,8 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
     2) Fall back to the free-plan default when unavailable.
 
     Priority for individual users:
-    1) If the user's ``UserBilling.max_contacts_per_agent`` override is set (>0), use it.
-    2) Otherwise, if ``UserQuota.max_agent_contacts`` is set (>0), use that legacy override.
-    3) When neither is set, fall back to the user's plan ``max_contacts_per_agent`` (defaulting to the free plan).
+    1) Use the highest explicit per-user contact override from ``UserBilling`` or legacy ``UserQuota``.
+    2) When neither is set, fall back to the user's plan ``max_contacts_per_agent`` (defaulting to the free plan).
     """
     if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
         return 0
@@ -1830,6 +1829,8 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
 
         return _with_addon(base_limit)
 
+    contact_overrides: list[int] = []
+
     # Check for per-user override stored on billing
     try:
         from api.models import UserBilling
@@ -1844,7 +1845,7 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
             and billing_record.max_contacts_per_agent is not None
             and billing_record.max_contacts_per_agent > 0
         ):
-            return _with_addon(billing_record.max_contacts_per_agent)
+            contact_overrides.append(int(billing_record.max_contacts_per_agent))
     except Exception as e:
         logger.error(
             "get_user_max_contacts_per_agent: billing lookup failed for user %s: %s",
@@ -1857,13 +1858,16 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
         from api.models import UserQuota
         quota = UserQuota.objects.filter(user=user).first()
         if quota and quota.max_agent_contacts is not None and quota.max_agent_contacts > 0:
-            return _with_addon(quota.max_agent_contacts)
+            contact_overrides.append(int(quota.max_agent_contacts))
     except Exception as e:
         logger.error(
             "get_user_max_contacts_per_agent: quota lookup failed for user %s: %s",
             getattr(user, 'id', 'n/a'),
             e,
         )
+
+    if contact_overrides:
+        return _with_addon(max(contact_overrides))
 
     # Fallback to plan default
     plan = get_user_plan(user)
