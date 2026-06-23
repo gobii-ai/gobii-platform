@@ -122,11 +122,10 @@ from .daily_limit_mode import (
     DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT,
     is_daily_hard_limit_message_only_mode,
 )
-from .contact_results import store_contacts_for_prompt
+from .contact_results import ContactSQLiteRecord, store_contacts_for_prompt
 from .contact_snapshot import (
     build_contact_activity_by_key,
     build_contacts_snapshot_records,
-    contact_relevance_at,
 )
 from .file_results import FileSQLiteRecord, store_files_for_prompt
 from .message_results import MessageSQLiteRecord, store_messages_for_prompt
@@ -1479,21 +1478,20 @@ def _render_prompt_context_once(
 
     # Contacts block - use promptree natively
     contact_activity_by_key = build_contact_activity_by_key(agent)
+    contact_records = build_contacts_snapshot_records(
+        agent,
+        display_name_for_user=_build_user_display_name,
+        user_can_configure=config_authority.user_can_configure,
+        activity_by_key=contact_activity_by_key,
+    )
     recent_contacts_text = _build_contacts_block(
         agent,
         important_group,
         span,
         config_authority,
-        contact_activity_by_key,
+        contact_records,
     )
-    store_contacts_for_prompt(
-        build_contacts_snapshot_records(
-            agent,
-            display_name_for_user=_build_user_display_name,
-            user_can_configure=config_authority.user_can_configure,
-            activity_by_key=contact_activity_by_key,
-        )
-    )
+    store_contacts_for_prompt(contact_records)
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
@@ -2257,12 +2255,27 @@ def _build_interacted_org_member_email_map(
     return email_map
 
 
+def _recent_contact_records_for_prompt(
+    records: Sequence[ContactSQLiteRecord],
+) -> list[ContactSQLiteRecord]:
+    ordered = sorted(
+        records,
+        key=lambda record: (
+            record.channel,
+            record.normalized_address,
+            record.contact_id,
+        ),
+    )
+    ordered.sort(key=lambda record: record.relevance_at or "", reverse=True)
+    return ordered[:CONTACT_PROMPT_SAMPLE_LIMIT]
+
+
 def _build_contacts_block(
     agent: PersistentAgent,
     contacts_group,
     span,
     config_authority: _ConfigAuthorityResolver,
-    contact_activity_by_key,
+    contact_records: Sequence[ContactSQLiteRecord],
 ) -> str | None:
     """Add contact information sections to the provided promptree group.
 
@@ -2541,13 +2554,11 @@ def _build_contacts_block(
 
     # Add explicitly allowed contacts from CommsAllowlistEntry (only if verified)
     if owner_email_verified:
-        allowed_contacts = list(
-            CommsAllowlistEntry.objects.filter(
-                agent=agent,
-                is_active=True,
-            )
-            .order_by("channel", "address")
-        )
+        allowed_contacts = [
+            record
+            for record in contact_records
+            if record.source == "allowlist_entry" and record.status == "allowed"
+        ]
         if allowed_contacts:
             allowed_lines.append(
                 "Additional allowed contacts (inbound = can receive from them; outbound = can send to them):"
@@ -2558,27 +2569,12 @@ def _build_contacts_block(
                     f"- {len(allowed_contacts)} active contacts are available; "
                     f"query {CONTACTS_TABLE} for the complete exact list."
                 )
-                display_contacts = sorted(
-                    allowed_contacts,
-                    key=lambda entry: (
-                        contact_relevance_at(
-                            channel=entry.channel,
-                            address=entry.address,
-                            activity_by_key=contact_activity_by_key,
-                            updated_at=entry.updated_at,
-                            created_at=entry.created_at,
-                        )
-                        or datetime.min.replace(tzinfo=timezone.utc),
-                        entry.channel,
-                        entry.address,
-                    ),
-                    reverse=True,
-                )[:CONTACT_PROMPT_SAMPLE_LIMIT]
+                display_contacts = _recent_contact_records_for_prompt(allowed_contacts)
                 allowed_lines.append(
                     f"Sample active contacts (the {len(display_contacts)} most recently active or updated):"
                 )
             for entry in display_contacts:
-                name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
+                name_str = f" ({entry.display_name})" if entry.display_name else ""
                 config_marker = " [can configure]" if entry.can_configure else ""
                 perms = (
                     ("inbound" if entry.allow_inbound else "")

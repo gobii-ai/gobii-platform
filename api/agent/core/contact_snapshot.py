@@ -2,7 +2,7 @@ from datetime import datetime
 from email.utils import parseaddr
 from typing import Callable, List
 
-from django.db.models import Max
+from django.db.models import F, Max
 
 from api.services.email_verification import has_verified_email
 from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
@@ -59,52 +59,31 @@ def build_contact_activity_by_key(agent: PersistentAgent) -> ContactActivityMap:
         if existing is None or last_conversed_at > existing:
             activity[key] = last_conversed_at
 
-    inbound_rows = (
-        PersistentAgentMessage.objects.filter(
-            owner_agent=agent,
-            is_outbound=False,
-            from_endpoint__isnull=False,
-        )
-        .values("from_endpoint__channel", "from_endpoint__address")
-        .annotate(last_conversed_at=Max("timestamp"))
+    message_sources = (
+        (
+            {"is_outbound": False, "from_endpoint__isnull": False},
+            "from_endpoint__channel",
+            "from_endpoint__address",
+        ),
+        (
+            {"is_outbound": True, "to_endpoint__isnull": False},
+            "to_endpoint__channel",
+            "to_endpoint__address",
+        ),
+        (
+            {"conversation__isnull": False},
+            "conversation__channel",
+            "conversation__address",
+        ),
     )
-    for row in inbound_rows:
-        merge(
-            row["from_endpoint__channel"],
-            row["from_endpoint__address"],
-            row["last_conversed_at"],
+    for filters, channel_field, address_field in message_sources:
+        rows = (
+            PersistentAgentMessage.objects.filter(owner_agent=agent, **filters)
+            .values(channel=F(channel_field), address=F(address_field))
+            .annotate(last_conversed_at=Max("timestamp"))
         )
-
-    outbound_rows = (
-        PersistentAgentMessage.objects.filter(
-            owner_agent=agent,
-            is_outbound=True,
-            to_endpoint__isnull=False,
-        )
-        .values("to_endpoint__channel", "to_endpoint__address")
-        .annotate(last_conversed_at=Max("timestamp"))
-    )
-    for row in outbound_rows:
-        merge(
-            row["to_endpoint__channel"],
-            row["to_endpoint__address"],
-            row["last_conversed_at"],
-        )
-
-    conversation_rows = (
-        PersistentAgentMessage.objects.filter(
-            owner_agent=agent,
-            conversation__isnull=False,
-        )
-        .values("conversation__channel", "conversation__address")
-        .annotate(last_conversed_at=Max("timestamp"))
-    )
-    for row in conversation_rows:
-        merge(
-            row["conversation__channel"],
-            row["conversation__address"],
-            row["last_conversed_at"],
-        )
+        for row in rows:
+            merge(row["channel"], row["address"], row["last_conversed_at"])
 
     cc_rows = (
         PersistentAgentCommsEndpoint.objects.filter(cc_messages__owner_agent=agent)
@@ -115,22 +94,6 @@ def build_contact_activity_by_key(agent: PersistentAgent) -> ContactActivityMap:
         merge(row["channel"], row["address"], row["last_conversed_at"])
 
     return activity
-
-
-def contact_relevance_at(
-    *,
-    channel: str,
-    address: str,
-    activity_by_key: ContactActivityMap,
-    updated_at: datetime | None = None,
-    created_at: datetime | None = None,
-) -> datetime | None:
-    candidates = [
-        _activity_for(activity_by_key, channel, address),
-        updated_at,
-        created_at,
-    ]
-    return max((candidate for candidate in candidates if candidate is not None), default=None)
 
 
 def build_contacts_snapshot_records(
