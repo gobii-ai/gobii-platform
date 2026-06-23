@@ -4,7 +4,7 @@ import json
 
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
@@ -14,6 +14,7 @@ from django.utils import timezone
 from api.agent.core.event_processing import (
     _finalize_tool_batch,
     _contact_permission_params_from_misrouted_human_input,
+    _ensure_credit_for_tool,
     _process_agent_events_locked,
     _is_warning_status,
     _normalize_error_result,
@@ -27,6 +28,9 @@ from api.agent.core.event_processing import (
     _ToolExecutionOutcome,
     _tool_call_likely_terminal_message,
 )
+from api.agent.core.burn_control import BurnRateAction, handle_burn_rate_limit
+from api.agent.core.llm_config import AgentLLMTier, clear_runtime_tier_override, get_runtime_tier_override
+from api.agent.core.period_events import DAILY_SOFT_LIMIT_EXCEEDED_EVENT, should_emit_daily_agent_event
 from django.urls import reverse
 
 from api.agent.core.prompt_context import build_prompt_context, build_prompt_context_preview
@@ -859,3 +863,97 @@ class DailyLimitProcessingTests(TestCase):
                 notes="daily_credit_limit_exhausted",
             ).exists()
         )
+
+    @patch("api.agent.core.period_events.get_redis_client")
+    @patch("api.agent.core.event_processing.Analytics.track_event")
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+        return_value=Decimal("10"),
+    )
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("1"))
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    def test_hard_limit_analytics_and_system_step_emit_once_per_daily_period(
+        self,
+        _mock_tool_cost,
+        _mock_available,
+        mock_track_event,
+        mock_get_redis_client,
+    ):
+        redis_client = MagicMock()
+        redis_client.set.side_effect = [True, True, False, False]
+        mock_get_redis_client.return_value = redis_client
+
+        for _ in range(2):
+            daily_state = {
+                "hard_limit": Decimal("2"),
+                "hard_limit_remaining": Decimal("0"),
+                "soft_target": None,
+                "soft_target_remaining": None,
+                "soft_target_exceeded": False,
+                "used": Decimal("2"),
+                "next_reset": timezone.now(),
+            }
+
+            result = _ensure_credit_for_tool(
+                self.agent,
+                "browser_search",
+                span=_DummySpan(),
+                credit_snapshot={"available": Decimal("10"), "daily_state": daily_state},
+            )
+            self.assertFalse(result)
+
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                notes="daily_credit_limit_mid_loop",
+            ).count(),
+            1,
+        )
+
+    @patch("api.agent.core.period_events.get_redis_client")
+    def test_daily_event_marker_fails_open_on_cache_error(self, mock_get_redis_client):
+        mock_get_redis_client.side_effect = RuntimeError("redis unavailable")
+        self.assertTrue(should_emit_daily_agent_event(self.agent.id, DAILY_SOFT_LIMIT_EXCEEDED_EVENT))
+
+    @patch("api.agent.core.burn_control.Analytics.track_event")
+    @patch("api.agent.core.burn_control.get_agent_baseline_llm_tier", return_value=AgentLLMTier.PREMIUM)
+    @patch("api.agent.core.period_events.get_redis_client")
+    def test_burn_rate_step_down_analytics_emit_once_but_override_still_applies(
+        self,
+        mock_get_redis_client,
+        _mock_baseline_tier,
+        mock_track_event,
+    ):
+        redis_client = MagicMock()
+        redis_client.set.side_effect = [True, False]
+        mock_get_redis_client.return_value = redis_client
+
+        daily_state = {
+            "burn_rate_per_hour": Decimal("20"),
+            "burn_rate_threshold_per_hour": Decimal("10"),
+            "burn_rate_window_minutes": 60,
+            "burn_rate_24h_total": Decimal("25"),
+            "burn_rate_threshold_24h": Decimal("0"),
+        }
+
+        first_action = handle_burn_rate_limit(
+            self.agent,
+            budget_ctx=None,
+            span=_DummySpan(),
+            daily_state=daily_state,
+        )
+        self.assertEqual(first_action, BurnRateAction.STEPPED_DOWN)
+        self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.STANDARD)
+
+        clear_runtime_tier_override(self.agent)
+        second_action = handle_burn_rate_limit(
+            self.agent,
+            budget_ctx=None,
+            span=_DummySpan(),
+            daily_state=daily_state,
+        )
+
+        self.assertEqual(second_action, BurnRateAction.STEPPED_DOWN)
+        self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.STANDARD)
+        self.assertEqual(mock_track_event.call_count, 1)
