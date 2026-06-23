@@ -706,6 +706,7 @@ class PersistentAgentToolCreditTests(TestCase):
         )
 
     @patch("api.agent.core.event_processing.Analytics.track_event")
+    @patch("api.agent.core.event_processing.should_emit_daily_agent_event", return_value=True)
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch(
         "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
@@ -721,6 +722,7 @@ class PersistentAgentToolCreditTests(TestCase):
         _mock_cost,
         _mock_available,
         _mock_consume,
+        _mock_should_emit,
         mock_track_event,
     ):
         self.agent.daily_credit_limit = 5
@@ -798,6 +800,7 @@ class PersistentAgentToolCreditTests(TestCase):
         span.add_event.assert_any_call("Tool skipped - daily credit limit reached")
 
     @patch("api.agent.core.event_processing.Analytics.track_event")
+    @patch("api.agent.core.event_processing.should_emit_daily_agent_event", return_value=True)
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
     @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=Decimal("5"))
@@ -807,6 +810,7 @@ class PersistentAgentToolCreditTests(TestCase):
         mock_cost,
         _mock_available,
         mock_consume,
+        _mock_should_emit,
         mock_track_event,
     ):
         span = MagicMock()
@@ -1195,7 +1199,8 @@ class PersistentAgentToolCreditTests(TestCase):
                  "api.agent.core.event_processing.process_agent_events_task",
                  create=True,
              ) as follow_up_task, \
-             patch("api.agent.core.burn_control.Analytics.track_event") as track_event_mock:
+             patch("api.agent.core.burn_control.Analytics.track_event") as track_event_mock, \
+             patch("api.agent.core.burn_control.should_emit_daily_agent_event", return_value=True):
             follow_up_task.apply_async = MagicMock()
 
             usage = ep._run_agent_loop(
@@ -1314,7 +1319,8 @@ class PersistentAgentToolCreditTests(TestCase):
         try:
             with override_settings(GOBII_PROPRIETARY_MODE=True), \
                  patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}), \
-                 patch("api.agent.core.burn_control.Analytics.track_event") as track_event_mock:
+                 patch("api.agent.core.burn_control.Analytics.track_event") as track_event_mock, \
+                 patch("api.agent.core.burn_control.should_emit_daily_agent_event", return_value=True):
                 stepped = bc.maybe_step_down_runtime_tier_for_burn_rate(
                     self.agent,
                     daily_state=burn_state,
