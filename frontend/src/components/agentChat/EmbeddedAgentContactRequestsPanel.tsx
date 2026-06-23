@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Check, Inbox, Loader2, Mail, Phone, X } from 'lucide-react'
 
-import { fetchContactRequests, resolveContactRequests } from '../../api/agentChat'
+import { fetchContactRequests, resolveContactRequests, type PendingActionMutationResult } from '../../api/agentChat'
 import { SettingsBanner } from '../agentSettings/SettingsBanner'
 import { InlineStatusBanner } from '../common/InlineStatusBanner'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
@@ -24,7 +24,7 @@ type EmbeddedAgentContactRequestsPanelProps = {
   agentId: string
   agentName: string
   onBack?: () => void
-  onResolveContactRequests?: (responses: ContactRequestResolution[]) => Promise<void>
+  onResolveContactRequests?: (responses: ContactRequestResolution[]) => Promise<PendingActionMutationResult | void>
 }
 
 const EMPTY_CONTACT_REQUESTS: PendingContactRequest[] = []
@@ -71,6 +71,7 @@ export function EmbeddedAgentContactRequestsPanel({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['agent-contact-requests', agentId],
@@ -139,6 +140,7 @@ export function EmbeddedAgentContactRequestsPanel({
 
     setBusyAction(`${decision}:${targetRequests.map((request) => request.id).join(',')}`)
     setErrorMessage(null)
+    setStatusMessage(null)
     const responses = targetRequests.map((request) => {
       const draft = drafts[request.id] ?? makeContactDraft(request)
       return {
@@ -152,10 +154,11 @@ export function EmbeddedAgentContactRequestsPanel({
     })
 
     try {
+      let result: PendingActionMutationResult | void
       if (onResolveContactRequests) {
-        await onResolveContactRequests(responses)
+        result = await onResolveContactRequests(responses)
       } else {
-        await resolveContactRequests(agentId, {
+        result = await resolveContactRequests(agentId, {
           responses: responses.map((response) => ({
             request_id: response.requestId,
             decision: response.decision,
@@ -166,6 +169,7 @@ export function EmbeddedAgentContactRequestsPanel({
           })),
         })
       }
+      setStatusMessage(result?.message ?? null)
       setSelectedIds((current) => {
         const resolvedIds = new Set(targetRequests.map((request) => request.id))
         return new Set([...current].filter((requestId) => !resolvedIds.has(requestId)))
@@ -202,6 +206,11 @@ export function EmbeddedAgentContactRequestsPanel({
         {errorMessage ? (
           <InlineStatusBanner variant="error" surface="embedded" icon={AlertTriangle}>
             <p>{errorMessage}</p>
+          </InlineStatusBanner>
+        ) : null}
+        {statusMessage && !errorMessage ? (
+          <InlineStatusBanner variant="info" surface="embedded" icon={Check} role="status">
+            <p>{statusMessage}</p>
           </InlineStatusBanner>
         ) : null}
 

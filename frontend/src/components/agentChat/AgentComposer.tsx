@@ -13,6 +13,7 @@ import { PendingActionComposerPanel } from './PendingActionComposerPanel'
 import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
 import { AgentPipedreamAppsModal } from '../mcp/AgentPipedreamAppsModal'
+import type { PendingActionMutationResult } from '../../api/agentChat'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
@@ -435,7 +436,7 @@ type AgentComposerProps = {
       canConfigure: boolean
       smsContactPermissionAttested?: boolean
     }>
-  ) => Promise<void>
+  ) => Promise<PendingActionMutationResult | void>
   onViewAllContactRequests?: () => void
   disabled?: boolean
   disabledReason?: string | null

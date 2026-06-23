@@ -3925,6 +3925,7 @@ export function AgentChatPage({
       })),
     })
     replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
+    return result
   }, [activeAgentId, queryClient])
 
   useEffect(() => {

@@ -13,6 +13,7 @@ type PendingContactRequestsPanelProps = {
   disabled?: boolean
   busy?: boolean
   error?: string | null
+  notice?: string | null
   contactDrafts: Record<string, PendingContactDraft>
   showReviewSummary?: boolean
   onContactDraftChange: (requestId: string, nextDraft: PendingContactDraft) => void
@@ -24,6 +25,7 @@ export function PendingContactRequestsPanel({
   disabled = false,
   busy = false,
   error = null,
+  notice = null,
   contactDrafts,
   showReviewSummary = true,
   onContactDraftChange,
@@ -79,6 +81,7 @@ export function PendingContactRequestsPanel({
         </div>
       </div>
       {error ? <p className="text-sm text-rose-600 sm:text-right">{error}</p> : null}
+      {notice && !error ? <p className="text-sm text-amber-700 sm:text-right">{notice}</p> : null}
     </div>
   )
 
