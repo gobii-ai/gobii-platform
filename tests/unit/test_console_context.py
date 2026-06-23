@@ -286,50 +286,6 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertFalse(AgentOwnerCustomInstructions.objects.filter(organization=self.org).exists())
         self.assertEqual(resp.json()["organization"]["customInstructions"], "")
 
-    def test_organization_and_personal_custom_instructions_are_isolated(self):
-        self._login_in_org_context(self.owner)
-
-        org_resp = self.client.patch(
-            reverse("console-current-organization"),
-            data=json.dumps({"customInstructions": "Organization-only instructions"}),
-            content_type="application/json",
-        )
-
-        self.assertEqual(org_resp.status_code, 200)
-        self.assertEqual(
-            org_resp.json()["organization"]["customInstructions"],
-            "Organization-only instructions",
-        )
-        profile_resp = self.client.get(reverse("console_user_profile"))
-        self.assertEqual(profile_resp.status_code, 200)
-        self.assertEqual(profile_resp.json()["customInstructions"], "")
-
-        personal_resp = self.client.patch(
-            reverse("console_user_profile"),
-            data=json.dumps({"customInstructions": "Personal-only instructions"}),
-            content_type="application/json",
-        )
-
-        self.assertEqual(personal_resp.status_code, 200)
-        self.assertEqual(personal_resp.json()["customInstructions"], "Personal-only instructions")
-        self.assertEqual(
-            self.client.get(reverse("console-current-organization")).json()["organization"]["customInstructions"],
-            "Organization-only instructions",
-        )
-
-        clear_personal_resp = self.client.patch(
-            reverse("console_user_profile"),
-            data=json.dumps({"customInstructions": ""}),
-            content_type="application/json",
-        )
-
-        self.assertEqual(clear_personal_resp.status_code, 200)
-        self.assertEqual(clear_personal_resp.json()["customInstructions"], "")
-        self.assertEqual(
-            self.client.get(reverse("console-current-organization")).json()["organization"]["customInstructions"],
-            "Organization-only instructions",
-        )
-
     def test_current_organization_templates_api_lists_templates_for_active_members(self):
         template = self._create_org_template()
         self._login_in_org_context(self.member)

@@ -353,30 +353,6 @@ export function OrganizationScreen() {
   }, [data?.organization.name])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined
-    }
-
-    const handleContextUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ type?: string; id?: string }>).detail
-      if (!detail?.type || !detail.id) {
-        return
-      }
-      if (detail.type !== 'organization' || detail.id !== data?.organization.id) {
-        queryClient.setQueryData(queryKey, undefined)
-        queryClient.setQueryData(templateQueryKey, undefined)
-        void queryClient.invalidateQueries({ queryKey })
-        void queryClient.invalidateQueries({ queryKey: templateQueryKey })
-      }
-    }
-
-    window.addEventListener('gobii:console-context-updated', handleContextUpdated)
-    return () => {
-      window.removeEventListener('gobii:console-context-updated', handleContextUpdated)
-    }
-  }, [data?.organization.id, queryClient, queryKey, templateQueryKey])
-
-  useEffect(() => {
     if (!inviteRole && data?.roles[0]) {
       setInviteRole(data.roles[0].value)
     }

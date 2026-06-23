@@ -28,16 +28,15 @@ def normalize_custom_instructions(raw_instructions: Any) -> str:
 
 
 def get_custom_instructions_for_organization_id(organization_id) -> str:
-    query_filter, _ = _owner_scope("organization_id", organization_id, "user")
-    return _get_custom_instructions(query_filter)
+    return _get_custom_instructions({"organization_id": organization_id})
 
 
 def get_custom_instructions_for_user_id(user_id) -> str:
-    query_filter, _ = _owner_scope("user_id", user_id, "organization")
-    return _get_custom_instructions(query_filter)
+    return _get_custom_instructions({"user_id": user_id})
 
 
 def _get_custom_instructions(owner_filter: dict) -> str:
+    _validate_owner_filter(owner_filter)
     instructions = (
         AgentOwnerCustomInstructions.objects
         .filter(**owner_filter)
@@ -48,28 +47,28 @@ def _get_custom_instructions(owner_filter: dict) -> str:
 
 
 def save_custom_instructions_for_organization_id(organization_id, *, instructions: str, updated_by) -> None:
-    query_filter, update_lookup = _owner_scope("organization_id", organization_id, "user")
-    _save_custom_instructions(query_filter, update_lookup, instructions=instructions, updated_by=updated_by)
+    _save_custom_instructions({"organization_id": organization_id}, instructions=instructions, updated_by=updated_by)
 
 
 def save_custom_instructions_for_user_id(user_id, *, instructions: str, updated_by) -> None:
-    query_filter, update_lookup = _owner_scope("user_id", user_id, "organization")
-    _save_custom_instructions(query_filter, update_lookup, instructions=instructions, updated_by=updated_by)
+    _save_custom_instructions({"user_id": user_id}, instructions=instructions, updated_by=updated_by)
 
 
-def _owner_scope(owner_field: str, owner_id, other_owner_field: str) -> tuple[dict, dict]:
+def _validate_owner_filter(owner_filter: dict) -> None:
+    if set(owner_filter) not in ({"user_id"}, {"organization_id"}):
+        raise ValueError("A valid organization_id or user_id must be provided.")
+
+    owner_id = next(iter(owner_filter.values()))
     if not owner_id:
         raise ValueError("A valid organization_id or user_id must be provided.")
-    return (
-        {owner_field: owner_id, f"{other_owner_field}__isnull": True},
-        {owner_field: owner_id, other_owner_field: None},
-    )
 
 
-def _save_custom_instructions(query_filter: dict, update_lookup: dict, *, instructions: str, updated_by) -> None:
+def _save_custom_instructions(owner_filter: dict, *, instructions: str, updated_by) -> None:
+    _validate_owner_filter(owner_filter)
+
     if instructions:
         AgentOwnerCustomInstructions.objects.update_or_create(
-            **update_lookup,
+            **owner_filter,
             defaults={
                 "instructions": instructions,
                 "updated_by": updated_by,
@@ -77,4 +76,4 @@ def _save_custom_instructions(query_filter: dict, update_lookup: dict, *, instru
         )
         return
 
-    AgentOwnerCustomInstructions.objects.filter(**query_filter).delete()
+    AgentOwnerCustomInstructions.objects.filter(**owner_filter).delete()

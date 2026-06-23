@@ -1,19 +1,15 @@
 import json
-from unittest import skipUnless
 from unittest.mock import patch
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.core import mail
-from django.db import connection
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
 from api.models import AgentOwnerCustomInstructions, Organization, UserPhoneNumber, UserPreference
 from api.services.agent_owner_custom_instructions import (
-    get_custom_instructions_for_organization_id,
-    get_custom_instructions_for_user_id,
     save_custom_instructions_for_organization_id,
     save_custom_instructions_for_user_id,
 )
@@ -244,33 +240,6 @@ class AgentOwnerCustomInstructionsServiceTests(TestCase):
 
         self.assertTrue(AgentOwnerCustomInstructions.objects.filter(pk=personal_instructions.pk).exists())
         self.assertTrue(AgentOwnerCustomInstructions.objects.filter(pk=org_instructions.pk).exists())
-
-    @skipUnless(connection.vendor == "sqlite", "legacy both-owner regression uses sqlite constraint override")
-    def test_owner_access_ignores_legacy_rows_with_both_owners(self):
-        now = timezone.now()
-        organization_id = self.org.id.hex
-        with connection.cursor() as cursor:
-            try:
-                cursor.execute("PRAGMA ignore_check_constraints = ON")
-                cursor.execute(
-                    """
-                    INSERT INTO api_agentownercustominstructions
-                        (user_id, organization_id, instructions, updated_by_id, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    """,
-                    [self.user.id, organization_id, "Legacy shared instructions", self.user.id, now, now],
-                )
-            finally:
-                cursor.execute("PRAGMA ignore_check_constraints = OFF")
-
-        self.assertEqual(get_custom_instructions_for_organization_id(self.org.id), "")
-        self.assertEqual(get_custom_instructions_for_user_id(self.user.id), "")
-
-        save_custom_instructions_for_user_id(self.user.id, instructions="", updated_by=self.user)
-
-        self.assertTrue(
-            AgentOwnerCustomInstructions.objects.filter(user=self.user, organization=self.org).exists()
-        )
 
 
 @tag("batch_console_api")
