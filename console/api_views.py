@@ -119,6 +119,7 @@ from api.models import (
     ProfileBrowserTierEndpoint,
     ProfilePersistentTierEndpoint,
     PersistentAgentPromptArchive,
+    SmsContactPurpose,
     AgentFileSpaceAccess,
     AgentFsNode,
     Organization,
@@ -4300,6 +4301,17 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                             request_obj.sms_contact_permission_attested = response[
                                 "sms_contact_permission_attested"
                             ]
+                            if (
+                                request_obj.sms_contact_permission_attested is True
+                                and not request_obj.sms_contact_purpose
+                            ):
+                                request_obj.sms_contact_purpose = SmsContactPurpose.OTHER_OPERATIONAL
+                                request_obj.sms_contact_purpose_details = (
+                                    request_obj.sms_contact_purpose_details
+                                    or request_obj.purpose
+                                    or request_obj.reason
+                                    or "Approved through a contact request."
+                                )
                         request_obj.save(
                             update_fields=[
                                 "request_inbound",

@@ -2513,6 +2513,73 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("address", properties)
         mock_delay.assert_called_once_with(str(self.agent.id))
 
+    @tag("batch_agent_chat")
+    @override_switch(SMS_CONTACT_PURPOSE_REQUIRED, active=True)
+    @patch("console.api_views.Analytics.track_event")
+    @patch("console.api_views.process_agent_events_task.delay")
+    def test_contact_request_resolve_api_approves_legacy_sms_request_without_purpose(
+        self,
+        mock_delay,
+        mock_track_event,
+    ):
+        request_obj = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15557654321",
+            reason="Need to notify the team when an escalation is assigned.",
+            purpose="Escalation notifications",
+            sms_contact_purpose=SmsContactPurpose.TEAM_OPERATIONAL,
+        )
+        CommsAllowlistRequest.objects.filter(id=request_obj.id).update(
+            sms_contact_purpose=None,
+            sms_contact_purpose_details=None,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/contact-requests/resolve/",
+                data=json.dumps(
+                    {
+                        "responses": [
+                            {
+                                "request_id": str(request_obj.id),
+                                "decision": "approve",
+                                "allow_inbound": True,
+                                "allow_outbound": True,
+                                "can_configure": False,
+                                "sms_contact_permission_attested": True,
+                            }
+                        ]
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, CommsAllowlistRequest.RequestStatus.APPROVED)
+        self.assertEqual(request_obj.sms_contact_purpose, SmsContactPurpose.OTHER_OPERATIONAL)
+        self.assertEqual(request_obj.sms_contact_purpose_details, "Escalation notifications")
+
+        allowlist_entry = self.agent.manual_allowlist.get(
+            channel=CommsChannel.SMS,
+            address="+15557654321",
+        )
+        self.assertEqual(allowlist_entry.sms_contact_purpose, SmsContactPurpose.OTHER_OPERATIONAL)
+        self.assertEqual(allowlist_entry.sms_contact_purpose_details, "Escalation notifications")
+        self.assertTrue(allowlist_entry.sms_contact_permission_attested)
+
+        sms_event_calls = [
+            call for call in mock_track_event.call_args_list
+            if call.kwargs.get("event") == AnalyticsEvent.AGENT_SMS_CONTACT_APPROVED
+        ]
+        self.assertEqual(len(sms_event_calls), 1)
+        self.assertEqual(
+            sms_event_calls[0].kwargs["properties"]["sms_contact_purpose"],
+            SmsContactPurpose.OTHER_OPERATIONAL,
+        )
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
 
     @tag("batch_agent_chat")
     def test_web_chat_tool_requires_active_session(self):
