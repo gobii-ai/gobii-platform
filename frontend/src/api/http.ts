@@ -51,7 +51,8 @@ function applyConsoleContextHeaders(headers: Headers): boolean {
 }
 
 function normalizePathname(pathname: string): string {
-  return pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  const cleaned = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  return cleaned.toLowerCase()
 }
 
 function isMarketingContextHeaderPath(pathname: string): boolean {

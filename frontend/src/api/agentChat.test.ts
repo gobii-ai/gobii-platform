@@ -71,7 +71,7 @@ describe('resolveSpawnRequest', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await jsonRequest('/qualify/', {
+    await jsonRequest('/QUALIFY/', {
       method: 'POST',
       includeCsrf: true,
       json: {},
