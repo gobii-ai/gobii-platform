@@ -156,11 +156,10 @@ BROWSER_TASK_RESULT_BLOCK_RE = re.compile(
     r"<result>\s*(?P<payload>.*?)\s*</result>",
     re.DOTALL | re.IGNORECASE,
 )
-TOOL_RESULT_PROMPT_COMPONENTS = frozenset({
-    "result",
+TOOL_RESULT_LOOKUP_COMPONENTS = frozenset({
+    "parent_result_id",
     "result_id",
     "result_meta",
-    "result_preview",
     "result_schema",
 })
 
@@ -4708,10 +4707,10 @@ def _get_unified_history_prompt(
             "cost": 2,        # Helpful for budgeting; small and should remain visible
             "params": 1,      # Low priority - can be shrunk aggressively
             "prompt": 1,      # Browser task/user prompt context; useful but repeatable
-            "result": 1,      # Sized upstream by tool_results.py; keep intact here.
+            "result": 1,      # Payload body; can be shrunk to protect model limits.
             "result_meta": 2, # Medium priority - supports tool result lookup
-            "result_schema": 1, # Sized upstream by tool_results.py; keep intact here.
-            "result_preview": 1, # Sized upstream by tool_results.py; keep intact here.
+            "result_schema": 1, # Query/shape hint from tool_results.py; keep intact.
+            "result_preview": 1, # Payload preview; can be shrunk to protect model limits.
             "result_summary": 1, # Low priority - browser task prose summary
             "files": 3,       # High priority - direct filespace paths for follow-up actions
             "content": 2,     # Medium priority for message content (SMS, etc.)
@@ -4739,16 +4738,15 @@ def _get_unified_history_prompt(
             for component_name, component_content in components.items():
                 component_weight = COMPONENT_WEIGHTS.get(component_name, 1)
 
-                # Tool result bodies and lookup metadata are already aggressively
-                # shaped by tool_results.py; a second promptree HMT pass can
-                # remove the exact result_id, query hints, or JSON shape the
-                # preview was intended to preserve.
-                non_shrinkable = component_name in TOOL_RESULT_PROMPT_COMPONENTS
+                # Preserve lookup metadata shaped by tool_results.py. Payload
+                # bodies remain shrinkable so promptree can still enforce the
+                # model budget when many small or fresh inline results pile up.
+                non_shrinkable = component_name in TOOL_RESULT_LOOKUP_COMPONENTS
 
                 # Apply HMT shrinking to bulky content
                 shrinker = None
                 if not non_shrinkable and (
-                    component_name in ("params", "prompt", "result_summary", "body") or
+                    component_name in ("params", "prompt", "result", "result_preview", "result_summary", "body") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
                     shrinker = "hmt"

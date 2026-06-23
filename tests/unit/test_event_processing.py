@@ -2187,7 +2187,7 @@ class PromptContextBuilderTests(TestCase):
         )
         self.assertNotIn(f"<parent_result_id>{parent_tool_call.pk}</parent_result_id>", content)
 
-    def test_tool_result_components_are_non_shrinkable_in_promptree(self):
+    def test_tool_result_lookup_components_are_non_shrinkable_in_promptree(self):
         from api.agent.core import promptree
 
         small_step = PersistentAgentStep.objects.create(
@@ -2204,18 +2204,29 @@ class PromptContextBuilderTests(TestCase):
             agent=self.agent,
             description="Tool call: http_request",
         )
-        PersistentAgentToolCall.objects.create(
+        parent_call = PersistentAgentToolCall.objects.create(
             step=large_step,
             tool_name="http_request",
             tool_params={"url": "https://example.test/data"},
             result=json.dumps({"content": "large-preview-result " * 3000}),
+        )
+        child_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: child_tool",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=child_step,
+            parent_tool_call=parent_call,
+            tool_name="child_tool",
+            tool_params={},
+            result=json.dumps({"status": "ok"}),
         )
 
         original_section_text = promptree._Node.section_text
         captured_tool_result_sections = []
 
         def capture_section_text(node, name, txt, **kwargs):
-            if name in {"result", "result_meta", "result_preview", "result_schema"}:
+            if name in {"parent_result_id", "result", "result_meta", "result_preview", "result_schema"}:
                 captured_tool_result_sections.append(
                     {
                         "name": name,
@@ -2237,9 +2248,14 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("result", captured_by_name)
         self.assertIn("result_meta", captured_by_name)
         self.assertIn("result_preview", captured_by_name)
-        for section in captured_tool_result_sections:
-            self.assertTrue(section["non_shrinkable"], section)
-            self.assertIsNone(section["shrinker"], section)
+        self.assertIn("parent_result_id", captured_by_name)
+
+        for name in ("parent_result_id", "result_meta"):
+            self.assertTrue(captured_by_name[name]["non_shrinkable"], captured_by_name[name])
+            self.assertIsNone(captured_by_name[name]["shrinker"], captured_by_name[name])
+        for name in ("result", "result_preview"):
+            self.assertFalse(captured_by_name[name]["non_shrinkable"], captured_by_name[name])
+            self.assertEqual(captured_by_name[name]["shrinker"], "hmt", captured_by_name[name])
 
     def test_completed_browser_tasks_use_unified_history_window_not_tool_history_limit(self):
         self._configure_unified_history_limits(
