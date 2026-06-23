@@ -2,13 +2,12 @@ import logging
 import re
 import uuid
 
-import djstripe
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.contrib.sites.models import Site
 from django.db import transaction
-from django.db.models import Count, Prefetch  # For annotated counts
+from django.db.models import Count, Prefetch
 from django.db.models.expressions import OuterRef, Exists
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -103,7 +102,6 @@ from django.template.response import TemplateResponse
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import default_storage
 from django.db.models import Sum
-from .agent.files.filespace_service import enqueue_import_after_commit
 from .tasks import sync_ip_block, backfill_missing_proxy_records, proxy_health_check_single, garbage_collect_timed_out_tasks
 from .tasks.sms_tasks import sync_twilio_numbers, send_test_sms
 from .services.sms_number_inventory import (
@@ -124,27 +122,23 @@ from .services.user_flags import (
     set_user_flag_choice,
     set_user_flag,
 )
-from config import settings
 from constants.plans import PlanNamesChoices
 
 from djstripe.models import Customer, BankAccount, Card
-from djstripe.admin import StripeModelAdmin  # base admin with actions & changelist_view
+from djstripe.admin import StripeModelAdmin
 
 import zstandard as zstd
 
 SMS_RELEASE_CANDIDATES_SESSION_KEY = "admin_sms_release_candidates_phone_numbers"
 SMS_RELEASE_CANDIDATES_PREFILL_SOURCE = "release_candidates"
 
-# Replace dj-stripe's default registration
 # 2.10.1 has removed some fields we still want to see, but their own admin still references them
 admin.site.unregister(Customer)
 
 @admin.register(Customer)
 class PatchedCustomerAdmin(StripeModelAdmin):
-    # remove the removed field; keep valid FKs
     list_select_related = ("subscriber", "djstripe_owner_account", "default_payment_method")
 
-# --- BankAccount ---
 admin.site.unregister(BankAccount)
 
 @admin.register(BankAccount)
@@ -153,7 +147,6 @@ class PatchedBankAccountAdmin(StripeModelAdmin):
     # Keep the common useful relations for query perf:
     list_select_related = ("customer", "djstripe_owner_account")
 
-# --- Card ---
 admin.site.unregister(Card)
 
 @admin.register(Card)
@@ -611,7 +604,6 @@ class MCPServerConfigAdmin(admin.ModelAdmin):
             return f"{obj.command} {args}".strip()
         return obj.url or "—"
 
-# Ownership filter reused across models
 class OwnershipTypeFilter(SimpleListFilter):
     title = 'Ownership'
     parameter_name = 'ownership'
@@ -649,7 +641,6 @@ class SoftExpirationFilter(SimpleListFilter):
         return queryset
 
 
-# --- TASK CREDIT ADMIN (Optimized) ---
 @admin.register(TaskCredit)
 class TaskCreditAdmin(admin.ModelAdmin):
     list_display = (
@@ -713,7 +704,6 @@ class TaskCreditAdmin(admin.ModelAdmin):
                 pass
         return queryset, use_distinct
 
-    # ---------------- Custom admin view: Grant by Plan -----------------
     def get_urls(self):
         from django.urls import path
         urls = super().get_urls()
@@ -756,13 +746,11 @@ class TaskCreditAdmin(admin.ModelAdmin):
             only_zero = form.cleaned_data["only_if_out_of_credits"]
             export_csv = form.cleaned_data["export_csv"]
 
-            # Resolve model lazily to avoid import cycles
             TaskCredit = apps.get_model("api", "TaskCredit")
             User = get_user_model()
             from util.subscription_helper import get_user_plan
             from constants.grant_types import GrantTypeChoices
 
-            # Iterate active users and match plan
             matched_users = []
             for user in User.objects.filter(is_active=True).iterator():
                 try:
@@ -773,7 +761,6 @@ class TaskCreditAdmin(admin.ModelAdmin):
                     logging.warning("Failed to get plan for user %s: %s", user.id, e)
                     continue
 
-            # Optionally filter to users currently out of credits
             if only_zero:
                 from django.db.models import Sum, Q, Value
                 from django.db.models.functions import Coalesce
@@ -802,7 +789,6 @@ class TaskCreditAdmin(admin.ModelAdmin):
 
                 matched_users = [user for user in matched_users if user.id in users_with_zero_credits_ids]
 
-            # Dry-run CSV export
             if dry_run and export_csv:
                 import csv
                 from django.http import HttpResponse
@@ -880,13 +866,11 @@ class TaskCreditAdmin(admin.ModelAdmin):
             only_zero = form.cleaned_data['only_if_out_of_credits']
             export_csv = form.cleaned_data['export_csv']
 
-            # Parse IDs by commas or newlines
             ids = [s for s in re.split(r"[\s,]+", raw.strip()) if s]
 
             TaskCredit = apps.get_model("api", "TaskCredit")
             User = get_user_model()
 
-            # ids are integers; invalid tokens are ignored by the filter
             users = list(User.objects.filter(id__in=ids, is_active=True))
 
             if only_zero:
@@ -917,7 +901,6 @@ class TaskCreditAdmin(admin.ModelAdmin):
 
                 users = [user for user in users if user.id in users_with_zero_credits_ids]
 
-            # Dry-run CSV export
             if dry_run and export_csv:
                 import csv
                 from django.http import HttpResponse
@@ -949,7 +932,6 @@ class TaskCreditAdmin(admin.ModelAdmin):
             if not dry_run:
                 with transaction.atomic():
                     for user in users:
-                        # Use the selected plan for the TaskCredit record
                         plan_choice = PlanNamesChoices(selected_plan)
                         TaskCredit.objects.create(
                             user=user,
@@ -1740,7 +1722,6 @@ class OrganizationInviteInline(admin.TabularInline):
         return format_html('<a class="button" href="{}">Approve</a>', url)
 
 
-# Minimal admin for Organization to enable autocomplete/search
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug")
@@ -1880,7 +1861,6 @@ class OrganizationInviteAdmin(admin.ModelAdmin):
             return
         self.message_user(request, f"Invite for {invite.email} was not approved ({result}).", level=messages.WARNING)
 
-# --- TASKS INSIDE AGENT (BrowserUseAgent) ---
 class BrowserUseAgentTaskInline(admin.TabularInline):
     model = BrowserUseAgentTask
     extra = 0
@@ -1896,38 +1876,30 @@ class BrowserUseAgentTaskInline(admin.TabularInline):
         Return only the most recent MAX_DISPLAY tasks for the parent agent,
         avoiding issues with admin filtering.
         """
-        # Get the full queryset of all tasks
         qs = super().get_queryset(request)
-        
-        # Extract parent object_id from the URL
+
         object_id = request.resolver_match.kwargs.get("object_id")
-        
+
         if not object_id:
-            # We are on an add page, no parent object yet
             return qs.none()
-        
-        # Filter tasks for the specific parent agent
+
         qs = qs.filter(agent__pk=object_id)
-        
-        # Order by creation date to get the most recent
+
         qs = qs.order_by('-created_at')
-        
-        # Get the primary keys of the most recent N tasks
+
         recent_pks = list(qs.values_list('pk', flat=True)[:self.MAX_DISPLAY])
-        
+
         # Return a new, unsliced queryset filtered by those specific pks.
         # This is the safe way to limit results in an admin inline.
         return self.model.objects.filter(pk__in=recent_pks).order_by('-created_at')
 
     def prompt_summary(self, obj):
-        # obj is BrowserUseAgentTask instance
         if obj.prompt:
             return (obj.prompt[:75] + '...') if len(obj.prompt) > 75 else obj.prompt
         return "-"
     prompt_summary.short_description = "Prompt"
 
     def view_task_link(self, obj):
-        # obj is BrowserUseAgentTask instance
         if obj.pk:
             url = reverse("admin:api_browseruseagenttask_change", args=[obj.pk])
             return format_html('<a href="{}">View/Edit Task</a>', url)
@@ -1940,9 +1912,7 @@ class BrowserUseAgentTaskInline(admin.TabularInline):
     def has_delete_permission(self, request, obj=None):
         return False
 
-# Link to the Task changelist, filtered to this agent, for Agent list display
 def tasks_for_agent_link(obj):
-    # obj here is a BrowserUseAgent instance
     url = (
         reverse("admin:api_browseruseagenttask_changelist")
         + f"?agent__id__exact={obj.pk}"
@@ -1957,15 +1927,12 @@ tasks_for_agent_link.short_description = "Tasks (Filtered List)"
 @admin.register(BrowserUseAgent)
 class BrowserUseAgentAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "user_email_display", tasks_for_agent_link, "persistent_agent_link", "created_at", "updated_at")
-    search_fields = ("name", "user__email", "id") 
+    search_fields = ("name", "user__email", "id")
     readonly_fields = ("id", "created_at", "updated_at", "persistent_agent_link", "tasks_summary_link")
-    list_filter = ("user",) 
+    list_filter = ("user",)
     raw_id_fields = ('user',)
     inlines = [BrowserUseAgentTaskInline] # Added inline for tasks
 
-    # ------------------------------------------------------------------
-    # Performance: annotate task counts & use select_related to reduce queries
-    # ------------------------------------------------------------------
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.select_related('user').annotate(num_tasks=Count('tasks'))
@@ -1982,9 +1949,6 @@ class BrowserUseAgentAdmin(admin.ModelAdmin):
         }),
     )
 
-    # ------------------------------------------------------------------
-    # Read-only summary + link to full task list (detail page)
-    # ------------------------------------------------------------------
     @admin.display(description="Tasks")
     def tasks_summary_link(self, obj):
         url = (
@@ -2020,7 +1984,6 @@ class BrowserUseAgentAdmin(admin.ModelAdmin):
         return format_html('<span style="color: gray;">{}</span>', "None")
     persistent_agent_link.admin_order_field = 'persistent_agent__name'
 
-# --- STEPS INSIDE TASK (BrowserUseAgentTask) ---
 class BrowserUseAgentTaskStepInline(admin.TabularInline):
     model = BrowserUseAgentTaskStep
     extra = 0
@@ -2036,25 +1999,19 @@ class BrowserUseAgentTaskStepInline(admin.TabularInline):
         Return only the most recent MAX_DISPLAY steps for the parent task,
         avoiding issues with admin filtering.
         """
-        # Get the full queryset of all steps
         qs = super().get_queryset(request)
-        
-        # Extract parent object_id from the URL
+
         object_id = request.resolver_match.kwargs.get("object_id")
-        
+
         if not object_id:
-            # We are on an add page, no parent object yet
             return qs.none()
-            
-        # Filter steps for the specific parent task
+
         qs = qs.filter(task__pk=object_id)
-        
-        # Order by step number to get the most recent
+
         qs = qs.order_by('-step_number')
-        
-        # Get the primary keys of the most recent N steps
+
         recent_pks = list(qs.values_list('pk', flat=True)[:self.MAX_DISPLAY])
-        
+
         # Return a new, unsliced queryset filtered by those specific pks.
         return self.model.objects.filter(pk__in=recent_pks).order_by('-step_number')
 
@@ -2066,7 +2023,6 @@ class BrowserUseAgentTaskStepInline(admin.TabularInline):
 
     def result_value_summary(self, obj):
         if obj.result_value:
-            # Simple string representation for summary; can be expanded
             value_str = str(obj.result_value)
             return (value_str[:75] + '...') if len(value_str) > 75 else value_str
         return "-"
@@ -2112,7 +2068,6 @@ class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
     get_user_email.admin_order_field = 'user__email'
 
     def display_task_result_summary(self, obj):
-        # obj is BrowserUseAgentTask instance
         result_step = obj.steps.filter(is_result=True).first()
         if result_step:
             if result_step.result_value:
@@ -2123,13 +2078,11 @@ class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
     display_task_result_summary.short_description = "Task Result Summary"
 
     def display_full_task_result(self, obj):
-        # obj is BrowserUseAgentTask instance
         result_step = obj.steps.filter(is_result=True).first()
         if result_step:
             if result_step.result_value:
                 import json # For pretty printing
                 try:
-                    # Attempt to pretty-print if it's JSON, otherwise just stringify
                     pretty_result = json.dumps(result_step.result_value, indent=2, sort_keys=True)
                     return format_html("<pre>Step {}:<br>{}</pre>", result_step.step_number, pretty_result)
                 except (TypeError, ValueError):
@@ -2139,9 +2092,6 @@ class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
         return "No step is marked as the result for this task."
     display_full_task_result.short_description = "Task Result Details"
 
-    # ------------------------------------------------------------------
-    #  Custom view + button: Run Garbage Collection
-    # ------------------------------------------------------------------
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
@@ -2166,7 +2116,6 @@ class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
             self.message_user(request, "Garbage-collection task queued – refresh in a minute.", messages.SUCCESS)
         except Exception as e:
             self.message_user(request, f"Error queuing garbage collection: {e}", messages.ERROR)
-        # Redirect back to the changelist
         changelist_url = reverse('admin:api_browseruseagenttask_changelist')
         return HttpResponseRedirect(changelist_url)
 
@@ -2202,19 +2151,17 @@ class UsageThresholdSentAdmin(admin.ModelAdmin):
         return False
 
 
-# --- TASK CREDITS INSIDE USER (CustomUserAdmin) ---
 class TaskCreditInlineForUser(admin.TabularInline):
     model = TaskCredit
     extra = 0
     fields = ("credits", "credits_used", "remaining_display", "plan", "granted_date", "expiration_date", "additional_task")
     readonly_fields = ("remaining_display", "granted_date")
     ordering = ("-granted_date",)
-    
+
     def remaining_display(self, obj):
         return obj.remaining
     remaining_display.short_description = "Remaining"
 
-# --- AGENTS INSIDE USER (CustomUserAdmin) ---
 class BrowserUseAgentInlineForUser(admin.TabularInline):
     model = BrowserUseAgent
     extra = 0
@@ -2223,7 +2170,6 @@ class BrowserUseAgentInlineForUser(admin.TabularInline):
     show_change_link = False # Using custom link
 
     def tasks_for_this_agent_link(self, obj):
-        # obj here is a BrowserUseAgent instance
         if obj.pk:
             url = (
                 reverse("admin:api_browseruseagenttask_changelist")
@@ -2234,7 +2180,6 @@ class BrowserUseAgentInlineForUser(admin.TabularInline):
     tasks_for_this_agent_link.short_description = "Tasks"
 
     def view_agent_link(self, obj):
-        # obj here is a BrowserUseAgent instance
         if obj.pk:
             url = reverse("admin:api_browseruseagent_change", args=[obj.pk])
             return format_html('<a href="{}">View/Edit {}</a>', url, obj.name or "Agent")
@@ -2242,7 +2187,7 @@ class BrowserUseAgentInlineForUser(admin.TabularInline):
     view_agent_link.short_description = "Agent Page"
 
     def has_add_permission(self, request, obj=None):
-        return False 
+        return False
     def has_delete_permission(self, request, obj=None):
         return False
 
@@ -2700,10 +2645,6 @@ class CustomUserAdminForm(forms.ModelForm):
             option = self._user_flag_choice_options_by_group_id.get(group.pk, {}).get(option_id)
             set_user_flag_choice(group, user, option)
 
-# ------------------------------------------------------------------
-# CUSTOM USER ADMIN (Optimized)  ------------------------------------
-# ------------------------------------------------------------------
-
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
     form = CustomUserAdminForm
@@ -2926,9 +2867,7 @@ class CustomUserAdmin(UserAdmin):
         return TemplateResponse(request, "admin/bulk_set_user_flags.html", context)
 
 
-    # Add a summary field for task credits (read-only).
     def get_readonly_fields(self, request, obj=None):
-        # Preserve any readonly fields defined by UserAdmin.
         base = super().get_readonly_fields(request, obj)
         return base + (
             "taskcredit_summary_link",
@@ -2940,7 +2879,6 @@ class CustomUserAdmin(UserAdmin):
     def get_fieldsets(self, request, obj=None):
         if obj is None:
             return super().get_fieldsets(request, obj)
-        # Append a dedicated "Task Credits" fieldset to the default ones.
         fieldsets = list(super().get_fieldsets(request, obj))
         fieldsets.append(("Preferences", {"fields": ("timezone_display",)}))
         configured_user_flag_fields = self._user_flag_field_names()
@@ -2985,7 +2923,7 @@ class CustomUserAdmin(UserAdmin):
         # Use annotated values if available (from get_queryset)
         total = getattr(obj, "total_credits", 0) or 0
         used = getattr(obj, "used_credits", 0) or 0
-        
+
         # Fallback to aggregation if not on the changelist view (e.g., on the change form)
         if not hasattr(obj, "total_credits"):
             summary = obj.task_credits.aggregate(
@@ -3042,7 +2980,6 @@ class CustomUserAdmin(UserAdmin):
             )
 
 
-# --- DECODO MODELS ---
 
 class DecodoIPBlockInline(admin.TabularInline):
     model = DecodoIPBlock
@@ -3114,13 +3051,10 @@ class DecodoIPBlockAdmin(admin.ModelAdmin):
     def sync_view(self, request, object_id, *args, **kwargs):
         """Handle the sync button click - queue a Celery task and redirect."""
         try:
-            # Verify the object exists
             ip_block = DecodoIPBlock.objects.get(pk=object_id)
 
-            # Queue the sync task
             sync_ip_block.delay(str(ip_block.id))
 
-            # Show success message
             self.message_user(
                 request,
                 f"Sync queued for IP block {ip_block.endpoint}:{ip_block.start_port}",
@@ -3140,7 +3074,6 @@ class DecodoIPBlockAdmin(admin.ModelAdmin):
                 messages.ERROR
             )
 
-        # Redirect back to the change form
         return HttpResponseRedirect(
             reverse("admin:api_decodoipblock_change", args=[object_id])
         )
@@ -3188,15 +3121,7 @@ class ProxyServerAdmin(admin.ModelAdmin):
     search_fields = ('name', 'host', 'username', 'static_ip', 'notes')
     readonly_fields = ('id', 'created_at', 'updated_at')
     raw_id_fields = ('decodo_ip',)
-    fieldsets = (
-        ('Details', {
-            'fields': (
-                'id', 'name', 'proxy_type', 'host', 'port', 'username', 'password', 'static_ip',
-                'is_active', 'is_dedicated', 'notes', 'decodo_ip', 'created_at', 'updated_at'
-            )
-        }),
-    )
-    
+
     def get_urls(self):
         """Add custom URL for health check functionality."""
         urls = super().get_urls()
@@ -3230,13 +3155,10 @@ class ProxyServerAdmin(admin.ModelAdmin):
     def health_check_view(self, request, object_id, *args, **kwargs):
         """Handle the health check button click - queue a Celery task and redirect."""
         try:
-            # Verify the object exists
             proxy_server = ProxyServer.objects.get(pk=object_id)
 
-            # Queue the health check task
             proxy_health_check_single.delay(str(proxy_server.id))
 
-            # Show success message
             self.message_user(
                 request,
                 f"Health check queued for proxy {proxy_server.host}:{proxy_server.port}",
@@ -3256,11 +3178,10 @@ class ProxyServerAdmin(admin.ModelAdmin):
                 messages.ERROR
             )
 
-        # Redirect back to the change form
         return HttpResponseRedirect(
             reverse("admin:api_proxyserver_change", args=[object_id])
         )
-    
+
     fieldsets = (
         ('Basic Configuration', {
             'fields': ('id', 'name', 'proxy_type', 'host', 'port', 'is_active')
@@ -3277,7 +3198,7 @@ class ProxyServerAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def health_results_link(self, obj):
         """Link to view health check results for this proxy."""
         count = obj.health_check_results.count()
@@ -3285,18 +3206,17 @@ class ProxyServerAdmin(admin.ModelAdmin):
             url = reverse("admin:api_proxyhealthcheckresult_changelist") + f"?proxy_server__id__exact={obj.id}"
             recent_passed = obj.health_check_results.filter(status='PASSED').order_by('-checked_at').first()
             recent_failed = obj.health_check_results.filter(status__in=['FAILED', 'ERROR', 'TIMEOUT']).order_by('-checked_at').first()
-            
-            # Determine status color
+
             if recent_passed and (not recent_failed or recent_passed.checked_at > recent_failed.checked_at):
                 color = "green"
                 icon = "✓"
             elif recent_failed:
-                color = "red" 
+                color = "red"
                 icon = "✗"
             else:
                 color = "gray"
                 icon = "?"
-                
+
             return format_html('<a href="{}" style="color: {};">{} {} results</a>', url, color, icon, count)
         return format_html('<span style="color: gray;">{}</span>', "No tests")
     health_results_link.short_description = 'Health Status'
@@ -3307,9 +3227,9 @@ class ProxyServerAdmin(admin.ModelAdmin):
             return format_html('<a href="{}">{}</a>', url, obj.decodo_ip.ip_address)
         return None
     decodo_ip_link.short_description = 'Decodo IP'
-    
+
     actions = ['mark_as_dedicated', 'mark_as_shared', 'backfill_missing_proxies', 'test_selected_proxies']
-    
+
     def backfill_missing_proxies(self, request, queryset):
         """Action to backfill missing proxy records for all Decodo IPs."""
         try:
@@ -3326,12 +3246,12 @@ class ProxyServerAdmin(admin.ModelAdmin):
                 messages.ERROR
             )
     backfill_missing_proxies.short_description = "Backfill missing proxy records for Decodo IPs"
-    
+
     def test_selected_proxies(self, request, queryset):
         """Action to run health checks on selected proxy servers."""
         active_proxies = queryset.filter(is_active=True)
         inactive_count = queryset.count() - active_proxies.count()
-        
+
         if not active_proxies.exists():
             self.message_user(
                 request,
@@ -3339,18 +3259,17 @@ class ProxyServerAdmin(admin.ModelAdmin):
                 messages.WARNING
             )
             return
-        
+
         try:
-            # Queue health check tasks for each selected active proxy
             queued_count = 0
             for proxy in active_proxies:
                 proxy_health_check_single.delay(str(proxy.id))
                 queued_count += 1
-            
+
             message = f"Health checks queued for {queued_count} proxy server(s)"
             if inactive_count > 0:
                 message += f" (skipped {inactive_count} inactive proxy server(s))"
-            
+
             self.message_user(
                 request,
                 message,
@@ -3399,7 +3318,7 @@ class ProxyHealthCheckSpecAdmin(admin.ModelAdmin):
     list_filter = ('is_active', 'created_at')
     search_fields = ('name', 'prompt')
     readonly_fields = ('id', 'created_at', 'updated_at')
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('id', 'name', 'is_active')
@@ -3412,7 +3331,7 @@ class ProxyHealthCheckSpecAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def results_count(self, obj):
         """Show the number of health check results for this spec."""
         count = obj.results.count()
@@ -3431,7 +3350,7 @@ class ProxyHealthCheckResultAdmin(admin.ModelAdmin):
     readonly_fields = ('id', 'checked_at', 'created_at')
     raw_id_fields = ('proxy_server', 'health_check_spec')
     date_hierarchy = 'checked_at'
-    
+
     fieldsets = (
         ('Test Information', {
             'fields': ('id', 'proxy_server', 'health_check_spec', 'checked_at')
@@ -3448,7 +3367,7 @@ class ProxyHealthCheckResultAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def proxy_server_link(self, obj):
         """Link to the proxy server being tested."""
         if obj.proxy_server:
@@ -3457,7 +3376,7 @@ class ProxyHealthCheckResultAdmin(admin.ModelAdmin):
         return None
     proxy_server_link.short_description = 'Proxy Server'
     proxy_server_link.admin_order_field = 'proxy_server__host'
-    
+
     def health_check_spec_link(self, obj):
         """Link to the health check spec used."""
         if obj.health_check_spec:
@@ -3466,13 +3385,12 @@ class ProxyHealthCheckResultAdmin(admin.ModelAdmin):
         return None
     health_check_spec_link.short_description = 'Health Check Spec'
     health_check_spec_link.admin_order_field = 'health_check_spec__name'
-    
+
     def get_queryset(self, request):
         """Optimize queryset with select_related for better performance."""
         return super().get_queryset(request).select_related('proxy_server', 'health_check_spec')
 
 
-# --- PERSISTENT AGENT MODELS ---
 
 
 class PersistentAgentWebhookInline(admin.TabularInline):
@@ -3491,7 +3409,7 @@ class PersistentAgentCommsEndpointInline(admin.TabularInline):
     extra = 0
     fields = ('channel', 'address', 'is_primary', 'endpoint_link')
     readonly_fields = ('endpoint_link',)
-    
+
     def endpoint_link(self, obj):
         if obj.pk:
             url = reverse("admin:api_persistentagentcommsendpoint_change", args=[obj.pk])
@@ -3573,63 +3491,57 @@ class AgentMessageInline(admin.TabularInline):
         Return only the most recent MAX_DISPLAY messages for the parent agent,
         avoiding issues with admin filtering.
         """
-        # Get the full queryset of all messages
         qs = super().get_queryset(request)
-        
-        # Extract parent object_id from the URL, which is how inlines are linked
+
         object_id = request.resolver_match.kwargs.get("object_id")
-        
+
         if not object_id:
-            # We are on an add page, no parent object yet
             return qs.none()
-        
-        # Filter messages for the specific parent agent
+
         qs = qs.filter(owner_agent__pk=object_id)
-        
-        # Order by timestamp to get the most recent
+
         qs = qs.order_by('-timestamp')
-        
-        # Get the primary keys of the most recent N messages
+
         recent_pks = list(qs.values_list('pk', flat=True)[:self.MAX_DISPLAY])
-        
+
         # Return a new, unsliced queryset filtered by those specific pks.
         # This is the safe way to limit results in an admin inline.
         return self.model.objects.filter(pk__in=recent_pks).order_by('-timestamp')
 
     can_delete = False
-    
+
     def direction_display(self, obj):
         if obj.is_outbound:
             return format_html('<span style="color: blue;">{}</span>', "→ OUT")
         else:
             return format_html('<span style="color: green;">{}</span>', "← IN")
     direction_display.short_description = "Direction"
-    
+
     def from_to_display(self, obj):
         from_addr = obj.from_endpoint.address if obj.from_endpoint else "Unknown"
         to_addr = obj.to_endpoint.address if obj.to_endpoint else "Conversation"
         return f"{from_addr} → {to_addr}"
     from_to_display.short_description = "From → To"
-    
+
     def body_preview(self, obj):
         if obj.body:
             preview = obj.body.replace('\n', ' ').strip()
             return (preview[:75] + '...') if len(preview) > 75 else preview
         return "-"
     body_preview.short_description = "Message"
-    
+
     def status_display(self, obj):
         status = obj.latest_status
         color_map = {
             'queued': 'orange',
-            'sent': 'green', 
+            'sent': 'green',
             'failed': 'red',
             'delivered': 'blue'
         }
         color = color_map.get(status, 'gray')
         return format_html('<span style="color: {};">{}</span>', color, status.title())
     status_display.short_description = "Status"
-    
+
     def message_link(self, obj):
         if obj.pk:
             url = reverse("admin:api_persistentagentmessage_change", args=[obj.pk])
@@ -3746,13 +3658,10 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         PersistentAgentSystemMessageInline,
     ]
 
-    # ------------------------------------------------------------------
-    # Performance: annotate message counts so we don't do a COUNT query per row
-    # ------------------------------------------------------------------
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.annotate(num_messages=Count('agent_messages'))
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': (
@@ -3790,7 +3699,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             'fields': ('messages_summary_link', 'audit_link')
         }),
     )
-    
+
     def get_urls(self):
         """Add custom URLs for simulation and processing actions."""
         urls = super().get_urls()
@@ -3971,16 +3880,16 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             url = reverse("admin:api_persistentagentmessage_changelist") + f"?owner_agent__id__exact={obj.pk}"
             return format_html('<a href="{}">{} messages</a>', url, count)
         return "0 messages"
-    
+
     @admin.display(description="All Messages")
     def messages_summary_link(self, obj):
         """Link to view all messages for this agent in the dedicated admin."""
         url = reverse("admin:api_persistentagentmessage_changelist") + f"?owner_agent__id__exact={obj.pk}"
-        
+
         count = getattr(obj, 'num_messages', None)
         if count is None:
             count = obj.agent_messages.count()
-        
+
         return format_html(
             '<a href="{}">View all {} messages</a>', url, count
         )
@@ -4169,7 +4078,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
         raw_lines = request.POST.get("agent_lines", "")
 
-        # Pass 1: Parse and validate lines to separate valid and invalid entries.
         parsed_updates = {}  # agent_id -> {schedule: str, original_line: str}
         error_lines_with_messages = []  # {original_line: str, message: str}
 
@@ -4208,7 +4116,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
             parsed_updates[agent_id] = {"schedule": schedule_part, "original_line": original_line}
 
-        # Pass 2: Fetch agents in bulk and perform updates.
         success_count = 0
         if parsed_updates:
             agent_ids_to_fetch = list(parsed_updates.keys())
@@ -4237,7 +4144,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                     error_lines_with_messages.append(
                         {"original_line": data["original_line"], "message": f"Failed to reschedule {agent_id}: {exc}"})
 
-        # Report successes and failures.
         if success_count:
             plural = "s" if success_count != 1 else ""
             self.message_user(request, f"Updated schedule for {success_count} agent{plural}.", level=messages.SUCCESS)
@@ -4376,37 +4282,33 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             subject = request.POST.get('subject', '').strip()
             body = request.POST.get('body', '').strip()
             attachments = request.FILES.getlist('attachments') if hasattr(request, 'FILES') else []
-            
-            # Validation
+
             if not from_address:
                 self.message_user(request, "From address is required", messages.ERROR)
             elif not body:
                 self.message_user(request, "Message body is required", messages.ERROR)
             else:
                 try:
-                    # Find agent's primary email endpoint
                     to_endpoint = PersistentAgentCommsEndpoint.objects.filter(
-                        owner_agent=agent, 
-                        channel=CommsChannel.EMAIL, 
+                        owner_agent=agent,
+                        channel=CommsChannel.EMAIL,
                         is_primary=True
                     ).first()
-                    
+
                     if not to_endpoint:
-                        # Fallback to any email endpoint
                         to_endpoint = PersistentAgentCommsEndpoint.objects.filter(
-                            owner_agent=agent, 
+                            owner_agent=agent,
                             channel=CommsChannel.EMAIL
                         ).first()
-                    
+
                     if not to_endpoint:
                         self.message_user(
-                            request, 
-                            "Agent has no email address configured. Please add one first.", 
+                            request,
+                            "Agent has no email address configured. Please add one first.",
                             messages.ERROR
                         )
                         return HttpResponseRedirect(reverse('admin:api_persistentagent_change', args=[object_id]))
-                    
-                    # Normalize through the same ingestion pipeline as webhooks
+
                     from api.agent.comms.adapters import ParsedMessage
                     from api.agent.comms.message_service import ingest_inbound_message
 
@@ -4422,25 +4324,24 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
                     msg_info = ingest_inbound_message(CommsChannel.EMAIL, parsed)
                     message = msg_info.message
-                    
+
                     self.message_user(
-                        request, 
+                        request,
                         f"Incoming email simulated successfully from {from_address}. "
                         f"Message ID: {message.id}. The agent will react as in production (including wake-up).",
                         messages.SUCCESS
                     )
-                    
+
                 except Exception as e:
                     self.message_user(
-                        request, 
-                        f"Error creating simulated email: {str(e)}", 
+                        request,
+                        f"Error creating simulated email: {str(e)}",
                         messages.ERROR
                     )
-            
+
             return HttpResponseRedirect(reverse('admin:api_persistentagent_change', args=[object_id]))
-        
+
         else:
-            # Display form
             context = {
                 **self.admin_site.each_context(request),
                 'agent': agent,
@@ -4462,14 +4363,12 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             body = request.POST.get('body', '').strip()
             attachments = list(request.FILES.getlist('attachments') or [])
 
-            # Validation
             if not from_address:
                 self.message_user(request, "From address is required", messages.ERROR)
             elif not body and not attachments:
                 self.message_user(request, "Message body or attachment is required", messages.ERROR)
             else:
                 try:
-                    # Find agent's primary email endpoint
                     to_endpoint = PersistentAgentCommsEndpoint.objects.filter(
                         owner_agent=agent,
                         channel=CommsChannel.SMS,
@@ -4477,7 +4376,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                     ).first()
 
                     if not to_endpoint:
-                        # Fallback to any email endpoint
                         to_endpoint = PersistentAgentCommsEndpoint.objects.filter(
                             owner_agent=agent,
                             channel=CommsChannel.SMS
@@ -4491,7 +4389,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                         )
                         return HttpResponseRedirect(reverse('admin:api_persistentagent_change', args=[object_id]))
 
-                    # Normalize through the same ingestion pipeline as webhooks
                     from api.agent.comms.adapters import ParsedMessage
                     from api.agent.comms.message_service import ingest_inbound_message
 
@@ -4524,7 +4421,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(reverse('admin:api_persistentagent_change', args=[object_id]))
 
         else:
-            # Display form
             context = {
                 **self.admin_site.each_context(request),
                 'agent': agent,
@@ -4735,11 +4631,8 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
         verbose_name = "Agent Email Account"
         verbose_name_plural = "Agent Email Account"
         fields = (
-            # SMTP
             'smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'smtp_password', 'is_outbound_enabled',
-            # IMAP
             'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_password', 'imap_folder', 'is_inbound_enabled', 'imap_idle_enabled', 'poll_interval_sec',
-            # Health
             'connection_last_ok_at', 'connection_error',
         )
         readonly_fields = ('connection_last_ok_at', 'connection_error')
@@ -4813,10 +4706,8 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             self.message_user(request, "No Agent Email Account configured for this endpoint.", messages.ERROR)
             return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
 
-        # Attempt connection
         try:
             import smtplib
-            # Choose client
             if acct.smtp_security == AgentEmailAccount.SmtpSecurity.SSL:
                 client = smtplib.SMTP_SSL(acct.smtp_host, int(acct.smtp_port or 465), timeout=30)
             else:
@@ -4833,7 +4724,6 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
                     client.auth("XOAUTH2", lambda _: auth_string)
                 elif acct.smtp_auth != AgentEmailAccount.AuthMode.NONE:
                     client.login(acct.smtp_username or '', acct.get_smtp_password() or '')
-                # Try NOOP
                 try:
                     client.noop()
                 except Exception:
@@ -4847,12 +4737,10 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
                     except Exception:
                         pass
 
-            # Success
             acct.connection_last_ok_at = timezone.now()
             acct.connection_error = ""
             acct.save(update_fields=['connection_last_ok_at', 'connection_error'])
             self.message_user(request, "SMTP connection test succeeded.", messages.SUCCESS)
-            # Analytics: SMTP Test Passed
             try:
                 user_id = getattr(getattr(endpoint.owner_agent, 'user', None), 'id', None)
                 if user_id:
@@ -4870,7 +4758,6 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             acct.connection_error = str(e)
             acct.save(update_fields=['connection_error'])
             self.message_user(request, f"SMTP connection test failed: {e}", messages.ERROR)
-            # Analytics: SMTP Test Failed
             try:
                 user_id = getattr(getattr(endpoint.owner_agent, 'user', None), 'id', None)
                 if user_id:
@@ -4904,7 +4791,6 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             self.message_user(request, "No Agent Email Account configured for this endpoint.", messages.ERROR)
             return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
 
-        # Attempt IMAP connection
         try:
             import imaplib
             if acct.imap_security == AgentEmailAccount.ImapSecurity.SSL:
@@ -4939,7 +4825,6 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             acct.connection_error = ""
             acct.save(update_fields=['connection_last_ok_at', 'connection_error'])
             self.message_user(request, "IMAP connection test succeeded.", messages.SUCCESS)
-            # Analytics: IMAP Test Passed
             try:
                 user_id = getattr(getattr(endpoint.owner_agent, 'user', None), 'id', None)
                 if user_id:
@@ -4957,7 +4842,6 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
             acct.connection_error = str(e)
             acct.save(update_fields=['connection_error'])
             self.message_user(request, f"IMAP connection test failed: {e}", messages.ERROR)
-            # Analytics: IMAP Test Failed
             try:
                 user_id = getattr(getattr(endpoint.owner_agent, 'user', None), 'id', None)
                 if user_id:
@@ -5117,7 +5001,7 @@ class PersistentAgentSystemMessageBroadcastAdmin(admin.ModelAdmin):
         )
 
 
-@admin.register(PersistentAgentMessage) 
+@admin.register(PersistentAgentMessage)
 class PersistentAgentMessageAdmin(admin.ModelAdmin):
     list_display = ('timestamp', 'owner_agent_link', 'direction_icon', 'from_address', 'to_address', 'body_summary', 'latest_status', 'conversation_link')
     list_filter = ('is_outbound', 'latest_status', 'timestamp', 'owner_agent', 'from_endpoint__channel')
@@ -5728,7 +5612,6 @@ class SmsNumberAdmin(admin.ModelAdmin):
         ]
         return extra + urls
 
-    # ③ view that queues the task
     def sync_view(self, request):
         if not request.user.has_perm("api.change_smsnumber"):
             messages.error(request, "Permission denied.")
@@ -5738,7 +5621,6 @@ class SmsNumberAdmin(admin.ModelAdmin):
         messages.success(request, "Background sync started – refresh in a minute.")
         return HttpResponseRedirect(reverse("admin:api_smsnumber_changelist"))
 
-    # 𝟑𝗮  view
     def test_sms_view(self, request, object_id):
         sms_number = self.get_object(request, object_id)
 
@@ -5969,9 +5851,6 @@ class LinkShortenerAdmin(admin.ModelAdmin):
             return f"/{obj.code}"
 
 
-# --------------------------------------------------------------------------- #
-#  LLM Provider + Endpoint Admin (DB-configurable LLM routing)
-# --------------------------------------------------------------------------- #
 from .models import (
     LLMProvider,
     PersistentModelEndpoint,
@@ -5990,7 +5869,6 @@ from .models import (
     BrowserLLMPolicy,
     BrowserLLMTier,
     BrowserTierEndpoint,
-    # Routing Profiles
     LLMRoutingProfile,
     ProfileTokenRange,
     ProfilePersistentTier,
@@ -6014,7 +5892,6 @@ class LLMProviderAdmin(admin.ModelAdmin):
     readonly_fields = ("_key_source",)
 
     def get_readonly_fields(self, request, obj=None):
-        # Only show Key Source after the object exists
         if obj is None:
             return tuple()
         return super().get_readonly_fields(request, obj)
@@ -6027,7 +5904,6 @@ class LLMProviderAdmin(admin.ModelAdmin):
             ("Vertex (Google)", {"fields": ("vertex_project", "vertex_location")}),
         ]
         if obj is not None:
-            # Append Key Source in credentials when editing existing provider
             base[1][1]["fields"] = ("api_key", "clear_api_key", "env_var_name", "_key_source")
         return base
 
@@ -6319,29 +6195,8 @@ class BrowserLLMPolicyAdmin(admin.ModelAdmin):
     list_display = ("name", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name",)
-    search_fields = ("code", "url")
-
-    @admin.display(description="Short URL")
-    def shortened(self, obj):
-        """Generate the URL for the landing page."""
-        if not obj.pk or not obj.code:
-            return "—"
-
-        rel =  reverse('short_link', kwargs={'code': obj.code})
-        current_site = Site.objects.get_current()
-
-        # get if https from request
-        protocol = 'https://'
-
-        # Ensure the site domain is used to create the absolute URL
-        absolute_url = f"{protocol}{current_site.domain}{rel}"
-
-        return format_html(f'<a href="{absolute_url}" target="_blank">{absolute_url}</a>')
 
 
-# --------------------------------------------------------------------------- #
-#  LLM Routing Profiles Admin
-# --------------------------------------------------------------------------- #
 
 class ProfileTokenRangeInline(admin.TabularInline):
     model = ProfileTokenRange
@@ -6436,9 +6291,6 @@ class ProfileEmbeddingsTierAdmin(admin.ModelAdmin):
     inlines = [ProfileEmbeddingsTierEndpointInline]
 
 
-# ------------------------------------------------------------------
-# Attachments & Filespaces (Admin)
-# ------------------------------------------------------------------
 
 @admin.register(PersistentAgentMessageAttachment)
 class PersistentAgentMessageAttachmentAdmin(admin.ModelAdmin):
