@@ -28,6 +28,13 @@ type UseConsoleContextSwitcherResult = {
   refresh: () => Promise<void>
 }
 
+function notifyConsoleContextUpdated(context: ConsoleContext): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(new CustomEvent('gobii:console-context-updated', { detail: context }))
+}
+
 export function useConsoleContextSwitcher({
   enabled = false,
   forAgentId,
@@ -149,6 +156,7 @@ export function useConsoleContextSwitcher({
         setData((prev) => (prev ? { ...prev, context: updated } : prev))
         setResolvedForAgentId(undefined)
         storeConsoleContext(updated)
+        notifyConsoleContextUpdated(updated)
         onSwitched?.(updated)
       } catch (err) {
         if (!mountedRef.current || requestId !== requestIdRef.current) {
@@ -199,6 +207,7 @@ export function useConsoleContextSwitcher({
         })
         setResolvedForAgentId(undefined)
         storeConsoleContext(created.context)
+        notifyConsoleContextUpdated(created.context)
         onSwitched?.(created.context)
         return created.context
       } catch (err) {

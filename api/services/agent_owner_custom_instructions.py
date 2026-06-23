@@ -1,6 +1,7 @@
 from typing import Any
 
 from django.conf import settings
+from django.db import transaction
 
 from api.models import AgentOwnerCustomInstructions
 
@@ -28,15 +29,16 @@ def normalize_custom_instructions(raw_instructions: Any) -> str:
 
 
 def get_custom_instructions_for_organization_id(organization_id) -> str:
-    return _get_custom_instructions({"organization_id": organization_id})
+    query_filter, _, _ = _owner_scope("organization_id", organization_id, "user")
+    return _get_custom_instructions(query_filter)
 
 
 def get_custom_instructions_for_user_id(user_id) -> str:
-    return _get_custom_instructions({"user_id": user_id})
+    query_filter, _, _ = _owner_scope("user_id", user_id, "organization")
+    return _get_custom_instructions(query_filter)
 
 
 def _get_custom_instructions(owner_filter: dict) -> str:
-    _validate_owner_filter(owner_filter)
     instructions = (
         AgentOwnerCustomInstructions.objects
         .filter(**owner_filter)
@@ -47,33 +49,55 @@ def _get_custom_instructions(owner_filter: dict) -> str:
 
 
 def save_custom_instructions_for_organization_id(organization_id, *, instructions: str, updated_by) -> None:
-    _save_custom_instructions({"organization_id": organization_id}, instructions=instructions, updated_by=updated_by)
+    query_filter, update_lookup, invalid_owner_filter = _owner_scope("organization_id", organization_id, "user")
+    _save_custom_instructions(
+        query_filter,
+        update_lookup,
+        invalid_owner_filter,
+        instructions=instructions,
+        updated_by=updated_by,
+    )
 
 
 def save_custom_instructions_for_user_id(user_id, *, instructions: str, updated_by) -> None:
-    _save_custom_instructions({"user_id": user_id}, instructions=instructions, updated_by=updated_by)
+    query_filter, update_lookup, invalid_owner_filter = _owner_scope("user_id", user_id, "organization")
+    _save_custom_instructions(
+        query_filter,
+        update_lookup,
+        invalid_owner_filter,
+        instructions=instructions,
+        updated_by=updated_by,
+    )
 
 
-def _validate_owner_filter(owner_filter: dict) -> None:
-    if set(owner_filter) not in ({"user_id"}, {"organization_id"}):
-        raise ValueError("A valid organization_id or user_id must be provided.")
-
-    owner_id = next(iter(owner_filter.values()))
+def _owner_scope(owner_field: str, owner_id, other_owner_field: str) -> tuple[dict, dict, dict]:
     if not owner_id:
         raise ValueError("A valid organization_id or user_id must be provided.")
+    return (
+        {owner_field: owner_id, f"{other_owner_field}__isnull": True},
+        {owner_field: owner_id, other_owner_field: None},
+        {owner_field: owner_id, f"{other_owner_field}__isnull": False},
+    )
 
 
-def _save_custom_instructions(owner_filter: dict, *, instructions: str, updated_by) -> None:
-    _validate_owner_filter(owner_filter)
+def _save_custom_instructions(
+    query_filter: dict,
+    update_lookup: dict,
+    invalid_owner_filter: dict,
+    *,
+    instructions: str,
+    updated_by,
+) -> None:
+    with transaction.atomic():
+        AgentOwnerCustomInstructions.objects.filter(**invalid_owner_filter).delete()
+        if instructions:
+            AgentOwnerCustomInstructions.objects.update_or_create(
+                **update_lookup,
+                defaults={
+                    "instructions": instructions,
+                    "updated_by": updated_by,
+                },
+            )
+            return
 
-    if instructions:
-        AgentOwnerCustomInstructions.objects.update_or_create(
-            **owner_filter,
-            defaults={
-                "instructions": instructions,
-                "updated_by": updated_by,
-            },
-        )
-        return
-
-    AgentOwnerCustomInstructions.objects.filter(**owner_filter).delete()
+        AgentOwnerCustomInstructions.objects.filter(**query_filter).delete()

@@ -1,15 +1,19 @@
 import json
+from unittest import skipUnless
 from unittest.mock import patch
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.db import connection
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
 from api.models import AgentOwnerCustomInstructions, Organization, UserPhoneNumber, UserPreference
 from api.services.agent_owner_custom_instructions import (
+    get_custom_instructions_for_organization_id,
+    get_custom_instructions_for_user_id,
     save_custom_instructions_for_organization_id,
     save_custom_instructions_for_user_id,
 )
@@ -221,6 +225,22 @@ class AgentOwnerCustomInstructionsServiceTests(TestCase):
             created_by=self.user,
         )
 
+    def _create_legacy_both_owner_custom_instructions(self, *, user, organization, instructions: str):
+        now = timezone.now()
+        with connection.cursor() as cursor:
+            try:
+                cursor.execute("PRAGMA ignore_check_constraints = ON")
+                cursor.execute(
+                    """
+                    INSERT INTO api_agentownercustominstructions
+                        (user_id, organization_id, instructions, updated_by_id, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    [user.id, organization.id.hex, instructions, user.id, now, now],
+                )
+            finally:
+                cursor.execute("PRAGMA ignore_check_constraints = OFF")
+
     def test_save_requires_valid_owner_id_before_delete(self):
         personal_instructions = AgentOwnerCustomInstructions.objects.create(
             user=self.other_user,
@@ -240,6 +260,72 @@ class AgentOwnerCustomInstructionsServiceTests(TestCase):
 
         self.assertTrue(AgentOwnerCustomInstructions.objects.filter(pk=personal_instructions.pk).exists())
         self.assertTrue(AgentOwnerCustomInstructions.objects.filter(pk=org_instructions.pk).exists())
+
+    @skipUnless(connection.vendor == "sqlite", "legacy both-owner regression uses sqlite constraint override")
+    def test_owner_access_ignores_legacy_rows_with_both_owners(self):
+        self._create_legacy_both_owner_custom_instructions(
+            user=self.user,
+            organization=self.org,
+            instructions="Legacy shared instructions",
+        )
+
+        self.assertEqual(get_custom_instructions_for_organization_id(self.org.id), "")
+        self.assertEqual(get_custom_instructions_for_user_id(self.user.id), "")
+
+        save_custom_instructions_for_user_id(self.user.id, instructions="", updated_by=self.user)
+
+        self.assertFalse(
+            AgentOwnerCustomInstructions.objects.filter(user=self.user, organization=self.org).exists()
+        )
+
+    @skipUnless(connection.vendor == "sqlite", "legacy both-owner regression uses sqlite constraint override")
+    def test_save_repairs_legacy_rows_with_both_owners_before_insert(self):
+        self._create_legacy_both_owner_custom_instructions(
+            user=self.user,
+            organization=self.org,
+            instructions="Legacy personal conflict",
+        )
+
+        save_custom_instructions_for_user_id(
+            self.user.id,
+            instructions="New personal instructions",
+            updated_by=self.user,
+        )
+
+        personal_instructions = AgentOwnerCustomInstructions.objects.get(
+            user=self.user,
+            organization__isnull=True,
+        )
+        self.assertEqual(personal_instructions.instructions, "New personal instructions")
+        self.assertFalse(
+            AgentOwnerCustomInstructions.objects.filter(user=self.user, organization=self.org).exists()
+        )
+
+        other_org = Organization.objects.create(
+            name="Other Instructions Org",
+            slug="other-instructions-org",
+            created_by=self.user,
+        )
+        self._create_legacy_both_owner_custom_instructions(
+            user=self.other_user,
+            organization=other_org,
+            instructions="Legacy organization conflict",
+        )
+
+        save_custom_instructions_for_organization_id(
+            other_org.id,
+            instructions="New organization instructions",
+            updated_by=self.user,
+        )
+
+        organization_instructions = AgentOwnerCustomInstructions.objects.get(
+            user__isnull=True,
+            organization=other_org,
+        )
+        self.assertEqual(organization_instructions.instructions, "New organization instructions")
+        self.assertFalse(
+            AgentOwnerCustomInstructions.objects.filter(user=self.other_user, organization=other_org).exists()
+        )
 
 
 @tag("batch_console_api")
