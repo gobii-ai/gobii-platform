@@ -125,7 +125,6 @@ from api.models import (
     get_agent_contact_counts,
 )
 from console.mixins import AgentOwnerContextOverrideMixin, ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
-from observability import traced
 from pages.account_info_cache import invalidate_account_info_cache
 
 from .context_helpers import build_console_context

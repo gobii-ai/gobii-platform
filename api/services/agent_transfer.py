@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import Optional, Tuple
+from typing import Optional
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError

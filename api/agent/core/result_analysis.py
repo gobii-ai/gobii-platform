@@ -16,7 +16,7 @@ import re
 import urllib.parse
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import json5
 from bs4 import BeautifulSoup

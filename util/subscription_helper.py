@@ -3,7 +3,6 @@ from django.db.models import IntegerField, Value
 from django.db.models.expressions import OuterRef, Subquery
 from django.db.models.functions import Coalesce
 from django.db.models.query_utils import Q
-from django.db.utils import IntegrityError
 from djstripe.models import Customer
 
 from constants.grant_types import GrantTypeChoices

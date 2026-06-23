@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 """Django's command-line utility for administrative tasks."""
-import sys, os, pathlib
+import sys, os
 
-from observability import GobiiService
 
 
 def main() -> None:

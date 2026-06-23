@@ -1,4 +1,3 @@
-from datetime import timedelta
 from dateutil.relativedelta import relativedelta     # pip install python-dateutil
 from django.core.management.base import BaseCommand
 from django.utils import timezone

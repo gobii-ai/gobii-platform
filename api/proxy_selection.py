@@ -59,7 +59,7 @@ def select_proxy(
     Raises:
         RuntimeError: When no proxy is available and DEBUG=False
     """
-    from .models import BrowserUseAgent, ProxyServer
+    from .models import BrowserUseAgent
     
     context_desc = f" for {context_id}" if context_id else ""
     

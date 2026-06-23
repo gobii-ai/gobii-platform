@@ -1,10 +1,8 @@
 """
 Management command to setup periodic Decodo IP block sync.
 """
-import os
 from celery.schedules import crontab
 from django.core.management.base import BaseCommand
-from django.conf import settings
 from redbeat import RedBeatScheduler
 from config.redis_client import get_redis_client
 

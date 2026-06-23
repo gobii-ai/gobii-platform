@@ -26,7 +26,7 @@ from django.conf import settings
 from django.utils import timezone
 from opentelemetry import trace
 
-from api.models import AgentEmailAccount, CommsChannel, PersistentAgentCommsEndpoint
+from api.models import AgentEmailAccount, CommsChannel
 from api.agent.comms.imap_adapter import ImapEmailAdapter, ImapParsedContext
 from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_identity_and_token
 from api.agent.comms.message_service import ingest_inbound_message

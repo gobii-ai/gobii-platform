@@ -5,7 +5,6 @@ from typing import Tuple, Optional
 
 import requests
 from django.contrib.sites.models import Site
-from django.urls import reverse
 from django.conf import settings
 from django.utils import timezone
 

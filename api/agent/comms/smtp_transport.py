@@ -8,7 +8,6 @@ from typing import Any, Sequence
 from opentelemetry import trace
 import logging
 
-from django.conf import settings
 
 from api.models import AgentEmailAccount
 from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_identity_and_token

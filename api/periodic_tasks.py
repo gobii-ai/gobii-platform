@@ -108,7 +108,6 @@ def clean_up_old_decodo_schedules():
     """Clean up old per-block schedule entries from Redis Beat."""
     logger.info("Starting cleanup of old Decodo IP block sync schedules")
     
-    import redis
     from config.redis_client import get_redis_client
     
     try:

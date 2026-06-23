@@ -26,7 +26,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 
 import requests
-import litellm  # re-exported for tests expecting to patch LiteLLM directly
 
 import httpx
 from fastmcp import Client

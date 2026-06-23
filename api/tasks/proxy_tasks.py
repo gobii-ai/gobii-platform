@@ -403,7 +403,6 @@ def proxy_health_check_nightly(self):
     Selects a random subset of active proxies and performs health checks.
     Excludes proxies that have been tested in the past 48 hours.
     """
-    import random
     with traced("PROXY Nightly Health Check"):
         logger.info("Starting nightly proxy health check")
 
@@ -513,8 +512,6 @@ def _perform_proxy_health_check(proxy_server: 'ProxyServer') -> 'ProxyHealthChec
         ProxyHealthCheckResult: Result of the health check
     """
     from ..models import ProxyHealthCheckSpec, ProxyHealthCheckResult, BrowserUseAgentTask
-    from django.contrib.auth import get_user_model
-    from celery import current_task
     with traced("PROXY Perform Health Check", proxy_id=str(proxy_server.id)):
         logger.info(f"Performing health check for proxy {proxy_server.host}:{proxy_server.port}")
 

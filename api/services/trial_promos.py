@@ -11,7 +11,6 @@ from api.models import (
     TrialPromoRedemption,
     TrialPromoRedemptionStatusChoices,
     UserTrialEligibility,
-    UserTrialEligibilityAutoStatusChoices,
     UserTrialEligibilityManualActionChoices,
 )
 from api.services.email_verification import has_verified_email_address

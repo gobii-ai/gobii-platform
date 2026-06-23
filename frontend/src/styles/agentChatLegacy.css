@@ -1,13 +1,3 @@
-/* ==========================================================================
-   Agent Chat - Canvas Design System
-   Inspired by Gobii recruiting solutions aesthetic
-   ========================================================================== */
-
-/* ==========================================================================
-   Canvas Background - Flat, paper-like, beautiful
-   Container scrolling architecture for mobile viewport stability
-   ========================================================================== */
-
 .agent-chat-page {
   --agent-chat-sidebar-width: 18rem;
   --agent-chat-sidebar-width-collapsed: 5rem;
@@ -20,15 +10,15 @@
     linear-gradient(175deg, #401B68 0%, #1c0f42 55%, #170d38 100%);
   --agent-chat-grain-texture: none;
   position: relative;
-  /* Use dvh for dynamic mobile viewport (adjusts with address bar) */
+
   height: 100vh;
   height: 100dvh;
-  /* Flex container for banner + content + composer */
+
   display: flex;
   flex-direction: column;
   isolation: isolate;
-  overflow: hidden; /* Prevent body scroll - timeline scrolls internally */
-  /* Super-light purple gradient background */
+  overflow: hidden;
+
   background:
     radial-gradient(ellipse 120% 80% at 20% 10%, rgba(139, 92, 246, 0.06) 0%, transparent 60%),
     radial-gradient(ellipse 100% 70% at 85% 20%, rgba(124, 58, 237, 0.05) 0%, transparent 55%),
@@ -36,11 +26,10 @@
     linear-gradient(to bottom, #fbf9ff 0%, #f9f7fe 100%);
 }
 
-/* Ambient shimmer — visible only while the agent is actively processing */
 .agent-chat-page::after {
   content: '';
   position: absolute;
-  /* Oversize so the drift translate doesn't expose edges */
+
   inset: -15%;
   z-index: 0;
   pointer-events: none;
@@ -104,10 +93,6 @@
     display: none;
   }
 }
-
-/* ==========================================================================
-   Banner - Glassmorphic header bar
-   ========================================================================== */
 
 .banner-shell {
   position: fixed;
@@ -394,7 +379,6 @@
   }
 }
 
-/* Subtle glass edge highlight along the top */
 .banner::before {
   content: '';
   position: absolute;
@@ -407,7 +391,6 @@
   z-index: 1;
 }
 
-/* Left section: Avatar + Info */
 .banner-left {
   display: flex;
   align-items: center;
@@ -687,7 +670,6 @@
   line-height: 1.25;
 }
 
-/* Connection badge - glassmorphic */
 .banner-connection {
   display: inline-flex;
   align-items: center;
@@ -764,7 +746,6 @@
 
 }
 
-/* Agent contact icons - inline with name */
 .banner-contact-icons {
   display: inline-flex;
   align-items: center;
@@ -805,7 +786,6 @@
   white-space: nowrap;
 }
 
-/* Hide text on smaller screens, show only icons */
 @media (max-width: 900px) {
   .banner-contact-text {
     display: none;
@@ -820,7 +800,6 @@
   }
 }
 
-/* Current task row */
 .banner-task {
   display: flex;
   align-items: center;
@@ -874,7 +853,6 @@
   line-height: 1.2;
 }
 
-/* Right section: Close button */
 .banner-right {
   display: flex;
   align-items: center;
@@ -988,7 +966,6 @@
   transform: scale(0.95);
 }
 
-/* Upgrade button */
 .banner-upgrade {
   position: relative;
   display: inline-flex;
@@ -1072,7 +1049,6 @@
   }
 }
 
-/* Mobile */
 @media (max-width: 480px) {
   .banner {
     padding: 0.5rem 0.875rem;
@@ -1121,7 +1097,6 @@
   }
 }
 
-/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .banner,
   .banner-task,
@@ -1141,21 +1116,16 @@
   }
 }
 
-/* ==========================================================================
-   Main Content Area - Container Scrolling Architecture
-   ========================================================================== */
-
-/* Main content flex child - fills remaining space after banner */
 .agent-chat-main {
   --agent-chat-sidebar-current-width: var(--agent-chat-sidebar-width, 18rem);
   --agent-chat-plan-panel-width: min(18.5rem, calc(100vw - 2rem));
   flex: 1;
-  min-height: 0; /* Critical for flex child to shrink and enable overflow */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   position: relative;
-  /* Sidebar offset */
+
   padding-left: var(--agent-chat-sidebar-current-width);
   transition: padding-left 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -1548,7 +1518,6 @@
   }
 }
 
-/* Scrollable timeline container - this is what scrolls, not the body */
 #timeline-shell {
   flex: 1;
   min-height: 0;
@@ -1565,15 +1534,12 @@
   background: transparent;
 }
 
-/* Spacer that grows to push content to bottom when there's extra space */
-/* Also provides padding for the fixed banner */
 #timeline-spacer {
   flex: 1 1 auto;
   min-height: calc(var(--agent-chat-banner-height, 0px) + 0.75rem);
   background: transparent;
 }
 
-/* Inner container for max-width constraint - doesn't grow */
 #timeline-inner {
   flex: 0 0 auto;
   width: 100%;
@@ -1626,12 +1592,10 @@
   margin: 0;
 }
 
-/* Extra padding when jump button is visible */
 #timeline-events[data-has-jump-button="true"] {
   padding-bottom: 3rem;
 }
 
-/* Ensure content above progress bar isn't cut off */
 #timeline-events[data-has-working-panel="true"] {
   scroll-padding-bottom: 1rem;
 }
@@ -1641,11 +1605,6 @@
   width: 0;
   height: 0;
 }
-
-
-/* ==========================================================================
-   Composer - Flex child at bottom (container scrolling architecture)
-   ========================================================================== */
 
 .composer-shell {
   position: absolute;
@@ -2144,10 +2103,6 @@
   border-color: rgba(99, 102, 241, 0.3);
 }
 
-/* ==========================================================================
-   Composer Working Panel (integrated)
-   ========================================================================== */
-
 .composer-working-panel {
   position: relative;
   display: flex;
@@ -2206,7 +2161,6 @@
   background: rgba(14, 165, 233, 0.13);
 }
 
-/* Header row - clickable to toggle expand/collapse */
 .composer-working-header-row {
   position: relative;
   z-index: 1;
@@ -2427,12 +2381,12 @@
   height: 7.5rem;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .composer-working-content::-webkit-scrollbar {
-  display: none; /* Chrome/Safari/Opera */
+  display: none;
 }
 
 .composer-working-panel[data-has-pending-actions="true"] .composer-working-content {
@@ -2551,7 +2505,6 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* v2 insight card in composer - transparent bg, wrapper gets gradient */
 .composer-working-insight .insight-card-v2 {
   background: transparent;
   border-radius: 0;
@@ -2561,7 +2514,6 @@
   display: none;
 }
 
-/* Colored pill tabs for composer insights - in header row */
 .composer-insight-tabs {
   flex-shrink: 1;
   min-width: 0;
@@ -2735,7 +2687,6 @@
   background: rgba(255, 255, 255, 0.22);
 }
 
-/* Countdown progress indicator */
 .composer-insight-tab-progress {
   position: absolute;
   top: 0;
@@ -2893,15 +2844,10 @@
   }
 }
 
-/* Connect working panel to input surface */
 .composer-shell[data-panel-visible="true"] .composer-surface > form > .composer-input-surface {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
-
-/* ==========================================================================
-   Drop Overlay
-   ========================================================================== */
 
 .agent-chat-drop-overlay {
   position: fixed;
@@ -2936,10 +2882,6 @@
     0 4px 16px rgba(99, 102, 241, 0.2),
     0 12px 40px rgba(15, 23, 42, 0.25);
 }
-
-/* ==========================================================================
-   Jump to Latest Button - Fixed at bottom of viewport
-   ========================================================================== */
 
 .jump-to-latest {
   position: fixed;
@@ -3030,10 +2972,6 @@
   50% { transform: scale(1.15); opacity: 0.85; }
 }
 
-/* ==========================================================================
-   Timeline Load Controls
-   ========================================================================== */
-
 .timeline-load-control {
   display: flex;
   justify-content: center;
@@ -3110,18 +3048,12 @@
   letter-spacing: 0.015em;
 }
 
-/* Timeline stack spacing is controlled by --timeline-row-gap. */
-
 #timeline-load-newer[hidden] {
   display: none !important;
   margin: 0;
   padding: 0;
   border: 0;
 }
-
-/* ==========================================================================
-   Chat Events & Bubbles - Canvas objects
-   ========================================================================== */
 
 .chat-event {
   display: flex;
@@ -3278,7 +3210,6 @@
   transform: none;
   box-shadow: none;
 }
-
 
 .hard-limit-callout-upsell {
   display: inline-flex;
@@ -3556,7 +3487,6 @@
   align-items: flex-start;
 }
 
-/* Chat bubble - Canvas object style */
 .chat-bubble {
   max-width: 100%;
   border-radius: 1rem;
@@ -3598,7 +3528,6 @@
   word-break: break-word;
 }
 
-/* Table styling */
 .chat-content table {
   width: 100%;
   border-collapse: collapse;
@@ -3637,7 +3566,6 @@
   color: #334155;
 }
 
-/* User messages - subtle accent, right-aligned */
 .chat-bubble--user {
   --user-author-color: #6366f1;
   --user-content-color: #334155;
@@ -3654,14 +3582,12 @@
   border-color: rgba(199, 210, 254, 0.5);
 }
 
-/* Agent messages */
 .chat-bubble--agent {
   background: rgba(255, 255, 255, 0.9);
   color: #1e293b;
   border-color: rgba(255, 255, 255, 0.7);
 }
 
-/* Peer messages */
 .chat-bubble--peer-out {
   background: rgba(250, 245, 255, 0.9);
   color: #1e293b;
@@ -3674,7 +3600,6 @@
   border: 1px dashed rgba(212, 212, 216, 0.6);
 }
 
-/* Chat author styling */
 .chat-author {
   font-size: 0.75rem;
   font-weight: 600;
@@ -3724,7 +3649,6 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
-/* Chat timestamp (inline in header) */
 .chat-message-meta-slot {
   position: relative;
   margin-left: auto;
@@ -3812,7 +3736,6 @@
   opacity: 0.6;
 }
 
-/* Chat attachments */
 .chat-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -3853,7 +3776,6 @@
   transform: translateY(-1px);
 }
 
-/* Mobile chat adjustments */
 @media (max-width: 768px) {
   .composer-shell {
     padding: 0 0.75rem;
@@ -3907,10 +3829,6 @@
     padding: 0.5rem 0.875rem;
   }
 }
-
-/* ==========================================================================
-   Tool Cluster - Floating tool cards
-   ========================================================================== */
 
 .tool-cluster {
   background: transparent;
@@ -4389,8 +4307,6 @@
   word-break: break-word;
 }
 
-/* ── Chart / image thumbnail grid ── */
-
 .tool-cluster-live-preview__chart-grid {
   display: grid;
   gap: 0.5rem;
@@ -4408,8 +4324,6 @@
 .tool-cluster-live-preview__chart-grid[data-count="4"] {
   grid-template-columns: 1fr 1fr;
 }
-
-/* ── Card ── */
 
 .tool-cluster-live-preview__chart-thumb {
   all: unset;
@@ -4432,8 +4346,6 @@
     0 2px 6px rgba(15, 23, 42, 0.05),
     0 6px 20px rgba(99, 102, 241, 0.08);
 }
-
-/* ── Header ── */
 
 .tool-cluster-live-preview__chart-thumb-header {
   display: flex;
@@ -4483,8 +4395,6 @@
   color: rgba(190, 24, 93, 0.58);
 }
 
-/* ── Image ── */
-
 .tool-cluster-live-preview__chart-thumb-img-wrap {
   position: relative;
   display: flex;
@@ -4515,8 +4425,6 @@
 .tool-cluster-live-preview__chart-thumb[data-single="false"] .tool-cluster-live-preview__chart-thumb-img {
   max-height: 10rem;
 }
-
-/* ── Title ── */
 
 .tool-cluster-live-preview__chart-thumb-title {
   padding: 0.3rem 0.55rem 0.35rem;
@@ -4971,7 +4879,6 @@
   color: #334155;
 }
 
-/* Tool cluster timeline overlay */
 .tool-cluster-timeline-overlay {
   position: fixed;
   inset: 0;
@@ -5310,7 +5217,6 @@
   color: #334155;
 }
 
-/* Tool search callouts */
 .tool-search-callout {
   display: flex;
   align-items: center;
@@ -5482,7 +5388,6 @@
   background: rgba(99, 102, 241, 0.4);
 }
 
-/* External Resources */
 .external-resources-list {
   list-style: none;
   margin: 0;
@@ -5616,7 +5521,6 @@
   line-height: 1.45;
 }
 
-/* Schedule Cards */
 .schedule-card {
   display: flex;
   gap: 0.85rem;
@@ -5713,7 +5617,6 @@
   padding: 0.15rem 0.4rem;
 }
 
-/* Schedule Hero Card */
 .schedule-hero {
   display: flex;
   align-items: center;
@@ -5801,10 +5704,6 @@
   color: rgba(100, 116, 139, 0.25);
 }
 
-/* ==========================================================================
-   Shared thinking animations
-   ========================================================================== */
-
 @keyframes thinkingWindowGlow {
   0%, 100% {
     box-shadow:
@@ -5837,10 +5736,6 @@
   }
 }
 
-/* ==========================================================================
-   Streaming Reply Card
-   ========================================================================== */
-
 .streaming-reply-event {
   align-items: flex-start;
 }
@@ -5865,10 +5760,6 @@
   50% { opacity: 0.3; }
 }
 
-/* Timeline stack spacing is controlled by --timeline-row-gap. */
-
-/* ── Streaming Thinking Card ─────────────────────────────────────── */
-
 .streaming-thinking-card {
   position: relative;
   border-radius: 0.75rem;
@@ -5890,7 +5781,6 @@
   animation: thinkingWindowGlow 3s ease-in-out infinite;
 }
 
-/* Subtle top-edge highlight */
 .streaming-thinking-card::before {
   content: '';
   position: absolute;
@@ -5990,10 +5880,6 @@
   }
 }
 
-/* ==========================================================================
-   Chat Sidebar - Glassmorphic navigation
-   ========================================================================== */
-
 .chat-sidebar {
   --sidebar-bg: #1e1145;
   --agent-chat-sidebar-current-width: var(--agent-chat-sidebar-width, 18rem);
@@ -6025,7 +5911,6 @@
   mix-blend-mode: screen;
 }
 
-/* Subtle inner highlight along the right edge */
 .chat-sidebar::after {
   content: '';
   position: absolute;
@@ -6606,7 +6491,6 @@
   width: 100%;
 }
 
-/* Dark theme overrides for context switcher inside sidebar */
 .chat-sidebar .chat-context-switcher__trigger {
   border-color: rgba(167, 139, 250, 0.25);
   background: rgba(167, 139, 250, 0.12);
@@ -6917,7 +6801,6 @@
   color: #ffffff;
 }
 
-
 .chat-sidebar-agent-desc {
   font-size: 0.6875rem;
   font-weight: 600;
@@ -6973,7 +6856,6 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
-/* Create agent button */
 .chat-sidebar-create-btn {
   display: flex;
   align-items: center;
@@ -7083,7 +6965,6 @@
   background: transparent;
 }
 
-/* Drawer variant of create button */
 .chat-sidebar-create-btn--drawer {
   padding: 0.875rem 1rem;
   margin-bottom: 0.375rem;
@@ -7129,7 +7010,6 @@
   color: rgba(79, 70, 229, 0.55);
 }
 
-/* Sidebar search */
 .chat-sidebar-controls {
   display: flex;
   flex-direction: column;
@@ -8044,10 +7924,6 @@
   }
 }
 
-/* ==========================================================================
-   Mobile Agent FAB & Drawer
-   ========================================================================== */
-
 .agent-fab {
   --_accent: var(--agent-fab-accent, #6366f1);
   position: fixed;
@@ -8122,7 +7998,6 @@
   line-height: 1;
 }
 
-/* Small badge in the bottom-right showing the switch icon */
 .agent-fab-switch-badge {
   position: absolute;
   bottom: -0.125rem;
@@ -8144,8 +8019,6 @@
   height: 0.5625rem;
 }
 
-/* Mobile sheet */
-/* Drawer search */
 .agent-drawer-search {
   position: relative;
   display: flex;
@@ -8846,10 +8719,6 @@
   color: #ffffff;
 }
 
-/* ==========================================================================
-   Agent Chat Settings Panel
-   ========================================================================== */
-
 .agent-settings-modal-body {
   padding-right: 0;
 }
@@ -8871,7 +8740,6 @@
   justify-content: space-between;
   gap: 1rem;
 }
-
 
 .agent-settings-title {
   font-size: 1.05rem;
@@ -9134,7 +9002,6 @@
   color: #0f172a;
 }
 
-/* Embedded billing inside the gallery shell */
 .billing-screen--embedded {
   color-scheme: dark;
   color: rgba(248, 245, 255, 0.94);
@@ -9226,7 +9093,6 @@
   accent-color: #8b5cf6;
 }
 
-/* Embedded profile inside the gallery shell */
 .profile-screen {
   display: grid;
   gap: 1rem;

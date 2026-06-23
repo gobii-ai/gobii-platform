@@ -20,7 +20,6 @@ from .models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     LinkShortener,
-    Organization,
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,

@@ -1,5 +1,4 @@
 import logging
-from typing import Iterable
 
 from django.conf import settings
 from django.db import transaction

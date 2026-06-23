@@ -17,7 +17,6 @@ from typing import Dict, List, Tuple, Any, Optional
 from django.apps import apps
 from django.core.exceptions import AppRegistryNotReady
 from django.core.cache import cache
-from django.db import connection
 from django.db.models import Q
 from django.db.utils import DatabaseError
 from django.conf import settings

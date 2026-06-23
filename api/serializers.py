@@ -2,7 +2,6 @@
 import uuid
 from urllib.parse import urlparse
 
-from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
@@ -27,7 +26,6 @@ from .models import (
 )
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
 from util.analytics import AnalyticsSource
-from util.subscription_helper import get_owner_plan
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     can_user_use_personal_agents_and_api,
@@ -239,7 +237,6 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
             return value
         
         try:
-            from .domain_validation import DomainPatternValidator
             from .encryption import SecretsEncryption
             from constants.security import SecretLimits, ValidationMessages
             

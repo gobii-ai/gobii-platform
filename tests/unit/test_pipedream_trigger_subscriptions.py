@@ -27,10 +27,12 @@ from api.services.pipedream_trigger_subscriptions import (
     disable_subscription,
     discover_targets,
     ensure_subscriptions,
-    process_discord_inbound_debounce,
     schedule_discord_inbound_processing,
 )
-from api.services.discord_messages import DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS
+from api.services.discord_messages import (
+    DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS,
+    process_discord_inbound_debounce,
+)
 
 
 def _response(payload=None, status_code=200, content=b"", headers=None):

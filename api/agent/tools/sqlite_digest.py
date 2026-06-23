@@ -3,7 +3,7 @@ import math
 import re
 import sqlite3
 import statistics
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional

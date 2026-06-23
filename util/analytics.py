@@ -6,7 +6,6 @@ import segment.analytics as analytics
 from enum import StrEnum
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db.models.fields import DateTimeField
 
 from observability import traced, trace
 

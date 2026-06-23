@@ -25,7 +25,6 @@ from datetime import datetime
 from typing import Callable, List, Sequence, Union, Dict, Any, Optional
 
 from django.conf import settings
-from django.utils import timezone
 from django.db import transaction
 from django.db.models import Case, F, TextField, Value, When
 from django.db.models.functions import Concat, Length, Substr, Greatest
