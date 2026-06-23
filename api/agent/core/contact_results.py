@@ -24,6 +24,8 @@ class ContactSQLiteRecord:
     requested_at: Optional[str]
     responded_at: Optional[str]
     updated_at: Optional[str]
+    last_conversed_at: Optional[str]
+    relevance_at: Optional[str]
 
 
 def store_contacts_for_prompt(records: Sequence[ContactSQLiteRecord]) -> None:
@@ -54,6 +56,8 @@ def store_contacts_for_prompt(records: Sequence[ContactSQLiteRecord]) -> None:
                     record.requested_at,
                     record.responded_at,
                     record.updated_at,
+                    record.last_conversed_at,
+                    record.relevance_at,
                 )
             )
         if rows:
@@ -72,9 +76,11 @@ def store_contacts_for_prompt(records: Sequence[ContactSQLiteRecord]) -> None:
                     can_configure,
                     requested_at,
                     responded_at,
-                    updated_at
+                    updated_at,
+                    last_conversed_at,
+                    relevance_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 rows,
@@ -108,7 +114,9 @@ def _recreate_contacts_table(conn) -> None:
             can_configure INTEGER,
             requested_at TEXT,
             responded_at TEXT,
-            updated_at TEXT
+            updated_at TEXT,
+            last_conversed_at TEXT,
+            relevance_at TEXT
         );
         """
     )
@@ -116,5 +124,11 @@ def _recreate_contacts_table(conn) -> None:
         f"""
         CREATE INDEX "{CONTACTS_TABLE}_channel_address_idx"
         ON "{CONTACTS_TABLE}" (channel, normalized_address);
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE INDEX "{CONTACTS_TABLE}_relevance_idx"
+        ON "{CONTACTS_TABLE}" (relevance_at);
         """
     )

@@ -28,7 +28,7 @@ from opentelemetry import trace
 from billing.addons import AddonEntitlementService
 from config import settings
 from config.plans import PLAN_CONFIG
-from util.subscription_helper import get_owner_plan
+from util.subscription_helper import get_owner_plan, get_user_max_contacts_per_agent
 from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview
 from util.urls import append_context_query, build_immersive_contact_requests_path
 
@@ -122,8 +122,11 @@ from .daily_limit_mode import (
     DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT,
     is_daily_hard_limit_message_only_mode,
 )
-from .contact_results import store_contacts_for_prompt
-from .contact_snapshot import build_contacts_snapshot_records
+from .contact_results import ContactSQLiteRecord, store_contacts_for_prompt
+from .contact_snapshot import (
+    build_contact_activity_by_key,
+    build_contacts_snapshot_records,
+)
 from .file_results import FileSQLiteRecord, store_files_for_prompt
 from .message_results import MessageSQLiteRecord, store_messages_for_prompt
 from api.services.email_verification import has_verified_email
@@ -633,7 +636,7 @@ columns include message_id, seq, timestamp, channel, is_outbound, from_address, 
 # __files (special table; metadata only)
 columns: node_id, filespace_id, path, name, parent_path, mime_type, size_bytes, checksum_sha256, created_at, updated_at. recent_files → SELECT * FROM __files ORDER BY updated_at DESC LIMIT 30. metadata only; read_file gets contents.
 # __contacts (special table)
-columns: contact_id, channel, address, normalized_address, display_name, source, status, allow_inbound, allow_outbound, can_configure, requested_at, responded_at, updated_at. Safe outbound recipients require status='allowed' AND allow_outbound=1. Bulk outreach join example: lower(leads.email)=__contacts.normalized_address AND __contacts.channel='email' AND __contacts.status='allowed' AND __contacts.allow_outbound=1. Do not infer approval from local lead status or an empty pending request queue.
+columns: contact_id, channel, address, normalized_address, display_name, source, status, allow_inbound, allow_outbound, can_configure, requested_at, responded_at, updated_at, last_conversed_at, relevance_at. Safe outbound recipients require status='allowed' AND allow_outbound=1. Recent contacts → ORDER BY relevance_at DESC. Bulk outreach join example: lower(leads.email)=__contacts.normalized_address AND __contacts.channel='email' AND __contacts.status='allowed' AND __contacts.allow_outbound=1. Do not infer approval from local lead status or an empty pending request queue.
 # JSON: path from hint, field from hint
 hint PATH $.data.items → json_each(result_json, '$.data.items'). hint FIELDS name,url → json_extract(r.value, '$.name'), json_extract(r.value, '$.url'). hint absent → inspect result_text/result_json first.
 ## CSV Parsing
@@ -1121,6 +1124,15 @@ def _get_contact_usage(agent: PersistentAgent) -> int | None:
         )
         return None
 
+def _get_effective_contact_cap(agent: PersistentAgent, fallback: int) -> int:
+    try:
+        return get_user_max_contacts_per_agent(agent.user, organization=agent.organization)
+    except DatabaseError:
+        logger.warning(
+            "Failed to compute contact cap for agent %s", getattr(agent, "id", "unknown"), exc_info=True
+        )
+        return fallback
+
 def _get_dedicated_ip_count(owner) -> int:
     try:
         return DedicatedProxyService.allocated_count(owner)
@@ -1142,7 +1154,8 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     owner = agent.organization or agent.user
     _plan, plan_id, plan_name, base_contact_cap, available_plans = _get_plan_details(owner)
     task_uplift, contact_uplift, browser_task_daily_uplift, advanced_captcha_uplift = _get_addon_details(owner)
-    effective_contact_cap = base_contact_cap + contact_uplift
+    plan_addon_contact_cap = base_contact_cap + contact_uplift
+    effective_contact_cap = _get_effective_contact_cap(agent, plan_addon_contact_cap)
 
     dedicated_total = _get_dedicated_ip_count(owner)
 
@@ -1182,14 +1195,16 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     lines.append(f"Add-ons: {'; '.join(addon_parts)}." if addon_parts else "Add-ons: none active.")
 
     if effective_contact_cap or contact_uplift:
-        if is_proprietary:
+        if effective_contact_cap == plan_addon_contact_cap and is_proprietary:
             lines.append(
                 f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} included in plan + add-ons)."
             )
-        else:
+        elif effective_contact_cap == plan_addon_contact_cap:
             lines.append(
                 f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} base + add-ons)."
             )
+        else:
+            lines.append(f"Per-agent contact cap: {effective_contact_cap} (effective account limit).")
 
     contact_usage = _get_contact_usage(agent)
     if contact_usage is not None and effective_contact_cap:
@@ -1480,14 +1495,21 @@ def _render_prompt_context_once(
             cap_group.section_text("agent_email_settings", email_settings_text, weight=1, non_shrinkable=True)
 
     # Contacts block - use promptree natively
-    recent_contacts_text = _build_contacts_block(agent, important_group, span, config_authority)
-    store_contacts_for_prompt(
-        build_contacts_snapshot_records(
-            agent,
-            display_name_for_user=_build_user_display_name,
-            user_can_configure=config_authority.user_can_configure,
-        )
+    contact_activity_by_key = build_contact_activity_by_key(agent)
+    contact_records = build_contacts_snapshot_records(
+        agent,
+        display_name_for_user=_build_user_display_name,
+        user_can_configure=config_authority.user_can_configure,
+        activity_by_key=contact_activity_by_key,
     )
+    recent_contacts_text = _build_contacts_block(
+        agent,
+        important_group,
+        span,
+        config_authority,
+        contact_records,
+    )
+    store_contacts_for_prompt(contact_records)
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
@@ -2251,11 +2273,27 @@ def _build_interacted_org_member_email_map(
     return email_map
 
 
+def _recent_contact_records_for_prompt(
+    records: Sequence[ContactSQLiteRecord],
+) -> list[ContactSQLiteRecord]:
+    ordered = sorted(
+        records,
+        key=lambda record: (
+            record.channel,
+            record.normalized_address,
+            record.contact_id,
+        ),
+    )
+    ordered.sort(key=lambda record: record.relevance_at or "", reverse=True)
+    return ordered[:CONTACT_PROMPT_SAMPLE_LIMIT]
+
+
 def _build_contacts_block(
     agent: PersistentAgent,
     contacts_group,
     span,
     config_authority: _ConfigAuthorityResolver,
+    contact_records: Sequence[ContactSQLiteRecord],
 ) -> str | None:
     """Add contact information sections to the provided promptree group.
 
@@ -2534,27 +2572,36 @@ def _build_contacts_block(
 
     # Add explicitly allowed contacts from CommsAllowlistEntry (only if verified)
     if owner_email_verified:
-        allowed_contacts = list(
-            CommsAllowlistEntry.objects.filter(
-                agent=agent,
-                is_active=True,
-            )
-            .order_by("channel", "address")
-        )
+        allowed_contacts = [
+            record
+            for record in contact_records
+            if record.source == "allowlist_entry" and record.status == "allowed"
+        ]
         if allowed_contacts:
-            allowed_lines.append("Additional allowed contacts (inbound = can receive from them; outbound = can send to them):")
+            allowed_lines.append(
+                "Additional allowed contacts (inbound = can receive from them; outbound = can send to them):"
+            )
             display_contacts = allowed_contacts
             if len(allowed_contacts) > CONTACT_PROMPT_INLINE_LIMIT:
                 allowed_lines.append(
-                    f"- {len(allowed_contacts)} active contacts are available; query {CONTACTS_TABLE} for the complete exact list."
+                    f"- {len(allowed_contacts)} active contacts are available; "
+                    f"query {CONTACTS_TABLE} for the complete exact list."
                 )
-                display_contacts = allowed_contacts[:CONTACT_PROMPT_SAMPLE_LIMIT]
-                allowed_lines.append(f"Sample active contacts (first {len(display_contacts)}):")
+                display_contacts = _recent_contact_records_for_prompt(allowed_contacts)
+                allowed_lines.append(
+                    f"Sample active contacts (the {len(display_contacts)} most recently active or updated):"
+                )
             for entry in display_contacts:
-                name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
+                name_str = f" ({entry.display_name})" if entry.display_name else ""
                 config_marker = " [can configure]" if entry.can_configure else ""
-                perms = ("inbound" if entry.allow_inbound else "") + ("/" if entry.allow_inbound and entry.allow_outbound else "") + ("outbound" if entry.allow_outbound else "")
-                allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str}{config_marker} - ({perms})")
+                perms = (
+                    ("inbound" if entry.allow_inbound else "")
+                    + ("/" if entry.allow_inbound and entry.allow_outbound else "")
+                    + ("outbound" if entry.allow_outbound else "")
+                )
+                allowed_lines.append(
+                    f"- {entry.channel}: {entry.address}{name_str}{config_marker} - ({perms})"
+                )
 
         collaborators = list(
             AgentCollaborator.objects.filter(agent=agent, user__email__isnull=False)
@@ -2570,7 +2617,10 @@ def _build_contacts_block(
     if owner_email_verified:
         allowed_lines.append("Only contact people listed here or in recent conversations.")
         allowed_lines.append(
-            f"For bulk or exact recipient checks, query {CONTACTS_TABLE}; safe outbound recipients have status='allowed' AND allow_outbound=1. Do not infer approval from local lead status or an empty pending contacts queue."
+            f"For bulk or exact recipient checks, query {CONTACTS_TABLE}; safe outbound recipients "
+            "have status='allowed' AND allow_outbound=1. Use ORDER BY relevance_at DESC for "
+            "recently active or updated contacts. Do not infer approval from local lead status or "
+            "an empty pending contacts queue."
         )
         allowed_lines.append("To reach someone new, use request_contact_permission—it returns a link to share with the user.")
         allowed_lines.append(

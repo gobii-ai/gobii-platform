@@ -89,8 +89,8 @@ class ContactLimitEnforcementTests(TestCase):
         self.assertIn("Maximum 1 contacts", str(ctx.exception))
 
     @patch('util.subscription_helper.get_user_plan')
-    def test_user_billing_override_takes_precedence(self, mock_get_user_plan):
-        """Billing overrides should apply before other per-user overrides."""
+    def test_highest_per_user_contact_override_wins(self, mock_get_user_plan):
+        """Either per-user override source can raise the contact cap."""
         mock_get_user_plan.return_value = PLAN_CONFIG['startup']
 
         billing, _ = UserBilling.objects.get_or_create(user=self.user)
@@ -103,9 +103,15 @@ class ContactLimitEnforcementTests(TestCase):
         quota.save(update_fields=["max_agent_contacts"]) 
 
         limit = get_user_max_contacts_per_agent(self.user)
-        self.assertEqual(limit, 2)
+        self.assertEqual(limit, 5)
 
-        for address in ["one@example.com", "two@example.com"]:
+        for address in [
+            "one@example.com",
+            "two@example.com",
+            "three@example.com",
+            "four@example.com",
+            "five@example.com",
+        ]:
             entry = CommsAllowlistEntry(
                 agent=self.agent,
                 channel=CommsChannel.EMAIL,
@@ -115,15 +121,15 @@ class ContactLimitEnforcementTests(TestCase):
             entry.full_clean()
             entry.save()
 
-        entry3 = CommsAllowlistEntry(
+        entry6 = CommsAllowlistEntry(
             agent=self.agent,
             channel=CommsChannel.EMAIL,
-            address="three@example.com",
+            address="six@example.com",
             is_active=True,
         )
         with self.assertRaises(ValidationError) as ctx:
-            entry3.full_clean()
-        self.assertIn("Maximum 2 contacts", str(ctx.exception))
+            entry6.full_clean()
+        self.assertIn("Maximum 5 contacts", str(ctx.exception))
 
     def test_direct_creation_enforces_limit_from_billing_override(self):
         """Creating entries via .objects.create should respect billing overrides."""

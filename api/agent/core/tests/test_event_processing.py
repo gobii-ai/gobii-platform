@@ -1,12 +1,17 @@
 """Tests for event processing continuation decisions."""
 
 import json
+import os
+import sqlite3
+import tempfile
 
+from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings, tag
 from django.utils import timezone
@@ -35,13 +40,18 @@ from django.urls import reverse
 
 from api.agent.core.prompt_context import build_prompt_context, build_prompt_context_preview
 from api.agent.peer_comm import PeerMessagingError
+from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tools.peer_dm import execute_send_agent_message
 from api.agent.tools.tool_manager import _normalize_tool_params_unicode_escapes
 from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.models import (
     BrowserUseAgent,
+    CommsAllowlistEntry,
+    CommsChannel,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     PersistentAgentKanbanCard,
+    PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     SmsContactPurpose,
@@ -757,6 +767,170 @@ class DailyLimitPromptContextTests(TestCase):
         self.assertIn("Only message and sleep tools are available until the user raises the limit", content)
         self.assertIn("sleep_until_next_trigger", content)
         self.assertIn("Once the user raises the limit, you can continue the task.", content)
+
+
+@tag("batch_event_processing")
+class ContactPromptTruncationTests(TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user(
+            username="contact-prompt@example.com",
+            email="contact-prompt@example.com",
+            password="secret",
+        )
+        EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="ContactPromptBA")
+        self.agent = PersistentAgent.objects.create(
+            user=user,
+            name="Contact Prompt Agent",
+            charter="Handle outreach",
+            browser_use_agent=browser_agent,
+        )
+
+    def _render_prompt_content(self, db_path):
+        token = set_sqlite_db_path(db_path)
+        try:
+            with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+                "api.agent.core.prompt_context.ensure_comms_compacted"
+            ), patch(
+                "api.agent.core.prompt_context.get_llm_config_with_failover",
+                return_value=[("endpoint", "openai/gpt-4o-mini", {})],
+            ):
+                context, _, _ = build_prompt_context(self.agent)
+        finally:
+            reset_sqlite_db_path(token)
+
+        user_message = next(message for message in context if message["role"] == "user")
+        return user_message["content"]
+
+    def test_large_allowlist_prompt_samples_recent_activity_and_keeps_sqlite_full(self):
+        old_time = timezone.now() - timedelta(days=30)
+        updated_time = timezone.now() - timedelta(hours=2)
+        conversation_time = timezone.now() - timedelta(minutes=5)
+
+        old_contacts = [
+            CommsAllowlistEntry(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address=f"old-{index:02d}@example.com",
+                is_active=True,
+                allow_inbound=True,
+                allow_outbound=True,
+            )
+            for index in range(30)
+        ]
+        recent_conversation = CommsAllowlistEntry(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="recent-conversation@example.com",
+            is_active=True,
+            allow_inbound=True,
+            allow_outbound=True,
+        )
+        newly_updated = CommsAllowlistEntry(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="newly-updated@example.com",
+            is_active=True,
+            allow_inbound=True,
+            allow_outbound=True,
+        )
+        CommsAllowlistEntry.objects.bulk_create(
+            [*old_contacts, recent_conversation, newly_updated]
+        )
+        CommsAllowlistEntry.objects.filter(agent=self.agent).update(
+            created_at=old_time,
+            updated_at=old_time,
+        )
+        CommsAllowlistEntry.objects.filter(address="newly-updated@example.com").update(
+            updated_at=updated_time
+        )
+
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.com",
+        )
+        contact_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="recent-conversation@example.com",
+        )
+        message = PersistentAgentMessage.objects.create(
+            from_endpoint=agent_endpoint,
+            to_endpoint=contact_endpoint,
+            is_outbound=True,
+            body="Recent outreach",
+        )
+        PersistentAgentMessage.objects.filter(id=message.id).update(timestamp=conversation_time)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "state.db")
+            content = self._render_prompt_content(db_path)
+
+            self.assertIn("32 active contacts are available; query __contacts", content)
+            self.assertIn("most recently active or updated", content)
+            self.assertIn("ORDER BY relevance_at DESC", content)
+            sample_section = content.split("Sample active contacts", 1)[1].split(
+                "Only contact people", 1
+            )[0]
+            self.assertEqual(sample_section.count("- email:"), 10)
+            self.assertIn("recent-conversation@example.com", sample_section)
+            self.assertIn("newly-updated@example.com", sample_section)
+            self.assertLess(
+                sample_section.index("recent-conversation@example.com"),
+                sample_section.index("newly-updated@example.com"),
+            )
+            self.assertNotIn("old-15@example.com", sample_section)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT last_conversed_at, relevance_at
+                    FROM "__contacts"
+                    WHERE normalized_address = 'recent-conversation@example.com';
+                    """
+                )
+                recent_row = cur.fetchone()
+                self.assertIsNotNone(recent_row)
+                self.assertEqual(recent_row[0], conversation_time.isoformat())
+                self.assertEqual(recent_row[1], conversation_time.isoformat())
+
+                cur.execute(
+                    """
+                    SELECT relevance_at
+                    FROM "__contacts"
+                    WHERE normalized_address = 'old-15@example.com';
+                    """
+                )
+                omitted_row = cur.fetchone()
+                self.assertIsNotNone(omitted_row)
+                self.assertEqual(omitted_row[0], old_time.isoformat())
+            finally:
+                conn.close()
+
+    def test_small_allowlist_stays_fully_inline(self):
+        CommsAllowlistEntry.objects.bulk_create(
+            [
+                CommsAllowlistEntry(
+                    agent=self.agent,
+                    channel=CommsChannel.EMAIL,
+                    address=f"small-{index:02d}@example.com",
+                    is_active=True,
+                    allow_inbound=True,
+                    allow_outbound=True,
+                )
+                for index in range(3)
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            content = self._render_prompt_content(os.path.join(tmp, "state.db"))
+
+        self.assertNotIn("active contacts are available; query __contacts", content)
+        self.assertIn("small-00@example.com", content)
+        self.assertIn("small-01@example.com", content)
+        self.assertIn("small-02@example.com", content)
 
 
 @tag("batch_event_processing")

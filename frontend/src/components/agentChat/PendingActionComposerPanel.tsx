@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { KeyRound, Mail, MessageSquareQuote, Zap } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
+import type { PendingActionMutationResult } from '../../api/agentChat'
 import type { PendingActionRequest } from '../../types/agentChat'
 import { HumanInputComposerPanel } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
@@ -40,7 +41,7 @@ type PendingActionComposerPanelProps = {
       canConfigure: boolean
       smsContactPermissionAttested?: boolean
     }>
-  ) => Promise<void>
+  ) => Promise<PendingActionMutationResult | void>
   onViewAllContactRequests?: () => void
   compact?: boolean
 }
@@ -140,6 +141,7 @@ export function PendingActionComposerPanel({
   const [contactDrafts, setContactDrafts] = useState<Record<string, PendingContactDraft>>({})
   const [busyContacts, setBusyContacts] = useState(false)
   const [contactError, setContactError] = useState<string | null>(null)
+  const [contactNotice, setContactNotice] = useState<string | null>(null)
 
   const activeAction = actions.find((action) => action.id === activeActionId) ?? actions[0] ?? null
   const orderedHumanInputRequests = activeAction?.kind === 'human_input'
@@ -273,8 +275,9 @@ export function PendingActionComposerPanel({
     }
     setBusyContacts(true)
     setContactError(null)
+    setContactNotice(null)
     try {
-      await onResolveContactRequests([
+      const result = await onResolveContactRequests([
         {
           requestId: request.id,
           decision,
@@ -284,6 +287,7 @@ export function PendingActionComposerPanel({
           smsContactPermissionAttested: draft.smsContactPermissionAttested,
         },
       ])
+      setContactNotice(result?.message ?? null)
     } catch (error) {
       setContactError(parseInlineError(error))
     } finally {
@@ -381,6 +385,7 @@ export function PendingActionComposerPanel({
                 disabled={disabled || !onResolveContactRequests}
                 busy={busyContacts}
                 error={contactError}
+                notice={contactNotice}
                 contactDrafts={contactDrafts}
                 showReviewSummary={!compact}
                 onContactDraftChange={(requestId, nextDraft) => {

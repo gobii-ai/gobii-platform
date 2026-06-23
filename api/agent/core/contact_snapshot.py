@@ -1,3 +1,4 @@
+from datetime import datetime
 from email.utils import parseaddr
 from typing import Callable, List
 
@@ -11,12 +12,16 @@ from ...models import (
     CommsChannel,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentMessage,
     UserPhoneNumber,
 )
 from .contact_results import ContactSQLiteRecord
 
 DisplayNameFn = Callable[[object], str | None]
 CanConfigureFn = Callable[[int | None], bool]
+ContactKey = tuple[str, str]
+ContactActivityMap = dict[ContactKey, datetime]
+CONTACT_ACTIVITY_MESSAGE_SCAN_LIMIT = 1_000
 
 
 def normalize_contact_address(channel: str, address: str) -> str:
@@ -26,14 +31,75 @@ def normalize_contact_address(channel: str, address: str) -> str:
     return raw
 
 
+def _activity_for(
+    activity_by_key: ContactActivityMap,
+    channel: str,
+    address: str,
+) -> datetime | None:
+    return activity_by_key.get((channel, normalize_contact_address(channel, address)))
+
+
+def build_contact_activity_by_key(agent: PersistentAgent) -> ContactActivityMap:
+    activity: ContactActivityMap = {}
+
+    def merge(
+        channel: str | None,
+        address: str | None,
+        last_conversed_at: datetime | None,
+    ) -> None:
+        if not channel or not address or last_conversed_at is None:
+            return
+        normalized_address = normalize_contact_address(channel, address)
+        if not normalized_address:
+            return
+        key = (channel, normalized_address)
+        existing = activity.get(key)
+        if existing is None or last_conversed_at > existing:
+            activity[key] = last_conversed_at
+
+    messages = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent)
+        .select_related("from_endpoint", "to_endpoint", "conversation")
+        .prefetch_related("cc_endpoints")
+        .order_by("-timestamp")
+    )[:CONTACT_ACTIVITY_MESSAGE_SCAN_LIMIT]
+    for message in messages:
+        if message.is_outbound:
+            if message.to_endpoint:
+                merge(
+                    message.to_endpoint.channel,
+                    message.to_endpoint.address,
+                    message.timestamp,
+                )
+        elif message.from_endpoint:
+            merge(
+                message.from_endpoint.channel,
+                message.from_endpoint.address,
+                message.timestamp,
+            )
+        if message.conversation:
+            merge(
+                message.conversation.channel,
+                message.conversation.address,
+                message.timestamp,
+            )
+        for cc_endpoint in message.cc_endpoints.all():
+            merge(cc_endpoint.channel, cc_endpoint.address, message.timestamp)
+
+    return activity
+
+
 def build_contacts_snapshot_records(
     agent: PersistentAgent,
     *,
     display_name_for_user: DisplayNameFn,
     user_can_configure: CanConfigureFn,
+    activity_by_key: ContactActivityMap | None = None,
 ) -> List[ContactSQLiteRecord]:
     allowed_records: dict[tuple[str, str], ContactSQLiteRecord] = {}
     owner_email_verified = has_verified_email(agent.user) if agent.user else False
+    if activity_by_key is None:
+        activity_by_key = build_contact_activity_by_key(agent)
 
     def add_allowed(record: ContactSQLiteRecord) -> None:
         if record.normalized_address:
@@ -51,6 +117,11 @@ def build_contacts_snapshot_records(
                 allow_inbound=True,
                 allow_outbound=True,
                 can_configure=user_can_configure(agent.user_id),
+                last_conversed_at=_activity_for(
+                    activity_by_key,
+                    CommsChannel.EMAIL,
+                    agent.user.email,
+                ),
             )
         )
         owner_phones = UserPhoneNumber.objects.filter(
@@ -69,6 +140,11 @@ def build_contacts_snapshot_records(
                     allow_inbound=True,
                     allow_outbound=True,
                     can_configure=user_can_configure(agent.user_id),
+                    last_conversed_at=_activity_for(
+                        activity_by_key,
+                        CommsChannel.SMS,
+                        phone.phone_number,
+                    ),
                 )
             )
 
@@ -97,6 +173,11 @@ def build_contacts_snapshot_records(
                     allow_inbound=True,
                     allow_outbound=True,
                     can_configure=membership.role in ORG_AGENT_CONFIG_AUTHORITY_ROLES,
+                    last_conversed_at=_activity_for(
+                        activity_by_key,
+                        CommsChannel.EMAIL,
+                        membership.user.email,
+                    ),
                 )
             )
 
@@ -120,6 +201,11 @@ def build_contacts_snapshot_records(
                     allow_inbound=True,
                     allow_outbound=False,
                     can_configure=user_can_configure(phone.user_id),
+                    last_conversed_at=_activity_for(
+                        activity_by_key,
+                        CommsChannel.SMS,
+                        phone.phone_number,
+                    ),
                 )
             )
 
@@ -143,6 +229,11 @@ def build_contacts_snapshot_records(
                     allow_outbound=True,
                     can_configure=user_can_configure(collaborator.user_id),
                     updated_at=collaborator.created_at.isoformat() if collaborator.created_at else None,
+                    last_conversed_at=_activity_for(
+                        activity_by_key,
+                        CommsChannel.EMAIL,
+                        collaborator.user.email,
+                    ),
                 )
             )
 
@@ -161,7 +252,13 @@ def build_contacts_snapshot_records(
                     allow_inbound=entry.allow_inbound,
                     allow_outbound=entry.allow_outbound,
                     can_configure=entry.can_configure,
+                    created_at=entry.created_at.isoformat() if entry.created_at else None,
                     updated_at=entry.updated_at.isoformat() if entry.updated_at else None,
+                    last_conversed_at=_activity_for(
+                        activity_by_key,
+                        entry.channel,
+                        entry.address,
+                    ),
                 )
             )
 
@@ -185,6 +282,11 @@ def build_contacts_snapshot_records(
             responded_at=request.responded_at.isoformat() if request.responded_at else None,
             updated_at=request.responded_at.isoformat() if request.responded_at else (
                 request.requested_at.isoformat() if request.requested_at else None
+            ),
+            last_conversed_at=_activity_for(
+                activity_by_key,
+                request.channel,
+                request.address,
             ),
         )
         key = (request_record.channel, request_record.normalized_address)
@@ -210,8 +312,25 @@ def _contact_record(
     can_configure: bool = False,
     requested_at: str | None = None,
     responded_at: str | None = None,
+    created_at: str | None = None,
     updated_at: str | None = None,
+    last_conversed_at: datetime | None = None,
 ) -> ContactSQLiteRecord:
+    last_conversed_at_iso = last_conversed_at.isoformat() if last_conversed_at else None
+    relevance_at = max(
+        (
+            value
+            for value in (
+                last_conversed_at_iso,
+                updated_at,
+                responded_at,
+                requested_at,
+                created_at,
+            )
+            if value
+        ),
+        default=None,
+    )
     return ContactSQLiteRecord(
         contact_id=contact_id,
         channel=channel,
@@ -226,6 +345,8 @@ def _contact_record(
         requested_at=requested_at,
         responded_at=responded_at,
         updated_at=updated_at,
+        last_conversed_at=last_conversed_at_iso,
+        relevance_at=relevance_at,
     )
 
 

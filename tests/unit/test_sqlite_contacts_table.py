@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from api.agent.core.contact_results import ContactSQLiteRecord, store_contacts_for_prompt
 from api.agent.core.contact_snapshot import (
+    build_contact_activity_by_key,
     build_contacts_snapshot_records,
 )
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
@@ -23,6 +24,8 @@ from api.models import (
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentMessage,
     UserPhoneNumber,
 )
 
@@ -54,6 +57,8 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
                 requested_at=None,
                 responded_at=None,
                 updated_at="2026-01-01T00:00:00+00:00",
+                last_conversed_at="2026-01-01T02:00:00+00:00",
+                relevance_at="2026-01-01T02:00:00+00:00",
             )
         ]
 
@@ -68,7 +73,7 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
                 """
                 SELECT contact_id, channel, address, normalized_address, display_name,
                        source, status, allow_inbound, allow_outbound, can_configure,
-                       requested_at, responded_at, updated_at
+                       requested_at, responded_at, updated_at, last_conversed_at, relevance_at
                 FROM "__contacts"
                 WHERE normalized_address='user@example.com';
                 """
@@ -89,6 +94,8 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
             self.assertIsNone(row[10])
             self.assertIsNone(row[11])
             self.assertEqual(row[12], "2026-01-01T00:00:00+00:00")
+            self.assertEqual(row[13], "2026-01-01T02:00:00+00:00")
+            self.assertEqual(row[14], "2026-01-01T02:00:00+00:00")
         finally:
             conn.close()
 
@@ -107,6 +114,8 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
             requested_at="2026-01-01T00:00:00+00:00",
             responded_at=None,
             updated_at=None,
+            last_conversed_at=None,
+            relevance_at="2026-01-01T00:00:00+00:00",
         )
         second = ContactSQLiteRecord(
             contact_id="contact_request:new",
@@ -122,6 +131,8 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
             requested_at="2026-01-02T00:00:00+00:00",
             responded_at="2026-01-02T01:00:00+00:00",
             updated_at="2026-01-02T01:00:00+00:00",
+            last_conversed_at=None,
+            relevance_at="2026-01-02T01:00:00+00:00",
         )
 
         store_contacts_for_prompt([first])
@@ -209,6 +220,51 @@ class SqliteContactsSnapshotBuilderTests(TestCase):
         self.assertTrue(record.allow_inbound)
         self.assertFalse(record.allow_outbound)
         self.assertTrue(record.can_configure)
+
+    def test_contact_activity_uses_bounded_recent_messages(self):
+        old_time = timezone.now() - timedelta(days=2)
+        recent_time = timezone.now() - timedelta(minutes=5)
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.com",
+        )
+        old_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="old@example.com",
+        )
+        recent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="recent@example.com",
+        )
+        cc_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="cc@example.com",
+        )
+        old_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=agent_endpoint,
+            to_endpoint=old_endpoint,
+            is_outbound=True,
+            body="Older message",
+        )
+        recent_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=agent_endpoint,
+            to_endpoint=recent_endpoint,
+            is_outbound=True,
+            body="Recent message",
+        )
+        recent_message.cc_endpoints.add(cc_endpoint)
+        PersistentAgentMessage.objects.filter(id=old_message.id).update(timestamp=old_time)
+        PersistentAgentMessage.objects.filter(id=recent_message.id).update(timestamp=recent_time)
+
+        with patch("api.agent.core.contact_snapshot.CONTACT_ACTIVITY_MESSAGE_SCAN_LIMIT", 1):
+            activity = build_contact_activity_by_key(self.agent)
+
+        self.assertNotIn((CommsChannel.EMAIL, "old@example.com"), activity)
+        self.assertEqual(activity[(CommsChannel.EMAIL, "recent@example.com")], recent_time)
+        self.assertEqual(activity[(CommsChannel.EMAIL, "cc@example.com")], recent_time)
 
     def test_contact_requests_are_non_sendable_diagnostics(self):
         pending = CommsAllowlistRequest.objects.create(

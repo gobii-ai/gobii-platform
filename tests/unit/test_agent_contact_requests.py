@@ -3,7 +3,9 @@ import uuid
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase, override_settings, tag
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from api.models import (
@@ -15,6 +17,10 @@ from api.models import (
     OrganizationMembership,
     PersistentAgent,
     SmsContactPurpose,
+)
+from console.agent_chat.pending_actions import (
+    CONTACT_REQUEST_PENDING_ACTION_PREVIEW_LIMIT,
+    list_pending_action_requests,
 )
 
 
@@ -176,3 +182,150 @@ class AgentContactRequestsFriendlyErrorsTest(TestCase):
         entry = CommsAllowlistEntry.objects.get(agent=self.agent, channel=CommsChannel.EMAIL)
         self.assertEqual(entry.address, "approve@example.com")
         self.assertEqual(payload["pending_action_requests"], [])
+
+    @patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=1)
+    @patch("console.api_views.get_user_max_contacts_per_agent", return_value=1)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    @patch("console.api_views.Analytics.track_event")
+    def test_contact_requests_api_partially_approves_until_contact_limit(
+        self,
+        _mock_track_event,
+        _mock_delay,
+        _mock_view_cap,
+        _mock_model_cap,
+    ):
+        self.client.force_login(self.owner)
+        first_request = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="first@example.com",
+            reason="Notify first.",
+            purpose="Testing contact limits",
+        )
+        second_request = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="second@example.com",
+            reason="Notify second.",
+            purpose="Testing contact limits",
+        )
+
+        response = self.client.post(
+            reverse("console_agent_contact_requests_resolve", kwargs={"agent_id": self.agent.pk}),
+            data=json.dumps({
+                "responses": [
+                    {
+                        "request_id": str(first_request.id),
+                        "decision": "approve",
+                        "allow_inbound": True,
+                        "allow_outbound": True,
+                        "can_configure": False,
+                    },
+                    {
+                        "request_id": str(second_request.id),
+                        "decision": "approve",
+                        "allow_inbound": True,
+                        "allow_outbound": True,
+                        "can_configure": False,
+                    },
+                ],
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content.decode())
+        payload = response.json()
+        self.assertEqual(payload["approved_count"], 1)
+        self.assertEqual(payload["rejected_count"], 0)
+        self.assertEqual(payload["skipped_count"], 1)
+        self.assertEqual(len(payload["pending_action_requests"]), 1)
+        self.assertEqual(payload["pending_action_requests"][0]["count"], 1)
+        self.assertEqual(
+            payload["pending_action_requests"][0]["requests"][0]["address"],
+            "second@example.com",
+        )
+
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.status, CommsAllowlistRequest.RequestStatus.APPROVED)
+        self.assertEqual(second_request.status, CommsAllowlistRequest.RequestStatus.PENDING)
+        self.assertTrue(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address="first@example.com",
+                is_active=True,
+            ).exists()
+        )
+        self.assertFalse(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address="second@example.com",
+                is_active=True,
+            ).exists()
+        )
+
+    @patch("console.api_views.get_user_max_contacts_per_agent", return_value=100)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    @patch("console.api_views.Analytics.track_event")
+    def test_contact_requests_api_batches_large_approval_work(
+        self,
+        _mock_track_event,
+        _mock_delay,
+        _mock_view_cap,
+    ):
+        self.client.force_login(self.owner)
+        requests = [
+            CommsAllowlistRequest.objects.create(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address=f"batch-{index}@example.com",
+                reason="Notify this contact.",
+                purpose="Testing batched approvals",
+            )
+            for index in range(30)
+        ]
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.post(
+                reverse("console_agent_contact_requests_resolve", kwargs={"agent_id": self.agent.pk}),
+                data=json.dumps({
+                    "responses": [
+                        {
+                            "request_id": str(request_obj.id),
+                            "decision": "approve",
+                            "allow_inbound": True,
+                            "allow_outbound": True,
+                            "can_configure": False,
+                        }
+                        for request_obj in requests
+                    ],
+                }),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content.decode())
+        self.assertLess(len(queries), 80)
+        self.assertEqual(response.json()["approved_count"], 30)
+        self.assertEqual(
+            CommsAllowlistEntry.objects.filter(agent=self.agent, is_active=True).count(),
+            30,
+        )
+
+    def test_pending_contact_actions_use_bounded_preview_with_full_count(self):
+        for index in range(CONTACT_REQUEST_PENDING_ACTION_PREVIEW_LIMIT + 3):
+            CommsAllowlistRequest.objects.create(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address=f"pending-{index}@example.com",
+                reason="Needs approval.",
+                purpose="Testing pending action payload size",
+            )
+
+        actions = list_pending_action_requests(self.agent, self.owner)
+        contact_action = next(action for action in actions if action["kind"] == "contact_requests")
+
+        self.assertEqual(contact_action["id"], "contact_requests")
+        self.assertEqual(contact_action["count"], CONTACT_REQUEST_PENDING_ACTION_PREVIEW_LIMIT + 3)
+        self.assertEqual(len(contact_action["requests"]), CONTACT_REQUEST_PENDING_ACTION_PREVIEW_LIMIT)

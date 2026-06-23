@@ -13,7 +13,7 @@ import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
-import { reportAgentMessageIssue, trackAgentMessageCopy } from '../../api/agentChat'
+import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
@@ -350,7 +350,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
       canConfigure: boolean
       smsContactPermissionAttested?: boolean
     }>
-  ) => Promise<void>
+  ) => Promise<PendingActionMutationResult | void>
   onViewAllContactRequests?: () => void
 }
 
