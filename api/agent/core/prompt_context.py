@@ -156,6 +156,13 @@ BROWSER_TASK_RESULT_BLOCK_RE = re.compile(
     r"<result>\s*(?P<payload>.*?)\s*</result>",
     re.DOTALL | re.IGNORECASE,
 )
+TOOL_RESULT_PROMPT_COMPONENTS = frozenset({
+    "result",
+    "result_id",
+    "result_meta",
+    "result_preview",
+    "result_schema",
+})
 
 
 def _config_allows_implied_send(params_with_hints: Mapping[str, Any] | None) -> bool:
@@ -4701,10 +4708,10 @@ def _get_unified_history_prompt(
             "cost": 2,        # Helpful for budgeting; small and should remain visible
             "params": 1,      # Low priority - can be shrunk aggressively
             "prompt": 1,      # Browser task/user prompt context; useful but repeatable
-            "result": 1,      # Low priority - can be shrunk aggressively
+            "result": 1,      # Sized upstream by tool_results.py; keep intact here.
             "result_meta": 2, # Medium priority - supports tool result lookup
-            "result_schema": 1, # Low priority - schema can be shrunk aggressively
-            "result_preview": 1, # Low priority - preview only
+            "result_schema": 1, # Sized upstream by tool_results.py; keep intact here.
+            "result_preview": 1, # Sized upstream by tool_results.py; keep intact here.
             "result_summary": 1, # Low priority - browser task prose summary
             "files": 3,       # High priority - direct filespace paths for follow-up actions
             "content": 2,     # Medium priority for message content (SMS, etc.)
@@ -4732,10 +4739,16 @@ def _get_unified_history_prompt(
             for component_name, component_content in components.items():
                 component_weight = COMPONENT_WEIGHTS.get(component_name, 1)
 
+                # Tool result bodies and lookup metadata are already aggressively
+                # shaped by tool_results.py; a second promptree HMT pass can
+                # remove the exact result_id, query hints, or JSON shape the
+                # preview was intended to preserve.
+                non_shrinkable = component_name in TOOL_RESULT_PROMPT_COMPONENTS
+
                 # Apply HMT shrinking to bulky content
                 shrinker = None
-                if (
-                    component_name in ("params", "prompt", "result", "result_preview", "result_schema", "result_summary", "body") or
+                if not non_shrinkable and (
+                    component_name in ("params", "prompt", "result_summary", "body") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
                     shrinker = "hmt"
@@ -4750,7 +4763,8 @@ def _get_unified_history_prompt(
                     component_name,
                     component_content,
                     weight=component_weight,
-                    shrinker=shrinker
+                    shrinker=shrinker,
+                    non_shrinkable=non_shrinkable,
                 )
 
     return fresh_tool_call_step_ids
