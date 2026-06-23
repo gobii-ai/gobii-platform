@@ -98,18 +98,25 @@ class PromptContextContactsGuidanceTests(TestCase):
             ]
         )
         collector = _PromptSectionCollector()
+        config_authority = prompt_context._ConfigAuthorityResolver(self.agent)
+        contact_records = prompt_context.build_contacts_snapshot_records(
+            self.agent,
+            display_name_for_user=prompt_context._build_user_display_name,
+            user_can_configure=config_authority.user_can_configure,
+        )
 
         prompt_context._build_contacts_block(
             self.agent,
             collector,
             _NoopSpan(),
-            prompt_context._ConfigAuthorityResolver(self.agent),
+            config_authority,
+            contact_records,
         )
 
         allowed_contacts = collector.sections["allowed_contacts"]
         self.assertIn("__contacts", allowed_contacts)
         self.assertIn("active contacts are available", allowed_contacts)
         self.assertIn("Sample active contacts", allowed_contacts)
-        self.assertIn("person-00@example.com", allowed_contacts)
-        self.assertNotIn("person-29@example.com", allowed_contacts)
+        self.assertIn("person-29@example.com", allowed_contacts)
+        self.assertNotIn("person-00@example.com", allowed_contacts)
         self.assertIn("status='allowed' AND allow_outbound=1", allowed_contacts)
