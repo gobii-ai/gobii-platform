@@ -13,6 +13,10 @@ from .llm_config import (
     get_runtime_tier_override,
     set_runtime_tier_override,
 )
+from .period_events import (
+    BURN_RATE_RUNTIME_TIER_STEP_DOWN_EVENT,
+    should_emit_daily_agent_event,
+)
 from .prompt_context import get_agent_daily_credit_state
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.models import PersistentAgent
@@ -133,43 +137,49 @@ def _step_down_runtime_tier(
     baseline_multiplier = get_credit_multiplier_for_tier(baseline_tier)
     runtime_multiplier = get_credit_multiplier_for_tier(runtime_tier)
 
-    try:
-        analytics_props: dict[str, str] = {
-            "agent_id": str(agent.id),
-            "agent_name": agent.name,
-            "baseline_tier": baseline_tier.value,
-            "runtime_tier": runtime_tier.value,
-            "baseline_multiplier": str(baseline_multiplier),
-            "runtime_multiplier": str(runtime_multiplier),
-            "burn_rate_per_hour": str(burn_rate),
-            "burn_rate_threshold_per_hour": str(burn_threshold),
-        }
-        analytics_props.update(
-            _burn_24h_analytics_props(
-                burn_24h_total=burn_24h_total,
-                burn_24h_threshold=burn_24h_threshold,
-            )
-        )
-        if burn_window is not None:
-            analytics_props["burn_rate_window_minutes"] = str(burn_window)
-        props_with_org = Analytics.with_org_properties(
-            analytics_props,
-            organization=getattr(agent, "organization", None),
-        )
-        Analytics.track_event(
-            user_id=getattr(getattr(agent, "user", None), "id", None),
-            event=AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_RUNTIME_TIER_STEPPED_DOWN,
-            source=AnalyticsSource.AGENT,
-            properties=props_with_org,
-        )
-    except Exception:
-        logger.debug(
-            "Failed to emit runtime tier step-down analytics for agent %s",
-            agent.id,
-            exc_info=True,
-        )
+    should_emit_step_down = should_emit_daily_agent_event(
+        agent.id,
+        BURN_RATE_RUNTIME_TIER_STEP_DOWN_EVENT,
+    )
 
-    if span is not None:
+    if should_emit_step_down:
+        try:
+            analytics_props: dict[str, str] = {
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "baseline_tier": baseline_tier.value,
+                "runtime_tier": runtime_tier.value,
+                "baseline_multiplier": str(baseline_multiplier),
+                "runtime_multiplier": str(runtime_multiplier),
+                "burn_rate_per_hour": str(burn_rate),
+                "burn_rate_threshold_per_hour": str(burn_threshold),
+            }
+            analytics_props.update(
+                _burn_24h_analytics_props(
+                    burn_24h_total=burn_24h_total,
+                    burn_24h_threshold=burn_24h_threshold,
+                )
+            )
+            if burn_window is not None:
+                analytics_props["burn_rate_window_minutes"] = str(burn_window)
+            props_with_org = Analytics.with_org_properties(
+                analytics_props,
+                organization=getattr(agent, "organization", None),
+            )
+            Analytics.track_event(
+                user_id=getattr(getattr(agent, "user", None), "id", None),
+                event=AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_RUNTIME_TIER_STEPPED_DOWN,
+                source=AnalyticsSource.AGENT,
+                properties=props_with_org,
+            )
+        except Exception:
+            logger.debug(
+                "Failed to emit runtime tier step-down analytics for agent %s",
+                agent.id,
+                exc_info=True,
+            )
+
+    if should_emit_step_down and span is not None:
         try:
             span.add_event("Burn-rate runtime tier step-down activated")
             span.set_attribute("burn_rate.runtime_tier_step_down", True)
@@ -189,7 +199,8 @@ def _step_down_runtime_tier(
                 exc_info=True,
             )
 
-    logger.info(
+    log_method = logger.info if should_emit_step_down else logger.debug
+    log_method(
         "Agent %s runtime tier stepped down from %s to %s due to burn rate %s > %s.",
         agent.id,
         baseline_tier.value,
@@ -197,7 +208,7 @@ def _step_down_runtime_tier(
         burn_rate,
         burn_threshold,
     )
-    return True
+    return should_emit_step_down
 
 
 def handle_burn_rate_limit(

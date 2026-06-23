@@ -113,6 +113,12 @@ from .daily_limit_mode import (
     is_daily_limit_allowed_tool,
     is_daily_hard_limit_message_only_mode,
 )
+from .period_events import (
+    DAILY_HARD_LIMIT_BLOCKED_EVENT,
+    DAILY_HARD_LIMIT_EXCEEDED_EVENT,
+    DAILY_SOFT_LIMIT_EXCEEDED_EVENT,
+    should_emit_daily_agent_event,
+)
 from .agent_judge import maybe_run_agent_judge
 from .prompt_context import (
     build_prompt_context,
@@ -4393,6 +4399,126 @@ def _has_sufficient_daily_credit(state: dict, cost: Decimal | None) -> bool:
         return False
 
 
+def _emit_soft_limit_exceeded_once(
+    *,
+    agent: PersistentAgent,
+    owner_user,
+    tool_name: str,
+    daily_state: dict,
+    soft_target,
+    soft_target_remaining,
+    span=None,
+) -> None:
+    if not should_emit_daily_agent_event(agent.id, DAILY_SOFT_LIMIT_EXCEEDED_EVENT):
+        return
+
+    logger.info(
+        "Agent %s exceeded daily soft target (used=%s target=%s)",
+        agent.id,
+        daily_state.get("used"),
+        soft_target,
+    )
+    try:
+        analytics_props: dict[str, Any] = {
+            "agent_id": str(agent.id),
+            "agent_name": agent.name,
+            "tool_name": tool_name,
+            "message_type": "task_credits_low",
+            "medium": "backend",
+        }
+        if soft_target is not None:
+            analytics_props["soft_target"] = str(soft_target)
+        used_value = daily_state.get("used")
+        if used_value is not None:
+            analytics_props["credits_used_today"] = str(used_value)
+        if soft_target_remaining is not None:
+            analytics_props["soft_target_remaining"] = str(soft_target_remaining)
+        props_with_org = Analytics.with_org_properties(
+            analytics_props,
+            organization=getattr(agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=owner_user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SOFT_LIMIT_EXCEEDED,
+            source=AnalyticsSource.AGENT,
+            properties=props_with_org,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to emit analytics for agent %s soft target exceedance",
+            agent.id,
+        )
+    if span is not None:
+        try:
+            span.add_event("Soft target exceeded")
+        except Exception:
+            pass
+
+
+def _emit_hard_limit_exceeded_once(
+    *,
+    agent: PersistentAgent,
+    owner_user,
+    tool_name: str,
+    daily_state: dict,
+    hard_limit,
+    hard_remaining,
+) -> None:
+    if not should_emit_daily_agent_event(agent.id, DAILY_HARD_LIMIT_EXCEEDED_EVENT):
+        return
+
+    try:
+        analytics_props: dict[str, Any] = {
+            "agent_id": str(agent.id),
+            "agent_name": agent.name,
+            "tool_name": tool_name,
+            "message_type": "daily_hard_limit",
+            "medium": "backend",
+        }
+        if hard_limit is not None:
+            analytics_props["hard_limit"] = str(hard_limit)
+        used_value = daily_state.get("used")
+        if used_value is not None:
+            analytics_props["credits_used_today"] = str(used_value)
+        if hard_remaining is not None:
+            analytics_props["hard_limit_remaining"] = str(hard_remaining)
+        props_with_org = Analytics.with_org_properties(
+            analytics_props,
+            organization=getattr(agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=owner_user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_HARD_LIMIT_EXCEEDED,
+            source=AnalyticsSource.AGENT,
+            properties=props_with_org,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to emit analytics for agent %s hard limit exceedance",
+            agent.id,
+        )
+
+
+def _create_daily_hard_limit_system_step_once(
+    *,
+    agent: PersistentAgent,
+    description: str,
+    notes: str,
+) -> None:
+    if not should_emit_daily_agent_event(agent.id, DAILY_HARD_LIMIT_BLOCKED_EVENT):
+        return
+
+    step = PersistentAgentStep.objects.create(
+        agent=agent,
+        description=description,
+    )
+    PersistentAgentSystemStep.objects.create(
+        step=step,
+        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        notes=notes,
+    )
+
+
 def _ensure_credit_for_tool(
     agent: PersistentAgent,
     tool_name: str,
@@ -4545,47 +4671,15 @@ def _ensure_credit_for_tool(
 
     if soft_exceeded and not daily_state.get("soft_target_warning_logged"):
         daily_state["soft_target_warning_logged"] = True
-        logger.info(
-            "Agent %s exceeded daily soft target (used=%s target=%s)",
-            agent.id,
-            daily_state.get("used"),
-            soft_target,
+        _emit_soft_limit_exceeded_once(
+            agent=agent,
+            owner_user=owner_user,
+            tool_name=tool_name,
+            daily_state=daily_state,
+            soft_target=soft_target,
+            soft_target_remaining=soft_target_remaining,
+            span=span,
         )
-        try:
-            analytics_props: dict[str, Any] = {
-                "agent_id": str(agent.id),
-                "agent_name": agent.name,
-                "tool_name": tool_name,
-                "message_type": "task_credits_low",
-                "medium": "backend",
-            }
-            if soft_target is not None:
-                analytics_props["soft_target"] = str(soft_target)
-            used_value = daily_state.get("used")
-            if used_value is not None:
-                analytics_props["credits_used_today"] = str(used_value)
-            if soft_target_remaining is not None:
-                analytics_props["soft_target_remaining"] = str(soft_target_remaining)
-            props_with_org = Analytics.with_org_properties(
-                analytics_props,
-                organization=getattr(agent, "organization", None),
-            )
-            Analytics.track_event(
-                user_id=owner_user.id,
-                event=AnalyticsEvent.PERSISTENT_AGENT_SOFT_LIMIT_EXCEEDED,
-                source=AnalyticsSource.AGENT,
-                properties=props_with_org,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to emit analytics for agent %s soft target exceedance",
-                agent.id,
-            )
-        if span is not None:
-            try:
-                span.add_event("Soft target exceeded")
-            except Exception:
-                pass
 
     if span is not None:
         try:
@@ -4646,36 +4740,14 @@ def _ensure_credit_for_tool(
     if not _has_sufficient_daily_credit(daily_state, cost):
         if not daily_state.get("hard_limit_warning_logged"):
             daily_state["hard_limit_warning_logged"] = True
-            try:
-                analytics_props: dict[str, Any] = {
-                    "agent_id": str(agent.id),
-                    "agent_name": agent.name,
-                    "tool_name": tool_name,
-                    "message_type": "daily_hard_limit",
-                    "medium": "backend",
-                }
-                if hard_limit is not None:
-                    analytics_props["hard_limit"] = str(hard_limit)
-                used_value = daily_state.get("used")
-                if used_value is not None:
-                    analytics_props["credits_used_today"] = str(used_value)
-                if hard_remaining is not None:
-                    analytics_props["hard_limit_remaining"] = str(hard_remaining)
-                props_with_org = Analytics.with_org_properties(
-                    analytics_props,
-                    organization=getattr(agent, "organization", None),
-                )
-                Analytics.track_event(
-                    user_id=owner_user.id,
-                    event=AnalyticsEvent.PERSISTENT_AGENT_HARD_LIMIT_EXCEEDED,
-                    source=AnalyticsSource.AGENT,
-                    properties=props_with_org,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to emit analytics for agent %s hard limit exceedance",
-                    agent.id,
-                )
+            _emit_hard_limit_exceeded_once(
+                agent=agent,
+                owner_user=owner_user,
+                tool_name=tool_name,
+                daily_state=daily_state,
+                hard_limit=hard_limit,
+                hard_remaining=hard_remaining,
+            )
         limit_display = hard_limit
         used_display = daily_state.get("used")
         msg_desc = (
@@ -4684,13 +4756,9 @@ def _ensure_credit_for_tool(
         if limit_display is not None:
             msg_desc += f" {used_display} of {limit_display} credits already used."
 
-        step = PersistentAgentStep.objects.create(
+        _create_daily_hard_limit_system_step_once(
             agent=agent,
             description=msg_desc,
-        )
-        PersistentAgentSystemStep.objects.create(
-            step=step,
-            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
             notes="daily_credit_limit_mid_loop",
         )
         if span is not None:
@@ -5389,13 +5457,9 @@ def _process_agent_events_locked(
                             daily_limit,
                         )
 
-                        step = PersistentAgentStep.objects.create(
+                        _create_daily_hard_limit_system_step_once(
                             agent=agent,
                             description=msg,
-                        )
-                        PersistentAgentSystemStep.objects.create(
-                            step=step,
-                            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
                             notes="daily_credit_limit_exhausted",
                         )
 
