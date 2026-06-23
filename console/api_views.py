@@ -4439,7 +4439,8 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                                     request_obj.sms_contact_permission_attested_at
                                 )
                                 existing_entry.updated_at = now
-                                existing_entries_to_update[existing_entry.pk] = existing_entry
+                                if existing_entry.pk is not None:
+                                    existing_entries_to_update[existing_entry.pk] = existing_entry
 
                         request_obj.status = CommsAllowlistRequest.RequestStatus.APPROVED
                         request_obj.responded_at = now

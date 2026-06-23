@@ -21,7 +21,7 @@ DisplayNameFn = Callable[[object], str | None]
 CanConfigureFn = Callable[[int | None], bool]
 ContactKey = tuple[str, str]
 ContactActivityMap = dict[ContactKey, datetime]
-CONTACT_ACTIVITY_MESSAGE_SCAN_LIMIT = 10_000
+CONTACT_ACTIVITY_MESSAGE_SCAN_LIMIT = 1_000
 
 
 def normalize_contact_address(channel: str, address: str) -> str:
