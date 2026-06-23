@@ -54,6 +54,8 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
                 requested_at=None,
                 responded_at=None,
                 updated_at="2026-01-01T00:00:00+00:00",
+                last_conversed_at="2026-01-01T02:00:00+00:00",
+                relevance_at="2026-01-01T02:00:00+00:00",
             )
         ]
 
@@ -68,7 +70,7 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
                 """
                 SELECT contact_id, channel, address, normalized_address, display_name,
                        source, status, allow_inbound, allow_outbound, can_configure,
-                       requested_at, responded_at, updated_at
+                       requested_at, responded_at, updated_at, last_conversed_at, relevance_at
                 FROM "__contacts"
                 WHERE normalized_address='user@example.com';
                 """
@@ -89,6 +91,8 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
             self.assertIsNone(row[10])
             self.assertIsNone(row[11])
             self.assertEqual(row[12], "2026-01-01T00:00:00+00:00")
+            self.assertEqual(row[13], "2026-01-01T02:00:00+00:00")
+            self.assertEqual(row[14], "2026-01-01T02:00:00+00:00")
         finally:
             conn.close()
 
@@ -107,6 +111,8 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
             requested_at="2026-01-01T00:00:00+00:00",
             responded_at=None,
             updated_at=None,
+            last_conversed_at=None,
+            relevance_at="2026-01-01T00:00:00+00:00",
         )
         second = ContactSQLiteRecord(
             contact_id="contact_request:new",
@@ -122,6 +128,8 @@ class SqliteContactsTableStorageTests(SimpleTestCase):
             requested_at="2026-01-02T00:00:00+00:00",
             responded_at="2026-01-02T01:00:00+00:00",
             updated_at="2026-01-02T01:00:00+00:00",
+            last_conversed_at=None,
+            relevance_at="2026-01-02T01:00:00+00:00",
         )
 
         store_contacts_for_prompt([first])
