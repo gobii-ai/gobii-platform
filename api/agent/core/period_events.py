@@ -5,8 +5,9 @@ import math
 from datetime import timedelta
 from typing import Any
 
-from django.core.cache import cache
 from django.utils import timezone
+
+from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,9 @@ def should_emit_daily_agent_event(agent_id: Any, event_key: str) -> bool:
     period_key, ttl_seconds = _daily_period_parts()
     cache_key = f"agent-period-event:{agent_id}:{event_key}:{period_key}"
     try:
-        return bool(cache.add(cache_key, "1", timeout=ttl_seconds))
+        return bool(get_redis_client().set(cache_key, "1", ex=ttl_seconds, nx=True))
     except Exception:
-        # Cache availability must not suppress important limit notifications.
+        # Redis availability must not suppress important limit notifications.
         logger.warning(
             "Failed to write agent period event marker %s for agent %s; emitting fail-open.",
             event_key,

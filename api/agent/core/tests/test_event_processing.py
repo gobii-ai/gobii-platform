@@ -4,7 +4,7 @@ import json
 
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
@@ -864,7 +864,7 @@ class DailyLimitProcessingTests(TestCase):
             ).exists()
         )
 
-    @patch("api.agent.core.period_events.cache.add", side_effect=[True, True, False, False])
+    @patch("api.agent.core.period_events.get_redis_client")
     @patch("api.agent.core.event_processing.Analytics.track_event")
     @patch(
         "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
@@ -877,8 +877,12 @@ class DailyLimitProcessingTests(TestCase):
         _mock_tool_cost,
         _mock_available,
         mock_track_event,
-        _mock_cache_add,
+        mock_get_redis_client,
     ):
+        redis_client = MagicMock()
+        redis_client.set.side_effect = [True, True, False, False]
+        mock_get_redis_client.return_value = redis_client
+
         for _ in range(2):
             daily_state = {
                 "hard_limit": Decimal("2"),
@@ -907,19 +911,24 @@ class DailyLimitProcessingTests(TestCase):
             1,
         )
 
-    @patch("api.agent.core.period_events.cache.add", side_effect=RuntimeError("cache unavailable"))
-    def test_daily_event_marker_fails_open_on_cache_error(self, _mock_cache_add):
+    @patch("api.agent.core.period_events.get_redis_client")
+    def test_daily_event_marker_fails_open_on_cache_error(self, mock_get_redis_client):
+        mock_get_redis_client.side_effect = RuntimeError("redis unavailable")
         self.assertTrue(should_emit_daily_agent_event(self.agent.id, DAILY_SOFT_LIMIT_EXCEEDED_EVENT))
 
     @patch("api.agent.core.burn_control.Analytics.track_event")
     @patch("api.agent.core.burn_control.get_agent_baseline_llm_tier", return_value=AgentLLMTier.PREMIUM)
-    @patch("api.agent.core.period_events.cache.add", side_effect=[True, False])
+    @patch("api.agent.core.period_events.get_redis_client")
     def test_burn_rate_step_down_analytics_emit_once_but_override_still_applies(
         self,
-        _mock_cache_add,
+        mock_get_redis_client,
         _mock_baseline_tier,
         mock_track_event,
     ):
+        redis_client = MagicMock()
+        redis_client.set.side_effect = [True, False]
+        mock_get_redis_client.return_value = redis_client
+
         daily_state = {
             "burn_rate_per_hour": Decimal("20"),
             "burn_rate_threshold_per_hour": Decimal("10"),
