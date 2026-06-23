@@ -15,6 +15,8 @@ export class HttpError extends Error {
 
 let loginRedirectScheduled = false
 
+const MARKETING_CONTEXT_HEADER_PATHS = new Set(['/contact', '/prequalify', '/qualify'])
+
 function getBrowserTimeZone(): string | null {
   try {
     if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') {
@@ -46,6 +48,35 @@ function applyConsoleContextHeaders(headers: Headers): boolean {
     applied = true
   }
   return applied
+}
+
+function normalizePathname(pathname: string): string {
+  const cleaned = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  return cleaned.toLowerCase()
+}
+
+function isMarketingContextHeaderPath(pathname: string): boolean {
+  return MARKETING_CONTEXT_HEADER_PATHS.has(normalizePathname(pathname))
+}
+
+function resolvePathname(input: RequestInfo | URL): string | null {
+  try {
+    if (input instanceof URL) {
+      return input.pathname
+    }
+    if (typeof Request !== 'undefined' && input instanceof Request) {
+      return new URL(input.url).pathname
+    }
+    const base = typeof window !== 'undefined' ? window.location.href : 'http://localhost/'
+    return new URL(String(input), base).pathname
+  } catch {
+    return null
+  }
+}
+
+function shouldApplyConsoleContextHeaders(input: RequestInfo | URL): boolean {
+  const requestPathname = resolvePathname(input)
+  return !requestPathname || !isMarketingContextHeaderPath(requestPathname)
 }
 
 export function buildLoginUrl(nextUrl?: string): string {
@@ -111,7 +142,7 @@ async function jsonFetchInternal<T>(
       headers.set('X-Gobii-Timezone', browserTimeZone)
     }
   }
-  const appliedContextHeaders = applyConsoleContextHeaders(headers)
+  const appliedContextHeaders = shouldApplyConsoleContextHeaders(input) ? applyConsoleContextHeaders(headers) : false
 
   const response = await fetch(input, {
     credentials: 'same-origin',
