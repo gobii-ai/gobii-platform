@@ -864,7 +864,7 @@ class TaskCreditAdmin(admin.ModelAdmin):
             only_zero = form.cleaned_data['only_if_out_of_credits']
             export_csv = form.cleaned_data['export_csv']
 
-            ids = [s for s in re.split(r"[\s,]+", raw.strip()) if s]
+            ids = [int(s) for s in re.split(r"[\s,]+", raw.strip()) if s.isdigit()]
 
             TaskCredit = apps.get_model("api", "TaskCredit")
             User = get_user_model()
