@@ -116,10 +116,12 @@ class AgentCapabilitiesPromptTests(TestCase):
     @override_settings(PUBLIC_SITE_URL="https://app.test")
     @patch("api.agent.core.prompt_context.DedicatedProxyService.allocated_count", return_value=2)
     @patch("api.agent.core.prompt_context.AddonEntitlementService.get_uplift")
+    @patch("api.agent.core.prompt_context.get_user_max_contacts_per_agent", return_value=30)
     @patch("api.agent.core.prompt_context.get_owner_plan")
     def test_capabilities_block_includes_plan_addons_and_links(
         self,
         plan_mock,
+        _contact_cap_mock,
         uplift_mock,
         _dedicated_mock,
     ):
@@ -168,3 +170,27 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn(f"/app/agents/{self.agent.id}/email", agent_settings)
         self.assertIn("Agent email settings", email_settings)
         self.assertIn(f"/app/agents/{self.agent.id}/email", email_settings)
+
+    @override_settings(PUBLIC_SITE_URL="https://app.test")
+    @patch("api.agent.core.prompt_context.DedicatedProxyService.allocated_count", return_value=0)
+    @patch("api.agent.core.prompt_context.AddonEntitlementService.get_uplift")
+    @patch("api.agent.core.prompt_context.get_user_max_contacts_per_agent", return_value=100)
+    @patch("api.agent.core.prompt_context.get_owner_plan")
+    def test_capabilities_block_uses_effective_contact_cap(
+        self,
+        plan_mock,
+        _contact_cap_mock,
+        uplift_mock,
+        _dedicated_mock,
+    ):
+        plan_mock.return_value = {
+            "id": "free",
+            "name": "Free",
+            "max_contacts_per_agent": 3,
+        }
+        uplift_mock.return_value = AddonUplift()
+
+        sections = _build_agent_capabilities_sections(self.agent)
+        plan_info = sections.get("plan_info", "")
+
+        self.assertIn("Per-agent contact cap: 100 (effective account limit).", plan_info)

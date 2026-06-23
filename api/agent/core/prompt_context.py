@@ -28,7 +28,7 @@ from opentelemetry import trace
 from billing.addons import AddonEntitlementService
 from config import settings
 from config.plans import PLAN_CONFIG
-from util.subscription_helper import get_owner_plan
+from util.subscription_helper import get_owner_plan, get_user_max_contacts_per_agent
 from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview
 from util.urls import append_context_query, build_immersive_contact_requests_path
 
@@ -1118,6 +1118,15 @@ def _get_contact_usage(agent: PersistentAgent) -> int | None:
         )
         return None
 
+def _get_effective_contact_cap(agent: PersistentAgent, fallback: int) -> int:
+    try:
+        return get_user_max_contacts_per_agent(agent.user, organization=agent.organization)
+    except DatabaseError:
+        logger.warning(
+            "Failed to compute contact cap for agent %s", getattr(agent, "id", "unknown"), exc_info=True
+        )
+        return fallback
+
 def _get_dedicated_ip_count(owner) -> int:
     try:
         return DedicatedProxyService.allocated_count(owner)
@@ -1139,7 +1148,8 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     owner = agent.organization or agent.user
     _plan, plan_id, plan_name, base_contact_cap, available_plans = _get_plan_details(owner)
     task_uplift, contact_uplift, browser_task_daily_uplift, advanced_captcha_uplift = _get_addon_details(owner)
-    effective_contact_cap = base_contact_cap + contact_uplift
+    plan_addon_contact_cap = base_contact_cap + contact_uplift
+    effective_contact_cap = _get_effective_contact_cap(agent, plan_addon_contact_cap)
 
     dedicated_total = _get_dedicated_ip_count(owner)
 
@@ -1179,14 +1189,16 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     lines.append(f"Add-ons: {'; '.join(addon_parts)}." if addon_parts else "Add-ons: none active.")
 
     if effective_contact_cap or contact_uplift:
-        if is_proprietary:
+        if effective_contact_cap == plan_addon_contact_cap and is_proprietary:
             lines.append(
                 f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} included in plan + add-ons)."
             )
-        else:
+        elif effective_contact_cap == plan_addon_contact_cap:
             lines.append(
                 f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} base + add-ons)."
             )
+        else:
+            lines.append(f"Per-agent contact cap: {effective_contact_cap} (effective account limit).")
 
     contact_usage = _get_contact_usage(agent)
     if contact_usage is not None and effective_contact_cap:
