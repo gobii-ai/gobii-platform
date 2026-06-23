@@ -807,10 +807,18 @@ export function ImmersiveApp({
     navigateTo(`/app/agents/${agentId}`)
   }, [])
 
-  const handleContextSwitch = useCallback((_context: ConsoleContext) => {
+  const handleContextSwitch = useCallback((context: ConsoleContext) => {
     setSelectionRefreshKey((current) => current + 1)
     if (route.kind === 'agent-chat') {
       navigateTo(buildAgentSelectionPath(location.search))
+      return
+    }
+    if (route.kind === 'profile' || route.kind === 'organization') {
+      navigateTo(
+        context.type === 'organization'
+          ? AGENT_SHELL_PAGE_CONFIG.organization.path
+          : AGENT_SHELL_PAGE_CONFIG.profile.path,
+      )
       return
     }
     if (isAgentShellRoute(route)) {
