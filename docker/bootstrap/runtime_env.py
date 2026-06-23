@@ -98,11 +98,19 @@ minio_password = _ensure_file(CONFIG_DIR / "minio-root-password", MINIO_PASSWORD
 django_env_path = CONFIG_DIR / "django.env"
 current_env = _load_env(django_env_path)
 
+
+def _runtime_env(key: str, default: str) -> str:
+    return os.environ.get(key) or current_env.get(key, default)
+
+
 defaults = {
     "DJANGO_SETTINGS_MODULE": "config.settings",
     "GOBII_RELEASE_ENV": "oss",
     "DEBUG": "0",
-    "GOBII_ENABLE_TRACING": current_env.get("GOBII_ENABLE_TRACING", "0"),
+    "GOBII_ENABLE_TRACING": _runtime_env("GOBII_ENABLE_TRACING", "0"),
+    "OTEL_EXPORTER_OTLP_ENDPOINT": _runtime_env("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"),
+    "OTEL_EXPORTER_OTLP_LOG_ENDPOINT": _runtime_env("OTEL_EXPORTER_OTLP_LOG_ENDPOINT", "http://otel-collector:4318/v1/logs"),
+    "OTEL_EXPORTER_OTLP_INSECURE": _runtime_env("OTEL_EXPORTER_OTLP_INSECURE", "true"),
     "DJANGO_SECRET_KEY": current_env.get("DJANGO_SECRET_KEY", DJANGO_SECRET_KEY_ENV or _random_token(64)),
     "GOBII_ENCRYPTION_KEY": current_env.get("GOBII_ENCRYPTION_KEY", GOBII_ENCRYPTION_KEY_ENV or _random_token(64)),
     "HOME": current_env.get("HOME", "/tmp"),

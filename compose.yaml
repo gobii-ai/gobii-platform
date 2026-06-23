@@ -26,6 +26,10 @@ services:
       MINIO_ROOT_USER_PREFIX: ${MINIO_ROOT_USER_PREFIX:-gobii}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
+      GOBII_ENABLE_TRACING: ${GOBII_ENABLE_TRACING:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_LOG_ENDPOINT: ${OTEL_EXPORTER_OTLP_LOG_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-}
       APP_UID: ${APP_UID:-101}
       APP_GID: ${APP_GID:-102}
     restart: "no"
@@ -295,10 +299,17 @@ services:
     profiles: ["object-storage"]
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.128.0
+    image: otel/opentelemetry-collector-contrib:0.148.0
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully
+    environment:
+      - AZURE_TENANT_ID
+      - AZURE_CLIENT_ID
+      - AZURE_CLIENT_SECRET
+      - AZURE_MONITOR_OTLP_TRACES_ENDPOINT
+      - AZURE_MONITOR_OTLP_LOGS_ENDPOINT
+      - AZURE_MONITOR_OTLP_METRICS_ENDPOINT
     command: [ "--config=/etc/otel/config.yaml" ]
     volumes:
       - ./docker/otel-collector-config.yaml:/etc/otel/config.yaml

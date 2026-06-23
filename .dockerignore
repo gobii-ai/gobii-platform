@@ -29,6 +29,9 @@ env/
 .ruff_cache/
 .tox/
 .cache/
+.uv_cache/
+.uv-cache/
+.uvcache/
 .coverage
 .coverage.*
 htmlcov/
