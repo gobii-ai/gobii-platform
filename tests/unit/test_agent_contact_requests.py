@@ -176,3 +176,80 @@ class AgentContactRequestsFriendlyErrorsTest(TestCase):
         entry = CommsAllowlistEntry.objects.get(agent=self.agent, channel=CommsChannel.EMAIL)
         self.assertEqual(entry.address, "approve@example.com")
         self.assertEqual(payload["pending_action_requests"], [])
+
+    @patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=1)
+    @patch("console.api_views.get_user_max_contacts_per_agent", return_value=1)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    @patch("console.api_views.Analytics.track_event")
+    def test_contact_requests_api_partially_approves_until_contact_limit(
+        self,
+        _mock_track_event,
+        _mock_delay,
+        _mock_view_cap,
+        _mock_model_cap,
+    ):
+        self.client.force_login(self.owner)
+        first_request = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="first@example.com",
+            reason="Notify first.",
+            purpose="Testing contact limits",
+        )
+        second_request = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="second@example.com",
+            reason="Notify second.",
+            purpose="Testing contact limits",
+        )
+
+        response = self.client.post(
+            reverse("console_agent_contact_requests_resolve", kwargs={"agent_id": self.agent.pk}),
+            data=json.dumps({
+                "responses": [
+                    {
+                        "request_id": str(first_request.id),
+                        "decision": "approve",
+                        "allow_inbound": True,
+                        "allow_outbound": True,
+                        "can_configure": False,
+                    },
+                    {
+                        "request_id": str(second_request.id),
+                        "decision": "approve",
+                        "allow_inbound": True,
+                        "allow_outbound": True,
+                        "can_configure": False,
+                    },
+                ],
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content.decode())
+        payload = response.json()
+        self.assertEqual(payload["approved_count"], 1)
+        self.assertEqual(payload["rejected_count"], 0)
+        self.assertEqual(payload["skipped_count"], 1)
+
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.status, CommsAllowlistRequest.RequestStatus.APPROVED)
+        self.assertEqual(second_request.status, CommsAllowlistRequest.RequestStatus.PENDING)
+        self.assertTrue(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address="first@example.com",
+                is_active=True,
+            ).exists()
+        )
+        self.assertFalse(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address="second@example.com",
+                is_active=True,
+            ).exists()
+        )

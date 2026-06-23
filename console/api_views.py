@@ -77,6 +77,7 @@ from api.models import (
     BrowserLLMTier,
     BrowserModelEndpoint,
     BrowserTierEndpoint,
+    CommsAllowlistEntry,
     CommsAllowlistRequest,
     CommsChannel,
     EmbeddingsLLMTier,
@@ -130,6 +131,7 @@ from api.models import (
     TaskCredit,
     build_web_agent_address,
     build_web_user_address,
+    get_agent_contact_counts,
 )
 from api.public_profiles import generate_handle_suggestion
 from django.core.files.storage import default_storage
@@ -188,6 +190,7 @@ from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     TrialRequiredValidationError,
 )
+from util.subscription_helper import get_user_max_contacts_per_agent
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
 
 from console.agent_chat.access import (
@@ -4285,11 +4288,34 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
 
                 approved_count = 0
                 rejected_count = 0
+                skipped_count = 0
                 approved_addresses: list[str] = []
+                approval_capacity: int | None = None
+                if any(response["decision"] == "approve" for response in normalized_responses):
+                    cap = get_user_max_contacts_per_agent(
+                        agent.user,
+                        organization=agent.organization,
+                    )
+                    counts = get_agent_contact_counts(agent)
+                    if cap > 0 and counts is not None:
+                        approval_capacity = max(cap - counts["total"], 0)
 
                 for response in normalized_responses:
                     request_obj = requests_by_id[response["request_id"]]
                     if response["decision"] == "approve":
+                        existing_entry = CommsAllowlistEntry.objects.filter(
+                            agent=agent,
+                            channel=request_obj.channel,
+                            address=request_obj.address,
+                            is_active=True,
+                        ).first()
+                        if (
+                            existing_entry is None
+                            and approval_capacity is not None
+                            and approval_capacity <= 0
+                        ):
+                            skipped_count += 1
+                            continue
                         request_obj.request_inbound = response["allow_inbound"]
                         request_obj.request_outbound = response["allow_outbound"]
                         request_obj.request_configure = response["can_configure"]
@@ -4323,6 +4349,8 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                             ]
                         )
                         result = request_obj.approve(invited_by=request.user, skip_invitation=True)
+                        if existing_entry is None and approval_capacity is not None:
+                            approval_capacity -= 1
                         if request_obj.channel == CommsChannel.SMS:
                             sms_event_kwargs = {
                                 "user_id": request.user.id,
@@ -4385,12 +4413,15 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
         return JsonResponse(
             {
                 "message": (
-                    f"Approved {approved_count} and declined {rejected_count} contact request(s)."
+                    f"Approved {approved_count}, declined {rejected_count}, and left {skipped_count} pending due to the contact limit."
+                    if skipped_count
+                    else f"Approved {approved_count} and declined {rejected_count} contact request(s)."
                     if approved_count or rejected_count
                     else "No contact requests were updated."
                 ),
                 "approved_count": approved_count,
                 "rejected_count": rejected_count,
+                "skipped_count": skipped_count,
                 **_pending_action_payload(agent, request.user),
             }
         )
