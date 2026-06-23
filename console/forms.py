@@ -6,7 +6,6 @@ from functools import lru_cache
 from api.models import (
     ApiKey,
     MCPServerConfig,
-    PersistentAgent,
     Organization,
     OrganizationMembership,
     OrganizationInvite,
@@ -17,7 +16,6 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.core.exceptions import ValidationError
 
-from constants.phone_countries import SUPPORTED_REGION_CODES
 from api.services.user_timezone import normalize_timezone_value, resolve_user_timezone
 from api.services.mcp_config_validation import (
     validate_environment_mapping,

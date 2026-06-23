@@ -7,4 +7,4 @@ class ConsoleConfig(AppConfig):
 
     def ready(self):  # noqa: D401 - init hook
         # Import signal handlers for realtime agent chat updates
-        from .agent_chat import signals  # pylint: disable=unused-import
+        from .agent_chat import signals  # noqa: F401  # pylint: disable=unused-import

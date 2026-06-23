@@ -5,12 +5,10 @@ from django.core.exceptions import ValidationError
 from django.db.models.aggregates import Sum
 from django.db.models.expressions import F
 from django.db.models import Q
-from django.db.models.functions import TruncMonth
 from django.utils import timezone
 from datetime import timezone as dt_timezone
 from django.utils.dateparse import parse_datetime, parse_date
 
-from api import models
 from billing.addons import AddonEntitlementService
 from billing.services import BillingService
 from constants.grant_types import GrantTypeChoices
@@ -26,9 +24,7 @@ from django.conf import settings
 from util.subscription_helper import (
     get_user_plan,
     get_active_subscription,
-    report_task_usage_to_stripe,
     get_user_extra_task_limit,
-    get_user_task_credit_limit,
     get_organization_plan,
     get_organization_extra_task_limit,
     allow_and_has_extra_tasks_for_organization,

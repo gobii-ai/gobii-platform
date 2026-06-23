@@ -7,7 +7,6 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest
 from django.contrib import messages
-from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
@@ -21,7 +20,6 @@ from api.agent.core.llm_config import AgentLLMTier, resolve_intelligence_tier_fo
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.models import (
     CommsChannel,
-    IntelligenceTier,
     MCPServerConfig,
     Organization,
     PersistentAgent,
@@ -53,7 +51,6 @@ from util.personal_signup_preview import (
     SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE,
 )
 from util.sms import find_unused_number, get_user_primary_sms_number
-from util.subscription_helper import get_owner_plan
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     TrialRequiredValidationError,

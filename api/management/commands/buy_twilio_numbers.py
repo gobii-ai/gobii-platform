@@ -26,7 +26,6 @@ from util.integrations import twilio_status
 from util import sms
 
 try:
-    from twilio.base.exceptions import TwilioRestException
     from twilio.rest import Client  # type: ignore
 except ImportError as exc:  # pragma: no cover – optional dependency
     raise CommandError(

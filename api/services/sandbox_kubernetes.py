@@ -11,7 +11,7 @@ from urllib.parse import quote
 import requests
 from django.conf import settings
 
-from api.models import AgentComputeSession, MCPServerConfig
+from api.models import AgentComputeSession
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from api.services.sandbox_compute import (
     SandboxComputeBackend,
@@ -22,7 +22,6 @@ from api.services.sandbox_compute import (
 )
 from api.services.system_settings import (
     get_sandbox_compute_pod_image,
-    get_sandbox_compute_require_proxy,
     get_sandbox_egress_proxy_pod_image,
 )
 

@@ -11,7 +11,6 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
-    PersistentAgentToolCall,
     PersistentAgentSystemMessage,
 )
 from console.agent_audit.serializers import (

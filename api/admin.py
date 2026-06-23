@@ -5,7 +5,6 @@ import uuid
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
-from django.contrib.sites.models import Site
 from django.db import transaction
 from django.db.models import Count, Prefetch
 from django.db.models.expressions import OuterRef, Exists
@@ -749,7 +748,6 @@ class TaskCreditAdmin(admin.ModelAdmin):
             TaskCredit = apps.get_model("api", "TaskCredit")
             User = get_user_model()
             from util.subscription_helper import get_user_plan
-            from constants.grant_types import GrantTypeChoices
 
             matched_users = []
             for user in User.objects.filter(is_active=True).iterator():

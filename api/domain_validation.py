@@ -108,7 +108,7 @@ class DomainPatternValidator:
             raise ValueError("Secrets dictionary cannot be empty")
         
         # Import security constants
-        from constants.security import SecretLimits, ValidationMessages, SecurityPatterns, DangerousSubstrings
+        from constants.security import SecretLimits, ValidationMessages
         
         # Check global limits
         total_secrets = sum(len(domain_secrets) for domain_secrets in secrets_dict.values())

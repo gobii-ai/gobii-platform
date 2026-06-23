@@ -4,7 +4,6 @@ from typing import Dict, List, Optional
 
 from django.db.models import Count, Min
 from django.db.models.functions import TruncDay
-from django.utils import timezone
 
 from api.models import (
     PersistentAgent,

@@ -3,7 +3,6 @@
 import logging
 from datetime import timedelta
 from dataclasses import dataclass
-from email.utils import parseaddr
 import json
 import re
 from typing import Any

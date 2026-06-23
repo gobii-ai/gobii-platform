@@ -11,12 +11,10 @@ import re
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-import litellm  # re-exported for tests that patch LiteLLM directly
 from django.conf import settings
 from django.db.models import F
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
-from litellm import drop_params
 from opentelemetry import trace
 
 from api.agent.eval_agents import is_eval_agent

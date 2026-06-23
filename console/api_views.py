@@ -73,7 +73,6 @@ from marketing_events.custom_events import ConfiguredCustomEvent, emit_configure
 from pages.public_template_urls import public_template_detail_path
 from api.models import (
     BrowserLLMPolicy,
-    BrowserUseAgent,
     BrowserUseAgentTask,
     BrowserLLMTier,
     BrowserModelEndpoint,

@@ -22,8 +22,8 @@ import math
 import re
 import statistics
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import datetime
+from typing import Optional
 
 from dateutil import parser as date_parser
 from dateutil.parser import ParserError

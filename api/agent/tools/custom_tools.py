@@ -30,7 +30,6 @@ from api.agent.tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from api.agent.tools.runtime_execution_context import get_tool_execution_context
 from api.utils.json_schema import (
     normalize_parameters_schema,
-    sanitize_tool_parameters_schema_for_llm,
 )
 from api.services.sandbox_compute import (
     LocalSandboxBackend,

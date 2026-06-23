@@ -13,7 +13,7 @@ from api.agent.core.llm_utils import run_completion
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.eval_agents import is_eval_agent
 from api.agent.short_description import compute_charter_hash
-from api.agent.tags import MAX_TAGS, normalize_tags, strip_code_fence
+from api.agent.tags import normalize_tags, strip_code_fence
 from api.models import PersistentAgent, PersistentAgentCompletion
 
 logger = logging.getLogger(__name__)

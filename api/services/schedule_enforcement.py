@@ -200,7 +200,6 @@ def enforce_minimum_for_agents(
     if min_minutes <= 0:
         return summary
 
-    from api.models import PersistentAgent  # local import to avoid circulars
 
     sample_limit = 20
 
