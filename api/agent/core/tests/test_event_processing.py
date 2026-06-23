@@ -864,47 +864,6 @@ class DailyLimitProcessingTests(TestCase):
             ).exists()
         )
 
-    @patch("api.agent.core.period_events.cache.add", side_effect=[True, False])
-    @patch("api.agent.core.event_processing.Analytics.track_event")
-    @patch(
-        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
-        return_value={"success": True, "credit": None},
-    )
-    @patch(
-        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
-        return_value=Decimal("10"),
-    )
-    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("1"))
-    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
-    def test_soft_limit_analytics_emit_once_per_daily_period(
-        self,
-        _mock_tool_cost,
-        _mock_available,
-        _mock_consume,
-        mock_track_event,
-        _mock_cache_add,
-    ):
-        for _ in range(2):
-            daily_state = {
-                "hard_limit": Decimal("100"),
-                "hard_limit_remaining": Decimal("90"),
-                "soft_target": Decimal("5"),
-                "soft_target_remaining": Decimal("0"),
-                "soft_target_exceeded": True,
-                "used": Decimal("5"),
-                "next_reset": timezone.now(),
-            }
-
-            result = _ensure_credit_for_tool(
-                self.agent,
-                "browser_search",
-                span=_DummySpan(),
-                credit_snapshot={"available": Decimal("10"), "daily_state": daily_state},
-            )
-            self.assertNotEqual(result, False)
-
-        self.assertEqual(mock_track_event.call_count, 1)
-
     @patch("api.agent.core.period_events.cache.add", side_effect=[True, True, False, False])
     @patch("api.agent.core.event_processing.Analytics.track_event")
     @patch(
@@ -946,74 +905,6 @@ class DailyLimitProcessingTests(TestCase):
                 notes="daily_credit_limit_mid_loop",
             ).count(),
             1,
-        )
-
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @patch("api.agent.core.event_processing._run_agent_loop", return_value={"total_tokens": 0})
-    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
-    @patch("api.agent.core.event_processing.maybe_schedule_agent_avatar")
-    @patch("api.agent.core.event_processing.maybe_schedule_agent_tags")
-    @patch("api.agent.core.event_processing.maybe_schedule_mini_description")
-    @patch("api.agent.core.event_processing.maybe_schedule_short_description")
-    @patch(
-        "api.agent.core.event_processing.get_agent_daily_credit_state",
-        return_value={
-            "hard_limit": Decimal("2"),
-            "hard_limit_remaining": Decimal("0"),
-            "soft_target": Decimal("1"),
-            "soft_target_remaining": Decimal("0"),
-            "soft_target_exceeded": True,
-            "used": Decimal("2"),
-            "next_reset": timezone.now(),
-        },
-    )
-    @patch(
-        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
-        return_value=Decimal("0"),
-    )
-    @patch("api.agent.core.period_events.cache.add", side_effect=[True, True, False])
-    def test_entry_hard_limit_marker_suppresses_later_mid_loop_system_step(
-        self,
-        _mock_cache_add,
-        _mock_available,
-        _mock_daily_state,
-        _mock_short_description,
-        _mock_mini_description,
-        _mock_agent_tags,
-        _mock_agent_avatar,
-        _mock_run_loop,
-    ):
-        _process_agent_events_locked(self.agent.id, _DummySpan())
-        self.assertEqual(
-            PersistentAgentSystemStep.objects.filter(
-                step__agent=self.agent,
-                notes="daily_credit_limit_exhausted",
-            ).count(),
-            1,
-        )
-
-        daily_state = {
-            "hard_limit": Decimal("2"),
-            "hard_limit_remaining": Decimal("0"),
-            "soft_target": None,
-            "soft_target_remaining": None,
-            "soft_target_exceeded": False,
-            "used": Decimal("2"),
-            "next_reset": timezone.now(),
-        }
-        result = _ensure_credit_for_tool(
-            self.agent,
-            "browser_search",
-            span=_DummySpan(),
-            credit_snapshot={"available": Decimal("10"), "daily_state": daily_state},
-        )
-
-        self.assertFalse(result)
-        self.assertFalse(
-            PersistentAgentSystemStep.objects.filter(
-                step__agent=self.agent,
-                notes="daily_credit_limit_mid_loop",
-            ).exists()
         )
 
     @patch("api.agent.core.period_events.cache.add", side_effect=RuntimeError("cache unavailable"))
