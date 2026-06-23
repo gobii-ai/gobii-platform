@@ -208,7 +208,7 @@ def _step_down_runtime_tier(
         burn_rate,
         burn_threshold,
     )
-    return should_emit_step_down
+    return True
 
 
 def handle_burn_rate_limit(

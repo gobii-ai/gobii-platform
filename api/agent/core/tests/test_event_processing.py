@@ -945,6 +945,6 @@ class DailyLimitProcessingTests(TestCase):
             daily_state=daily_state,
         )
 
-        self.assertEqual(second_action, BurnRateAction.NONE)
+        self.assertEqual(second_action, BurnRateAction.STEPPED_DOWN)
         self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.STANDARD)
         self.assertEqual(mock_track_event.call_count, 1)
