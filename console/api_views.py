@@ -172,7 +172,7 @@ from api.services.web_sessions import (
     start_web_session,
     touch_web_session,
 )
-from api.services.sms_contact_purpose import track_sms_contact_approval
+from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
 
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -415,6 +415,12 @@ def _pending_action_payload(agent: PersistentAgent, viewer_user) -> dict[str, An
         "pending_human_input_requests": get_legacy_pending_human_input_requests(pending_action_requests),
         "pending_action_requests": pending_action_requests,
     }
+
+
+def _emit_pending_action_requests_update_on_commit(agent: PersistentAgent) -> None:
+    from console.agent_chat.signals import emit_pending_action_requests_update
+
+    emit_pending_action_requests_update(agent)
 
 
 class ConsolePersistentAgentViewSet(PersistentAgentViewSet):
@@ -4291,6 +4297,7 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                 skipped_count = 0
                 approved_addresses: list[str] = []
                 approval_capacity: int | None = None
+                now = timezone.now()
                 if any(response["decision"] == "approve" for response in normalized_responses):
                     cap = get_user_max_contacts_per_agent(
                         agent.user,
@@ -4300,15 +4307,30 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                     if cap > 0 and counts is not None:
                         approval_capacity = max(cap - counts["total"], 0)
 
+                approval_request_objects = [
+                    requests_by_id[response["request_id"]]
+                    for response in normalized_responses
+                    if response["decision"] == "approve"
+                ]
+                existing_entries_by_key = {
+                    (entry.channel, entry.address): entry
+                    for entry in CommsAllowlistEntry.objects.filter(
+                        agent=agent,
+                        is_active=True,
+                        channel__in={request_obj.channel for request_obj in approval_request_objects},
+                        address__in={request_obj.address for request_obj in approval_request_objects},
+                    )
+                }
+                new_entries: list[CommsAllowlistEntry] = []
+                existing_entries_to_update: dict[Any, CommsAllowlistEntry] = {}
+                requests_to_update: list[CommsAllowlistRequest] = []
+                approved_sms_events: list[tuple[CommsAllowlistRequest, CommsAllowlistEntry]] = []
+                sms_purpose_required = sms_contact_purpose_required()
+
                 for response in normalized_responses:
                     request_obj = requests_by_id[response["request_id"]]
                     if response["decision"] == "approve":
-                        existing_entry = CommsAllowlistEntry.objects.filter(
-                            agent=agent,
-                            channel=request_obj.channel,
-                            address=request_obj.address,
-                            is_active=True,
-                        ).first()
+                        existing_entry = existing_entries_by_key.get((request_obj.channel, request_obj.address))
                         if (
                             existing_entry is None
                             and approval_capacity is not None
@@ -4320,6 +4342,20 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                         request_obj.request_outbound = response["allow_outbound"]
                         request_obj.request_configure = response["can_configure"]
                         if request_obj.channel == CommsChannel.SMS:
+                            if existing_entry is None and agent.organization_id is not None:
+                                return JsonResponse(
+                                    {
+                                        "errors": {
+                                            response["request_id"]: [
+                                                (
+                                                    "Organization agents only support email addresses in allowlists. "
+                                                    "Group SMS functionality is not yet available."
+                                                )
+                                            ]
+                                        }
+                                    },
+                                    status=400,
+                                )
                             if response["sms_contact_purpose"] is not None:
                                 request_obj.sms_contact_purpose = response["sms_contact_purpose"]
                             if response["sms_contact_purpose_details"] is not None:
@@ -4327,6 +4363,12 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                             request_obj.sms_contact_permission_attested = response[
                                 "sms_contact_permission_attested"
                             ]
+                            if request_obj.sms_contact_permission_attested is True:
+                                request_obj.sms_contact_permission_attested_at = (
+                                    request_obj.sms_contact_permission_attested_at or now
+                                )
+                            else:
+                                request_obj.sms_contact_permission_attested_at = None
                             if (
                                 request_obj.sms_contact_permission_attested is True
                                 and not request_obj.sms_contact_purpose
@@ -4338,45 +4380,135 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                                     or request_obj.reason
                                     or "Approved through a contact request."
                                 )
-                        request_obj.save(
-                            update_fields=[
-                                "request_inbound",
-                                "request_outbound",
-                                "request_configure",
-                                "sms_contact_purpose",
-                                "sms_contact_purpose_details",
-                                "sms_contact_permission_attested",
-                            ]
-                        )
-                        result = request_obj.approve(invited_by=request.user, skip_invitation=True)
+                            if (
+                                existing_entry is None
+                                and sms_purpose_required
+                                and (
+                                    not request_obj.sms_contact_purpose
+                                    or request_obj.sms_contact_permission_attested is not True
+                                )
+                            ):
+                                return JsonResponse(
+                                    {
+                                        "errors": {
+                                            response["request_id"]: [
+                                                "Confirm you have permission to contact this number by SMS."
+                                            ]
+                                        }
+                                    },
+                                    status=400,
+                                )
+                        else:
+                            request_obj.sms_contact_purpose = None
+                            request_obj.sms_contact_purpose_details = None
+                            request_obj.sms_contact_permission_attested = None
+                            request_obj.sms_contact_permission_attested_at = None
+
+                        if existing_entry is None:
+                            result = CommsAllowlistEntry(
+                                agent=agent,
+                                channel=request_obj.channel,
+                                address=request_obj.address,
+                                is_active=True,
+                                allow_inbound=request_obj.request_inbound,
+                                allow_outbound=request_obj.request_outbound,
+                                can_configure=request_obj.request_configure,
+                                sms_contact_purpose=request_obj.sms_contact_purpose,
+                                sms_contact_purpose_details=request_obj.sms_contact_purpose_details,
+                                sms_contact_permission_attested=request_obj.sms_contact_permission_attested,
+                                sms_contact_permission_attested_at=request_obj.sms_contact_permission_attested_at,
+                                created_at=now,
+                                updated_at=now,
+                            )
+                            new_entries.append(result)
+                            existing_entries_by_key[(result.channel, result.address)] = result
+                        else:
+                            result = existing_entry
+                            if request_obj.channel == CommsChannel.SMS and (
+                                request_obj.sms_contact_purpose
+                                or request_obj.sms_contact_permission_attested is True
+                            ):
+                                existing_entry.sms_contact_purpose = request_obj.sms_contact_purpose
+                                existing_entry.sms_contact_purpose_details = (
+                                    request_obj.sms_contact_purpose_details
+                                )
+                                existing_entry.sms_contact_permission_attested = (
+                                    request_obj.sms_contact_permission_attested
+                                )
+                                existing_entry.sms_contact_permission_attested_at = (
+                                    request_obj.sms_contact_permission_attested_at
+                                )
+                                existing_entry.updated_at = now
+                                existing_entries_to_update[existing_entry.pk] = existing_entry
+
+                        request_obj.status = CommsAllowlistRequest.RequestStatus.APPROVED
+                        request_obj.responded_at = now
+                        requests_to_update.append(request_obj)
                         if existing_entry is None and approval_capacity is not None:
                             approval_capacity -= 1
                         if request_obj.channel == CommsChannel.SMS:
-                            sms_event_kwargs = {
-                                "user_id": request.user.id,
-                                "agent": agent,
-                                "address": request_obj.address,
-                                "approval_source": "agent_chat_contact_request_resolve",
-                                "approval_action": "approve",
-                                "allow_inbound": request_obj.request_inbound,
-                                "allow_outbound": request_obj.request_outbound,
-                                "can_configure": request_obj.request_configure,
-                                "sms_contact_purpose": request_obj.sms_contact_purpose,
-                                "sms_contact_purpose_details": request_obj.sms_contact_purpose_details,
-                                "sms_contact_permission_attested": (
-                                    request_obj.sms_contact_permission_attested
-                                ),
-                                "allowlist_entry_id": getattr(result, "id", None),
-                                "contact_request_id": str(request_obj.id),
-                            }
-                            transaction.on_commit(
-                                lambda kwargs=sms_event_kwargs: track_sms_contact_approval(**kwargs)
-                            )
+                            approved_sms_events.append((request_obj, result))
                         approved_count += 1
                         approved_addresses.append(request_obj.name or request_obj.address)
                     else:
-                        request_obj.reject()
+                        request_obj.status = CommsAllowlistRequest.RequestStatus.REJECTED
+                        request_obj.responded_at = now
+                        requests_to_update.append(request_obj)
                         rejected_count += 1
+
+                if new_entries:
+                    CommsAllowlistEntry.objects.bulk_create(new_entries, batch_size=500)
+                if existing_entries_to_update:
+                    CommsAllowlistEntry.objects.bulk_update(
+                        list(existing_entries_to_update.values()),
+                        [
+                            "sms_contact_purpose",
+                            "sms_contact_purpose_details",
+                            "sms_contact_permission_attested",
+                            "sms_contact_permission_attested_at",
+                            "updated_at",
+                        ],
+                        batch_size=500,
+                    )
+                if requests_to_update:
+                    CommsAllowlistRequest.objects.bulk_update(
+                        requests_to_update,
+                        [
+                            "request_inbound",
+                            "request_outbound",
+                            "request_configure",
+                            "sms_contact_purpose",
+                            "sms_contact_purpose_details",
+                            "sms_contact_permission_attested",
+                            "sms_contact_permission_attested_at",
+                            "status",
+                            "responded_at",
+                        ],
+                        batch_size=500,
+                    )
+                    transaction.on_commit(lambda: _emit_pending_action_requests_update_on_commit(agent))
+
+                for sms_request, sms_entry in approved_sms_events:
+                    sms_event_kwargs = {
+                        "user_id": request.user.id,
+                        "agent": agent,
+                        "address": sms_request.address,
+                        "approval_source": "agent_chat_contact_request_resolve",
+                        "approval_action": "approve",
+                        "allow_inbound": sms_request.request_inbound,
+                        "allow_outbound": sms_request.request_outbound,
+                        "can_configure": sms_request.request_configure,
+                        "sms_contact_purpose": sms_request.sms_contact_purpose,
+                        "sms_contact_purpose_details": sms_request.sms_contact_purpose_details,
+                        "sms_contact_permission_attested": (
+                            sms_request.sms_contact_permission_attested
+                        ),
+                        "allowlist_entry_id": getattr(sms_entry, "id", None),
+                        "contact_request_id": str(sms_request.id),
+                    }
+                    transaction.on_commit(
+                        lambda kwargs=sms_event_kwargs: track_sms_contact_approval(**kwargs)
+                    )
 
                 if approved_count > 0:
                     if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:

@@ -16,6 +16,8 @@ from api.models import (
 
 from .access import user_can_manage_agent_settings
 
+CONTACT_REQUEST_PENDING_ACTION_PREVIEW_LIMIT = 10
+
 
 def _build_human_input_actions(agent: PersistentAgent) -> list[dict]:
     actions_by_batch: dict[str, dict] = {}
@@ -222,18 +224,23 @@ def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[di
             }
         )
 
-    for request_obj in (
+    contact_request_qs = (
         CommsAllowlistRequest.objects.filter(
             agent=agent,
             status=CommsAllowlistRequest.RequestStatus.PENDING,
         ).order_by("-requested_at")
-    ):
+    )
+    contact_request_count = contact_request_qs.count()
+    if contact_request_count:
         pending_actions.append(
             {
-                "id": f"contact_request:{request_obj.id}",
+                "id": "contact_requests",
                 "kind": "contact_requests",
-                "requests": [_serialize_contact_request(request_obj)],
-                "count": 1,
+                "requests": [
+                    _serialize_contact_request(request_obj)
+                    for request_obj in contact_request_qs[:CONTACT_REQUEST_PENDING_ACTION_PREVIEW_LIMIT]
+                ],
+                "count": contact_request_count,
                 "resolveApiUrl": reverse("console_agent_contact_requests_resolve", kwargs={"agent_id": agent.id}),
             }
         )
