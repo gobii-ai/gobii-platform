@@ -364,11 +364,8 @@ jobs:
               "repo": "${{ github.event.repository.name }}",
               "pr_number": ${{ github.event.pull_request.number }},
               "head_sha": "${{ needs.preview_preflight.outputs.head_sha }}",
-              "short_sha": "${{ needs.preview_preflight.outputs.short_sha }}",
               "image": "${{ needs.publish_preview.outputs.image }}",
-              "url": "${{ needs.preview_preflight.outputs.preview_url }}",
               "html_url": "${{ github.event.pull_request.html_url }}",
-              "title": ${{ toJson(github.event.pull_request.title) }},
               "trigger_run_id": ${{ github.run_id }},
               "trigger_run_attempt": ${{ github.run_attempt }},
               "actor": "${{ github.actor }}"
