@@ -1054,7 +1054,14 @@ def _score_schedule_scope(
         policy = {}
 
     schedule_in_scope = bool(policy.get("schedule_in_scope"))
-    explicit_intent = bool(policy.get("explicit_user_intent"))
+    explicit_schedule_intent = policy.get("explicit_schedule_intent")
+    if explicit_schedule_intent is None:
+        # Older eval schema used an ambiguous field name. Treat it as schedule
+        # intent only when the schedule itself is in scope so explicit non-schedule
+        # control-plane requests do not fail no-schedule cases.
+        explicit_intent = bool(policy.get("explicit_user_intent") and schedule_in_scope)
+    else:
+        explicit_intent = bool(explicit_schedule_intent)
     approval_includes_schedule = bool(policy.get("included_in_approval_scope"))
     asks_clarifying_question = bool(policy.get("asks_clarifying_question"))
     schedule_action = str(policy.get("schedule_action") or "none").strip().lower()

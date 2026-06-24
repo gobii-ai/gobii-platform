@@ -3775,6 +3775,8 @@ def _get_system_instruction(
         "```\n"
         "small_result_answers -> answer directly\n"
         "provided exact URL -> use it directly; do not search for it\n"
+        "public exact URL + http/scrape tool callable -> http_request or scrape directly; spawn_web_task only after access/render/login blockage\n"
+        "exact docs/blog/changelog/release-notes URL -> scrape_as_markdown or http_request first; never spawn_web_task first just because it is a webpage or app URL\n"
         "explicit SQLite/database request and sqlite_batch is callable -> use sqlite_batch directly; do not search for a SQLite/database tool\n"
         "recurring setup with URL -> sqlite_batch charter+schedule first; no URL search/read/fetch unless asked to run now\n"
         "scheduled exact feed/API briefing -> http_request then send concise sourced report; no update_plan/files/charts unless asked\n"
@@ -3795,6 +3797,7 @@ def _get_system_instruction(
 
         "For MCP tools (Google Sheets, Slack, etc.), call the matching tool; do not list/open first unless required. If auth is needed, share the connect link and wait. "
         "Email/SMS imperatives map directly to send_email/send_sms, or request_contact_permission if contact is not allowed. "
+        "Do not downgrade requested email/SMS delivery to chat unless the send tool result proves delivery is blocked and no setup path exists. "
         "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "
         "For credential domains, think broadly: *.google.com covers more than one subdomain. "
 

@@ -34,6 +34,7 @@ from api.evals.scenarios.effort_calibration import (
     _sqlite_result_text_reads,
     _web_query_value,
 )
+from api.evals.scenarios.monitor_pollution import BACKGROUND_DRAIN_TIMEOUT_SECONDS
 from api.evals.scenarios.sqlite_tool_results import (
     INVENTORY_URLS,
     LISTING_URLS,
@@ -230,6 +231,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(scenario.sourced_answer_task_name, "verify_listing_links_in_report")
         self.assertIn(scenario.sourced_answer_task_name, task_names)
         self.assertNotIn("verify_sourced_answer", task_names)
+
+    def test_monitor_pollution_allows_slow_background_browser_drain(self):
+        self.assertGreaterEqual(BACKGROUND_DRAIN_TIMEOUT_SECONDS, 600)
 
     def test_sqlite_tool_result_usage_rejects_manual_values_working_table(self):
         scenario, recorded = SqliteToolResultScenario(), []
@@ -1035,3 +1039,10 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
         self.assertIn("enabled tool fits -> use directly", system_prompt)
+        self.assertIn("public exact URL + http/scrape tool callable", system_prompt)
+        self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
+        self.assertIn("exact docs/blog/changelog/release-notes URL", system_prompt)
+        self.assertIn("one-off file/sheet/doc/chart/create/format task", system_prompt)
+        self.assertIn("never update __agent_config schedule/charter", system_prompt)
+        self.assertIn("explicit SMS/text request + send_sms callable", system_prompt)
+        self.assertIn("Do not downgrade requested email/SMS delivery to chat", system_prompt)

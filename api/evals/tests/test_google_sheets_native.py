@@ -77,6 +77,13 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
 
         self.assertIn("update_plan", policy["ignored_tool_names"])
 
+    def test_create_and_format_response_accepts_formatting_language(self):
+        create_case = next(case for case in GOOGLE_SHEETS_NATIVE_CASES if case.slug == GOOGLE_SHEETS_NATIVE_CREATE_AND_FORMAT)
+
+        first_group = create_case.response_term_groups[0]
+        self.assertIn("formatted", first_group)
+        self.assertIn("styled", first_group)
+
     def test_known_id_cases_allow_drive_preflight(self):
         known_id_cases = {
             case.slug: case

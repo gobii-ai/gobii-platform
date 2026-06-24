@@ -12,7 +12,7 @@ from api.agent.events import AgentEventType
 from api.services.schedule_enforcement import cron_interval_seconds
 
 INITIAL_PROCESSING_TIMEOUT_SECONDS = 300
-BACKGROUND_DRAIN_TIMEOUT_SECONDS = 300
+BACKGROUND_DRAIN_TIMEOUT_SECONDS = 600
 
 
 def _charter_mentions_pollution_monitoring(charter: str | None) -> tuple[bool, str]:
