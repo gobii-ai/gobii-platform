@@ -4,8 +4,92 @@ sidebar_label: Dedicated IPs
 description: "Use dedicated IPs to give Gobii agents stable network identity for browser automation and allowlisted workflows."
 ---
 
-By default, the IP address an agent uses for accessing the internet may change. Users who would like to have a consistent IP address for their agent may add one or more dedicated IP address to their account, and assign them to their agent.
+import Link from '@docusaurus/Link';
 
-When using a dedicated IP, you will have a consistent IP to use for firewall rules. For example, you may wish to add a dedicated IP address to an agent for connecting to privileged network monitoring to tools which require a firewall rule to permit access.
+## What are dedicated IPs?
 
-To add Dedicated IP addresses to your account, visit your [billing](https://gobii.ai/console/billing/) page. Once added to your account, assign the IP to the agent of choice on the agent's configuration page.
+By default, the IP address your Gobii agent uses to access the internet can change between tasks. For most use cases this is fine — but when your agent needs to connect to services behind a firewall or VPN, a shifting IP becomes a problem.
+
+A **dedicated IP** is a fixed, static IP address assigned exclusively to your agent. Once assigned, all of your agent's outbound traffic — browser tasks, API calls, web scraping — originates from that single, consistent address.
+
+## Why use a dedicated IP?
+
+| Scenario | Without dedicated IP | With dedicated IP |
+|---|---|---|
+| **Firewall allowlisting** | Can't connect — your agent's IP keeps changing | Whitelist the fixed IP once and it works indefinitely |
+| **Privileged network monitoring** | Each task may come from a different IP, triggering alerts | Consistent IP means predictable network identity |
+| **IP-based API authentication** | API keys tied to an IP range break when the IP shifts | A single known IP stays valid |
+| **Compliance / audit logging** | Logs show multiple source IPs for the same agent | All agent activity traces to one auditable address |
+| **Third-party services with IP restrictions** | Access denied when the IP changes mid-session | Reliable, uninterrupted access |
+
+In short: if you're connecting to anything that cares *who* is connecting based on IP address, you want a dedicated IP.
+
+## How dedicated IPs work
+
+1. **Purchase** one or more dedicated IPs on your [billing page](https://gobii.ai/console/billing/)
+2. **Assign** the IP to a specific agent on that agent's configuration page
+3. **Allowlist** the IP in your firewall, VPN, or third-party service
+4. **Done** — your agent now routes all outbound traffic through that fixed address
+
+Once assigned, the agent uses the dedicated IP for every task — browser automation, HTTP requests, email sending via SMTP, and any other outbound network activity.
+
+## Adding dedicated IPs to your account
+
+Dedicated IPs are purchased per account, not per agent. You can buy one or more and assign them across your agents as needed.
+
+1. Go to **https://gobii.ai/console/billing/**
+2. Find the **Dedicated IPs** section
+3. Select the number of IPs you need
+4. Complete the purchase
+
+Dedicated IPs are billed as a recurring add-on. Pricing and availability depend on your plan — check the [pricing page](https://gobii.ai/pricing/) for current rates.
+
+## Assigning a dedicated IP to an agent
+
+Once you have dedicated IPs on your account:
+
+1. Open the agent's configuration page at `https://gobii.ai/app/agents/{id}/settings`
+2. Find the **Dedicated IP** setting
+3. Select an available IP from the dropdown
+4. Save your changes
+
+The assignment takes effect immediately. Your agent's next task will use the new dedicated IP.
+
+## Multiple dedicated IPs
+
+You can purchase more than one dedicated IP and distribute them across your agents:
+
+- **One IP per agent** — the most common setup. Each agent gets its own fixed identity.
+- **Shared IP** — assign the same dedicated IP to multiple agents if they all need access to the same allowlisted services.
+- **No dedicated IP** — agents without an assigned dedicated IP continue using dynamic IPs as normal.
+
+## Dedicated IPs and organizations
+
+If your agents belong to an [organization](/core-concepts/organizations), dedicated IPs are managed at the organization level:
+
+- Org owners and admins purchase IPs from the billing page
+- IPs are available to all agents within the organization
+- Agents owned by the org can be assigned any available org IP
+
+See [Organizations](/core-concepts/organizations) and [Usage and Billing](/admin-and-teams/usage-and-billing) for details on org-level resource management.
+
+## Troubleshooting
+
+### My agent still can't connect after assigning a dedicated IP
+
+Double-check your firewall rule. The IP shown on the agent's configuration page is the exact address you need to allowlist. Make sure the rule covers all relevant ports (typically 80, 443, and any service-specific ports).
+
+### The dedicated IP doesn't appear in the dropdown
+
+Confirm the IP was successfully added to your account on the billing page. It can take a few minutes for a newly purchased IP to become available for assignment.
+
+### I need to change which agent uses a dedicated IP
+
+Unassign the IP from the current agent first, then assign it to the new agent. There's no downtime — the change is instant.
+
+## Next steps
+
+- [Agent settings](/console-guides/agent-settings) — assign dedicated IPs and configure your agent
+- [Organizations](/core-concepts/organizations) — manage IPs across your team
+- [Usage and Billing](/admin-and-teams/usage-and-billing) — purchase dedicated IPs and manage add-ons
+- [Browser tasks](/developers/legacy-browser-tasks) — see dedicated IPs in action with browser automation
