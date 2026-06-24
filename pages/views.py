@@ -1252,42 +1252,43 @@ class HomePage(TemplateView):
             }
         )
 
-        payload = get_homepage_pretrained_payload()
-        all_templates = list(payload.get("templates") or [])
+        if settings.GOBII_PROPRIETARY_MODE:
+            payload = get_homepage_pretrained_payload()
+            all_templates = list(payload.get("templates") or [])
 
-        category_filter = (self.request.GET.get("pretrained_category") or "").strip()
-        search_term = (self.request.GET.get("pretrained_search") or "").strip()
+            category_filter = (self.request.GET.get("pretrained_category") or "").strip()
+            search_term = (self.request.GET.get("pretrained_search") or "").strip()
 
-        filtered_templates = list(all_templates)
-        if category_filter:
-            category_lower = category_filter.lower()
-            filtered_templates = [
-                template
-                for template in filtered_templates
-                if (template.get("category") or "").lower() == category_lower
-            ]
+            filtered_templates = list(all_templates)
+            if category_filter:
+                category_lower = category_filter.lower()
+                filtered_templates = [
+                    template
+                    for template in filtered_templates
+                    if (template.get("category") or "").lower() == category_lower
+                ]
 
-        if search_term:
-            search_lower = search_term.lower()
-            filtered_templates = [
-                template
-                for template in filtered_templates
-                if search_lower in (template.get("display_name") or "").lower()
-                or search_lower in (template.get("tagline") or "").lower()
-                or search_lower in (template.get("description") or "").lower()
-            ]
+            if search_term:
+                search_lower = search_term.lower()
+                filtered_templates = [
+                    template
+                    for template in filtered_templates
+                    if search_lower in (template.get("display_name") or "").lower()
+                    or search_lower in (template.get("tagline") or "").lower()
+                    or search_lower in (template.get("description") or "").lower()
+                ]
 
-        filtered_workers = [SimpleNamespace(**template) for template in filtered_templates]
-        context.update(
-            {
-                "homepage_pretrained_workers": filtered_workers,
-                "homepage_pretrained_total": payload.get("total", len(all_templates)),
-                "homepage_pretrained_filtered_count": len(filtered_workers),
-                "homepage_pretrained_categories": payload.get("categories") or [],
-                "homepage_pretrained_selected_category": category_filter,
-                "homepage_pretrained_search_term": search_term,
-            }
-        )
+            filtered_workers = [SimpleNamespace(**template) for template in filtered_templates]
+            context.update(
+                {
+                    "homepage_pretrained_workers": filtered_workers,
+                    "homepage_pretrained_total": payload.get("total", len(all_templates)),
+                    "homepage_pretrained_filtered_count": len(filtered_workers),
+                    "homepage_pretrained_categories": payload.get("categories") or [],
+                    "homepage_pretrained_selected_category": category_filter,
+                    "homepage_pretrained_search_term": search_term,
+                }
+            )
 
         if self.request.user.is_authenticated:
             recent_agents_qs = PersistentAgent.objects.non_eval().alive().filter(user_id=self.request.user.id)

@@ -1497,6 +1497,7 @@
     })
   </script>
 
+  {% if settings.GOBII_PROPRIETARY_MODE %}
   <!-- Employee Directory Section -->
   <section id="pretrained-workers" class="relative pt-0 pb-16 scroll-mt-32">
     <div class="max-w-6xl mx-auto px-6">
@@ -1576,6 +1577,7 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
     <script>
       function setPrompt(promptText) {

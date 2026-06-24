@@ -536,6 +536,7 @@ class HomePageTests(TestCase):
         self.assertEqual(parsed.path, "/app/agents")
         self.assertEqual(parse_qs(parsed.query).get("return_to"), ["/"])
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_page_exposes_all_pretrained_workers(self):
         templates = PretrainedWorkerTemplateService.get_active_templates()
         response = self.client.get("/")
@@ -546,6 +547,7 @@ class HomePageTests(TestCase):
         self.assertEqual(response.context.get("homepage_pretrained_total"), len(templates))
         self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(templates))
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_page_filters_by_category(self):
         templates = PretrainedWorkerTemplateService.get_active_templates()
         category = None
@@ -567,6 +569,7 @@ class HomePageTests(TestCase):
         self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
         self.assertEqual(response.context.get("homepage_pretrained_total"), len(templates))
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_page_filters_by_search(self):
         templates = PretrainedWorkerTemplateService.get_active_templates()
         self.assertGreater(len(templates), 0)
@@ -586,6 +589,30 @@ class HomePageTests(TestCase):
 
         self.assertEqual(len(workers), len(expected))
         self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_home_page_omits_pretrained_worker_directory_in_community_mode(self):
+        with patch("pages.views.get_homepage_pretrained_payload") as mock_payload:
+            response = self.client.get("/", {"pretrained_search": "Talent", "pretrained_category": "Research"})
+
+        self.assertEqual(response.status_code, 200)
+        mock_payload.assert_not_called()
+        self.assertIsNone(response.context.get("homepage_pretrained_workers"))
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertIsNone(soup.find(id="pretrained-workers"))
+        self.assertIsNone(
+            soup.find(
+                "input",
+                {"name": "source_page", "value": "home_pretrained_workers"},
+            )
+        )
+        self.assertFalse(
+            any(
+                (link.get("href") or "").startswith("/pretrained-workers/")
+                for link in soup.find_all("a", href=True)
+            )
+        )
 
     @patch("pages.views.get_homepage_integrations_payload", return_value={"enabled": False, "builtins": []})
     def test_home_page_hides_integrations_section_when_pipedream_is_disabled(self, _mock_integrations):
@@ -789,7 +816,7 @@ class HomePageTests(TestCase):
             },
         )
 
-    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_home_cta_text_changes_for_authenticated_users(self):
         unauth_response = self.client.get("/")
         self.assertEqual(unauth_response.status_code, 200)
@@ -936,7 +963,7 @@ class HomePageTests(TestCase):
         self.assertNotContains(response, "header.hs-header")
         self.assertNotContains(response, "breathingRoom = mobile ? 20 : 28")
 
-    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     def test_home_cta_text_shows_trial_when_authenticated_user_requires_trial(self):
         user = get_user_model().objects.create_user(
             username="home_cta_trial_required@example.com",
@@ -967,7 +994,7 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(card_button)
         self.assertEqual(self._normalized_button_text(card_button), "Start Free Trial")
 
-    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     def test_home_cta_text_stays_spawn_for_grandfathered_user(self):
         user = get_user_model().objects.create_user(
             username="home_cta_grandfathered@example.com",
@@ -999,6 +1026,7 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(card_button)
         self.assertEqual(self._normalized_button_text(card_button), "Spawn This Worker")
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_pretrained_worker_cards_include_trial_onboarding_fields(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
