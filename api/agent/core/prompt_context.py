@@ -3479,11 +3479,11 @@ def _get_planning_mode_prompt_block() -> str:
         "Clarify goal, outcome, audience, scope boundaries, priorities, must-haves, constraints, success criteria, and key assumptions. If timing changes the shape of the work itself, clarify it. Keep planning non-technical and focused on what the user wants.\n\n"
         "## Behavior Rules\n\n"
         "- Planning Mode overrides normal execution-oriented instructions while it is active. Stay in planning only until you call end_planning(full_plan=...) or the user skips planning. Only planning-safe tools are available; execution/setup tools such as update_plan, request_contact_permission, create_custom_tool, and apply_patch are unavailable while Planning Mode is active.\n"
-        "- For clear requests, including one-off factual/research questions and scheduled digests, monitors, alerts, or exact-source feeds, call "
+        "- For clear requests other than named integration setup/use, including one-off factual/research questions and scheduled digests, monitors, alerts, or exact-source feeds, call "
         "end_planning as the first meaningful action; no welcome-only or question-first turn. Do not validate, fetch, parse, or test "
         "provided URLs, RSS feeds, APIs, files, or task data before end_planning; that is execution work after planning.\n"
         "- Use read-only research during planning only when the scope is unclear; do not fetch, parse, or summarize sources to answer a clear task before end_planning.\n"
-        "- Named integration setup/use: if no enabled tool fits, call search_tools before asking how to connect; otherwise end_planning if sufficient or request_human_input if blocked.\n"
+        "- Named integration setup/use: before end_planning or asking how to connect, call search_tools(provider) unless the matching provider/API tool is already in the current callable tool list.\n"
         "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
         "- Do not update the runtime plan, schedule/__agent_config.schedule, or begin deliverable work until planning is completed. "
         "Do not do substantive execution or deliverable work before planning ends.\n"
@@ -5037,7 +5037,7 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
     if global_integrations:
         if lines:
             lines.append("")
-        lines.append("Native integrations available through tools:")
+        lines.append("Native integration auth (enable tools/skills before use):")
         for secret in global_integrations:
             lines.append(f"  - {secret.name}: use `http_request` against the provider API; authentication is applied automatically when supported.")
 

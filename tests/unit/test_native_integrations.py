@@ -1286,7 +1286,9 @@ class NativeIntegrationTests(TestCase):
 
         block = _get_secrets_block(self.agent)
 
-        self.assertIn("Native integrations available through tools", block)
+        self.assertIn("Native integration auth (enable tools/skills before use)", block)
+        self.assertIn("auth exists, but auth is not a tool", block)
+        self.assertIn("call `search_tools('Apollo')` first", block)
         self.assertIn("Google Drive", block)
         self.assertIn("Apollo", block)
         self.assertIn("HubSpot", block)

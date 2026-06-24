@@ -169,6 +169,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("Start your response with a brief welcome message to Matt", prompt)
         self.assertIn("end_planning", prompt)
         self.assertIn("request_human_input", prompt)
+        self.assertIn("For clear requests other than named integration setup/use", prompt)
+        self.assertIn("before end_planning or asking how to connect, call search_tools(provider)", prompt)
         self.assertNotIn("spawn_agent", prompt)
         self.assertNotIn("Normal tools are available", prompt)
         self.assertNotIn("## Then charter + runtime plan + everything else", prompt)
