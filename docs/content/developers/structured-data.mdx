@@ -4,7 +4,37 @@ sidebar_label: "Structured Data"
 description: "Request structured JSON outputs from Gobii agents so browser automation results are easier to validate, store, and integrate."
 ---
 
-API requests can return data in a structured JSON format, if requested. To use this feature, in your API request, specify the `output_schema` like so:
+import Link from '@docusaurus/Link';
+
+## What is structured data?
+
+By default, Gobii agents return free-form text — great for chat and reports, but harder to parse programmatically. **Structured data** lets you request results in a predictable JSON format by providing a [JSON Schema](https://json-schema.org/) definition alongside your prompt.
+
+When you supply an `output_schema`, the agent validates its response against your schema before returning it, giving you clean, machine-readable output you can feed directly into databases, APIs, or downstream workflows.
+
+## Why use structured data?
+
+| Without structured data | With structured data |
+|---|---|
+| Text responses need manual parsing | JSON output ready for automation |
+| Inconsistent formatting between runs | Every response matches your schema |
+| Hard to validate programmatically | Agent validates against schema before returning |
+| Brittle regex or string matching | Standard JSON parsing |
+| Difficult to store in databases | Direct INSERT from returned JSON |
+
+Common use cases:
+
+- **Web scraping** — extract product details, prices, and availability into consistent JSON records
+- **Data enrichment** — pull structured fields from pages and merge them with existing datasets
+- **API integrations** — pass structured agent output directly to another API
+- **Database loading** — scrape pages and INSERT results into PostgreSQL, SQLite, or any database
+- **Validation pipelines** — enforce that scraped data matches expected formats before downstream processing
+
+## How to request structured data
+
+Include an `output_schema` field in your API request. The value must be a valid JSON Schema object.
+
+### Basic example
 
 ```json
 {
@@ -29,4 +59,116 @@ API requests can return data in a structured JSON format, if requested. To use t
 }
 ```
 
-`output_schema` should be a [JSON Schema](https://json-schema.org/) definition.
+The agent will navigate to the page, extract the requested fields, validate them against your schema, and return:
+
+```json
+{
+  "name": "A Light in the Attic",
+  "price": "£51.77"
+}
+```
+
+### Supported schema features
+
+The agent supports standard JSON Schema constructs:
+
+| Feature | Example | Notes |
+|---|---|---|
+| **Object properties** | `"properties": { "title": { "type": "string" } }` | Define named fields |
+| **Required fields** | `"required": ["title", "price"]` | Agent errors if a required field is missing |
+| **Nested objects** | `"type": "object", "properties": { "address": { "type": "object", ... } }` | Extract complex, nested structures |
+| **Arrays** | `"type": "array", "items": { "type": "string" }` | Return lists of values or objects |
+| **Type constraints** | `"type": "string"`, `"type": "number"`, `"type": "integer"`, `"type": "boolean"` | Enforce data types |
+| **Additional properties** | `"additionalProperties": false` | Reject unexpected fields |
+| **Enums** | `"enum": ["in_stock", "out_of_stock"]` | Constrain to specific values |
+| **Descriptions** | `"description": "The product title"` | Guide the agent (not enforced) |
+
+### Advanced: arrays of objects
+
+```json
+{
+  "prompt": "Go to https://books.toscrape.com and return the first 5 books as a list",
+  "wait": 300,
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "books": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "price": { "type": "string" },
+            "availability": { "type": "string" }
+          },
+          "required": ["title", "price"]
+        }
+      }
+    },
+    "required": ["books"]
+  }
+}
+```
+
+### Advanced: nested objects
+
+```json
+{
+  "prompt": "Go to the product page and return the product info including supplier details",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "product_name": { "type": "string" },
+      "price": { "type": "number" },
+      "supplier": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "rating": { "type": "number" },
+          "contact_email": { "type": "string" }
+        },
+        "required": ["name"]
+      }
+    },
+    "required": ["product_name", "price"]
+  }
+}
+```
+
+## Error handling
+
+When the agent cannot satisfy your schema, it returns an error instead of partial or invalid data:
+
+- **Missing required field** — the agent reports which field couldn't be extracted
+- **Type mismatch** — the agent reports the expected vs. actual type
+- **Page inaccessible** — the agent returns a standard error (not a malformed JSON blob)
+
+This means you can rely on the output: if you get a successful response, the data matches your schema. If you get an error, you know to retry or investigate.
+
+## Using structured data with the Agent API
+
+Structured data works with any Gobii API endpoint that accepts a prompt. Pass `output_schema` alongside your `prompt` in the request body.
+
+See the [Agent API](/developers/agent-api) documentation for full endpoint details, authentication, and request format.
+
+## Tips for effective schemas
+
+1. **Be specific in your prompt** — the clearer your instructions, the more reliably the agent extracts the right data
+2. **Use `additionalProperties: false`** — prevents the agent from adding unexpected fields
+3. **Mark critical fields as `required`** — ensures you never get partial data for key fields
+4. **Add descriptions** — schema descriptions help the agent understand what each field means
+5. **Keep schemas focused** — extract only what you need; overly complex schemas are harder to satisfy
+6. **Test with a small schema first** — start with 2-3 fields, verify it works, then expand
+
+## Limitations
+
+- **Schema complexity** — very large schemas (50+ fields) may reduce extraction accuracy
+- **Page dependency** — if the target page changes structure, previously working schemas may fail
+- **Dynamic content** — JavaScript-rendered content may require browser tasks (see [Legacy Browser Tasks](/developers/legacy-browser-tasks))
+
+## Next steps
+
+- [Agent API](/developers/agent-api) — full API reference and authentication
+- [Legacy Browser Tasks](/developers/legacy-browser-tasks) — browser automation for JavaScript-heavy pages
+- [Async vs Sync](/developers/async-vs-sync) — choose the right execution mode for your workflow
+- [JSON Schema](https://json-schema.org/) — official JSON Schema specification
