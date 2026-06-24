@@ -2,6 +2,7 @@ from datetime import timezone, datetime
 from functools import lru_cache
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlencode, urlsplit
 import uuid
 
@@ -156,6 +157,7 @@ from .utils_markdown import (
 )
 from .homepage_cache import (
     get_homepage_integrations_payload,
+    get_homepage_pretrained_payload,
 )
 from .public_template_urls import (
     public_template_category_label,
@@ -246,7 +248,6 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "trello": "images/integrations/pipedream/trello.svg",
 }
 HOMEPAGE_META_TITLE_SUFFIX = "AI Coworkers for Teams With Real Work to Do"
-HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX = "Source Candidates in the Tools Your Team Already Uses"
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
@@ -1041,22 +1042,13 @@ class HomePage(TemplateView):
         )
         home_brand_name = settings.PUBLIC_BRAND_NAME or "Gobii"
         context["home_brand_name"] = home_brand_name
-        if settings.GOBII_PROPRIETARY_MODE:
-            context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_PROPRIETARY_META_TITLE_SUFFIX}"
-            context["home_meta_description"] = (
-                f"Give {home_brand_name} a role brief. It researches candidates, prepares "
-                "shortlists, and hands off results in LinkedIn Recruiter, Greenhouse, "
-                "and Google Sheets."
-            )
-            context["home_social_image_alt"] = f"{home_brand_name} AI recruiting operations platform preview"
-        else:
-            context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
-            context["home_meta_description"] = (
-                f"{home_brand_name} agents are virtual coworkers with their own identity, "
-                "memory, and tools. Email them, text them — they browse the web, collect "
-                "data, and deliver reports 24/7."
-            )
-            context["home_social_image_alt"] = f"{home_brand_name} AI coworker platform preview"
+        context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
+        context["home_meta_description"] = (
+            f"{home_brand_name} agents are virtual coworkers with their own identity, "
+            "memory, and tools. Email them, text them — they browse the web, collect "
+            "data, and deliver reports 24/7."
+        )
+        context["home_social_image_alt"] = f"{home_brand_name} AI coworker platform preview"
         context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
         context["home_canonical_url"] = _public_site_absolute_url("/")
         context["home_social_image_url"] = _public_site_absolute_url(
@@ -1257,6 +1249,43 @@ class HomePage(TemplateView):
                     "isAuthenticated": self.request.user.is_authenticated,
                     "selectedFieldsContainerId": "homepage-integrations-selected-fields",
                 },
+            }
+        )
+
+        payload = get_homepage_pretrained_payload()
+        all_templates = list(payload.get("templates") or [])
+
+        category_filter = (self.request.GET.get("pretrained_category") or "").strip()
+        search_term = (self.request.GET.get("pretrained_search") or "").strip()
+
+        filtered_templates = list(all_templates)
+        if category_filter:
+            category_lower = category_filter.lower()
+            filtered_templates = [
+                template
+                for template in filtered_templates
+                if (template.get("category") or "").lower() == category_lower
+            ]
+
+        if search_term:
+            search_lower = search_term.lower()
+            filtered_templates = [
+                template
+                for template in filtered_templates
+                if search_lower in (template.get("display_name") or "").lower()
+                or search_lower in (template.get("tagline") or "").lower()
+                or search_lower in (template.get("description") or "").lower()
+            ]
+
+        filtered_workers = [SimpleNamespace(**template) for template in filtered_templates]
+        context.update(
+            {
+                "homepage_pretrained_workers": filtered_workers,
+                "homepage_pretrained_total": payload.get("total", len(all_templates)),
+                "homepage_pretrained_filtered_count": len(filtered_workers),
+                "homepage_pretrained_categories": payload.get("categories") or [],
+                "homepage_pretrained_selected_category": category_filter,
+                "homepage_pretrained_search_term": search_term,
             }
         )
 
@@ -1475,7 +1504,14 @@ class HomepageIntegrationsSearchView(View):
         return JsonResponse({"results": results})
 
 
-class PretrainedWorkerDirectoryRedirectView(RedirectView):
+class ProprietaryPretrainedWorkerOnlyMixin:
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("pages:home", permanent=True)
+        return super().dispatch(request, *args, **kwargs)
+
+
+class PretrainedWorkerDirectoryRedirectView(ProprietaryPretrainedWorkerOnlyMixin, RedirectView):
     permanent = False
 
     def get_redirect_url(self, *args, **kwargs):
@@ -1504,7 +1540,7 @@ class PretrainedWorkerDirectoryRedirectView(RedirectView):
         return f"{base_url}{fragment}"
 
 
-class PretrainedWorkerDetailView(TemplateView):
+class PretrainedWorkerDetailView(ProprietaryPretrainedWorkerOnlyMixin, TemplateView):
     template_name = "pretrained_worker_directory/detail.html"
 
     def dispatch(self, request, *args, **kwargs):
@@ -1656,7 +1692,7 @@ def _template_launch_analytics_properties(request, template, *, default_source_p
     return properties
 
 
-class PretrainedWorkerLaunchView(View):
+class PretrainedWorkerLaunchView(ProprietaryPretrainedWorkerOnlyMixin, View):
     def get(self, request, *args, **kwargs):
         template = _get_pretrained_worker_template_or_404(kwargs.get("slug"))
 
@@ -1699,7 +1735,7 @@ class PretrainedWorkerLaunchView(View):
         return response
 
 
-class PretrainedWorkerHireView(View):
+class PretrainedWorkerHireView(ProprietaryPretrainedWorkerOnlyMixin, View):
     def post(self, request, *args, **kwargs):
         template = _get_pretrained_worker_template_or_404(kwargs.get("slug"))
         _seed_pretrained_worker_session(request, template)
