@@ -81,6 +81,12 @@ from .token_usage import (
     extract_token_usage,
     set_usage_span_attributes,
 )
+from .tool_execution_records import (
+    create_pending_tool_call_step as _create_pending_tool_call_step,
+    finalize_pending_tool_call_step as _finalize_pending_tool_call_step,
+    normalize_tool_result_content as _normalize_tool_result_content,
+    persist_tool_call_step as _persist_tool_call_step,
+)
 from ..short_description import (
     maybe_schedule_mini_description,
     maybe_schedule_short_description,
@@ -188,7 +194,6 @@ from api.services.agent_error_logging import (
     log_agent_error,
     log_credit_failure,
     log_prompt_construction_error,
-    log_tool_persistence_error,
 )
 from api.services.billing_snapshot import get_billing_snapshot_for_owner
 from api.services.owner_execution_pause import (
@@ -202,7 +207,6 @@ from api.services.signup_preview import (
     is_signup_preview_processing_paused,
 )
 from api.services.web_sessions import (
-    get_deliverable_web_sessions,
     has_deliverable_web_session,
 )
 from config import settings
@@ -430,17 +434,16 @@ def _record_defaultable_setup_question_correction(
     attach_completion: Any,
     attach_prompt_archive: Any,
 ) -> None:
-    step_kwargs = {
-        "agent": agent,
-        "description": (
+    _create_attached_step(
+        agent=agent,
+        description=(
             "Tool policy: this is a reversible recurring setup request with enough information to proceed. "
             "Do not ask a scope or preference survey; choose reasonable defaults, update __agent_config "
             "charter/schedule with sqlite_batch, and stop unless a real blocker remains."
         ),
-    }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+    )
     logger.info(
         "Agent %s: rejected defaultable setup question and requested sqlite_batch configuration.",
         agent.id,
@@ -632,25 +635,6 @@ def _strip_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
     if found:
         cleaned = cleaned.strip()
     return cleaned, found
-
-
-def _normalize_tool_result_content(raw: str) -> str:
-    """Decode stringified JSON payloads so nested arrays/objects stay structured."""
-    from api.agent.tools.json_utils import decode_embedded_json_strings
-
-    if not raw or not isinstance(raw, str):
-        return raw
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return raw
-    if not isinstance(parsed, (dict, list)):
-        return raw
-    normalized = decode_embedded_json_strings(parsed)
-    try:
-        return json.dumps(normalized, ensure_ascii=False)
-    except TypeError:
-        return raw
 
 
 def _should_imply_continue(
@@ -1210,89 +1194,6 @@ def _sanitize_tool_name(name: str) -> str:
     return name
 
 
-def _build_tool_call_description(
-    tool_name: str,
-    tool_params: Dict[str, Any],
-    normalized_result: str | None,
-) -> str:
-    # Keep descriptions compact; they surface in chat captions.
-    safe_tool_name = (tool_name or "")[:256]
-    try:
-        params_preview = str(tool_params)[:100] if tool_params else ""
-        result_preview = (normalized_result or "")[:100]
-        return f"Tool call: {safe_tool_name}({params_preview}) -> {result_preview}"
-    except Exception:
-        return f"Tool call: {safe_tool_name}"
-
-
-def _emit_tool_call_realtime(step: "PersistentAgentStep", context: str) -> None:
-    try:
-        from console.agent_chat.signals import emit_tool_call_realtime
-
-        emit_tool_call_realtime(step)
-    except Exception:
-        logger.debug(
-            "Failed to broadcast %s tool call for agent %s step %s",
-            context,
-            getattr(step, "agent_id", None),
-            getattr(step, "id", None),
-            exc_info=True,
-        )
-
-
-def _emit_tool_call_audit(step: "PersistentAgentStep", context: str) -> None:
-    try:
-        from console.agent_chat.signals import emit_tool_call_audit
-
-        emit_tool_call_audit(step)
-    except Exception:
-        logger.debug(
-            "Failed to broadcast %s tool call audit for agent %s step %s",
-            context,
-            getattr(step, "agent_id", None),
-            getattr(step, "id", None),
-            exc_info=True,
-        )
-
-
-def _tool_context_for_error(
-    tool_name: str,
-    tool_params: Dict[str, Any] | None,
-    *,
-    result_content: str | None = None,
-    execution_duration_ms: Optional[int] = None,
-    status: str | None = None,
-    credits_consumed: Any = None,
-    consumed_credit: Any = None,
-    step: PersistentAgentStep | None = None,
-) -> dict[str, Any]:
-    context: dict[str, Any] = {
-        "tool_name": tool_name,
-        "tool_status": status,
-        "execution_duration_ms": execution_duration_ms,
-        "param_keys": sorted(str(key) for key in tool_params.keys()) if isinstance(tool_params, dict) else [],
-        "result_length": len(result_content or ""),
-        "credits_consumed": str(credits_consumed) if credits_consumed is not None else None,
-        "task_credit_id": str(getattr(consumed_credit, "id", "")) if consumed_credit is not None else None,
-    }
-    if step is not None:
-        context["step_id"] = str(getattr(step, "id", ""))
-        context["completion_id"] = str(getattr(step, "completion_id", "")) if getattr(step, "completion_id", None) else None
-    return context
-
-
-def _completion_from_step_kwargs(step_kwargs: dict[str, Any]) -> PersistentAgentCompletion | None:
-    completion = step_kwargs.get("completion")
-    return completion if isinstance(completion, PersistentAgentCompletion) else None
-
-
-def _agent_from_step(step: PersistentAgentStep) -> PersistentAgent | None:
-    try:
-        return step.agent
-    except (AttributeError, DatabaseError, PersistentAgent.DoesNotExist):
-        return None
-
-
 def _tool_definition_names_for_completion(tools: list[dict] | None) -> list[str]:
     names: list[str] = []
     for tool in tools or []:
@@ -1307,291 +1208,52 @@ def _tool_definition_names_for_completion(tools: list[dict] | None) -> list[str]
     return names
 
 
-def _persist_tool_call_step(
-    agent: "PersistentAgent",
-    tool_name: str,
-    tool_params: Dict[str, Any],
-    result_content: str,
-    execution_duration_ms: Optional[int],
-    status: str | None,
-    credits_consumed: Any,
-    consumed_credit: Any,
-    attach_completion: Any,
-    attach_prompt_archive: Any,
-    parent_tool_call: Any = None,
-) -> Optional["PersistentAgentStep"]:
-    """Persist a tool call step with robust error handling.
-
-    This function handles all database errors gracefully to ensure agent
-    processing continues even if step persistence fails. The tool has already
-    executed - we're just recording it.
-
-    Returns the created step, or None if persistence failed.
-    """
-    from api.models import PersistentAgentStep, PersistentAgentToolCall
-    normalized_result = _normalize_tool_result_content(result_content)
-
-    # Truncate tool_name as a safety measure (should already be sanitized, but be defensive)
-    safe_tool_name = (tool_name or "")[:256]
-
-    # Build a safe description (truncate if needed)
-    description = _build_tool_call_description(safe_tool_name, tool_params, normalized_result)
-
+def _create_attached_step(
+    *,
+    agent: PersistentAgent,
+    description: str,
+    attach_completion: Callable[[dict], None] | None = None,
+    attach_prompt_archive: Callable[[PersistentAgentStep], None] | None = None,
+    **extra_fields: Any,
+) -> PersistentAgentStep:
     step_kwargs = {
         "agent": agent,
-        "description": description[:500],  # Ensure description fits
-        "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-        "task_credit": consumed_credit,
+        "description": description,
+        **extra_fields,
     }
-
-    def _try_create_step() -> Optional[PersistentAgentStep]:
-        """Attempt to create the step and tool call record."""
+    if attach_completion is not None:
         attach_completion(step_kwargs)
-        step = PersistentAgentStep.objects.create(**step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    if attach_prompt_archive is not None:
         attach_prompt_archive(step)
-        tool_call_status = status or "complete"
-        PersistentAgentToolCall.objects.create(
-            step=step,
-            parent_tool_call=parent_tool_call,
-            tool_name=safe_tool_name,
-            tool_params=tool_params,
-            result=normalized_result,
-            execution_duration_ms=execution_duration_ms,
-            status=tool_call_status,
-        )
-        _emit_tool_call_realtime(step, "realtime")
-        return step
+    return step
 
-    # Try primary path
+
+def _record_attached_step(
+    *,
+    agent: PersistentAgent,
+    description: str,
+    attach_completion: Callable[[dict], None] | None = None,
+    attach_prompt_archive: Callable[[PersistentAgentStep], None] | None = None,
+    failure_message: str | None = None,
+    failure_args: tuple[Any, ...] = (),
+    **extra_fields: Any,
+) -> Optional[PersistentAgentStep]:
     try:
-        step = _try_create_step()
-        logger.info(
-            "Agent %s: persisted tool call step_id=%s for %s",
-            agent.id,
-            getattr(step, "id", None),
-            safe_tool_name,
+        return _create_attached_step(
+            agent=agent,
+            description=description,
+            attach_completion=attach_completion,
+            attach_prompt_archive=attach_prompt_archive,
+            **extra_fields,
         )
-        return step
-    except OperationalError:
-        # Stale connection - retry once
-        close_old_connections()
-        try:
-            step = _try_create_step()
-            logger.info(
-                "Agent %s: persisted tool call (retry) step_id=%s for %s",
-                agent.id,
-                getattr(step, "id", None),
-                safe_tool_name,
-            )
-            return step
-        except Exception as retry_exc:
-            log_tool_persistence_error(
-                agent,
-                retry_exc,
-                source="api.agent.core.event_processing._persist_tool_call_step.retry",
-                logger=logger,
-                completion=_completion_from_step_kwargs(step_kwargs),
-                context=_tool_context_for_error(
-                    safe_tool_name,
-                    tool_params,
-                    result_content=normalized_result,
-                    execution_duration_ms=execution_duration_ms,
-                    status=status or "complete",
-                    credits_consumed=credits_consumed,
-                    consumed_credit=consumed_credit,
-                ),
-            )
-            return None
-    except DatabaseError as db_exc:
-        # Data errors, integrity errors, etc. - log and continue
-        log_tool_persistence_error(
-            agent,
-            db_exc,
-            source="api.agent.core.event_processing._persist_tool_call_step",
-            logger=logger,
-            completion=_completion_from_step_kwargs(step_kwargs),
-            context=_tool_context_for_error(
-                safe_tool_name,
-                tool_params,
-                result_content=normalized_result,
-                execution_duration_ms=execution_duration_ms,
-                status=status or "complete",
-                credits_consumed=credits_consumed,
-                consumed_credit=consumed_credit,
-            ),
+    except Exception:
+        logger.debug(
+            failure_message or "Failed to persist attached step for agent %s",
+            *(failure_args or (getattr(agent, "id", None),)),
+            exc_info=True,
         )
         return None
-    except Exception as exc:
-        # Catch-all for unexpected errors - never crash the agent
-        log_tool_persistence_error(
-            agent,
-            exc,
-            source="api.agent.core.event_processing._persist_tool_call_step",
-            logger=logger,
-            completion=_completion_from_step_kwargs(step_kwargs),
-            context=_tool_context_for_error(
-                safe_tool_name,
-                tool_params,
-                result_content=normalized_result,
-                execution_duration_ms=execution_duration_ms,
-                status=status or "complete",
-                credits_consumed=credits_consumed,
-                consumed_credit=consumed_credit,
-            ),
-        )
-        return None
-
-
-def _create_pending_tool_call_step(
-    agent: "PersistentAgent",
-    tool_name: str,
-    tool_params: Dict[str, Any],
-    credits_consumed: Any,
-    consumed_credit: Any,
-    attach_completion: Any,
-    attach_prompt_archive: Any,
-    parent_tool_call: Any = None,
-) -> Optional["PersistentAgentStep"]:
-    from api.models import PersistentAgentStep, PersistentAgentToolCall
-
-    safe_tool_name = (tool_name or "")[:256]
-    step_kwargs = {
-        "agent": agent,
-        "description": "",
-        "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-        "task_credit": consumed_credit,
-    }
-
-    try:
-        attach_completion(step_kwargs)
-        step = PersistentAgentStep.objects.create(**step_kwargs)
-        attach_prompt_archive(step)
-        PersistentAgentToolCall.objects.create(
-            step=step,
-            parent_tool_call=parent_tool_call,
-            tool_name=safe_tool_name,
-            tool_params=tool_params,
-            result="",
-            execution_duration_ms=None,
-            status="pending",
-        )
-        _emit_tool_call_realtime(step, "pending")
-        return step
-    except Exception as exc:
-        log_tool_persistence_error(
-            agent,
-            exc,
-            source="api.agent.core.event_processing._create_pending_tool_call_step",
-            logger=logger,
-            completion=_completion_from_step_kwargs(step_kwargs),
-            context=_tool_context_for_error(
-                safe_tool_name,
-                tool_params,
-                status="pending",
-                credits_consumed=credits_consumed,
-                consumed_credit=consumed_credit,
-            ),
-        )
-        return None
-
-
-def _finalize_pending_tool_call_step(
-    step: "PersistentAgentStep",
-    tool_name: str,
-    tool_params: Dict[str, Any],
-    result_content: str,
-    execution_duration_ms: Optional[int],
-    status: str,
-    parent_tool_call: Any = None,
-) -> None:
-    from api.models import PersistentAgentToolCall
-
-    normalized_result = _normalize_tool_result_content(result_content)
-    safe_tool_name = (tool_name or "")[:256]
-    description = _build_tool_call_description(safe_tool_name, tool_params, normalized_result)
-
-    try:
-        step.description = description[:500]
-        step.save(update_fields=["description"])
-    except Exception as exc:
-        agent = _agent_from_step(step)
-        if agent is not None:
-            log_tool_persistence_error(
-                agent,
-                exc,
-                source="api.agent.core.event_processing._finalize_pending_tool_call_step.description",
-                logger=logger,
-                context=_tool_context_for_error(
-                    safe_tool_name,
-                    tool_params,
-                    result_content=normalized_result,
-                    execution_duration_ms=execution_duration_ms,
-                    status=status,
-                    step=step,
-                ),
-            )
-        else:
-            logger.debug(
-                "Failed to update tool step description for agent %s step %s",
-                getattr(step, "agent_id", None),
-                getattr(step, "id", None),
-                exc_info=True,
-            )
-
-    created_tool_call = False
-    try:
-        tool_call = getattr(step, "tool_call", None)
-        if tool_call is None:
-            tool_call = PersistentAgentToolCall.objects.create(
-                step=step,
-                parent_tool_call=parent_tool_call,
-                tool_name=safe_tool_name,
-                tool_params=tool_params,
-                result=normalized_result,
-                execution_duration_ms=execution_duration_ms,
-                status=status,
-            )
-            created_tool_call = True
-        else:
-            tool_call.tool_name = safe_tool_name
-            tool_call.tool_params = tool_params
-            tool_call.result = normalized_result
-            tool_call.execution_duration_ms = execution_duration_ms
-            tool_call.status = status
-            update_fields = ["tool_name", "tool_params", "result", "execution_duration_ms", "status"]
-            if parent_tool_call is not None and tool_call.parent_tool_call_id is None:
-                tool_call.parent_tool_call = parent_tool_call
-                update_fields.append("parent_tool_call")
-            tool_call.save(update_fields=update_fields)
-    except Exception as exc:
-        agent = _agent_from_step(step)
-        if agent is not None:
-            log_tool_persistence_error(
-                agent,
-                exc,
-                source="api.agent.core.event_processing._finalize_pending_tool_call_step",
-                logger=logger,
-                context=_tool_context_for_error(
-                    safe_tool_name,
-                    tool_params,
-                    result_content=normalized_result,
-                    execution_duration_ms=execution_duration_ms,
-                    status=status,
-                    step=step,
-                ),
-            )
-        else:
-            logger.debug(
-                "Failed to finalize tool call for agent %s step %s",
-                getattr(step, "agent_id", None),
-                getattr(step, "id", None),
-                exc_info=True,
-            )
-        return
-
-    _emit_tool_call_realtime(step, "finalized")
-    if not created_tool_call:
-        _emit_tool_call_audit(step, "finalized")
 
 
 def _clear_refunded_step_charge(step: "PersistentAgentStep") -> None:
@@ -1784,16 +1446,15 @@ def _record_terminal_send_unfinished_plan_correction(
     attach_completion: Any,
     attach_prompt_archive: Any,
 ) -> None:
-    step_kwargs = {
-        "agent": agent,
-        "description": (
+    _create_attached_step(
+        agent=agent,
+        description=(
             "Terminal message delivery requested stop, but the current plan still has unfinished items. "
             "Call update_plan with the complete current plan state before stopping."
         ),
-    }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+    )
 
 
 def _should_skip_stale_planning_mode_after_terminal_delivery(
@@ -2224,16 +1885,15 @@ def _record_irrelevant_agent_config_mutation_skip(
     attach_completion: Any,
     attach_prompt_archive: Any,
 ) -> None:
-    step_kwargs = {
-        "agent": agent,
-        "description": (
+    _create_attached_step(
+        agent=agent,
+        description=(
             "Skipped unrelated __agent_config mutation attached to a one-off final answer. "
             "Deliver the requested answer without changing durable charter or schedule."
         ),
-    }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+    )
 
 
 def _normalize_tool_name_for_execution(agent: PersistentAgent, tool_name: str) -> str:
@@ -2330,17 +1990,16 @@ def _record_duplicate_http_request_skip(
     attach_completion: Any,
     attach_prompt_archive: Any,
 ) -> None:
-    step_kwargs = {
-        "agent": agent,
-        "description": (
+    _create_attached_step(
+        agent=agent,
+        description=(
             "Skipped duplicate http_request: this exact request already succeeded in this task. "
             f"Use the prior tool result from step {prior_call.step_id}. "
             "If it answers the request, send the final message next; do not refetch or inspect __tool_results just to reread it."
         ),
-    }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+    )
 
 
 _ToolExecutor = Callable[[PersistentAgent, Dict[str, Any]], Any]
@@ -2508,6 +2167,65 @@ def _execute_prepared_tool_call(
     )
 
 
+def _get_batch_daily_credit_state(
+    agent: PersistentAgent,
+    credit_snapshot: Any,
+) -> dict | None:
+    daily_state = credit_snapshot.get("daily_state") if isinstance(credit_snapshot, dict) else None
+    if daily_state is not None:
+        return daily_state
+    try:
+        daily_state = get_agent_daily_credit_state(agent)
+    except Exception:
+        logger.warning(
+            "Failed to load daily credit state while preparing tool batch for agent %s.",
+            agent.id,
+            exc_info=True,
+        )
+        daily_state = None
+    if isinstance(credit_snapshot, dict):
+        credit_snapshot["daily_state"] = daily_state
+    return daily_state
+
+
+def _apply_message_continue_policy(
+    agent: PersistentAgent,
+    tool_name: str,
+    tool_params: Dict[str, Any],
+    *,
+    allow_inferred_message_continue: bool,
+) -> tuple[Optional[bool], bool]:
+    explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
+    inferred_continue = False
+    if tool_name not in MESSAGE_TOOL_NAMES:
+        return explicit_continue, inferred_continue
+
+    body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+    if body_key and isinstance(tool_params.get(body_key), str):
+        cleaned_body, found_phrase = _strip_canonical_continuation_phrase(
+            tool_params[body_key]
+        )
+        should_infer_continue = _should_infer_message_tool_continuation(cleaned_body)
+        if found_phrase:
+            tool_params[body_key] = cleaned_body
+            tool_params["will_continue_work"] = True
+        elif explicit_continue is None and allow_inferred_message_continue and should_infer_continue:
+            tool_params["will_continue_work"] = True
+            inferred_continue = True
+            logger.info(
+                "Agent %s: inferred will_continue_work=true for %s based on progress-update language.",
+                agent.id,
+                tool_name,
+            )
+        elif explicit_continue is None and not allow_inferred_message_continue and should_infer_continue:
+            logger.info(
+                "Agent %s: suppressing inferred continuation for %s to avoid progress-message loops without work tools.",
+                agent.id,
+                tool_name,
+            )
+    return _coerce_optional_bool(tool_params.get("will_continue_work")), inferred_continue
+
+
 def _prepare_tool_batch(
     agent: PersistentAgent,
     *,
@@ -2527,10 +2245,6 @@ def _prepare_tool_batch(
     followup_required = False
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
-    batch_has_human_input_request = any(
-        _get_tool_call_name(call) == "request_human_input"
-        for call in tool_calls
-    )
     batch_has_planning_gate = any(_get_tool_call_name(call) in {"end_planning", "request_human_input"} for call in tool_calls)
     batch_has_terminal_message = any(_tool_call_likely_terminal_message(call) for call in tool_calls)
     skipped_plan_requested_sleep = False
@@ -2555,24 +2269,22 @@ def _prepare_tool_batch(
                     "Agent %s: received tool call without a function name; skipping and requesting resend.",
                     agent.id,
                 )
-                try:
-                    step_kwargs = {
-                        "agent": agent,
-                        "description": (
-                            "Tool call error: missing function name. "
-                            "Re-send the SAME tool call with a valid 'name' and JSON arguments."
-                        ),
-                    }
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                step = _record_attached_step(
+                    agent=agent,
+                    description=(
+                        "Tool call error: missing function name. "
+                        "Re-send the SAME tool call with a valid 'name' and JSON arguments."
+                    ),
+                    attach_completion=attach_completion,
+                    attach_prompt_archive=attach_prompt_archive,
+                    failure_message="Failed to persist correction step for missing tool name",
+                )
+                if step is not None:
                     logger.info(
                         "Agent %s: added correction step_id=%s for missing tool name",
                         agent.id,
                         getattr(step, "id", None),
                     )
-                except Exception:
-                    logger.debug("Failed to persist correction step for missing tool name", exc_info=True)
                 followup_required = True
                 break
             if heartbeat:
@@ -2580,48 +2292,29 @@ def _prepare_tool_batch(
             tool_span.set_attribute("tool.name", tool_name)
             logger.info("Agent %s preparing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
-            daily_state = None
-            if isinstance(credit_snapshot, dict):
-                daily_state = credit_snapshot.get("daily_state")
-            if daily_state is None:
-                try:
-                    daily_state = get_agent_daily_credit_state(agent)
-                except Exception:
-                    logger.warning(
-                        "Failed to load daily credit state while preparing tool batch for agent %s.",
-                        agent.id,
-                        exc_info=True,
-                    )
-                    daily_state = None
-                if isinstance(credit_snapshot, dict):
-                    credit_snapshot["daily_state"] = daily_state
+            daily_state = _get_batch_daily_credit_state(agent, credit_snapshot)
 
             if (
                 is_daily_hard_limit_message_only_mode(daily_state)
                 and not is_daily_limit_allowed_tool(tool_name)
             ):
-                try:
-                    step_kwargs = {
-                        "agent": agent,
-                        "description": (
-                            "Daily hard limit mode is active. Only message and sleep tools are allowed right now: "
-                            f"{DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT}. "
-                            f"Do not call {tool_name}; message the user and ask them to raise the limit."
-                        ),
-                    }
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                step = _record_attached_step(
+                    agent=agent,
+                    description=(
+                        "Daily hard limit mode is active. Only message and sleep tools are allowed right now: "
+                        f"{DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT}. "
+                        f"Do not call {tool_name}; message the user and ask them to raise the limit."
+                    ),
+                    attach_completion=attach_completion,
+                    attach_prompt_archive=attach_prompt_archive,
+                    failure_message="Failed to persist daily-limit message-only correction step for agent %s",
+                    failure_args=(agent.id,),
+                )
+                if step is not None:
                     logger.info(
                         "Agent %s: rejected %s in daily-limit message-only mode.",
                         agent.id,
                         tool_name,
-                    )
-                except Exception:
-                    logger.debug(
-                        "Failed to persist daily-limit message-only correction step for agent %s",
-                        agent.id,
-                        exc_info=True,
                     )
                 followup_required = True
                 continue
@@ -2645,15 +2338,14 @@ def _prepare_tool_batch(
                     break
                 credits_consumed = credit_info.get("cost")
                 consumed_credit = credit_info.get("credit")
-                step_kwargs = {
-                    "agent": agent,
-                    "description": "Decided to sleep until next trigger.",
-                    "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-                    "task_credit": consumed_credit,
-                }
-                attach_completion(step_kwargs)
-                step = PersistentAgentStep.objects.create(**step_kwargs)
-                attach_prompt_archive(step)
+                _create_attached_step(
+                    agent=agent,
+                    description="Decided to sleep until next trigger.",
+                    attach_completion=attach_completion,
+                    attach_prompt_archive=attach_prompt_archive,
+                    credits_cost=credits_consumed if isinstance(credits_consumed, Decimal) else None,
+                    task_credit=consumed_credit,
+                )
                 logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
                 continue
 
@@ -2670,34 +2362,36 @@ def _prepare_tool_batch(
                     preview,
                     "…" if raw_args and len(raw_args) > len(preview) else "",
                 )
-                try:
-                    step_text = (
+                step = _record_attached_step(
+                    agent=agent,
+                    description=(
                         f"Tool call error: arguments for {tool_name} were not valid JSON. "
                         "Re-send the SAME tool call immediately with valid JSON only; do not switch tools. "
                         "For create_custom_tool, retry create_custom_tool with source_code instead of using create_file. "
                         "For HTML content, use single quotes for all attributes to avoid JSON conflicts."
-                    )
-                    step_kwargs = {"agent": agent, "description": step_text}
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                    ),
+                    attach_completion=attach_completion,
+                    attach_prompt_archive=attach_prompt_archive,
+                    failure_message="Failed to persist correction step",
+                )
+                if step is not None:
                     logger.info(
                         "Agent %s: added correction step_id=%s to request a retried tool call",
                         agent.id,
                         getattr(step, "id", None),
                     )
-                except Exception:
-                    logger.debug("Failed to persist correction step", exc_info=True)
                 followup_required = True
                 break
 
             if tool_name == "send_chat_message":
                 message_body = str(tool_params.get("body") or "")
                 if not batch_has_planning_gate and agent.planning_state == PersistentAgent.PlanningState.PLANNING and _coerce_optional_bool(tool_params.get("will_continue_work")) is True and PLANNING_READY_WITHOUT_GATE_RE.search(message_body):
-                    step_kwargs = {"agent": agent, "description": "Planning Mode is active and the plan appears clear. Call end_planning(full_plan=...) before ready/start-work chat."}
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                    _create_attached_step(
+                        agent=agent,
+                        description="Planning Mode is active and the plan appears clear. Call end_planning(full_plan=...) before ready/start-work chat.",
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
                     followup_required = True
                     break
                 if _should_reject_defaultable_setup_question(agent, message_body):
@@ -2736,13 +2430,12 @@ def _prepare_tool_batch(
             if tool_name == "update_plan":
                 skipped_plan_result = build_redundant_research_plan_skip_result(agent, tool_params)
                 if skipped_plan_result is not None:
-                    step_kwargs = {
-                        "agent": agent,
-                        "description": skipped_plan_result["message"],
-                    }
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                    _create_attached_step(
+                        agent=agent,
+                        description=skipped_plan_result["message"],
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
                     logger.info(
                         "Agent %s: skipped redundant research plan update before execution.",
                         agent.id,
@@ -2759,16 +2452,15 @@ def _prepare_tool_batch(
             if tool_name == "search_tools":
                 tool_params.pop("will_continue_work", None)
                 if _should_skip_planning_execute_tool_search(agent, tool_name, prepared_calls):
-                    step_kwargs = {
-                        "agent": agent,
-                        "description": (
+                    _create_attached_step(
+                        agent=agent,
+                        description=(
                             "Skipped search_tools before planning was completed. The user asked to execute now, "
                             "so first call end_planning(full_plan=...) if the plan is sufficient, or request_human_input if blocked."
                         ),
-                    }
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
                     logger.info(
                         "Agent %s: skipped search_tools before planning gate for execute-now prompt.",
                         agent.id,
@@ -2797,40 +2489,12 @@ def _prepare_tool_batch(
                     agent.id,
                 )
                 continue
-            explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
-            inferred_continue = False
-            if tool_name in MESSAGE_TOOL_NAMES:
-                body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
-                if body_key and isinstance(tool_params.get(body_key), str):
-                    cleaned_body, found_phrase = _strip_canonical_continuation_phrase(
-                        tool_params[body_key]
-                    )
-                    if found_phrase:
-                        tool_params[body_key] = cleaned_body
-                        tool_params["will_continue_work"] = True
-                    elif (
-                        explicit_continue is None
-                        and allow_inferred_message_continue
-                        and _should_infer_message_tool_continuation(cleaned_body)
-                    ):
-                        tool_params["will_continue_work"] = True
-                        inferred_continue = True
-                        logger.info(
-                            "Agent %s: inferred will_continue_work=true for %s based on progress-update language.",
-                            agent.id,
-                            tool_name,
-                        )
-                    elif (
-                        explicit_continue is None
-                        and not allow_inferred_message_continue
-                        and _should_infer_message_tool_continuation(cleaned_body)
-                    ):
-                        logger.info(
-                            "Agent %s: suppressing inferred continuation for %s to avoid progress-message loops without work tools.",
-                            agent.id,
-                            tool_name,
-                        )
-                explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
+            explicit_continue, inferred_continue = _apply_message_continue_policy(
+                agent,
+                tool_name,
+                tool_params,
+                allow_inferred_message_continue=allow_inferred_message_continue,
+            )
 
             tool_span.set_attribute("tool.params", json.dumps(tool_params))
             logger.info(
@@ -3214,11 +2878,112 @@ def _finalize_tool_batch(
     )
 
 
-def _get_latest_deliverable_web_session(agent: PersistentAgent):
-    for session in get_deliverable_web_sessions(agent):
-        if session.user_id is not None:
-            return session
-    return None
+def _gate_send_chat_tool_for_delivery(
+    tools: List[dict],
+    agent: PersistentAgent,
+    *,
+    has_deliverable_web_target_now: Optional[bool] = None,
+) -> List[dict]:
+    """Hide send_chat_message only when no deliverable web target exists and non-web fallback channels are available."""
+    if has_deliverable_web_target_now is None:
+        has_deliverable_web_target_now = has_deliverable_web_session(agent)
+    if has_deliverable_web_target_now:
+        return tools
+    owner_user = getattr(agent, "user", None)
+    if owner_user and not has_other_contact_channel(agent, owner_user):
+        return tools
+
+    filtered = [
+        tool for tool in tools
+        if not (
+            isinstance(tool, dict)
+            and isinstance(tool.get("function"), dict)
+            and tool.get("function", {}).get("name") == "send_chat_message"
+        )
+    ]
+    return filtered if len(filtered) < len(tools) else tools
+
+
+def _track_post_completion_deliverable_web_session_activation(
+    agent: PersistentAgent,
+    *,
+    run_sequence_number: Optional[int],
+    iteration_index: int,
+    retry_switch_active: bool,
+    retry_performed: bool,
+) -> None:
+    """Emit analytics when a deliverable web session appears after completion returns."""
+    if not agent.user_id:
+        return
+
+    analytics_props: dict[str, Any] = {
+        "agent_id": str(agent.id),
+        "agent_name": agent.name,
+        "run_sequence_number": run_sequence_number,
+        "iteration": iteration_index,
+        "retry_reason": "web_session_activated_mid_completion",
+        "retry_strategy": "discard_and_rerun_once" if retry_performed else "none",
+        "retry_switch_active": retry_switch_active,
+        "retry_performed": retry_performed,
+        "had_deliverable_web_target_at_start": False,
+    }
+    props_with_org = Analytics.with_org_properties(
+        analytics_props,
+        organization=getattr(agent, "organization", None),
+    )
+    Analytics.track_event(
+        user_id=agent.user_id,
+        event=AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
+        source=AnalyticsSource.AGENT,
+        properties=props_with_org,
+    )
+
+
+def _should_retry_after_post_completion_deliverable_web_session_activation(
+    agent: PersistentAgent,
+    *,
+    run_sequence_number: Optional[int],
+    iteration_index: int,
+    max_remaining: int,
+    retry_used: bool,
+) -> bool:
+    """
+    Decide whether to retry once after a deliverable web session appears and emit analytics.
+
+    Returns True when the caller should discard current completion output and retry
+    on the next loop iteration.
+    """
+    retry_switch_active = True
+    has_iterations_remaining = iteration_index < max_remaining
+    retry_performed = not retry_used and has_iterations_remaining
+
+    try:
+        _track_post_completion_deliverable_web_session_activation(
+            agent,
+            run_sequence_number=run_sequence_number,
+            iteration_index=iteration_index,
+            retry_switch_active=retry_switch_active,
+            retry_performed=retry_performed,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to emit analytics for post-completion deliverable web-session activation (agent=%s)",
+            agent.id,
+        )
+
+    if retry_performed:
+        logger.info(
+            "Agent %s: web session activated mid-completion; discarding completion output and retrying next iteration.",
+            agent.id,
+        )
+        return True
+
+    if not has_iterations_remaining:
+        logger.info(
+            "Agent %s: web session activated mid-completion but no iterations remain; processing current completion.",
+            agent.id,
+        )
+    return False
 
 
 def _build_implied_send_tool_call(
@@ -3533,67 +3298,6 @@ def _should_skip_processing_for_inactive_or_deleted_agent(
     except Exception:
         pass
     return True
-
-
-def _estimate_message_tokens(messages: List[dict]) -> int:
-    """Estimate token count for a list of messages using simple heuristics."""
-    total_text = ""
-    for message in messages:
-        content = message.get("content", "")
-        if isinstance(content, str):
-            total_text += content + " "
-
-    # Rough estimation: ~4 characters per token (conservative estimate)
-    estimated_tokens = len(total_text) // 4
-    return max(estimated_tokens, 100)  # Minimum of 100 tokens
-
-
-def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
-    """Estimate token count for agent context using simple heuristics."""
-    total_length = 0
-    tool_result_overhead = 240
-
-    # Charter length
-    if agent.charter:
-        total_length += len(agent.charter)
-
-    # Rough estimates for other content
-    # History: estimate based on recent steps and comms
-    recent_steps = (
-        PersistentAgentStep.objects.filter(agent=agent)
-        .select_related("tool_call")
-        .only("description", "tool_call__tool_name")
-        .order_by('-created_at')[:10]
-    )
-    for step in recent_steps:
-        # Add description length
-        if step.description:
-            total_length += len(step.description)
-
-        # Account for tool result metadata (prompt stores metadata + small previews)
-        try:
-            if step.tool_call:
-                total_length += tool_result_overhead
-        except PersistentAgentToolCall.DoesNotExist:
-            pass
-
-    recent_comms = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent)
-        .only("body")
-        .order_by('-timestamp')[:5]
-    )
-    for comm in recent_comms:
-        if comm.body:
-            total_length += len(comm.body)
-
-    # Add base overhead for system prompt and structure
-    total_length += 2000  # Base system prompt overhead
-
-    # Rough estimation: ~4 characters per token 
-    estimated_tokens = total_length // 4
-
-    # Apply reasonable bounds
-    return max(min(estimated_tokens, 50000), 1000)  # Between 1k and 50k tokens
 
 
 def _stream_completion_with_broadcast(
@@ -4245,6 +3949,121 @@ def _enforce_tool_rate_limit(
 # --------------------------------------------------------------------------- #
 #  Credit gating utilities
 # --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class _CreditOwnerContext:
+    owner: Any
+    owner_user: Any
+    owner_is_org: bool
+    owner_label: str
+
+    @property
+    def owner_type(self) -> str:
+        return "organization" if self.owner_is_org else "user"
+
+
+def _get_credit_owner_context(agent: PersistentAgent) -> _CreditOwnerContext:
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    owner_user = getattr(agent, "user", None)
+    owner_is_org = TaskCreditService._is_organization_owner(owner) if owner is not None else False
+    owner_label = (
+        f"organization {getattr(owner, 'id', 'unknown')}"
+        if owner_is_org
+        else f"user {getattr(owner_user, 'id', 'unknown')}"
+    )
+    return _CreditOwnerContext(
+        owner=owner,
+        owner_user=owner_user,
+        owner_is_org=owner_is_org,
+        owner_label=owner_label,
+    )
+
+
+def _credit_failure_context(
+    owner_ctx: _CreditOwnerContext,
+    *,
+    operation: str,
+    tool_name: str,
+    cost: Decimal | None = None,
+    available: Any = None,
+    fallback: str | None = None,
+    daily_state: dict | None = None,
+) -> dict[str, Any]:
+    context = {
+        "operation": operation,
+        "tool_name": tool_name,
+        "owner_label": owner_ctx.owner_label,
+        "owner_type": owner_ctx.owner_type,
+        "owner_id": str(getattr(owner_ctx.owner, "id", "")) if owner_ctx.owner is not None else None,
+        "user_id": str(getattr(owner_ctx.owner_user, "id", "")) if owner_ctx.owner_user is not None else None,
+        "cost": str(cost) if cost is not None else None,
+        "available": str(available) if available is not None else None,
+    }
+    if fallback is not None:
+        context["fallback"] = fallback
+    if daily_state:
+        context["daily_hard_limit"] = str(daily_state.get("hard_limit")) if daily_state.get("hard_limit") is not None else None
+        context["daily_hard_remaining"] = str(daily_state.get("hard_limit_remaining")) if daily_state.get("hard_limit_remaining") is not None else None
+    return context
+
+
+def _create_process_system_step(
+    *,
+    agent: PersistentAgent,
+    description: str,
+    notes: str,
+    code: str = PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+) -> PersistentAgentStep:
+    step = PersistentAgentStep.objects.create(
+        agent=agent,
+        description=description,
+    )
+    PersistentAgentSystemStep.objects.create(
+        step=step,
+        code=code,
+        notes=notes,
+    )
+    return step
+
+
+def _get_credit_snapshot_daily_state(
+    agent: PersistentAgent,
+    credit_snapshot: Optional[Dict[str, Any]],
+) -> dict:
+    daily_state = None
+    if credit_snapshot is not None and isinstance(credit_snapshot.get("daily_state"), dict):
+        daily_state = credit_snapshot["daily_state"]
+    if daily_state is None:
+        daily_state = get_agent_daily_credit_state(agent)
+        if credit_snapshot is not None:
+            credit_snapshot["daily_state"] = daily_state
+    return daily_state
+
+
+def _update_cached_daily_state_after_credit(daily_state: dict, cost: Decimal | None) -> None:
+    if cost is None or not isinstance(daily_state, dict):
+        return
+    used_value = daily_state.get("used", Decimal("0"))
+    if not isinstance(used_value, Decimal):
+        used_value = Decimal(str(used_value))
+    new_used = used_value + cost
+    daily_state["used"] = new_used
+
+    hard_limit_value = daily_state.get("hard_limit")
+    if hard_limit_value is not None:
+        hard_remaining_after = hard_limit_value - new_used
+        daily_state["hard_limit_remaining"] = (
+            hard_remaining_after if hard_remaining_after > Decimal("0") else Decimal("0")
+        )
+    soft_target_value = daily_state.get("soft_target")
+    if soft_target_value is not None:
+        soft_remaining_after = soft_target_value - new_used
+        soft_remaining_after = (
+            soft_remaining_after if soft_remaining_after > Decimal("0") else Decimal("0")
+        )
+        daily_state["soft_target_remaining"] = soft_remaining_after
+        daily_state["soft_target_exceeded"] = soft_remaining_after <= Decimal("0")
+
+
 def _has_sufficient_daily_credit(state: dict, cost: Decimal | None) -> bool:
     """Return True if the daily credit limit permits the additional cost."""
 
@@ -4382,13 +4201,9 @@ def _create_daily_hard_limit_system_step_once(
     if not should_emit_daily_agent_event(agent.id, DAILY_HARD_LIMIT_BLOCKED_EVENT):
         return
 
-    step = PersistentAgentStep.objects.create(
+    _create_process_system_step(
         agent=agent,
         description=description,
-    )
-    PersistentAgentSystemStep.objects.create(
-        step=step,
-        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
         notes=notes,
     )
 
@@ -4418,14 +4233,9 @@ def _ensure_credit_for_tool(
                 pass
         return {"cost": None, "credit": None}
 
-    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
-    owner_is_org = TaskCreditService._is_organization_owner(owner) if owner is not None else False
-    owner_user = getattr(agent, "user", None)
-    owner_label = (
-        f"organization {getattr(owner, 'id', 'unknown')}"
-        if owner_is_org
-        else f"user {getattr(owner_user, 'id', 'unknown')}"
-    )
+    owner_ctx = _get_credit_owner_context(agent)
+    owner = owner_ctx.owner
+    owner_user = owner_ctx.owner_user
 
     if not settings.GOBII_PROPRIETARY_MODE or owner is None:
         return {"cost": None, "credit": None}
@@ -4451,15 +4261,12 @@ def _ensure_credit_for_tool(
             e,
             source="api.agent.core.event_processing._ensure_credit_for_tool.cost",
             logger=logger,
-            context={
-                "operation": "get_tool_credit_cost",
-                "tool_name": tool_name,
-                "owner_label": owner_label,
-                "owner_type": "organization" if owner_is_org else "user",
-                "owner_id": str(getattr(owner, "id", "")) if owner is not None else None,
-                "user_id": str(getattr(owner_user, "id", "")) if owner_user is not None else None,
-                "fallback": "default_task_credit_cost",
-            },
+            context=_credit_failure_context(
+                owner_ctx,
+                operation="get_tool_credit_cost",
+                tool_name=tool_name,
+                fallback="default_task_credit_cost",
+            ),
         )
         # Fallback to default single-task cost when lookup fails
         cost = get_default_task_credit_cost()
@@ -4478,27 +4285,18 @@ def _ensure_credit_for_tool(
                 e,
                 source="api.agent.core.event_processing._ensure_credit_for_tool.availability",
                 logger=logger,
-                context={
-                    "operation": "calculate_available_tasks",
-                    "tool_name": tool_name,
-                    "owner_label": owner_label,
-                    "owner_type": "organization" if owner_is_org else "user",
-                    "owner_id": str(getattr(owner, "id", "")) if owner is not None else None,
-                    "user_id": str(getattr(owner_user, "id", "")) if owner_user is not None else None,
-                    "cost": str(cost) if cost is not None else None,
-                },
+                context=_credit_failure_context(
+                    owner_ctx,
+                    operation="calculate_available_tasks",
+                    tool_name=tool_name,
+                    cost=cost,
+                ),
             )
             available = None
         if credit_snapshot is not None:
             credit_snapshot["available"] = available
 
-    daily_state = None
-    if credit_snapshot is not None and isinstance(credit_snapshot.get("daily_state"), dict):
-        daily_state = credit_snapshot["daily_state"]
-    if daily_state is None:
-        daily_state = get_agent_daily_credit_state(agent)
-        if credit_snapshot is not None:
-            credit_snapshot["daily_state"] = daily_state
+    daily_state = _get_credit_snapshot_daily_state(agent, credit_snapshot)
 
     if is_daily_hard_limit_message_only_mode(daily_state) and is_daily_limit_allowed_tool(tool_name):
         if (
@@ -4510,13 +4308,9 @@ def _ensure_credit_for_tool(
             msg_desc = (
                 f"Skipped tool '{tool_name}' due to insufficient credits mid-loop."
             )
-            step = PersistentAgentStep.objects.create(
+            _create_process_system_step(
                 agent=agent,
                 description=msg_desc,
-            )
-            PersistentAgentSystemStep.objects.create(
-                step=step,
-                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
                 notes="credit_insufficient_mid_loop",
             )
             if span is not None:
@@ -4566,9 +4360,9 @@ def _ensure_credit_for_tool(
         try:
             span.set_attribute(
                 "credit_check.owner_type",
-                "organization" if owner_is_org else "user",
+                owner_ctx.owner_type,
             )
-            if owner_is_org:
+            if owner_ctx.owner_is_org:
                 span.set_attribute("credit_check.organization_id", str(getattr(owner, "id", None)))
             if owner_user is not None:
                 span.set_attribute("credit_check.user_id", str(owner_user.id))
@@ -4659,13 +4453,9 @@ def _ensure_credit_for_tool(
         msg_desc = (
             f"Skipped tool '{tool_name}' due to insufficient credits mid-loop."
         )
-        step = PersistentAgentStep.objects.create(
+        _create_process_system_step(
             agent=agent,
             description=msg_desc,
-        )
-        PersistentAgentSystemStep.objects.create(
-            step=step,
-            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
             notes="credit_insufficient_mid_loop",
         )
         if span is not None:
@@ -4689,18 +4479,14 @@ def _ensure_credit_for_tool(
             e,
             source="api.agent.core.event_processing._ensure_credit_for_tool",
             logger=logger,
-            context={
-                "operation": "consume_credit",
-                "tool_name": tool_name,
-                "owner_label": owner_label,
-                "owner_type": "organization" if owner_is_org else "user",
-                "owner_id": str(getattr(owner, "id", "")) if owner is not None else None,
-                "user_id": str(getattr(owner_user, "id", "")) if owner_user is not None else None,
-                "cost": str(cost) if cost is not None else None,
-                "available": str(available) if available is not None else None,
-                "daily_hard_limit": str(hard_limit) if hard_limit is not None else None,
-                "daily_hard_remaining": str(hard_remaining) if hard_remaining is not None else None,
-            },
+            context=_credit_failure_context(
+                owner_ctx,
+                operation="consume_credit",
+                tool_name=tool_name,
+                cost=cost,
+                available=available,
+                daily_state=daily_state,
+            ),
         )
         if span is not None:
             try:
@@ -4718,13 +4504,9 @@ def _ensure_credit_for_tool(
         msg_desc = (
             f"Skipped tool '{tool_name}' due to insufficient credits during processing."
         )
-        step = PersistentAgentStep.objects.create(
+        _create_process_system_step(
             agent=agent,
             description=msg_desc,
-        )
-        PersistentAgentSystemStep.objects.create(
-            step=step,
-            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
             notes="credit_consumption_failure_mid_loop",
         )
         if span is not None:
@@ -4742,27 +4524,7 @@ def _ensure_credit_for_tool(
     # see the cost impact (DB-backed aggregation lags until the step is persisted).
     if cost is not None and isinstance(daily_state, dict):
         try:
-            used_value = daily_state.get("used", Decimal("0"))
-            if not isinstance(used_value, Decimal):
-                used_value = Decimal(str(used_value))
-            new_used = used_value + cost
-            daily_state["used"] = new_used
-
-            # Recompute remaining fields (best-effort; do not fail tool execution).
-            hard_limit_value = daily_state.get("hard_limit")
-            if hard_limit_value is not None:
-                hard_remaining_after = hard_limit_value - new_used
-                daily_state["hard_limit_remaining"] = (
-                    hard_remaining_after if hard_remaining_after > Decimal("0") else Decimal("0")
-                )
-            soft_target_value = daily_state.get("soft_target")
-            if soft_target_value is not None:
-                soft_remaining_after = soft_target_value - new_used
-                soft_remaining_after = (
-                    soft_remaining_after if soft_remaining_after > Decimal("0") else Decimal("0")
-                )
-                daily_state["soft_target_remaining"] = soft_remaining_after
-                daily_state["soft_target_exceeded"] = soft_remaining_after <= Decimal("0")
+            _update_cached_daily_state_after_credit(daily_state, cost)
         except Exception:
             logger.debug(
                 "Failed to update cached daily_state after consuming credit for agent %s",
@@ -5108,6 +4870,70 @@ def _maybe_enqueue_sandbox_warmup_for_recent_tool_history(agent: PersistentAgent
     span.add_event("Sandbox warm-up queued")
     span.set_attribute("sandbox_warmup.queued", True)
     span.set_attribute("sandbox_warmup.reason", reason)
+
+
+@dataclass(frozen=True)
+class _ToolBatchSummary:
+    names: list[Optional[str]]
+    has_non_sleep_calls: bool
+    actionable_calls_total: int
+    has_user_facing_message: bool
+
+
+def _summarize_tool_calls(tool_calls: list[Any] | None) -> _ToolBatchSummary:
+    names = [_get_tool_call_name(call) for call in (tool_calls or [])]
+    return _ToolBatchSummary(
+        names=names,
+        has_non_sleep_calls=any(name != "sleep_until_next_trigger" for name in names),
+        actionable_calls_total=sum(1 for name in names if name != "sleep_until_next_trigger"),
+        has_user_facing_message=any(name in MESSAGE_TOOL_NAMES for name in names if name),
+    )
+
+
+def _log_tool_call_summary(agent: PersistentAgent, tool_calls: list[Any] | None) -> None:
+    try:
+        logger.info(
+            "Agent %s: model returned %d tool_call(s)",
+            agent.id,
+            len(tool_calls) if isinstance(tool_calls, list) else 0,
+        )
+        for idx, call in enumerate(list(tool_calls) or [], start=1):
+            try:
+                fn_name = _get_tool_call_name(call)
+                raw_args = _get_tool_call_arguments(call) or ""
+                call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
+                arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
+                logger.info(
+                    "Agent %s: tool_call %d: id=%s name=%s args=%s%s",
+                    agent.id,
+                    idx,
+                    call_id or "<none>",
+                    fn_name or "<unknown>",
+                    arg_preview,
+                    "…" if raw_args and len(raw_args) > len(arg_preview) else "",
+                )
+            except Exception:
+                logger.info("Agent %s: failed to log one tool_call entry", agent.id)
+    except Exception:
+        logger.debug("Tool call summary logging failed", exc_info=True)
+
+
+def _plan_state_for_sleep_log(agent: PersistentAgent, *, warn_unfinished: bool = False) -> str:
+    try:
+        snap = build_plan_snapshot(agent)
+        if not snap:
+            return "unknown"
+        plan_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
+        if warn_unfinished and (snap.todo_count > 0 or snap.doing_count > 0):
+            logger.warning(
+                "Agent %s: auto-sleeping with unfinished plan work! %s",
+                agent.id,
+                plan_state,
+            )
+        return plan_state
+    except (DatabaseError, LookupError, RuntimeError):
+        logger.debug("Failed to build plan snapshot for termination log", exc_info=True)
+        return "unknown"
 
 
 def _process_agent_events_locked(
@@ -5968,34 +5794,26 @@ def _run_agent_loop(
                     reasoning_text = (reasoning_source or "").strip()
                     if not reasoning_text:
                         return None
-                    step_kwargs = {
-                        "agent": agent,
-                        "description": internal_reasoning.build_internal_reasoning_description(reasoning_text),
-                    }
-                    _attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    _attach_prompt_archive(step)
-                    return step
+                    return _create_attached_step(
+                        agent=agent,
+                        description=internal_reasoning.build_internal_reasoning_description(reasoning_text),
+                        attach_completion=_attach_completion,
+                        attach_prompt_archive=_attach_prompt_archive,
+                    )
 
                 def _apply_agent_config_updates() -> bool:
                     config_apply = apply_sqlite_agent_config_updates(agent, config_snapshot)
                     if not config_apply.errors:
                         return False
                     for error in config_apply.errors:
-                        try:
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": f"Agent config update failed: {error}",
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                        except Exception:
-                            logger.debug(
-                                "Failed to persist config update error step for agent %s",
-                                agent.id,
-                                exc_info=True,
-                            )
+                        _record_attached_step(
+                            agent=agent,
+                            description=f"Agent config update failed: {error}",
+                            attach_completion=_attach_completion,
+                            attach_prompt_archive=_attach_prompt_archive,
+                            failure_message="Failed to persist config update error step for agent %s",
+                            failure_args=(agent.id,),
+                        )
                     return True
 
                 def _apply_skill_updates() -> tuple[bool, bool]:
@@ -6006,20 +5824,14 @@ def _run_agent_loop(
                         return False, bool(skill_apply.changed)
 
                     for error in skill_apply.errors:
-                        try:
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": f"Skill update failed: {error}",
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                        except Exception:
-                            logger.debug(
-                                "Failed to persist skill update error step for agent %s",
-                                agent.id,
-                                exc_info=True,
-                            )
+                        _record_attached_step(
+                            agent=agent,
+                            description=f"Skill update failed: {error}",
+                            attach_completion=_attach_completion,
+                            attach_prompt_archive=_attach_prompt_archive,
+                            failure_message="Failed to persist skill update error step for agent %s",
+                            failure_args=(agent.id,),
+                        )
                     return True, bool(skill_apply.changed)
 
                 def _apply_runtime_updates() -> bool:
@@ -6097,20 +5909,17 @@ def _run_agent_loop(
                             implied_error or "unknown error",
                         )
                         if implied_error:
-                            try:
-                                step_kwargs = {
-                                    "agent": agent,
-                                    "description": (
-                                        "Message delivery requires explicit send tools when implied send is unavailable. "
-                                        "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
-                                        "recently active non-web communication channel from unified history/recent contacts."
-                                    ),
-                                }
-                                _attach_completion(step_kwargs)
-                                step = PersistentAgentStep.objects.create(**step_kwargs)
-                                _attach_prompt_archive(step)
-                            except Exception:
-                                logger.debug("Failed to persist implied-send correction step", exc_info=True)
+                            _record_attached_step(
+                                agent=agent,
+                                description=(
+                                    "Message delivery requires explicit send tools when implied send is unavailable. "
+                                    "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
+                                    "recently active non-web communication channel from unified history/recent contacts."
+                                ),
+                                attach_completion=_attach_completion,
+                                attach_prompt_archive=_attach_prompt_archive,
+                                failure_message="Failed to persist implied-send correction step",
+                            )
                         # Don't continue here - still execute any other tool calls that were returned
 
                 reasoning_source = thinking_content
@@ -6125,16 +5934,7 @@ def _run_agent_loop(
                         _mark_accepted_human_generation_consumed()
                         continue
                     if not message_text and not thinking_content:
-                        # Truly empty response (no text, no thinking, no tools) = agent is done
-                        # Log plan state to help diagnose premature termination
-                        plan_state = "unknown"
-                        try:
-                            from api.agent.tools.plan import build_plan_snapshot
-                            snap = build_plan_snapshot(agent)
-                            if snap:
-                                plan_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
-                        except (DatabaseError, LookupError, RuntimeError):
-                            logger.debug("Failed to build plan snapshot for termination log", exc_info=True)
+                        plan_state = _plan_state_for_sleep_log(agent)
                         logger.info(
                             "Agent %s: empty response (no message, no thinking, no tools), auto-sleeping. "
                             "Plan at termination: %s. Raw msg_content type=%s, len=%s",
@@ -6170,21 +5970,7 @@ def _run_agent_loop(
                     effective_limit = MAX_NO_TOOL_STREAK + 1 if has_continuation else MAX_NO_TOOL_STREAK
 
                     if reasoning_only_streak >= effective_limit:
-                        # Log plan state to help diagnose premature termination
-                        plan_state = "unknown"
-                        try:
-                            from api.agent.tools.plan import build_plan_snapshot
-                            snap = build_plan_snapshot(agent)
-                            if snap:
-                                plan_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
-                                if snap.todo_count > 0 or snap.doing_count > 0:
-                                    logger.warning(
-                                        "Agent %s: auto-sleeping with unfinished plan work! %s",
-                                        agent.id,
-                                        plan_state,
-                                    )
-                        except (DatabaseError, LookupError, RuntimeError):
-                            logger.debug("Failed to build plan snapshot for termination log", exc_info=True)
+                        plan_state = _plan_state_for_sleep_log(agent, warn_unfinished=True)
                         logger.info(
                             "Agent %s: %d consecutive responses without tool calls (limit=%d), auto-sleeping. "
                             "Plan: %s. Last message preview: %.100s",
@@ -6202,32 +5988,7 @@ def _run_agent_loop(
 
                 reasoning_only_streak = 0
 
-                # Log high-level summary of tool calls
-                try:
-                    logger.info(
-                        "Agent %s: model returned %d tool_call(s)",
-                        agent.id,
-                        len(tool_calls) if isinstance(tool_calls, list) else 0,
-                    )
-                    for idx, call in enumerate(list(tool_calls) or [], start=1):
-                        try:
-                            fn_name = _get_tool_call_name(call)
-                            raw_args = _get_tool_call_arguments(call) or ""
-                            call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
-                            arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
-                            logger.info(
-                                "Agent %s: tool_call %d: id=%s name=%s args=%s%s",
-                                agent.id,
-                                idx,
-                                call_id or "<none>",
-                                fn_name or "<unknown>",
-                                arg_preview,
-                                "…" if raw_args and len(raw_args) > len(arg_preview) else "",
-                            )
-                        except Exception:
-                            logger.info("Agent %s: failed to log one tool_call entry", agent.id)
-                except Exception:
-                    logger.debug("Tool call summary logging failed", exc_info=True)
+                _log_tool_call_summary(agent, tool_calls)
 
                 executed_calls = 0
                 followup_required = False
@@ -6236,14 +5997,10 @@ def _run_agent_loop(
                 inferred_message_continue_this_iteration = False
                 executed_non_message_action = False
                 try:
-                    tool_names = [_get_tool_call_name(c) for c in (tool_calls or [])]
-                    has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
-                    actionable_calls_total = sum(
-                        1 for name in tool_names if name != "sleep_until_next_trigger"
-                    )
-                    has_user_facing_message = any(
-                        name in MESSAGE_TOOL_NAMES for name in tool_names if name
-                    )
+                    tool_summary = _summarize_tool_calls(tool_calls)
+                    has_non_sleep_calls = tool_summary.has_non_sleep_calls
+                    actionable_calls_total = tool_summary.actionable_calls_total
+                    has_user_facing_message = tool_summary.has_user_facing_message
                 except Exception:
                     # Defensive fallback: assume we have actionable work so the agent keeps processing
                     has_non_sleep_calls = True

@@ -8,6 +8,11 @@ from api.agent.comms.human_input_requests import (
     attach_originating_step_from_result,
     track_human_input_request_created,
 )
+from api.agent.core.tool_execution_records import (
+    create_pending_tool_call_step,
+    finalize_pending_tool_call_step,
+    persist_tool_call_step,
+)
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
 
 from .runtime_execution_context import tool_execution_context
@@ -54,13 +59,10 @@ def execute_tracked_runtime_tool_call(
 ) -> tuple[Any, Optional[list[dict]]]:
     from api.agent.core.event_processing import (
         _build_safe_error_payload,
-        _create_pending_tool_call_step,
         _enforce_tool_rate_limit,
         _ensure_credit_for_tool,
-        _finalize_pending_tool_call_step,
         _is_error_status,
         _normalize_error_result,
-        _persist_tool_call_step,
     )
 
     attach_completion = _build_attach_completion(parent_step)
@@ -86,7 +88,7 @@ def execute_tracked_runtime_tool_call(
 
     credits_consumed = credit_info.get("cost")
     consumed_credit = credit_info.get("credit")
-    pending_step = _create_pending_tool_call_step(
+    pending_step = create_pending_tool_call_step(
         agent=agent,
         tool_name=tool_name,
         tool_params=exec_params,
@@ -133,7 +135,7 @@ def execute_tracked_runtime_tool_call(
         result_content = json.dumps(result, default=str)
 
     if pending_step is not None:
-        _finalize_pending_tool_call_step(
+        finalize_pending_tool_call_step(
             step=pending_step,
             tool_name=tool_name,
             tool_params=exec_params,
@@ -144,7 +146,7 @@ def execute_tracked_runtime_tool_call(
         )
         step = pending_step
     else:
-        step = _persist_tool_call_step(
+        step = persist_tool_call_step(
             agent=agent,
             tool_name=tool_name,
             tool_params=exec_params,
