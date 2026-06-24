@@ -13,7 +13,6 @@ from constants.plans import PlanNamesChoices
 from .models import (
     AgentEmailAccount,
     CommsChannel,
-    LLMProvider,
     MCPServerConfig,
     StripeConfig,
     TrialPromo,
@@ -619,69 +618,6 @@ class BulkSetUserFlagsForm(forms.Form):
 
         self.invalid_user_id_tokens = invalid_tokens
         return parsed_ids
-
-
-class LLMProviderForm(ModelForm):
-    """Admin form for LLMProvider with write-only API key handling."""
-    api_key = forms.CharField(
-        label="Admin API Key",
-        required=False,
-        widget=forms.PasswordInput(render_value=False),
-        help_text="Leave blank to keep existing key."
-    )
-    clear_api_key = forms.BooleanField(
-        label="Clear stored admin API key",
-        required=False,
-        initial=False,
-    )
-
-    class Meta:
-        model = LLMProvider
-        fields = (
-            "display_name",
-            "key",
-            "enabled",
-            "env_var_name",
-            "model_prefix",
-            "browser_backend",
-            "supports_safety_identifier",
-            "vertex_project",
-            "vertex_location",
-        )
-
-    def clean(self):
-        cleaned = super().clean()
-        # Explicit uniqueness feedback for 'key' to avoid generic banner only
-        key = cleaned.get("key")
-        if key:
-            qs = LLMProvider.objects.filter(key=key)
-            if self.instance.pk:
-                qs = qs.exclude(pk=self.instance.pk)
-            if qs.exists():
-                self.add_error("key", "A provider with this key already exists.")
-
-        # Allow providers without any key (admin or env) — no validation required here.
-        # Vertex fields are optional and only used if backend == GOOGLE (no strict enforcement).
-        # Ensure display_name and key are non-empty strings
-        if not cleaned.get("display_name"):
-            self.add_error("display_name", "Display name is required.")
-        if not cleaned.get("key"):
-            self.add_error("key", "Key is required.")
-        return cleaned
-
-    def save(self, commit=True):
-        instance: LLMProvider = super().save(commit=False)
-        api_key = self.cleaned_data.get("api_key")
-        clear = self.cleaned_data.get("clear_api_key")
-        if clear:
-            instance.api_key_encrypted = None
-        elif api_key:
-            from .encryption import SecretsEncryption
-            instance.api_key_encrypted = SecretsEncryption.encrypt_value(api_key)
-        if commit:
-            instance.save()
-            self.save_m2m()
-        return instance
 
 
 class StripeConfigForm(ModelForm):
