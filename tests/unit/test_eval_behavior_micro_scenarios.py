@@ -120,9 +120,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
 
-        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 135)
-        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 135)
-        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 135)
+        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 134)
+        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 134)
+        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 134)
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
 
@@ -377,6 +377,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(
             by_slug["common_use_case_057_sheets_read_rows"].accepted_tool_alternatives,
             {"google_sheets-read-rows": ("google_sheets-get-values-in-range",)},
+        )
+        self.assertEqual(
+            by_slug["common_use_case_058_sheets_get_by_id"].accepted_tool_alternatives,
+            {"google_sheets-get-spreadsheet-by-id": ("google_sheets-get-spreadsheet-info",)},
         )
         self.assertEqual(
             by_slug["common_use_case_132_sheets_blank_due_bulk_update"].accepted_tool_alternatives,
