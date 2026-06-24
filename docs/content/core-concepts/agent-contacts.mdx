@@ -4,8 +4,86 @@ sidebar_label: Contacts
 description: "Manage the email, SMS, and chat contact points that let users and systems communicate with Gobii agents."
 ---
 
-Every agent may communicate with the owner via their approved method. Additionally, each _may_ have additional contacts if desired. Additional contacts may be added by messaging your agent ("Loop my teammate Will (will@example.com) in to our thread"), or via the agent configuration page.
+import Link from '@docusaurus/Link';
 
-Each additional contact may be allowed to have inbound and/or outbound contact. Inbound permission allows the added contact to communicate and instruct an agent to perform tasks, share information, etc. Outbound permission allows the agent to message the user.
+## What are agent contacts?
 
-The number of additional contacts allowed per agent varies on the user's plan. Upgrading plans allows for an increased limit of additional contacts. See our [pricing](https://gobii.ai/pricing/) page for the latest details.
+Contacts are the people and systems your Gobii agent can communicate with. By default, every agent can talk to its owner — but you can add additional contacts to loop in teammates, clients, or external systems.
+
+Each contact has two independent permissions:
+
+- **Inbound** — the contact can send messages and instructions to your agent
+- **Outbound** — your agent can proactively message the contact
+
+You control both per contact, so you can set up read-only observers (inbound only), notification recipients (outbound only), or full collaborators (both).
+
+## Default contacts
+
+When you create an agent, the owner is automatically an allowed contact with full inbound and outbound permissions. No setup needed — you can start chatting immediately.
+
+## Adding contacts
+
+There are two ways to add contacts:
+
+### 1. Ask your agent
+
+The simplest approach: message your agent and ask it to add someone.
+
+> "Loop my teammate Will (will@example.com) into this thread."
+
+Your agent will request contact permission on your behalf. Once you approve, the contact is added.
+
+### 2. Via the agent settings page
+
+Add contacts directly from the agent configuration page at `https://gobii.ai/app/agents/{id}/settings`. This gives you full control over inbound and outbound permissions from the start.
+
+## Contact permissions explained
+
+| Permission | What it allows |
+|---|---|
+| **Inbound only** | The contact can message the agent and ask it to perform tasks. The agent cannot message them first. |
+| **Outbound only** | The agent can send messages, alerts, or reports to the contact. The contact cannot initiate conversations. |
+| **Both** | Full two-way communication — the contact can instruct the agent, and the agent can reach out proactively. |
+
+Common patterns:
+
+- **Teammate collaborator**: Both inbound and outbound — they can chat with the agent and receive updates
+- **Status alerts**: Outbound only — the agent sends daily summaries to a Slack email or distribution list
+- **Client access**: Inbound only — clients can ask the agent questions but the agent won't message them unprompted
+- **Monitoring**: Inbound only — a manager can check in on agent activity without receiving notifications
+
+## Contact limits
+
+The number of additional contacts you can add per agent depends on your plan. The limit is displayed on your agent settings page and on the [pricing page](https://gobii.ai/pricing/).
+
+Upgrading your plan increases the contact cap. Contact packs are also available as add-ons if you need more contacts without changing plans.
+
+## Supported channels
+
+Contacts can communicate with your agent through:
+
+| Channel | Example |
+|---|---|
+| **Email** | teammate@company.com |
+| **SMS** | +1 555-123-4567 |
+| **Web chat** | Direct chat in the gobii.ai app |
+
+Your agent's available channels depend on what's configured in its settings. See [Channels and Contacts](/tools-and-apps/channels-and-contacts) for setup details.
+
+## Organization contacts
+
+If your agent is owned by an organization, contacts can be managed at the org level for consistency across multiple agents. See [Organizations](/core-concepts/organizations) and [Contact Access](/admin-and-teams/contact-access) for details on org-wide contact management.
+
+## Managing contacts
+
+- **View contacts**: Agent settings page shows all current contacts and their permissions
+- **Add contacts**: Use the agent settings page or ask your agent to request permission
+- **Remove contacts**: Revoke access from the agent settings page at any time
+- **Modify permissions**: Toggle inbound/outbound independently without removing the contact
+
+## Next steps
+
+- [Create your first agent](/start-here/create-your-first-gobii) — see contacts in action
+- [Channels and Contacts](/tools-and-apps/channels-and-contacts) — configure email, SMS, and chat
+- [Contact Access](/admin-and-teams/contact-access) — org-level contact management
+- [Organizations](/core-concepts/organizations) — team workspaces and shared contacts
