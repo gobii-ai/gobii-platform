@@ -51,7 +51,6 @@ from .admin_forms import (
     AgentEmailAccountForm,
     StripeConfigForm,
     TrialPromoAdminForm,
-    MCPServerConfigAdminForm,
     GlobalAgentSkillImportForm,
 )
 from .models import (
@@ -69,7 +68,6 @@ from .models import (
     MeteringBatch,
     UsageThresholdSent,
     PersistentAgentWebhook,
-    MCPServerConfig,
     AgentColor,
     BrowserLLMPolicy,
     IntelligenceTier,
@@ -570,40 +568,6 @@ class AgentColorAdmin(admin.ModelAdmin):
             color,
             color.upper(),
         )
-@admin.register(MCPServerConfig)
-class MCPServerConfigAdmin(admin.ModelAdmin):
-    form = MCPServerConfigAdminForm
-    list_display = ("name", "display_name", "auth_method", "is_active", "transport_summary", "updated_at")
-    search_fields = ("name", "display_name", "description")
-    list_filter = ("is_active", "auth_method")
-    readonly_fields = ("scope", "created_at", "updated_at")
-    fieldsets = (
-        (None, {"fields": ("name", "display_name", "description", "auth_method", "is_active")}),
-        (
-            "Transport",
-            {"fields": ("command", "command_args", "url", "prefetch_apps", "metadata")},
-        ),
-        ("Secrets", {"fields": ("environment", "headers")}),
-        ("Metadata", {"fields": ("scope", "created_at", "updated_at"), "classes": ("collapse",)}),
-    )
-
-    def get_queryset(self, request):
-        queryset = super().get_queryset(request)
-        return queryset.filter(scope=MCPServerConfig.Scope.PLATFORM)
-
-    def save_model(self, request, obj, form, change):
-        obj.scope = MCPServerConfig.Scope.PLATFORM
-        obj.organization = None
-        obj.user = None
-        super().save_model(request, obj, form, change)
-
-    @admin.display(description="Transport", ordering="command")
-    def transport_summary(self, obj):
-        if obj.command:
-            args = " ".join(obj.command_args or [])
-            return f"{obj.command} {args}".strip()
-        return obj.url or "—"
-
 class OwnershipTypeFilter(SimpleListFilter):
     title = 'Ownership'
     parameter_name = 'ownership'

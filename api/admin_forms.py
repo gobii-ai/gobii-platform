@@ -13,15 +13,10 @@ from constants.plans import PlanNamesChoices
 from .models import (
     AgentEmailAccount,
     CommsChannel,
-    MCPServerConfig,
     StripeConfig,
     TrialPromo,
     TrialPromoAllowedEmail,
     UserFlagDefinition,
-)
-from .services.mcp_config_validation import (
-    validate_environment_mapping,
-    validate_mcp_metadata_environment_references,
 )
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -129,99 +124,6 @@ class AgentEmailAccountForm(ModelForm):
                     )
             except Exception:
                 pass
-        return obj
-
-
-class MCPServerConfigAdminForm(forms.ModelForm):
-    """Admin form for managing platform-scoped MCP servers."""
-
-    environment = forms.JSONField(
-        required=False,
-        help_text="Key/value environment variables passed to the MCP server process.",
-    )
-    headers = forms.JSONField(
-        required=False,
-        help_text="HTTP headers to include when invoking remote MCP servers.",
-    )
-
-    class Meta:
-        model = MCPServerConfig
-        fields = [
-            "name",
-            "display_name",
-            "description",
-            "auth_method",
-            "command",
-            "command_args",
-            "url",
-            "prefetch_apps",
-            "metadata",
-            "is_active",
-        ]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._force_platform_scope()
-        instance = self.instance
-        if instance and instance.pk:
-            self.fields["environment"].initial = instance.environment
-            self.fields["headers"].initial = instance.headers
-            self.fields["auth_method"].initial = instance.auth_method
-        else:
-            self.fields["environment"].initial = {}
-            self.fields["headers"].initial = {}
-            self.fields["auth_method"].initial = MCPServerConfig.AuthMethod.NONE
-
-    def _force_platform_scope(self) -> None:
-        """Ensure new instances pass model validation before save."""
-        instance = self.instance
-        if instance is None:
-            return
-        instance.scope = MCPServerConfig.Scope.PLATFORM
-        instance.organization = None
-        instance.organization_id = None
-        instance.user = None
-        instance.user_id = None
-
-    def _post_clean(self):
-        self._force_platform_scope()
-        super()._post_clean()
-
-    def clean_name(self):
-        name = self.cleaned_data["name"]
-        if name and name.strip().lower() != name:
-            raise forms.ValidationError("Name must be lowercase and may not contain leading/trailing whitespace.")
-        return name
-
-    def clean_environment(self):
-        value = self.cleaned_data.get("environment") or {}
-        if not isinstance(value, dict):
-            raise forms.ValidationError("Environment must be a JSON object.")
-        environment_errors = validate_environment_mapping(value)
-        if environment_errors:
-            raise forms.ValidationError(environment_errors)
-        return value
-
-    def clean_metadata(self):
-        value = self.cleaned_data.get("metadata") or {}
-        if not isinstance(value, dict):
-            raise forms.ValidationError("Metadata must be a JSON object.")
-        metadata_errors = validate_mcp_metadata_environment_references(value)
-        if metadata_errors:
-            raise forms.ValidationError(metadata_errors)
-        return value
-
-    def save(self, commit=True):
-        obj = super().save(commit=False)
-        self._force_platform_scope()
-        environment = self.cleaned_data.get("environment") or {}
-        headers = self.cleaned_data.get("headers") or {}
-        obj.environment = environment
-        obj.headers = headers
-        obj.auth_method = self.cleaned_data.get("auth_method") or MCPServerConfig.AuthMethod.NONE
-        if commit:
-            obj.save()
-            self.save_m2m()
         return obj
 
 

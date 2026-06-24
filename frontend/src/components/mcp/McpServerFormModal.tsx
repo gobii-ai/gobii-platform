@@ -43,6 +43,7 @@ type FormState = {
   connectionType: 'http' | 'stdio'
   commandLine: string
   environmentEntries: EnvEntry[]
+  metadataJson: string
   prefetchAppsInput: string
   isActive: boolean
   authMethod: string
@@ -119,6 +120,7 @@ export function McpServerFormModal({
   }, [formErrors])
 
   const nonFieldErrors = formErrors?.non_field_errors ?? []
+  const showMetadataSection = ownerScope === 'platform'
   const showPipedreamPrefetchApps = ownerScope === 'platform' && state.slug.trim().toLowerCase() === 'pipedream'
 
   const handleSubmit = async (event: FormEvent) => {
@@ -152,6 +154,14 @@ export function McpServerFormModal({
       return
     }
 
+    const metadataResult = showMetadataSection ? parseMetadataJson(state.metadataJson) : { value: {} }
+    if (metadataResult.error) {
+      setFormErrors({ metadata: [metadataResult.error] })
+      setStatusMessage(metadataResult.error)
+      onError(metadataResult.error)
+      return
+    }
+
     const payload: McpServerPayload = {
       display_name: state.displayName.trim(),
       name: state.slug.trim(),
@@ -164,7 +174,7 @@ export function McpServerFormModal({
             authMethod: state.authMethod,
             bearerToken: state.bearerToken,
           }),
-      metadata: {},
+      metadata: metadataResult.value,
       environment,
       command,
       command_args: commandArgs,
@@ -488,6 +498,27 @@ export function McpServerFormModal({
               ))}
             </div>
           )}
+
+          {showMetadataSection && (
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-white px-4 py-4">
+              <label className="block text-sm font-semibold text-slate-700">Metadata</label>
+              <textarea
+                className="min-h-36 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:ring-blue-500"
+                value={state.metadataJson}
+                onChange={(event) => setState((prev) => ({ ...prev, metadataJson: event.target.value }))}
+                placeholder={'{\n  "env_fallback": {\n    "WEB_UNLOCKER_ZONE": "WEB_UNLOCKER_ZONE_FALLBACK"\n  }\n}'}
+                spellCheck={false}
+              />
+              <p className="text-xs text-slate-500">
+                Optional JSON object for platform server behavior such as environment fallbacks and integration metadata.
+              </p>
+              {getFieldErrors('metadata', formErrors).map((error) => (
+                <p key={error} className="text-xs text-red-600">
+                  {error}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
 
         {state.connectionType !== 'stdio' && state.authMethod === 'oauth2' && (
@@ -695,6 +726,7 @@ function getInitialState(server?: McpServerDetail, allowCommands = false): FormS
       connectionType: 'http',
       commandLine: '',
       environmentEntries: createBlankEnvEntries(),
+      metadataJson: '{}',
       prefetchAppsInput: '',
       isActive: true,
       authMethod: 'none',
@@ -712,6 +744,7 @@ function getInitialState(server?: McpServerDetail, allowCommands = false): FormS
     connectionType,
     commandLine: hasCommand ? formatCommandLine(server.command ?? '', server.commandArgs ?? []) : '',
     environmentEntries: environmentToEntries(server.environment),
+    metadataJson: formatMetadataJson(server.metadata),
     prefetchAppsInput: (server.prefetchApps ?? []).join('\n'),
     isActive: server.isActive,
     authMethod: server.authMethod,
@@ -840,6 +873,30 @@ function environmentToEntries(environment?: Record<string, string> | null): EnvE
     return createBlankEnvEntries()
   }
   return Object.entries(environment).map(([key, value]) => ({ key, value }))
+}
+
+function formatMetadataJson(metadata?: Record<string, unknown> | null): string {
+  if (!metadata || Object.keys(metadata).length === 0) {
+    return '{}'
+  }
+  return JSON.stringify(metadata, null, 2)
+}
+
+function parseMetadataJson(raw: string): { value: Record<string, unknown>; error?: string } {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return { value: {} }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return { value: {}, error: 'Metadata must be valid JSON.' }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { value: {}, error: 'Metadata must be a JSON object.' }
+  }
+  return { value: parsed as Record<string, unknown> }
 }
 
 function formatCommandLine(command: string, args: string[]): string {
