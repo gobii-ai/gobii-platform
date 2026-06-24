@@ -1911,6 +1911,13 @@ class SitemapTests(TestCase):
             "/solutions/sales/",
             "/solutions/operations/",
             "/recruiting/contact/",
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 301)
+                self.assertEqual(response["Location"], "/")
+
+        for path in (
             "/pretrained-workers/",
             "/pretrained-workers/talent-scout/",
             "/pretrained-workers/talent-scout/hire/",
@@ -1918,7 +1925,7 @@ class SitemapTests(TestCase):
         ):
             with self.subTest(path=path):
                 response = self.client.get(path)
-                self.assertEqual(response.status_code, 301)
+                self.assertEqual(response.status_code, 302)
                 self.assertEqual(response["Location"], "/")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
@@ -2781,7 +2788,7 @@ class PretrainedWorkerSurfaceTests(TestCase):
             with self.subTest(path=path):
                 response = self.client.get(path)
 
-                self.assertEqual(response.status_code, 301)
+                self.assertEqual(response.status_code, 302)
                 self.assertEqual(response["Location"], "/")
 
 

@@ -1508,7 +1508,7 @@ class HomepageIntegrationsSearchView(View):
 class ProprietaryPretrainedWorkerOnlyMixin:
     def dispatch(self, request, *args, **kwargs):
         if not settings.GOBII_PROPRIETARY_MODE:
-            return redirect("pages:home", permanent=True)
+            return redirect("pages:home")
         return super().dispatch(request, *args, **kwargs)
 
 
