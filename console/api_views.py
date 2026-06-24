@@ -19,6 +19,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import zstandard as zstd
 from anymail.exceptions import AnymailAPIError
+from celery.exceptions import CeleryError
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -38,6 +39,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.urls import NoReverseMatch, reverse
 from django.utils.text import get_valid_filename
+from kombu.exceptions import OperationalError as KombuOperationalError
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.human_input_requests import (
@@ -147,7 +149,7 @@ from console.llm_tier_usage import (
     build_persistent_endpoint_tier_usage,
 )
 from api.encryption import SecretsEncryption
-from api.agent.tasks import process_agent_events_task
+from api.agent.tasks import process_agent_events_task, queue_agent_process_events_batch_task
 from api.services.system_settings import get_max_file_size
 from api.services.owner_execution_pause import get_owner_account_pause_state
 from api.services.agent_owner_custom_instructions import (
@@ -2675,28 +2677,31 @@ def _create_staff_scoped_system_messages(request: HttpRequest, target_qs) -> Jso
 
 def _queue_staff_scoped_process_events(target_qs) -> JsonResponse:
     agents = list(target_qs.order_by("id").only("id", "is_active"))
-    queued_count = 0
     skipped_inactive_count = 0
+    active_agent_ids: list[str] = []
 
-    try:
-        for agent in agents:
-            if not agent.is_active:
-                skipped_inactive_count += 1
-                continue
-            process_agent_events_task.delay(str(agent.id))
-            queued_count += 1
-    except Exception as exc:  # pragma: no cover - defensive guard around queueing
-        logger.exception("Failed to queue scoped process events for staff action")
-        return JsonResponse(
-            {
-                "error": "queue_failed",
-                "detail": str(exc),
-                "queuedCount": queued_count,
-                "skippedInactiveCount": skipped_inactive_count,
-                "targetCount": len(agents),
-            },
-            status=500,
-        )
+    for agent in agents:
+        if not agent.is_active:
+            skipped_inactive_count += 1
+            continue
+        active_agent_ids.append(str(agent.id))
+
+    queued_count = len(active_agent_ids)
+    if queued_count:
+        try:
+            queue_agent_process_events_batch_task.delay(active_agent_ids)
+        except (CeleryError, KombuOperationalError) as exc:
+            logger.exception("Failed to queue scoped process events batch for staff action")
+            return JsonResponse(
+                {
+                    "error": "queue_failed",
+                    "detail": str(exc),
+                    "queuedCount": 0,
+                    "skippedInactiveCount": skipped_inactive_count,
+                    "targetCount": len(agents),
+                },
+                status=500,
+            )
 
     status_code = 202 if queued_count else 200
     return JsonResponse(

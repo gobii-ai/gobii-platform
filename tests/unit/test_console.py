@@ -884,7 +884,7 @@ class ConsoleViewsTest(TestCase):
         self._create_staff_test_agent(user=target_user, name="Eval Process Non Target", execution_environment="eval")
 
         self.client.force_login(admin_user)
-        with patch("console.api_views.process_agent_events_task.delay") as mock_delay:
+        with patch("console.api_views.queue_agent_process_events_batch_task.delay") as mock_delay:
             response = self.client.post(reverse("staff-user-process-events", kwargs={"user_id": target_user.id}))
 
         self.assertEqual(response.status_code, 202)
@@ -897,7 +897,7 @@ class ConsoleViewsTest(TestCase):
                 "targetCount": 2,
             },
         )
-        mock_delay.assert_called_once_with(str(active_agent.id))
+        mock_delay.assert_called_once_with([str(active_agent.id)])
 
     @tag("batch_console_agents")
     def test_staff_org_process_events_targets_active_org_agents_only(self):
@@ -922,14 +922,43 @@ class ConsoleViewsTest(TestCase):
         self._create_staff_test_agent(user=target_user, name="Personal Process Non Target")
 
         self.client.force_login(admin_user)
-        with patch("console.api_views.process_agent_events_task.delay") as mock_delay:
+        with patch("console.api_views.queue_agent_process_events_batch_task.delay") as mock_delay:
             response = self.client.post(reverse("staff-org-process-events", kwargs={"org_id": organization.id}))
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.json()["queuedCount"], 1)
         self.assertEqual(response.json()["skippedInactiveCount"], 1)
         self.assertEqual(response.json()["targetCount"], 2)
-        mock_delay.assert_called_once_with(str(active_agent.id))
+        mock_delay.assert_called_once_with([str(active_agent.id)])
+
+    @tag("batch_console_agents")
+    def test_staff_process_events_returns_queue_failed_when_batch_publish_fails(self):
+        from celery.exceptions import CeleryError
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-process-events-failure@example.com",
+            email="admin-process-events-failure@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="process-events-failure",
+            email="process-events-failure@example.com",
+            password="testpass123",
+        )
+        self._create_staff_test_agent(user=target_user, name="Publish Failure Target")
+
+        self.client.force_login(admin_user)
+        with patch(
+            "console.api_views.queue_agent_process_events_batch_task.delay",
+            side_effect=CeleryError("broker unavailable"),
+        ):
+            response = self.client.post(reverse("staff-user-process-events", kwargs={"user_id": target_user.id}))
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["error"], "queue_failed")
+        self.assertEqual(response.json()["queuedCount"], 0)
+        self.assertEqual(response.json()["targetCount"], 1)
 
     @tag("batch_console_agents")
     def test_staff_scoped_agent_controls_require_staff(self):

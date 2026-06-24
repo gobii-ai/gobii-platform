@@ -293,6 +293,7 @@ function SystemMessageModal({
   targetCount,
   body,
   submitting,
+  error,
   onBodyChange,
   onClose,
   onSubmit,
@@ -301,6 +302,7 @@ function SystemMessageModal({
   targetCount: number
   body: string
   submitting: boolean
+  error?: string | null
   onBodyChange: (body: string) => void
   onClose: () => void
   onSubmit: () => void
@@ -320,6 +322,7 @@ function SystemMessageModal({
       submittingLabel="Queueing..."
       submitting={submitting}
       submitDisabled={!body.trim()}
+      errorMessages={error ? [error] : null}
       onSubmit={(event) => {
         event.preventDefault()
         onSubmit()
@@ -343,12 +346,14 @@ function ProcessEventsModal({
   targetLabel,
   targetCount,
   submitting,
+  error,
   onClose,
   onConfirm,
 }: {
   targetLabel: string
   targetCount: number
   submitting: boolean
+  error?: string | null
   onClose: () => void
   onConfirm: () => void
 }) {
@@ -359,6 +364,7 @@ function ProcessEventsModal({
       description={`This will queue event processing for up to ${formatAgentTarget(targetCount, targetLabel)}. This can be expensive for large agent sets.`}
       confirmLabel="Queue Processing"
       busy={submitting}
+      localError={error}
       icon={AlertTriangle}
       onClose={onClose}
       onConfirm={onConfirm}
@@ -793,6 +799,8 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
   const actionTargetCount = orgDetail ? orgDetail.agents.length : personalAgentTargetCount
   const actionTargetLabel = orgDetail ? 'organization agent' : 'personal agent'
   const agentActionPending = systemMessageMutation.isPending || processEventsMutation.isPending
+  const systemMessageError = systemMessageMutation.error instanceof Error ? systemMessageMutation.error.message : null
+  const processEventsError = processEventsMutation.error instanceof Error ? processEventsMutation.error.message : null
 
   const pageSubtitle = userDetail
     ? `Viewing ${userDetail.user.name} · ${userDetail.user.email || `User #${userDetail.user.id}`}`
@@ -850,7 +858,19 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
     if (agentActionPending) {
       return
     }
+    systemMessageMutation.reset()
+    processEventsMutation.reset()
     setActiveAgentAction(null)
+  }
+
+  const openSystemMessageModal = () => {
+    systemMessageMutation.reset()
+    setActiveAgentAction('system-message')
+  }
+
+  const openProcessEventsModal = () => {
+    processEventsMutation.reset()
+    setActiveAgentAction('process-events')
   }
 
   const handleSystemMessageSubmit = () => {
@@ -914,8 +934,6 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
               {grantMutation.error instanceof Error ? <p className="text-sm text-rose-700">{grantMutation.error.message}</p> : null}
               {orgGrantMutation.error instanceof Error ? <p className="text-sm text-rose-700">{orgGrantMutation.error.message}</p> : null}
               {emailTriggerMutation.error instanceof Error ? <p className="text-sm text-rose-700">{emailTriggerMutation.error.message}</p> : null}
-              {systemMessageMutation.error instanceof Error ? <p className="text-sm text-rose-700">{systemMessageMutation.error.message}</p> : null}
-              {processEventsMutation.error instanceof Error ? <p className="text-sm text-rose-700">{processEventsMutation.error.message}</p> : null}
             </form>
           </div>
         </section>
@@ -966,8 +984,8 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
               emptyText="This user does not currently own any persistent agents."
               actionTargetLabel="personal agent"
               actionTargetCount={personalAgentTargetCount}
-              onSystemMessage={() => setActiveAgentAction('system-message')}
-              onProcessEvents={() => setActiveAgentAction('process-events')}
+              onSystemMessage={openSystemMessageModal}
+              onProcessEvents={openProcessEventsModal}
               systemMessagePending={systemMessageMutation.isPending}
               processEventsPending={processEventsMutation.isPending}
             />
@@ -991,8 +1009,8 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
               emptyText="This organization does not currently own any persistent agents."
               actionTargetLabel="organization agent"
               actionTargetCount={orgDetail.agents.length}
-              onSystemMessage={() => setActiveAgentAction('system-message')}
-              onProcessEvents={() => setActiveAgentAction('process-events')}
+              onSystemMessage={openSystemMessageModal}
+              onProcessEvents={openProcessEventsModal}
               systemMessagePending={systemMessageMutation.isPending}
               processEventsPending={processEventsMutation.isPending}
             />
@@ -1011,6 +1029,7 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
           targetCount={actionTargetCount}
           body={systemMessageBody}
           submitting={systemMessageMutation.isPending}
+          error={systemMessageError}
           onBodyChange={setSystemMessageBody}
           onClose={closeAgentActionModal}
           onSubmit={handleSystemMessageSubmit}
@@ -1021,6 +1040,7 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
           targetLabel={actionTargetLabel}
           targetCount={actionTargetCount}
           submitting={processEventsMutation.isPending}
+          error={processEventsError}
           onClose={closeAgentActionModal}
           onConfirm={handleProcessEventsConfirm}
         />
