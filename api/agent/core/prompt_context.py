@@ -2288,6 +2288,19 @@ def _recent_contact_records_for_prompt(
     return ordered[:CONTACT_PROMPT_SAMPLE_LIMIT]
 
 
+def _allowed_communication_channels(
+    agent_endpoints: Sequence[PersistentAgentCommsEndpoint],
+    contact_records: Sequence[ContactSQLiteRecord],
+) -> list[str]:
+    channels = {endpoint.channel for endpoint in agent_endpoints if endpoint.channel}
+    channels.update(
+        record.channel
+        for record in contact_records
+        if record.channel and record.status == "allowed" and record.allow_outbound
+    )
+    return sorted(channels)
+
+
 def _build_contacts_block(
     agent: PersistentAgent,
     contacts_group,
@@ -2646,16 +2659,12 @@ def _build_contacts_block(
     )
     
     # Explicitly list allowed communication channels
-    allowed_channels = set()
-    for ep in agent_eps:
-        # ep.channel is already a string value from the database, not an enum object
-        allowed_channels.add(ep.channel)
+    allowed_channels = _allowed_communication_channels(agent_eps, contact_records)
 
     if allowed_channels:
-        channels_list = sorted(allowed_channels)  # Already strings, no need for .value
         contacts_group.section_text(
             "allowed_channels",
-            f"You can communicate via: {', '.join(channels_list)}. Stick to these channels, and include the primary contact endpoint when one is configured.",
+            f"You can communicate via: {', '.join(allowed_channels)}. Stick to these channels, and include the primary contact endpoint when one is configured.",
             weight=3,
             non_shrinkable=True
         )
@@ -3663,8 +3672,10 @@ def _get_system_instruction(
         f"{tool_calls_note}"
         f"{stop_explicit_note}"
         "Missing recipient or required content for an email/SMS/outbound send is a blocker: use request_human_input with will_continue_work=false, not chat-only questions. "
+        "Ask one compact, option-based tracked request for the missing send details; do not ask the same blocker as ordinary chat. "
         "Fetching data is step one; reporting completes the task. "
-        "Use exactly the requested delivery channel; if asked to email, send_email and stop without a chat confirmation unless both channels were requested. "
+        "Use exactly the requested delivery channel; if asked to email an allowed address and send_email is available, call send_email. "
+        "For final send_email/send_sms/send_chat_message deliveries, set will_continue_work=false on that send call unless another immediate, user-requested action remains after delivery. "
         "Never announce what you're about to do—announcements terminate you before delivery. "
         "Wrong: 'Let me fetch that data...' Right: [just make the tool call with no text]\n\n"
         "Scheduled/background exact feed/API fetches without implied send still need send_chat_message(body=brief sourced report, will_continue_work=false).\n\n"
@@ -3720,7 +3731,7 @@ def _get_system_instruction(
         "User-facing question, blocker, config change, or finding only; never narrate internal reasoning, tool sequencing, or skill maintenance unless asked for live status. "
         "Speak naturally and avoid internal terms like 'charter'. SMS stays brief; email can use rich HTML and source links. Give web tasks specific URLs/searches/actions. "
 
-        "Calibrate effort to the request. Trivial questions, acknowledgements, exact-URL lookups, one-shot statuses, and simple facts need only the necessary tool calls, one answer, then stop. "
+        "Calibrate effort to the request. Trivial questions, acknowledgements, exact-URL lookups, one-shot statuses, simple facts, and one-off research questions need only the necessary tool calls, one answer, then stop. "
         "For scheduled digests/reports, produce the requested report once with sources and finish until the next trigger; after an exact feed/API fetch, send the report directly with send_chat_message when web chat is the channel, never with update_plan or plain text. "
         "When the answer depends on current facts, recent events, pricing, hiring, funding, company/person profiles, or social posts, use web/structured tools instead of memory and cite full copied source URLs. "
         "Do not add charts, files, broad extra research, follow-up questions, plans, or comparisons unless requested or materially necessary. "
@@ -3806,7 +3817,8 @@ def _get_system_instruction(
         "## Configuration Discipline (CRITICAL)\n\n"
         "__agent_config is durable operating memory, not normal task output. "
         "Only mutate it when a configure-authorized user changes ongoing behavior, role/scope/process/customer context, monitoring/alerting rules, feedback/preferences, stable inferred preferences, or recurrence; preserve still-relevant guidance and named channels/tools. "
-        "Never update charter/schedule for one-off work, transient facts, completed answers, weak guesses, or to describe what you just did. A finished answer, briefing, chart, or lookup is not a charter change. "
+        "Never update charter/schedule for one-off work, transient facts, completed answers, weak guesses, or to describe what you just did. A finished answer, briefing, chart, lookup, or one-off research answer is not a charter change. "
+        "Do not set a schedule merely to continue or remember a single research question; only schedule work when the user asked for recurring monitoring, alerts, digests, follow-up, or durable role changes. "
         "For scheduled runs, keep cadence unless explicitly changed. For future recurring digests/reports/monitors/alerts, update charter/schedule once and stop; do not run the first job unless asked. "
         "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due. "
         "Respect one-off preferences like 'stand by' or 'don't follow up unless I ask' in the current conversation without mutating config. When in doubt, leave config unchanged, deliver the result, and stop.\n\n"

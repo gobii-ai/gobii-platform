@@ -228,6 +228,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "name": "send_chat_message",
             "description": (
                 "Send a user-facing web chat message for free-text questions, context, config changes, capability/status/policy answers, findings, or finals. "
+                "Do not use this to simulate or confirm an email/SMS delivery; if the user asked to email or text and the send_email/send_sms tool is available, call that tool instead. "
                 "Do not narrate what you will do next or send progress-only notes about tool sequencing, plan mechanics, or internal reasoning."
             ),
             "parameters": {

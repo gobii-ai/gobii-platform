@@ -301,7 +301,7 @@ class SqliteDedupeRequeryScenario(SqliteToolResultScenario):
     mock_kind = "dedupe"
     verify_task_name = "verify_dedupe_sqlite_usage"
     answer_source_urls = SOURCE_URLS
-    required_terms = ("HIPAA", "SMB")
+    required_terms = ()
     min_sources = 2
     max_single_result_filters = 2
 

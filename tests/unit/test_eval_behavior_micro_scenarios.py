@@ -57,6 +57,7 @@ from api.evals.scenarios.behavior_micro import (
 )
 from api.evals.scenarios.effort_calibration import _hierarchical_report_shape
 from api.evals.scenarios.monitor_pollution import (
+    MonitorPollutionScenario,
     _charter_mentions_pollution_monitoring,
     _schedule_is_reasonable_pollution_monitoring,
 )
@@ -77,6 +78,7 @@ from api.models import (
     EvalRun,
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
@@ -747,6 +749,28 @@ class BehaviorMicroHelperTests(TestCase):
                 self.assertTrue(entry.allow_outbound)
                 self.assertTrue(entry.allow_inbound)
 
+    def test_prior_tool_results_cases_seed_visible_tool_calls(self):
+        for slug in (
+            "common_use_case_111_prior_results_sqlite_rank",
+            "common_use_case_124_tool_results_cte_dedupe_urls",
+            "common_use_case_125_tool_results_json_each_plan",
+        ):
+            with self.subTest(slug=slug):
+                scenario = ScenarioRegistry.get(slug)
+
+                scenario._seed_prior_tool_results_context(self.agent.id)
+
+                calls = list(PersistentAgentToolCall.objects.filter(step__agent=self.agent))
+                self.assertGreaterEqual(len(calls), 1)
+                joined_results = "\n".join(call.result for call in calls)
+                if slug == "common_use_case_111_prior_results_sqlite_rank":
+                    self.assertIn("annual cost", joined_results)
+                if slug == "common_use_case_125_tool_results_json_each_plan":
+                    self.assertIn("offers", joined_results)
+
+                PersistentAgentToolCall.objects.filter(step__agent=self.agent).delete()
+                PersistentAgentStep.objects.filter(agent=self.agent).delete()
+
     def test_outbound_sms_cases_do_not_seed_sendable_sms_contacts(self):
         for slug in (
             "common_use_case_065_send_status_sms",
@@ -770,6 +794,52 @@ class BehaviorMicroHelperTests(TestCase):
         should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
 
         self.assertFalse(should_stop, reason)
+
+    def test_monitor_pollution_completion_fallback_detects_persisted_success(self):
+        scenario = MonitorPollutionScenario()
+        self.agent.charter = "Monitor pollution index for Washington DC."
+        self.agent.schedule = "0 */6 * * *"
+        self.agent.save(update_fields=["charter", "schedule"])
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=f"web://user/{self.user.id}/agent/{self.agent.id}",
+        )
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=f"web://agent/{self.agent.id}",
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=f"web://user/{self.user.id}/agent/{self.agent.id}",
+        )
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            conversation=conversation,
+            from_endpoint=user_endpoint,
+            to_endpoint=agent_endpoint,
+            is_outbound=False,
+            body="Monitor pollution in Washington DC.",
+        )
+        step = PersistentAgentStep.objects.create(agent=self.agent)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="spawn_web_task",
+            tool_params={"prompt": "Find Washington DC pollution."},
+            result='{"status":"pending"}',
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            conversation=conversation,
+            from_endpoint=agent_endpoint,
+            to_endpoint=user_endpoint,
+            is_outbound=True,
+            body="Current Washington DC pollution index: 55.",
+        )
+
+        self.assertTrue(
+            scenario._has_completed_expected_work(str(self.agent.id), after=inbound.timestamp)
+        )
 
     def test_custom_tool_common_use_case_exposes_enabled_sandbox_builtin(self):
         scenario = ScenarioRegistry.get("common_use_case_122_custom_tool_bulk_api_sqlite")

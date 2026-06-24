@@ -214,7 +214,10 @@ def get_send_email_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true=another action follows; false=done and no current plan items remain unfinished.",
+                        "description": (
+                            "REQUIRED. false when this email is the requested final delivery, including 'send this now', reports, dashboards, summaries, outreach, or one-off replies. "
+                            "true only when another immediate user-requested tool action must happen after the email; future scheduled work does not count."
+                        ),
                     },
                 },
                 "required": ["to_address", "subject", "mobile_first_html", "will_continue_work"],

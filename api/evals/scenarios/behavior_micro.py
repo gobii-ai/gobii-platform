@@ -625,6 +625,104 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
         )
 
+    def _seed_prior_tool_results_context(self, agent_id):
+        """Seed actual tool-call rows for prompts that claim __tool_results already exists."""
+        seed_rows = {
+            "common_use_case_111_prior_results_sqlite_rank": [
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://pricing.example.test/acme"},
+                    {
+                        "status": "ok",
+                        "url": "https://pricing.example.test/acme",
+                        "result": "Acme Suite: annual cost $12,000 for the requested package.",
+                    },
+                ),
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://pricing.example.test/globex"},
+                    {
+                        "status": "ok",
+                        "url": "https://pricing.example.test/globex",
+                        "result": "Globex Platform: annual cost $9,600 for the requested package.",
+                    },
+                ),
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://pricing.example.test/initech"},
+                    {
+                        "status": "ok",
+                        "url": "https://pricing.example.test/initech",
+                        "result": "Initech Cloud: annual cost $15,500 for the requested package.",
+                    },
+                ),
+            ],
+            "common_use_case_124_tool_results_cte_dedupe_urls": [
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://sources.example.test/alpha"},
+                    {
+                        "status": "ok",
+                        "url": "https://sources.example.test/alpha",
+                        "result": "Alpha claims SOC 2 support and audit exports for enterprise teams.",
+                    },
+                ),
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://sources.example.test/beta"},
+                    {
+                        "status": "ok",
+                        "url": "https://sources.example.test/beta",
+                        "result": "Alpha duplicate: SOC 2 support and audit exports for enterprise teams.",
+                    },
+                ),
+            ],
+            "common_use_case_125_tool_results_json_each_plan": [
+                (
+                    "http_request",
+                    {"url": "https://api.example.test/offers/caremesh.json"},
+                    {
+                        "status": "ok",
+                        "content": {
+                            "vendor": "CareMesh",
+                            "offers": [
+                                {"plan": "Starter", "monthly_usd": 540, "hipaa_ready": False},
+                                {"plan": "Regulated", "monthly_usd": 720, "hipaa_ready": True},
+                            ],
+                        },
+                    },
+                ),
+                (
+                    "http_request",
+                    {"url": "https://api.example.test/offers/axonflow.json"},
+                    {
+                        "status": "ok",
+                        "content": {
+                            "vendor": "AxonFlow",
+                            "offers": [
+                                {"plan": "Business", "monthly_usd": 890, "hipaa_ready": True},
+                                {"plan": "Enterprise", "monthly_usd": 1200, "hipaa_ready": True},
+                            ],
+                        },
+                    },
+                ),
+            ],
+        }.get(getattr(self.case, "slug", None))
+        if not seed_rows:
+            return
+
+        for tool_name, tool_params, result in seed_rows:
+            step = PersistentAgentStep.objects.create(
+                agent_id=agent_id,
+                description=f"Seeded prior eval tool result: {tool_name}",
+            )
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name=tool_name,
+                tool_params=tool_params,
+                result=json.dumps(result),
+            )
+
     def _seed_completed_process_run(self, agent_id):
         self._seed_prior_processing_run(agent_id)
 
@@ -2717,6 +2815,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         forbidden_tools = case.forbidden_tool_names()
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
         self._seed_prior_processing_run(agent_id)
+        self._seed_prior_tool_results_context(agent_id)
         self._seed_outbound_contact_context(agent_id)
         self._seed_file_context(agent_id)
         tool_names = self._tool_names_to_enable()

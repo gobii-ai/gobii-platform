@@ -81,6 +81,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(suite.scenario_slugs, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
         self.assertIn(SQLITE_ITEM_LINK_REPORT, suite.scenario_slugs)
 
+    def test_dedupe_requery_answer_assertion_does_not_force_specific_claim_category(self):
+        self.assertEqual(SqliteDedupeRequeryScenario.required_terms, ())
+
     def test_near_duplicate_query_detector_flags_repetitive_searches(self):
         duplicates = _find_near_duplicate_texts(
             [
@@ -994,3 +997,38 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Do not validate, fetch, parse, or test provided URLs", system_prompt)
         self.assertIn("call end_planning in the same response as any welcome", system_prompt)
         self.assertIn("Do not say you will check, validate, test, fetch, or inspect a provided feed", system_prompt)
+
+    def test_system_prompt_has_delivery_and_config_guardrails(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="delivery-guardrails@example.com",
+            email="delivery-guardrails@example.com",
+        )
+        EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Delivery Guardrails Browser")
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address="delivery-guardrails-web",
+        )
+        agent = PersistentAgent.objects.create(
+            name="Delivery Guardrails Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Do one-off work carefully.",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+            preferred_contact_endpoint=endpoint,
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ), patch(
+            "api.agent.core.prompt_context.get_llm_config_with_failover",
+            return_value=[("endpoint", "openai/gpt-4o-mini", {})],
+        ):
+            context, _, _ = build_prompt_context_preview(agent, is_first_run=False)
+
+        system_prompt = next(message["content"] for message in context if message["role"] == "system")
+        self.assertIn("Use exactly the requested delivery channel", system_prompt)
+        self.assertIn("For final send_email/send_sms/send_chat_message deliveries", system_prompt)
+        self.assertIn("Do not set a schedule merely to continue or remember a single research question", system_prompt)

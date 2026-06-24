@@ -3,7 +3,13 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
 
 from api.agent.core import prompt_context
-from api.models import BrowserUseAgent, CommsAllowlistEntry, CommsChannel, PersistentAgent
+from api.models import (
+    BrowserUseAgent,
+    CommsAllowlistEntry,
+    CommsChannel,
+    PersistentAgent,
+    PersistentAgentCommsEndpoint,
+)
 
 
 @tag("batch_promptree")
@@ -120,3 +126,45 @@ class PromptContextContactsGuidanceTests(TestCase):
         self.assertIn("person-29@example.com", allowed_contacts)
         self.assertNotIn("person-00@example.com", allowed_contacts)
         self.assertIn("status='allowed' AND allow_outbound=1", allowed_contacts)
+
+    def test_allowed_channels_include_outbound_allowed_contact_channels(self):
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=f"web://agent/{self.agent.id}",
+        )
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="ops@example.test",
+            is_active=True,
+            allow_inbound=True,
+            allow_outbound=True,
+        )
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550123",
+            is_active=True,
+            allow_inbound=True,
+            allow_outbound=False,
+        )
+        collector = _PromptSectionCollector()
+        config_authority = prompt_context._ConfigAuthorityResolver(self.agent)
+        contact_records = prompt_context.build_contacts_snapshot_records(
+            self.agent,
+            display_name_for_user=prompt_context._build_user_display_name,
+            user_can_configure=config_authority.user_can_configure,
+        )
+
+        prompt_context._build_contacts_block(
+            self.agent,
+            collector,
+            _NoopSpan(),
+            config_authority,
+            contact_records,
+        )
+
+        allowed_channels = collector.sections["allowed_channels"]
+        self.assertIn("You can communicate via: email, web.", allowed_channels)
+        self.assertNotIn("sms", allowed_channels)
