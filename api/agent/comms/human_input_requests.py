@@ -37,10 +37,6 @@ BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<bod
 MAX_OPTION_COUNT = 6
 MAX_HUMAN_INPUT_QUESTION_LENGTH = 500
 DEFAULT_HUMAN_INPUT_REQUEST_EXPIRATION_DAYS = 3
-OPTIONS_REQUIRED_MESSAGE = (
-    "request_human_input requires at least one option. Use a send_* tool for free-text questions, "
-    "or include an Other / I'll explain option for open-ended answers."
-)
 HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
 HUMAN_INPUT_LLM_MATCH_CONFIDENCE_THRESHOLD = 0.8
 
@@ -225,11 +221,29 @@ def build_option_payloads(raw_options: list[dict[str, Any]] | None) -> list[dict
 
 
 def _validate_human_input_options(raw_options: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    if not build_option_payloads(raw_options):
+    if not raw_options:
+        return None
+    if len(raw_options) > MAX_OPTION_COUNT:
         return {
             "status": "error",
-            "message": OPTIONS_REQUIRED_MESSAGE,
+            "message": f"Options cannot exceed {MAX_OPTION_COUNT} items.",
         }
+    for raw_option in raw_options:
+        if not isinstance(raw_option, dict):
+            return {
+                "status": "error",
+                "message": "Invalid option payload. Each option must be an object.",
+            }
+        if not _normalize_human_input_text(raw_option.get("title")):
+            return {
+                "status": "error",
+                "message": "Each option must include title and description.",
+            }
+        if not _normalize_human_input_text(raw_option.get("description")):
+            return {
+                "status": "error",
+                "message": "Each option must include title and description.",
+            }
     return None
 
 
@@ -562,11 +576,6 @@ def _create_human_input_request_for_target(
     if question_error:
         return None, question_error
     options = build_option_payloads(raw_options)
-    if not options:
-        return None, {
-            "status": "error",
-            "message": OPTIONS_REQUIRED_MESSAGE,
-        }
     input_mode = (
         PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT
         if options

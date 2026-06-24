@@ -3498,7 +3498,7 @@ def _get_planning_mode_prompt_block() -> str:
         "- Treat named local time zones such as ET as sufficiently clear; handle DST and UTC conversion as "
         "implementation details instead of asking the user.\n"
         "- Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them. Keep the conversation focused on the user's need, scope, and desired outcome. If goal/source/cadence/output are clear, call end_planning and use current conversation/contact setup.\n"
-        "- Human input rule: use request_human_input only for tracked option-based decisions; every request needs explicit options. Use send tools for free-text clarification and capability/status/policy answers.\n"
+        "- Human input rule: use request_human_input for tracked blockers; options for decisions, free-text-only when choices are artificial. Use send tools for non-blocking/status/policy answers.\n"
         "- Once request_human_input succeeds, questions are visible in web chat. Do not repeat them; an optional chat message may only frame why you asked or reference pending questions.\n"
         "- Each planning question must be its own request item. If asking multiple questions, prefer one request_human_input call with the `requests` parameter, where each item contains exactly one question; top-level `question` is fine for one.\n"
         "- Prefer tangible, mutually exclusive options; add `Other / I'll explain` when useful.\n"
@@ -3610,7 +3610,7 @@ def _get_system_instruction(
         delivery_context = (
             f"## Implied Send → {display_name}\n\n"
             "Your response text is a user message: use it only for questions, blockers, config changes, findings, or final deliverables. "
-            "Use request_human_input only for tracked option-based decisions; use this chat for free-text questions and capability/status/policy answers. "
+            "Use request_human_input for tracked blockers; use this chat for non-blocking/status/policy answers. "
             "While working, respond with tool calls and no text; if an exact URL/result already succeeded, never search for it or refetch the same successful URL. "
             "Text-only messages auto-send and stop; add \"CONTINUE_WORK_SIGNAL\" alone to continue. "
             "To reach someone else, use explicit tools: "
@@ -3620,7 +3620,7 @@ def _get_system_instruction(
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
         response_structure = (
-            "Response structure: tools only while working; message for blockers/questions/findings/finals; request_human_input only for option-based tracked decisions; empty response sleeps. "
+            "Response structure: tools only while working; message for blockers/questions/findings/finals; request_human_input only for tracked blockers; empty response sleeps. "
             "Use CONTINUE_WORK_SIGNAL only after a message that must continue."
         )
         tool_calls_note = "Text + tools in one response is only for real user-facing content, never status narration. "
@@ -3629,7 +3629,7 @@ def _get_system_instruction(
         delivery_context = (
             "## Delivery & Response Behavior\n\n"
             "Text is not delivered in this mode: use send_ tools for questions, blockers, findings, config changes, and final deliverables; update_plan is not delivery. "
-            "Use request_human_input only for tracked option-based decisions; use send tools for free-text questions and capability/status/policy answers. "
+            "Use request_human_input for tracked blockers; use send tools for non-blocking/status/policy answers. "
             "If notifying by email/SMS too, include the same questions in that outbound body. "
             "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts. "
             "Focus on tool calls - text alone is not delivered.\n\n"
@@ -3709,7 +3709,7 @@ def _get_system_instruction(
         "## Durable Config\n\n"
 
         "Update charter/schedule only for durable role/scope, preferences, feedback, monitoring, recurrence, or memory. "
-        "Merge changes; preserve relevant guidance/tools; never save one-offs, transient facts, completed work, or weak guesses.\n\n"
+        "Merge changes; preserve unrelated guidance/tools, including unavailable saved channels; never save one-offs, transient facts, completed work, or weak guesses.\n\n"
 
         f"{schedule_updates_guidance}"
 

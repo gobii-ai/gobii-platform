@@ -3003,6 +3003,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
     def _request_human_input_call_has_options(call):
         params = call.tool_params or {}
         options = params.get("options")
+        if params.get("question") and options in (None, []):
+            return True
         if _valid_human_input_options(options):
             return True
         for raw_requests_key in ("requests", "questions"):
@@ -3011,7 +3013,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 continue
             return all(
                 isinstance(request, dict)
-                and _valid_human_input_options(request.get("options"))
+                and request.get("question")
+                and (request.get("options") in (None, []) or _valid_human_input_options(request.get("options")))
                 for request in raw_requests
             )
         return False

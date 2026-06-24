@@ -1,9 +1,11 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.event_processing import _eval_mock_rule_matches, _resolve_eval_mock_result
+from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.google_sheets_native import (
     FORBIDDEN_DISCOVERY_TOOL_NAMES,
@@ -83,6 +85,14 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         first_group = create_case.response_term_groups[0]
         self.assertIn("formatted", first_group)
         self.assertIn("styled", first_group)
+
+    def test_formatting_guidance_stops_after_successful_batch_update(self):
+        with patch("api.agent.system_skills.defaults._native_integration_connected", return_value=True):
+            instructions = GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.prompt_instructions_renderer(SimpleNamespace())
+
+        self.assertIn("one metadata inspection is usually enough", instructions)
+        self.assertIn("after a successful `batchUpdate`", instructions)
+        self.assertIn("instead of doing extra readback verification", instructions)
 
     def test_known_id_cases_allow_drive_preflight(self):
         known_id_cases = {

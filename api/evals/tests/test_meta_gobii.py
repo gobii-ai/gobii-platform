@@ -159,6 +159,19 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
         self.assertIsNotNone(suite)
         self.assertIn(META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS, suite.scenario_slugs)
         self.assertIn(META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS, suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_prompt",
+                "verify_skill_search",
+                "verify_meta_gobii_enabled",
+                "verify_no_research_persona_path",
+            ],
+        )
+        self.assertIn(
+            "verify_meta_gobii_surface_used",
+            [task.name for task in launch_scenario.tasks],
+        )
 
     def test_search_tools_surface_mentions_hidden_system_skills_for_agent_teams(self):
         description = get_search_tools_tool()["function"]["description"].lower()

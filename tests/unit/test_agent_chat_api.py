@@ -3057,6 +3057,29 @@ class AgentChatAPITests(TestCase):
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, body=tenth_body).exists())
 
     @tag("batch_agent_chat")
+    def test_send_chat_tool_delivers_all_done_artifact_final(self):
+        start_web_session(self.agent, self.user)
+        body = (
+            "All done! Your **Top Local LLM Models** sheet is ready -> "
+            "[Open Sheet](https://docs.google.com/spreadsheets/d/sheet-local-llms/edit)\n\n"
+            "- **Name** | **Size** | **License** | **Links** columns\n"
+            "- Llama 3.1 8B, Qwen2.5 7B, and Mistral 7B rows"
+        )
+
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "body": body,
+                "to_address": self.user_address,
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result.get("skipped", False))
+        self.assertTrue(PersistentAgentMessage.objects.filter(owner_agent=self.agent, body=body).exists())
+
+    @tag("batch_agent_chat")
     def test_send_chat_tool_skips_optional_followup_only_when_progress_only(self):
         start_web_session(self.agent, self.user)
 

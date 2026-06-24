@@ -1780,9 +1780,12 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(all_requests_have_options([missing_description]))
         self.assertFalse(all_requests_have_options([blank_title]))
 
-    def test_request_human_input_eval_tool_check_requires_valid_options(self):
+    def test_request_human_input_eval_tool_check_accepts_valid_options_or_free_text(self):
         valid_single = SimpleNamespace(
             tool_params={"options": [{"title": "Yes", "description": "Proceed with yes."}]}
+        )
+        free_text_single = SimpleNamespace(
+            tool_params={"question": "What should I tell the team?"}
         )
         invalid_single = SimpleNamespace(
             tool_params={"options": [{"title": "Yes"}]}
@@ -1793,7 +1796,10 @@ class BehaviorMicroHelperTests(TestCase):
                     {
                         "question": "Proceed?",
                         "options": [{"title": "Yes", "description": "Proceed with yes."}],
-                    }
+                    },
+                    {
+                        "question": "What context should I use?",
+                    },
                 ]
             }
         )
@@ -1809,6 +1815,7 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertTrue(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(valid_single))
+        self.assertTrue(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(free_text_single))
         self.assertFalse(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(invalid_single))
         self.assertTrue(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(valid_batch))
         self.assertFalse(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(invalid_batch))

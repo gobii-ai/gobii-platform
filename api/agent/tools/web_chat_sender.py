@@ -119,7 +119,7 @@ def _strip_trailing_optional_followup(body: str) -> str:
 _TOOL_FRUSTRATION_PROGRESS_RE = re.compile(
     r"\b(?:fabricated(?:\b| (?:test data|links|results))|fake (?:job ids|links|data|results)|eval environment|stop fighting the sim|pivot hard|trying every tool|"
     r"same fabricated|same data set|same simulated results|simulated results|instructions say|"
-    r"stop verifying|let me deliver|all done)\b",
+    r"stop verifying|let me deliver)\b",
     re.IGNORECASE,
 )
 

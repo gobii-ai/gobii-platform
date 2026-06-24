@@ -5,7 +5,6 @@ from typing import Any
 from api.agent.comms.human_input_requests import (
     MAX_HUMAN_INPUT_QUESTION_LENGTH,
     MAX_OPTION_COUNT,
-    OPTIONS_REQUIRED_MESSAGE,
     create_human_input_request,
     create_human_input_requests_batch,
 )
@@ -69,11 +68,10 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "options": {
                 "type": "array",
                 "items": option_schema,
-                "minItems": 1,
-                "description": "Required choices; include an Other / I'll explain option for open-ended answers.",
+                "description": "Optional choices; omit or pass [] for a free-text-only answer.",
             },
         },
-        "required": ["question", "options"],
+        "required": ["question"],
     }
 
     return {
@@ -81,9 +79,10 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create tracked, option-based human input; it appears in web chat and does not send email/SMS. "
-                "Every request needs at least one option; use send_chat_message/send_email/send_sms/send_agent_message for free-text questions or capability/status/policy answers. "
-                "Include an Other / I'll explain option when useful. "
+                "Create tracked human input; it appears in web chat and does not send email/SMS. "
+                "Use options for concrete decisions; omit options for free-text-only blocking questions. "
+                "Use send_chat_message/send_email/send_sms/send_agent_message for non-blocking questions or capability/status/policy answers. "
+                "Include an Other / I'll explain option when choices are useful but not exhaustive. "
                 "Planning questions should use at most three options. "
                 "Outside Planning Mode, do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose. "
                 "Use it when the user explicitly asks you to ask for targets/scope before setup or missing targets/scope block a recurring monitor. "
@@ -100,8 +99,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "options": {
                         "type": "array",
                         "items": option_schema,
-                        "minItems": 1,
-                        "description": "Required choices; include an Other / I'll explain option for open-ended answers.",
+                        "description": "Optional choices; omit or pass [] for a free-text-only answer.",
                     },
                     "requests": {
                         "type": "array",
@@ -121,7 +119,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 },
                 "required": ["will_continue_work"],
                 "anyOf": [
-                    {"required": ["question", "options"]},
+                    {"required": ["question"]},
                     {"required": ["requests"]},
                 ],
             },
@@ -164,13 +162,6 @@ def _normalize_request_options(raw_options: Any) -> tuple[list[dict[str, Any]] |
             }
         )
     return options, None
-
-
-def _missing_required_options_error() -> dict[str, Any]:
-    return {
-        "status": "error",
-        "message": OPTIONS_REQUIRED_MESSAGE,
-    }
 
 
 def _normalize_recipient(raw_recipient: Any) -> tuple[dict[str, str] | None, dict[str, Any] | None]:
@@ -235,8 +226,6 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
             options, error = _normalize_request_options(raw_request.get("options"))
             if error:
                 return error
-            if not options:
-                return _missing_required_options_error()
             requests.append(
                 {
                     "question": question,
@@ -271,8 +260,6 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
     if error:
         return error
 
-    if not options:
-        return _missing_required_options_error()
     if agent.planning_state != PersistentAgent.PlanningState.PLANNING and options and len(options) > 3:
         return {
             "status": "error",

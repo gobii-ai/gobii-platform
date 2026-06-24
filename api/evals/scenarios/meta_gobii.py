@@ -1411,7 +1411,6 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
         ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_skill_search", assertion_type="tool_call"),
         ScenarioTask(name="verify_meta_gobii_enabled", assertion_type="tool_call"),
-        ScenarioTask(name="verify_meta_gobii_surface_used", assertion_type="tool_call"),
         ScenarioTask(name="verify_no_research_persona_path", assertion_type="tool_call"),
     ]
 
@@ -1452,9 +1451,13 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
 
         self._record_skill_search_result(run_id, agent_id, inbound, calls)
         self._record_meta_gobii_enabled_result(run_id, agent_id, inbound, calls)
-        self._record_meta_gobii_surface_result(run_id, agent_id, inbound, calls)
+        if self._has_task("verify_meta_gobii_surface_used"):
+            self._record_meta_gobii_surface_result(run_id, agent_id, inbound, calls)
         self._record_bad_path_result(run_id, agent_id, inbound, calls)
         self._record_additional_results(run_id, agent_id, inbound, calls)
+
+    def _has_task(self, task_name: str) -> bool:
+        return any(task.name == task_name for task in self.tasks)
 
     @staticmethod
     def _prepare_agent(agent_id: str) -> None:
