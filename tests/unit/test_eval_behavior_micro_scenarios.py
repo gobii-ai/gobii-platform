@@ -256,6 +256,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("market timestamp", by_slug["common_use_case_105_current_finance_snapshot"].prompt)
         self.assertIn("review evidence", by_slug["common_use_case_106_maps_dental_lead_screen"].prompt)
         self.assertIn("do not run it now", by_slug["common_use_case_107_schedule_vc_digest"].prompt)
+        self.assertEqual(
+            by_slug["common_use_case_138_intercom_notes_capability_answer"].accepted_tool_alternatives,
+            {"send_chat_message": ("search_tools",)},
+        )
         new_intelligent_work_slugs = {
             f"common_use_case_{index:03d}_{suffix}"
             for index, suffix in [

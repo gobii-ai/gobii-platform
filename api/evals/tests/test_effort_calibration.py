@@ -1032,3 +1032,6 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Use exactly the requested delivery channel", system_prompt)
         self.assertIn("For final send_email/send_sms/send_chat_message deliveries", system_prompt)
         self.assertIn("Do not set a schedule merely to continue or remember a single research question", system_prompt)
+        self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
+        self.assertIn("do not search for a SQLite/database tool", system_prompt)
+        self.assertIn("enabled tool fits -> use directly", system_prompt)
