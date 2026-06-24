@@ -3164,12 +3164,10 @@ def _get_web_chat_formatting_guidance() -> str:
 
     return (
         "Web chat and peer DM formatting:\n"
-        "Use Markdown. Start with the answer/main finding; for reports add a brief human lead-in, then titled sections, bullets or compact tables, and tasteful emoji/status labels. "
-        "When a report has metrics, pending items, or next-run status, make it feel like a compact operating update: surface key numbers in a small table or metric block, label status clearly, and separate done/pending/next. "
-        "If the recipient/audience is known, address them naturally once and frame the result around what they can act on; avoid generic delivery-log prose. "
-        "Do not introduce yourself by agent name in reports unless the user asked who you are. "
-        "Use whitespace, not decorative separators. For charts, paste create_chart result.inline; don't attach/read/rebuild. "
-        "Do not add optional follow-up offers after quick facts, prices, statuses, exact lookups, or completed reports."
+        "Markdown. Start with answer/main finding. Reports: brief human lead-in, titled sections, bullets/tables, status labels. "
+        "Metric, pending-item, or next-run reports: compact operating update with a small table or metric block and done/pending/next. "
+        "Address known recipients naturally once around actions; avoid generic delivery logs and agent-name self-intros unless asked. "
+        "Use whitespace, not separators. Charts: paste create_chart result.inline; don't attach/read/rebuild."
     )
 
 
@@ -3650,35 +3648,22 @@ def _get_system_instruction(
         else ""
     )
     stop_continue_examples = (
-        "## When to stop vs continue\n\n"
-        "Set will_continue_work on every tool call. Use true while another immediate action remains: unsent results, unverified requested constraints, unfinished useful plan work, needed tool results, or a final user-facing report. "
-        "Use false only after the requested reply/report/config change is delivered and no active useful work remains. Future scheduled work does not count as continuing now.\n"
+        "## Stop/continue\n\n"
+        "Set will_continue_work=true only for immediate work: unsent results, unverified constraints, plan cleanup, needed tool results, or final delivery. "
+        "Set false after delivery/config and no active work; future schedules do not count.\n"
         f"{text_only_guidance}"
-        "Plans: final report first. If visible plan items remain, send the report with will_continue_work=true, then update_plan to mark finished/deferred items and stop with will_continue_work=false.\n\n"
+        "Plans: if cleanup remains, send final report with true, update_plan finished/deferred items, then stop with false.\n\n"
         "Recurring or truly multi-phase work may need charter/schedule updates; one-off work usually needs neither.\n"
     )
-
-    if implied_send_active:
-        will_continue_guidance = (
-            "**Stopping:** Text-only replies auto-send and stop by default. "
-            "End with \"CONTINUE_WORK_SIGNAL\" on its own line if you still have work to do.\n"
-        )
-    else:
-        will_continue_guidance = (
-            "**Stopping:** After sending your final report and completing all work, stop without an extra turn.\n"
-        )
 
     delivery_instructions = (
         f"{delivery_context}"
         f"{response_structure}\n\n"
-        f"{will_continue_guidance}"
         f"{tool_calls_note}"
         f"{stop_explicit_note}"
         "Missing recipient or required content for an email/SMS/outbound send is a blocker: use request_human_input with will_continue_work=false, not chat-only questions. "
         "Ask one compact, option-based tracked request for the missing send details; do not ask the same blocker as ordinary chat. "
-        "Fetching data is step one; reporting completes the task. "
         "Use exactly the requested delivery channel; if asked to email an allowed address and send_email is available, call send_email. "
-        "For final send_email/send_sms/send_chat_message deliveries, set will_continue_work=false on that send call unless another immediate, user-requested action remains after delivery. "
         "Never announce what you're about to do—announcements terminate you before delivery. "
         "Wrong: 'Let me fetch that data...' Right: [just make the tool call with no text]\n\n"
         "Scheduled/background exact feed/API fetches without implied send still need send_chat_message(body=brief sourced report, will_continue_work=false).\n\n"
@@ -3723,9 +3708,8 @@ def _get_system_instruction(
         "\n\n"
         "## Durable Config\n\n"
 
-        "Update charter/schedule only for changed ongoing responsibilities, user feedback/preferences, recurring-work context, role/scope/process/customer changes, or vague/missing standing memory. "
-        "Merge new durable guidance into the existing charter instead of replacing it wholesale; preserve still-relevant guidance and named channels/tools. "
-        "Feedback and preferences are durable without the user saying save/remember/charter; do not update for one-off style requests, transient facts, completed work, or weak guesses.\n\n"
+        "Update charter/schedule only for durable role/scope, preferences, feedback, monitoring, recurrence, or memory. "
+        "Merge changes; preserve relevant guidance/tools; never save one-offs, transient facts, completed work, or weak guesses.\n\n"
 
         f"{schedule_updates_guidance}"
 
@@ -3823,8 +3807,8 @@ def _get_system_instruction(
 
         "## Configuration Discipline (CRITICAL)\n\n"
         "__agent_config is durable operating memory, not normal task output. "
-        "Only mutate it when a configure-authorized user changes ongoing behavior, role/scope/process/customer context, monitoring/alerting rules, feedback/preferences, stable inferred preferences, or recurrence; preserve still-relevant guidance and named channels/tools. "
-        "Never update charter/schedule for one-off work, transient facts, completed answers, weak guesses, or to describe what you just did. A finished answer, briefing, chart, lookup, or one-off research answer is not a charter change. "
+        "Mutate only for durable behavior/context, alerts/preferences, or recurrence. "
+        "Never update charter/schedule for one-off work, transient facts, completed answers, weak guesses, or describing what you just did. Finished answers/briefings/charts/lookups/one-off research are not charter changes. "
         "Do not set a schedule merely to continue or remember a single research question; only schedule work when the user asked for recurring monitoring, alerts, digests, follow-up, or durable role changes. "
         "For scheduled runs, keep cadence unless explicitly changed. For future recurring digests/reports/monitors/alerts, update charter/schedule once and stop; do not run the first job unless asked. "
         "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due. "

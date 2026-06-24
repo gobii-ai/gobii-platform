@@ -15,7 +15,7 @@ from api.agent.tools.search_tools import search_tools
 from api.agent.tools.tool_manager import execute_enabled_tool, get_enabled_tool_definitions
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.bitcoin_price_multiturn import (
-    bitcoin_response_has_followup_question,
+    bitcoin_response_has_unnecessary_followup_question,
     bitcoin_tool_calls_include_supported_price_api,
     is_supported_bitcoin_price_api_url,
 )
@@ -589,13 +589,18 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
 
     def test_bitcoin_response_followup_check_ignores_url_query_strings(self):
         self.assertFalse(
-            bitcoin_response_has_followup_question(
+            bitcoin_response_has_unnecessary_followup_question(
                 "The current price is $68,500.50 USD. "
                 "Source: https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
             )
         )
+        self.assertFalse(
+            bitcoin_response_has_unnecessary_followup_question(
+                "Bitcoin is currently $68,500.50 USD. Does that match what you needed?"
+            )
+        )
         self.assertTrue(
-            bitcoin_response_has_followup_question(
+            bitcoin_response_has_unnecessary_followup_question(
                 "The current price is $68,500.50 USD. Want me to track it?"
             )
         )

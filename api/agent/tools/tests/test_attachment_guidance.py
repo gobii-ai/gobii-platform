@@ -83,8 +83,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("status labels", chat_guidance)
         self.assertIn("compact operating update", chat_guidance)
         self.assertIn("small table or metric block", chat_guidance)
-        self.assertIn("address them naturally once", chat_guidance)
-        self.assertIn("Do not introduce yourself by agent name", chat_guidance)
+        self.assertIn("Address known recipients naturally once", chat_guidance)
+        self.assertIn("agent-name self-intros", chat_guidance)
         self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
 
     def test_create_file_tool_schema_requires_content_or_query(self):
