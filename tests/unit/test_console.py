@@ -124,6 +124,34 @@ class ConsoleViewsTest(TestCase):
             )
         return organization
 
+    def _create_staff_test_agent(
+        self,
+        *,
+        user,
+        name,
+        organization=None,
+        is_active=True,
+        execution_environment=None,
+    ):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        fields = {
+            "user": user,
+            "name": name,
+            "charter": name,
+            "browser_use_agent": BrowserUseAgent.objects.create(user=user, name=f"{name} Browser"),
+            "is_active": is_active,
+        }
+        if organization is not None:
+            billing = organization.billing
+            if not billing.purchased_seats:
+                billing.purchased_seats = 10
+                billing.save(update_fields=["purchased_seats"])
+            fields["organization"] = organization
+        if execution_environment is not None:
+            fields["execution_environment"] = execution_environment
+        return PersistentAgent.objects.create(**fields)
+
     def _create_persistent_agent_template(
         self,
         *,
@@ -728,6 +756,221 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(Decimal(payload["taskCredits"]["available"]), Decimal("17"))
         self.assertEqual([grant["id"] for grant in payload["taskCredits"]["recentGrants"]], [str(current_credit.id)])
         self.assertNotIn(str(expired_credit.id), [grant["id"] for grant in payload["taskCredits"]["recentGrants"]])
+
+    @tag("batch_console_agents")
+    def test_staff_user_system_message_targets_personal_agents_only_without_processing(self):
+        from api.models import Organization, PersistentAgentSystemMessage
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-user-system-message@example.com",
+            email="admin-user-system-message@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="user-system-message",
+            email="user-system-message@example.com",
+            password="testpass123",
+        )
+        organization = Organization.objects.create(name="System Message Org", slug="system-message-org", created_by=admin_user)
+        personal_agent = self._create_staff_test_agent(user=target_user, name="Personal Scoped")
+        org_agent = self._create_staff_test_agent(user=target_user, organization=organization, name="Org Scoped")
+        deleted_agent = self._create_staff_test_agent(user=target_user, name="Deleted Scoped")
+        deleted_agent.soft_delete()
+        eval_agent = self._create_staff_test_agent(user=target_user, name="Eval Scoped", execution_environment="eval")
+
+        self.client.force_login(admin_user)
+        with patch("console.api_views.process_agent_events_task.delay") as mock_delay:
+            response = self.client.post(
+                reverse("staff-user-system-message", kwargs={"user_id": target_user.id}),
+                data=json.dumps({"body": "Review the billing rollout"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["createdCount"], 1)
+        self.assertEqual(response.json()["targetCount"], 1)
+        mock_delay.assert_not_called()
+        messages = list(PersistentAgentSystemMessage.objects.order_by("agent_id"))
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].agent_id, personal_agent.id)
+        self.assertEqual(messages[0].body, "Review the billing rollout")
+        self.assertEqual(messages[0].created_by_id, admin_user.id)
+        self.assertTrue(messages[0].is_active)
+        self.assertFalse(PersistentAgentSystemMessage.objects.filter(agent__in=[org_agent, deleted_agent, eval_agent]).exists())
+
+    @tag("batch_console_agents")
+    def test_staff_org_system_message_targets_org_agents_only(self):
+        from api.models import Organization, PersistentAgentSystemMessage
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-org-system-message@example.com",
+            email="admin-org-system-message@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="org-system-message-user",
+            email="org-system-message-user@example.com",
+            password="testpass123",
+        )
+        organization = Organization.objects.create(name="Scoped Org", slug="scoped-org", created_by=admin_user)
+        other_org = Organization.objects.create(name="Other Scoped Org", slug="other-scoped-org", created_by=admin_user)
+        org_agent = self._create_staff_test_agent(user=target_user, organization=organization, name="Org Message Target")
+        self._create_staff_test_agent(user=target_user, organization=other_org, name="Other Org Message Target")
+        self._create_staff_test_agent(user=target_user, name="Personal Message Non Target")
+
+        self.client.force_login(admin_user)
+        with patch("console.api_views.process_agent_events_task.delay") as mock_delay:
+            response = self.client.post(
+                reverse("staff-org-system-message", kwargs={"org_id": organization.id}),
+                data=json.dumps({"body": "Check organization setup"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["createdCount"], 1)
+        self.assertEqual(response.json()["targetCount"], 1)
+        mock_delay.assert_not_called()
+        message = PersistentAgentSystemMessage.objects.get()
+        self.assertEqual(message.agent_id, org_agent.id)
+        self.assertEqual(message.body, "Check organization setup")
+
+    @tag("batch_console_agents")
+    def test_staff_system_message_rejects_blank_body(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-blank-system-message@example.com",
+            email="admin-blank-system-message@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="blank-system-message",
+            email="blank-system-message@example.com",
+            password="testpass123",
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.post(
+            reverse("staff-user-system-message", kwargs={"user_id": target_user.id}),
+            data=json.dumps({"body": "   "}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "body_required")
+
+    @tag("batch_console_agents")
+    def test_staff_user_process_events_targets_active_personal_agents_only(self):
+        from api.models import Organization
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-user-process-events@example.com",
+            email="admin-user-process-events@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="user-process-events",
+            email="user-process-events@example.com",
+            password="testpass123",
+        )
+        organization = Organization.objects.create(name="Process Events Org", slug="process-events-org", created_by=admin_user)
+        active_agent = self._create_staff_test_agent(user=target_user, name="Active Personal Process")
+        self._create_staff_test_agent(user=target_user, name="Inactive Personal Process", is_active=False)
+        self._create_staff_test_agent(user=target_user, organization=organization, name="Org Process Non Target")
+        deleted_agent = self._create_staff_test_agent(user=target_user, name="Deleted Process Non Target")
+        deleted_agent.soft_delete()
+        self._create_staff_test_agent(user=target_user, name="Eval Process Non Target", execution_environment="eval")
+
+        self.client.force_login(admin_user)
+        with patch("console.api_views.queue_agent_process_events_batch_task.delay") as mock_delay:
+            response = self.client.post(reverse("staff-user-process-events", kwargs={"user_id": target_user.id}))
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(
+            response.json(),
+            {
+                "ok": True,
+                "queuedCount": 1,
+                "skippedInactiveCount": 1,
+                "targetCount": 2,
+            },
+        )
+        mock_delay.assert_called_once_with([str(active_agent.id)])
+
+    @tag("batch_console_agents")
+    def test_staff_org_process_events_targets_active_org_agents_only(self):
+        from api.models import Organization
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-org-process-events@example.com",
+            email="admin-org-process-events@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="org-process-events-user",
+            email="org-process-events-user@example.com",
+            password="testpass123",
+        )
+        organization = Organization.objects.create(name="Process Org", slug="process-org", created_by=admin_user)
+        other_org = Organization.objects.create(name="Other Process Org", slug="other-process-org", created_by=admin_user)
+        active_agent = self._create_staff_test_agent(user=target_user, organization=organization, name="Active Org Process")
+        self._create_staff_test_agent(user=target_user, organization=organization, name="Inactive Org Process", is_active=False)
+        self._create_staff_test_agent(user=target_user, organization=other_org, name="Other Org Process")
+        self._create_staff_test_agent(user=target_user, name="Personal Process Non Target")
+
+        self.client.force_login(admin_user)
+        with patch("console.api_views.queue_agent_process_events_batch_task.delay") as mock_delay:
+            response = self.client.post(reverse("staff-org-process-events", kwargs={"org_id": organization.id}))
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["queuedCount"], 1)
+        self.assertEqual(response.json()["skippedInactiveCount"], 1)
+        self.assertEqual(response.json()["targetCount"], 2)
+        mock_delay.assert_called_once_with([str(active_agent.id)])
+
+    @tag("batch_console_agents")
+    def test_staff_process_events_returns_queue_failed_when_batch_publish_fails(self):
+        from celery.exceptions import CeleryError
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-process-events-failure@example.com",
+            email="admin-process-events-failure@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="process-events-failure",
+            email="process-events-failure@example.com",
+            password="testpass123",
+        )
+        self._create_staff_test_agent(user=target_user, name="Publish Failure Target")
+
+        self.client.force_login(admin_user)
+        with patch(
+            "console.api_views.queue_agent_process_events_batch_task.delay",
+            side_effect=CeleryError("broker unavailable"),
+        ):
+            response = self.client.post(reverse("staff-user-process-events", kwargs={"user_id": target_user.id}))
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["error"], "queue_failed")
+        self.assertEqual(response.json()["queuedCount"], 0)
+        self.assertEqual(response.json()["targetCount"], 1)
+
+    @tag("batch_console_agents")
+    def test_staff_scoped_agent_controls_require_staff(self):
+        response = self.client.post(
+            reverse("staff-user-system-message", kwargs={"user_id": self.user.id}),
+            data=json.dumps({"body": "No access"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+        response = self.client.post(reverse("staff-user-process-events", kwargs={"user_id": self.user.id}))
+        self.assertEqual(response.status_code, 403)
 
     @tag("batch_console_agents")
     def test_staff_org_task_credit_grant_api_creates_manual_org_credit(self):

@@ -44,6 +44,23 @@ export type StaffTaskCreditGrantPayload = {
   expirationPreset: 'one_month' | 'one_year'
 }
 
+export type StaffScopedSystemMessagePayload = {
+  body: string
+}
+
+export type StaffScopedSystemMessageResponse = {
+  ok: boolean
+  createdCount: number
+  targetCount: number
+}
+
+export type StaffScopedProcessEventsResponse = {
+  ok: boolean
+  queuedCount: number
+  skippedInactiveCount: number
+  targetCount: number
+}
+
 export type StaffUserDetail = {
   user: {
     id: number
@@ -161,6 +178,37 @@ export function createStaffUserTaskCreditGrant(userId: number, payload: StaffTas
 
 export function createStaffOrgTaskCreditGrant(orgId: string, payload: StaffTaskCreditGrantPayload) {
   return createStaffTaskCreditGrant(`/console/api/staff/orgs/${orgId}/task-credits/`, payload)
+}
+
+function createStaffScopedSystemMessage(url: string, payload: StaffScopedSystemMessagePayload): Promise<StaffScopedSystemMessageResponse> {
+  return jsonRequest<StaffScopedSystemMessageResponse>(url, {
+    method: 'POST',
+    includeCsrf: true,
+    json: payload,
+  })
+}
+
+export function createStaffUserSystemMessage(userId: number, payload: StaffScopedSystemMessagePayload) {
+  return createStaffScopedSystemMessage(`/console/api/staff/users/${userId}/system-messages/`, payload)
+}
+
+export function createStaffOrgSystemMessage(orgId: string, payload: StaffScopedSystemMessagePayload) {
+  return createStaffScopedSystemMessage(`/console/api/staff/orgs/${orgId}/system-messages/`, payload)
+}
+
+function triggerStaffScopedProcessEvents(url: string): Promise<StaffScopedProcessEventsResponse> {
+  return jsonRequest<StaffScopedProcessEventsResponse>(url, {
+    method: 'POST',
+    includeCsrf: true,
+  })
+}
+
+export function triggerStaffUserProcessEvents(userId: number) {
+  return triggerStaffScopedProcessEvents(`/console/api/staff/users/${userId}/process-events/`)
+}
+
+export function triggerStaffOrgProcessEvents(orgId: string) {
+  return triggerStaffScopedProcessEvents(`/console/api/staff/orgs/${orgId}/process-events/`)
 }
 
 export async function sendStaffUserEmailTrigger(

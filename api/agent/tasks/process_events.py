@@ -286,6 +286,29 @@ def process_agent_events_task(
             )
 
 
+@shared_task(bind=True, name="api.agent.tasks.queue_agent_process_events_batch")
+def queue_agent_process_events_batch_task(self, agent_ids: list[str]) -> dict[str, int]:  # noqa: D401, ANN001
+    """Fan out process-event tasks for a pre-filtered set of active agents."""
+    queued_count = 0
+    invalid_count = 0
+
+    for agent_id in agent_ids:
+        normalized_agent_id = _normalize_agent_id(agent_id)
+        if not normalized_agent_id:
+            invalid_count += 1
+            continue
+        process_agent_events_task.delay(normalized_agent_id)
+        queued_count += 1
+
+    if invalid_count:
+        logger.warning(
+            "Skipped %s invalid agent id(s) while queueing staff-scoped process events.",
+            invalid_count,
+        )
+
+    return {"queued_count": queued_count, "invalid_count": invalid_count}
+
+
 @shared_task(bind=True, name="api.agent.tasks.process_unseen_web_chat_followup")
 def process_unseen_web_chat_followup_task(self, message_id: str) -> None:  # noqa: D401, ANN001
     """Queue agent processing when an outbound web chat message remains unread."""

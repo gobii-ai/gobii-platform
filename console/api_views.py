@@ -19,6 +19,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import zstandard as zstd
 from anymail.exceptions import AnymailAPIError
+from celery.exceptions import CeleryError
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -38,6 +39,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.urls import NoReverseMatch, reverse
 from django.utils.text import get_valid_filename
+from kombu.exceptions import OperationalError as KombuOperationalError
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.human_input_requests import (
@@ -150,7 +152,7 @@ from console.llm_tier_usage import (
     build_persistent_endpoint_tier_usage,
 )
 from api.encryption import SecretsEncryption
-from api.agent.tasks import process_agent_events_task
+from api.agent.tasks import process_agent_events_task, queue_agent_process_events_batch_task
 from api.services.system_settings import get_max_file_size
 from api.services.owner_execution_pause import get_owner_account_pause_state
 from api.services.agent_owner_custom_instructions import (
@@ -2219,6 +2221,14 @@ def _serialize_staff_agent_summaries(**filters) -> list[dict[str, Any]]:
     ]
 
 
+def _staff_user_scoped_agents(user):
+    return PersistentAgent.objects.non_eval().alive().filter(user=user, organization__isnull=True)
+
+
+def _staff_org_scoped_agents(org: Organization):
+    return PersistentAgent.objects.non_eval().alive().filter(organization=org)
+
+
 def _staff_stripe_customer_dashboard_url(customer) -> str | None:
     customer_id = getattr(customer, "id", "") or ""
     if not customer_id:
@@ -2637,6 +2647,122 @@ class StaffOrgTaskCreditGrantAPIView(SystemAdminAPIView):
 
         task_credit = _create_staff_task_credit_grant(org, payload)
         return JsonResponse({"ok": True, "taskCredit": _serialize_task_credit(task_credit)}, status=201)
+
+
+def _parse_staff_system_message_payload(request: HttpRequest) -> tuple[str | None, JsonResponse | None]:
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return None, JsonResponse({"error": "invalid_json"}, status=400)
+
+    body = str(payload.get("body") or "").strip()
+    if not body:
+        return None, JsonResponse({"error": "body_required"}, status=400)
+    return body, None
+
+
+def _create_staff_scoped_system_messages(request: HttpRequest, target_qs) -> JsonResponse:
+    body, error_response = _parse_staff_system_message_payload(request)
+    if error_response is not None:
+        return error_response
+
+    agent_ids = list(target_qs.order_by("id").values_list("id", flat=True))
+    target_count = len(agent_ids)
+    if target_count == 0:
+        return JsonResponse({"ok": True, "createdCount": 0, "targetCount": 0}, status=200)
+
+    created_by = request.user if request.user.is_authenticated else None
+    system_messages = [
+        PersistentAgentSystemMessage(
+            agent_id=agent_id,
+            body=body,
+            created_by=created_by,
+            is_active=True,
+        )
+        for agent_id in agent_ids
+    ]
+    PersistentAgentSystemMessage.objects.bulk_create(system_messages, batch_size=500)
+    return JsonResponse({"ok": True, "createdCount": target_count, "targetCount": target_count}, status=201)
+
+
+def _queue_staff_scoped_process_events(target_qs) -> JsonResponse:
+    agents = list(target_qs.order_by("id").only("id", "is_active"))
+    skipped_inactive_count = 0
+    active_agent_ids: list[str] = []
+
+    for agent in agents:
+        if not agent.is_active:
+            skipped_inactive_count += 1
+            continue
+        active_agent_ids.append(str(agent.id))
+
+    queued_count = len(active_agent_ids)
+    if queued_count:
+        try:
+            queue_agent_process_events_batch_task.delay(active_agent_ids)
+        except (CeleryError, KombuOperationalError) as exc:
+            logger.exception("Failed to queue scoped process events batch for staff action")
+            return JsonResponse(
+                {
+                    "error": "queue_failed",
+                    "detail": str(exc),
+                    "queuedCount": 0,
+                    "skippedInactiveCount": skipped_inactive_count,
+                    "targetCount": len(agents),
+                },
+                status=500,
+            )
+
+    status_code = 202 if queued_count else 200
+    return JsonResponse(
+        {
+            "ok": True,
+            "queuedCount": queued_count,
+            "skippedInactiveCount": skipped_inactive_count,
+            "targetCount": len(agents),
+        },
+        status=status_code,
+    )
+
+
+class StaffUserSystemMessageAPIView(SystemAdminAPIView):
+    """Create pending system directives for a user's personal agents."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, user_id: int, *args: Any, **kwargs: Any):
+        user = get_object_or_404(User, pk=user_id)
+        return _create_staff_scoped_system_messages(request, _staff_user_scoped_agents(user))
+
+
+class StaffOrgSystemMessageAPIView(SystemAdminAPIView):
+    """Create pending system directives for an organization's agents."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, org_id: uuid.UUID, *args: Any, **kwargs: Any):
+        org = get_object_or_404(Organization, pk=org_id)
+        return _create_staff_scoped_system_messages(request, _staff_org_scoped_agents(org))
+
+
+class StaffUserProcessEventsAPIView(SystemAdminAPIView):
+    """Queue process-events tasks for a user's personal agents."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, user_id: int, *args: Any, **kwargs: Any):
+        user = get_object_or_404(User, pk=user_id)
+        return _queue_staff_scoped_process_events(_staff_user_scoped_agents(user))
+
+
+class StaffOrgProcessEventsAPIView(SystemAdminAPIView):
+    """Queue process-events tasks for an organization's agents."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, org_id: uuid.UUID, *args: Any, **kwargs: Any):
+        org = get_object_or_404(Organization, pk=org_id)
+        return _queue_staff_scoped_process_events(_staff_org_scoped_agents(org))
 
 
 class StaffUserEmailTriggerAPIView(SystemAdminAPIView):

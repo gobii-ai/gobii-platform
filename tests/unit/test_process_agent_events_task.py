@@ -3,10 +3,20 @@ from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, tag
 
-from api.agent.tasks.process_events import process_agent_events_task
+from api.agent.tasks.process_events import process_agent_events_task, queue_agent_process_events_batch_task
 
 
 class ProcessAgentEventsTaskTests(SimpleTestCase):
+    @tag("batch_console_agents")
+    def test_queue_agent_process_events_batch_fans_out_valid_agent_ids(self):
+        valid_agent_id = "11111111-1111-1111-1111-111111111111"
+
+        with patch("api.agent.tasks.process_events.process_agent_events_task.delay") as mock_delay:
+            result = queue_agent_process_events_batch_task.run([valid_agent_id, "not-a-uuid"])
+
+        mock_delay.assert_called_once_with(valid_agent_id)
+        self.assertEqual(result, {"queued_count": 1, "invalid_count": 1})
+
     @tag("batch_agent_chat")
     def test_apply_async_marks_queue_and_broadcasts(self):
         agent_id = "agent-apply-async-test"

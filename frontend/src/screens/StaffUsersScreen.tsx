@@ -1,17 +1,24 @@
 import { useDeferredValue, useState, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Building2, CheckCircle2, Clock3, ExternalLink, Loader2, Mail, Search, Send, ShieldCheck, UsersRound } from 'lucide-react'
+import { Activity, AlertTriangle, Building2, CheckCircle2, Clock3, ExternalLink, Loader2, Mail, MessageSquare, PlayCircle, Search, Send, ShieldCheck, UsersRound } from 'lucide-react'
 
+import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
+import { ModalForm } from '../components/common/ModalForm'
 import {
+  createStaffOrgSystemMessage,
   createStaffOrgTaskCreditGrant,
+  createStaffUserSystemMessage,
   createStaffUserTaskCreditGrant,
   fetchStaffOrgDetail,
   fetchStaffUserDetail,
   markStaffUserEmailVerified,
   searchStaffUsers,
   sendStaffUserEmailTrigger,
+  triggerStaffOrgProcessEvents,
+  triggerStaffUserProcessEvents,
   type StaffAgentSummary,
   type StaffOrgDetail,
+  type StaffScopedSystemMessagePayload,
   type StaffTaskCredits,
   type StaffTaskCreditGrantPayload,
   type StaffUserDetail,
@@ -277,20 +284,150 @@ function BillingCard({ detail }: { detail: StaffUserDetail }) {
   )
 }
 
+function formatAgentTarget(count: number, singularLabel: string): string {
+  return `${count} ${count === 1 ? singularLabel : `${singularLabel}s`}`
+}
+
+function SystemMessageModal({
+  targetLabel,
+  targetCount,
+  body,
+  submitting,
+  error,
+  onBodyChange,
+  onClose,
+  onSubmit,
+}: {
+  targetLabel: string
+  targetCount: number
+  body: string
+  submitting: boolean
+  error?: string | null
+  onBodyChange: (body: string) => void
+  onClose: () => void
+  onSubmit: () => void
+}) {
+  return (
+    <ModalForm
+      id="staff-scoped-system-message-form"
+      title="System Message"
+      subtitle={`Queue a pending directive for ${formatAgentTarget(targetCount, targetLabel)}.`}
+      icon={MessageSquare}
+      iconBgClass="bg-sky-100"
+      iconColorClass="text-sky-700"
+      widthClass="sm:max-w-2xl"
+      onClose={onClose}
+      dismissible={!submitting}
+      submitLabel="Queue Message"
+      submittingLabel="Queueing..."
+      submitting={submitting}
+      submitDisabled={!body.trim()}
+      errorMessages={error ? [error] : null}
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSubmit()
+      }}
+    >
+      <label className="grid gap-2 text-sm font-semibold text-slate-700">
+        Directive
+        <textarea
+          value={body}
+          onChange={(event) => onBodyChange(event.currentTarget.value)}
+          rows={6}
+          className="resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-slate-900 outline-none transition focus:border-sky-400"
+          placeholder="Enter the directive agents should see the next time they process events."
+        />
+      </label>
+    </ModalForm>
+  )
+}
+
+function ProcessEventsModal({
+  targetLabel,
+  targetCount,
+  submitting,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  targetLabel: string
+  targetCount: number
+  submitting: boolean
+  error?: string | null
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <ActionConfirmDialog
+      open
+      title="Process Events"
+      description={`This will queue event processing for up to ${formatAgentTarget(targetCount, targetLabel)}. This can be expensive for large agent sets.`}
+      confirmLabel="Queue Processing"
+      busy={submitting}
+      localError={error}
+      icon={AlertTriangle}
+      onClose={onClose}
+      onConfirm={onConfirm}
+    />
+  )
+}
+
 function AgentsCard({
   agents,
   title = 'Persistent Agents',
   subtitle,
   emptyText,
+  actionTargetLabel,
+  actionTargetCount,
+  onSystemMessage,
+  onProcessEvents,
+  systemMessagePending = false,
+  processEventsPending = false,
 }: {
   agents: StaffAgentSummary[]
   title?: string
   subtitle: string
   emptyText: string
+  actionTargetLabel: string
+  actionTargetCount: number
+  onSystemMessage: () => void
+  onProcessEvents: () => void
+  systemMessagePending?: boolean
+  processEventsPending?: boolean
 }) {
+  const actionsDisabled = actionTargetCount === 0
+
   return (
     <section className="card">
-      <CardHeader title={title} subtitle={subtitle} status={<span className="app-status-indicator">{agents.length} total</span>} />
+      <CardHeader
+        title={title}
+        subtitle={subtitle}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="app-status-indicator">{agents.length} total</span>
+            <button
+              type="button"
+              onClick={onSystemMessage}
+              disabled={actionsDisabled || systemMessagePending || processEventsPending}
+              className="inline-flex items-center gap-2 rounded-2xl border border-sky-200 bg-white px-3 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-300 hover:text-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+              title={actionsDisabled ? `No ${actionTargetLabel}s available` : `Queue a system message for ${formatAgentTarget(actionTargetCount, actionTargetLabel)}`}
+            >
+              {systemMessagePending ? <Loader2 className="size-4 animate-spin" /> : <MessageSquare className="size-4" />}
+              System Message
+            </button>
+            <button
+              type="button"
+              onClick={onProcessEvents}
+              disabled={actionsDisabled || systemMessagePending || processEventsPending}
+              className="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-amber-800 transition hover:border-amber-300 hover:text-amber-900 disabled:cursor-not-allowed disabled:opacity-60"
+              title={actionsDisabled ? `No ${actionTargetLabel}s available` : `Queue processing for ${formatAgentTarget(actionTargetCount, actionTargetLabel)}`}
+            >
+              {processEventsPending ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+              Process Events
+            </button>
+          </div>
+        }
+      />
 
       {agents.length ? (
         <div className="grid gap-3">
@@ -552,6 +689,8 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
   const [searchInput, setSearchInput] = useState('')
   const [feedback, setFeedback] = useState<string | null>(null)
   const [sendingEmailTriggerId, setSendingEmailTriggerId] = useState<number | null>(null)
+  const [activeAgentAction, setActiveAgentAction] = useState<'system-message' | 'process-events' | null>(null)
+  const [systemMessageBody, setSystemMessageBody] = useState('')
   const deferredSearchInput = useDeferredValue(searchInput.trim())
   const hasSelectedUser = selectedUserId !== null
   const hasSelectedOrg = Boolean(selectedOrgId)
@@ -613,6 +752,40 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
     },
   })
 
+  const systemMessageMutation = useMutation({
+    mutationFn: (payload: StaffScopedSystemMessagePayload) => {
+      if (selectedOrgId) {
+        return createStaffOrgSystemMessage(selectedOrgId, payload)
+      }
+      if (selectedUserId !== null) {
+        return createStaffUserSystemMessage(selectedUserId, payload)
+      }
+      throw new Error('Select a user or organization first.')
+    },
+    onSuccess: (payload) => {
+      setFeedback(`System message queued for ${payload.createdCount} agent${payload.createdCount === 1 ? '' : 's'}.`)
+      setSystemMessageBody('')
+      setActiveAgentAction(null)
+    },
+  })
+
+  const processEventsMutation = useMutation({
+    mutationFn: () => {
+      if (selectedOrgId) {
+        return triggerStaffOrgProcessEvents(selectedOrgId)
+      }
+      if (selectedUserId !== null) {
+        return triggerStaffUserProcessEvents(selectedUserId)
+      }
+      throw new Error('Select a user or organization first.')
+    },
+    onSuccess: (payload) => {
+      const skipped = payload.skippedInactiveCount ? ` ${payload.skippedInactiveCount} inactive skipped.` : ''
+      setFeedback(`Process events queued for ${payload.queuedCount} agent${payload.queuedCount === 1 ? '' : 's'}.${skipped}`)
+      setActiveAgentAction(null)
+    },
+  })
+
   const userDetail = detailQuery.data
   const orgDetail = orgDetailQuery.data
   const adminUrl = userDetail?.user.adminUrl ?? orgDetail?.organization.adminUrl
@@ -622,6 +795,12 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
   const userDetailError = detailQuery.error instanceof Error ? detailQuery.error.message : null
   const orgDetailError = orgDetailQuery.error instanceof Error ? orgDetailQuery.error.message : null
   const detailError = userDetailError || orgDetailError
+  const personalAgentTargetCount = userDetail?.agents.filter((agent) => !agent.organizationName).length ?? 0
+  const actionTargetCount = orgDetail ? orgDetail.agents.length : personalAgentTargetCount
+  const actionTargetLabel = orgDetail ? 'organization agent' : 'personal agent'
+  const agentActionPending = systemMessageMutation.isPending || processEventsMutation.isPending
+  const systemMessageError = systemMessageMutation.error instanceof Error ? systemMessageMutation.error.message : null
+  const processEventsError = processEventsMutation.error instanceof Error ? processEventsMutation.error.message : null
 
   const pageSubtitle = userDetail
     ? `Viewing ${userDetail.user.name} · ${userDetail.user.email || `User #${userDetail.user.id}`}`
@@ -673,6 +852,37 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
       return
     }
     emailTriggerMutation.mutate(trigger)
+  }
+
+  const closeAgentActionModal = () => {
+    if (agentActionPending) {
+      return
+    }
+    systemMessageMutation.reset()
+    processEventsMutation.reset()
+    setActiveAgentAction(null)
+  }
+
+  const openSystemMessageModal = () => {
+    systemMessageMutation.reset()
+    setActiveAgentAction('system-message')
+  }
+
+  const openProcessEventsModal = () => {
+    processEventsMutation.reset()
+    setActiveAgentAction('process-events')
+  }
+
+  const handleSystemMessageSubmit = () => {
+    const body = systemMessageBody.trim()
+    if (!body) {
+      return
+    }
+    systemMessageMutation.mutate({ body })
+  }
+
+  const handleProcessEventsConfirm = () => {
+    processEventsMutation.mutate()
   }
 
   return (
@@ -772,6 +982,12 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
               agents={userDetail.agents}
               subtitle="All agents owned by this user, including organization-backed agents."
               emptyText="This user does not currently own any persistent agents."
+              actionTargetLabel="personal agent"
+              actionTargetCount={personalAgentTargetCount}
+              onSystemMessage={openSystemMessageModal}
+              onProcessEvents={openProcessEventsModal}
+              systemMessagePending={systemMessageMutation.isPending}
+              processEventsPending={processEventsMutation.isPending}
             />
             <UserEmailsCard detail={userDetail} sendingTriggerId={sendingEmailTriggerId} onSend={handleEmailSend} />
             <TaskCreditsCard
@@ -791,6 +1007,12 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
               agents={orgDetail.agents}
               subtitle="All persistent agents assigned to this organization."
               emptyText="This organization does not currently own any persistent agents."
+              actionTargetLabel="organization agent"
+              actionTargetCount={orgDetail.agents.length}
+              onSystemMessage={openSystemMessageModal}
+              onProcessEvents={openProcessEventsModal}
+              systemMessagePending={systemMessageMutation.isPending}
+              processEventsPending={processEventsMutation.isPending}
             />
             <TaskCreditsCard
               taskCredits={orgDetail.taskCredits}
@@ -801,6 +1023,28 @@ export function StaffUsersScreen({ selectedUserId = null, selectedOrgId = null }
           </>
         ) : null}
       </main>
+      {activeAgentAction === 'system-message' ? (
+        <SystemMessageModal
+          targetLabel={actionTargetLabel}
+          targetCount={actionTargetCount}
+          body={systemMessageBody}
+          submitting={systemMessageMutation.isPending}
+          error={systemMessageError}
+          onBodyChange={setSystemMessageBody}
+          onClose={closeAgentActionModal}
+          onSubmit={handleSystemMessageSubmit}
+        />
+      ) : null}
+      {activeAgentAction === 'process-events' ? (
+        <ProcessEventsModal
+          targetLabel={actionTargetLabel}
+          targetCount={actionTargetCount}
+          submitting={processEventsMutation.isPending}
+          error={processEventsError}
+          onClose={closeAgentActionModal}
+          onConfirm={handleProcessEventsConfirm}
+        />
+      ) : null}
     </div>
   )
 }

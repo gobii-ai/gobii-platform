@@ -546,6 +546,7 @@ class PlatformMCPServerAPITests(TestCase):
             "is_active": True,
             "environment": {"API_TOKEN": "secret"},
             "headers": {"X-Platform": "1"},
+            "metadata": {"env_fallback": {"API_TOKEN": "PLATFORM_API_TOKEN_FALLBACK"}},
             "prefetch_apps": ["Google Sheets", "greenhouse", "google_sheets", ""],
         }
 
@@ -564,6 +565,7 @@ class PlatformMCPServerAPITests(TestCase):
         self.assertEqual(server.command_args, ["-y", "@example/mcp"])
         self.assertEqual(server.environment, {"API_TOKEN": "secret"})
         self.assertEqual(server.headers, {"X-Platform": "1"})
+        self.assertEqual(server.metadata, {"env_fallback": {"API_TOKEN": "PLATFORM_API_TOKEN_FALLBACK"}})
         self.assertEqual(server.prefetch_apps, ["google_sheets", "greenhouse"])
         mock_get_mcp_manager.return_value.refresh_server.assert_called_once_with(str(server.id))
         mock_track_event.assert_called_once()
@@ -593,6 +595,7 @@ class PlatformMCPServerAPITests(TestCase):
                     "auth_method": MCPServerConfig.AuthMethod.BEARER_TOKEN,
                     "is_active": False,
                     "headers": {"Authorization": "Bearer updated"},
+                    "metadata": {"env_fallback": {"WEB_UNLOCKER_ZONE": "WEB_UNLOCKER_ZONE_FALLBACK"}},
                     "environment": {},
                     "command": "",
                     "command_args": [],
@@ -610,6 +613,7 @@ class PlatformMCPServerAPITests(TestCase):
         self.assertEqual(server.command, "")
         self.assertEqual(server.auth_method, MCPServerConfig.AuthMethod.BEARER_TOKEN)
         self.assertEqual(server.headers, {"Authorization": "Bearer updated"})
+        self.assertEqual(server.metadata, {"env_fallback": {"WEB_UNLOCKER_ZONE": "WEB_UNLOCKER_ZONE_FALLBACK"}})
         self.assertEqual(server.prefetch_apps, ["slack", "google_docs"])
         self.assertFalse(server.is_active)
         mock_get_mcp_manager.return_value.refresh_server.assert_called_once_with(str(server.id))
