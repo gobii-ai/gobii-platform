@@ -1,19 +1,80 @@
 ---
 title: "Tasks"
 sidebar_label: "Tasks"
-description: "Understand Gobii tasks, the small units of browser automation work that agents complete behind the scenes."
+description: "Understand Gobii tasks, the small units of work that agents complete behind the scenes — from web searches to browser automation to sending messages."
 ---
 
-Tasks are the smallest unit of work on Gobii, and happen behind the scenes. When your Gobii is taking action on your behalf, multiple smaller units are generally required to meet to fulfill your request. For example:
+import Link from '@docusaurus/Link';
 
-**User:** "Look up the weather in Rehoboth Beach, DE this weekend and find appropriate daytime activities for each day."
+## What is a task?
 
-**Gobii Agent:**
+A task is the smallest unit of work a Gobii agent performs. Every action your agent takes — searching the web, reading a page, running a browser automation, sending an email, calling an API — counts as one or more tasks.
 
-  1) Search for weather information for Rehoboth Beach, DE
-  2) Extract the forecast data
-  3) Use LLM to match potential activities for the weather data extracted
-  4) Search for venues for each of the potential activities
-  5) Send email to the user with results
+Tasks happen behind the scenes. You don't need to manage them directly, but understanding them helps you interpret what your agent is doing and how it consumes credits.
 
-End users do not need to be concerned with the specifics of tasks, but it's good to have an understanding of the concept as your agent may reference tasks it is completing.
+## How tasks work
+
+When you ask your agent to do something, it breaks the request into a sequence of tasks. Each task is a discrete tool call: one search, one page scrape, one email send, one chart generation.
+
+### Example
+
+**You ask:** "Look up the weather in Rehoboth Beach, DE this weekend and find appropriate daytime activities for each day."
+
+**Your agent plans and executes these tasks:**
+
+1. Search for the weekend weather forecast for Rehoboth Beach
+2. Extract and parse the forecast data
+3. Use the LLM to match activities to the forecast
+4. Search for venues matching each activity
+5. Compose and send an email with the results
+
+That's 5 tasks to fulfill one request. Some tasks are fast (milliseconds for an API call), others take longer (browser automation can run for minutes).
+
+## Types of tasks
+
+Tasks span the full range of agent capabilities:
+
+| Category | Examples |
+|---|---|
+| **Search & browse** | Web searches, page scraping, reading documentation |
+| **Browser automation** | Logging into sites, filling forms, capturing screenshots, clicking through workflows |
+| **Messaging** | Sending emails, SMS, chat messages |
+| **Data** | Running SQL queries, generating charts, creating CSV/PDF exports |
+| **Files** | Reading, writing, and patching files in the agent workspace |
+| **Code** | Executing Python or shell commands in the sandbox |
+| **Integrations** | Calling MCP servers, connected apps (Google Sheets, HubSpot, Discord, etc.) |
+| **Planning** | Updating the agent's plan, requesting human input |
+
+## Tasks vs. task credits
+
+Tasks consume **task credits** from your account. The cost varies by task type and complexity:
+
+- A simple email send might cost ~0.04 credits
+- A web search or page scrape might cost ~2–3 credits
+- A complex browser automation could cost more
+
+Your plan includes a monthly pool of task credits. See [Task Credits](/core-concepts/task-credits) for details on budgets, soft limits, and monitoring usage.
+
+## Task execution
+
+Agents execute tasks sequentially within each processing cycle. You can watch tasks unfold in the agent's chat timeline — each tool call appears as it happens, with results and any errors.
+
+If a task fails (e.g., a page won't load, an API returns an error), the agent typically retries or adjusts its approach. Persistent failures are reported in the chat so you can intervene.
+
+## Agent budgets and limits
+
+Each agent has a **daily soft limit** on task credits. This prevents runaway consumption. The agent will pause when it hits the limit and resume the next day.
+
+You set this limit per agent in the agent settings. See the [agent settings guide](/console-guides/agent-settings) for details.
+
+## Monitoring tasks
+
+- **Chat timeline**: Watch tasks execute in real time as your agent works
+- **Usage dashboard**: View aggregate task credit consumption at `https://gobii.ai/console/usage/`
+- **Agent logs**: Each agent's activity history shows completed tasks and their credit costs
+
+## Next steps
+
+- [Understand task credits](/core-concepts/task-credits) — budgets, soft limits, and billing
+- [Configure agent budgets](/console-guides/agent-settings) — set daily limits per agent
+- [See tasks in action](/start-here/create-your-first-gobii) — create an agent and watch it work
