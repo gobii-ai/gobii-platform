@@ -152,5 +152,5 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where   = ["."]
-include = ["config", "console*", "api*", "pages*"]
+include = ["config", "console*", "api*", "pages*", "tasks*"]
 exclude = ["*/tests*", "*/static*", "*/templates*"]
