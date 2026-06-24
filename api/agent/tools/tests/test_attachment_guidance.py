@@ -81,6 +81,10 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("false when this email is the requested final delivery", email_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"])
         self.assertIn("Do not use this to simulate or confirm an email/SMS delivery", chat_tool["function"]["description"])
         self.assertIn("status labels", chat_guidance)
+        self.assertIn("compact operating update", chat_guidance)
+        self.assertIn("small table or metric block", chat_guidance)
+        self.assertIn("address them naturally once", chat_guidance)
+        self.assertIn("Do not introduce yourself by agent name", chat_guidance)
         self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
 
     def test_create_file_tool_schema_requires_content_or_query(self):

@@ -3164,7 +3164,10 @@ def _get_web_chat_formatting_guidance() -> str:
 
     return (
         "Web chat and peer DM formatting:\n"
-        "Use Markdown. Start with the answer/main finding; for reports add titled sections, bullets or compact tables, and tasteful emoji/status labels. "
+        "Use Markdown. Start with the answer/main finding; for reports add a brief human lead-in, then titled sections, bullets or compact tables, and tasteful emoji/status labels. "
+        "When a report has metrics, pending items, or next-run status, make it feel like a compact operating update: surface key numbers in a small table or metric block, label status clearly, and separate done/pending/next. "
+        "If the recipient/audience is known, address them naturally once and frame the result around what they can act on; avoid generic delivery-log prose. "
+        "Do not introduce yourself by agent name in reports unless the user asked who you are. "
         "Use whitespace, not decorative separators. For charts, paste create_chart result.inline; don't attach/read/rebuild. "
         "Do not add optional follow-up offers after quick facts, prices, statuses, exact lookups, or completed reports."
     )
