@@ -9987,6 +9987,146 @@ class PersistentAgentDiscordWebhookEcho(models.Model):
         return f"DiscordWebhookEcho<{self.agent_id}:{self.channel_id}:{self.discord_message_id or self.signature_hash}>"
 
 
+class PersistentAgentSlackWorkspace(models.Model):
+    """Slack workspace claimed by a Gobii user or organization through OAuth."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    team_id = models.CharField(max_length=32)
+    team_name = models.CharField(max_length=255)
+    enterprise_id = models.CharField(max_length=64, blank=True)
+    enterprise_name = models.CharField(max_length=255, blank=True)
+    app_id = models.CharField(max_length=64, blank=True)
+    bot_user_id = models.CharField(max_length=64, blank=True)
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="slack_workspace_claims",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="slack_workspace_claims",
+    )
+    claimed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="claimed_slack_workspaces",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["team_id"],
+                condition=Q(is_active=True),
+                name="uniq_active_slack_workspace_claim",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(owner_user__isnull=False, organization__isnull=True)
+                    | Q(owner_user__isnull=True, organization__isnull=False)
+                ),
+                name="pa_slack_workspace_one_owner",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["owner_user", "is_active"], name="pa_slack_ws_user_idx"),
+            models.Index(fields=["organization", "is_active"], name="pa_slack_ws_org_idx"),
+            models.Index(fields=["team_id"], name="pa_slack_ws_team_idx"),
+        ]
+        ordering = ["team_name", "team_id"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"SlackWorkspace<{self.team_name}:{self.team_id}>"
+
+
+class PersistentAgentSlackChannelSubscription(models.Model):
+    """Agent subscription to one Slack workspace/channel pair."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+        ERROR = "error", "Error"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="slack_channel_subscriptions",
+    )
+    workspace = models.ForeignKey(
+        PersistentAgentSlackWorkspace,
+        on_delete=models.CASCADE,
+        related_name="channel_subscriptions",
+    )
+    channel_id = models.CharField(max_length=32)
+    channel_name = models.CharField(max_length=255, blank=True)
+    channel_type = models.CharField(max_length=32, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE, db_index=True)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "workspace", "channel_id"],
+                condition=Q(status="active"),
+                name="uniq_active_slack_agent_channel_sub",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "status"], name="pa_slack_sub_agent_idx"),
+            models.Index(fields=["workspace", "channel_id"], name="pa_slack_sub_channel_idx"),
+        ]
+        ordering = ["workspace__team_name", "channel_name", "channel_id"]
+
+    def record_message(self) -> None:
+        self.last_message_at = timezone.now()
+        self.last_error = ""
+        self.save(update_fields=["last_message_at", "last_error", "updated_at"])
+
+    def record_error(self, message: str) -> None:
+        self.last_error = (message or "")[:2000]
+        self.status = self.Status.ERROR
+        self.save(update_fields=["last_error", "status", "updated_at"])
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        label = self.channel_name or self.channel_id
+        return f"SlackSubscription<{self.workspace_id}:{label}:{self.agent_id}>"
+
+
+class PersistentAgentSlackEventReceipt(models.Model):
+    """Idempotency receipt for Slack Events API callbacks."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event_id = models.CharField(max_length=128, unique=True)
+    team_id = models.CharField(max_length=64, blank=True)
+    event_type = models.CharField(max_length=64, blank=True)
+    channel_id = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["team_id", "created_at"], name="pa_slack_evt_team_idx"),
+            models.Index(fields=["channel_id", "created_at"], name="pa_slack_evt_channel_idx"),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"SlackEventReceipt<{self.event_id}>"
+
+
 class PersistentAgentCommsEndpoint(models.Model):
     """Channel-agnostic communication endpoint (address/number/etc.)."""
 

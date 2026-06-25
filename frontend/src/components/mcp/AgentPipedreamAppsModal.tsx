@@ -8,6 +8,11 @@ import {
   type AgentDiscordApp,
 } from '../../api/discordNative'
 import {
+  agentSlackAppQueryKey,
+  fetchAgentSlackApp,
+  type AgentSlackApp,
+} from '../../api/slackNative'
+import {
   disconnectAgentPipedreamApp,
   fetchAgentPipedreamApps,
   removeAgentPipedreamApp,
@@ -57,6 +62,11 @@ import {
   useDiscordNativeAgentActions,
   useDiscordOAuthCompleteRefetch,
 } from './DiscordNativeAppModal'
+import {
+  AgentSlackAppRowItem,
+  SlackConfigurationScreen,
+  useSlackNativeAgentActions,
+} from './SlackNativeAppModal'
 
 type AgentPipedreamAppsModalProps = {
   agentId: string
@@ -69,6 +79,7 @@ type AgentAppRow =
   | (AgentPipedreamAppRow & { kind: 'pipedream' })
   | (NativeIntegrationProvider & { kind: 'native' })
   | (AgentDiscordApp & { kind: 'discord' })
+  | (AgentSlackApp & { kind: 'slack' })
 
 type PendingAction = {
   slug: string
@@ -93,14 +104,20 @@ export function AgentPipedreamAppsModal({
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [discordConfigureOpen, setDiscordConfigureOpen] = useState(false)
+  const [slackConfigureOpen, setSlackConfigureOpen] = useState(false)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
     [nativeIntegrationsUrl],
   )
   const discordQueryKey = useMemo(() => agentDiscordAppQueryKey(agentId), [agentId])
+  const slackQueryKey = useMemo(() => agentSlackAppQueryKey(agentId), [agentId])
   useNativeIntegrationRefreshEffects({ queryKey: nativeQueryKey, onError: (message) => setStatusMessage({ text: message, tone: 'error' }) })
+  useNativeIntegrationRefreshEffects({ queryKey: slackQueryKey, onError: (message) => setStatusMessage({ text: message, tone: 'error' }) })
   const handleDiscordError = useCallback((message: string) => {
+    setStatusMessage({ text: message, tone: 'error' })
+  }, [])
+  const handleSlackError = useCallback((message: string) => {
     setStatusMessage({ text: message, tone: 'error' })
   }, [])
   useDiscordOAuthCompleteRefetch({ agentId, onError: handleDiscordError })
@@ -112,6 +129,15 @@ export function AgentPipedreamAppsModal({
   } = useDiscordNativeAgentActions({
     onStart: () => setStatusMessage(null),
     onError: handleDiscordError,
+  })
+  const {
+    connectSlackAgent,
+    saveSlackAgentSubscriptions,
+    pendingSlackAgentAction,
+    isSlackAgentActionPending,
+  } = useSlackNativeAgentActions({
+    onStart: () => setStatusMessage(null),
+    onError: handleSlackError,
   })
 
   const appsQuery = useQuery({
@@ -128,6 +154,10 @@ export function AgentPipedreamAppsModal({
   const discordAppQuery = useQuery({
     queryKey: discordQueryKey,
     queryFn: () => fetchAgentDiscordApp(agentId),
+  })
+  const slackAppQuery = useQuery({
+    queryKey: slackQueryKey,
+    queryFn: () => fetchAgentSlackApp(agentId),
   })
 
   const connectMutation = useMutation({
@@ -243,6 +273,7 @@ export function AgentPipedreamAppsModal({
 
   const normalizedSearch = debouncedSearchTerm.toLowerCase()
   const nativeRows = (nativeIntegrationsQuery.data?.providers ?? [])
+    .filter((provider) => provider.providerKey !== 'slack')
     .filter((provider) => !normalizedSearch || [
       provider.providerKey,
       provider.displayName,
@@ -257,9 +288,18 @@ export function AgentPipedreamAppsModal({
     ].some((value) => value.toLowerCase().includes(normalizedSearch)))
     ? { ...discordAppQuery.data, kind: 'discord' as const }
     : null
+  const slackRow = slackAppQuery.data
+    && (!normalizedSearch || [
+      slackAppQuery.data.providerKey,
+      slackAppQuery.data.displayName,
+      slackAppQuery.data.description,
+    ].some((value) => value.toLowerCase().includes(normalizedSearch)))
+    ? { ...slackAppQuery.data, kind: 'slack' as const }
+    : null
   const apps: AgentAppRow[] = [
     ...nativeRows,
     ...(discordRow ? [discordRow] : []),
+    ...(slackRow ? [slackRow] : []),
     ...(enablePipedreamApps ? (appsQuery.data?.apps ?? []).map((app) => ({ ...app, kind: 'pipedream' as const })) : []),
   ]
   const isBusy = connectMutation.isPending
@@ -269,8 +309,11 @@ export function AgentPipedreamAppsModal({
     || nativeDisconnectMutation.isPending
     || nativePickerMutation.isPending
     || isDiscordAgentActionPending
+    || isSlackAgentActionPending
   const activeDiscordApp = discordConfigureOpen ? (discordAppQuery.data ?? discordRow) : null
+  const activeSlackApp = slackConfigureOpen ? (slackAppQuery.data ?? slackRow) : null
   const pendingDiscordAction = pendingDiscordAgentAction?.agentId === agentId ? pendingDiscordAgentAction.kind : null
+  const pendingSlackAction = pendingSlackAgentAction?.agentId === agentId ? pendingSlackAgentAction.kind : null
 
   const body = activeDiscordApp ? (
     <DiscordConfigurationScreen
@@ -285,19 +328,33 @@ export function AgentPipedreamAppsModal({
       }}
       onSave={(subscriptions) => saveDiscordAgentSubscriptions(agentId, subscriptions)}
     />
+  ) : activeSlackApp ? (
+    <SlackConfigurationScreen
+      agentId={agentId}
+      app={activeSlackApp}
+      disabled={isBusy}
+      pendingSlackAction={pendingSlackAction}
+      statusMessage={statusMessage}
+      onBack={() => {
+        setSlackConfigureOpen(false)
+        setStatusMessage(null)
+      }}
+      onConnect={() => connectSlackAgent(agentId)}
+      onSave={(subscriptions) => saveSlackAgentSubscriptions(agentId, subscriptions)}
+    />
   ) : (
       <div className="space-y-4 p-1">
         <PipedreamStatusBanner statusMessage={statusMessage} />
         <PipedreamSearchInput
           value={searchTerm}
           onChange={setSearchTerm}
-          isFetching={appsQuery.isFetching || nativeIntegrationsQuery.isFetching || discordAppQuery.isFetching}
+          isFetching={appsQuery.isFetching || nativeIntegrationsQuery.isFetching || discordAppQuery.isFetching || slackAppQuery.isFetching}
           disabled={isBusy}
         />
 
-        {(enablePipedreamApps && appsQuery.isError) || nativeIntegrationsQuery.isError || discordAppQuery.isError ? (
-          <PipedreamErrorState error={appsQuery.error ?? nativeIntegrationsQuery.error ?? discordAppQuery.error} fallback="Unable to load apps." />
-        ) : (enablePipedreamApps && appsQuery.isLoading) || nativeIntegrationsQuery.isLoading || discordAppQuery.isLoading ? (
+        {(enablePipedreamApps && appsQuery.isError) || nativeIntegrationsQuery.isError || discordAppQuery.isError || slackAppQuery.isError ? (
+          <PipedreamErrorState error={appsQuery.error ?? nativeIntegrationsQuery.error ?? discordAppQuery.error ?? slackAppQuery.error} fallback="Unable to load apps." />
+        ) : (enablePipedreamApps && appsQuery.isLoading) || nativeIntegrationsQuery.isLoading || discordAppQuery.isLoading || slackAppQuery.isLoading ? (
           <PipedreamLoadingState label="Loading apps…" />
         ) : apps.length === 0 ? (
           <PipedreamEmptyState label="No apps matched your search." />
@@ -329,6 +386,18 @@ export function AgentPipedreamAppsModal({
                   setStatusMessage(null)
                 }}
               />
+            ) : app.kind === 'slack' ? (
+              <AgentSlackAppRowItem
+                key="native-slack"
+                app={app}
+                pendingSlackAction={pendingSlackAction}
+                disabled={isBusy}
+                onConnect={() => connectSlackAgent(agentId)}
+                onConfigure={() => {
+                  setSlackConfigureOpen(true)
+                  setStatusMessage(null)
+                }}
+              />
             ) : (
               <AgentPipedreamAppRowItem
                 key={`pipedream-${app.slug}`}
@@ -346,9 +415,13 @@ export function AgentPipedreamAppsModal({
   )
 
   return (
-    <PipedreamModalShell
-      title={activeDiscordApp ? 'Configure Discord' : 'Apps'}
-      subtitle={activeDiscordApp ? 'Choose the Discord server channels this agent should watch.' : 'Search, connect, and disconnect apps for this agent.'}
+      <PipedreamModalShell
+      title={activeDiscordApp ? 'Configure Discord' : activeSlackApp ? 'Configure Slack' : 'Apps'}
+      subtitle={activeDiscordApp
+        ? 'Choose the Discord server channels this agent should watch.'
+        : activeSlackApp
+          ? 'Choose the Slack channels this agent should watch.'
+          : 'Search, connect, and disconnect apps for this agent.'}
       ariaLabel="Manage agent apps"
       onClose={onClose}
     >

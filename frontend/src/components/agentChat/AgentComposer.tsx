@@ -8,6 +8,7 @@ import { ApolloInsightPanel } from './insights/ApolloInsightPanel'
 import { DiscordInsightPanel } from './insights/DiscordInsightPanel'
 import { GoogleDriveInsightPanel } from './insights/GoogleDriveInsightPanel'
 import { HubSpotInsightPanel } from './insights/HubSpotInsightPanel'
+import { SlackInsightPanel } from './insights/SlackInsightPanel'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
 import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
@@ -189,7 +190,7 @@ type HumanInputComposerBatchResponse = {
   responses: HumanInputComposerResponse[]
 }
 
-type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord'
+type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord' | 'slack'
 type PendingWorkingTabKind = 'questions' | 'credentials' | 'contacts' | 'agents'
 type PendingWorkingPanelTab = {
   id: `pending:${PendingWorkingTabKind}`
@@ -260,6 +261,13 @@ const NATIVE_WORKING_TAB_CONFIG = {
     ariaLabel: 'View Discord connection',
     panel: DiscordInsightPanel,
     icon: <img src="/static/images/integrations/native/discord.svg" alt="" className="composer-insight-tab-image" />,
+  },
+  slack: {
+    label: 'Slack',
+    title: 'Slack',
+    ariaLabel: 'View Slack connection',
+    panel: SlackInsightPanel,
+    icon: <img src="/static/images/integrations/native/slack.svg" alt="" className="composer-insight-tab-image" />,
   },
 } as const
 
@@ -483,6 +491,7 @@ type AgentComposerProps = {
   apolloNativeTabEnabled?: boolean
   hubspotNativeTabEnabled?: boolean
   discordNativeTabEnabled?: boolean
+  slackNativeTabEnabled?: boolean
   compact?: boolean
   externalShellRef?: Ref<HTMLDivElement>
 }
@@ -545,6 +554,7 @@ export const AgentComposer = memo(function AgentComposer({
   apolloNativeTabEnabled = false,
   hubspotNativeTabEnabled = false,
   discordNativeTabEnabled = false,
+  slackNativeTabEnabled = false,
   compact = false,
   externalShellRef,
 }: AgentComposerProps) {
@@ -674,14 +684,16 @@ export const AgentComposer = memo(function AgentComposer({
   const apolloTabAvailable = Boolean(apolloNativeTabEnabled && canManageAgent)
   const hubspotTabAvailable = Boolean(hubspotNativeTabEnabled && canManageAgent)
   const discordTabAvailable = Boolean(discordNativeTabEnabled && canManageAgent)
+  const slackTabAvailable = Boolean(slackNativeTabEnabled && canManageAgent)
   const nativeTabAvailability = useMemo(
     () => [
       { kind: 'google_drive', available: googleDriveTabAvailable },
       { kind: 'apollo', available: apolloTabAvailable },
       { kind: 'hubspot', available: hubspotTabAvailable },
       { kind: 'discord', available: discordTabAvailable },
+      { kind: 'slack', available: slackTabAvailable },
     ] as const,
-    [apolloTabAvailable, discordTabAvailable, googleDriveTabAvailable, hubspotTabAvailable],
+    [apolloTabAvailable, discordTabAvailable, googleDriveTabAvailable, hubspotTabAvailable, slackTabAvailable],
   )
   const pendingActionTabs = useMemo<PendingWorkingPanelTab[]>(() => {
     const actionsByTabKind = new Map<PendingWorkingTabKind, PendingActionRequest[]>()

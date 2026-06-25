@@ -166,7 +166,7 @@ jobs:
           - batch: shard_06
             tag: batch_event_processing_credits batch_marketing_events batch_email batch_video_generation batch_proxy_selection batch_public_templates batch_email_blocklist batch_global_skill_evals batch_xvfb batch_websocket batch_stripe_config batch_peer_intro
           - batch: shard_07
-            tag: batch_sqlite batch_agent_lifecycle batch_console_mcp_servers batch_agent_short_description batch_api_tasks_mutations batch_email_verification batch_peer_dm agent_credit_soft_target_batch batch_console_mcp_oauth batch_native_integrations batch_agent_tags eval_sim batch_agent_colors
+            tag: batch_sqlite batch_agent_lifecycle batch_console_mcp_servers batch_agent_short_description batch_api_tasks_mutations batch_email_verification batch_peer_dm agent_credit_soft_target_batch batch_console_mcp_oauth batch_native_integrations batch_native_slack batch_agent_tags eval_sim batch_agent_colors
           - batch: shard_08
             tag: batch_agent_tools sqlite_analysis batch_event_llm batch_agent_secrets_ctx batch_task_credits batch_allowlist_rules batch_api_decodo batch_llm_intelligence batch_llm_admin_cleanup batch_dedicated_proxy_service batch_pa_step_credits oss_readiness_batch batch_api_serializer batch_fbp_middleware
           - batch: shard_09

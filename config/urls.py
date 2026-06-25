@@ -225,6 +225,13 @@ from console.discord_api import (
     DiscordOAuthCallbackView,
     DiscordOAuthStartView,
 )
+from console.slack_api import (
+    AgentSlackAppView,
+    AgentSlackChannelsView,
+    AgentSlackConnectView,
+    AgentSlackSubscriptionsView,
+    SlackEventsView,
+)
 from console.usage_views import (
     UsageSummaryAPIView,
     UsageBurnRateSnapshotAPIView,
@@ -343,6 +350,7 @@ urlpatterns = [
     path("r/<slug:code>", _beluga_tracking_redirect_view, name="beluga_tracking_redirect_no_slash"),
     path("m/<slug:code>/", LinkShortenerRedirectView.as_view(), name="short_link"),
     path("d/<str:token>/", SignedAgentFsNodeDownloadAPIView.as_view(), name="signed_agent_fs_download"),
+    path("api/slack/events/", SlackEventsView.as_view(), name="slack-events"),
 
     # Pipedream JIT connect redirect - generates fresh auth links on-demand
     path("connect/pipedream/<uuid:agent_id>/<slug:app_slug>/", PipedreamConnectRedirectView.as_view(), name="pipedream_jit_connect"),
@@ -602,6 +610,10 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/discord/guilds/<str:guild_id>/channels/", AgentDiscordChannelsView.as_view(), name="console-agent-discord-channels"),
     path("console/api/agents/<uuid:agent_id>/discord/subscriptions/", AgentDiscordSubscriptionsView.as_view(), name="console-agent-discord-subscriptions"),
     path("console/api/discord/disconnect/", DiscordDisconnectView.as_view(), name="console-discord-disconnect"),
+    path("console/api/agents/<uuid:agent_id>/slack/app/", AgentSlackAppView.as_view(), name="console-agent-slack-app"),
+    path("console/api/agents/<uuid:agent_id>/slack/connect/", AgentSlackConnectView.as_view(), name="console-agent-slack-connect"),
+    path("console/api/agents/<uuid:agent_id>/slack/channels/", AgentSlackChannelsView.as_view(), name="console-agent-slack-channels"),
+    path("console/api/agents/<uuid:agent_id>/slack/subscriptions/", AgentSlackSubscriptionsView.as_view(), name="console-agent-slack-subscriptions"),
     path("console/api/session/", ConsoleSessionAPIView.as_view(), name="console_session"),
     path("console/api/support/request/", AppSupportRequestAPIView.as_view(), name="console_app_support_request"),
     path("console/api/billing/initial/", BillingInitialDataAPIView.as_view(), name="console_billing_initial_data"),

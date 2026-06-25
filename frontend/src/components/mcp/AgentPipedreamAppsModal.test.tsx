@@ -10,6 +10,13 @@ import {
   updateAgentDiscordSubscriptions,
   type AgentDiscordApp,
 } from '../../api/discordNative'
+import {
+  fetchAgentSlackApp,
+  fetchAgentSlackChannels,
+  startAgentSlackConnect,
+  updateAgentSlackSubscriptions,
+  type AgentSlackApp,
+} from '../../api/slackNative'
 
 vi.mock('../../api/discordNative', () => ({
   agentDiscordAppQueryKey: (agentId: string) => ['agent-discord-app', agentId],
@@ -18,6 +25,14 @@ vi.mock('../../api/discordNative', () => ({
   fetchAgentDiscordGuildChannels: vi.fn(),
   startAgentDiscordConnect: vi.fn(),
   updateAgentDiscordSubscriptions: vi.fn(),
+}))
+
+vi.mock('../../api/slackNative', () => ({
+  agentSlackAppQueryKey: (agentId: string) => ['agent-slack-app', agentId],
+  fetchAgentSlackApp: vi.fn(),
+  fetchAgentSlackChannels: vi.fn(),
+  startAgentSlackConnect: vi.fn(),
+  updateAgentSlackSubscriptions: vi.fn(),
 }))
 
 const disconnectedDiscordApp: AgentDiscordApp = {
@@ -50,6 +65,31 @@ const connectedDiscordApp: AgentDiscordApp = {
   ],
 }
 
+const connectedSlackApp: AgentSlackApp = {
+  providerKey: 'slack',
+  displayName: 'Slack',
+  description: 'Connect Slack workspaces and subscribe this agent to selected channels.',
+  icon: 'slack',
+  connected: true,
+  subscribed: false,
+  skillEnabled: true,
+  workspaces: [
+    {
+      workspaceId: 'workspace-1',
+      teamId: 'T1',
+      teamName: 'Ops Slack',
+      enterpriseId: '',
+      enterpriseName: '',
+      botUserId: 'B1',
+    },
+  ],
+  subscriptions: [],
+  activeSubscriptionCount: 0,
+  workspaceCount: 1,
+  connectUrl: '/console/api/native-integrations/slack/connect/',
+  identityNote: 'Display identity only.',
+}
+
 function renderModal() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -75,6 +115,11 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
     vi.mocked(fetchAgentDiscordGuildChannels).mockReset()
     vi.mocked(startAgentDiscordConnect).mockReset()
     vi.mocked(updateAgentDiscordSubscriptions).mockReset()
+    vi.mocked(fetchAgentSlackApp).mockReset()
+    vi.mocked(fetchAgentSlackChannels).mockReset()
+    vi.mocked(startAgentSlackConnect).mockReset()
+    vi.mocked(updateAgentSlackSubscriptions).mockReset()
+    vi.mocked(fetchAgentSlackApp).mockResolvedValue(connectedSlackApp)
     vi.spyOn(window, 'open').mockImplementation(() => null)
   })
 
@@ -127,7 +172,8 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
 
     renderModal()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Configure' }))
+    const configureButtons = await screen.findAllByRole('button', { name: 'Configure' })
+    fireEvent.click(configureButtons[0])
     expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
 
     const generalChannel = await screen.findByRole('checkbox', { name: /general/i })
@@ -140,6 +186,54 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
           guildId: 'guild-1',
           channelId: 'channel-1',
           channelName: 'general',
+        },
+      ])
+    })
+  })
+
+  it('saves selected Slack channel subscriptions', async () => {
+    vi.mocked(fetchAgentDiscordApp).mockResolvedValue(connectedDiscordApp)
+    vi.mocked(fetchAgentSlackApp).mockResolvedValue(connectedSlackApp)
+    vi.mocked(fetchAgentSlackChannels).mockResolvedValue({
+      status: 'success',
+      message: '',
+      error: '',
+      setupUrl: '',
+      channels: [
+        {
+          workspaceId: 'workspace-1',
+          teamId: 'T1',
+          teamName: 'Ops Slack',
+          channelId: 'C1',
+          channelName: 'triage',
+          channelType: 'public_channel',
+          label: 'Ops Slack / #triage',
+        },
+      ],
+    })
+    vi.mocked(updateAgentSlackSubscriptions).mockResolvedValue({
+      ...connectedSlackApp,
+      subscribed: true,
+      activeSubscriptionCount: 1,
+    })
+
+    renderModal()
+
+    const configureButtons = await screen.findAllByRole('button', { name: 'Configure' })
+    fireEvent.click(configureButtons[1])
+    expect(screen.getByText(/does not create separate mentionable bot users/i)).toBeInTheDocument()
+
+    const triageChannel = await screen.findByRole('checkbox', { name: /triage/i })
+    fireEvent.click(triageChannel)
+    fireEvent.click(screen.getByRole('button', { name: 'Save channels' }))
+
+    await waitFor(() => {
+      expect(updateAgentSlackSubscriptions).toHaveBeenCalledWith('agent-1', [
+        {
+          workspaceId: 'workspace-1',
+          channelId: 'C1',
+          channelName: 'triage',
+          channelType: 'public_channel',
         },
       ])
     })

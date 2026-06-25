@@ -1692,6 +1692,25 @@ HUBSPOT_OAUTH_SCOPES = tuple(
     if scope
 )
 
+# Slack
+SLACK_CLIENT_ID = env("SLACK_CLIENT_ID", default="")
+SLACK_CLIENT_SECRET = env("SLACK_CLIENT_SECRET", default="")
+SLACK_SIGNING_SECRET = env("SLACK_SIGNING_SECRET", default="")
+SLACK_DEFAULT_OAUTH_SCOPES = (
+    "chat:write",
+    "chat:write.customize",
+    "channels:read",
+    "channels:history",
+    "groups:read",
+    "groups:history",
+)
+SLACK_OAUTH_SCOPES = tuple(
+    scope
+    for scope in env("SLACK_OAUTH_SCOPES", default=" ".join(SLACK_DEFAULT_OAUTH_SCOPES)).replace(",", " ").split()
+    if scope
+)
+SLACK_INBOUND_DEBOUNCE_SECONDS = env.int("SLACK_INBOUND_DEBOUNCE_SECONDS", default=15)
+
 # ────────── Native Discord Bot ──────────
 DISCORD_CLIENT_ID = env("DISCORD_CLIENT_ID", default="")
 DISCORD_CLIENT_SECRET = env("DISCORD_CLIENT_SECRET", default="")

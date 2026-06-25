@@ -220,6 +220,20 @@ HUBSPOT_PROVIDER = NativeIntegrationProvider(
     authorization_params={},
 )
 
+SLACK_PROVIDER = NativeIntegrationProvider(
+    key="slack",
+    display_name="Slack",
+    description="Connect Slack so agents can subscribe to channels, receive messages, and reply with display-level agent identity.",
+    auth_type="oauth2",
+    authorization_endpoint="https://slack.com/oauth/v2/authorize",
+    token_endpoint="https://slack.com/api/oauth.v2.access",
+    scopes=tuple(settings.SLACK_OAUTH_SCOPES),
+    api_hosts=("slack.com",),
+    api_url_prefixes=("https://slack.com/api/",),
+    icon="slack",
+    authorization_params={},
+)
+
 GOOGLE_SHEETS_PROVIDER = GOOGLE_DRIVE_PROVIDER
 GOOGLE_DRIVE_PROVIDER_ALIASES = ("google_sheets",)
 GOOGLE_DRIVE_LEGACY_SECRET_KEYS = ("native_google_sheets",)
@@ -228,6 +242,7 @@ NATIVE_INTEGRATION_PROVIDERS = {
     GOOGLE_DRIVE_PROVIDER.key: GOOGLE_DRIVE_PROVIDER,
     APOLLO_PROVIDER.key: APOLLO_PROVIDER,
     HUBSPOT_PROVIDER.key: HUBSPOT_PROVIDER,
+    SLACK_PROVIDER.key: SLACK_PROVIDER,
 }
 
 NATIVE_INTEGRATION_CAPABILITIES: dict[str, tuple[NativeIntegrationCapability, ...]] = {
@@ -445,12 +460,48 @@ NATIVE_INTEGRATION_CAPABILITIES: dict[str, tuple[NativeIntegrationCapability, ..
             write_risk="read",
         ),
     ),
+    SLACK_PROVIDER.key: (
+        NativeIntegrationCapability(
+            key="slack_channel_discovery",
+            provider_key=SLACK_PROVIDER.key,
+            resource="conversations",
+            operation="list",
+            label="List accessible Slack public and private channels",
+            required_scopes=("channels:read", "groups:read"),
+            endpoint_hints=("GET https://slack.com/api/conversations.list",),
+            write_risk="read",
+            setup_guidance="Reconnect Slack if channel discovery scopes are missing.",
+        ),
+        NativeIntegrationCapability(
+            key="slack_channel_messages_read",
+            provider_key=SLACK_PROVIDER.key,
+            resource="messages",
+            operation="read",
+            label="Receive Slack channel messages for subscribed channels",
+            required_scopes=("channels:history", "groups:history"),
+            endpoint_hints=("Slack Events API message.channels and message.groups callbacks",),
+            write_risk="read",
+            setup_guidance="Reconnect Slack if channel history event scopes are missing.",
+        ),
+        NativeIntegrationCapability(
+            key="slack_messages_send",
+            provider_key=SLACK_PROVIDER.key,
+            resource="messages",
+            operation="write",
+            label="Send Slack messages with this agent's display name and avatar",
+            required_scopes=("chat:write", "chat:write.customize"),
+            endpoint_hints=("POST https://slack.com/api/chat.postMessage",),
+            write_risk="write",
+            setup_guidance="Reconnect Slack if customized message posting scopes are missing.",
+        ),
+    ),
 }
 
 NATIVE_INTEGRATION_PIPEDREAM_APP_SLUGS = {
     GOOGLE_DRIVE_PROVIDER.key: ("google_sheets", "google_drive"),
     APOLLO_PROVIDER.key: ("apollo_io", "apollo_io_oauth"),
     HUBSPOT_PROVIDER.key: ("hubspot",),
+    SLACK_PROVIDER.key: ("slack",),
 }
 
 
@@ -488,6 +539,8 @@ def native_integration_client_credentials(provider: NativeIntegrationProvider) -
         return settings.APOLLO_CLIENT_ID, settings.APOLLO_CLIENT_SECRET
     if provider.key == HUBSPOT_PROVIDER.key:
         return settings.HUBSPOT_CLIENT_ID, settings.HUBSPOT_CLIENT_SECRET
+    if provider.key == SLACK_PROVIDER.key:
+        return settings.SLACK_CLIENT_ID, settings.SLACK_CLIENT_SECRET
     return "", ""
 
 
@@ -543,6 +596,8 @@ def _native_integration_not_connected_guidance(provider: NativeIntegrationProvid
             f"Ask the user to open {setup_url}, connect Google Drive, "
             "and choose the relevant file."
         )
+    if provider.key == SLACK_PROVIDER.key:
+        return f"Ask the user to open {setup_url}, connect Slack, and choose Slack channels for this agent."
     return f"Ask the user to open {setup_url} and connect {provider.display_name}."
 
 
@@ -987,6 +1042,11 @@ def native_integration_capability_for_request(
             capability_key = "hubspot_deals_read" if is_search or not is_write else "hubspot_deals_write"
         elif "/crm/v3/owners" in path or "/crm/v3/properties" in path:
             capability_key = "hubspot_metadata_read"
+    elif provider.key == SLACK_PROVIDER.key:
+        if path.endswith("/conversations.list"):
+            capability_key = "slack_channel_discovery"
+        elif path.endswith("/chat.postmessage"):
+            capability_key = "slack_messages_send"
 
     if not capability_key:
         return None

@@ -87,7 +87,15 @@ from .send_discord_message import (
     get_send_discord_message_tool,
     execute_send_discord_message,
 )
-from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
+from .slack_channel_subscriptions import (
+    get_slack_channel_subscriptions_tool,
+    execute_slack_channel_subscriptions,
+)
+from .send_slack_message import (
+    get_send_slack_message_tool,
+    execute_send_slack_message,
+)
+from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY, SLACK_NATIVE_SYSTEM_SKILL_KEY
 from .meta_gobii import (
     execute_meta_gobii_tool,
     get_meta_gobii_tool_definition,
@@ -113,6 +121,8 @@ RUN_COMMAND_TOOL_NAME = "run_command"
 META_ADS_TOOL_NAME = "meta_ads"
 DISCORD_CHANNEL_SUBSCRIPTIONS_TOOL_NAME = "discord_channel_subscriptions"
 DISCORD_SEND_MESSAGE_TOOL_NAME = "send_discord_message"
+SLACK_CHANNEL_SUBSCRIPTIONS_TOOL_NAME = "slack_channel_subscriptions"
+SLACK_SEND_MESSAGE_TOOL_NAME = "send_slack_message"
 PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
@@ -293,6 +303,18 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_send_discord_message,
         "search_hidden": True,
         "system_skill_key": DISCORD_NATIVE_SYSTEM_SKILL_KEY,
+    },
+    SLACK_CHANNEL_SUBSCRIPTIONS_TOOL_NAME: {
+        "definition": get_slack_channel_subscriptions_tool,
+        "executor": execute_slack_channel_subscriptions,
+        "search_hidden": True,
+        "system_skill_key": SLACK_NATIVE_SYSTEM_SKILL_KEY,
+    },
+    SLACK_SEND_MESSAGE_TOOL_NAME: {
+        "definition": get_send_slack_message_tool,
+        "executor": execute_send_slack_message,
+        "search_hidden": True,
+        "system_skill_key": SLACK_NATIVE_SYSTEM_SKILL_KEY,
     },
     **{
         tool_name: {

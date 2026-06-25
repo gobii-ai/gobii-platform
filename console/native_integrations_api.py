@@ -15,6 +15,7 @@ from django.views import View
 
 from api.services.native_integrations import (
     GOOGLE_DRIVE_PROVIDER,
+    SLACK_PROVIDER,
     NativeIntegrationAuthError,
     NativeIntegrationConfigurationError,
     NativeIntegrationFileListError,
@@ -33,6 +34,10 @@ from api.services.native_integrations import (
     refresh_oauth_credentials_if_needed,
     request_oauth_token,
     save_native_integration_credentials,
+)
+from api.services.slack_bot import (
+    disconnect_slack_native_integration,
+    sync_slack_workspace_from_oauth,
 )
 from api.services.native_integration_events import (
     normalize_native_integration_event_files,
@@ -200,11 +205,12 @@ class NativeIntegrationConnectAPIView(LoginRequiredMixin, View):
         state = _sign_oauth_state(provider.key, request, owner_scope, owner_user, owner_org)
         redirect_uri = request.build_absolute_uri(reverse("console-native-integration-oauth-callback-view"))
 
+        scope_string = ",".join(provider.scopes) if provider.key == SLACK_PROVIDER.key else provider.scope_string
         query = {
             "response_type": "code",
             "client_id": client_id,
             "redirect_uri": redirect_uri,
-            "scope": provider.scope_string,
+            "scope": scope_string,
             "state": state,
         }
         query.update(provider.authorization_params)
@@ -282,6 +288,16 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
                 error_payload["status_code"] = exc.status_code
                 error_payload["body"] = exc.response_body
             return JsonResponse(error_payload, status=exc.status_code)
+        if provider.key == SLACK_PROVIDER.key and token_payload.get("ok") is False:
+            slack_error = str(token_payload.get("error") or "unknown_error")
+            return JsonResponse(
+                {
+                    "error": "Token endpoint returned an error",
+                    "detail": f"Slack OAuth failed: {slack_error}.",
+                    "body": token_payload,
+                },
+                status=400,
+            )
 
         existing_credentials = {}
         existing_secret = get_native_integration_secret(provider.key, owner_user, owner_org)
@@ -300,9 +316,19 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
         except ValidationError as exc:
             return _validation_error_response(exc, status=502)
 
-        with transaction.atomic():
-            secret = save_native_integration_credentials(provider, owner_user, owner_org, credentials)
-            disable_overlapping_pipedream_tools_for_native_integration(provider.key, owner_user, owner_org)
+        try:
+            with transaction.atomic():
+                secret = save_native_integration_credentials(provider, owner_user, owner_org, credentials)
+                if provider.key == SLACK_PROVIDER.key:
+                    sync_slack_workspace_from_oauth(
+                        token_payload,
+                        owner_user=owner_user,
+                        owner_org=owner_org,
+                        claimed_by=request.user,
+                    )
+                disable_overlapping_pipedream_tools_for_native_integration(provider.key, owner_user, owner_org)
+        except ValidationError as exc:
+            return _validation_error_response(exc)
 
         return JsonResponse(
             {
@@ -329,6 +355,8 @@ class NativeIntegrationRevokeAPIView(LoginRequiredMixin, View):
         except PermissionDenied as exc:
             return _permission_denied_response(exc)
         deleted = delete_native_integration_credentials(provider.key, owner_user, owner_org)
+        if provider.key == SLACK_PROVIDER.key:
+            disconnect_slack_native_integration(owner_user=owner_user, organization=owner_org)
         return JsonResponse({"revoked": deleted})
 
 

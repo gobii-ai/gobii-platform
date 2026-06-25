@@ -14,6 +14,7 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
 APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
 HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
+SLACK_NATIVE_SYSTEM_SKILL_KEY = "slack_native"
 CODE_WORK_SYSTEM_SKILL_KEY = "code_work"
 
 
@@ -701,8 +702,8 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     query_aliases=(
         "discord",
         "connected app messages",
-        "slack receive",
-        "slack messages",
+        "discord receive",
+        "discord messages",
     ),
     prompt_instructions=(
         "Use the native Gobii Discord bot tools for Discord setup and replies.\n"
@@ -727,6 +728,61 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"
         "If channel discovery says the Gobii bot cannot list channels, send the returned `bot_invite_url` as a fallback repair link and ask the user to install the bot in the target server before retrying discovery."
+    ),
+)
+
+
+SLACK_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=SLACK_NATIVE_SYSTEM_SKILL_KEY,
+    name="Slack",
+    search_summary="Provision inbound Slack channel subscriptions through native Slack OAuth.",
+    tool_names=("slack_channel_subscriptions", "send_slack_message"),
+    enables=(
+        "receive Slack channel messages through native Slack Events API subscriptions",
+        "discover public and private Slack channels visible to the connected Slack app",
+        "send Slack replies with the agent name and avatar as display-level message identity",
+        "inspect and disable Slack channel subscriptions",
+        "turn selected Slack channels into agent conversations",
+    ),
+    use_when=(
+        "the user wants the agent to receive Slack messages",
+        "the user asks to monitor or listen to a Slack channel",
+        "the user wants the agent to interact with Slack over time",
+        "the user wants Slack messages to wake the agent",
+        "the user asks whether Slack channel subscriptions are active",
+    ),
+    query_aliases=(
+        "slack",
+        "slack receive",
+        "slack messages",
+        "slack channel subscription",
+        "slack bot",
+    ),
+    prompt_instructions=(
+        "Use the native Gobii Slack tools for Slack setup and replies. Do not use Pipedream Slack tools when this "
+        "native skill can perform the task.\n"
+        "When the user asks to connect, set up, enable, or test Slack, immediately call `slack_channel_subscriptions` "
+        "with `action=\"discover_channels\"`; do not ask whether to start setup first. Never invent Slack setup links "
+        "or format separate setup steps yourself; only send URLs returned by the tool.\n"
+        "Use `slack_channel_subscriptions` to manage inbound Slack channel subscriptions that wake this agent. "
+        "V1 supports public and private channels visible to the connected Slack app, not DMs or MPIMs. Multiple agents "
+        "may subscribe to the same workspace/channel; each subscribed agent receives inbound channel messages.\n"
+        "Before asking the user for Slack channel IDs, call `slack_channel_subscriptions` with `action=\"discover_channels\"`. "
+        "If the tool returns `action_required`, send the returned `setup_url` as the single setup link. Do not request "
+        "Slack channel IDs as secrets.\n"
+        "After the user says Slack setup is complete, call `discover_channels` again. If several channels are returned, "
+        "ask the user to choose by channel name, then call `ensure` with the selected `workspace_id`, `channel_id`, "
+        "`channel_name`, and `channel_type` so future channel messages wake this agent.\n"
+        "Use `send_slack_message` for outbound Slack text replies to subscribed channels. Pass `channel_id`, `message`, "
+        "and the correct `will_continue_work` value. V1 is text-only; do not claim to upload files or attachments.\n"
+        "Slack identity is display-only: the backend uses `chat.postMessage` with `chat:write.customize` to set the "
+        "message username and avatar URL to the agent's display name/avatar when possible. Slack does not create "
+        "separate mentionable bot users, separate per-agent DMs, or per-agent Slack identities. Do not tell users they "
+        "can mention an individual agent bot.\n"
+        "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when "
+        "the user asks to stop receiving messages from a subscribed Slack channel. If Slack returns missing_scope, "
+        "not_in_channel, or channel_not_found guidance, share the returned reconnect or setup guidance and retry only "
+        "after the user repairs access."
     ),
 )
 
@@ -861,5 +917,6 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     HUBSPOT_NATIVE_SYSTEM_SKILL.skill_key: HUBSPOT_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     DISCORD_NATIVE_SYSTEM_SKILL.skill_key: DISCORD_NATIVE_SYSTEM_SKILL,
+    SLACK_NATIVE_SYSTEM_SKILL.skill_key: SLACK_NATIVE_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,
 }
