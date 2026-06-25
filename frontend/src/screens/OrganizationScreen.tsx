@@ -648,29 +648,35 @@ export function OrganizationScreen() {
             {nameMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{nameMessage}</p> : null}
           </div>
         </form>
-        <div className="profile-screen__form-grid">
-          <label className="profile-screen__field profile-screen__field--wide">
-            <span>Member Agent Creation</span>
-            <span className="inline-flex items-center gap-3 text-sm font-normal text-slate-700">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                checked={data.organization.membersCanCreateAgents}
-                disabled={!canEditMemberAgentCreation || savingAgentCreation}
-                onChange={(event) => void handleMemberAgentCreationChange(event.target.checked)}
-              />
-              <span>Members may create organization agents</span>
-            </span>
-            {agentCreationErrors.map((message) => (
-              <em key={message}>{message}</em>
-            ))}
-          </label>
-        </div>
-        <div className="profile-screen__actions">
-          {agentCreationMessage ? (
-            <p className="profile-screen__feedback profile-screen__feedback--success">{agentCreationMessage}</p>
-          ) : null}
-        </div>
+        {canEditMemberAgentCreation ? (
+          <>
+            <div className="organization-screen__setting-group">
+              <label className="organization-screen__setting-row">
+                <span className="organization-screen__setting-copy">
+                  <span className="organization-screen__setting-title">Member Agent Creation</span>
+                  <span className="organization-screen__setting-description">Members may create organization agents</span>
+                </span>
+                <span className="organization-screen__setting-toggle">
+                  <input
+                    type="checkbox"
+                    checked={data.organization.membersCanCreateAgents}
+                    disabled={savingAgentCreation}
+                    onChange={(event) => void handleMemberAgentCreationChange(event.currentTarget.checked)}
+                  />
+                  <span className="organization-screen__setting-switch" aria-hidden="true" />
+                </span>
+              </label>
+              {agentCreationErrors.map((message) => (
+                <em key={message} className="organization-screen__setting-error">{message}</em>
+              ))}
+            </div>
+            <div className="profile-screen__actions">
+              {agentCreationMessage ? (
+                <p className="profile-screen__feedback profile-screen__feedback--success">{agentCreationMessage}</p>
+              ) : null}
+            </div>
+          </>
+        ) : null}
       </section>
 
       <CustomInstructionsSection
