@@ -62,7 +62,7 @@ When your instructions are built into the platform instead of pasted into prompt
 
 Custom Instructions live in your Gobii profile settings. Open Settings, then select Profile.
 
-### Personal profile
+### Personal Profile
 
 Save your own tone, workflow, and preferences.
 
