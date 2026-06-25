@@ -58,6 +58,7 @@ JUDGE_RUN_COOLDOWN_SECONDS = 60 * 45
 JUDGE_DAILY_RUN_LIMIT = 6
 REPORT_TOOL_NAME = "report_judge_suggestion"
 NO_ACTION = "no_action"
+JUDGE_FAILED_TOOL_TRIGGER_IGNORED_TOOL_NAMES = frozenset({"send_chat_message"})
 ALLOWED_SUGGESTION_TYPES = {
     PersistentAgentJudgeSuggestion.SuggestionType.INTELLIGENCE_UPGRADE,
     PersistentAgentJudgeSuggestion.SuggestionType.STONEWALL_REFRAME,
@@ -740,7 +741,12 @@ def _trigger_reasons(
     reasons: list[str] = []
     trigger_tool_calls = recent_tool_calls[:JUDGE_TRIGGER_TOOL_LIMIT]
     trigger_messages = recent_messages[:JUDGE_TRIGGER_MESSAGE_LIMIT]
-    recent_errors = [call for call in trigger_tool_calls if (call.status or "").lower() == "error"]
+    recent_errors = [
+        call
+        for call in trigger_tool_calls
+        if (call.status or "").lower() == "error"
+        and (call.tool_name or "") not in JUDGE_FAILED_TOOL_TRIGGER_IGNORED_TOOL_NAMES
+    ]
     if len(recent_errors) >= JUDGE_FAILED_TOOL_THRESHOLD:
         reasons.append("failed_tool_calls")
 

@@ -128,14 +128,14 @@ class AgentJudgeTests(TestCase):
                 description=f"Step {index}",
             )
 
-    def _add_error_tool_call(self, index: int) -> None:
+    def _add_error_tool_call(self, index: int, *, tool_name: str = "read_file") -> None:
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description=f"Tool error {index}",
         )
         PersistentAgentToolCall.objects.create(
             step=step,
-            tool_name="read_file",
+            tool_name=tool_name,
             tool_params={"path": f"/tmp/{index}"},
             result='{"status":"error","message":"failed"}',
             status="error",
@@ -206,6 +206,23 @@ class AgentJudgeTests(TestCase):
 
         self.assertIsNotNone(trigger)
         self.assertIn("failed_tool_calls", trigger.reasons)
+
+    def test_failed_send_chat_message_tool_calls_do_not_trigger_judge(self):
+        for index in range(3):
+            self._add_error_tool_call(index, tool_name="send_chat_message")
+
+        trigger = build_judge_trigger(self.agent, tools=[])
+
+        self.assertIsNone(trigger)
+
+    def test_failed_send_chat_message_tool_calls_do_not_count_toward_failure_threshold(self):
+        self._add_error_tool_call(0, tool_name="send_chat_message")
+        self._add_error_tool_call(1, tool_name="read_file")
+        self._add_error_tool_call(2, tool_name="http_request")
+
+        trigger = build_judge_trigger(self.agent, tools=[])
+
+        self.assertIsNone(trigger)
 
     def test_negative_language_trigger_only_checks_latest_user_message(self):
         self._add_steps(1)

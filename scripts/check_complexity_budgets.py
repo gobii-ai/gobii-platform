@@ -334,7 +334,6 @@ def _measure_prompt_scenario(
     planning: bool = False,
     web_session: bool = False,
 ) -> dict[str, int]:
-    from api.agent.core.event_processing import _gate_send_chat_tool_for_delivery
     from api.agent.core.prompt_context import build_prompt_context_preview, get_agent_tools
     from api.services.web_sessions import start_web_session
 
@@ -350,11 +349,7 @@ def _measure_prompt_scenario(
     )
     system_message = next(message["content"] for message in messages if message["role"] == "system")
     user_message = next(message["content"] for message in messages if message["role"] == "user")
-    tools = _gate_send_chat_tool_for_delivery(
-        get_agent_tools(agent),
-        agent,
-        has_deliverable_web_target_now=web_session,
-    )
+    tools = get_agent_tools(agent)
 
     system_bytes = _text_size(system_message)
     user_bytes = _text_size(user_message)

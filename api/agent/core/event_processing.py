@@ -32,7 +32,6 @@ from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
-from waffle import switch_is_active
 
 from observability import mark_span_failed_with_exception
 from .budget import (
@@ -156,7 +155,7 @@ from ..tools.tool_manager import (
     should_skip_auto_substitution,
 )
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
-from ..tools.web_chat_sender import execute_send_chat_message, has_other_contact_channel
+from ..tools.web_chat_sender import execute_send_chat_message
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
 from ..tools.agent_variables import (
@@ -206,7 +205,6 @@ from api.services.web_sessions import (
     get_deliverable_web_sessions,
     has_deliverable_web_session,
 )
-from constants.feature_flags import AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -3216,130 +3214,6 @@ def _finalize_tool_batch(
     )
 
 
-def _gate_send_chat_tool_for_delivery(
-    tools: List[dict],
-    agent: PersistentAgent,
-    *,
-    has_deliverable_web_target_now: Optional[bool] = None,
-) -> List[dict]:
-    """Hide send_chat_message only when no deliverable web target exists and non-web fallback channels are available."""
-    if has_deliverable_web_target_now is None:
-        has_deliverable_web_target_now = has_deliverable_web_session(agent)
-    if has_deliverable_web_target_now:
-        return tools
-    owner_user = getattr(agent, "user", None)
-    if owner_user and not has_other_contact_channel(agent, owner_user):
-        return tools
-
-    filtered = [
-        tool for tool in tools
-        if not (
-            isinstance(tool, dict)
-            and isinstance(tool.get("function"), dict)
-            and tool.get("function", {}).get("name") == "send_chat_message"
-        )
-    ]
-    return filtered if len(filtered) < len(tools) else tools
-
-
-def _track_post_completion_deliverable_web_session_activation(
-    agent: PersistentAgent,
-    *,
-    run_sequence_number: Optional[int],
-    iteration_index: int,
-    retry_switch_active: bool,
-    retry_performed: bool,
-) -> None:
-    """Emit analytics when a deliverable web session appears after completion returns."""
-    if not agent.user_id:
-        return
-
-    analytics_props: dict[str, Any] = {
-        "agent_id": str(agent.id),
-        "agent_name": agent.name,
-        "run_sequence_number": run_sequence_number,
-        "iteration": iteration_index,
-        "retry_reason": "web_session_activated_mid_completion",
-        "retry_strategy": "discard_and_rerun_once" if retry_performed else "none",
-        "retry_switch_active": retry_switch_active,
-        "retry_performed": retry_performed,
-        "had_deliverable_web_target_at_start": False,
-    }
-    props_with_org = Analytics.with_org_properties(
-        analytics_props,
-        organization=getattr(agent, "organization", None),
-    )
-    Analytics.track_event(
-        user_id=agent.user_id,
-        event=AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
-        source=AnalyticsSource.AGENT,
-        properties=props_with_org,
-    )
-
-
-def _should_retry_after_post_completion_deliverable_web_session_activation(
-    agent: PersistentAgent,
-    *,
-    run_sequence_number: Optional[int],
-    iteration_index: int,
-    max_remaining: int,
-    retry_used: bool,
-) -> bool:
-    """
-    Decide whether to retry once after a deliverable web session appears and emit analytics.
-
-    Returns True when the caller should discard current completion output and retry
-    on the next loop iteration.
-    """
-    retry_switch_active = False
-    try:
-        retry_switch_active = switch_is_active(
-            AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
-        )
-    except Exception:
-        logger.warning(
-            "Failed to evaluate switch %s; skipping mid-completion retry.",
-            AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION,
-            exc_info=True,
-        )
-        retry_switch_active = False
-
-    has_iterations_remaining = iteration_index < max_remaining
-    retry_performed = (
-        retry_switch_active
-        and not retry_used
-        and has_iterations_remaining
-    )
-
-    try:
-        _track_post_completion_deliverable_web_session_activation(
-            agent,
-            run_sequence_number=run_sequence_number,
-            iteration_index=iteration_index,
-            retry_switch_active=retry_switch_active,
-            retry_performed=retry_performed,
-        )
-    except Exception:
-        logger.exception(
-            "Failed to emit analytics for post-completion deliverable web-session activation (agent=%s)",
-            agent.id,
-        )
-
-    if retry_performed:
-        logger.info(
-            "Agent %s: web session activated mid-completion; discarding completion output and retrying next iteration.",
-            agent.id,
-        )
-        return True
-
-    if retry_switch_active and not has_iterations_remaining:
-        logger.info(
-            "Agent %s: web session activated mid-completion but no iterations remain; processing current completion.",
-            agent.id,
-        )
-    return False
-
-
 def _get_latest_deliverable_web_session(agent: PersistentAgent):
     for session in get_deliverable_web_sessions(agent):
         if session.user_id is not None:
@@ -5666,7 +5540,6 @@ def _run_agent_loop(
     inferred_message_continue_streak = 0
     pending_reply_after_progress = False
     continuation_notice: Optional[str] = None
-    web_session_activation_retry_used = False
     empty_response_loop_retries = 0
 
     def _current_human_inbound_generation() -> int:
@@ -5754,11 +5627,7 @@ def _run_agent_loop(
                 if credit_snapshot is not None:
                     credit_snapshot["daily_state"] = daily_state
 
-                iteration_tools = _gate_send_chat_tool_for_delivery(
-                    tools,
-                    agent,
-                    has_deliverable_web_target_now=had_deliverable_web_target_at_start,
-                )
+                iteration_tools = tools
                 if is_daily_hard_limit_message_only_mode(daily_state):
                     iteration_tools = filter_tools_for_daily_limit_message_only_mode(iteration_tools)
                 iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
@@ -6088,23 +5957,6 @@ def _run_agent_loop(
                 # attach it to steps because PersistentAgentStep.save() would otherwise consume
                 # more task credits via completion billing.
                 _ensure_completion()
-
-                deliverable_web_session_activated_post_completion = (
-                    not had_deliverable_web_target_at_start and has_deliverable_web_session(agent)
-                )
-                if deliverable_web_session_activated_post_completion:
-                    if _should_retry_after_post_completion_deliverable_web_session_activation(
-                        agent,
-                        run_sequence_number=run_sequence_number,
-                        iteration_index=i + 1,
-                        max_remaining=max_remaining,
-                        retry_used=web_session_activation_retry_used,
-                    ):
-                        web_session_activation_retry_used = True
-                        continuation_notice = (
-                            "Web chat became active mid-run; rerunning once with updated tool availability."
-                        )
-                        continue
 
                 def _attach_completion(step_kwargs: dict) -> None:
                     if suppress_step_completion_billing:

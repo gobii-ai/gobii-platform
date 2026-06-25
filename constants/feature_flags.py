@@ -150,11 +150,6 @@ MULTISEND_ENABLED = "multisend_enabled"
 # they can be added to an agent allowlist or requested by an agent.
 SMS_CONTACT_PURPOSE_REQUIRED = "sms_contact_purpose_required"
 
-# Retry one completion when web chat session becomes active mid-iteration.
-AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION = (
-    "agent_retry_completion_on_web_session_activation"
-)
-
 # Owner-wide execution pause controls for billing lifecycle events.
 OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY = (
     "owner_execution_pause_on_billing_delinquency"
