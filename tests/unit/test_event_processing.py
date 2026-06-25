@@ -2002,13 +2002,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("<implied_send_status>", combined)
         self.assertNotIn("implied_send_status", combined)
 
-    def test_agent_tools_include_send_chat_message_without_active_web_session_when_verified_fallback_exists(self):
-        EmailAddress.objects.create(
-            user=self.user,
-            email=self.user.email,
-            verified=True,
-            primary=True,
-        )
+    def test_agent_tools_include_send_chat_message(self):
         tools = get_agent_tools(self.agent)
         tool_names = [
             entry.get("function", {}).get("name")
@@ -3312,14 +3306,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertEqual(mock_completion.call_count, 2, "Warning status should force a follow-up iteration.")
 
-    def test_agent_loop_includes_send_chat_message_without_active_web_session_when_verified_fallback_exists(self):
-        EmailAddress.objects.create(
-            user=self.user,
-            email=self.user.email,
-            verified=True,
-            primary=True,
-        )
-
+    def test_agent_loop_includes_send_chat_message(self):
         message_first = MagicMock()
         message_first.tool_calls = None
         message_first.function_call = None
