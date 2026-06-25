@@ -3,6 +3,7 @@ Custom browser use agent action for solving CAPTCHA with CapSolver.
 """
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -27,6 +28,23 @@ CAPSOLVER_REQUEST_TIMEOUT_SEC = 30
 CAPSOLVER_DEFAULT_POLL_INTERVAL_SEC = 5
 CAPSOLVER_DEFAULT_MAX_WAIT_SEC = 120
 CAPTCHA_DETECTION_ERRORS = (RuntimeError, ConnectionError)
+CAPSOLVER_TASK_TYPE_ALIASES = {
+    "cloudflare_turnstile": "AntiTurnstileTaskProxyLess",
+    "cf_turnstile": "AntiTurnstileTaskProxyLess",
+    "turnstile": "AntiTurnstileTaskProxyLess",
+    "g_recaptcha": "ReCaptchaV2TaskProxyLess",
+    "recaptcha": "ReCaptchaV2TaskProxyLess",
+    "recaptcha_v2": "ReCaptchaV2TaskProxyLess",
+}
+DETECTION_PREFERRED_TASK_TYPE_ALIASES = {
+    "cf_challenge",
+    "cloudflare",
+    "cloudflare_challenge",
+    "cloudflare_managed_challenge",
+    "managed_challenge",
+    "verify_human",
+    "verify_you_are_human",
+}
 
 
 @dataclass(frozen=True)
@@ -45,6 +63,10 @@ class CaptchaOption(BaseModel):
     disabled: Optional[bool] = None
 
 
+def _task_type_alias_key(task_type: str) -> str:
+    return task_type.strip().lower().replace("-", "_").replace(" ", "_")
+
+
 def _normalize_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
     if "websiteURL" not in normalized and "website_url" in normalized:
@@ -53,6 +75,11 @@ def _normalize_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
         normalized["websiteKey"] = normalized.pop("website_key")
     if "type" not in normalized and "task_type" in normalized:
         normalized["type"] = normalized.pop("task_type")
+    if "type" in normalized and isinstance(normalized["type"], str):
+        normalized["type"] = CAPSOLVER_TASK_TYPE_ALIASES.get(
+            _task_type_alias_key(normalized["type"]),
+            normalized["type"],
+        )
     normalized.pop("disabled", None)
     return normalized
 
@@ -188,6 +215,29 @@ def _capsolver_error_message(payload: Any) -> Optional[str]:
     return "CapSolver returned an error response."
 
 
+def _capsolver_response_payload(response: httpx.Response) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except json.JSONDecodeError:
+        response.raise_for_status()
+        return {"errorId": 1, "errorDescription": "CapSolver returned an empty response."}
+
+    if response.is_error:
+        if isinstance(payload, dict):
+            if _capsolver_error_message(payload):
+                return payload
+            payload = dict(payload)
+            payload.setdefault("errorId", 1)
+            payload.setdefault("errorCode", f"HTTP_{response.status_code}")
+            payload.setdefault("errorDescription", response.reason_phrase)
+            return payload
+        response.raise_for_status()
+
+    if isinstance(payload, dict):
+        return payload
+    return {"errorId": 1, "errorDescription": "CapSolver returned an unexpected response."}
+
+
 async def _capsolver_create_task(
     client: httpx.AsyncClient,
     api_key: str,
@@ -198,8 +248,7 @@ async def _capsolver_create_task(
         json={"clientKey": api_key, "task": task_payload},
         timeout=CAPSOLVER_REQUEST_TIMEOUT_SEC,
     )
-    response.raise_for_status()
-    return response.json()
+    return _capsolver_response_payload(response)
 
 
 async def _capsolver_poll_result(
@@ -217,10 +266,11 @@ async def _capsolver_poll_result(
             json={"clientKey": api_key, "taskId": task_id},
             timeout=CAPSOLVER_REQUEST_TIMEOUT_SEC,
         )
-        response.raise_for_status()
-        payload = response.json()
+        payload = _capsolver_response_payload(response)
         status = payload.get("status") if isinstance(payload, dict) else None
         if status in ("ready", "failed"):
+            return payload
+        if _capsolver_error_message(payload):
             return payload
         if time.monotonic() >= deadline:
             if isinstance(payload, dict):
@@ -265,6 +315,24 @@ async def _inject_captcha_token(page, token: str) -> int:
             };
             selectors.forEach((selector) => {
                 document.querySelectorAll(selector).forEach(applyToken);
+            });
+            document.querySelectorAll('.cf-turnstile[data-sitekey]').forEach((widget) => {
+                const form = widget.closest('form');
+                const container = form || widget.parentElement || document.body;
+                if (!container.querySelector('[name="cf-turnstile-response"]')) {
+                    const field = document.createElement('input');
+                    field.type = 'hidden';
+                    field.id = 'cf-turnstile-response';
+                    field.name = 'cf-turnstile-response';
+                    container.appendChild(field);
+                    applyToken(field);
+                }
+
+                const callbackName = widget.getAttribute('data-callback');
+                const callback = callbackName && window[callbackName];
+                if (typeof callback === 'function') {
+                    callback(token);
+                }
             });
             return updated;
         }
@@ -341,6 +409,14 @@ def _build_task_payload(
         task_payload = _normalize_task_payload(selected_task_payload)
 
     task_payload = _normalize_task_payload(task_payload)
+    task_type = task_payload.get("type")
+    if (
+        detection
+        and isinstance(task_type, str)
+        and _task_type_alias_key(task_type) in DETECTION_PREFERRED_TASK_TYPE_ALIASES
+    ):
+        task_payload["type"] = detection.task_type
+
     if "websiteURL" not in task_payload and page_url:
         task_payload["websiteURL"] = page_url
     if "websiteKey" not in task_payload and detection:
@@ -415,7 +491,7 @@ def register_captcha_actions(
 ) -> None:
     """Register the CAPTCHA solver action with the given controller."""
 
-    @controller.action("Solve CAPTCHA using CapSolver API.")
+    @controller.action("Solve CAPTCHA using CapSolver API.", terminates_sequence=True)
     async def solve_captcha(
         browser_session: BrowserSession,
         detect_timeout_ms: Optional[int] = None,
@@ -430,7 +506,7 @@ def register_captcha_actions(
                 organization=organization,
                 properties={"captcha_provider": "capsolver"},
             )
-            api_key = getattr(settings, "CAPSOLVER_API_KEY", "")
+            api_key = settings.CAPSOLVER_API_KEY
             if not api_key:
                 return _captcha_failure_result(
                     "Error: CAPSOLVER_API_KEY is not configured.",
@@ -607,6 +683,7 @@ def register_captcha_actions(
             if detection:
                 message_parts.append(f"type: {detection.captcha_type}")
             message_parts.append(f"token_fields_updated: {updated_fields}")
+            success_message = "; ".join(message_parts)
 
             _track_captcha_event(
                 event=AnalyticsEvent.PERSISTENT_AGENT_CAPTCHA_SUCCEEDED,
@@ -620,6 +697,7 @@ def register_captcha_actions(
                 },
             )
             return ActionResult(
-                extracted_content="; ".join(message_parts),
-                include_in_memory=True,
+                extracted_content=success_message,
+                long_term_memory=success_message,
+                metadata={"include_screenshot": True},
             )
