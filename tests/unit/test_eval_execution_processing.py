@@ -139,20 +139,23 @@ class EvalExecutionProcessingTests(TestCase):
         )
         mock_delay.assert_not_called()
 
-    @patch("api.evals.execution.time.sleep")
     @patch("api.agent.core.llm_config.get_llm_config_with_failover")
     @patch("api.evals.execution.run_completion")
-    def test_llm_judge_retries_missing_judgment_tool(self, mock_completion, mock_configs, mock_sleep):
+    def test_llm_judge_falls_back_to_json_when_judgment_tool_missing(self, mock_completion, mock_configs):
         mock_configs.return_value = [("test_provider", "test-model", {})]
-        judgment_call = SimpleNamespace(
-            function=SimpleNamespace(
-                name="submit_judgment",
-                arguments=json.dumps({"choice": "Yes", "reasoning": "The condition is satisfied."}),
-            )
-        )
         mock_completion.side_effect = [
             SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[]))]),
-            SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[judgment_call]))]),
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {"choice": "Yes", "reasoning": "The condition is satisfied."}
+                            )
+                        )
+                    )
+                ]
+            ),
         ]
 
         choice, reasoning = self.tools.llm_judge(
@@ -161,13 +164,15 @@ class EvalExecutionProcessingTests(TestCase):
         )
 
         self.assertEqual(choice, "Yes")
-        self.assertEqual(reasoning, "The condition is satisfied.")
+        self.assertIn("Structured judge fallback used", reasoning)
+        self.assertIn("The condition is satisfied.", reasoning)
         self.assertEqual(mock_completion.call_count, 2)
         self.assertEqual(
-            mock_completion.call_args.kwargs["tool_choice"],
+            mock_completion.call_args_list[0].kwargs["tool_choice"],
             {"type": "function", "function": {"name": "submit_judgment"}},
         )
-        mock_sleep.assert_called_once_with(1.0)
+        self.assertNotIn("tools", mock_completion.call_args_list[1].kwargs)
+        self.assertNotIn("tool_choice", mock_completion.call_args_list[1].kwargs)
 
     @patch("api.agent.core.llm_config.get_llm_config_with_failover")
     @patch("api.evals.execution.run_completion")

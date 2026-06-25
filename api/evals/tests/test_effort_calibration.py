@@ -34,6 +34,7 @@ from api.evals.scenarios.effort_calibration import (
     _sqlite_result_text_reads,
     _web_query_value,
 )
+from api.evals.scenarios.monitor_pollution import BACKGROUND_DRAIN_TIMEOUT_SECONDS
 from api.evals.scenarios.sqlite_tool_results import (
     INVENTORY_URLS,
     LISTING_URLS,
@@ -80,6 +81,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIsNotNone(suite)
         self.assertEqual(suite.scenario_slugs, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
         self.assertIn(SQLITE_ITEM_LINK_REPORT, suite.scenario_slugs)
+
+    def test_dedupe_requery_answer_assertion_does_not_force_specific_claim_category(self):
+        self.assertEqual(SqliteDedupeRequeryScenario.required_terms, ())
 
     def test_near_duplicate_query_detector_flags_repetitive_searches(self):
         duplicates = _find_near_duplicate_texts(
@@ -227,6 +231,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(scenario.sourced_answer_task_name, "verify_listing_links_in_report")
         self.assertIn(scenario.sourced_answer_task_name, task_names)
         self.assertNotIn("verify_sourced_answer", task_names)
+
+    def test_monitor_pollution_allows_slow_background_browser_drain(self):
+        self.assertGreaterEqual(BACKGROUND_DRAIN_TIMEOUT_SECONDS, 600)
 
     def test_sqlite_tool_result_usage_rejects_manual_values_working_table(self):
         scenario, recorded = SqliteToolResultScenario(), []
@@ -990,7 +997,53 @@ class FirstRunPromptCalibrationTests(TestCase):
             context, _, _ = build_prompt_context_preview(agent, is_first_run=True)
 
         system_prompt = next(message["content"] for message in context if message["role"] == "system")
-        self.assertIn("For clear requests, including one-off factual/research questions", system_prompt)
+        self.assertIn("For clear requests other than named integration setup/use", system_prompt)
+        self.assertIn("including one-off factual/research questions", system_prompt)
         self.assertIn("Do not validate, fetch, parse, or test provided URLs", system_prompt)
         self.assertIn("call end_planning in the same response as any welcome", system_prompt)
         self.assertIn("Do not say you will check, validate, test, fetch, or inspect a provided feed", system_prompt)
+
+    def test_system_prompt_has_delivery_and_config_guardrails(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="delivery-guardrails@example.com",
+            email="delivery-guardrails@example.com",
+        )
+        EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Delivery Guardrails Browser")
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address="delivery-guardrails-web",
+        )
+        agent = PersistentAgent.objects.create(
+            name="Delivery Guardrails Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Do one-off work carefully.",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+            preferred_contact_endpoint=endpoint,
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ), patch(
+            "api.agent.core.prompt_context.get_llm_config_with_failover",
+            return_value=[("endpoint", "openai/gpt-4o-mini", {})],
+        ):
+            context, _, _ = build_prompt_context_preview(agent, is_first_run=False)
+
+        system_prompt = next(message["content"] for message in context if message["role"] == "system")
+        self.assertIn("Use exactly the requested delivery channel", system_prompt)
+        self.assertIn("Set false after delivery/config and no active work", system_prompt)
+        self.assertIn("Do not set a schedule merely to continue or remember a single research question", system_prompt)
+        self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
+        self.assertIn("do not search for a SQLite/database tool", system_prompt)
+        self.assertIn("enabled tool fits -> use directly", system_prompt)
+        self.assertIn("public exact URL + http/scrape tool callable", system_prompt)
+        self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
+        self.assertIn("exact docs/blog/changelog/release-notes URL", system_prompt)
+        self.assertIn("Charts: create only when requested/materially useful", system_prompt)
+        self.assertIn("Finished answers/briefings/charts/lookups/one-off research are not charter changes", system_prompt)
+        self.assertIn("Email/SMS imperatives map directly to send_email/send_sms", system_prompt)
+        self.assertIn("Do not downgrade requested email/SMS delivery to chat", system_prompt)

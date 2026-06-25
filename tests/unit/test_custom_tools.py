@@ -221,8 +221,6 @@ class CustomToolsTests(TestCase):
             "datetime.now(timezone.utc)",
             "not datetime.timezone",
             "Every success or error return dict should include `next_action`",
-            "do_not_repeat_manually=true",
-            "source-code next_action text exactly",
             "what changed or which outputs are ready",
             "remaining work",
             "verification guidance",
@@ -230,7 +228,6 @@ class CustomToolsTests(TestCase):
             "scrape_ready_urls",
             "accepted ready-to-use values",
             "require source params like `urls`, `domains`, `candidates`, `source_table`, or `input_table`",
-            "Do not repeat manually; verify read-only",
         ):
             self.assertIn(text, create_tool_description)
 
@@ -252,19 +249,16 @@ class CustomToolsTests(TestCase):
             "Never invoke a custom tool with empty params",
             "validation/dedupe",
             "Every success or error return dict should include `next_action`",
-            "do_not_repeat_manually=true",
-            "source-code next_action text exactly",
             "what changed or which outputs are ready",
             "remaining work or cursor",
             "verification guidance",
             "direct_post_urls",
             "scrape_ready_urls",
             "accepted ready-to-use values",
-            "Do not repeat manually; verify read-only",
         ):
             self.assertIn(text, skill_instructions)
 
-    def test_side_effect_source_requires_manual_replay_prevention(self):
+    def test_side_effect_source_accepts_next_action_without_replay_prevention(self):
         source = self._build_runnable_tool_source(
             """
 def run(params, ctx):
@@ -277,16 +271,7 @@ def run(params, ctx):
 """
         )
 
-        error = validate_custom_tool_source_code(source, "/tools/sheets_sync.py")
-
-        self.assertIn("manual replay prevention", error or "")
-
-        valid_source = source.replace(
-            '"next_action": "Verify the sheet.",',
-            '"do_not_repeat_manually": True,\n'
-            '        "next_action": "Do not repeat manually; verify read-only; do not append/add/update again.",',
-        )
-        self.assertIsNone(validate_custom_tool_source_code(valid_source, "/tools/sheets_sync.py"))
+        self.assertIsNone(validate_custom_tool_source_code(source, "/tools/sheets_sync.py"))
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     def test_create_custom_tool_saves_invalid_source_for_patch_loop(self, _mock_sandbox):
@@ -313,10 +298,8 @@ def run(params, ctx):
             },
         )
 
-        self.assertEqual(result["status"], "error")
-        self.assertEqual(result["source_path"], "/tools/patchable_sheets_sync.py")
-        self.assertIn("manual replay prevention", result["message"])
-        self.assertFalse(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_patchable_sheets_sync").exists())
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_patchable_sheets_sync").exists())
         node = AgentFsNode.objects.get(path="/tools/patchable_sheets_sync.py")
         with node.content.open("rb") as handle:
             self.assertIn(b"Appended 10 rows", handle.read())

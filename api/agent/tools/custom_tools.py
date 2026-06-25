@@ -51,7 +51,7 @@ MAX_CUSTOM_TOOL_TIMEOUT_SECONDS = 900
 MAX_CUSTOM_TOOL_SOURCE_BYTES = 64 * 1024
 CUSTOM_TOOL_RETRY_CHECKLIST = (
     "Patch all validation issues before retrying: exact import, exact final line, referenced imports, "
-    "required params, remaining_work/next_cursor, and do_not_repeat_manually when writes happen."
+    "required params, and remaining_work/next_cursor when batching."
 )
 
 _PARAMS_ENV_KEY = "SANDBOX_CUSTOM_TOOL_PARAMS_B64"
@@ -594,22 +594,6 @@ _BATCH_PROGRESS_TERMS = (
     "cursor",
 )
 
-_REPLAY_PREVENTION_TERMS = (
-    "do_not_repeat_manually",
-    "read-only",
-    "read only",
-    "do not repeat",
-    "do not replay",
-    "do not manually",
-    "not another append",
-    "not replay",
-)
-_SIDE_EFFECT_CONTEXT_TERMS = ("side_effect", "sheet", "worksheet", "external", "ctx.call_tool", "call_tool")
-_SIDE_EFFECT_ACTION_RE = re.compile(
-    r"\b(?:append(?:ed|ing)?|sync(?:ed|ing)?|insert(?:ed|ing)?|update(?:d|ing)?|"
-    r"upsert(?:ed|ing)?|delete(?:d|ing)?|write|writes|written)\b"
-)
-
 
 def _source_string_literals(tree: ast.Module) -> set[str]:
     return {
@@ -671,18 +655,6 @@ def _needs_batch_progress_signal(source_text: str) -> bool:
 def _has_batch_progress_signal(tree: ast.Module) -> bool:
     terms = _source_string_literals(tree) | _source_identifiers(tree)
     return any(progress_term in term for term in terms for progress_term in _BATCH_PROGRESS_TERMS)
-
-
-def _needs_replay_prevention_signal(source_text: str) -> bool:
-    source_lower = source_text.lower()
-    return any(term in source_lower for term in _SIDE_EFFECT_CONTEXT_TERMS) and bool(
-        _SIDE_EFFECT_ACTION_RE.search(source_lower)
-    )
-
-
-def _has_replay_prevention_signal(source_text: str) -> bool:
-    source_lower = source_text.lower()
-    return any(term in source_lower for term in _REPLAY_PREVENTION_TERMS)
 
 
 def _invalid_datetime_timezone_refs(tree: ast.Module) -> list[str]:
@@ -798,7 +770,7 @@ def _validate_schema_runtime_params_for_source(
     return (
         "URL/list validator custom tools must require explicit runtime inputs instead of relying on built-in samples "
         "or hidden defaults. Mark urls/domains/candidates/input_table/source_table plus output_table/dest_table/minimum/limit params as required as appropriate, then "
-        "invoke the tool with concrete values. Patch all validation issues before retrying: undefined names, remaining_work/next_cursor, explicit inputs, and do_not_repeat_manually when writes happen."
+        "invoke the tool with concrete values. Patch all validation issues before retrying: undefined names, remaining_work/next_cursor, and explicit inputs."
     )
 
 
@@ -863,7 +835,7 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
     missing_fstring_names = _find_likely_undefined_fstring_names(tree)
     if missing_fstring_names:
         names = ", ".join(missing_fstring_names)
-        return f"Custom tool source may reference undefined f-string name(s): {names}. Patch all validation issues before retrying: remaining_work/next_cursor, explicit inputs, and do_not_repeat_manually when writes happen."
+        return f"Custom tool source may reference undefined f-string name(s): {names}. Patch all validation issues before retrying: remaining_work/next_cursor and explicit inputs."
     invalid_datetime_refs = _invalid_datetime_timezone_refs(tree)
     if invalid_datetime_refs:
         refs = ", ".join(invalid_datetime_refs)
@@ -886,13 +858,7 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
     if _needs_batch_progress_signal(source_text) and not _has_batch_progress_signal(tree):
         return (
             "Custom tool source accepts batch/limit params but lacks remaining-work or cursor reporting. "
-            "Return remaining_work or next_cursor so the agent can resume bounded work. Patch all validation issues before retrying: explicit inputs and do_not_repeat_manually when writes happen."
-        )
-    if _needs_replay_prevention_signal(source_text) and not _has_replay_prevention_signal(source_text):
-        return (
-            "Custom tool source performs side effects but lacks manual replay prevention. "
-            "Return do_not_repeat_manually=True or next_action like "
-            "'Do not repeat manually; verify read-only; do not append/add/update again.' Patch all validation issues before retrying."
+            "Return remaining_work or next_cursor so the agent can resume bounded work. Patch all validation issues before retrying: explicit inputs."
         )
     return None
 
@@ -1017,7 +983,7 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
             "description": (
                 "Create/update a sandboxed Python custom tool. "
                 "Use for 3+ repeated steps, API/MCP fan-out, pagination, sync/import, transforms, validation/dedupe, or bulk SQLite writes; err early. "
-                "Before the first call, verify: Exact import `from _gobii_ctx import main`; exact final line `if __name__ == '__main__': main(run)`; imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`; `parameters_schema.required` requires real source inputs plus destinations/filters/limits/dates; SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`; batch/limit tools return `remaining_work`/`next_cursor`; completed writes return do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
+                "Before the first call, verify: Exact import `from _gobii_ctx import main`; exact final line `if __name__ == '__main__': main(run)`; imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`; `parameters_schema.required` requires real source inputs plus destinations/filters/limits/dates; SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`; batch/limit tools return `remaining_work`/`next_cursor`. "
                 "Use PEP 723 for third-party deps such as `# dependencies = [\"requests[socks]\"]`; never list stdlib deps. "
                 "For one-shot creation call create_custom_tool with source_path='/tools/my_tool.py' + source_code; do not pass only `source_path` unless you already wrote that file; if rejected, fix every listed issue and retry create_custom_tool, not create_file. "
                 "For tool-to-tool calls use ctx.call_tool(name, params). Write durable data to the agent SQLite DB; do not ATTACH sandbox file paths. "

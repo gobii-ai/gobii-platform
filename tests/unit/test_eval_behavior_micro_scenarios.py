@@ -15,7 +15,7 @@ from api.agent.tools.search_tools import search_tools
 from api.agent.tools.tool_manager import execute_enabled_tool, get_enabled_tool_definitions
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.bitcoin_price_multiturn import (
-    bitcoin_response_has_followup_question,
+    bitcoin_response_has_unnecessary_followup_question,
     bitcoin_tool_calls_include_supported_price_api,
     is_supported_bitcoin_price_api_url,
 )
@@ -57,6 +57,7 @@ from api.evals.scenarios.behavior_micro import (
 )
 from api.evals.scenarios.effort_calibration import _hierarchical_report_shape
 from api.evals.scenarios.monitor_pollution import (
+    MonitorPollutionScenario,
     _charter_mentions_pollution_monitoring,
     _schedule_is_reasonable_pollution_monitoring,
 )
@@ -77,6 +78,7 @@ from api.models import (
     EvalRun,
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
@@ -118,9 +120,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
 
-        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 135)
-        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 135)
-        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 135)
+        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 134)
+        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 134)
+        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 134)
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
 
@@ -254,6 +256,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("market timestamp", by_slug["common_use_case_105_current_finance_snapshot"].prompt)
         self.assertIn("review evidence", by_slug["common_use_case_106_maps_dental_lead_screen"].prompt)
         self.assertIn("do not run it now", by_slug["common_use_case_107_schedule_vc_digest"].prompt)
+        self.assertEqual(
+            by_slug["common_use_case_138_intercom_notes_capability_answer"].accepted_tool_alternatives,
+            {"send_chat_message": ("search_tools",)},
+        )
         new_intelligent_work_slugs = {
             f"common_use_case_{index:03d}_{suffix}"
             for index, suffix in [
@@ -371,6 +377,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(
             by_slug["common_use_case_057_sheets_read_rows"].accepted_tool_alternatives,
             {"google_sheets-read-rows": ("google_sheets-get-values-in-range",)},
+        )
+        self.assertEqual(
+            by_slug["common_use_case_058_sheets_get_by_id"].accepted_tool_alternatives,
+            {"google_sheets-get-spreadsheet-by-id": ("google_sheets-get-spreadsheet-info",)},
         )
         self.assertEqual(
             by_slug["common_use_case_132_sheets_blank_due_bulk_update"].accepted_tool_alternatives,
@@ -583,13 +593,18 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
 
     def test_bitcoin_response_followup_check_ignores_url_query_strings(self):
         self.assertFalse(
-            bitcoin_response_has_followup_question(
+            bitcoin_response_has_unnecessary_followup_question(
                 "The current price is $68,500.50 USD. "
                 "Source: https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
             )
         )
+        self.assertFalse(
+            bitcoin_response_has_unnecessary_followup_question(
+                "Bitcoin is currently $68,500.50 USD. Does that match what you needed?"
+            )
+        )
         self.assertTrue(
-            bitcoin_response_has_followup_question(
+            bitcoin_response_has_unnecessary_followup_question(
                 "The current price is $68,500.50 USD. Want me to track it?"
             )
         )
@@ -747,6 +762,28 @@ class BehaviorMicroHelperTests(TestCase):
                 self.assertTrue(entry.allow_outbound)
                 self.assertTrue(entry.allow_inbound)
 
+    def test_prior_tool_results_cases_seed_visible_tool_calls(self):
+        for slug in (
+            "common_use_case_111_prior_results_sqlite_rank",
+            "common_use_case_124_tool_results_cte_dedupe_urls",
+            "common_use_case_125_tool_results_json_each_plan",
+        ):
+            with self.subTest(slug=slug):
+                scenario = ScenarioRegistry.get(slug)
+
+                scenario._seed_prior_tool_results_context(self.agent.id)
+
+                calls = list(PersistentAgentToolCall.objects.filter(step__agent=self.agent))
+                self.assertGreaterEqual(len(calls), 1)
+                joined_results = "\n".join(call.result for call in calls)
+                if slug == "common_use_case_111_prior_results_sqlite_rank":
+                    self.assertIn("annual cost", joined_results)
+                if slug == "common_use_case_125_tool_results_json_each_plan":
+                    self.assertIn("offers", joined_results)
+
+                PersistentAgentToolCall.objects.filter(step__agent=self.agent).delete()
+                PersistentAgentStep.objects.filter(agent=self.agent).delete()
+
     def test_outbound_sms_cases_do_not_seed_sendable_sms_contacts(self):
         for slug in (
             "common_use_case_065_send_status_sms",
@@ -770,6 +807,52 @@ class BehaviorMicroHelperTests(TestCase):
         should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
 
         self.assertFalse(should_stop, reason)
+
+    def test_monitor_pollution_completion_fallback_detects_persisted_success(self):
+        scenario = MonitorPollutionScenario()
+        self.agent.charter = "Monitor pollution index for Washington DC."
+        self.agent.schedule = "0 */6 * * *"
+        self.agent.save(update_fields=["charter", "schedule"])
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=f"web://user/{self.user.id}/agent/{self.agent.id}",
+        )
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=f"web://agent/{self.agent.id}",
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=f"web://user/{self.user.id}/agent/{self.agent.id}",
+        )
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            conversation=conversation,
+            from_endpoint=user_endpoint,
+            to_endpoint=agent_endpoint,
+            is_outbound=False,
+            body="Monitor pollution in Washington DC.",
+        )
+        step = PersistentAgentStep.objects.create(agent=self.agent)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="spawn_web_task",
+            tool_params={"prompt": "Find Washington DC pollution."},
+            result='{"status":"pending"}',
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            conversation=conversation,
+            from_endpoint=agent_endpoint,
+            to_endpoint=user_endpoint,
+            is_outbound=True,
+            body="Current Washington DC pollution index: 55.",
+        )
+
+        self.assertTrue(
+            scenario._has_completed_expected_work(str(self.agent.id), after=inbound.timestamp)
+        )
 
     def test_custom_tool_common_use_case_exposes_enabled_sandbox_builtin(self):
         scenario = ScenarioRegistry.get("common_use_case_122_custom_tool_bulk_api_sqlite")
@@ -1697,9 +1780,12 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(all_requests_have_options([missing_description]))
         self.assertFalse(all_requests_have_options([blank_title]))
 
-    def test_request_human_input_eval_tool_check_requires_valid_options(self):
+    def test_request_human_input_eval_tool_check_accepts_valid_options_or_free_text(self):
         valid_single = SimpleNamespace(
             tool_params={"options": [{"title": "Yes", "description": "Proceed with yes."}]}
+        )
+        free_text_single = SimpleNamespace(
+            tool_params={"question": "What should I tell the team?"}
         )
         invalid_single = SimpleNamespace(
             tool_params={"options": [{"title": "Yes"}]}
@@ -1710,7 +1796,10 @@ class BehaviorMicroHelperTests(TestCase):
                     {
                         "question": "Proceed?",
                         "options": [{"title": "Yes", "description": "Proceed with yes."}],
-                    }
+                    },
+                    {
+                        "question": "What context should I use?",
+                    },
                 ]
             }
         )
@@ -1726,6 +1815,7 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertTrue(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(valid_single))
+        self.assertTrue(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(free_text_single))
         self.assertFalse(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(invalid_single))
         self.assertTrue(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(valid_batch))
         self.assertFalse(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(invalid_batch))

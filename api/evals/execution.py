@@ -52,6 +52,14 @@ def _is_structured_judge_grammar_error(exc: Exception) -> bool:
     )
 
 
+def _is_missing_judgment_tool_reason(reasoning: Any) -> bool:
+    message = str(reasoning or "").lower()
+    return (
+        "did not call the judgment tool" in message
+        or "did not call submit_judgment" in message
+    )
+
+
 def _preview_text(value: Any, *, limit: int = 1200) -> str:
     text = str(value)
     if len(text) <= limit:
@@ -665,6 +673,17 @@ class ScenarioExecutionTools:
                     drop_params=True,
                 )
                 choice, reasoning = self._extract_judgment(response)
+                if choice == "Error" and _is_missing_judgment_tool_reason(reasoning):
+                    logger.warning(
+                        "LLM judge did not call the judgment tool for model %s; retrying as strict JSON text.",
+                        model,
+                    )
+                    return self._run_unstructured_judge_completion(
+                        model=model,
+                        prompt=prompt,
+                        params=params,
+                        options=options,
+                    )
                 if choice not in options:
                     raise ValueError(f"LLM judge returned invalid choice {choice!r}: {reasoning}")
                 return choice, reasoning

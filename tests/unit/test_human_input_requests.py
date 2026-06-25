@@ -294,7 +294,7 @@ class HumanInputRequestTests(TestCase):
             raw_payload=raw_payload or {"source": "test"},
         )
 
-    def test_tool_definition_requires_options(self):
+    def test_tool_definition_allows_free_text_only_questions(self):
         tool = get_request_human_input_tool()
         function = tool["function"]
         self.assertEqual(function["name"], "request_human_input")
@@ -304,53 +304,53 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("recipient", function["parameters"]["properties"])
         self.assertIn("will_continue_work", function["parameters"]["properties"])
         self.assertEqual(function["parameters"]["properties"]["question"]["maxLength"], 500)
-        self.assertEqual(function["parameters"]["properties"]["options"]["minItems"], 1)
+        self.assertNotIn("minItems", function["parameters"]["properties"]["options"])
         self.assertEqual(function["parameters"]["required"], ["will_continue_work"])
         self.assertEqual(
             function["parameters"]["anyOf"],
             [
-                {"required": ["question", "options"]},
+                {"required": ["question"]},
                 {"required": ["requests"]},
             ],
         )
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["required"],
-            ["question", "options"],
+            ["question"],
         )
-        self.assertEqual(
-            function["parameters"]["properties"]["requests"]["items"]["properties"]["options"]["minItems"],
-            1,
-        )
+        self.assertNotIn("minItems", function["parameters"]["properties"]["requests"]["items"]["properties"]["options"])
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["properties"]["question"]["maxLength"],
             500,
         )
 
-    def test_execute_request_human_input_rejects_missing_options(self):
+    def test_execute_request_human_input_accepts_missing_options_as_free_text_only(self):
         result = execute_request_human_input(
             self.agent,
             {
                 "question": "What should I tell the team?",
+                "will_continue_work": False,
             },
         )
 
-        self.assertEqual(result["status"], "error")
-        self.assertIn("requires at least one option", result["message"])
-        self.assertIn("send_* tool", result["message"])
-        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+        self.assertEqual(result["status"], "ok")
+        request_obj = PersistentAgentHumanInputRequest.objects.get(agent=self.agent)
+        self.assertEqual(request_obj.input_mode, PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY)
+        self.assertEqual(request_obj.options_json, [])
 
-    def test_execute_request_human_input_rejects_empty_options(self):
+    def test_execute_request_human_input_accepts_empty_options_as_free_text_only(self):
         result = execute_request_human_input(
             self.agent,
             {
                 "question": "What should I tell the team?",
                 "options": [],
+                "will_continue_work": False,
             },
         )
 
-        self.assertEqual(result["status"], "error")
-        self.assertIn("requires at least one option", result["message"])
-        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+        self.assertEqual(result["status"], "ok")
+        request_obj = PersistentAgentHumanInputRequest.objects.get(agent=self.agent)
+        self.assertEqual(request_obj.input_mode, PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY)
+        self.assertEqual(request_obj.options_json, [])
 
     def test_execute_request_human_input_will_continue_true_keeps_panel_request_active(self):
         result = execute_request_human_input(
@@ -368,7 +368,7 @@ class HumanInputRequestTests(TestCase):
         self.assertNotIn("relay_payload", result)
         self.assertNotIn("auto_sleep_ok", result)
 
-    def test_execute_request_human_input_requires_options_in_planning_mode(self):
+    def test_execute_request_human_input_allows_free_text_only_in_planning_mode(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
@@ -377,14 +377,15 @@ class HumanInputRequestTests(TestCase):
             {
                 "question": "What is your company?",
                 "options": [],
+                "will_continue_work": False,
             },
         )
 
-        self.assertEqual(result["status"], "error")
-        self.assertIn("requires at least one option", result["message"])
-        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+        self.assertEqual(result["status"], "ok")
+        request_obj = PersistentAgentHumanInputRequest.objects.get(agent=self.agent)
+        self.assertEqual(request_obj.input_mode, PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY)
 
-    def test_execute_request_human_input_rejects_batch_missing_options(self):
+    def test_execute_request_human_input_accepts_batch_missing_options_as_free_text_only(self):
         result = execute_request_human_input(
             self.agent,
             {
@@ -398,12 +399,15 @@ class HumanInputRequestTests(TestCase):
                         "options": [{"title": "All updates", "description": "Track anything notable."}],
                     },
                 ],
+                "will_continue_work": False,
             },
         )
 
-        self.assertEqual(result["status"], "error")
-        self.assertIn("requires at least one option", result["message"])
-        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+        self.assertEqual(result["status"], "ok")
+        request_objects = list(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).order_by("created_at"))
+        self.assertEqual(len(request_objects), 2)
+        self.assertEqual(request_objects[0].input_mode, PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY)
+        self.assertEqual(request_objects[1].input_mode, PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT)
 
     def test_execute_request_human_input_limits_planning_batch_to_three_questions(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING

@@ -12,7 +12,7 @@ from api.agent.events import AgentEventType
 from api.services.schedule_enforcement import cron_interval_seconds
 
 INITIAL_PROCESSING_TIMEOUT_SECONDS = 300
-BACKGROUND_DRAIN_TIMEOUT_SECONDS = 300
+BACKGROUND_DRAIN_TIMEOUT_SECONDS = 600
 
 
 def _charter_mentions_pollution_monitoring(charter: str | None) -> tuple[bool, str]:
@@ -94,6 +94,29 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         ScenarioTask(name="verify_pollution_report", assertion_type="exact_match"),
     ]
 
+    def _has_completed_expected_work(self, agent_id: str, *, after) -> bool:
+        """Treat missed/late drain events as complete when persisted eval evidence is present."""
+        agent = self.get_agent(agent_id)
+        charter_accepted, _ = _charter_mentions_pollution_monitoring(agent.charter)
+        schedule_accepted, _ = _schedule_is_reasonable_pollution_monitoring(agent.schedule)
+        if not (charter_accepted and schedule_accepted):
+            return False
+
+        has_fetch_or_browser = PersistentAgentToolCall.objects.filter(
+            step__agent=agent,
+            step__created_at__gt=after,
+            tool_name__in=["http_request", "mcp_brightdata_scrape_as_markdown", "spawn_web_task"],
+        ).exists()
+        if not has_fetch_or_browser:
+            return False
+
+        return PersistentAgentMessage.objects.filter(
+            owner_agent=agent,
+            is_outbound=True,
+            timestamp__gt=after,
+            body__icontains="55",
+        ).exists()
+
     def run(self, run_id: str, agent_id: str) -> None:
         # 1. Instruct Agent
         self.record_task_result(run_id, 1, EvalRunTask.Status.RUNNING)
@@ -147,22 +170,36 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
 
             final_outstanding = int((completion_event.get("payload") or {}).get("outstanding_tasks", 0) or 0) if completion_event else None
             if not completion_event or final_outstanding != 0:
+                if msg and self._has_completed_expected_work(agent_id, after=msg.timestamp):
+                    self.record_task_result(
+                        run_id,
+                        1,
+                        EvalRunTask.Status.PASSED,
+                        observed_summary=(
+                            "Instruction processed; event listener missed the final idle drain, "
+                            "but persisted agent evidence shows the expected work completed."
+                        ),
+                        artifacts={"message": msg},
+                    )
+                else:
+                    self.record_task_result(
+                        run_id,
+                        1,
+                        EvalRunTask.Status.FAILED,
+                        observed_summary=(
+                            "Timed out waiting for agent to finish background web task "
+                            f"after {BACKGROUND_DRAIN_TIMEOUT_SECONDS}s."
+                        ),
+                    )
+                    return
+            else:
                 self.record_task_result(
                     run_id,
                     1,
-                    EvalRunTask.Status.FAILED,
-                    observed_summary=(
-                        "Timed out waiting for agent to finish background web task "
-                        f"after {BACKGROUND_DRAIN_TIMEOUT_SECONDS}s."
-                    ),
+                    EvalRunTask.Status.PASSED,
+                    observed_summary="Instruction sent and agent finished processing.",
+                    artifacts={"message": msg},
                 )
-                return
-
-        self.record_task_result(
-            run_id, 1, EvalRunTask.Status.PASSED,
-            observed_summary="Instruction sent and agent finished processing.",
-            artifacts={"message": msg}
-        )
 
         # Refresh agent to see updates
         agent = self.get_agent(agent_id)

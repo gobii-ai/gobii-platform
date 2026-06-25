@@ -119,7 +119,7 @@ def _strip_trailing_optional_followup(body: str) -> str:
 _TOOL_FRUSTRATION_PROGRESS_RE = re.compile(
     r"\b(?:fabricated(?:\b| (?:test data|links|results))|fake (?:job ids|links|data|results)|eval environment|stop fighting the sim|pivot hard|trying every tool|"
     r"same fabricated|same data set|same simulated results|simulated results|instructions say|"
-    r"stop verifying|let me deliver|all done)\b",
+    r"stop verifying|let me deliver)\b",
     re.IGNORECASE,
 )
 
@@ -228,6 +228,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "name": "send_chat_message",
             "description": (
                 "Send a user-facing web chat message for free-text questions, context, config changes, capability/status/policy answers, findings, or finals. "
+                "Do not use this to simulate or confirm an email/SMS delivery; if the user asked to email or text and the send_email/send_sms tool is available, call that tool instead. "
                 "Do not narrate what you will do next or send progress-only notes about tool sequencing, plan mechanics, or internal reasoning."
             ),
             "parameters": {

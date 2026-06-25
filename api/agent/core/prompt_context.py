@@ -2288,6 +2288,19 @@ def _recent_contact_records_for_prompt(
     return ordered[:CONTACT_PROMPT_SAMPLE_LIMIT]
 
 
+def _allowed_communication_channels(
+    agent_endpoints: Sequence[PersistentAgentCommsEndpoint],
+    contact_records: Sequence[ContactSQLiteRecord],
+) -> list[str]:
+    channels = {endpoint.channel for endpoint in agent_endpoints if endpoint.channel}
+    channels.update(
+        record.channel
+        for record in contact_records
+        if record.channel and record.status == "allowed" and record.allow_outbound
+    )
+    return sorted(channels)
+
+
 def _build_contacts_block(
     agent: PersistentAgent,
     contacts_group,
@@ -2646,16 +2659,12 @@ def _build_contacts_block(
     )
     
     # Explicitly list allowed communication channels
-    allowed_channels = set()
-    for ep in agent_eps:
-        # ep.channel is already a string value from the database, not an enum object
-        allowed_channels.add(ep.channel)
+    allowed_channels = _allowed_communication_channels(agent_eps, contact_records)
 
     if allowed_channels:
-        channels_list = sorted(allowed_channels)  # Already strings, no need for .value
         contacts_group.section_text(
             "allowed_channels",
-            f"You can communicate via: {', '.join(channels_list)}. Stick to these channels, and include the primary contact endpoint when one is configured.",
+            f"You can communicate via: {', '.join(allowed_channels)}. Stick to these channels, and include the primary contact endpoint when one is configured.",
             weight=3,
             non_shrinkable=True
         )
@@ -3155,9 +3164,10 @@ def _get_web_chat_formatting_guidance() -> str:
 
     return (
         "Web chat and peer DM formatting:\n"
-        "Use Markdown. Start with the answer/main finding; for reports add titled sections, bullets or compact tables, and tasteful emoji/status labels. "
-        "Use whitespace, not decorative separators. For charts, paste create_chart result.inline; don't attach/read/rebuild. "
-        "Do not add optional follow-up offers after quick facts, prices, statuses, exact lookups, or completed reports."
+        "Markdown. Start with answer/main finding. Reports: brief human lead-in, titled sections, bullets/tables, status labels. "
+        "Metric, pending-item, or next-run reports: compact operating update with a small table or metric block and done/pending/next. "
+        "Address known recipients naturally once around actions; avoid generic delivery logs and agent-name self-intros unless asked. "
+        "Use whitespace, not separators. Charts: paste create_chart result.inline; don't attach/read/rebuild."
     )
 
 
@@ -3470,11 +3480,11 @@ def _get_planning_mode_prompt_block() -> str:
         "Clarify goal, outcome, audience, scope boundaries, priorities, must-haves, constraints, success criteria, and key assumptions. If timing changes the shape of the work itself, clarify it. Keep planning non-technical and focused on what the user wants.\n\n"
         "## Behavior Rules\n\n"
         "- Planning Mode overrides normal execution-oriented instructions while it is active. Stay in planning only until you call end_planning(full_plan=...) or the user skips planning. Only planning-safe tools are available; execution/setup tools such as update_plan, request_contact_permission, create_custom_tool, and apply_patch are unavailable while Planning Mode is active.\n"
-        "- For clear requests, including one-off factual/research questions and scheduled digests, monitors, alerts, or exact-source feeds, call "
+        "- For clear requests other than named integration setup/use, including one-off factual/research questions and scheduled digests, monitors, alerts, or exact-source feeds, call "
         "end_planning as the first meaningful action; no welcome-only or question-first turn. Do not validate, fetch, parse, or test "
         "provided URLs, RSS feeds, APIs, files, or task data before end_planning; that is execution work after planning.\n"
         "- Use read-only research during planning only when the scope is unclear; do not fetch, parse, or summarize sources to answer a clear task before end_planning.\n"
-        "- Named integration setup/use: if no enabled tool fits, call search_tools before asking how to connect; otherwise end_planning if sufficient or request_human_input if blocked.\n"
+        "- Named integration setup/use: before end_planning or asking how to connect, call search_tools(provider) unless the matching provider/API tool is already in the current callable tool list.\n"
         "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
         "- Do not update the runtime plan, schedule/__agent_config.schedule, or begin deliverable work until planning is completed. "
         "Do not do substantive execution or deliverable work before planning ends.\n"
@@ -3488,7 +3498,7 @@ def _get_planning_mode_prompt_block() -> str:
         "- Treat named local time zones such as ET as sufficiently clear; handle DST and UTC conversion as "
         "implementation details instead of asking the user.\n"
         "- Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them. Keep the conversation focused on the user's need, scope, and desired outcome. If goal/source/cadence/output are clear, call end_planning and use current conversation/contact setup.\n"
-        "- Human input rule: use request_human_input only for tracked option-based decisions; every request needs explicit options. Use send tools for free-text clarification and capability/status/policy answers.\n"
+        "- Human input rule: request_human_input for tracked blockers/resume; options for decisions, free-text-only when choices are artificial. Send tools for ordinary questions/status/policy answers.\n"
         "- Once request_human_input succeeds, questions are visible in web chat. Do not repeat them; an optional chat message may only frame why you asked or reference pending questions.\n"
         "- Each planning question must be its own request item. If asking multiple questions, prefer one request_human_input call with the `requests` parameter, where each item contains exactly one question; top-level `question` is fine for one.\n"
         "- Prefer tangible, mutually exclusive options; add `Other / I'll explain` when useful.\n"
@@ -3600,7 +3610,7 @@ def _get_system_instruction(
         delivery_context = (
             f"## Implied Send → {display_name}\n\n"
             "Your response text is a user message: use it only for questions, blockers, config changes, findings, or final deliverables. "
-            "Use request_human_input only for tracked option-based decisions; use this chat for free-text questions and capability/status/policy answers. "
+            "Use request_human_input for tracked blockers/resume; use this chat for ordinary questions/status/policy answers. "
             "While working, respond with tool calls and no text; if an exact URL/result already succeeded, never search for it or refetch the same successful URL. "
             "Text-only messages auto-send and stop; add \"CONTINUE_WORK_SIGNAL\" alone to continue. "
             "To reach someone else, use explicit tools: "
@@ -3610,7 +3620,7 @@ def _get_system_instruction(
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
         response_structure = (
-            "Response structure: tools only while working; message for blockers/questions/findings/finals; request_human_input only for option-based tracked decisions; empty response sleeps. "
+            "Response structure: tools while working; message for ordinary questions/findings/finals; request_human_input for tracked blockers; empty response sleeps. "
             "Use CONTINUE_WORK_SIGNAL only after a message that must continue."
         )
         tool_calls_note = "Text + tools in one response is only for real user-facing content, never status narration. "
@@ -3619,7 +3629,7 @@ def _get_system_instruction(
         delivery_context = (
             "## Delivery & Response Behavior\n\n"
             "Text is not delivered in this mode: use send_ tools for questions, blockers, findings, config changes, and final deliverables; update_plan is not delivery. "
-            "Use request_human_input only for tracked option-based decisions; use send tools for free-text questions and capability/status/policy answers. "
+            "Use request_human_input for tracked blockers/resume; use send tools for ordinary questions/status/policy answers. "
             "If notifying by email/SMS too, include the same questions in that outbound body. "
             "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts. "
             "Focus on tool calls - text alone is not delivered.\n\n"
@@ -3638,33 +3648,22 @@ def _get_system_instruction(
         else ""
     )
     stop_continue_examples = (
-        "## When to stop vs continue\n\n"
-        "Set will_continue_work on every tool call. Use true while another immediate action remains: unsent results, unverified requested constraints, unfinished useful plan work, needed tool results, or a final user-facing report. "
-        "Use false only after the requested reply/report/config change is delivered and no active useful work remains. Future scheduled work does not count as continuing now.\n"
+        "## Stop/continue\n\n"
+        "Set will_continue_work=true only for immediate work: unsent results, unverified constraints, plan cleanup, or needed tool results. "
+        "Set false after delivery/config and no active work; future schedules do not count.\n"
         f"{text_only_guidance}"
-        "Plans: final report first. If visible plan items remain, send the report with will_continue_work=true, then update_plan to mark finished/deferred items and stop with will_continue_work=false.\n\n"
+        "Plans: if cleanup remains, send final report with true, update_plan finished/deferred items, then stop with false.\n\n"
         "Recurring or truly multi-phase work may need charter/schedule updates; one-off work usually needs neither.\n"
     )
-
-    if implied_send_active:
-        will_continue_guidance = (
-            "**Stopping:** Text-only replies auto-send and stop by default. "
-            "End with \"CONTINUE_WORK_SIGNAL\" on its own line if you still have work to do.\n"
-        )
-    else:
-        will_continue_guidance = (
-            "**Stopping:** After sending your final report and completing all work, stop without an extra turn.\n"
-        )
 
     delivery_instructions = (
         f"{delivery_context}"
         f"{response_structure}\n\n"
-        f"{will_continue_guidance}"
         f"{tool_calls_note}"
         f"{stop_explicit_note}"
         "Missing recipient or required content for an email/SMS/outbound send is a blocker: use request_human_input with will_continue_work=false, not chat-only questions. "
-        "Fetching data is step one; reporting completes the task. "
-        "Use exactly the requested delivery channel; if asked to email, send_email and stop without a chat confirmation unless both channels were requested. "
+        "Ask one compact, option-based tracked request for the missing send details; do not ask the same blocker as ordinary chat. "
+        "Use exactly the requested delivery channel; if asked to email an allowed address and send_email is available, call send_email. "
         "Never announce what you're about to do—announcements terminate you before delivery. "
         "Wrong: 'Let me fetch that data...' Right: [just make the tool call with no text]\n\n"
         "Scheduled/background exact feed/API fetches without implied send still need send_chat_message(body=brief sourced report, will_continue_work=false).\n\n"
@@ -3709,9 +3708,8 @@ def _get_system_instruction(
         "\n\n"
         "## Durable Config\n\n"
 
-        "Update charter/schedule only for changed ongoing responsibilities, user feedback/preferences, recurring-work context, role/scope/process/customer changes, or vague/missing standing memory. "
-        "Merge new durable guidance into the existing charter instead of replacing it wholesale; preserve still-relevant guidance and named channels/tools. "
-        "Feedback and preferences are durable without the user saying save/remember/charter; do not update for one-off style requests, transient facts, completed work, or weak guesses.\n\n"
+        "Update charter/schedule only for durable role/scope, preferences, feedback, monitoring, recurrence, or memory. "
+        "Merge changes; preserve unrelated guidance/tools, including unavailable saved channels; never save one-offs, transient facts, completed work, or weak guesses.\n\n"
 
         f"{schedule_updates_guidance}"
 
@@ -3720,7 +3718,7 @@ def _get_system_instruction(
         "User-facing question, blocker, config change, or finding only; never narrate internal reasoning, tool sequencing, or skill maintenance unless asked for live status. "
         "Speak naturally and avoid internal terms like 'charter'. SMS stays brief; email can use rich HTML and source links. Give web tasks specific URLs/searches/actions. "
 
-        "Calibrate effort to the request. Trivial questions, acknowledgements, exact-URL lookups, one-shot statuses, and simple facts need only the necessary tool calls, one answer, then stop. "
+        "Calibrate effort to the request. Trivial questions, acknowledgements, exact-URL lookups, one-shot statuses, simple facts, and one-off research questions need only the necessary tool calls, one answer, then stop. "
         "For scheduled digests/reports, produce the requested report once with sources and finish until the next trigger; after an exact feed/API fetch, send the report directly with send_chat_message when web chat is the channel, never with update_plan or plain text. "
         "When the answer depends on current facts, recent events, pricing, hiring, funding, company/person profiles, or social posts, use web/structured tools instead of memory and cite full copied source URLs. "
         "Do not add charts, files, broad extra research, follow-up questions, plans, or comparisons unless requested or materially necessary. "
@@ -3740,6 +3738,14 @@ def _get_system_instruction(
 
         "Action over deliberation.\n\n"
 
+        "## Warm Continuity\n\n"
+        "Be warm, natural, and context-aware in user-facing messages without becoming verbose. "
+        "For casual greetings or check-ins such as \"how are you?\" or \"what's up?\", respond socially instead of giving a bare generic status. "
+        "When recent work or conversation context is known, briefly acknowledge it and bridge back to what would be useful next. "
+        "Do not invent completed work, sent messages, tool results, preferences, or personal experiences. "
+        "Keep casual replies to 2-5 sentences unless the user asks for detail. "
+        "This warmth applies to actual delivered messages, blockers, questions, and final reports; it does not permit progress-only narration before tool calls.\n\n"
+
         "## Output Rules\n\n"
         "Use the lightest clear structure: labeled fact, short list, compact table, or sectioned report. Ground facts, numbers, units, and URLs in tool results; do not relabel or convert units unless asked. Present returned data directly, omit unavailable extras, summarize overflow, and do not add follow-up offers after simple facts, prices, statuses, or quick lookups. "
         "Charts: create only when requested/materially useful. "
@@ -3756,6 +3762,9 @@ def _get_system_instruction(
         "```\n"
         "small_result_answers -> answer directly\n"
         "provided exact URL -> use it directly; do not search for it\n"
+        "public exact URL + http/scrape tool callable -> http_request or scrape directly; spawn_web_task only after access/render/login blockage\n"
+        "exact docs/blog/changelog/release-notes URL -> scrape_as_markdown or http_request first; never spawn_web_task first just because it is a webpage or app URL\n"
+        "explicit SQLite/database request and sqlite_batch is callable -> use sqlite_batch directly; do not search for a SQLite/database tool\n"
         "recurring setup with URL -> sqlite_batch charter+schedule first; no URL search/read/fetch unless asked to run now\n"
         "scheduled exact feed/API briefing -> http_request then send concise sourced report; no update_plan/files/charts unless asked\n"
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
@@ -3775,6 +3784,7 @@ def _get_system_instruction(
 
         "For MCP tools (Google Sheets, Slack, etc.), call the matching tool; do not list/open first unless required. If auth is needed, share the connect link and wait. "
         "Email/SMS imperatives map directly to send_email/send_sms, or request_contact_permission if contact is not allowed. "
+        "Do not downgrade requested email/SMS delivery to chat unless the send tool result proves delivery is blocked and no setup path exists. "
         "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "
         "For credential domains, think broadly: *.google.com covers more than one subdomain. "
 
@@ -3797,8 +3807,9 @@ def _get_system_instruction(
 
         "## Configuration Discipline (CRITICAL)\n\n"
         "__agent_config is durable operating memory, not normal task output. "
-        "Only mutate it when a configure-authorized user changes ongoing behavior, role/scope/process/customer context, monitoring/alerting rules, feedback/preferences, stable inferred preferences, or recurrence; preserve still-relevant guidance and named channels/tools. "
-        "Never update charter/schedule for one-off work, transient facts, completed answers, weak guesses, or to describe what you just did. A finished answer, briefing, chart, or lookup is not a charter change. "
+        "Mutate only for durable behavior/context, alerts/preferences, or recurrence. "
+        "Never update charter/schedule for one-off work, transient facts, completed answers, weak guesses, or describing what you just did. Finished answers/briefings/charts/lookups/one-off research are not charter changes. "
+        "Do not set a schedule merely to continue or remember a single research question; only schedule work when the user asked for recurring monitoring, alerts, digests, follow-up, or durable role changes. "
         "For scheduled runs, keep cadence unless explicitly changed. For future recurring digests/reports/monitors/alerts, update charter/schedule once and stop; do not run the first job unless asked. "
         "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due. "
         "Respect one-off preferences like 'stand by' or 'don't follow up unless I ask' in the current conversation without mutating config. When in doubt, leave config unchanged, deliver the result, and stop.\n\n"
@@ -5017,9 +5028,12 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
     if global_integrations:
         if lines:
             lines.append("")
-        lines.append("Native integrations available through tools:")
+        lines.append("Native integration auth (enable tools/skills before use):")
         for secret in global_integrations:
-            lines.append(f"  - {secret.name}: use `http_request` against the provider API; authentication is applied automatically when supported.")
+            lines.append(
+                f"  - {secret.name}: auth exists, but auth is not a tool; if the native skill/tool is not enabled, "
+                f"call `search_tools('{secret.name}')` first. Native auth applies automatically when supported."
+            )
 
     # Agent-specific secrets (override globals on key conflict)
     if available_credentials:

@@ -29,7 +29,6 @@ class CustomToolResultContractCase:
             "verification",
         )
     )
-    requires_manual_replay_prevention: bool = False
     requires_batching: bool = False
 
     @property
@@ -43,8 +42,7 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
         title="Google Sheets final sync",
         real_world_basis=(
             "A Clay Pay signal-hunter agent used a custom final sync tool that appended today's SQLite findings "
-            "to Google Sheets, then manually replayed stale google_sheets-add-rows calls because the custom tool "
-            "result did not make the completed side effects unmistakable."
+            "to Google Sheets; the result needs to make completed side effects unmistakable."
         ),
         user_task="Sync today's new ISV buying signals and run log from SQLite to the configured Google Sheet.",
         custom_tool_job=(
@@ -56,11 +54,9 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "names the spreadsheet and worksheets",
             "reports per-worksheet rows appended",
             "reports source table filters or run_date used",
-            "tells the agent not to manually append the same records again",
             "makes read-only verification/follow-up clear",
         ),
         required_param_names=("run_date",),
-        requires_manual_replay_prevention=True,
     ),
     CustomToolResultContractCase(
         slug="sheets_backlog_sync",
@@ -83,7 +79,6 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "explains whether another write invocation is needed",
         ),
         required_param_names=("batch_size", "status_filter"),
-        requires_manual_replay_prevention=True,
         requires_batching=True,
     ),
     CustomToolResultContractCase(
@@ -795,68 +790,12 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
         ):
             return False, "batching-required custom tool invocation must include batch_size or limit."
 
-        payload = CustomToolResultContractScenario._custom_result_payload(result)
-        if (
-            case.requires_manual_replay_prevention
-            and CustomToolResultContractScenario._observed_completed_side_effect(payload)
-            and not CustomToolResultContractScenario._has_manual_replay_prevention(payload)
-        ):
-            return False, "completed side-effect result must make manual replay prevention clear."
-
         return True, "Agent invoked the custom tool with useful runtime params."
 
     @staticmethod
     def _custom_result_payload(result: dict[str, Any]) -> dict[str, Any]:
         nested = result.get("result")
         return nested if isinstance(nested, dict) else result
-
-    @staticmethod
-    def _observed_completed_side_effect(payload: dict[str, Any]) -> bool:
-        status = str(payload.get("status") or "").lower()
-        if payload.get("dry_run") is True or "dry_run" in status:
-            return False
-
-        if payload.get("side_effects_completed") is True:
-            return True
-
-        text = json.dumps(payload, sort_keys=True).lower()
-        if not any(
-            marker in text
-            for marker in (
-                "append",
-                "sync",
-                "synced",
-                "written",
-                "write",
-                "updated",
-                "inserted",
-                "rows_appended",
-                "records_synced",
-            )
-        ):
-            return False
-
-        remaining_work = payload.get("remaining_work")
-        if remaining_work in (False, 0, "0", "false", "False"):
-            return True
-
-        return "complete" in status or "success" in status
-
-    @staticmethod
-    def _has_manual_replay_prevention(payload: dict[str, Any]) -> bool:
-        if payload.get("do_not_repeat_manually") is True:
-            return True
-        text = json.dumps(payload, sort_keys=True).lower()
-        return any(
-            term in text
-            for term in (
-                "do not repeat",
-                "do not replay",
-                "do not manually",
-                "not another append",
-                "not replay",
-            )
-        )
 
     @classmethod
     def _agent_judge_context(
@@ -885,7 +824,6 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                     "custom_tool_job": case.custom_tool_job,
                     "helpful_param_concepts": list(case.required_param_names),
                     "requires_batching": case.requires_batching,
-                    "must_prevent_manual_replay": case.requires_manual_replay_prevention,
                     "required_result_traits": list(case.required_result_traits),
                 },
                 "create_custom_tool": {
@@ -907,7 +845,6 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                     "The parameters schema and invocation must expose useful runtime params rather than hardcoding ids, dates, filters, destinations, or batch settings. Equivalent parameter names are acceptable when they cover the same concept.",
                     "Batching-required cases must include bounded batch params and resumable remaining-work state.",
                     "The custom tool source/result must return helpful fields such as side effects, counts, source scope, verification/follow-up guidance, resumable remaining work, or ready-to-use accepted outputs.",
-                    "Completed writes must include manual replay prevention. Read-only validators do not need replay-prevention guidance if they clearly say no external write occurred.",
                 ],
             },
             indent=2,

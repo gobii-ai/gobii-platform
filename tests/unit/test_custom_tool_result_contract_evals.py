@@ -326,7 +326,7 @@ if __name__ == "__main__":
         self.assertFalse(ok)
         self.assertIn("helpful result signal", reason)
 
-    def test_local_create_tool_check_accepts_structured_manual_replay_prevention(self):
+    def test_local_create_tool_check_accepts_structured_side_effect_summary(self):
         case = _case("sheets_backlog_sync")
         source = _source_code(extra_fields='"do_not_repeat_manually": True,').replace(
             "Use read-only verification; do not replay append/add/update calls.",
@@ -482,7 +482,7 @@ if __name__ == "__main__":
 
         self.assertTrue(ok, reason)
 
-    def test_local_custom_call_check_requires_replay_prevention_for_completed_writes(self):
+    def test_local_custom_call_check_accepts_completed_writes_without_replay_prevention(self):
         case = _case("sheets_final_sync")
         custom_call = _custom_call(case)
         custom_call.result = {
@@ -497,8 +497,7 @@ if __name__ == "__main__":
 
         ok, reason = CustomToolResultContractScenario._local_custom_call_check(case, custom_call)
 
-        self.assertFalse(ok)
-        self.assertIn("manual replay prevention", reason)
+        self.assertTrue(ok, reason)
 
     def test_agent_judge_context_includes_actual_tool_calls_and_rubric(self):
         case = _case("chunked_mcp_fanout")

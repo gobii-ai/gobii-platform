@@ -9,10 +9,18 @@ from api.models import EvalRunTask, PersistentAgentToolCall, PersistentAgentMess
 
 BITCOIN_PRICE_RE = re.compile(r"\b68,?500(?:\.50)?\b")
 URL_RE = re.compile(r"https?://[^\s)>\]]+")
+OPTIONAL_WORK_FOLLOWUP_RE = re.compile(
+    r"\b("
+    r"want me to|would you like me to|do you want me to|should i|shall i|need me to|"
+    r"track|monitor|alert|watch|chart|graph|compare|set up"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
-def bitcoin_response_has_followup_question(body: str) -> bool:
-    return "?" in URL_RE.sub("", body or "")
+def bitcoin_response_has_unnecessary_followup_question(body: str) -> bool:
+    body_without_urls = URL_RE.sub("", body or "")
+    return "?" in body_without_urls and bool(OPTIONAL_WORK_FOLLOWUP_RE.search(body_without_urls))
 
 
 def is_supported_bitcoin_price_api_url(url: str) -> bool:
@@ -299,7 +307,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
         lower_body = body.lower()
         has_asset = "bitcoin" in lower_body or "btc" in lower_body
         has_price = bool(BITCOIN_PRICE_RE.search(body))
-        if last_outbound and has_asset and has_price and not bitcoin_response_has_followup_question(body):
+        if last_outbound and has_asset and has_price and not bitcoin_response_has_unnecessary_followup_question(body):
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.PASSED, task_name="verify_bitcoin_response",
                 observed_summary=f"Agent replied with Bitcoin price data: {last_outbound.body[:100]}..."

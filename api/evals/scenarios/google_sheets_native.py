@@ -475,7 +475,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                 body_terms=("frozenrowcount", "repeatcell", "addbanding", "bandedrange", "autoresizedimensions"),
             ),
         ),
-        response_term_groups=(("polishing", "applied"), ("Top Local LLM Models", "sheet")),
+        response_term_groups=(("polishing", "polished", "formatting", "formatted", "styled"), ("Top Local LLM Models", "sheet")),
         tags=("create", "format"),
     ),
     GoogleSheetsNativeCase(

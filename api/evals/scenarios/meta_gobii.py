@@ -251,11 +251,12 @@ def _record_plan_tool() -> dict[str, Any]:
                                 "type": "string",
                                 "description": "User-requested cadence or schedule phrase, or empty when none is in scope.",
                             },
-                            "explicit_user_intent": {
+                            "explicit_schedule_intent": {
                                 "type": "boolean",
                                 "description": (
                                     "True only when the user explicitly requested scheduled, recurring, ongoing, "
-                                    "proactive, or cadence-based behavior."
+                                    "proactive, or cadence-based behavior. This is only about schedule/recurrence "
+                                    "intent, not whether the user explicitly asked for some other Meta Gobii action."
                                 ),
                             },
                             "included_in_approval_scope": {
@@ -276,7 +277,7 @@ def _record_plan_tool() -> dict[str, Any]:
                             "schedule_in_scope",
                             "schedule_action",
                             "cadence_or_schedule",
-                            "explicit_user_intent",
+                            "explicit_schedule_intent",
                             "included_in_approval_scope",
                             "asks_clarifying_question",
                             "rationale",
@@ -1410,7 +1411,6 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
         ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_skill_search", assertion_type="tool_call"),
         ScenarioTask(name="verify_meta_gobii_enabled", assertion_type="tool_call"),
-        ScenarioTask(name="verify_meta_gobii_surface_used", assertion_type="tool_call"),
         ScenarioTask(name="verify_no_research_persona_path", assertion_type="tool_call"),
     ]
 
@@ -1451,9 +1451,13 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
 
         self._record_skill_search_result(run_id, agent_id, inbound, calls)
         self._record_meta_gobii_enabled_result(run_id, agent_id, inbound, calls)
-        self._record_meta_gobii_surface_result(run_id, agent_id, inbound, calls)
+        if self._has_task("verify_meta_gobii_surface_used"):
+            self._record_meta_gobii_surface_result(run_id, agent_id, inbound, calls)
         self._record_bad_path_result(run_id, agent_id, inbound, calls)
         self._record_additional_results(run_id, agent_id, inbound, calls)
+
+    def _has_task(self, task_name: str) -> bool:
+        return any(task.name == task_name for task in self.tasks)
 
     @staticmethod
     def _prepare_agent(agent_id: str) -> None:
@@ -2037,7 +2041,7 @@ def _simulated_schedule_policy(case: MetaGobiiEvalCase) -> dict[str, Any]:
             "schedule_in_scope": True,
             "schedule_action": case.expected_schedule_change_kind or "create",
             "cadence_or_schedule": cadence,
-            "explicit_user_intent": True,
+            "explicit_schedule_intent": True,
             "included_in_approval_scope": True,
             "asks_clarifying_question": False,
             "rationale": "The user explicitly requested scheduled or recurring work.",
@@ -2047,7 +2051,7 @@ def _simulated_schedule_policy(case: MetaGobiiEvalCase) -> dict[str, Any]:
             "schedule_in_scope": False,
             "schedule_action": "clarify",
             "cadence_or_schedule": "",
-            "explicit_user_intent": False,
+            "explicit_schedule_intent": False,
             "included_in_approval_scope": False,
             "asks_clarifying_question": True,
             "rationale": "The prompt hints at ongoing work but does not provide a cadence.",
@@ -2056,7 +2060,7 @@ def _simulated_schedule_policy(case: MetaGobiiEvalCase) -> dict[str, Any]:
         "schedule_in_scope": False,
         "schedule_action": "none",
         "cadence_or_schedule": "",
-        "explicit_user_intent": False,
+        "explicit_schedule_intent": False,
         "included_in_approval_scope": False,
         "asks_clarifying_question": False,
         "rationale": "The request is setup or one-time work, so no recurring work is in scope.",

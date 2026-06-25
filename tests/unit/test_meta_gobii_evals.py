@@ -64,7 +64,7 @@ def _no_schedule_policy():
         "schedule_in_scope": False,
         "schedule_action": "none",
         "cadence_or_schedule": "",
-        "explicit_user_intent": False,
+        "explicit_schedule_intent": False,
         "included_in_approval_scope": False,
         "asks_clarifying_question": False,
         "rationale": "No recurring work was explicitly requested.",
@@ -76,7 +76,7 @@ def _explicit_schedule_policy(action="create", cadence="daily"):
         "schedule_in_scope": True,
         "schedule_action": action,
         "cadence_or_schedule": cadence,
-        "explicit_user_intent": True,
+        "explicit_schedule_intent": True,
         "included_in_approval_scope": True,
         "asks_clarifying_question": False,
         "rationale": "The user explicitly requested recurring work.",
@@ -88,7 +88,7 @@ def _clarifying_schedule_policy():
         "schedule_in_scope": False,
         "schedule_action": "clarify",
         "cadence_or_schedule": "",
-        "explicit_user_intent": False,
+        "explicit_schedule_intent": False,
         "included_in_approval_scope": False,
         "asks_clarifying_question": True,
         "rationale": "The user implied ongoing work but did not provide a cadence.",
@@ -419,6 +419,9 @@ class MetaGobiiEvalRegistrationTests(TestCase):
         self.assertIn("target Gobii lifecycle", schedule_action["description"])
         self.assertIn("existing named Gobii", schedule_action["description"])
         self.assertIn("Use none whenever schedule_in_scope=false", schedule_action["description"])
+        self.assertIn("explicit_schedule_intent", schedule_policy["properties"])
+        self.assertIn("schedule/recurrence intent", schedule_policy["properties"]["explicit_schedule_intent"]["description"])
+        self.assertNotIn("explicit_user_intent", schedule_policy["required"])
 
     def test_standalone_meta_gobii_eval_command_is_removed(self):
         command_path = (
@@ -967,6 +970,29 @@ class MetaGobiiEvalScoringTests(TestCase):
         )
 
         self.assertFalse(scores["schedule_scope"][0])
+
+    def test_legacy_explicit_user_intent_does_not_fail_no_schedule_case(self):
+        case = _case("no_schedule_activate_existing")
+        policy = _no_schedule_policy()
+        policy.pop("explicit_schedule_intent")
+        policy["explicit_user_intent"] = True
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_get_agent", "meta_gobii_update_agent"],
+                "tools_before_approval": ["meta_gobii_list_agents", "meta_gobii_get_agent"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": ["Partner Research Gobii"],
+                "extra_scope_items": [],
+                "schedule_policy": policy,
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["schedule_scope"][0], scores["schedule_scope"][1])
 
     def test_duplicate_output_helper_detects_repeated_sections(self):
         text = (

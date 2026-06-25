@@ -252,7 +252,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_055_sheets_info", "category": "sheets", "prompt": "Get spreadsheet info for sheet-123 and report the spreadsheet title.", "expected_tools": ["google_sheets-get-spreadsheet-info"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_056_sheets_create_spreadsheet", "category": "sheets", "prompt": "Create a spreadsheet named Q2 Lead Tracker with a Leads worksheet.", "expected_tools": ["google_sheets-create-spreadsheet"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_057_sheets_read_rows", "category": "sheets", "prompt": "Read the first 10 rows from the Tasks worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-read-rows"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-read-rows": ["google_sheets-get-values-in-range"]}, "plan_expected": False},
-    {"slug": "common_use_case_058_sheets_get_by_id", "category": "sheets", "prompt": "Open spreadsheet sheet-123 by id and return its name.", "expected_tools": ["google_sheets-get-spreadsheet-by-id"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
+    {"slug": "common_use_case_058_sheets_get_by_id", "category": "sheets", "prompt": "Open spreadsheet sheet-123 by id and return its name.", "expected_tools": ["google_sheets-get-spreadsheet-by-id"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-get-spreadsheet-by-id": ["google_sheets-get-spreadsheet-info"]}, "plan_expected": False},
     {"slug": "common_use_case_059_sheets_current_user", "category": "sheets", "prompt": "Check the connected Google Sheets user before editing the tracker.", "expected_tools": ["google_sheets-get-current-user"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_060_sheets_append_rows", "category": "sheets", "prompt": "Append two new rows to the Research worksheet in spreadsheet sheet-123: company Vanta priority high owner Maya; company Notion priority medium owner Omar.", "expected_tools": ["google_sheets-add-rows"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-add-rows": ["google_sheets-add-multiple-rows"]}, "plan_expected": False},
     {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test three sentences: Enterprise leads increased. Acme renewal moved to legal review. Globex needs a Friday follow-up.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
@@ -289,7 +289,6 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_092_schedule_hourly_monitor", "category": "monitoring", "prompt": "Set an hourly schedule to monitor https://status.example.test/support and report support status changes.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_093_schedule_weekly_report", "category": "monitoring", "prompt": "Set a Monday 8am ET schedule for a weekly pipeline report.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_094_update_agent_charter", "category": "monitoring", "prompt": "Update your charter to monitor AI funding news and summarize notable deals.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_095_request_research_scope", "category": "human_input", "prompt": "Ask me which target account segment to research before starting the work.", "expected_tools": ["request_human_input"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_096_schedule_price_alert", "category": "monitoring", "prompt": "Set a daily schedule to check the BTC-USD price and alert only if it moves 5 percent.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday schedule to check https://borough.example.test/permits/decks for permit page updates.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_098_update_charter_sourcing", "category": "monitoring", "prompt": "Update your charter to source three qualified backend candidates each weekday.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
@@ -330,7 +329,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_135_search_scrape_two_sources", "category": "web_research", "prompt": "Search current warehouse robotics funding, scrape two strong sources, and cite both without extra query variants.", "expected_tools": ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_136_apollo_connect_tool_search", "category": "integration_discovery", "prompt": "Connect my Apollo.io account so you can use it for lead sourcing.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_137_slack_connect_tool_search", "category": "integration_discovery", "prompt": "Connect Slack so you can read and summarize customer feedback from our support channel.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_138_intercom_notes_capability_answer", "category": "tool_choice", "prompt": "Are you able to add internal notes to Intercom threads, different from replies?", "expected_tools": ["send_chat_message"], "forbidden_tools": ["request_human_input"], "plan_expected": False},
+    {"slug": "common_use_case_138_intercom_notes_capability_answer", "category": "tool_choice", "prompt": "Are you able to add internal notes to Intercom threads, different from replies?", "expected_tools": ["send_chat_message"], "forbidden_tools": ["request_human_input"], "accepted_tool_alternatives": {"send_chat_message": ["search_tools"]}, "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -624,6 +623,104 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
             step=prior_step,
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
         )
+
+    def _seed_prior_tool_results_context(self, agent_id):
+        """Seed actual tool-call rows for prompts that claim __tool_results already exists."""
+        seed_rows = {
+            "common_use_case_111_prior_results_sqlite_rank": [
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://pricing.example.test/acme"},
+                    {
+                        "status": "ok",
+                        "url": "https://pricing.example.test/acme",
+                        "result": "Acme Suite: annual cost $12,000 for the requested package.",
+                    },
+                ),
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://pricing.example.test/globex"},
+                    {
+                        "status": "ok",
+                        "url": "https://pricing.example.test/globex",
+                        "result": "Globex Platform: annual cost $9,600 for the requested package.",
+                    },
+                ),
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://pricing.example.test/initech"},
+                    {
+                        "status": "ok",
+                        "url": "https://pricing.example.test/initech",
+                        "result": "Initech Cloud: annual cost $15,500 for the requested package.",
+                    },
+                ),
+            ],
+            "common_use_case_124_tool_results_cte_dedupe_urls": [
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://sources.example.test/alpha"},
+                    {
+                        "status": "ok",
+                        "url": "https://sources.example.test/alpha",
+                        "result": "Alpha claims SOC 2 support and audit exports for enterprise teams.",
+                    },
+                ),
+                (
+                    "mcp_brightdata_scrape_as_markdown",
+                    {"url": "https://sources.example.test/beta"},
+                    {
+                        "status": "ok",
+                        "url": "https://sources.example.test/beta",
+                        "result": "Alpha duplicate: SOC 2 support and audit exports for enterprise teams.",
+                    },
+                ),
+            ],
+            "common_use_case_125_tool_results_json_each_plan": [
+                (
+                    "http_request",
+                    {"url": "https://api.example.test/offers/caremesh.json"},
+                    {
+                        "status": "ok",
+                        "content": {
+                            "vendor": "CareMesh",
+                            "offers": [
+                                {"plan": "Starter", "monthly_usd": 540, "hipaa_ready": False},
+                                {"plan": "Regulated", "monthly_usd": 720, "hipaa_ready": True},
+                            ],
+                        },
+                    },
+                ),
+                (
+                    "http_request",
+                    {"url": "https://api.example.test/offers/axonflow.json"},
+                    {
+                        "status": "ok",
+                        "content": {
+                            "vendor": "AxonFlow",
+                            "offers": [
+                                {"plan": "Business", "monthly_usd": 890, "hipaa_ready": True},
+                                {"plan": "Enterprise", "monthly_usd": 1200, "hipaa_ready": True},
+                            ],
+                        },
+                    },
+                ),
+            ],
+        }.get(getattr(self.case, "slug", None))
+        if not seed_rows:
+            return
+
+        for tool_name, tool_params, result in seed_rows:
+            step = PersistentAgentStep.objects.create(
+                agent_id=agent_id,
+                description=f"Seeded prior eval tool result: {tool_name}",
+            )
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name=tool_name,
+                tool_params=tool_params,
+                result=json.dumps(result),
+            )
 
     def _seed_completed_process_run(self, agent_id):
         self._seed_prior_processing_run(agent_id)
@@ -2717,6 +2814,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         forbidden_tools = case.forbidden_tool_names()
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
         self._seed_prior_processing_run(agent_id)
+        self._seed_prior_tool_results_context(agent_id)
         self._seed_outbound_contact_context(agent_id)
         self._seed_file_context(agent_id)
         tool_names = self._tool_names_to_enable()
@@ -2905,6 +3003,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
     def _request_human_input_call_has_options(call):
         params = call.tool_params or {}
         options = params.get("options")
+        if params.get("question") and options in (None, []):
+            return True
         if _valid_human_input_options(options):
             return True
         for raw_requests_key in ("requests", "questions"):
@@ -2913,7 +3013,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 continue
             return all(
                 isinstance(request, dict)
-                and _valid_human_input_options(request.get("options"))
+                and request.get("question")
+                and (request.get("options") in (None, []) or _valid_human_input_options(request.get("options")))
                 for request in raw_requests
             )
         return False

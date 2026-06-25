@@ -3,7 +3,8 @@ from urllib.parse import parse_qs, urlparse
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
-from api.models import EvalRunTask, PersistentAgentMessage, PersistentAgentToolCall
+from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
+from api.models import EvalRunTask, PersistentAgent, PersistentAgentMessage, PersistentAgentToolCall
 
 FREDERICK_MD_LATITUDE = 39.4143
 FREDERICK_MD_LONGITUDE = -77.4105
@@ -156,6 +157,9 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
     ]
 
     def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        mark_tool_enabled_without_discovery(agent, "http_request")
+
         # Task 1: Inject Prompt
         self.record_task_result(
             run_id,

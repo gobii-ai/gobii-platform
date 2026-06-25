@@ -41,7 +41,7 @@ def _implicit_research_team_plan_args(schedule_policy=None):
             "schedule_in_scope": False,
             "schedule_action": "none",
             "cadence_or_schedule": "",
-            "explicit_user_intent": False,
+            "explicit_schedule_intent": False,
             "included_in_approval_scope": False,
             "asks_clarifying_question": False,
             "rationale": "Summer/fall describes the research window, not a recurring cadence.",
@@ -159,6 +159,19 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
         self.assertIsNotNone(suite)
         self.assertIn(META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS, suite.scenario_slugs)
         self.assertIn(META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS, suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_prompt",
+                "verify_skill_search",
+                "verify_meta_gobii_enabled",
+                "verify_no_research_persona_path",
+            ],
+        )
+        self.assertIn(
+            "verify_meta_gobii_surface_used",
+            [task.name for task in launch_scenario.tasks],
+        )
 
     def test_search_tools_surface_mentions_hidden_system_skills_for_agent_teams(self):
         description = get_search_tools_tool()["function"]["description"].lower()
@@ -291,7 +304,7 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
             "schedule_in_scope": True,
             "schedule_action": "create",
             "cadence_or_schedule": "weekly Friday digest",
-            "explicit_user_intent": True,
+            "explicit_schedule_intent": True,
             "included_in_approval_scope": True,
             "asks_clarifying_question": False,
             "rationale": "Invented a recurring schedule for summer/fall research.",
