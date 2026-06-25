@@ -10,7 +10,7 @@ from django.db.models import Q
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0401_merge_20260618_1848"),
+        ("api", "0402_remove_agent_retry_completion_on_web_session_activation_switch"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
