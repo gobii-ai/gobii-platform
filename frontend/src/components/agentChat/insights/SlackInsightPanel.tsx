@@ -59,7 +59,7 @@ export function SlackInsightPanel({ agentId = null, onOpenApps }: SlackInsightPa
       notConfiguredMessage="Slack is not configured."
       title={app?.subscribed ? 'Slack channels subscribed' : app?.connected ? 'Slack connected' : 'Connect Slack'}
       text={app?.subscribed
-        ? `${app.activeSubscriptionCount} ${app.activeSubscriptionCount === 1 ? 'channel is' : 'channels are'} subscribed. Replies use display-level agent identity, not separate mentionable Slack bots.`
+        ? `${app.activeSubscriptionCount} ${app.activeSubscriptionCount === 1 ? 'channel is' : 'channels are'} subscribed.`
         : app?.connected
           ? 'Choose the Slack channels that should wake this agent. Replies can show the agent name per message.'
           : 'Connect Slack so this agent can receive and reply to selected public or private channels.'}
