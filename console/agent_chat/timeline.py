@@ -408,6 +408,16 @@ def _discord_outbound_channel_label(message: PersistentAgentMessage, conversatio
     return ""
 
 
+def _payload_text(raw_payload: object, *keys: str) -> str:
+    if not isinstance(raw_payload, Mapping):
+        return ""
+    for key in keys:
+        value = raw_payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _format_timestamp(dt: datetime | None) -> str | None:
     if dt is None:
         return None
@@ -633,6 +643,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
     sender_user_id: int | None = None
     sender_name: str | None = None
     sender_address = message.from_endpoint.address if message.from_endpoint_id else None
+    payload_sender_name = _payload_text(message.raw_payload, "sender_name", "senderName")
     if channel.lower() == "web" and sender_address:
         user_id, agent_id = parse_web_user_address(sender_address)
         if user_id is not None and (not agent_id or not message.owner_agent_id or str(message.owner_agent_id) == agent_id):
@@ -650,11 +661,13 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
                 ).first()
                 if user:
                     sender_name = _build_user_display_name(user)
+    if not sender_name and payload_sender_name:
+        sender_name = payload_sender_name
     if not sender_name:
         sender_name = (conversation.display_name or "").strip() if conversation else ""
         if not sender_name:
             sender_name = sender_address
-    if source_label and not message.is_outbound:
+    if source_label and not message.is_outbound and not payload_sender_name:
         sender_name = source_label
 
     body_html = _message_body_html(message, channel, attachments)

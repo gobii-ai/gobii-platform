@@ -45,6 +45,7 @@ from api.services.slack_bot import (
     send_channel_message,
     slack_event_message_from_payload,
 )
+from console.agent_chat.timeline import serialize_message_event
 
 
 User = get_user_model()
@@ -90,6 +91,7 @@ def _slack_signature(body: bytes, secret: str, timestamp: str | None = None):
         "channels:history",
         "groups:read",
         "groups:history",
+        "users:read",
     ),
     SLACK_INBOUND_DEBOUNCE_SECONDS=15,
     PUBLIC_SITE_URL="https://app.example.test",
@@ -189,6 +191,7 @@ class NativeSlackTests(TestCase):
         self.assertEqual(provider.display_name, "Slack")
         self.assertIn("chat:write.customize", provider.scopes)
         self.assertIn("channels:history", provider.scopes)
+        self.assertIn("users:read", provider.scopes)
         self.assertEqual(provider.api_url_prefixes, ("https://slack.com/api/",))
         self.assertEqual(NATIVE_INTEGRATION_PIPEDREAM_APP_SLUGS["slack"], ("slack",))
 
@@ -372,6 +375,7 @@ class NativeSlackTests(TestCase):
                 "channel_type": "channel",
                 "channel_name": "general",
                 "user": "U123",
+                "user_profile": {"display_name": "Mira Example", "real_name": "Mira Real"},
                 "text": "hello from human",
                 "ts": "171000.123",
             },
@@ -392,6 +396,10 @@ class NativeSlackTests(TestCase):
         stored = PersistentAgentMessage.objects.get(body="hello from human")
         self.assertEqual(stored.conversation.channel, CommsChannel.SLACK)
         self.assertEqual(stored.raw_payload["slack_event_id"], "Ev123")
+        self.assertEqual(stored.raw_payload["slack_author_name"], "Mira Example")
+        message_payload = serialize_message_event(stored)["message"]
+        self.assertEqual(message_payload["senderName"], "Mira Example")
+        self.assertEqual(message_payload["sourceLabel"], "#general")
         schedule_mock.assert_called_once_with(str(self.agent.id))
 
         duplicate = self.client.post(
@@ -419,6 +427,53 @@ class NativeSlackTests(TestCase):
             },
         }
         self.assertIsNone(slack_event_message_from_payload(subtype_payload))
+
+    @patch("api.services.slack_bot.schedule_slack_inbound_processing")
+    @patch("api.services.slack_bot.requests.get")
+    def test_event_ingestion_fetches_slack_user_profile_when_event_lacks_name(self, get_mock, schedule_mock):
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        self._create_secret(owner_user=self.user)
+        self._active_subscription(channel_id="C123", channel_name="general")
+        get_mock.return_value = _response(
+            {
+                "ok": True,
+                "user": {
+                    "id": "U123",
+                    "name": "mira",
+                    "profile": {
+                        "display_name": "Mira Profile",
+                        "real_name": "Mira Real",
+                    },
+                },
+            }
+        )
+        message = SlackEventMessage(
+            event_id="EvProfile",
+            team_id="T123",
+            channel_id="C123",
+            channel_name="general",
+            channel_type="channel",
+            user_id="U123",
+            text="profile lookup",
+            ts="171000.456",
+            thread_ts="",
+            raw_event={
+                "type": "message",
+                "channel": "C123",
+                "channel_type": "channel",
+                "user": "U123",
+                "text": "profile lookup",
+                "ts": "171000.456",
+            },
+        )
+
+        ingest_event_message(message)
+
+        stored = PersistentAgentMessage.objects.get(body="profile lookup")
+        self.assertEqual(stored.raw_payload["sender_name"], "Mira Profile")
+        self.assertEqual(serialize_message_event(stored)["message"]["senderName"], "Mira Profile")
+        self.assertEqual(get_mock.call_args.args[0], "https://slack.com/api/users.info")
+        self.assertEqual(get_mock.call_args.kwargs["params"], {"user": "U123"})
 
     def test_events_endpoint_handles_url_verification_and_rejects_bad_or_stale_signatures(self):
         body = json.dumps({"type": "url_verification", "challenge": "challenge-token"}).encode("utf-8")

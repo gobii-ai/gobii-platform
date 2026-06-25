@@ -1703,12 +1703,16 @@ SLACK_DEFAULT_OAUTH_SCOPES = (
     "channels:history",
     "groups:read",
     "groups:history",
+    "users:read",
 )
-SLACK_OAUTH_SCOPES = tuple(
+SLACK_REQUIRED_OAUTH_SCOPES = (
+    "users:read",
+)
+SLACK_OAUTH_SCOPES = tuple(dict.fromkeys([
     scope
     for scope in env("SLACK_OAUTH_SCOPES", default=" ".join(SLACK_DEFAULT_OAUTH_SCOPES)).replace(",", " ").split()
     if scope
-)
+] + list(SLACK_REQUIRED_OAUTH_SCOPES)))
 SLACK_INBOUND_DEBOUNCE_SECONDS = env.int("SLACK_INBOUND_DEBOUNCE_SECONDS", default=15)
 
 # ────────── Native Discord Bot ──────────

@@ -303,6 +303,87 @@ def _channel_type(channel: Mapping[str, Any]) -> str:
     return SLACK_PUBLIC_CHANNEL_TYPE
 
 
+def _first_nonempty_text(*values: object) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _slack_profile_display_name(profile: Mapping[str, Any]) -> str:
+    return _first_nonempty_text(
+        profile.get("display_name"),
+        profile.get("display_name_normalized"),
+        profile.get("real_name"),
+        profile.get("real_name_normalized"),
+        profile.get("name"),
+    )
+
+
+def _slack_user_display_name_from_event(event: Mapping[str, Any]) -> str:
+    profile = event.get("user_profile") or event.get("profile")
+    if isinstance(profile, Mapping):
+        display_name = _slack_profile_display_name(profile)
+        if display_name:
+            return display_name
+    return _first_nonempty_text(
+        event.get("username"),
+        event.get("user_name"),
+        event.get("display_name"),
+        event.get("real_name"),
+    )
+
+
+def _fetch_slack_user_display_name(agent: PersistentAgent, user_id: str) -> str:
+    normalized_user_id = user_id.strip()
+    if not normalized_user_id:
+        return ""
+    try:
+        response = requests.get(
+            f"{SLACK_API_BASE}/users.info",
+            params={"user": normalized_user_id},
+            headers=_slack_headers(agent),
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json() or {}
+    except SlackIntegrationError as exc:
+        logger.info("Skipping Slack user profile lookup for agent %s: %s", agent.id, exc)
+        return ""
+    except requests.RequestException as exc:
+        logger.info("Slack user profile lookup failed for %s: %s", normalized_user_id, exc)
+        return ""
+    except ValueError:
+        logger.info("Slack user profile lookup returned invalid JSON for %s.", normalized_user_id)
+        return ""
+
+    if not isinstance(payload, Mapping) or not payload.get("ok", False):
+        error = str(payload.get("error") or "unknown_error") if isinstance(payload, Mapping) else "invalid_response"
+        logger.info("Slack user profile lookup skipped for %s: %s", normalized_user_id, error)
+        return ""
+
+    user = payload.get("user")
+    if not isinstance(user, Mapping):
+        return ""
+    profile = user.get("profile")
+    if isinstance(profile, Mapping):
+        display_name = _slack_profile_display_name(profile)
+        if display_name:
+            return display_name
+    return _first_nonempty_text(
+        user.get("real_name"),
+        user.get("name"),
+    )
+
+
+def _resolve_slack_user_display_name(agent: PersistentAgent, message: SlackEventMessage) -> str:
+    return (
+        _slack_user_display_name_from_event(message.raw_event)
+        or _fetch_slack_user_display_name(agent, message.user_id)
+        or (f"Slack {message.user_id}" if message.user_id else "")
+    )
+
+
 def discover_channels(agent: PersistentAgent, *, query: str = "", limit: int = 100) -> dict[str, Any]:
     workspaces = list(_claimed_workspace_queryset(agent).order_by("team_name", "team_id"))
     if not workspaces:
@@ -508,6 +589,7 @@ def _ingest_event_for_subscription(
     platform_channel_address = slack_channel_address(message.team_id, message.channel_id)
     conversation_address = slack_conversation_address(agent.id, message.team_id, message.channel_id)
     source_label = slack_channel_source_label(message.channel_id, message.channel_name)
+    sender_name = _resolve_slack_user_display_name(agent, message)
     raw_payload = {
         "source": "slack_events_api",
         "source_kind": "slack",
@@ -521,8 +603,10 @@ def _ingest_event_for_subscription(
         "slack_channel_type": message.channel_type,
         "slack_team_id": message.team_id,
         "slack_author_id": message.user_id,
+        "slack_author_name": sender_name,
         "slack_platform_channel_address": platform_channel_address,
         "slack_conversation_address": conversation_address,
+        "sender_name": sender_name,
         "source_label": source_label,
         "slack_event": dict(message.raw_event),
     }

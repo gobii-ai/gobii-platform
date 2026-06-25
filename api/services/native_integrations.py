@@ -478,10 +478,13 @@ NATIVE_INTEGRATION_CAPABILITIES: dict[str, tuple[NativeIntegrationCapability, ..
             resource="messages",
             operation="read",
             label="Receive Slack channel messages for subscribed channels",
-            required_scopes=("channels:history", "groups:history"),
-            endpoint_hints=("Slack Events API message.channels and message.groups callbacks",),
+            required_scopes=("channels:history", "groups:history", "users:read"),
+            endpoint_hints=(
+                "Slack Events API message.channels and message.groups callbacks",
+                "GET https://slack.com/api/users.info",
+            ),
             write_risk="read",
-            setup_guidance="Reconnect Slack if channel history event scopes are missing.",
+            setup_guidance="Reconnect Slack if channel history or user profile scopes are missing.",
         ),
         NativeIntegrationCapability(
             key="slack_messages_send",
