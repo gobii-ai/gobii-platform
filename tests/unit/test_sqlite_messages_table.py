@@ -29,6 +29,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
                 channel="email",
                 is_outbound=False,
                 from_address="user@example.com",
+                from_display_name="Mira Example",
                 to_address="agent@example.com",
                 conversation_id="conv-1",
                 conversation_address="user@example.com",
@@ -57,7 +58,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
 
             cur.execute(
                 """
-                SELECT message_id, channel, is_outbound, direction, subject, attachment_paths_json, attachment_count, rejected_attachments_json
+                SELECT message_id, channel, is_outbound, direction, from_display_name, subject, attachment_paths_json, attachment_count, rejected_attachments_json
                 FROM "__messages"
                 WHERE message_id='msg-1';
                 """
@@ -69,10 +70,11 @@ class SqliteMessagesTableTests(SimpleTestCase):
             self.assertEqual(row[1], "email")
             self.assertEqual(row[2], 0)
             self.assertEqual(row[3], "inbound")
-            self.assertEqual(row[4], "Hello")
-            self.assertEqual(json.loads(row[5]), ["/reports/daily.csv"])
-            self.assertEqual(row[6], 1)
-            self.assertEqual(json.loads(row[7]), [])
+            self.assertEqual(row[4], "Mira Example")
+            self.assertEqual(row[5], "Hello")
+            self.assertEqual(json.loads(row[6]), ["/reports/daily.csv"])
+            self.assertEqual(row[7], 1)
+            self.assertEqual(json.loads(row[8]), [])
         finally:
             conn.close()
 
@@ -84,6 +86,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
             channel="sms",
             is_outbound=True,
             from_address="+15550000000",
+            from_display_name="",
             to_address="+15551111111",
             conversation_id=None,
             conversation_address="",
@@ -107,6 +110,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
             channel="web",
             is_outbound=True,
             from_address="web://agent/1",
+            from_display_name="",
             to_address="web://user/1/agent/1",
             conversation_id="conv-2",
             conversation_address="web://user/1/agent/1",
@@ -145,6 +149,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
             channel="email",
             is_outbound=True,
             from_address="agent@example.com",
+            from_display_name="Agent Smith",
             to_address="user@example.com",
             conversation_id=None,
             conversation_address="",

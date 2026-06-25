@@ -632,7 +632,7 @@ TEMP TABLE = gone next call; use CREATE TABLE for durable working data
 # __tool_results (special table)
 columns: result_id, tool_name, created_at, result_json, result_text, analysis_json, bytes, line_count, is_json, json_type, top_keys, is_truncated, truncated_bytes. result_text is always populated; result_json is preferred when is_json=1; analysis_json is hints, not the data. scrape_as_markdown → prefer json_extract(result_json,'$.result') for original markdown. do not invent columns; only use those listed above.
 # __messages (special table)
-columns include message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, body_bytes, body_is_truncated, attachment_paths_json, attachment_count, rejected_attachments_json, latest_status, latest_sent_at, latest_delivered_at, latest_error_message. message_id is the internal Gobii id accepted by send_email.reply_to_message_id. attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json). Use __messages only for structured analysis/history, not freshness checks.
+columns include message_id, seq, timestamp, channel, is_outbound, from_address, from_display_name, to_address, subject, body, body_bytes, body_is_truncated, attachment_paths_json, attachment_count, rejected_attachments_json, latest_status, latest_sent_at, latest_delivered_at, latest_error_message. message_id is the internal Gobii id accepted by send_email.reply_to_message_id. attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json). Use __messages only for structured analysis/history, not freshness checks.
 # __files (special table; metadata only)
 columns: node_id, filespace_id, path, name, parent_path, mime_type, size_bytes, checksum_sha256, created_at, updated_at. recent_files → SELECT * FROM __files ORDER BY updated_at DESC LIMIT 30. metadata only; read_file gets contents.
 # __contacts (special table)
@@ -4098,6 +4098,25 @@ def _extract_rejected_attachments_from_raw_payload(raw_payload: object) -> List[
     return attachments
 
 
+def _extract_message_sender_display_name(raw_payload: object) -> str:
+    if not isinstance(raw_payload, Mapping):
+        return ""
+
+    for key in (
+        "sender_name",
+        "senderName",
+        "slack_author_name",
+        "discord_author_name",
+        "author_name",
+        "display_name",
+        "displayName",
+    ):
+        value = raw_payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _format_outbound_attachment_status_suffix(attachment_paths: Sequence[str]) -> str:
     return f" [attachments: {len(attachment_paths)}]"
 
@@ -4130,6 +4149,7 @@ def _build_message_sqlite_record(
         channel=channel,
         is_outbound=bool(message.is_outbound),
         from_address=message.from_endpoint.address or "",
+        from_display_name=_extract_message_sender_display_name(raw_payload),
         to_address=to_address,
         conversation_id=str(message.conversation_id) if message.conversation_id else None,
         conversation_address=message.conversation.address if message.conversation else "",
@@ -4622,6 +4642,7 @@ def _get_unified_history_prompt(
                 from_addr = _format_web_party(from_addr, m.from_endpoint_id)
             source_kind, source_label = get_message_source_metadata(m.raw_payload)
             is_webhook = channel == CommsChannel.OTHER and str(source_kind).strip().lower() == "webhook"
+            sender_display_name = _extract_message_sender_display_name(raw_payload)
             if m.is_outbound:
                 to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
                 if channel == CommsChannel.EMAIL and m.conversation and m.conversation.address:
@@ -4636,8 +4657,15 @@ def _get_unified_history_prompt(
                 if is_webhook:
                     label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "unknown webhook"
                     header = f'[{m.timestamp.isoformat()}] Inbound webhook "{label}" triggered:'
+                elif sender_display_name and source_kind == "slack" and source_label:
+                    header = (
+                        f"[{m.timestamp.isoformat()}] On {channel}, "
+                        f"you received a message from {sender_display_name} in {source_label}:"
+                    )
                 elif source_label:
                     header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {source_label}:"
+                elif sender_display_name:
+                    header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {sender_display_name}:"
                 else:
                     header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {from_addr}:"
 

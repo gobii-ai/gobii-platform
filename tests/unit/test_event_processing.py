@@ -1533,6 +1533,65 @@ class PromptContextBuilderTests(TestCase):
             reset_sqlite_db_path(token)
             sqlite_tmp.cleanup()
 
+    def test_build_prompt_context_exposes_slack_sender_display_name(self):
+        slack_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SLACK,
+            address="slack://team/T123/channel/C123",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=slack_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Slack hello",
+            raw_payload={
+                "source_kind": "slack",
+                "source_label": "#ops",
+                "sender_name": "Mira Example",
+                "slack_author_name": "Mira Example",
+            },
+            seq=f"SLACK{int(timezone.now().timestamp() * 1_000_000):020d}"[:26],
+        )
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+        try:
+            with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+                context, _, _ = build_prompt_context(self.agent)
+
+            user_message = next((m for m in context if m["role"] == "user"), None)
+            self.assertIsNotNone(user_message)
+            assert user_message is not None
+            self.assertIn(
+                "On slack, you received a message from Mira Example in #ops:",
+                user_message["content"],
+            )
+
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT from_address, from_display_name, body
+                    FROM "__messages"
+                    ORDER BY timestamp DESC
+                    LIMIT 1;
+                    """
+                )
+                row = cur.fetchone()
+                self.assertIsNotNone(row)
+                assert row is not None
+                self.assertEqual(row[0], "slack://team/t123/channel/c123")
+                self.assertEqual(row[1], "Mira Example")
+                self.assertEqual(row[2], "Slack hello")
+            finally:
+                conn.close()
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
+
     def test_sqlite_messages_snapshot_includes_rejected_attachment_metadata(self):
         PersistentAgentMessage.objects.create(
             owner_agent=self.agent,

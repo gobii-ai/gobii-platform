@@ -18,6 +18,7 @@ class MessageSQLiteRecord:
     channel: str
     is_outbound: bool
     from_address: str
+    from_display_name: str
     to_address: str
     conversation_id: Optional[str]
     conversation_address: str
@@ -60,6 +61,7 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
                     1 if record.is_outbound else 0,
                     "outbound" if record.is_outbound else "inbound",
                     record.from_address or "",
+                    record.from_display_name or "",
                     record.to_address or "",
                     record.conversation_id,
                     record.conversation_address or "",
@@ -92,6 +94,7 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
                     is_outbound,
                     direction,
                     from_address,
+                    from_display_name,
                     to_address,
                     conversation_id,
                     conversation_address,
@@ -112,7 +115,7 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
                     latest_error_message,
                     is_hidden_in_chat
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 rows,
@@ -141,6 +144,7 @@ def _recreate_messages_table(conn) -> None:
             is_outbound INTEGER,
             direction TEXT,
             from_address TEXT,
+            from_display_name TEXT,
             to_address TEXT,
             conversation_id TEXT,
             conversation_address TEXT,
