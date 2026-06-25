@@ -12,10 +12,6 @@ from typing import Any, Awaitable, Callable, List, Dict, Tuple, Optional
 import tarfile
 import zstandard as zstd
 
-# browser_use mutates root logging on import unless this env var is disabled first.
-# Guard here too so direct module imports outside normal Django startup stay quiet.
-os.environ.setdefault("BROWSER_USE_SETUP_LOGGING", "false")
-
 from browser_use.browser.profile import ProxySettings
 from django.core.files.storage import default_storage
 from django.core.files import File
@@ -1056,6 +1052,7 @@ async def _run_agent(
                 auto_download_pdfs=False,
                 proxy=proxy_settings,
                 custom_context={'available_file_paths': available_file_paths},
+                captcha_solver=False,
             )
 
             browser_session = BrowserSession(
