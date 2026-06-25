@@ -3649,7 +3649,7 @@ def _get_system_instruction(
     )
     stop_continue_examples = (
         "## Stop/continue\n\n"
-        "Set will_continue_work=true only for immediate work: unsent results, unverified constraints, plan cleanup, needed tool results, or final delivery. "
+        "Set will_continue_work=true only for immediate work: unsent results, unverified constraints, plan cleanup, or needed tool results. "
         "Set false after delivery/config and no active work; future schedules do not count.\n"
         f"{text_only_guidance}"
         "Plans: if cleanup remains, send final report with true, update_plan finished/deferred items, then stop with false.\n\n"
@@ -5030,7 +5030,10 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
             lines.append("")
         lines.append("Native integration auth (enable tools/skills before use):")
         for secret in global_integrations:
-            lines.append(f"  - {secret.name}: use `http_request` against the provider API; authentication is applied automatically when supported.")
+            lines.append(
+                f"  - {secret.name}: auth exists, but auth is not a tool; if the native skill/tool is not enabled, "
+                f"call `search_tools('{secret.name}')` first. Native auth applies automatically when supported."
+            )
 
     # Agent-specific secrets (override globals on key conflict)
     if available_credentials:
