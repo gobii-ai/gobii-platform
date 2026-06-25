@@ -14,7 +14,7 @@
       "planning_first_run": {
         "fitted_tokens": 3379,
         "system_bytes": 30850,
-        "tools_bytes": 11350,
+        "tools_bytes": 11760,
         "total_bytes": 57450,
         "user_bytes": 15600
       },
