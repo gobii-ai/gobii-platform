@@ -68,12 +68,14 @@ export type CurrentOrganizationPayload = {
     plan: string
     customInstructions: string
     customInstructionsMaxChars: number
+    membersCanCreateAgents: boolean
   }
   viewer: {
     role: string
     roleLabel: string
     canEditOrganization: boolean
     canEditCustomInstructions: boolean
+    canEditMemberAgentCreation: boolean
     canManageMembers: boolean
     canManageBilling: boolean
   }
@@ -121,6 +123,14 @@ export function updateCurrentOrganizationCustomInstructions(customInstructions: 
   return jsonRequest<CurrentOrganizationPayload>(CURRENT_ORGANIZATION_URL, {
     method: 'PATCH',
     json: { customInstructions },
+    includeCsrf: true,
+  })
+}
+
+export function updateCurrentOrganizationMemberAgentCreation(membersCanCreateAgents: boolean): Promise<CurrentOrganizationPayload> {
+  return jsonRequest<CurrentOrganizationPayload>(CURRENT_ORGANIZATION_URL, {
+    method: 'PATCH',
+    json: { membersCanCreateAgents },
     includeCsrf: true,
   })
 }

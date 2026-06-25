@@ -73,6 +73,7 @@ class ConsoleContextMixin:
                 context['current_membership'] = resolved.current_membership
 
             context['can_manage_org_agents'] = resolved.can_manage_org_agents
+            context['can_create_org_agents'] = resolved.can_create_org_agents
 
             # Add user's subscription plan for frontend
             # Normalize plan IDs to frontend-friendly values: free, startup, scale

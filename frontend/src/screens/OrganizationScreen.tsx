@@ -13,6 +13,7 @@ import {
   resendOrganizationInvite,
   revokeOrganizationInvite,
   updateCurrentOrganizationCustomInstructions,
+  updateCurrentOrganizationMemberAgentCreation,
   updateCurrentOrganizationName,
   updateOrganizationMemberRole,
   type CurrentOrganizationPayload,
@@ -329,6 +330,9 @@ export function OrganizationScreen() {
   const [nameMessage, setNameMessage] = useState<string | null>(null)
   const [nameErrors, setNameErrors] = useState<string[]>([])
   const [savingName, setSavingName] = useState(false)
+  const [agentCreationMessage, setAgentCreationMessage] = useState<string | null>(null)
+  const [agentCreationErrors, setAgentCreationErrors] = useState<string[]>([])
+  const [savingAgentCreation, setSavingAgentCreation] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('')
   const [inviteErrors, setInviteErrors] = useState<string[]>([])
@@ -427,6 +431,21 @@ export function OrganizationScreen() {
     const nextData = await updateCurrentOrganizationCustomInstructions(normalizedInstructions)
     updateCachedData(nextData)
     return nextData.organization.customInstructions
+  }
+
+  const handleMemberAgentCreationChange = async (enabled: boolean) => {
+    setSavingAgentCreation(true)
+    setAgentCreationErrors([])
+    setAgentCreationMessage(null)
+    try {
+      const nextData = await updateCurrentOrganizationMemberAgentCreation(enabled)
+      updateCachedData(nextData)
+      setAgentCreationMessage('Agent creation setting updated.')
+    } catch (err) {
+      setAgentCreationErrors(formatErrors(err, 'Unable to update agent creation setting.'))
+    } finally {
+      setSavingAgentCreation(false)
+    }
   }
 
   const handleInviteSubmit = async (event: FormEvent) => {
@@ -557,6 +576,7 @@ export function OrganizationScreen() {
   const canManageMembers = data.viewer.canManageMembers
   const canEditOrganization = data.viewer.canEditOrganization
   const canEditCustomInstructions = data.viewer.canEditCustomInstructions
+  const canEditMemberAgentCreation = data.viewer.canEditMemberAgentCreation
   const availableSeats = data.billing?.seatsAvailable ?? null
   const noSeatsAvailable = availableSeats !== null && availableSeats <= 0
   const canInviteSolutionsPartnerWithoutSeats = data.roles.some((roleOption) => roleOption.value === SOLUTIONS_PARTNER_ROLE)
@@ -628,6 +648,35 @@ export function OrganizationScreen() {
             {nameMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{nameMessage}</p> : null}
           </div>
         </form>
+        {canEditMemberAgentCreation ? (
+          <>
+            <div className="organization-screen__setting-group">
+              <label className="organization-screen__setting-row">
+                <span className="organization-screen__setting-copy">
+                  <span className="organization-screen__setting-title">Member Agent Creation</span>
+                  <span className="organization-screen__setting-description">Members may create organization agents</span>
+                </span>
+                <span className="organization-screen__setting-toggle">
+                  <input
+                    type="checkbox"
+                    checked={data.organization.membersCanCreateAgents}
+                    disabled={savingAgentCreation}
+                    onChange={(event) => void handleMemberAgentCreationChange(event.currentTarget.checked)}
+                  />
+                  <span className="organization-screen__setting-switch" aria-hidden="true" />
+                </span>
+              </label>
+              {agentCreationErrors.map((message) => (
+                <em key={message} className="organization-screen__setting-error">{message}</em>
+              ))}
+            </div>
+            <div className="profile-screen__actions">
+              {agentCreationMessage ? (
+                <p className="profile-screen__feedback profile-screen__feedback--success">{agentCreationMessage}</p>
+              ) : null}
+            </div>
+          </>
+        ) : null}
       </section>
 
       <CustomInstructionsSection

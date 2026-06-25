@@ -31,6 +31,7 @@ from console.agent_creation import (
     AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
     AGENT_TEMPLATE_SOURCE_SESSION_KEY,
 )
+from api.services.organization_permissions import ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS
 from django.utils import timezone
 from constants.plans import PlanNamesChoices
 
@@ -64,6 +65,7 @@ class OrganizationCreateAPITests(TestCase):
             "type": "organization",
             "id": str(org.id),
             "name": "New Ops Org",
+            "canCreateAgents": True,
         })
         self.assertTrue(
             OrganizationMembership.objects.filter(
@@ -168,8 +170,10 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["organization"]["id"], str(self.org.id))
+        self.assertFalse(payload["organization"]["membersCanCreateAgents"])
         self.assertEqual(payload["viewer"]["role"], OrganizationMembership.OrgRole.OWNER)
         self.assertTrue(payload["viewer"]["canEditOrganization"])
+        self.assertTrue(payload["viewer"]["canEditMemberAgentCreation"])
         self.assertTrue(payload["viewer"]["canManageMembers"])
         self.assertEqual({member["email"] for member in payload["members"]}, {
             "owner@example.com",
@@ -232,6 +236,44 @@ class CurrentOrganizationAPITests(TestCase):
                 self.assertEqual(instructions.instructions, f"{label} line\nSecond line")
                 self.assertEqual(instructions.updated_by, user)
                 self.assertEqual(resp.json()["organization"]["customInstructions"], f"{label} line\nSecond line")
+
+    def test_config_authority_roles_can_update_member_agent_creation_setting(self):
+        self._login_in_org_context(self.admin)
+
+        enable_resp = self.client.patch(
+            reverse("console-current-organization"),
+            data=json.dumps({"membersCanCreateAgents": True}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(enable_resp.status_code, 200)
+        self.org.refresh_from_db()
+        self.assertTrue(self.org.org_settings[ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS])
+        self.assertTrue(enable_resp.json()["organization"]["membersCanCreateAgents"])
+
+        disable_resp = self.client.patch(
+            reverse("console-current-organization"),
+            data=json.dumps({"membersCanCreateAgents": False}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(disable_resp.status_code, 200)
+        self.org.refresh_from_db()
+        self.assertNotIn(ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS, self.org.org_settings)
+        self.assertFalse(disable_resp.json()["organization"]["membersCanCreateAgents"])
+
+    def test_member_cannot_update_member_agent_creation_setting(self):
+        self._login_in_org_context(self.member)
+
+        resp = self.client.patch(
+            reverse("console-current-organization"),
+            data=json.dumps({"membersCanCreateAgents": True}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.org.refresh_from_db()
+        self.assertNotIn(ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS, self.org.org_settings)
 
     def test_member_and_viewer_cannot_update_custom_instructions(self):
         viewer = User.objects.create_user(username="org-viewer", email="viewer@example.com", password="pw")
@@ -344,6 +386,8 @@ class CurrentOrganizationAPITests(TestCase):
 
     def test_current_organization_template_launch_seeds_org_spawn_session(self):
         template = self._create_org_template()
+        self.org.org_settings = {ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS: True}
+        self.org.save(update_fields=["org_settings"])
         self._login_in_org_context(self.member)
 
         resp = self.client.post(
@@ -362,6 +406,22 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertEqual(session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY], template.code)
         self.assertEqual(session[AGENT_TEMPLATE_SOURCE_SESSION_KEY], AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE)
         self.assertEqual(session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY], str(self.org.id))
+
+    def test_current_organization_template_launch_rejects_member_without_creation_setting(self):
+        template = self._create_org_template()
+        self._login_in_org_context(self.member)
+
+        resp = self.client.post(
+            reverse("console-current-organization-template-launch", kwargs={"template_id": template.id}),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("permission to create agents", resp.json()["error"])
+        session = self.client.session
+        self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
+        self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, session)
 
     @patch("api.services.template_clone.TemplateCloneService._generate_template")
     def test_current_organization_templates_api_allows_manage_roles_to_create_and_deactivate(self, mock_generate_template):
@@ -740,6 +800,50 @@ class ConsoleContextTests(TestCase):
         roster_ids = {entry["id"] for entry in payload.get("agents", [])}
         self.assertIn(str(extra_org_agent.id), roster_ids)
         self.assertNotIn(str(self.org_agent.id), roster_ids)
+
+    def test_roster_context_marks_member_agent_creation_permission(self):
+        member = User.objects.create_user(username="org-member-roster", email="member-roster@example.com", password="pw")
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=member,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        self.client.logout()
+        assert self.client.login(username="org-member-roster", password="pw")
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session.save()
+
+        default_resp = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(default_resp.status_code, 200)
+        self.assertFalse(default_resp.json()["context"]["canCreateAgents"])
+        default_context_resp = self.client.get(reverse("switch_context"))
+        self.assertEqual(default_context_resp.status_code, 200)
+        default_context_payload = default_context_resp.json()
+        self.assertFalse(default_context_payload["context"]["canCreateAgents"])
+        organization_option = next(
+            option for option in default_context_payload["organizations"] if option["id"] == str(self.org.id)
+        )
+        self.assertFalse(organization_option["canCreateAgents"])
+
+        self.org.org_settings = {ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS: True}
+        self.org.save(update_fields=["org_settings"])
+
+        enabled_resp = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(enabled_resp.status_code, 200)
+        self.assertTrue(enabled_resp.json()["context"]["canCreateAgents"])
+        enabled_context_resp = self.client.post(
+            reverse("switch_context"),
+            data=json.dumps({"type": "organization", "id": str(self.org.id)}),
+            content_type="application/json",
+        )
+        self.assertEqual(enabled_context_resp.status_code, 200)
+        self.assertTrue(enabled_context_resp.json()["context"]["canCreateAgents"])
 
     def test_switch_context_for_deleted_agent_returns_org_context(self):
         self.org_agent.soft_delete()

@@ -6,6 +6,7 @@ export type ConsoleContext = {
   type: ConsoleContextType
   id: string
   name: string
+  canCreateAgents?: boolean
 }
 
 export type ConsoleContextOption = ConsoleContext & {
@@ -16,12 +17,13 @@ type ConsoleContextPayload = {
   type: ConsoleContextType
   id: string
   name: string
+  canCreateAgents?: boolean
 }
 
 type ConsoleContextResponsePayload = {
   context: ConsoleContextPayload
   personal: { id: string; name: string }
-  organizations: { id: string; name: string; role: string | null }[]
+  organizations: { id: string; name: string; role: string | null; canCreateAgents?: boolean }[]
   organizations_enabled: boolean
 }
 
@@ -54,12 +56,14 @@ export async function fetchConsoleContext(options: { forAgentId?: string } = {})
       type: 'personal',
       id: payload.personal.id,
       name: payload.personal.name,
+      canCreateAgents: true,
     },
     organizations: payload.organizations.map((org) => ({
       type: 'organization',
       id: org.id,
       name: org.name,
       role: org.role ?? null,
+      canCreateAgents: org.canCreateAgents,
     })),
     organizationsEnabled: payload.organizations_enabled,
   }
