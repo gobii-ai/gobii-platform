@@ -45,6 +45,11 @@ from api.services.slack_bot import (
     send_channel_message,
     slack_event_message_from_payload,
 )
+from api.services.slack_messages import (
+    create_slack_outbound_message,
+    slack_channel_address,
+    slack_conversation_address,
+)
 from console.agent_chat.timeline import serialize_message_event
 
 
@@ -426,6 +431,26 @@ class NativeSlackTests(TestCase):
         }
         self.assertIsNone(slack_event_message_from_payload(subtype_payload))
 
+        bot_payload = {
+            "type": "event_callback",
+            "event_id": "Ev125",
+            "team_id": "T123",
+            "event": {
+                "type": "message",
+                "subtype": "bot_message",
+                "channel": "C123",
+                "channel_type": "channel",
+                "bot_id": "B123",
+                "app_id": "A123",
+                "username": "Ada Slack",
+                "text": "hello from an agent",
+                "ts": "171000.456",
+            },
+        }
+        bot_message = slack_event_message_from_payload(bot_payload)
+        self.assertIsNotNone(bot_message)
+        self.assertEqual(bot_message.user_id, "B123")
+
     @patch("api.services.slack_bot.schedule_slack_inbound_processing")
     @patch("api.services.slack_bot.requests.get")
     def test_event_ingestion_fetches_slack_user_profile_when_event_lacks_name(self, get_mock, schedule_mock):
@@ -547,6 +572,79 @@ class NativeSlackTests(TestCase):
         self.assertEqual(
             set(PersistentAgentMessage.objects.filter(body="fan out").values_list("owner_agent_id", flat=True)),
             {self.agent.id, second_agent.id},
+        )
+
+    @patch("api.services.slack_bot.schedule_slack_inbound_processing")
+    def test_agent_slack_bot_message_fans_out_to_other_subscribed_agents_only(self, schedule_mock):
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        workspace = self._workspace()
+        workspace.app_id = "A123"
+        workspace.bot_user_id = "Ubot"
+        workspace.save(update_fields=["app_id", "bot_user_id", "updated_at"])
+        second_browser = BrowserUseAgent.objects.create(user=self.user, name="Second Browser")
+        second_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Second Slack",
+            charter="Also handle Slack.",
+            browser_use_agent=second_browser,
+        )
+        for agent in (self.agent, second_agent):
+            PersistentAgentSlackChannelSubscription.objects.create(
+                agent=agent,
+                workspace=workspace,
+                channel_id="C123",
+                channel_name="general",
+                channel_type="public_channel",
+            )
+        create_slack_outbound_message(
+            self.agent,
+            channel_id="C123",
+            body="hello from sender",
+            conversation_address=slack_conversation_address(self.agent.id, "T123", "C123"),
+            platform_channel_address=slack_channel_address("T123", "C123"),
+            channel_name="general",
+            raw_payload={
+                "source": "slack_bot_api",
+                "slack_message_ts": "171000.999",
+                "slack_team_id": "T123",
+                "slack_channel_id": "C123",
+            },
+        )
+        payload = {
+            "type": "event_callback",
+            "event_id": "EvAgentBot",
+            "team_id": "T123",
+            "event": {
+                "type": "message",
+                "subtype": "bot_message",
+                "channel": "C123",
+                "channel_type": "channel",
+                "channel_name": "general",
+                "bot_id": "B123",
+                "app_id": "A123",
+                "username": "Ada Slack",
+                "text": "hello from sender",
+                "ts": "171000.999",
+            },
+        }
+
+        message = slack_event_message_from_payload(payload)
+        self.assertIsNotNone(message)
+        result = ingest_event_message(message)
+
+        self.assertFalse(result["ignored"])
+        self.assertEqual(result["subscription_count"], 1)
+        self.assertEqual(len(result["deliveries"]), 1)
+        self.assertEqual(result["deliveries"][0]["agent_id"], str(second_agent.id))
+        inbound = PersistentAgentMessage.objects.get(owner_agent=second_agent, body="hello from sender")
+        self.assertFalse(inbound.is_outbound)
+        self.assertEqual(inbound.raw_payload["slack_author_name"], "Ada Slack")
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body="hello from sender",
+                is_outbound=False,
+            ).exists()
         )
 
     def test_slack_app_endpoints_enable_skill_and_replace_subscriptions(self):

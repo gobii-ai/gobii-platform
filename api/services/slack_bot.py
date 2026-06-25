@@ -659,10 +659,28 @@ def ingest_event_message(message: SlackEventMessage) -> dict[str, Any]:
             workspace__is_active=True,
         )
     )
+    event_app_id = _slack_event_app_id(message.raw_event)
+    if event_app_id:
+        subscriptions = [
+            subscription
+            for subscription in subscriptions
+            if not subscription.workspace.app_id or subscription.workspace.app_id == event_app_id
+        ]
     if not subscriptions:
         return {"ignored": True, "reason": "no_subscriptions", "subscription_count": 0}
 
-    deliveries = [_ingest_event_for_subscription(message, subscription) for subscription in subscriptions]
+    outbound_agent_ids = _outbound_agent_ids_for_slack_event(message)
+    deliveries = [
+        _ingest_event_for_subscription(message, subscription)
+        for subscription in subscriptions
+        if subscription.agent_id not in outbound_agent_ids
+    ]
+    if not deliveries:
+        return {
+            "ignored": True,
+            "reason": "self_echo",
+            "subscription_count": len(subscriptions),
+        }
     first_delivery = deliveries[0]
     return {
         "ignored": False,
@@ -675,16 +693,43 @@ def ingest_event_message(message: SlackEventMessage) -> dict[str, Any]:
     }
 
 
+def _slack_event_app_id(event: Mapping[str, Any]) -> str:
+    app_id = str(event.get("app_id") or "").strip()
+    if app_id:
+        return app_id
+    bot_profile = event.get("bot_profile")
+    if isinstance(bot_profile, Mapping):
+        return str(bot_profile.get("app_id") or "").strip()
+    return ""
+
+
+def _outbound_agent_ids_for_slack_event(message: SlackEventMessage) -> set[Any]:
+    slack_ts = str(message.ts or "").strip()
+    if not slack_ts:
+        return set()
+    return set(
+        PersistentAgentMessage.objects.filter(
+            is_outbound=True,
+            conversation__channel=CommsChannel.SLACK,
+            raw_payload__source="slack_bot_api",
+            raw_payload__slack_team_id=message.team_id,
+            raw_payload__slack_channel_id=message.channel_id,
+            raw_payload__slack_message_ts=slack_ts,
+        ).values_list("owner_agent_id", flat=True)
+    )
+
+
 def slack_event_message_from_payload(payload: Mapping[str, Any]) -> SlackEventMessage | None:
     event = payload.get("event") if isinstance(payload.get("event"), Mapping) else {}
     if event.get("type") != "message":
         return None
-    if event.get("subtype") or event.get("bot_id") or event.get("app_id"):
+    subtype = str(event.get("subtype") or "").strip()
+    if subtype and subtype != "bot_message":
         return None
     text = str(event.get("text") or "").strip()
     if not text:
         return None
-    user_id = str(event.get("user") or "").strip()
+    user_id = str(event.get("user") or event.get("bot_id") or _slack_event_app_id(event)).strip()
     if not user_id:
         return None
     channel_id = str(event.get("channel") or "").strip()
