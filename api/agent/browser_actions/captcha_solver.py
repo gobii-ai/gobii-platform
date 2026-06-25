@@ -317,19 +317,14 @@ async def _inject_captcha_token(page, token: str) -> int:
                 document.querySelectorAll(selector).forEach(applyToken);
             });
             document.querySelectorAll('.cf-turnstile[data-sitekey]').forEach((widget) => {
-                if (!document.querySelector('[name="cf-turnstile-response"]')) {
+                const form = widget.closest('form');
+                const container = form || widget.parentElement || document.body;
+                if (!container.querySelector('[name="cf-turnstile-response"]')) {
                     const field = document.createElement('input');
                     field.type = 'hidden';
                     field.id = 'cf-turnstile-response';
                     field.name = 'cf-turnstile-response';
-                    const form = widget.closest('form');
-                    if (form) {
-                        form.appendChild(field);
-                    } else if (widget.parentElement) {
-                        widget.parentElement.appendChild(field);
-                    } else {
-                        document.body.appendChild(field);
-                    }
+                    container.appendChild(field);
                     applyToken(field);
                 }
 

@@ -152,7 +152,7 @@ async def _page_snapshot(page) -> dict:
         }
         """
     )
-    return json.loads(raw) if raw else {}
+    return _coerce_evaluate_object(raw)
 
 
 async def _write_artifacts(browser_session: BrowserSession, artifact_dir: Path, label: str, data: dict) -> None:
@@ -180,6 +180,16 @@ def _redact_payload(payload: object) -> object:
     if isinstance(payload, list):
         return [_redact_payload(value) for value in payload]
     return payload
+
+
+def _coerce_evaluate_object(raw: object) -> dict:
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        return json.loads(raw)
+    raise TypeError(f"Expected page.evaluate object result, got {type(raw).__name__}")
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -279,7 +289,7 @@ async def run(args: argparse.Namespace) -> int:
             """,
             token,
         )
-        callback_probe = json.loads(callback_probe_raw) if callback_probe_raw else {}
+        callback_probe = _coerce_evaluate_object(callback_probe_raw)
         print("[debug] callback_probe:")
         print(json.dumps(callback_probe, indent=2, sort_keys=True))
 
