@@ -66,7 +66,7 @@ Custom Instructions live in your Gobii profile settings. Open Settings, then sel
 
 Save your own tone, workflow, and preferences.
 
-### Organization profile
+### Organization Profile
 
 Set shared defaults for every agent in the organization. You must be an organization Owner or Admin to edit organization-level instructions.
 
