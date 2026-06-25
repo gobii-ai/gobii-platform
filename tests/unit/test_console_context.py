@@ -386,6 +386,8 @@ class CurrentOrganizationAPITests(TestCase):
 
     def test_current_organization_template_launch_seeds_org_spawn_session(self):
         template = self._create_org_template()
+        self.org.org_settings = {ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS: True}
+        self.org.save(update_fields=["org_settings"])
         self._login_in_org_context(self.member)
 
         resp = self.client.post(
@@ -404,6 +406,22 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertEqual(session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY], template.code)
         self.assertEqual(session[AGENT_TEMPLATE_SOURCE_SESSION_KEY], AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE)
         self.assertEqual(session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY], str(self.org.id))
+
+    def test_current_organization_template_launch_rejects_member_without_creation_setting(self):
+        template = self._create_org_template()
+        self._login_in_org_context(self.member)
+
+        resp = self.client.post(
+            reverse("console-current-organization-template-launch", kwargs={"template_id": template.id}),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("permission to create agents", resp.json()["error"])
+        session = self.client.session
+        self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
+        self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, session)
 
     @patch("api.services.template_clone.TemplateCloneService._generate_template")
     def test_current_organization_templates_api_allows_manage_roles_to_create_and_deactivate(self, mock_generate_template):

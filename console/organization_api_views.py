@@ -30,6 +30,7 @@ from api.services.organization_permissions import (
     ORG_AGENT_CONFIG_AUTHORITY_ROLES,
     ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS,
     organization_members_can_create_agents,
+    user_role_can_create_org_agents,
 )
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from console.api_helpers import _parse_json_body as _parse_json_body_or_raise
@@ -512,6 +513,8 @@ class CurrentOrganizationTemplateLaunchAPIView(LoginRequiredMixin, View):
             return _json_error(str(exc), status=404)
         if error:
             return error
+        if not user_role_can_create_org_agents(membership.role, org):
+            return _json_error("You do not have permission to create agents for this organization.", status=403)
 
         template = get_object_or_404(
             PersistentAgentTemplate,

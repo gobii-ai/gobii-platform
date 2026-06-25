@@ -13,7 +13,7 @@ ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS = "members_can_create_agents"
 
 
 def organization_members_can_create_agents(organization) -> bool:
-    org_settings = organization.org_settings if organization is not None else {}
+    org_settings = organization.org_settings
     if not isinstance(org_settings, dict):
         return False
     return org_settings.get(ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS) is True

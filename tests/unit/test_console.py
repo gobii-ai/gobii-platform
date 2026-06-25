@@ -2673,7 +2673,7 @@ class ConsoleViewsTest(TestCase):
     @patch("console.agent_creation.emit_configured_custom_capi_event")
     @patch("console.agent_creation.Analytics.track_event")
     @tag("batch_console_agents_management")
-    def test_quick_create_from_organization_template_allows_member_to_create_org_agent(
+    def test_quick_create_from_organization_template_allows_member_when_org_setting_enabled(
         self,
         _mock_track_event,
         _mock_capi_event,
@@ -2687,6 +2687,8 @@ class ConsoleViewsTest(TestCase):
             slug="template-create-org",
             role=OrganizationMembership.OrgRole.MEMBER,
         )
+        organization.org_settings = {ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS: True}
+        organization.save(update_fields=["org_settings"])
         PipedreamAppSelection.objects.create(
             organization=organization,
             selected_app_slugs=["notion"],
@@ -2724,6 +2726,51 @@ class ConsoleViewsTest(TestCase):
         self.assertNotIn(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, session)
         selection = PipedreamAppSelection.objects.get(organization=organization)
         self.assertEqual(selection.selected_app_slugs, ["notion"])
+
+    @override_settings(
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
+        SEGMENT_WRITE_KEY="",
+        SEGMENT_WEB_WRITE_KEY="",
+        GOBII_PROPRIETARY_MODE=False,
+    )
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.emit_configured_custom_capi_event")
+    @patch("console.agent_creation.Analytics.track_event")
+    @tag("batch_console_agents_management")
+    def test_quick_create_from_organization_template_rejects_member_without_org_setting(
+        self,
+        _mock_track_event,
+        _mock_capi_event,
+        _mock_delay,
+    ):
+        from api.models import OrganizationMembership, PersistentAgent
+
+        organization = self._create_organization(
+            name="Template Block Org",
+            slug="template-block-org",
+            role=OrganizationMembership.OrgRole.MEMBER,
+        )
+        template = self._create_persistent_agent_template(
+            code="blocked-console-org-template",
+            organization=organization,
+            display_name="Blocked Console Org Template",
+            charter="Run the blocked organization workflow.",
+            base_schedule="@daily",
+        )
+        self._seed_org_template_spawn_session(
+            template=template,
+            context_organization=organization,
+        )
+
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": template.charter}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("permission to create agents", response.json()["error"])
+        self.assertFalse(PersistentAgent.objects.filter(organization=organization).exists())
 
     @override_settings(
         PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
