@@ -188,7 +188,7 @@ export function SlackConfigurationScreen({
               Subscribe this agent to public or private channels visible to the connected Slack app.
             </p>
             <p className="mt-2 text-xs text-slate-500">
-              Replies can show this agent's name and avatar per message. Slack does not create separate mentionable bot users per agent.
+              Replies can show this agent's name per message. Slack does not create separate mentionable bot users per agent.
             </p>
           </div>
           {app.connected ? (

@@ -326,12 +326,10 @@ class NativeSlackTests(TestCase):
         self.assertEqual(disable_result["subscription"]["status"], "disabled")
         self.assertTrue(disable_result["auto_sleep_ok"])
 
-    @patch("api.services.slack_bot.build_public_agent_avatar_thumbnail_url")
     @patch("api.services.slack_bot.requests.post")
-    def test_send_message_posts_customized_identity_and_records_outbound(self, post_mock, avatar_mock):
+    def test_send_message_posts_customized_name_and_records_outbound(self, post_mock):
         self._create_secret(owner_user=self.user)
         self._active_subscription(channel_id="C123", channel_name="general")
-        avatar_mock.return_value = "https://cdn.example.test/avatar.png"
         post_mock.return_value = _response({"ok": True, "ts": "171000.123"})
 
         message = send_channel_message(self.agent, channel_id="C123", body="hello Slack")
@@ -340,7 +338,7 @@ class NativeSlackTests(TestCase):
         self.assertEqual(payload["channel"], "C123")
         self.assertEqual(payload["text"], "hello Slack")
         self.assertEqual(payload["username"], "Ada Slack")
-        self.assertEqual(payload["icon_url"], "https://cdn.example.test/avatar.png")
+        self.assertNotIn("icon_url", payload)
         self.assertEqual(message.body, "hello Slack")
         self.assertTrue(message.is_outbound)
         self.assertEqual(message.raw_payload["slack_response"]["ts"], "171000.123")

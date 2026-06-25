@@ -491,7 +491,7 @@ NATIVE_INTEGRATION_CAPABILITIES: dict[str, tuple[NativeIntegrationCapability, ..
             provider_key=SLACK_PROVIDER.key,
             resource="messages",
             operation="write",
-            label="Send Slack messages with this agent's display name and avatar",
+            label="Send Slack messages with this agent's display name",
             required_scopes=("chat:write", "chat:write.customize"),
             endpoint_hints=("POST https://slack.com/api/chat.postMessage",),
             write_risk="write",

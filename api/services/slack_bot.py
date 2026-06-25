@@ -27,7 +27,6 @@ from api.models import (
     PersistentAgentSystemSkillState,
 )
 from api.agent.system_skills.defaults import SLACK_NATIVE_SYSTEM_SKILL_KEY
-from api.services.agent_avatar_public import build_public_agent_avatar_thumbnail_url
 from api.services.native_integrations import (
     SLACK_PROVIDER,
     NativeIntegrationAuthError,
@@ -200,7 +199,7 @@ def slack_setup_required_response(agent: PersistentAgent) -> dict[str, Any]:
         "status": "action_required",
         "message": (
             "Connect Slack to Gobii, then choose channels for this agent. "
-            "Slack supports per-message display names and avatars, not separate mentionable bot users per agent."
+            "Slack supports per-message display names, not separate mentionable bot users per agent."
         ),
         "setup_url": native_integration_setup_url(),
         "channels": [],
@@ -512,10 +511,6 @@ def disable_subscription(agent: PersistentAgent, subscription_id: str) -> dict[s
     return serialize_subscription(subscription)
 
 
-def _agent_avatar_url(agent: PersistentAgent) -> str:
-    return build_public_agent_avatar_thumbnail_url(agent) or ""
-
-
 def send_channel_message(agent: PersistentAgent, *, channel_id: str, body: str) -> PersistentAgentMessage:
     body = decode_unicode_character_escapes(body).strip()
     if not body:
@@ -530,9 +525,6 @@ def send_channel_message(agent: PersistentAgent, *, channel_id: str, body: str) 
         "text": body,
         "username": (agent.name or "").strip() or "Agent",
     }
-    avatar_url = _agent_avatar_url(agent)
-    if avatar_url:
-        payload["icon_url"] = avatar_url
 
     response = requests.post(
         f"{SLACK_API_BASE}/chat.postMessage",

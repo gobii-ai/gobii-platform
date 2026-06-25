@@ -68,7 +68,7 @@ def _serialize_slack_app(agent, request: HttpRequest | None = None) -> dict[str,
         "workspace_count": len(workspaces),
         "connect_url": connect_url,
         "identity_note": (
-            "Slack replies can use this agent's name and avatar as message display identity, "
+            "Slack replies can use this agent's name as message display identity, "
             "but Slack does not create separate mentionable bot users per agent."
         ),
     }

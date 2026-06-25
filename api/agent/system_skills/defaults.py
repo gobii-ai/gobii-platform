@@ -740,7 +740,7 @@ SLACK_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     enables=(
         "receive Slack channel messages through native Slack Events API subscriptions",
         "discover public and private Slack channels visible to the connected Slack app",
-        "send Slack replies with the agent name and avatar as display-level message identity",
+        "send Slack replies with the agent name as display-level message identity",
         "inspect and disable Slack channel subscriptions",
         "turn selected Slack channels into agent conversations",
     ),
@@ -776,7 +776,7 @@ SLACK_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "Use `send_slack_message` for outbound Slack text replies to subscribed channels. Pass `channel_id`, `message`, "
         "and the correct `will_continue_work` value. V1 is text-only; do not claim to upload files or attachments.\n"
         "Slack identity is display-only: the backend uses `chat.postMessage` with `chat:write.customize` to set the "
-        "message username and avatar URL to the agent's display name/avatar when possible. Slack does not create "
+        "message username to the agent's display name when possible. Slack does not create "
         "separate mentionable bot users, separate per-agent DMs, or per-agent Slack identities. Do not tell users they "
         "can mention an individual agent bot.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when "
