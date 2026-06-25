@@ -61,7 +61,7 @@ export function SlackInsightPanel({ agentId = null, onOpenApps }: SlackInsightPa
       text={app?.subscribed
         ? `${app.activeSubscriptionCount} ${app.activeSubscriptionCount === 1 ? 'channel is' : 'channels are'} subscribed.`
         : app?.connected
-          ? 'Choose the Slack channels that should wake this agent. Replies can show the agent name per message.'
+          ? 'Choose the Slack channels that should wake this agent.'
           : 'Connect Slack so this agent can receive and reply to selected public or private channels.'}
       actions={onOpenApps ? (
         <button
