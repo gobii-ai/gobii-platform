@@ -35,6 +35,7 @@ export function TaskCreditsCalloutCard({
     <AgentChatSectionCard
       className="timeline-event hard-limit-callout"
       tone={isOutOfCredits || isNoOrgSeats ? 'critical' : 'warning'}
+      data-billing-issue={isNoOrgSeats ? 'no_org_seats' : undefined}
     >
       {onDismiss ? (
         <button
@@ -60,28 +61,30 @@ export function TaskCreditsCalloutCard({
               : isOutOfCredits
               ? 'Your account is out of task credits.'
               : 'Your account is almost out of task credits.'}
-            {isNoOrgSeats && onPurchaseSeats ? (
-              <>
-                {' '}
-                <button type="button" className="banner-upgrade banner-upgrade--text banner-upgrade--inline" onClick={onPurchaseSeats}>
-                  <CreditCard size={14} strokeWidth={2} />
-                  <span>Purchase Seats</span>
-                </button>
-              </>
-            ) : showUpgrade ? (
-              <>
-                {' Upgrade to allow your agents to do more work for you. '}
-                <button type="button" className="banner-upgrade banner-upgrade--text banner-upgrade--inline" onClick={handleUpgradeClick}>
-                  <Zap size={14} strokeWidth={2} />
-                  <span>Upgrade</span>
-                </button>
-              </>
-            ) : (
-              <span> for this billing period.</span>
-            )}
+            {!isNoOrgSeats ? (
+              showUpgrade ? (
+                <>
+                  {' Upgrade to allow your agents to do more work for you. '}
+                  <button type="button" className="banner-upgrade banner-upgrade--text banner-upgrade--inline" onClick={handleUpgradeClick}>
+                    <Zap size={14} strokeWidth={2} />
+                    <span>Upgrade</span>
+                  </button>
+                </>
+              ) : (
+                <span> for this billing period.</span>
+              )
+            ) : null}
           </p>
         </div>
       </div>
+      {isNoOrgSeats && onPurchaseSeats ? (
+        <div className="hard-limit-callout-actions">
+          <button type="button" className="hard-limit-callout-button hard-limit-callout-button--purchase" onClick={onPurchaseSeats}>
+            <CreditCard size={14} strokeWidth={2} />
+            Purchase Seats
+          </button>
+        </div>
+      ) : null}
       {onOpenPacks && !isNoOrgSeats ? (
         <div className="hard-limit-callout-actions">
           <button type="button" className="hard-limit-callout-button" onClick={onOpenPacks}>

@@ -21,6 +21,7 @@ import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { track, AnalyticsEvent } from '../../util/analytics'
 import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
+import { sanitizeHtml } from '../../util/sanitize'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { PlanningState } from '../../types/agentRoster'
 import { useModal } from '../../hooks/useModal'
@@ -53,6 +54,7 @@ function getBurnRateUsageLevel(metadata: BurnRateMetadata): 'normal' | 'warning'
 }
 
 const DEFAULT_INSIGHT_TAB_COLOR = '#AA74CE'
+const INLINE_HTML_TAG_PATTERN = /<\/?[a-z][\s\S]*>/i
 
 function getInsightTabColor(insight: InsightEvent): string {
   if (insight.insightType === 'burn_rate') {
@@ -593,6 +595,12 @@ export const AgentComposer = memo(function AgentComposer({
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRotationTimeRef = useRef<number>(Date.now())
   const feedbackMessage = disabledReason || attachmentError || submitError
+  const feedbackMessageHtml = useMemo(() => {
+    if (!feedbackMessage || !INLINE_HTML_TAG_PATTERN.test(feedbackMessage)) {
+      return null
+    }
+    return sanitizeHtml(feedbackMessage)
+  }, [feedbackMessage])
   const showSubmitErrorAlert = Boolean((attachmentError || submitError) && !disabledReason)
   const seenHumanInputBatchAnalyticsRef = useRef<Set<string>>(new Set())
 
@@ -2169,7 +2177,14 @@ export const AgentComposer = memo(function AgentComposer({
                   role={showSubmitErrorAlert ? 'alert' : undefined}
                   aria-live={showSubmitErrorAlert ? 'polite' : undefined}
                 >
-                  <span className="composer-submit-error-text">{feedbackMessage}</span>
+                  {feedbackMessageHtml ? (
+                    <span
+                      className="composer-submit-error-text"
+                      dangerouslySetInnerHTML={{ __html: feedbackMessageHtml }}
+                    />
+                  ) : (
+                    <span className="composer-submit-error-text">{feedbackMessage}</span>
+                  )}
                   {!disabledReason && showSubmitErrorUpgrade && isProprietaryMode && canManageAgent ? (
                     <button
                       type="button"

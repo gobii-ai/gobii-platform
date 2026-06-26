@@ -1872,6 +1872,15 @@
 .composer-submit-error-text {
     flex: 1 1 12rem;
 }
+.composer-submit-error-text a {
+    color: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 0.15rem;
+}
+.composer-submit-error-text a:hover {
+    color: #7f1d1d;
+}
 .composer-submit-error-upgrade {
     flex: 0 0 auto;
     border-radius: 999px;
@@ -2777,6 +2786,14 @@
     --callout-icon-bg: rgba(248, 113, 113, 0.2);
     --callout-icon-color: #be123c;
 }
+.hard-limit-callout[data-billing-issue='no_org_seats'] {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 1.15rem 1.25rem;
+    border-color: rgba(244, 63, 94, 0.36);
+    border-radius: 1.1rem;
+    background: linear-gradient(135deg, rgba(255, 228, 230, 0.92), rgba(254, 205, 211, 0.72));
+}
 .hard-limit-callout :is(.hard-limit-callout-header, .hard-limit-callout-actions, .hard-limit-callout-button, .hard-limit-callout-upsell, .hard-limit-callout-upsell a),
 :is(.hard-limit-callout-icon, .hard-limit-callout-dismiss, .scheduled-resume-card__icon-wrap) {
     display: flex;
@@ -2788,6 +2805,9 @@
 .hard-limit-callout-actions {
     flex-wrap: wrap;
     gap: 0.75rem;
+}
+.hard-limit-callout[data-billing-issue='no_org_seats'] .hard-limit-callout-actions {
+    justify-content: flex-end;
 }
 .hard-limit-callout-icon {
     width: 2rem;
@@ -2823,6 +2843,11 @@
 .hard-limit-callout-button--secondary {
     background: #0f766e;
 }
+.hard-limit-callout-button--purchase {
+    border-radius: 0.55rem;
+    background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
+    box-shadow: 0 10px 20px rgba(99, 102, 241, 0.2);
+}
 .hard-limit-callout-button:focus-visible {
     outline: 2px solid rgba(14, 165, 233, 0.4);
     outline-offset: 2px;
@@ -2849,6 +2874,14 @@
 }
 .hard-limit-callout-upsell a:hover {
     text-decoration: underline;
+}
+@media (max-width: 640px) {
+    .hard-limit-callout[data-billing-issue='no_org_seats'] {
+        grid-template-columns: 1fr;
+    }
+    .hard-limit-callout[data-billing-issue='no_org_seats'] .hard-limit-callout-actions {
+        justify-content: flex-start;
+    }
 }
 .scheduled-resume-card {
     grid-template-columns: auto 1fr auto;
