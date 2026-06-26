@@ -1875,6 +1875,14 @@ def _json_ok(**extra):
     return JsonResponse(payload)
 
 
+def _coerce_provider_browser_backend(value: Any) -> str:
+    backend = str(value or LLMProvider.BrowserBackend.OPENAI).strip()
+    if backend not in LLMProvider.BrowserBackend.values:
+        allowed = ", ".join(LLMProvider.BrowserBackend.values)
+        raise ValueError(f"browser_backend must be one of: {allowed}")
+    return backend
+
+
 _REASONING_EFFORT_VALUES = set(PersistentModelEndpoint.ReasoningEffort.values)
 
 
@@ -5551,13 +5559,18 @@ class LLMProviderListCreateAPIView(SystemAdminAPIView):
         if LLMProvider.objects.filter(key=key).exists():
             return HttpResponseBadRequest("Provider key already exists")
 
+        try:
+            browser_backend = _coerce_provider_browser_backend(payload.get("browser_backend"))
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
         provider = LLMProvider(
             display_name=display_name,
             key=key,
             enabled=_coerce_bool(payload.get("enabled", True)),
             env_var_name=(payload.get("env_var_name") or "").strip(),
             model_prefix=(payload.get("model_prefix") or "").strip(),
-            browser_backend=payload.get("browser_backend") or LLMProvider.BrowserBackend.OPENAI,
+            browser_backend=browser_backend,
             supports_safety_identifier=_coerce_bool(payload.get("supports_safety_identifier", False)),
             vertex_project=(payload.get("vertex_project") or "").strip(),
             vertex_location=(payload.get("vertex_location") or "").strip(),
@@ -5595,6 +5608,11 @@ class LLMProviderDetailAPIView(SystemAdminAPIView):
                     value = value.strip()
                 if model_field == "supports_safety_identifier":
                     value = _coerce_bool(value)
+                if model_field == "browser_backend":
+                    try:
+                        value = _coerce_provider_browser_backend(value)
+                    except ValueError as exc:
+                        return HttpResponseBadRequest(str(exc))
                 setattr(provider, model_field, value)
 
         if "enabled" in payload:
