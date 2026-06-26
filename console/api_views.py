@@ -238,11 +238,8 @@ from console.support_requests import (
     send_app_support_request,
 )
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
-from console.views import (
-    build_agent_detail_props_for_request,
-    build_llm_intelligence_props,
-    handle_agent_settings_post_for_request,
-)
+from console.agent_settings import build_agent_settings_payload, handle_agent_settings_mutation
+from console.views import build_llm_intelligence_props
 from console.agent_addons import (
     _build_billing_status_payload,
     build_account_pause_payload,
@@ -7591,7 +7588,7 @@ class AgentSettingsAPIView(ApiLoginRequiredMixin, View):
             agent_id,
             allow_delinquent_personal_chat=True,
         )
-        payload = build_agent_detail_props_for_request(request, agent)
+        payload = build_agent_settings_payload(request, agent)
         return JsonResponse(payload)
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
@@ -7600,7 +7597,7 @@ class AgentSettingsAPIView(ApiLoginRequiredMixin, View):
             agent_id,
             allow_delinquent_personal_chat=True,
         )
-        return handle_agent_settings_post_for_request(request, agent)
+        return handle_agent_settings_mutation(request, agent)
 
 
 class BillingInitialDataAPIView(ApiLoginRequiredMixin, View):

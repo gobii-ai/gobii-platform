@@ -830,22 +830,6 @@ def get_subscription_base_price(subscription) -> tuple[Decimal | None, str | Non
 
     return None, None
 
-def user_has_active_subscription(user) -> bool:
-    """
-    Checks whether the specified user has an active subscription.
-
-    This function determines if the given user has an active subscription
-    based on the result of the `get_active_subscription` function.
-
-    Args:
-        user: The user object for which the active subscription status
-        is being checked.
-
-    Returns:
-        bool: True if the user has an active subscription, otherwise False.
-    """
-    return get_active_subscription(user) is not None
-
 def resolve_plan_from_subscription_data(
     subscription_data: Mapping[str, Any] | None,
     *,
@@ -1250,32 +1234,6 @@ def report_task_usage(subscription: Subscription, quantity: int = 1, idempotency
             logger.error(f"report_task_usage: Error reporting task usage: {str(e)}")
             raise
 
-def get_free_plan_users():
-    """
-    Retrieves all users who are currently on the free plan.
-
-    This function queries the database for all users whose associated plan is
-    the free plan. It returns a list of user objects.
-
-    Returns:
-    -------
-    list[User]
-        A list of user objects who are subscribed to the free plan.
-    """
-    from django.contrib.auth import get_user_model
-    with traced("SUBSCRIPTION Get Free Plan Users"):
-        users = get_user_model()
-
-        active_subscriber_ids = (
-            Subscription.objects
-            .filter(status=SubscriptionStatus.active)  # or .in_(["active", "trialing"])
-            .values_list("customer__subscriber_id", flat=True)  # FK hop: Subscription ➜ Customer ➜ subscriber (User)
-        )
-
-        users_without_active_sub = users.objects.exclude(id__in=active_subscriber_ids)
-
-        return users_without_active_sub
-
 def get_users_due_for_monthly_grant(days: int = 35):
     """
     Return users who are due for their free monthly task credit grant.
@@ -1461,9 +1419,6 @@ def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = Tr
 def mark_user_billing_with_plan(user, plan_name: str, update_anchor: bool = True, plan_version=None):
     return mark_owner_billing_with_plan(user, plan_name, update_anchor, plan_version=plan_version)
 
-
-def mark_organization_billing_with_plan(organization, plan_name: str, update_anchor: bool = True, plan_version=None):
-    return mark_owner_billing_with_plan(organization, plan_name, update_anchor, plan_version=plan_version)
 
 
 # ------------------------------------------------------------------------------
@@ -1740,12 +1695,6 @@ def downgrade_owner_to_free_plan(owner):
         mark_owner_billing_with_plan(owner, PlanNames.FREE, False)
 
 
-def downgrade_user_to_free_plan(user):
-    downgrade_owner_to_free_plan(user)
-
-
-def downgrade_organization_to_free_plan(organization):
-    downgrade_owner_to_free_plan(organization)
 
 
 def is_community_unlimited_mode() -> bool:

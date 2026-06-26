@@ -674,18 +674,6 @@ def _overview_card(*, card_id, label, section, value_key=None, value_builder=Non
     }
 
 
-def _iter_redis_keys(redis_client, pattern):
-    scan_iter = getattr(redis_client, "scan_iter", None)
-    if callable(scan_iter):
-        keys = scan_iter(match=pattern)
-    else:
-        keys_method = getattr(redis_client, "keys", None)
-        if not callable(keys_method):
-            return []
-        keys = keys_method(pattern)
-
-    return [_decode_redis_value(key) for key in keys]
-
 
 def _processing_lock_exists(redis_client, agent_id: str) -> bool:
     return any(bool(redis_client.exists(key)) for key in processing_lock_storage_keys(agent_id))
@@ -697,16 +685,6 @@ def _decode_redis_value(value):
     return str(value)
 
 
-def _load_redis_json(raw_value):
-    decoded = _decode_redis_value(raw_value) if raw_value is not None else ""
-    if not decoded:
-        return {}
-    try:
-        payload = json.loads(decoded)
-    except (TypeError, ValueError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
 
 def _normalize_uuid(raw_value):
     try:
@@ -714,10 +692,6 @@ def _normalize_uuid(raw_value):
     except (TypeError, ValueError, AttributeError):
         return ""
 
-
-def _uuid_from_suffix(key):
-    suffix = key.rsplit(":", 1)[-1]
-    return _normalize_uuid(suffix)
 
 
 def _coerce_timestamp(raw_value):

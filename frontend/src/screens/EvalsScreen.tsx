@@ -13,8 +13,7 @@ import {
   type GlobalSkillEvalSkill,
 } from '../api/evals'
 import { fetchRoutingProfiles, type RoutingProfileListItem } from '../api/llmConfig'
-import { StatusBadge } from '../components/common/StatusBadge'
-import { RunTypeBadge } from '../components/common/RunTypeBadge'
+import { RunTypeBadge, StatusBadge } from '../components/evals/Badges'
 
 const formatTs = (value: string | null | undefined) => {
   if (!value) return '—'

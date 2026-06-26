@@ -98,7 +98,8 @@ class AgentTransferServiceTests(TestCase):
                 'is_active': 'on',
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
         return AgentTransferInvite.objects.get(agent=self.agent)
 
     def test_initiate_transfer_replaces_existing_invite(self):
