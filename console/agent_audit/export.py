@@ -309,7 +309,6 @@ def write_agent_audit_export_json(
     agent_payload = {
         "id": str(agent.id),
         "name": agent.name or "",
-        "color": agent.get_display_color(),
     }
 
     _write_json_bytes(file_obj, "{")

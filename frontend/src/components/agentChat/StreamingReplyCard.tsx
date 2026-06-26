@@ -11,7 +11,6 @@ type StreamingReplyCardProps = {
   content: string
   agentFirstName: string
   agentAvatarUrl?: string | null
-  agentColorHex?: string | null
   isStreaming: boolean
   onLinkClick?: (href: string) => boolean | void
 }
@@ -78,7 +77,6 @@ export function StreamingReplyCard({
   content,
   agentFirstName,
   agentAvatarUrl,
-  agentColorHex,
   isStreaming,
   onLinkClick,
 }: StreamingReplyCardProps) {
@@ -163,7 +161,6 @@ export function StreamingReplyCard({
             className="chat-author-avatar"
             imageClassName="chat-author-avatar-image"
             textClassName="chat-author-avatar-text"
-            style={{ background: agentColorHex || '#6366f1' }}
           />
           {agentFirstName || 'Agent'}
         </div>

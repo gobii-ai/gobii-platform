@@ -45,7 +45,6 @@ const isStaff = mountNode.dataset.isStaff === 'true'
 
 const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
-const agentColor = mountNode.dataset.agentColor || null
 const maxChatUploadSizeBytesRaw = mountNode.dataset.maxChatUploadSizeBytes
 const maxChatUploadSizeBytesValue = maxChatUploadSizeBytesRaw ? Number.parseInt(maxChatUploadSizeBytesRaw, 10) : null
 const maxChatUploadSizeBytes =
@@ -177,7 +176,6 @@ switch (appName) {
       <AgentAuditScreen
         agentId={agentId}
         agentName={agentName}
-        agentColor={agentColor}
         adminAgentUrl={mountNode.dataset.adminAgentUrl}
       />
     )

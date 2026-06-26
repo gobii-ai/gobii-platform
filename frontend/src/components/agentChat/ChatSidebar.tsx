@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useEffect, useMemo, type CSSProperties, type ReactNode } from 'react'
+import { memo, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import { ArrowLeftRight, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
@@ -260,7 +260,6 @@ export const ChatSidebar = memo(function ChatSidebar({
               isFavorite={favoriteAgentIdSet.has(agent.id)}
               onSelect={handleAgentSelect}
               onToggleFavorite={onToggleAgentFavorite}
-              accentColor={agent.displayColorHex}
               collapsed={collapsedView}
               showFavoriteToggle={false}
             />
@@ -282,7 +281,6 @@ export const ChatSidebar = memo(function ChatSidebar({
                 isFavorite={true}
                 onSelect={handleAgentSelect}
                 onToggleFavorite={onToggleAgentFavorite}
-                accentColor={agent.displayColorHex}
                 collapsed={collapsedView}
               />
             ))}
@@ -301,7 +299,6 @@ export const ChatSidebar = memo(function ChatSidebar({
                 isFavorite={false}
                 onSelect={handleAgentSelect}
                 onToggleFavorite={onToggleAgentFavorite}
-                accentColor={agent.displayColorHex}
                 collapsed={collapsedView}
               />
             ))}
@@ -317,7 +314,6 @@ export const ChatSidebar = memo(function ChatSidebar({
               isFavorite={false}
               onSelect={handleAgentSelect}
               onToggleFavorite={onToggleAgentFavorite}
-              accentColor={agent.displayColorHex}
               collapsed={collapsedView}
             />
           ))
@@ -356,9 +352,6 @@ export const ChatSidebar = memo(function ChatSidebar({
           },
         }
       : null
-    const fabAccent = activeAgent?.displayColorHex || '#6366f1'
-    const fabStyle = { '--agent-fab-accent': fabAccent } as CSSProperties
-
     return (
       <>
         <AgentChatButton
@@ -367,7 +360,6 @@ export const ChatSidebar = memo(function ChatSidebar({
           onClick={() => setDrawerOpen(true)}
           aria-label="Switch agent"
           aria-expanded={drawerOpen}
-          style={fabStyle}
         >
           <AgentChatAvatar
             name={activeAgent?.name || 'Agent'}

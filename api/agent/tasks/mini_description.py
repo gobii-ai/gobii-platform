@@ -151,7 +151,7 @@ def generate_agent_mini_description_task(
         try:
             refreshed = (
                 PersistentAgent.objects.filter(id=agent.id)
-                .only("id", "name", "avatar", "agent_color_id", "mini_description", "short_description")
+                .only("id", "name", "avatar", "mini_description", "short_description")
                 .first()
             )
         except DatabaseError:

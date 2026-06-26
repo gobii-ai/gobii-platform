@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 import { Check, Search, Star, X } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -134,7 +134,6 @@ type AgentListItemProps = {
   variant: 'drawer' | 'sidebar'
   collapsed?: boolean
   showFavoriteToggle?: boolean
-  accentColor?: string | null
 }
 
 export function AgentWorkingIndicator({ label = true }: { label?: boolean }) {
@@ -160,11 +159,7 @@ export function AgentListItem({
   variant,
   collapsed,
   showFavoriteToggle = true,
-  accentColor,
 }: AgentListItemProps) {
-  const accentStyle = accentColor
-    ? ({ '--agent-accent': accentColor } as CSSProperties)
-    : undefined
   const showMeta = variant === 'drawer' || !collapsed
   const miniDescription = (agent.miniDescription || '').trim()
   const pendingRequestCount = Math.max(0, agent.pendingActionRequestCount ?? 0)
@@ -206,7 +201,6 @@ export function AgentListItem({
       data-collapsed={collapsed && variant === 'sidebar' ? 'true' : 'false'}
       onClick={() => onSelect(agent)}
       title={variant === 'sidebar' && collapsed ? (hasUnread ? `${collapsedTitle} • Unread` : collapsedTitle) : undefined}
-      style={accentStyle}
       role="listitem"
       aria-current={isActive ? 'page' : undefined}
     >

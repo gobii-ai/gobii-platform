@@ -842,9 +842,9 @@ class AgentChatAccessTests(TestCase):
             matching_entry.get("detail_url"),
             f"/app/agents/{self.org_agent.id}/settings",
         )
-        self.assertIn("linear-gradient", matching_entry.get("card_gradient_style", ""))
-        self.assertTrue((matching_entry.get("icon_background_hex") or "").startswith("#"))
-        self.assertTrue((matching_entry.get("icon_border_hex") or "").startswith("#"))
+        self.assertNotIn("card_gradient_style", matching_entry)
+        self.assertNotIn("icon_background_hex", matching_entry)
+        self.assertNotIn("icon_border_hex", matching_entry)
         self.assertIn("daily_credit_remaining", matching_entry)
         self.assertEqual(matching_entry.get("daily_credit_low"), False)
         self.assertEqual(matching_entry.get("last_24h_credit_burn"), 0.0)

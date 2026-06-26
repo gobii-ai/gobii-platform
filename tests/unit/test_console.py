@@ -297,9 +297,9 @@ class ConsoleViewsTest(TestCase):
             matching_entry.get("detailUrl"),
             reverse("agent_detail", kwargs={"pk": persistent_agent.id}),
         )
-        self.assertIn("linear-gradient", matching_entry.get("cardGradientStyle", ""))
-        self.assertTrue((matching_entry.get("iconBackgroundHex") or "").startswith("#"))
-        self.assertTrue((matching_entry.get("iconBorderHex") or "").startswith("#"))
+        self.assertNotIn("cardGradientStyle", matching_entry)
+        self.assertNotIn("iconBackgroundHex", matching_entry)
+        self.assertNotIn("iconBorderHex", matching_entry)
         self.assertIn("dailyCreditRemaining", matching_entry)
         self.assertEqual(matching_entry.get("dailyCreditLow"), False)
 

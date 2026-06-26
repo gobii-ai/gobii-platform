@@ -12,7 +12,6 @@ type TimelineEventItemProps = {
   event: SimplifiedTimelineItem
   isLatestEvent: boolean
   agentFirstName: string
-  agentColorHex?: string
   agentAvatarUrl?: string | null
   viewerUserId?: number | null
   viewerEmail?: string | null
@@ -29,7 +28,6 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   event,
   isLatestEvent,
   agentFirstName,
-  agentColorHex,
   agentAvatarUrl,
   viewerUserId,
   viewerEmail,
@@ -60,7 +58,6 @@ export const TimelineEventItem = memo(function TimelineEventItem({
         eventCursor={event.cursor}
         message={event.message}
         agentFirstName={agentFirstName}
-        agentColorHex={agentColorHex}
         agentAvatarUrl={agentAvatarUrl}
         viewerUserId={viewerUserId ?? null}
         viewerEmail={viewerEmail ?? null}

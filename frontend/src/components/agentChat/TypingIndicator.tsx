@@ -3,7 +3,6 @@ import '../../styles/simplifiedChat.css'
 
 type TypingIndicatorProps = {
   statusText: string
-  agentColorHex?: string
   agentAvatarUrl?: string | null
   agentFirstName: string
   hidden?: boolean
@@ -23,13 +22,10 @@ export function deriveTypingStatusText({
 
 export function TypingIndicator({
   statusText,
-  agentColorHex,
   agentAvatarUrl,
   agentFirstName,
   hidden,
 }: TypingIndicatorProps) {
-  const avatarColor = agentColorHex || '#475569'
-
   return (
     <div
       className="typing-indicator-container"
@@ -41,10 +37,7 @@ export function TypingIndicator({
           {agentAvatarUrl ? (
             <img src={agentAvatarUrl} alt="" className="typing-indicator__avatar-img" />
           ) : (
-            <div
-              className="typing-indicator__avatar-fallback"
-              style={{ backgroundColor: avatarColor }}
-            >
+            <div className="typing-indicator__avatar-fallback">
               {agentFirstName.charAt(0).toUpperCase()}
             </div>
           )}

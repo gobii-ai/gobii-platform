@@ -22,9 +22,6 @@ import {
   Zap,
 } from 'lucide-react'
 import {
-  ColorSwatch,
-  ColorSwatchPicker,
-  ColorSwatchPickerItem,
   Slider as AriaSlider,
   SliderThumb,
   SliderTrack,
@@ -51,7 +48,6 @@ import { useModal } from '../hooks/useModal'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import type {
-  AgentColorOption,
   AgentDailyCreditsInfo as DailyCreditsInfo,
   AgentInboundWebhook,
   AgentOrganization,
@@ -68,15 +64,6 @@ import type {
   PeerLinksInfo,
   PrimaryEndpoint,
 } from '../types/agentSettings'
-
-function resolveAgentColorHex(agentColorHex: string | null | undefined, palette: AgentColorOption[]): string {
-  if (!palette.length) {
-    return agentColorHex || ''
-  }
-  const normalized = (agentColorHex || '').toUpperCase()
-  const match = palette.find((color) => color.hex.toUpperCase() === normalized)
-  return match ? match.hex : palette[0].hex
-}
 
 type PendingWebhookAction =
   | { type: 'create'; tempId: string; name: string; url: string }
@@ -124,7 +111,6 @@ export type AgentSettingsWorkspaceSavePayload = {
   agentId: string
   agentName: string
   agentAvatarUrl: string | null
-  agentColorHex: string
   preferredLlmTier: IntelligenceTierKey
   organization: AgentOrganization
 }
@@ -153,7 +139,6 @@ type FormState = {
   sliderValue: number
   dedicatedProxyId: string
   preferredTier: IntelligenceTierKey
-  agentColorHex: string
 }
 
 const generateTempId = () =>
@@ -440,15 +425,12 @@ export function AgentSettingsWorkspace({
       sliderValue: initialData.dailyCredits.sliderValue ?? fallbackSliderEmptyValue,
       dedicatedProxyId: initialData.dedicatedIps.selectedId ?? '',
       preferredTier: (initialData.agent.preferredLlmTier || 'standard') as IntelligenceTierKey,
-      agentColorHex: resolveAgentColorHex(initialData.agent.agentColorHex, initialData.agentColors),
     }),
     [
       initialData.agent.name,
       initialData.agent.charter,
       initialData.agent.isActive,
       initialData.agent.preferredLlmTier,
-      initialData.agent.agentColorHex,
-      initialData.agentColors,
       initialData.dailyCredits.limit,
       initialData.dailyCredits.sliderValue,
       initialData.dedicatedIps.selectedId,
@@ -560,7 +542,6 @@ export function AgentSettingsWorkspace({
       formState.sliderValue !== savedFormState.sliderValue ||
       formState.dedicatedProxyId !== savedFormState.dedicatedProxyId ||
       formState.preferredTier !== savedFormState.preferredTier ||
-      formState.agentColorHex !== savedFormState.agentColorHex ||
       avatarFile !== null ||
       (removeAvatar && Boolean(savedAvatarUrl))
     )
@@ -1274,7 +1255,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         agentId: initialData.agent.id,
         agentName: nextSavedFormState.name,
         agentAvatarUrl: nextSavedAvatarUrl,
-        agentColorHex: nextSavedFormState.agentColorHex,
         preferredLlmTier: nextSavedFormState.preferredTier,
         organization: initialData.agent.organization,
       })
@@ -1970,21 +1950,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 </div>
               </div>
 
-              <div className="sm:col-span-3">
-                <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Theme color</span>
-                <CircleHelp className="ms-1 inline-block size-3 text-gray-400" aria-hidden="true" />
-              </div>
-              <div className="sm:col-span-9">
-                <input type="hidden" name="agent_color_hex" value={formState.agentColorHex} />
-                <AgentColorPicker
-                  colors={initialData.agentColors}
-                  selectedHex={formState.agentColorHex}
-                  embedded
-                  onChange={(hex) => setFormState((prev) => ({ ...prev, agentColorHex: hex }))}
-                />
-                <p className="mt-2 text-xs text-gray-500">Choose the accent color used across agent chat and cards.</p>
-              </div>
-
               {initialData.llmIntelligence && (
                 <>
                   <div className="sm:col-span-3">
@@ -2317,66 +2282,6 @@ type DedicatedIpSummaryProps = {
   organizationName: string | null
   selectedValue: string
   onChange: (value: string) => void
-}
-
-type AgentColorPickerProps = {
-  colors: AgentColorOption[]
-  selectedHex: string
-  embedded?: boolean
-  onChange: (hex: string) => void
-}
-
-function AgentColorPicker({ colors, selectedHex, embedded = false, onChange }: AgentColorPickerProps) {
-  if (!colors.length) {
-    return <p className="text-xs text-gray-500">No theme colors are available right now.</p>
-  }
-
-  const normalizedSelected = selectedHex.toUpperCase()
-  const resolvedHex = colors.some((color) => color.hex.toUpperCase() === normalizedSelected)
-    ? selectedHex
-    : colors[0].hex
-
-  return (
-    <ColorSwatchPicker
-      value={resolvedHex}
-      onChange={(color) => onChange(color.toString('hex'))}
-      layout="grid"
-      className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8"
-      aria-label="Agent theme color"
-    >
-      {colors.map((color) => (
-        <ColorSwatchPickerItem
-          key={color.id}
-          color={color.hex}
-          className={({ isSelected, isFocusVisible, isHovered, isDisabled }) =>
-            [
-              'relative flex items-center justify-center rounded-md border p-1 transition',
-              'size-9 sm:size-10',
-              isSelected
-                ? `border-blue-500 ${embedded ? 'bg-transparent' : 'bg-blue-50/60'}`
-                : `${embedded ? 'border-slate-200 bg-transparent' : 'border-gray-200 bg-white'}`,
-              isHovered && !isSelected ? 'border-blue-300' : '',
-              isDisabled ? 'opacity-60' : '',
-              isFocusVisible ? `ring-2 ring-blue-300 ring-offset-2 ${embedded ? 'ring-offset-transparent' : 'ring-offset-white'}` : '',
-            ]
-              .filter(Boolean)
-              .join(' ')
-          }
-        >
-          {({ isSelected }) => (
-            <>
-              <ColorSwatch className="h-5 w-5 rounded-full border border-slate-300 sm:h-6 sm:w-6" />
-              {isSelected && (
-                <span className={embedded ? 'absolute right-1 top-1 rounded-full bg-slate-900 p-0.5 text-white' : 'absolute right-1 top-1 rounded-full bg-white/80 p-0.5 text-blue-600'}>
-                  <Check className="h-3 w-3" aria-hidden="true" />
-                </span>
-              )}
-            </>
-          )}
-        </ColorSwatchPickerItem>
-      ))}
-    </ColorSwatchPicker>
-  )
 }
 
 function DedicatedIpSummary({ dedicatedIps, embedded = false, organizationName, selectedValue, onChange }: DedicatedIpSummaryProps) {

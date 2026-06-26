@@ -9,7 +9,6 @@ from console.views import (
     _agent_collaborator_invite_app_path,
     _agent_settings_app_path,
     _format_validation_error,
-    _normalize_agent_color_hex,
     _posted_bool,
 )
 from console.daily_credit import build_agent_daily_credit_context, serialize_daily_credit_payload
@@ -790,16 +789,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         primary_email = context.get('primary_email')
         primary_sms = context.get('primary_sms')
 
-        palette = AgentColor.get_active_palette()
-        agent_colors = [
-            {
-                'id': str(color.id),
-                'name': color.name,
-                'hex': color.hex_value.upper(),
-            }
-            for color in palette
-        ]
-
         features = {
             'organizations': flag_is_active(request, 'organizations'),
         }
@@ -870,7 +859,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'pendingTransfer': pending_transfer_payload,
                 'whitelistPolicy': agent.whitelist_policy,
                 'preferredLlmTier': getattr(getattr(agent, 'preferred_llm_tier', None), 'key', AgentLLMTier.STANDARD.value),
-                'agentColorHex': agent.get_display_color().upper(),
                 'organization': (
                     {
                         'id': str(agent.organization_id),
@@ -880,7 +868,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     else None
                 ),
             },
-            'agentColors': agent_colors,
             'primaryEmail': {'address': primary_email.address} if primary_email else None,
             'primarySms': {'address': primary_sms.address} if primary_sms else None,
             'dailyCredits': daily_credits,
@@ -1683,18 +1670,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         # Checkbox inputs are only present in POST data when checked. Determine the desired
         # active state based on whether the "is_active" field was submitted.
         new_is_active = 'is_active' in request.POST
-        raw_agent_color_hex = (request.POST.get('agent_color_hex') or '').strip()
-        selected_agent_color = None
-        if raw_agent_color_hex:
-            normalized_agent_color_hex = _normalize_agent_color_hex(raw_agent_color_hex)
-            if not normalized_agent_color_hex:
-                return _general_error("Select a valid theme color.")
-            selected_agent_color = AgentColor.objects.filter(
-                hex_value__iexact=normalized_agent_color_hex,
-                is_active=True,
-            ).first()
-            if selected_agent_color is None:
-                return _general_error("Select a valid theme color.")
 
         # Handle whitelist policy update (flag removed)
         new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
@@ -1746,7 +1721,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         prev_daily_limit = agent.daily_credit_limit
         prev_hard_limit = agent.get_daily_credit_hard_limit()
         prev_preferred_tier = getattr(getattr(agent, "preferred_llm_tier", None), "key", AgentLLMTier.STANDARD.value)
-        prev_agent_color_hex = agent.get_display_color().upper()
         prev_whitelist_policy = agent.whitelist_policy
 
         plan = None
@@ -1904,10 +1878,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     agent.is_active = new_is_active
                     agent_fields_to_update.append('is_active')
 
-                if selected_agent_color and agent.agent_color_id != selected_agent_color.id:
-                    agent.agent_color = selected_agent_color
-                    agent_fields_to_update.append('agent_color')
-
                 # Update whitelist policy if provided and changed
                 if new_whitelist_policy and agent.whitelist_policy != new_whitelist_policy:
                     if new_whitelist_policy in [choice[0] for choice in PersistentAgent.WhitelistPolicy.choices]:
@@ -2037,7 +2007,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                         'daily_credit_soft_target': soft_value,
                         'daily_credit_hard_limit': float(hard_limit_value) if hard_limit_value is not None else None,
                         'preferred_llm_tier': resolved_preferred_tier.key,
-                        'agent_color_hex': agent.get_display_color().upper(),
                         'updated_fields': changed_fields_for_analytics,
                     },
                     organization=agent.organization,
@@ -2058,8 +2027,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     update_props['previous_name'] = prev_name
                 if 'preferred_llm_tier' in changed_fields_for_analytics:
                     update_props['previous_preferred_llm_tier'] = prev_preferred_tier
-                if 'agent_color' in changed_fields_for_analytics:
-                    update_props['previous_agent_color_hex'] = prev_agent_color_hex
                 if 'whitelist_policy' in changed_fields_for_analytics:
                     update_props['previous_whitelist_policy'] = prev_whitelist_policy
                 Analytics.track_event(

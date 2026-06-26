@@ -12,79 +12,6 @@ from api.services.daily_credit_settings import get_daily_credit_settings_for_own
 from util.urls import IMMERSIVE_APP_BASE_PATH, build_immersive_chat_url
 
 
-def _clamp_color(value: int) -> int:
-    return max(0, min(255, value))
-
-
-def _hex_to_rgb_components(hex_color: str) -> tuple[int, int, int]:
-    normalized = (hex_color or "").strip().lstrip("#")
-    if len(normalized) != 6:
-        return (0, 116, 212)
-    return tuple(int(normalized[i:i + 2], 16) for i in (0, 2, 4))
-
-
-def _rgb_to_hex(r: int, g: int, b: int) -> str:
-    return f"#{_clamp_color(r):02X}{_clamp_color(g):02X}{_clamp_color(b):02X}"
-
-
-def adjust_hex(hex_color: str, ratio: float) -> str:
-    r, g, b = _hex_to_rgb_components(hex_color)
-    if ratio >= 0:
-        r = _clamp_color(int(r + (255 - r) * ratio))
-        g = _clamp_color(int(g + (255 - g) * ratio))
-        b = _clamp_color(int(b + (255 - b) * ratio))
-    else:
-        ratio = abs(ratio)
-        r = _clamp_color(int(r * (1 - ratio)))
-        g = _clamp_color(int(g * (1 - ratio)))
-        b = _clamp_color(int(b * (1 - ratio)))
-    return _rgb_to_hex(r, g, b)
-
-
-def build_agent_gradient(hex_color: str) -> str:
-    base = (hex_color or "#0074D4").upper()
-    lighter = adjust_hex(base, 0.35)
-    darker = adjust_hex(base, -0.25)
-    return f"background-image: linear-gradient(135deg, {lighter} 0%, {base} 55%, {darker} 100%); background-color: {base};"
-
-
-def _relative_luminance(hex_color: str) -> float:
-    r, g, b = _hex_to_rgb_components(hex_color)
-
-    def _normalize(channel: int) -> float:
-        c = channel / 255.0
-        if c <= 0.03928:
-            return c / 12.92
-        return ((c + 0.055) / 1.055) ** 2.4
-
-    r_lin = _normalize(r)
-    g_lin = _normalize(g)
-    b_lin = _normalize(b)
-    return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
-
-
-def text_palette_for_hex(hex_color: str) -> dict[str, str]:
-    luminance = _relative_luminance(hex_color)
-    use_light = luminance <= 0.55
-    if use_light:
-        return {
-            "primary": "text-white",
-            "secondary": "text-white/70",
-            "status": "text-white/80",
-            "badge": "bg-white/20 text-white border border-white/40",
-            "icon": "text-white",
-            "link_hover": "hover:text-white",
-        }
-    return {
-        "primary": "text-slate-900",
-        "secondary": "text-slate-700",
-        "status": "text-slate-800",
-        "badge": "bg-black/5 text-slate-800 border border-black/10",
-        "icon": "text-slate-900",
-        "link_hover": "hover:text-slate-900",
-    }
-
-
 def _first_endpoint_address(endpoints) -> str | None:
     if not endpoints:
         return None
@@ -175,18 +102,6 @@ def enrich_agents_for_card_surface(agents: list[PersistentAgent], owner) -> None
         agent.listing_description = description
         agent.listing_description_source = source
         agent.is_initializing = source == "placeholder"
-        color_hex = agent.get_display_color().upper()
-        agent.display_color_hex = color_hex
-        agent.card_gradient_style = build_agent_gradient(color_hex)
-        agent.icon_background_hex = adjust_hex(color_hex, 0.55)
-        agent.icon_border_hex = adjust_hex(color_hex, -0.25)
-        palette = text_palette_for_hex(color_hex)
-        agent.header_text_class = palette["primary"]
-        agent.header_subtext_class = palette["secondary"]
-        agent.header_status_class = palette["status"]
-        agent.header_badge_class = palette["badge"]
-        agent.header_icon_class = palette["icon"]
-        agent.header_link_hover_class = palette["link_hover"]
 
         mini_description, mini_source = build_mini_description(agent)
         agent.mini_description = mini_description
@@ -267,16 +182,6 @@ def serialize_agent_card_payload(
         "primarySms": primary_sms,
         "detailUrl": detail_url,
         "chatUrl": chat_url,
-        "cardGradientStyle": getattr(agent, "card_gradient_style", "") or "",
-        "iconBackgroundHex": getattr(agent, "icon_background_hex", "") or "",
-        "iconBorderHex": getattr(agent, "icon_border_hex", "") or "",
-        "displayColorHex": getattr(agent, "display_color_hex", None) or agent.get_display_color(),
-        "headerTextClass": getattr(agent, "header_text_class", "") or "",
-        "headerSubtextClass": getattr(agent, "header_subtext_class", "") or "",
-        "headerStatusClass": getattr(agent, "header_status_class", "") or "",
-        "headerBadgeClass": getattr(agent, "header_badge_class", "") or "",
-        "headerIconClass": getattr(agent, "header_icon_class", "") or "",
-        "headerLinkHoverClass": getattr(agent, "header_link_hover_class", "") or "",
         "dailyCreditRemaining": remaining,
         "dailyCreditLow": bool(getattr(agent, "daily_credit_low", False)),
         "last24hCreditBurn": recent_burn,

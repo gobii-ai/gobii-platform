@@ -3,7 +3,6 @@ import { Check, CreditCard, EllipsisVertical, ListTodo, Mail, MessageSquare, Set
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
-import { normalizeHexColor } from '../../util/color'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { PlanSnapshot } from '../../types/agentChat'
@@ -18,7 +17,6 @@ type AgentChatBannerProps = {
   agentId?: string | null
   agentName: string
   agentAvatarUrl?: string | null
-  agentColorHex?: string | null
   agentEmail?: string | null
   agentSms?: string | null
   auditUrl?: string | null
@@ -70,7 +68,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   agentId,
   agentName,
   agentAvatarUrl,
-  agentColorHex,
   agentEmail,
   agentSms,
   auditUrl,
@@ -104,7 +101,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   children,
 }: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
-  const accentColor = normalizeHexColor(agentColorHex) || '#6366f1'
   const bannerRef = useRef<HTMLDivElement | null>(null)
   const [animate, setAnimate] = useState(false)
   const hasAnimatedRef = useRef(false)
@@ -244,10 +240,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
   return (
     <div className="banner-shell" data-sidebar-mode={sidebarMode} ref={bannerRef}>
-      <div
-        className="banner"
-        style={{ '--banner-accent': accentColor } as React.CSSProperties}
-      >
+      <div className="banner">
         {/* Left: Avatar + Info */}
         <div className="banner-left">
           <AgentChatAvatar

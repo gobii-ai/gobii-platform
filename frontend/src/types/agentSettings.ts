@@ -26,13 +26,6 @@ export type AgentSummary = {
   whitelistPolicy: string
   organization: AgentOrganization
   preferredLlmTier: string
-  agentColorHex: string
-}
-
-export type AgentColorOption = {
-  id: string
-  name: string
-  hex: string
 }
 
 export type AgentDailyCreditsInfo = {
@@ -227,7 +220,6 @@ export type AgentSettingsData = {
   csrfToken: string
   urls: AgentSettingsUrls
   agent: AgentSummary
-  agentColors: AgentColorOption[]
   primaryEmail: PrimaryEndpoint | null
   primarySms: PrimaryEndpoint | null
   dailyCredits: AgentDailyCreditsInfo

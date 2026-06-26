@@ -25,7 +25,6 @@ function timelineEventKey(event: SimplifiedTimelineItem): string {
 
 type AgentTimelinePaneProps = {
   agentAvatarUrl?: string | null
-  agentColorHex?: string | null
   agentFirstName: string
   animateCursors?: Set<string>
   autoScrollPinned: boolean
@@ -90,7 +89,6 @@ type AgentTimelinePaneProps = {
 
 export function AgentTimelinePane({
   agentAvatarUrl,
-  agentColorHex,
   agentFirstName,
   animateCursors,
   autoScrollPinned,
@@ -203,7 +201,6 @@ export function AgentTimelinePane({
                       event={event}
                       isLatestEvent={index === lastRenderedIndex}
                       agentFirstName={agentFirstName}
-                      agentColorHex={agentColorHex || undefined}
                       agentAvatarUrl={agentAvatarUrl}
                       viewerUserId={viewerUserId ?? null}
                       viewerEmail={viewerEmail ?? null}
@@ -276,7 +273,6 @@ export function AgentTimelinePane({
                       content={streaming?.content || ''}
                       agentFirstName={agentFirstName}
                       agentAvatarUrl={agentAvatarUrl}
-                      agentColorHex={agentColorHex}
                       isStreaming={isStreaming}
                       onLinkClick={onMessageLinkClick}
                     />
@@ -287,7 +283,6 @@ export function AgentTimelinePane({
               {showTypingIndicator ? (
                 <TypingIndicator
                   statusText={typingStatusText}
-                  agentColorHex={agentColorHex || undefined}
                   agentAvatarUrl={agentAvatarUrl}
                   agentFirstName={agentFirstName}
                   hidden={hideTypingIndicator}

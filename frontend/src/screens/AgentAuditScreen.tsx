@@ -37,7 +37,6 @@ import { renderHtmlOrText } from '../components/agentAudit/eventPrimitives'
 type AgentAuditScreenProps = {
   agentId: string
   agentName?: string | null
-  agentColor?: string | null
   adminAgentUrl?: string | null
 }
 

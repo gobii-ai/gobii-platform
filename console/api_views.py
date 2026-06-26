@@ -2885,7 +2885,6 @@ class StaffAgentAuditAPIView(SystemAdminAPIView):
                 "agent": {
                     "id": str(agent.id),
                     "name": agent.name,
-                    "color": agent.get_display_color(),
                 },
             }
         )
@@ -3275,13 +3274,11 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 context_info.current_context,
                 allow_delinquent_personal_chat=True,
             )
-            .select_related("agent_color")
             .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
             .order_by("name")
         )
         shared_qs = (
             shared_agent_queryset_for(request.user)
-            .select_related("agent_color")
             .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
         )
         agent_ids = list(agents_qs.values_list("id", flat=True))
@@ -3352,7 +3349,6 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "id": str(agent.id),
                     "name": agent.name or "",
                     "avatar_url": card_payload["avatarUrl"],
-                    "display_color_hex": card_payload["displayColorHex"],
                     "is_active": bool(agent.is_active),
                     "processing_active": processing_activity_by_agent_id.get(str(agent.id), False),
                     "mini_description": agent.mini_description or "",
@@ -3361,9 +3357,6 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "listing_description_source": card_payload["listingDescriptionSource"],
                     "display_tags": card_payload["displayTags"],
                     "detail_url": card_payload["detailUrl"],
-                    "card_gradient_style": card_payload["cardGradientStyle"],
-                    "icon_background_hex": card_payload["iconBackgroundHex"],
-                    "icon_border_hex": card_payload["iconBorderHex"],
                     "daily_credit_remaining": card_payload["dailyCreditRemaining"],
                     "daily_credit_low": card_payload["dailyCreditLow"],
                     "last_24h_credit_burn": card_payload["last24hCreditBurn"],
@@ -3875,7 +3868,6 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "processing_active": window.processing_active,
             "processing_snapshot": serialize_processing_snapshot(window.processing_snapshot),
             "current_plan": window.current_plan,
-            "agent_color_hex": agent.get_display_color(),
             "agent_name": agent.name,
             "agent_avatar_url": agent.get_avatar_thumbnail_url(),
             "signup_preview_state": agent.signup_preview_state,

@@ -116,7 +116,6 @@ from api.models import (
     CommsChannel,
     UserPhoneNumber,
     Organization,
-    AgentColor,
     OrganizationMembership,
     OrganizationInvite,
     TaskCredit,
@@ -180,19 +179,6 @@ from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG
 from waffle import flag_is_active
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
-
-def _normalize_agent_color_hex(hex_color: str) -> str | None:
-    normalized = (hex_color or "").strip().lstrip("#")
-    if len(normalized) == 8:
-        normalized = normalized[:6]
-    if len(normalized) != 6:
-        return None
-    try:
-        int(normalized, 16)
-    except ValueError:
-        return None
-    return f"#{normalized.upper()}"
-
 
 def _format_validation_error(error: ValidationError) -> str:
     if hasattr(error, "message_dict") and error.message_dict:

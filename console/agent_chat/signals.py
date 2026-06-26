@@ -100,7 +100,6 @@ def emit_agent_profile_update(
     payload_base = {
         "agent_id": str(agent.id),
         "agent_name": agent.name or "Agent",
-        "agent_color_hex": agent.get_display_color(),
         "agent_avatar_url": agent.get_avatar_thumbnail_url(),
         "mini_description": agent.mini_description or "",
         "short_description": agent.short_description or "",
@@ -553,8 +552,6 @@ def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: b
     tracked_fields = {
         "name",
         "avatar",
-        "agent_color",
-        "agent_color_id",
         "mini_description",
         "short_description",
     }
@@ -568,7 +565,7 @@ def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: b
         refreshed = (
             PersistentAgent.objects
             .filter(id=instance.id)
-            .only("id", "name", "avatar", "agent_color_id", "mini_description", "short_description")
+            .only("id", "name", "avatar", "mini_description", "short_description")
             .first()
         )
         if refreshed is None:
