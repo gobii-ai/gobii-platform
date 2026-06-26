@@ -757,22 +757,27 @@
     line-height: 1.2;
 }
 
+.agent-chat-button.banner-settings,
 .banner-settings {
     width: 1.75rem;
     height: 1.75rem;
     border-radius: 0.5rem;
-    background: rgba(255, 255, 255, 0.45);
-    color: #4c3a7a;
+    border: 1px solid rgba(124, 58, 237, 0.18);
+    background: rgba(255, 255, 255, 0.55);
+    color: #3b2d6b;
     position: relative;
     padding: 0;
 }
 
+.agent-chat-button.banner-settings:hover,
 .banner-settings:hover {
-    background: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(124, 58, 237, 0.28);
     color: #3b2d6b;
     transform: scale(1.05);
 }
 
+.agent-chat-button.banner-settings:active,
 .banner-settings:active {
     transform: scale(0.95);
 }
@@ -780,14 +785,12 @@
 .banner-settings[aria-disabled='true']:hover,
 .banner-settings[aria-disabled='true']:focus-visible,
 .banner-settings[aria-disabled='true']:active {
-    background: rgba(255, 255, 255, 0.45);
-    color: #4c3a7a;
+    background: rgba(255, 255, 255, 0.55);
+    color: #3b2d6b;
     transform: none;
 }
 
 .banner-plan {
-    display: inline-flex;
-    align-items: center;
     gap: 0.35rem;
     height: 1.75rem;
     padding: 0 0.6rem;
@@ -797,10 +800,9 @@
     color: #3b2d6b;
     font-size: 0.75rem;
     font-weight: 700;
-    cursor: pointer;
-    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 }
 
+.agent-chat-button.banner-plan:hover,
 .banner-plan:hover {
     background: rgba(255, 255, 255, 0.75);
     border-color: rgba(124, 58, 237, 0.28);
@@ -1081,24 +1083,27 @@
 .banner-share {
     gap: 0.35rem;
     height: 1.75rem;
-    padding: 0 0.65rem;
+    padding: 0 0.6rem;
     border-radius: 0.5rem;
-    background: rgba(255, 255, 255, 0.45);
-    color: #4c3a7a;
+    border: 1px solid rgba(124, 58, 237, 0.18);
+    background: rgba(255, 255, 255, 0.55);
+    color: #3b2d6b;
     font-size: 0.75rem;
-    font-weight: 600;
+    font-weight: 700;
 }
 
+.agent-chat-button.banner-share:hover,
 .banner-share:hover {
-    background: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(124, 58, 237, 0.28);
     color: #3b2d6b;
     transform: translateY(-1px);
 }
 
 .banner-share[aria-disabled='true']:hover,
 .banner-share[aria-disabled='true']:focus-visible {
-    background: rgba(255, 255, 255, 0.45);
-    color: #4c3a7a;
+    background: rgba(255, 255, 255, 0.55);
+    color: #3b2d6b;
     transform: none;
 }
 
@@ -1131,27 +1136,33 @@
     }
 }
 
+.agent-chat-button.banner-close,
 .banner-close {
     width: 1.75rem;
     height: 1.75rem;
     border-radius: 0.5rem;
-    background: rgba(255, 255, 255, 0.45);
-    color: #4c3a7a;
+    border: 1px solid rgba(124, 58, 237, 0.18);
+    background: rgba(255, 255, 255, 0.55);
+    color: #3b2d6b;
     isolation: isolate;
     padding: 0;
 }
 
+.agent-chat-button.banner-close:hover,
 .banner-close:hover {
-    background: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(124, 58, 237, 0.28);
     color: #3b2d6b;
     transform: scale(1.05);
 }
 
+.agent-chat-button.banner-close:active,
 .banner-close:active {
-    background: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.65);
     transform: scale(0.95);
 }
 
+.agent-chat-button.banner-upgrade,
 .banner-upgrade {
     position: relative;
     gap: 0.375rem;
@@ -1166,6 +1177,7 @@
     overflow: hidden;
 }
 
+.agent-chat-button.banner-upgrade::after,
 .banner-upgrade::after {
     content: '';
     position: absolute;
@@ -1191,12 +1203,14 @@
     }
 }
 
+.agent-chat-button.banner-upgrade:hover,
 .banner-upgrade:hover {
     background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
     box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
     transform: translateY(-1px);
 }
 
+.agent-chat-button.banner-upgrade:active,
 .banner-upgrade:active {
     transform: translateY(0);
     box-shadow: 0 1px 2px rgba(99, 102, 241, 0.2);
@@ -3397,9 +3411,12 @@
     }
 }
 
-.starter-prompts-card {
+.agent-chat-section-card.starter-prompts-card {
     gap: 0;
     padding: 0;
+    border-color: rgba(99, 102, 241, 0.2);
+    border-radius: 0.85rem;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.97), rgba(238, 242, 255, 0.94));
     color: #1e1b4b;
     overflow: hidden;
 }
@@ -3430,10 +3447,12 @@
     color: #312e81;
     text-align: left;
     cursor: pointer;
+    transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .starter-prompts-card__row:hover:not(:disabled) {
     background: rgba(224, 231, 255, 0.38);
+    color: #1e1b4b;
 }
 
 .starter-prompts-card__row:focus-visible {
@@ -3456,9 +3475,15 @@
     justify-content: center;
     width: 1.42rem;
     height: 1.42rem;
+    border: 1px solid rgba(99, 102, 241, 0.24);
     border-radius: 0.45rem;
-    background: rgba(255, 255, 255, 0.72);
+    background: rgba(255, 255, 255, 0.92);
     color: #4f46e5;
+}
+
+.starter-prompts-card__icon-wrap--loading {
+    border-color: rgba(99, 102, 241, 0.16);
+    background: rgba(255, 255, 255, 0.72);
 }
 
 .starter-prompts-card__icon {

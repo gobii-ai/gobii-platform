@@ -128,22 +128,25 @@ export function AgentChatIconButton({
 }
 
 type ButtonProps = {
+  as?: ElementType
   tone?: AgentChatTone
   variant?: 'ghost' | 'soft' | 'solid'
   size?: 'sm' | 'md'
-} & ButtonHTMLAttributes<HTMLButtonElement>
+} & ButtonHTMLAttributes<HTMLButtonElement> & AnchorHTMLAttributes<HTMLAnchorElement>
 
 export function AgentChatButton({
+  as: Component = 'button',
   tone = 'neutral',
   variant = 'soft',
   size = 'md',
   className,
   children,
+  type,
   ...rest
 }: ButtonProps) {
   return (
-    <button
-      type="button"
+    <Component
+      type={Component === 'button' ? (type ?? 'button') : type}
       className={joinClassNames('agent-chat-button', className)}
       data-tone={tone}
       data-variant={variant}
@@ -151,7 +154,7 @@ export function AgentChatButton({
       {...rest}
     >
       {children}
-    </button>
+    </Component>
   )
 }
 

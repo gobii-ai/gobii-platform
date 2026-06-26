@@ -328,9 +328,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             </AgentChatButton>
           )}
           {onPlanOpen ? (
-            <button
-              type="button"
+            <AgentChatButton
               className="banner-plan"
+              variant="soft"
+              size="sm"
               onClick={onPlanOpen}
               onMouseEnter={() => onPlanHoverChange?.(true)}
               onMouseLeave={() => onPlanHoverChange?.(false)}
@@ -347,7 +348,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <ListTodo size={14} strokeWidth={2} />
               <span className="banner-plan-label">Plan</span>
               {hasPlan ? <span className="banner-plan-count">{planSnapshot.doingCount + planSnapshot.todoCount}</span> : null}
-            </button>
+            </AgentChatButton>
           ) : null}
           {showShareButton ? (
             <AgentChatButton
@@ -380,8 +381,11 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             </AgentChatButton>
           ) : null}
           {showAuditButton ? (
-            <a
+            <AgentChatButton
+              as="a"
               className="banner-settings banner-desktop-only"
+              variant="ghost"
+              size="sm"
               href={auditUrl ?? undefined}
               target="_blank"
               rel="noreferrer"
@@ -389,7 +393,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               title="Open audit timeline"
             >
               <Stethoscope size={16} />
-            </a>
+            </AgentChatButton>
           ) : null}
           {showMobileOverflow ? (
             <DialogTrigger isOpen={overflowMenuOpen} onOpenChange={setOverflowMenuOpen}>
