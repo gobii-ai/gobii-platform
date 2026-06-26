@@ -31,10 +31,8 @@ export function HighPriorityBanner({
   tone = 'warning',
   onDismiss,
 }: HighPriorityBannerProps) {
-  const className = `high-priority-banner high-priority-banner--${tone}`
-
   return (
-    <section className={className} role="alert" aria-live="assertive">
+    <section className="high-priority-banner" data-tone={tone} role="alert" aria-live="assertive">
       <div className="high-priority-banner-main">
         <span className="high-priority-banner-icon" aria-hidden="true">
           <AlertTriangle size={16} />

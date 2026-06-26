@@ -58,8 +58,8 @@ function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; labe
   const isReconnecting = status === 'reconnecting' || status === 'connecting'
 
   return (
-    <div className={`banner-connection banner-connection--${status}`}>
-      <span className={`banner-connection-dot ${isReconnecting ? 'banner-connection-dot--pulse' : ''}`} />
+    <div className="banner-connection" data-status={status}>
+      <span className="banner-connection-dot" data-pulse={isReconnecting ? 'true' : 'false'} />
       <span className="banner-connection-label">{label}</span>
       {isConnected && <Check size={10} className="banner-connection-check" strokeWidth={3} />}
     </div>
@@ -491,7 +491,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
           {showSettingsButton ? (
             <button
               type="button"
-              className={`banner-settings banner-desktop-only ${hardLimitReached ? 'banner-settings--alert' : ''}`}
+              className="banner-settings banner-desktop-only"
+              data-alert={hardLimitReached ? 'true' : 'false'}
               onClick={() => handleSettingsClick('banner_desktop')}
               aria-label={resolvedSettingsLabel}
               title={resolvedSettingsLabel}
@@ -500,7 +501,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             >
               <Settings size={16} />
               {showAttentionDot ? (
-                <span className={`banner-settings-dot ${hardLimitReached ? 'banner-settings-dot--alert' : ''}`} />
+                <span className="banner-settings-dot" data-alert={hardLimitReached ? 'true' : 'false'} />
               ) : null}
             </button>
           ) : null}

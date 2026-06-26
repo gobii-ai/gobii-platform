@@ -59,7 +59,8 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
               </span>
               <span className="starter-prompts-card__text starter-prompts-card__text--loading">
                 <span
-                  className={`starter-prompts-card__text-pulse starter-prompts-card__text-pulse--${index % 3}`}
+                  className="starter-prompts-card__text-pulse"
+                  data-pulse-index={index % 3}
                 />
               </span>
               <span className="starter-prompts-card__chevron starter-prompts-card__chevron--loading" />
