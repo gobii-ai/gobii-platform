@@ -197,7 +197,8 @@ export function SidebarSettingsMenu({
 
   return (
     <div
-      className={`sidebar-settings sidebar-settings--${variant}`}
+      className="sidebar-settings"
+      data-variant={variant}
       data-collapsed={collapsed ? 'true' : 'false'}
       data-has-help={onOpenHelp ? 'true' : 'false'}
     >
@@ -235,7 +236,8 @@ export function SidebarSettingsMenu({
         placement="top"
         containerPadding={0}
         isNonModal
-        className={`sidebar-settings__popover sidebar-settings__popover--${variant}`}
+        className="sidebar-settings__popover"
+        data-variant={variant}
         data-collapsed={collapsed ? 'true' : 'false'}
       >
         <Dialog className="sidebar-settings__menu" aria-label="Settings menu">

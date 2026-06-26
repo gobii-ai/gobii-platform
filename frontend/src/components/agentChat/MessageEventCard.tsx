@@ -5,7 +5,6 @@ import type { AgentMessage } from './types'
 import { MessageContent } from './MessageContent'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { formatRelativeTimestamp } from '../../util/time'
-import { buildUserChatPalette } from '../../util/color'
 import { sanitizeHtml } from '../../util/sanitize'
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -27,7 +26,6 @@ type MessageEventCardProps = {
   eventCursor: string
   message: AgentMessage
   agentFirstName: string
-  agentColorHex?: string
   agentAvatarUrl?: string | null
   viewerUserId?: number | null
   viewerEmail?: string | null
@@ -75,7 +73,6 @@ export const MessageEventCard = memo(function MessageEventCard({
   eventCursor,
   message,
   agentFirstName,
-  agentColorHex,
   agentAvatarUrl,
   viewerUserId,
   viewerEmail,
@@ -150,7 +147,6 @@ export const MessageEventCard = memo(function MessageEventCard({
   const statusLabel = status === 'sending' ? 'Sending...' : status === 'failed' ? 'Failed to send' : null
   const metaLabel = statusLabel || relativeLabel || message.timestamp || ''
   const metaTitle = message.error || message.timestamp || undefined
-  const palette = !isPeer && !isAgent ? buildUserChatPalette(agentColorHex) : null
   const webhookMeta = isWebhook ? message.webhookMeta : null
   const webhookPayloadKind = (webhookMeta?.payloadKind || '').toLowerCase()
   const webhookPayloadObject = webhookMeta?.payload
@@ -182,7 +178,6 @@ export const MessageEventCard = memo(function MessageEventCard({
       ? `${channelTagBaseClass} border border-indigo-100 bg-indigo-50 text-indigo-600`
       : `${channelTagBaseClass} user-channel-badge`
 
-  const bubbleStyle = palette?.cssVars
   const showMessageActions = isAgent && !isPeer
   const clipboardHtml = useMemo(() => (
     message.bodyHtml?.trim() ? sanitizeHtml(message.bodyHtml) : ''
@@ -217,7 +212,7 @@ export const MessageEventCard = memo(function MessageEventCard({
       data-message-id={message.id}
       data-status={status || undefined}
     >
-      <div className={`chat-bubble ${bubbleTheme}`} style={bubbleStyle}>
+      <div className={`chat-bubble ${bubbleTheme}`}>
         <div className={`chat-author ${authorTheme}`}>
           {isAgent && !isPeer ? (
             <AgentAvatarBadge
@@ -226,7 +221,6 @@ export const MessageEventCard = memo(function MessageEventCard({
               className="chat-author-avatar"
               imageClassName="chat-author-avatar-image"
               textClassName="chat-author-avatar-text"
-              style={{ background: agentColorHex || '#6366f1' }}
             />
           ) : null}
           <span className="chat-author-name">{authorLabel}</span>

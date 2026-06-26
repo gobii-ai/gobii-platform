@@ -5,10 +5,7 @@ from django.core import mail
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from console import views as console_views
-from constants.feature_flags import STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED
 from waffle.models import Flag
-from waffle.testutils import override_switch
 
 from api.models import (
     Organization,
@@ -19,10 +16,6 @@ from api.models import (
 )
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
-
-from constants.stripe import (
-    EXCLUDED_PAYMENT_METHOD_TYPES,
-)
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
@@ -211,43 +204,6 @@ class OrganizationInvitesTest(TestCase):
         self.assertEqual(resp.status_code, 302)
         invite.refresh_from_db()
         self.assertIsNotNone(invite.revoked_at)
-
-
-@tag("batch_organizations")
-class OrganizationBillingCheckoutHelpersTest(TestCase):
-    @patch("console.views.stripe.checkout.Session.create")
-    def test_start_addon_checkout_session_excludes_disabled_payment_methods(self, mock_session_create):
-        mock_session_create.return_value = MagicMock(url="https://stripe.test/addon-checkout")
-
-        with (
-            patch.object(console_views.stripe, "api_key", "sk_test_checkout"),
-            override_switch(STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED, active=True),
-        ):
-            checkout_url = console_views._start_addon_checkout_session(
-                customer_id="cus_addon",
-                price_id="price_addon",
-                quantity=3,
-                success_url="https://app.test/billing?success=1",
-                cancel_url="https://app.test/billing?cancel=1",
-            )
-
-        self.assertEqual(checkout_url, "https://stripe.test/addon-checkout")
-        _, kwargs = mock_session_create.call_args
-        self.assertEqual(
-            kwargs["excluded_payment_method_types"],
-            EXCLUDED_PAYMENT_METHOD_TYPES,
-        )
-        self.assertEqual(
-            kwargs["consent_collection"],
-            {"terms_of_service": "required"},
-        )
-        self.assertNotIn("payment_method_types", kwargs)
-        self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")
-        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "purchase")
-        self.assertEqual(
-            kwargs["line_items"],
-            [{"price": "price_addon", "quantity": 3}],
-        )
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')

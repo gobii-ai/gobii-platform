@@ -14,7 +14,6 @@ import type { BurnRateMetadata, InsightEvent } from '../types/insight'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import { INSIGHT_TIMING } from '../types/insight'
 import { sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
-import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
 import { mergeTimelineEvents, normalizeTimelineEvent } from './agentChatTimeline'
 import {
   injectRealtimeEventIntoCache,
@@ -298,7 +297,6 @@ export type AgentChatState = {
   autoScrollPinSuppressedUntil: number | null
   pendingEvents: TimelineEvent[]
   realtimeEventCursors: Set<string>
-  agentColorHex: string | null
   agentName: string | null
   agentAvatarUrl: string | null
   signupPreviewState: SignupPreviewState
@@ -313,7 +311,6 @@ export type AgentChatState = {
   setAgentId: (
     agentId: string | null,
     options?: {
-      agentColorHex?: string | null
       agentName?: string | null
       agentAvatarUrl?: string | null
       processingActive?: boolean
@@ -330,7 +327,6 @@ export type AgentChatState = {
   updateAgentIdentity: (update: {
     agentId?: string | null
     agentName?: string | null
-    agentColorHex?: string | null
     agentAvatarUrl?: string | null
     signupPreviewState?: SignupPreviewState | null
     planningState?: PlanningState | null
@@ -367,7 +363,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   autoScrollPinSuppressedUntil: null,
   pendingEvents: [],
   realtimeEventCursors: new Set(),
-  agentColorHex: null,
   agentName: null,
   agentAvatarUrl: null,
   signupPreviewState: 'none',
@@ -381,7 +376,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   insightsPaused: false,
 
   setAgentId(agentId, options) {
-    const providedColor = options?.agentColorHex ? normalizeHexColor(options.agentColorHex) : null
     const providedName = options?.agentName ?? null
     const providedAvatarUrl = options?.agentAvatarUrl ?? null
     const providedSignupPreviewState = options?.signupPreviewState ?? null
@@ -400,7 +394,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       }
     }
 
-    const fallbackColor = reuseExisting ? get().agentColorHex : DEFAULT_CHAT_COLOR_HEX
     const fallbackName = reuseExisting ? get().agentName : null
     const fallbackAvatarUrl = reuseExisting ? get().agentAvatarUrl : null
 
@@ -420,7 +413,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       streamingLastUpdatedAt: reuseExisting ? get().streamingLastUpdatedAt : null,
       streamingClearOnDone: reuseExisting ? get().streamingClearOnDone : false,
       streamingThinkingCollapsed: reuseExisting ? get().streamingThinkingCollapsed : false,
-      agentColorHex: providedColor ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
       agentName: providedName ?? fallbackName ?? null,
       agentAvatarUrl: providedAvatarUrl ?? fallbackAvatarUrl ?? null,
       signupPreviewState: reuseExisting
@@ -763,12 +755,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       }
 
       const hasName = Object.prototype.hasOwnProperty.call(update, 'agentName')
-      const hasColor = Object.prototype.hasOwnProperty.call(update, 'agentColorHex')
       const hasAvatar = Object.prototype.hasOwnProperty.call(update, 'agentAvatarUrl')
       const hasSignupPreviewState = Object.prototype.hasOwnProperty.call(update, 'signupPreviewState')
       const hasPlanningState = Object.prototype.hasOwnProperty.call(update, 'planningState')
 
-      if (!hasName && !hasColor && !hasAvatar && !hasSignupPreviewState && !hasPlanningState) {
+      if (!hasName && !hasAvatar && !hasSignupPreviewState && !hasPlanningState) {
         return state
       }
 
@@ -779,9 +770,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
       return {
         ...(hasName ? { agentName: update.agentName ?? null } : {}),
-        ...(hasColor
-          ? { agentColorHex: update.agentColorHex ? normalizeHexColor(update.agentColorHex) : null }
-          : {}),
         ...(hasAvatar ? { agentAvatarUrl: update.agentAvatarUrl ?? null } : {}),
         ...(hasSignupPreviewState ? { signupPreviewState: update.signupPreviewState ?? 'none' } : {}),
         ...(hasPlanningState ? { planningState: update.planningState ?? 'skipped' } : {}),

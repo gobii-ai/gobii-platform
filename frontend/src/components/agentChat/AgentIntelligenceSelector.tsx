@@ -136,7 +136,7 @@ export function AgentIntelligenceSelector({
                 key={option.key}
                 id={option.key}
                 textValue={option.label}
-                className="composer-intelligence-option"
+                className="agent-chat-menu-item composer-intelligence-option"
                 data-tier={option.key}
                 data-locked={option.locked ? 'true' : 'false'}
               >

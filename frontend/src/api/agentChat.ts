@@ -33,7 +33,6 @@ export type TimelineResponse = {
   has_more_newer: boolean
   processing_active: boolean
   processing_snapshot?: ProcessingSnapshot
-  agent_color_hex?: string | null
   agent_name?: string | null
   agent_avatar_url?: string | null
   signup_preview_state?: SignupPreviewState | null

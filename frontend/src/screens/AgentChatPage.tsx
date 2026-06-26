@@ -84,7 +84,6 @@ import {
 } from '../hooks/useTimelineCacheInjector'
 import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
-import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
@@ -222,61 +221,6 @@ function getLatestPlanSnapshot(events: TimelineEvent[], currentPlan?: PlanSnapsh
     }
   }
   return currentPlan ?? null
-}
-
-function adjustHexColor(hexColor: string, ratio: number): string {
-  const normalized = normalizeHexColor(hexColor)
-  const parse = (sliceStart: number) => parseInt(normalized.slice(sliceStart, sliceStart + 2), 16)
-  const clamp = (value: number) => Math.max(0, Math.min(255, Math.round(value)))
-  const r = parse(1)
-  const g = parse(3)
-  const b = parse(5)
-  if (ratio >= 0) {
-    return `#${clamp(r + (255 - r) * ratio).toString(16).padStart(2, '0')}${clamp(g + (255 - g) * ratio).toString(16).padStart(2, '0')}${clamp(b + (255 - b) * ratio).toString(16).padStart(2, '0')}`.toUpperCase()
-  }
-  const factor = 1 - Math.abs(ratio)
-  return `#${clamp(r * factor).toString(16).padStart(2, '0')}${clamp(g * factor).toString(16).padStart(2, '0')}${clamp(b * factor).toString(16).padStart(2, '0')}`.toUpperCase()
-}
-
-function buildFishSvgFaviconDataUrl(sourceSvg: string, colorHex: string): string {
-  const accent = normalizeHexColor(colorHex)
-  const light = adjustHexColor(accent, 0.1)
-  const dark = adjustHexColor(accent, -0.25)
-  const visor = adjustHexColor(accent, -0.55)
-
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(sourceSvg, 'image/svg+xml')
-  const svg = doc.querySelector('svg')
-  if (!svg) {
-    throw new Error('Invalid Gobii fish SVG favicon source')
-  }
-
-  // Tint the existing fish anatomy while preserving eye highlights and overall shape.
-  const setFill = (id: string, fill: string) => {
-    const node = svg.querySelector(`#${id}`) as SVGElement | null
-    if (node) {
-      node.setAttribute('fill', fill)
-    }
-  }
-
-  setFill('body', light)
-  setFill('top-fin', light)
-  setFill('tail-fin', light)
-  setFill('bottom-right-fin', light)
-  setFill('bottom-left-fin', dark)
-  setFill('eye-rectangle', visor)
-
-  svg.setAttribute('width', '64')
-  svg.setAttribute('height', '64')
-
-  const serialized = new XMLSerializer().serializeToString(svg)
-  return `data:image/svg+xml,${encodeURIComponent(serialized)}`
-}
-
-function buildFallbackFaviconDataUrl(colorHex: string): string {
-  const accent = normalizeHexColor(colorHex)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${accent}"/></svg>`
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`
 }
 
 function resolveBillingAlertMessage(reason?: string | null): string {
@@ -756,7 +700,6 @@ function hasAgentResponse(events: TimelineEvent[]): boolean {
 type AgentSwitchMeta = {
   agentId: string
   agentName?: string | null
-  agentColorHex?: string | null
   agentAvatarUrl?: string | null
   processingActive?: boolean
   signupPreviewState?: SignupPreviewState | null
@@ -958,7 +901,6 @@ function AgentSelectState({
 export type AgentChatPageProps = {
   agentId?: string | null
   agentName?: string | null
-  agentColor?: string | null
   agentAvatarUrl?: string | null
   agentEmail?: string | null
   agentSms?: string | null
@@ -1000,7 +942,6 @@ const RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES = DEFAULT_CONTIGUOUS_BACKFILL_MAX
 export function AgentChatPage({
   agentId,
   agentName,
-  agentColor,
   agentAvatarUrl,
   agentEmail,
   agentSms,
@@ -1033,10 +974,6 @@ export function AgentChatPage({
   onOpenSecrets,
   onOpenIntegrations,
 }: AgentChatPageProps) {
-  const initialThemeColorRef = useRef<string | null>(null)
-  const fishFaviconSvgRef = useRef<string | null>(null)
-  const fishFaviconSvgPromiseRef = useRef<Promise<string> | null>(null)
-
   const [shellPathname, setShellPathname] = useState(() => (
     typeof window === 'undefined' ? '' : window.location.pathname
   ))
@@ -1226,17 +1163,13 @@ export function AgentChatPage({
       store.updateProcessing(snapshot ?? { active: processingActive, webTasks: [] })
     }
     // Update agent identity from timeline response
-    const color = initialPageResponse.agent_color_hex
-      ? normalizeHexColor(initialPageResponse.agent_color_hex)
-      : null
     const name = initialPageResponse.agent_name ?? null
     const avatar = initialPageResponse.agent_avatar_url ?? null
     const signupPreviewState = normalizeSignupPreviewState(initialPageResponse.signup_preview_state)
     const planningState = normalizePlanningState(initialPageResponse.planning_state)
-    if (color || name || avatar || signupPreviewState !== 'none' || planningState !== 'skipped') {
+    if (name || avatar || signupPreviewState !== 'none' || planningState !== 'skipped') {
       store.updateAgentIdentity({
         agentId: activeAgentId,
-        ...(color ? { agentColorHex: color } : {}),
         ...(name ? { agentName: name } : {}),
         ...(avatar ? { agentAvatarUrl: avatar } : {}),
         signupPreviewState,
@@ -1248,7 +1181,6 @@ export function AgentChatPage({
   // Zustand store subscriptions (slimmed down — no more events/cursors/loading)
   const setAgentId = useAgentChatStore((state) => state.setAgentId)
   const storeAgentId = useAgentChatStore((state) => state.agentId)
-  const agentColorHex = useAgentChatStore((state) => state.agentColorHex)
   const storedAgentName = useAgentChatStore((state) => state.agentName)
   const storedAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
   const signupPreviewState = useAgentChatStore((state) => state.signupPreviewState)
@@ -1404,7 +1336,6 @@ export function AgentChatPage({
       }
 
       const hasName = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_name')
-      const hasColor = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_color_hex')
       const hasAvatar = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_avatar_url')
       const hasShortDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'short_description')
       const hasMiniDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'mini_description')
@@ -1421,7 +1352,6 @@ export function AgentChatPage({
         || hasLatestAgentMessageReadAt
       if (
         !hasName
-        && !hasColor
         && !hasAvatar
         && !hasShortDescription
         && !hasMiniDescription
@@ -1466,13 +1396,6 @@ export function AgentChatPage({
               const nextName = typeof rawPayload.agent_name === 'string' ? rawPayload.agent_name : null
               if (nextName && nextName !== next.name) {
                 next.name = nextName
-                changed = true
-              }
-            }
-            if (hasColor) {
-              const nextColor = typeof rawPayload.agent_color_hex === 'string' ? rawPayload.agent_color_hex : null
-              if (nextColor !== next.displayColorHex) {
-                next.displayColorHex = nextColor
                 changed = true
               }
             }
@@ -1885,7 +1808,6 @@ export function AgentChatPage({
       pendingAgentMetaRef.current = {
         agentId: nextAgentId,
         agentName: pendingMeta.agentName ?? rosterEntry?.name ?? null,
-        agentColorHex: pendingMeta.agentColorHex ?? rosterEntry?.displayColorHex ?? null,
         agentAvatarUrl: pendingMeta.agentAvatarUrl ?? rosterEntry?.avatarUrl ?? null,
         processingActive: pendingMeta.processingActive ?? rosterEntry?.processingActive,
         signupPreviewState: pendingMeta.signupPreviewState ?? rosterEntry?.signupPreviewState ?? 'none',
@@ -2039,7 +1961,6 @@ export function AgentChatPage({
     const activeRosterPlanningState = activeRosterMeta?.planningState ?? 'skipped'
     pendingAgentMetaRef.current = null
     setAgentId(activeAgentId, {
-      agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
       agentName: resolvedPendingMeta?.agentName ?? agentName,
       agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
       processingActive: resolvedPendingMeta?.processingActive,
@@ -2051,17 +1972,14 @@ export function AgentChatPage({
     activeRosterMeta?.planningState,
     activeRosterMeta?.signupPreviewState,
     agentAvatarUrl,
-    agentColor,
     agentName,
     setAgentId,
     agentContextReady,
   ])
   const storeAgentName = isStoreSynced ? storedAgentName : null
   const storeResolvedAvatarUrl = isStoreSynced ? storedAgentAvatarUrl : null
-  const storeAgentColor = isStoreSynced ? agentColorHex : null
   const resolvedAgentName = storeAgentName ?? activeRosterMeta?.name ?? agentName ?? null
   const resolvedAvatarUrl = storeResolvedAvatarUrl ?? activeRosterMeta?.avatarUrl ?? agentAvatarUrl ?? null
-  const resolvedAgentColorHex = storeAgentColor ?? activeRosterMeta?.displayColorHex ?? agentColor ?? null
   const pendingAgentEmail = activeAgentId ? pendingAgentEmails[activeAgentId] ?? null : null
   const resolvedAgentEmail = activeRosterMeta?.email ?? pendingAgentEmail ?? agentEmail ?? null
   const resolvedAgentSms = activeRosterMeta?.sms ?? agentSms ?? null
@@ -2376,109 +2294,6 @@ export function AgentChatPage({
     document.title = `${name} · Gobii`
   }, [isNewAgent, isSelectionView, resolvedAgentName])
 
-  // Keep favicon synced to the active agent's color in live chat contexts.
-  useEffect(() => {
-    const head = document.head
-    if (!head) {
-      return
-    }
-
-    if (isSelectionView || !activeAgentId) {
-      head.querySelector('link[data-agent-favicon="true"]')?.remove()
-      head.querySelector('link[data-agent-favicon-shortcut="true"]')?.remove()
-      const themeColorMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
-      if (themeColorMeta && initialThemeColorRef.current !== null) {
-        themeColorMeta.content = initialThemeColorRef.current
-      }
-      return
-    }
-
-    const colorHex = normalizeHexColor(resolvedAgentColorHex)
-    let cancelled = false
-
-    const resolveFishSvg = async (): Promise<string> => {
-      if (fishFaviconSvgRef.current) {
-        return fishFaviconSvgRef.current
-      }
-      if (!fishFaviconSvgPromiseRef.current) {
-        fishFaviconSvgPromiseRef.current = fetch('/static/images/gobii-fish.svg', { credentials: 'same-origin' })
-          .then(async (response) => {
-            if (!response.ok) {
-              throw new Error(`Failed to load Gobii fish SVG favicon source (${response.status})`)
-            }
-            return response.text()
-          })
-          .then((svgText) => {
-            fishFaviconSvgRef.current = svgText
-            return svgText
-          })
-      }
-      return fishFaviconSvgPromiseRef.current
-    }
-
-    const applyFaviconHref = (href: string) => {
-      if (cancelled) {
-        return
-      }
-
-      let icon = head.querySelector('link[data-agent-favicon="true"]') as HTMLLinkElement | null
-      if (!icon) {
-        icon = document.createElement('link')
-        icon.setAttribute('data-agent-favicon', 'true')
-        icon.rel = 'icon'
-        icon.type = 'image/svg+xml'
-        head.appendChild(icon)
-      }
-      icon.href = href
-
-      let shortcut = head.querySelector('link[data-agent-favicon-shortcut="true"]') as HTMLLinkElement | null
-      if (!shortcut) {
-        shortcut = document.createElement('link')
-        shortcut.setAttribute('data-agent-favicon-shortcut', 'true')
-        shortcut.rel = 'shortcut icon'
-        shortcut.type = 'image/svg+xml'
-        head.appendChild(shortcut)
-      }
-      shortcut.href = href
-    }
-
-    void resolveFishSvg()
-      .then((svgText) => buildFishSvgFaviconDataUrl(svgText, colorHex))
-      .then((faviconHref) => {
-        applyFaviconHref(faviconHref)
-      })
-      .catch(() => {
-        applyFaviconHref(buildFallbackFaviconDataUrl(colorHex))
-      })
-
-    const themeColorMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
-    if (themeColorMeta && initialThemeColorRef.current === null) {
-      initialThemeColorRef.current = themeColorMeta.content
-    }
-    if (themeColorMeta) {
-      themeColorMeta.content = colorHex
-    }
-    return () => {
-      cancelled = true
-    }
-  }, [activeAgentId, isSelectionView, resolvedAgentColorHex])
-
-  useEffect(() => {
-    return () => {
-      const head = document.head
-      if (!head) {
-        return
-      }
-      head.querySelector('link[data-agent-favicon="true"]')?.remove()
-      head.querySelector('link[data-agent-favicon-shortcut="true"]')?.remove()
-
-      const themeColorMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
-      if (themeColorMeta && initialThemeColorRef.current !== null) {
-        themeColorMeta.content = initialThemeColorRef.current
-      }
-    }
-  }, [])
-
   const rosterErrorMessage = rosterQuery.isError
     ? rosterQuery.error instanceof Error
       ? rosterQuery.error.message
@@ -2492,7 +2307,6 @@ export function AgentChatPage({
       id: activeAgentId,
       name: resolvedAgentName || 'Agent',
       avatarUrl: resolvedAvatarUrl,
-      displayColorHex: resolvedAgentColorHex ?? null,
       isActive: true,
       processingActive: false,
       lastInteractionAt: null,
@@ -2502,16 +2316,13 @@ export function AgentChatPage({
       listingDescriptionSource: null,
       displayTags: [],
       detailUrl: `/app/agents/${activeAgentId}/settings`,
-      cardGradientStyle: '',
-      iconBackgroundHex: '',
-      iconBorderHex: '',
       dailyCreditRemaining: null,
       dailyCreditLow: false,
       last24hCreditBurn: null,
       isOrgOwned: false,
       pendingActionRequestCount: 0,
     }
-  }, [activeAgentId, resolvedAgentColorHex, resolvedAgentName, resolvedAvatarUrl])
+  }, [activeAgentId, resolvedAgentName, resolvedAvatarUrl])
   const rosterAgentsWithActiveMeta = useMemo(() => {
     if (!activeAgentId) {
       return rosterAgents
@@ -2525,7 +2336,6 @@ export function AgentChatPage({
 
       const nextName = resolvedAgentName || agent.name || 'Agent'
       const nextAvatarUrl = normalizeAvatarUrl(resolvedAvatarUrl) ?? normalizeAvatarUrl(agent.avatarUrl)
-      const nextColor = resolvedAgentColorHex ?? agent.displayColorHex ?? null
       const nextEmail = resolvedAgentEmail ?? agent.email ?? null
       const nextSms = resolvedAgentSms ?? agent.sms ?? null
       const nextIsOrgOwned = agent.isOrgOwned ?? resolvedIsOrgOwned
@@ -2533,7 +2343,6 @@ export function AgentChatPage({
       if (
         nextName === agent.name
         && nextAvatarUrl === agent.avatarUrl
-        && nextColor === agent.displayColorHex
         && nextEmail === (agent.email ?? null)
         && nextSms === (agent.sms ?? null)
         && nextIsOrgOwned === agent.isOrgOwned
@@ -2546,7 +2355,6 @@ export function AgentChatPage({
         ...agent,
         name: nextName,
         avatarUrl: nextAvatarUrl,
-        displayColorHex: nextColor,
         email: nextEmail,
         sms: nextSms,
         isOrgOwned: nextIsOrgOwned,
@@ -2556,7 +2364,6 @@ export function AgentChatPage({
     return changed ? nextAgents : rosterAgents
   }, [
     activeAgentId,
-    resolvedAgentColorHex,
     resolvedAgentEmail,
     resolvedAgentName,
     resolvedAgentSms,
@@ -2757,7 +2564,6 @@ export function AgentChatPage({
     pendingAgentMetaRef.current = {
       agentId: agent.id,
       agentName: agent.name,
-      agentColorHex: agent.displayColorHex,
       agentAvatarUrl: agent.avatarUrl,
       processingActive: agent.processingActive,
       signupPreviewState: agent.signupPreviewState ?? 'none',
@@ -2775,7 +2581,6 @@ export function AgentChatPage({
     (agent: AgentRosterEntry) => {
       openAgentChat(agent.id, {
         agentName: agent.name,
-        agentColorHex: agent.displayColorHex,
         agentAvatarUrl: agent.avatarUrl,
         processingActive: agent.processingActive,
         signupPreviewState: agent.signupPreviewState ?? 'none',
@@ -2945,7 +2750,6 @@ export function AgentChatPage({
           id: result.agent_id,
           name: createdAgentName,
           avatarUrl: null,
-          displayColorHex: null,
           isActive: true,
           processingActive: false,
           lastInteractionAt: new Date().toISOString(),
@@ -2955,9 +2759,6 @@ export function AgentChatPage({
           listingDescriptionSource: null,
           displayTags: [],
           detailUrl: `/app/agents/${result.agent_id}/settings`,
-          cardGradientStyle: '',
-          iconBackgroundHex: '',
-          iconBorderHex: '',
           dailyCreditRemaining: null,
           dailyCreditLow: false,
           last24hCreditBurn: null,
@@ -4243,7 +4044,6 @@ export function AgentChatPage({
       <AgentChatLayout
         agentId={activeAgentId}
         agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
-        agentColorHex={resolvedAgentColorHex || undefined}
         agentAvatarUrl={resolvedAvatarUrl}
         agentEmail={resolvedAgentEmail}
         agentSms={resolvedAgentSms}

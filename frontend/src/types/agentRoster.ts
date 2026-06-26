@@ -14,7 +14,6 @@ export type AgentRosterEntry = {
   id: string
   name: string
   avatarUrl: string | null
-  displayColorHex: string | null
   isActive: boolean
   processingActive: boolean
   lastInteractionAt: string | null
@@ -24,9 +23,6 @@ export type AgentRosterEntry = {
   listingDescriptionSource: string | null
   displayTags: string[]
   detailUrl: string | null
-  cardGradientStyle: string
-  iconBackgroundHex: string
-  iconBorderHex: string
   dailyCreditRemaining: number | null
   dailyCreditLow: boolean
   last24hCreditBurn: number | null

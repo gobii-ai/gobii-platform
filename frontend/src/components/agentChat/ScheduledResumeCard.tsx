@@ -1,6 +1,7 @@
 import { memo, useMemo } from 'react'
 import { AlarmClock } from 'lucide-react'
 import { formatRelativeTimestamp } from '../../util/time'
+import { AgentChatSectionCard, AgentChatStatusBadge } from './uiPrimitives'
 
 type ScheduledResumeCardProps = {
   nextScheduledAt?: string | null
@@ -73,8 +74,7 @@ export const ScheduledResumeCard = memo(function ScheduledResumeCard({
     : 'Agent will continue soon'
 
   return (
-    <article className="timeline-event scheduled-resume-card" aria-live="polite">
-      <div className="scheduled-resume-card__spark" aria-hidden="true" />
+    <AgentChatSectionCard className="timeline-event scheduled-resume-card" tone="info" aria-live="polite">
       <div className="scheduled-resume-card__icon-wrap" aria-hidden="true">
         <AlarmClock size={16} />
       </div>
@@ -84,7 +84,9 @@ export const ScheduledResumeCard = memo(function ScheduledResumeCard({
           {absoluteText}
         </time>
       </div>
-      <span className="scheduled-resume-card__pill">Scheduled wake-up</span>
-    </article>
+      <AgentChatStatusBadge className="scheduled-resume-card__pill" tone="info">
+        Scheduled wake-up
+      </AgentChatStatusBadge>
+    </AgentChatSectionCard>
   )
 })

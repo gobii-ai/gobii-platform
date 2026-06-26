@@ -41,7 +41,6 @@ import {
   useSubscriptionStore,
   type PlanTier,
 } from '../../stores/subscriptionStore'
-import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
@@ -167,7 +166,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   realtimeEventCursors?: Set<string>
   onRealtimeEventAnimationConsumed?: (cursor: string) => void
   agentId?: string | null
-  agentColorHex?: string | null
   agentAvatarUrl?: string | null
   agentEmail?: string | null
   agentSms?: string | null
@@ -364,7 +362,6 @@ export function AgentChatLayout({
   realtimeEventCursors,
   onRealtimeEventAnimationConsumed,
   agentId,
-  agentColorHex,
   agentAvatarUrl,
   agentEmail,
   agentSms,
@@ -935,7 +932,6 @@ export function AgentChatLayout({
     )
 
   const showBanner = Boolean(agentName)
-  const composerPalette = useMemo(() => buildAgentComposerPalette(agentColorHex), [agentColorHex])
   const showHardLimitCallout = Boolean(
     (dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked) && onUpdateDailyCredits,
   )
@@ -1524,7 +1520,6 @@ export function AgentChatLayout({
           agentId={agentId}
           agentName={agentName || 'Agent'}
           agentAvatarUrl={agentAvatarUrl}
-          agentColorHex={agentColorHex}
           agentEmail={agentEmail}
           agentSms={agentSms}
           auditUrl={auditUrl}
@@ -1608,12 +1603,10 @@ export function AgentChatLayout({
         <div
           id="agent-workspace-root"
           data-plan-mode={workspacePlanMode}
-          style={composerPalette.cssVars}
         >
           <div className="agent-chat-workspace-main">
           <AgentTimelinePane
             agentAvatarUrl={agentAvatarUrl}
-            agentColorHex={agentColorHex}
             agentFirstName={agentFirstName}
             animateCursors={realtimeEventCursors}
             autoScrollPinned={autoScrollPinned}

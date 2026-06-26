@@ -37,7 +37,6 @@ type AgentRosterPayload = {
     id: string
     name: string
     avatar_url: string | null
-    display_color_hex: string | null
     is_active: boolean
     processing_active: boolean
     mini_description: string
@@ -46,9 +45,6 @@ type AgentRosterPayload = {
     listing_description_source: string | null
     display_tags: string[]
     detail_url: string | null
-    card_gradient_style: string
-    icon_background_hex: string
-    icon_border_hex: string
     daily_credit_remaining: number | null
     daily_credit_low: boolean
     last_24h_credit_burn: number | null
@@ -92,7 +88,6 @@ export async function fetchAgentRoster(
     id: agent.id,
     name: agent.name,
     avatarUrl: agent.avatar_url,
-    displayColorHex: agent.display_color_hex,
     isActive: agent.is_active,
     processingActive: agent.processing_active,
     miniDescription: agent.mini_description,
@@ -101,9 +96,6 @@ export async function fetchAgentRoster(
     listingDescriptionSource: agent.listing_description_source,
     displayTags: Array.isArray(agent.display_tags) ? agent.display_tags : [],
     detailUrl: agent.detail_url,
-    cardGradientStyle: agent.card_gradient_style,
-    iconBackgroundHex: agent.icon_background_hex,
-    iconBorderHex: agent.icon_border_hex,
     dailyCreditRemaining: agent.daily_credit_remaining,
     dailyCreditLow: Boolean(agent.daily_credit_low),
     last24hCreditBurn: agent.last_24h_credit_burn,

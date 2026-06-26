@@ -16,7 +16,6 @@ import { extractAgentChatSocketEnvelopeAgentId } from './agentChatSocketProtocol
 type AgentIdentityUpdate = {
   agentId?: string | null
   agentName?: string | null
-  agentColorHex?: string | null
   agentAvatarUrl?: string | null
   signupPreviewState?: SignupPreviewState | null
   planningState?: PlanningState | null
@@ -52,9 +51,6 @@ function buildAgentIdentityUpdate(payload: Record<string, unknown>): AgentIdenti
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'agent_name')) {
     nextIdentity.agentName = typeof payload.agent_name === 'string' ? payload.agent_name : null
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, 'agent_color_hex')) {
-    nextIdentity.agentColorHex = typeof payload.agent_color_hex === 'string' ? payload.agent_color_hex : null
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'agent_avatar_url')) {
     nextIdentity.agentAvatarUrl = typeof payload.agent_avatar_url === 'string' ? payload.agent_avatar_url : null

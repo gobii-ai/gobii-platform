@@ -68,7 +68,6 @@ from .models import (
     MeteringBatch,
     UsageThresholdSent,
     PersistentAgentWebhook,
-    AgentColor,
     BrowserLLMPolicy,
     IntelligenceTier,
     EvalRun,
@@ -539,35 +538,6 @@ class AddonEntitlementAdmin(admin.ModelAdmin):
         return obj.user
 
 
-@admin.register(AgentColor)
-class AgentColorAdmin(admin.ModelAdmin):
-    list_display = (
-        "name",
-        "hex_value",
-        "preview",
-        "sort_order",
-        "is_active",
-        "created_at",
-        "updated_at",
-    )
-    list_editable = ("hex_value", "sort_order", "is_active")
-    search_fields = ("name", "hex_value")
-    list_filter = ("is_active",)
-    ordering = ("sort_order", "name")
-    readonly_fields = ("preview", "created_at", "updated_at")
-    fields = ("name", "hex_value", "sort_order", "is_active", "preview", "created_at", "updated_at")
-
-    @admin.display(description="Preview")
-    def preview(self, obj):
-        color = (obj.hex_value or "").strip() or "#000000"
-        return format_html(
-            '<span style="display:inline-flex;align-items:center;gap:0.5rem;">'
-            '<span style="width:2.75rem;height:1.25rem;border-radius:0.35rem;border:1px solid rgba(15,23,42,0.18);background:{};"></span>'
-            '<code style="font-size:0.85rem;">{}</code>'
-            '</span>',
-            color,
-            color.upper(),
-        )
 class OwnershipTypeFilter(SimpleListFilter):
     title = 'Ownership'
     parameter_name = 'ownership'

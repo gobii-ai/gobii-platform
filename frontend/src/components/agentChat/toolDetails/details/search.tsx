@@ -128,7 +128,7 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
       <KeyValueList items={infoItems} />
 
       {calloutLines.length || calloutLists.length ? (
-        <div className={`tool-search-callout tool-search-callout--${calloutVariant}`}>
+        <div className="tool-search-callout" data-variant={calloutVariant}>
           <span className="tool-search-callout-icon" aria-hidden="true">
             {calloutVariant === 'error' ? (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">

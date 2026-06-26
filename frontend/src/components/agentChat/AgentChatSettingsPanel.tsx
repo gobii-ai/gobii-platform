@@ -315,7 +315,7 @@ export function AgentChatSettingsPanel({
               <h3 className="agent-settings-title">Daily task credits</h3>
             </div>
             {statusLabel ? (
-              <span className={`agent-settings-status agent-settings-status--${statusLabel.tone}`}>
+              <span className="agent-settings-status" data-tone={statusLabel.tone}>
                 {statusLabel.tone === 'alert' ? <AlertTriangle size={14} /> : null}
                 {statusLabel.label}
               </span>

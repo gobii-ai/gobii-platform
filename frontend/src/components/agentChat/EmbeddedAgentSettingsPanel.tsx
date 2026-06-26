@@ -28,7 +28,6 @@ type RosterQueryData = {
     id: string
     name: string
     avatarUrl: string | null
-    displayColorHex: string | null
     preferredLlmTier?: string | null
   }>
 }
@@ -59,7 +58,6 @@ function updateRosterIdentity(
       ...agent,
       name: payload.agentName,
       avatarUrl: payload.agentAvatarUrl,
-      displayColorHex: payload.agentColorHex,
       preferredLlmTier: payload.preferredLlmTier,
     }
   })
@@ -91,7 +89,6 @@ export function EmbeddedAgentSettingsPanel({
     useAgentChatStore.getState().updateAgentIdentity({
       agentId: payload.agentId,
       agentName: payload.agentName,
-      agentColorHex: payload.agentColorHex,
       agentAvatarUrl: payload.agentAvatarUrl,
     })
     queryClient.setQueriesData<RosterQueryData>(

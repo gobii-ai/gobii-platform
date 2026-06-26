@@ -2,6 +2,7 @@ import { memo, type MouseEvent } from 'react'
 import { Download, FileText, MessageSquareText } from 'lucide-react'
 import type { PlanSnapshot } from '../../types/agentChat'
 import { PlanTaskItem, type PlanTaskStatus } from './PlanTaskItem'
+import { AgentChatSurface } from './uiPrimitives'
 
 type PlanPanelProps = {
   plan?: PlanSnapshot | null
@@ -40,7 +41,7 @@ export const PlanPanel = memo(function PlanPanel({
     ...snapshot.todoTitles.map((title) => ({ title, status: 'todo' as const })),
   ]
 
-  const handleMessageClick = (event: MouseEvent<HTMLButtonElement>, messageId: string) => {
+  const handleMessageClick = (event: MouseEvent<HTMLElement>, messageId: string) => {
     event.preventDefault()
     onMessageClick?.(messageId)
   }
@@ -70,7 +71,7 @@ export const PlanPanel = memo(function PlanPanel({
         <div className="plan-panel-deliverables">
           <div className="plan-panel-deliverables-title">Deliverables</div>
           {files.map((file) => (
-            <div key={`file:${file.path}`} className="plan-panel-deliverable plan-panel-deliverable--file">
+            <AgentChatSurface key={`file:${file.path}`} className="plan-panel-deliverable plan-panel-deliverable--file">
               <span className="plan-panel-deliverable-main">
                 <FileText size={14} />
                 <span>{file.label || file.path}</span>
@@ -88,10 +89,11 @@ export const PlanPanel = memo(function PlanPanel({
                   <Download size={13} strokeWidth={2.2} />
                 </a>
               ) : null}
-            </div>
+            </AgentChatSurface>
           ))}
           {messages.map((message) => (
-            <button
+            <AgentChatSurface
+              as="button"
               key={`message:${message.messageId}`}
               type="button"
               className="plan-panel-deliverable"
@@ -101,7 +103,7 @@ export const PlanPanel = memo(function PlanPanel({
                 <MessageSquareText size={14} />
                 <span>{message.label || 'Message'}</span>
               </span>
-            </button>
+            </AgentChatSurface>
           ))}
         </div>
       ) : null}

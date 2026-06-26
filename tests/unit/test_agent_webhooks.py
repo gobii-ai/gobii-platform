@@ -5,7 +5,6 @@ from allauth.account.models import EmailAddress
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
 from django.http import QueryDict
-from django.test import RequestFactory
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -22,7 +21,6 @@ from api.models import (
     ProxyServer,
 )
 from api.webhooks import _parse_inbound_agent_webhook_request
-from console.views import AgentSettingsController
 from util.analytics import AnalyticsEvent
 
 
@@ -223,7 +221,6 @@ class AgentWebhookConsoleViewTests(TestCase):
         self.user = type(self).user
         self.client.force_login(self.user)
         self.agent = PersistentAgent.objects.get(pk=self.agent_id)
-        self.factory = RequestFactory()
 
     @tag("batch_agent_webhooks")
     def test_console_creates_webhook(self):
@@ -235,7 +232,8 @@ class AgentWebhookConsoleViewTests(TestCase):
                 "webhook_url": "https://example.com/ci",
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
         self.assertTrue(
             PersistentAgentWebhook.objects.filter(agent=self.agent, name="CI Hook").exists()
         )
@@ -256,7 +254,8 @@ class AgentWebhookConsoleViewTests(TestCase):
                 "webhook_url": "https://example.com/new",
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
         webhook.refresh_from_db()
         self.assertEqual(webhook.name, "Updated")
         self.assertEqual(webhook.url, "https://example.com/new")
@@ -275,7 +274,8 @@ class AgentWebhookConsoleViewTests(TestCase):
                 "webhook_id": str(webhook.id),
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
         self.assertFalse(
             PersistentAgentWebhook.objects.filter(pk=webhook.pk).exists()
         )
@@ -290,7 +290,8 @@ class AgentWebhookConsoleViewTests(TestCase):
                 "inbound_webhook_is_active": "true",
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
         webhook = PersistentAgentInboundWebhook.objects.get(agent=self.agent, name="Build Trigger")
         self.assertTrue(webhook.is_active)
         self.assertTrue(webhook.secret)
@@ -311,7 +312,8 @@ class AgentWebhookConsoleViewTests(TestCase):
                 "inbound_webhook_is_active": "false",
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
         webhook.refresh_from_db()
         self.assertEqual(webhook.name, "Inbound Updated")
         self.assertFalse(webhook.is_active)
@@ -330,7 +332,8 @@ class AgentWebhookConsoleViewTests(TestCase):
                 "inbound_webhook_id": str(webhook.id),
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
         webhook.refresh_from_db()
         self.assertNotEqual(webhook.secret, old_secret)
 
@@ -347,84 +350,69 @@ class AgentWebhookConsoleViewTests(TestCase):
                 "inbound_webhook_id": str(webhook.id),
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
         self.assertFalse(
             PersistentAgentInboundWebhook.objects.filter(pk=webhook.pk).exists()
         )
 
     @tag("batch_agent_webhooks")
-    @patch("console.views.Analytics.track_event")
+    @patch("console.agent_settings.service.Analytics.track_event")
     def test_inbound_webhook_actions_emit_analytics(self, mock_track_event):
-        view = AgentSettingsController()
+        settings_url = reverse("console_agent_settings", args=[self.agent_id])
 
-        create_request = self.factory.post(
-            "/console/agents/test/",
-            {
-                "inbound_webhook_name": "Build Trigger",
-                "inbound_webhook_is_active": "true",
-            },
-        )
-        create_request.user = self.user
         with self.captureOnCommitCallbacks(execute=True):
-            create_response = view._handle_inbound_webhook_action(
-                create_request,
-                self.agent,
-                "create",
-                ajax=True,
+            create_response = self.client.post(
+                settings_url,
+                {
+                    "inbound_webhook_action": "create",
+                    "inbound_webhook_name": "Build Trigger",
+                    "inbound_webhook_is_active": "true",
+                },
             )
 
         self.assertEqual(create_response.status_code, 200)
+        self.assertTrue(create_response.json()["success"])
         webhook = PersistentAgentInboundWebhook.objects.get(agent=self.agent, name="Build Trigger")
 
-        update_request = self.factory.post(
-            "/console/agents/test/",
-            {
-                "inbound_webhook_id": str(webhook.id),
-                "inbound_webhook_name": "Build Trigger Updated",
-                "inbound_webhook_is_active": "false",
-            },
-        )
-        update_request.user = self.user
         with self.captureOnCommitCallbacks(execute=True):
-            update_response = view._handle_inbound_webhook_action(
-                update_request,
-                self.agent,
-                "update",
-                ajax=True,
+            update_response = self.client.post(
+                settings_url,
+                {
+                    "inbound_webhook_action": "update",
+                    "inbound_webhook_id": str(webhook.id),
+                    "inbound_webhook_name": "Build Trigger Updated",
+                    "inbound_webhook_is_active": "false",
+                },
             )
 
         self.assertEqual(update_response.status_code, 200)
+        self.assertTrue(update_response.json()["success"])
         webhook.refresh_from_db()
 
-        rotate_request = self.factory.post(
-            "/console/agents/test/",
-            {"inbound_webhook_id": str(webhook.id)},
-        )
-        rotate_request.user = self.user
         with self.captureOnCommitCallbacks(execute=True):
-            rotate_response = view._handle_inbound_webhook_action(
-                rotate_request,
-                self.agent,
-                "rotate_secret",
-                ajax=True,
+            rotate_response = self.client.post(
+                settings_url,
+                {
+                    "inbound_webhook_action": "rotate_secret",
+                    "inbound_webhook_id": str(webhook.id),
+                },
             )
 
         self.assertEqual(rotate_response.status_code, 200)
+        self.assertTrue(rotate_response.json()["success"])
 
-        delete_request = self.factory.post(
-            "/console/agents/test/",
-            {"inbound_webhook_id": str(webhook.id)},
-        )
-        delete_request.user = self.user
         with self.captureOnCommitCallbacks(execute=True):
-            delete_response = view._handle_inbound_webhook_action(
-                delete_request,
-                self.agent,
-                "delete",
-                ajax=True,
+            delete_response = self.client.post(
+                settings_url,
+                {
+                    "inbound_webhook_action": "delete",
+                    "inbound_webhook_id": str(webhook.id),
+                },
             )
 
         self.assertEqual(delete_response.status_code, 200)
+        self.assertTrue(delete_response.json()["success"])
 
         self.assertEqual(
             [call.kwargs["event"] for call in mock_track_event.call_args_list],

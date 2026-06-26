@@ -253,13 +253,6 @@ export function updateAgentIdentityInCache(
         changed = true
       }
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'agent_color_hex')) {
-      const agentColorHex = typeof payload.agent_color_hex === 'string' ? payload.agent_color_hex : null
-      if (agentColorHex !== current.agent_color_hex) {
-        next.agent_color_hex = agentColorHex
-        changed = true
-      }
-    }
     if (Object.prototype.hasOwnProperty.call(payload, 'agent_avatar_url')) {
       const agentAvatarUrl = typeof payload.agent_avatar_url === 'string' ? payload.agent_avatar_url : null
       if (agentAvatarUrl !== current.agent_avatar_url) {
