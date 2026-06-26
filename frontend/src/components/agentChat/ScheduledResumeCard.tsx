@@ -75,7 +75,6 @@ export const ScheduledResumeCard = memo(function ScheduledResumeCard({
 
   return (
     <AgentChatSectionCard className="timeline-event scheduled-resume-card" tone="info" aria-live="polite">
-      <div className="scheduled-resume-card__spark" aria-hidden="true" />
       <div className="scheduled-resume-card__icon-wrap" aria-hidden="true">
         <AlarmClock size={16} />
       </div>

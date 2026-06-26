@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { ChevronRight, FileText, Lightbulb, Link2, ListChecks } from 'lucide-react'
+import { AgentChatSectionCard } from './uiPrimitives'
 
 export type StarterPrompt = {
   id: string
@@ -40,8 +41,10 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
   }
 
   return (
-    <section
+    <AgentChatSectionCard
       className="timeline-event starter-prompts-card"
+      tone="info"
+      density="compact"
       aria-label="Suggested follow-ups"
       aria-busy={loading}
     >
@@ -89,6 +92,6 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
           })}
       </div>
       {loading ? <span className="sr-only">Loading suggested follow-ups</span> : null}
-    </section>
+    </AgentChatSectionCard>
   )
 })

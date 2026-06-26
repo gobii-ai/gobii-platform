@@ -3,7 +3,7 @@ import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentEmptyState, AgentListSectionHeader } from './ChatSidebarParts'
-import { joinClassNames } from './uiPrimitives'
+import { AgentChatIconButton, AgentChatPill, joinClassNames } from './uiPrimitives'
 
 type ChatSidebarGalleryProps = {
   variant: 'sidebar' | 'drawer'
@@ -61,8 +61,8 @@ function GalleryCard({
       role="listitem"
     >
       <div className="agent-gallery-card__top-actions">
-        <button
-          type="button"
+        <AgentChatIconButton
+          size="sm"
           className="agent-gallery-card__favorite"
           data-active={isFavorite ? 'true' : 'false'}
           onClick={() => onToggleAgentFavorite?.(agent.id)}
@@ -71,7 +71,7 @@ function GalleryCard({
           title={isFavorite ? 'Remove favorite' : 'Add favorite'}
         >
           <Star className="h-4 w-4" />
-        </button>
+        </AgentChatIconButton>
       </div>
 
       <button
@@ -93,9 +93,9 @@ function GalleryCard({
           <div className="agent-gallery-card__hero-meta">
             <span className="agent-gallery-card__name">{agent.name || 'Agent'}</span>
             {pendingRequestCount > 0 ? (
-              <span className="agent-roster-pending-pill">
+              <AgentChatPill className="agent-roster-pending-pill" tone="info">
                 {pendingRequestCount} {pendingRequestCount === 1 ? 'request' : 'requests'}
-              </span>
+              </AgentChatPill>
             ) : miniDescription ? (
               <span className="agent-gallery-card__mini">{miniDescription}</span>
             ) : null}
@@ -105,9 +105,9 @@ function GalleryCard({
         {agent.displayTags.length > 0 ? (
           <div className="agent-gallery-card__tags">
             {agent.displayTags.map((tag) => (
-              <span key={tag} className="agent-gallery-card__tag">
+              <AgentChatPill key={tag} className="agent-gallery-card__tag">
                 {tag}
-              </span>
+              </AgentChatPill>
             ))}
           </div>
         ) : null}
@@ -146,16 +146,16 @@ function GalleryCard({
             </a>
           ) : null}
           {showChatAction ? (
-          <button
-            type="button"
-            className="agent-gallery-card__channel-action"
-            data-channel="chat"
-            onClick={() => onSelectAgent?.(agent)}
-            disabled={isSwitching}
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            <span>{isSwitching ? 'Loading…' : 'Chat'}</span>
-          </button>
+            <button
+              type="button"
+              className="agent-gallery-card__channel-action"
+              data-channel="chat"
+              onClick={() => onSelectAgent?.(agent)}
+              disabled={isSwitching}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>{isSwitching ? 'Loading…' : 'Chat'}</span>
+            </button>
           ) : null}
         </div>
       </div>

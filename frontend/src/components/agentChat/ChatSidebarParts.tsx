@@ -3,7 +3,7 @@ import { Check, Search, Star, X } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
-import { joinClassNames } from './uiPrimitives'
+import { AgentChatPill, joinClassNames } from './uiPrimitives'
 
 type SearchVariant = 'drawer' | 'sidebar'
 type SortVariant = SearchVariant
@@ -248,9 +248,9 @@ export function AgentListItem({
         <span className="agent-roster-item__meta">
           <span className="agent-roster-item__name">{agent.name || 'Agent'}</span>
           {hasPendingRequests ? (
-            <span className="agent-roster-pending-pill">
+            <AgentChatPill className="agent-roster-pending-pill" tone="info">
               {pendingRequestCount} {pendingRequestCount === 1 ? 'request' : 'requests'}
-            </span>
+            </AgentChatPill>
           ) : isWorking ? (
             <span className="agent-roster-item__desc">
               <AgentWorkingIndicator />
