@@ -1,9 +1,8 @@
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { Check, Search, Star, X } from 'lucide-react'
 
-import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
-import { AgentChatPill, joinClassNames } from './uiPrimitives'
+import { AgentChatAvatar, AgentChatPill, joinClassNames } from './uiPrimitives'
 
 type SearchVariant = 'drawer' | 'sidebar'
 type SortVariant = SearchVariant
@@ -217,7 +216,7 @@ export function AgentListItem({
           </span>
         ) : null}
         <span className="agent-roster-item__avatar-wrap">
-          <AgentAvatarBadge
+          <AgentChatAvatar
             name={agent.name || 'Agent'}
             avatarUrl={agent.avatarUrl}
             className="agent-roster-item__avatar"

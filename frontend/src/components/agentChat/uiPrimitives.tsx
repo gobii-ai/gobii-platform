@@ -169,10 +169,15 @@ export function AgentChatMenuItem({
   as: Component = 'button',
   className,
   children,
+  type,
   ...rest
 }: MenuItemProps) {
   return (
-    <Component className={joinClassNames('agent-chat-menu-item', className)} {...rest}>
+    <Component
+      type={Component === 'button' ? (type ?? 'button') : type}
+      className={joinClassNames('agent-chat-menu-item', className)}
+      {...rest}
+    >
       {children}
     </Component>
   )
