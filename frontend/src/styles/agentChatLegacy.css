@@ -5875,17 +5875,22 @@
     color: var(--roster-active-desc-color);
 }
 .agent-roster-pending-pill {
-    max-width: 100%;
-    height: 0.875rem;
+    align-self: flex-start;
+    width: fit-content;
+    max-width: min(100%, 8rem);
+    height: 1rem;
     min-height: 0;
-    padding: 0 0.36rem;
-    font-size: 0.55rem;
+    padding: 0 0.5rem;
+    border-color: rgba(125, 211, 252, 0.34);
+    background: rgba(125, 211, 252, 0.1);
+    font-size: 0.58rem;
     line-height: 1;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .agent-roster-item[data-variant='sidebar'] .agent-roster-pending-pill {
-    background: rgba(125, 211, 252, 0.1);
+    border-color: rgba(186, 230, 253, 0.24);
+    background: rgba(125, 211, 252, 0.08);
     color: rgba(186, 230, 253, 0.86);
 }
 .agent-roster-item__state {
