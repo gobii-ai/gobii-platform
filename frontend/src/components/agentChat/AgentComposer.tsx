@@ -1,5 +1,5 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, Ref } from 'react'
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, KeyRound, Loader2, Mail, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
 
@@ -1204,7 +1204,7 @@ export const AgentComposer = memo(function AgentComposer({
     submitShortcutHint,
   ].filter(Boolean).join(' · ')
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (activeHumanInputUsesMainComposer) {
       return
     }
@@ -1456,7 +1456,7 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [busyHumanInputRequestId, disabled, isSending, onDismissHumanInput, syncDraftHumanInputResponses])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!activeHumanInputUsesMainComposer || !activeHumanInputRequest) {
       return
     }
@@ -1781,19 +1781,11 @@ export const AgentComposer = memo(function AgentComposer({
     if (!item) {
       return
     }
-    const leavingMainComposerHumanInput = activeHumanInputUsesMainComposer
-      && (
-        item.kind !== 'human_input'
-        || item.requestId !== activeHumanInputRequest?.id
-      )
     setActivePendingActionId(item.actionId)
     if (item.kind === 'human_input') {
       setActiveHumanInputRequestId(item.requestId)
     } else {
       setActiveHumanInputRequestId(null)
-    }
-    if (leavingMainComposerHumanInput) {
-      restoreMessageDraft()
     }
   }
 
