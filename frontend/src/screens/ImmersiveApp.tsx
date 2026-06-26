@@ -911,7 +911,6 @@ export function ImmersiveApp({
     onCreateAgent: handleNavigateToNewAgent,
     onAgentCreated: handleAgentCreated,
     showContextSwitcher: true,
-    persistContextSession: false,
     onContextSwitch: handleContextSwitch,
     selectionPage,
     selectionShellPanel,

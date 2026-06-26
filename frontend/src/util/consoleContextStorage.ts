@@ -16,12 +16,22 @@ const LEGACY_LOCAL_STORAGE_KEYS = {
   name: 'contextName',
 }
 
+function isUsableStorage(storage: Storage | null): storage is Storage {
+  return Boolean(
+    storage
+    && typeof storage.getItem === 'function'
+    && typeof storage.setItem === 'function'
+    && typeof storage.removeItem === 'function'
+  )
+}
+
 function getLocalStorage(): Storage | null {
   if (typeof window === 'undefined') {
     return null
   }
   try {
-    return window.localStorage
+    const storage = window.localStorage
+    return isUsableStorage(storage) ? storage : null
   } catch {
     return null
   }
@@ -32,23 +42,47 @@ function getSessionStorage(): Storage | null {
     return null
   }
   try {
-    return window.sessionStorage
+    const storage = window.sessionStorage
+    return isUsableStorage(storage) ? storage : null
   } catch {
     return null
   }
 }
 
-export function readStoredConsoleContext(): StoredConsoleContext | null {
-  const storage = getSessionStorage()
+function safeGetItem(storage: Storage, key: string): string | null {
+  try {
+    return storage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeSetItem(storage: Storage, key: string, value: string): void {
+  try {
+    storage.setItem(key, value)
+  } catch {
+    // Storage can be available but blocked, e.g. private or locked-down browser modes.
+  }
+}
+
+function safeRemoveItem(storage: Storage, key: string): void {
+  try {
+    storage.removeItem(key)
+  } catch {
+    // Storage can be available but blocked, e.g. private or locked-down browser modes.
+  }
+}
+
+function readContextFromStorage(storage: Storage | null): StoredConsoleContext | null {
   if (!storage) {
     return null
   }
-  const type = storage.getItem(STORAGE_KEYS.type)
-  const id = storage.getItem(STORAGE_KEYS.id)
+  const type = safeGetItem(storage, STORAGE_KEYS.type)
+  const id = safeGetItem(storage, STORAGE_KEYS.id)
   if (!type || !id) {
     return null
   }
-  const name = storage.getItem(STORAGE_KEYS.name)
+  const name = safeGetItem(storage, STORAGE_KEYS.name)
   return {
     type,
     id,
@@ -56,26 +90,57 @@ export function readStoredConsoleContext(): StoredConsoleContext | null {
   }
 }
 
-export function storeConsoleContext(context: StoredConsoleContext): void {
-  const storage = getSessionStorage()
+function readLegacyContextFromStorage(storage: Storage | null): StoredConsoleContext | null {
+  if (!storage) {
+    return null
+  }
+  const type = safeGetItem(storage, LEGACY_LOCAL_STORAGE_KEYS.type)
+  const id = safeGetItem(storage, LEGACY_LOCAL_STORAGE_KEYS.id)
+  if (!type || !id) {
+    return null
+  }
+  const name = safeGetItem(storage, LEGACY_LOCAL_STORAGE_KEYS.name)
+  return {
+    type,
+    id,
+    name: name && name.trim() ? name : null,
+  }
+}
+
+function writeContextToStorage(storage: Storage | null, context: StoredConsoleContext): void {
   if (!storage) {
     return
   }
-  storage.setItem(STORAGE_KEYS.type, context.type)
-  storage.setItem(STORAGE_KEYS.id, context.id)
+  safeSetItem(storage, STORAGE_KEYS.type, context.type)
+  safeSetItem(storage, STORAGE_KEYS.id, context.id)
   if (context.name) {
-    storage.setItem(STORAGE_KEYS.name, context.name)
+    safeSetItem(storage, STORAGE_KEYS.name, context.name)
   } else {
-    storage.removeItem(STORAGE_KEYS.name)
+    safeRemoveItem(storage, STORAGE_KEYS.name)
   }
+}
+
+export function readStoredConsoleContext(): StoredConsoleContext | null {
+  const sessionContext = readContextFromStorage(getSessionStorage())
+  if (sessionContext) {
+    return sessionContext
+  }
+
+  const localStorageRef = getLocalStorage()
+  return readContextFromStorage(localStorageRef) ?? readLegacyContextFromStorage(localStorageRef)
+}
+
+export function storeConsoleContext(context: StoredConsoleContext): void {
+  writeContextToStorage(getSessionStorage(), context)
+  writeContextToStorage(getLocalStorage(), context)
 }
 
 export function clearStoredConsoleContext(): void {
   const sessionStorageRef = getSessionStorage()
   if (sessionStorageRef) {
-    sessionStorageRef.removeItem(STORAGE_KEYS.type)
-    sessionStorageRef.removeItem(STORAGE_KEYS.id)
-    sessionStorageRef.removeItem(STORAGE_KEYS.name)
+    safeRemoveItem(sessionStorageRef, STORAGE_KEYS.type)
+    safeRemoveItem(sessionStorageRef, STORAGE_KEYS.id)
+    safeRemoveItem(sessionStorageRef, STORAGE_KEYS.name)
   }
 
   const localStorageRef = getLocalStorage()
@@ -83,10 +148,10 @@ export function clearStoredConsoleContext(): void {
     return
   }
 
-  localStorageRef.removeItem(STORAGE_KEYS.type)
-  localStorageRef.removeItem(STORAGE_KEYS.id)
-  localStorageRef.removeItem(STORAGE_KEYS.name)
-  localStorageRef.removeItem(LEGACY_LOCAL_STORAGE_KEYS.type)
-  localStorageRef.removeItem(LEGACY_LOCAL_STORAGE_KEYS.id)
-  localStorageRef.removeItem(LEGACY_LOCAL_STORAGE_KEYS.name)
+  safeRemoveItem(localStorageRef, STORAGE_KEYS.type)
+  safeRemoveItem(localStorageRef, STORAGE_KEYS.id)
+  safeRemoveItem(localStorageRef, STORAGE_KEYS.name)
+  safeRemoveItem(localStorageRef, LEGACY_LOCAL_STORAGE_KEYS.type)
+  safeRemoveItem(localStorageRef, LEGACY_LOCAL_STORAGE_KEYS.id)
+  safeRemoveItem(localStorageRef, LEGACY_LOCAL_STORAGE_KEYS.name)
 }

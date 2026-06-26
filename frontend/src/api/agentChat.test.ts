@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resolveSpawnRequest } from './agentChat'
 import { jsonRequest } from './http'
-import { storeConsoleContext } from '../util/consoleContextStorage'
+import { clearStoredConsoleContext, storeConsoleContext } from '../util/consoleContextStorage'
 
 describe('resolveSpawnRequest', () => {
   beforeEach(() => {
     document.cookie = 'csrftoken=test-token'
     window.sessionStorage.clear()
+    clearStoredConsoleContext()
     window.history.replaceState(null, '', '/')
   })
 
