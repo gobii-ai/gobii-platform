@@ -997,13 +997,13 @@ class DailyLimitProcessingTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("api.agent.core.event_processing._run_agent_loop", return_value={"total_tokens": 0})
-    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.credit_gating.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.maybe_schedule_agent_avatar")
     @patch("api.agent.core.event_processing.maybe_schedule_agent_tags")
     @patch("api.agent.core.event_processing.maybe_schedule_mini_description")
     @patch("api.agent.core.event_processing.maybe_schedule_short_description")
     @patch(
-        "api.agent.core.event_processing.get_agent_daily_credit_state",
+        "api.agent.core.credit_gating.get_agent_daily_credit_state",
         return_value={
             "hard_limit": Decimal("2"),
             "hard_limit_remaining": Decimal("0"),
@@ -1015,7 +1015,7 @@ class DailyLimitProcessingTests(TestCase):
         },
     )
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+        "api.agent.core.credit_gating.TaskCreditService.calculate_available_tasks_for_owner",
         return_value=Decimal("0"),
     )
     def test_process_agent_events_enters_message_only_mode_without_notice(
@@ -1039,13 +1039,13 @@ class DailyLimitProcessingTests(TestCase):
         )
 
     @patch("api.agent.core.period_events.get_redis_client")
-    @patch("api.agent.core.event_processing.Analytics.track_event")
+    @patch("api.agent.core.credit_gating.Analytics.track_event")
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+        "api.agent.core.credit_gating.TaskCreditService.calculate_available_tasks_for_owner",
         return_value=Decimal("10"),
     )
-    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("1"))
-    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.credit_gating.get_tool_credit_cost", return_value=Decimal("1"))
+    @patch("api.agent.core.credit_gating.settings.GOBII_PROPRIETARY_MODE", True)
     def test_hard_limit_analytics_and_system_step_emit_once_per_daily_period(
         self,
         _mock_tool_cost,

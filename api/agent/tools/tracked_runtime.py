@@ -13,6 +13,7 @@ from api.agent.core.tool_execution_records import (
     finalize_pending_tool_call_step,
     persist_tool_call_step,
 )
+from api.agent.core.credit_gating import reserve_tool_credit
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
 
 from .runtime_execution_context import tool_execution_context
@@ -60,7 +61,6 @@ def execute_tracked_runtime_tool_call(
     from api.agent.core.event_processing import (
         _build_safe_error_payload,
         _enforce_tool_rate_limit,
-        _ensure_credit_for_tool,
         _is_error_status,
         _normalize_error_result,
     )
@@ -79,15 +79,15 @@ def execute_tracked_runtime_tool_call(
             "message": f"Tool '{tool_name}' skipped due to hourly rate limit.",
         }, None
 
-    credit_info = _ensure_credit_for_tool(agent, tool_name)
-    if not credit_info:
+    credit_decision = reserve_tool_credit(agent, tool_name)
+    if credit_decision.blocked:
         return {
             "status": "error",
             "message": f"Tool '{tool_name}' skipped due to credit limits.",
         }, None
 
-    credits_consumed = credit_info.get("cost")
-    consumed_credit = credit_info.get("credit")
+    credits_consumed = credit_decision.cost
+    consumed_credit = credit_decision.credit
     pending_step = create_pending_tool_call_step(
         agent=agent,
         tool_name=tool_name,

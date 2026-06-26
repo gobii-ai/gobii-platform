@@ -170,7 +170,11 @@ class ImpliedSendTests(TestCase):
 
         with (
             patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
-            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+            patch.object(
+                ep,
+                "reserve_tool_credit",
+                return_value=MagicMock(blocked=False, cost=None, credit=None),
+            ) as mock_credit,
         ):
             prepared = ep._prepare_tool_batch(
                 self.agent,
@@ -229,7 +233,11 @@ class ImpliedSendTests(TestCase):
 
         with (
             patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
-            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+            patch.object(
+                ep,
+                "reserve_tool_credit",
+                return_value=MagicMock(blocked=False, cost=None, credit=None),
+            ) as mock_credit,
         ):
             prepared = ep._prepare_tool_batch(
                 self.agent,
@@ -264,7 +272,11 @@ class ImpliedSendTests(TestCase):
     def test_invalid_custom_tool_json_correction_preserves_same_tool_retry(self):
         with (
             patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
-            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+            patch.object(
+                ep,
+                "reserve_tool_credit",
+                return_value=MagicMock(blocked=False, cost=None, credit=None),
+            ) as mock_credit,
         ):
             prepared = ep._prepare_tool_batch(
                 self.agent,
@@ -1221,7 +1233,11 @@ class ImpliedSendTests(TestCase):
 
         with (
             patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
-            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+            patch.object(
+                ep,
+                "reserve_tool_credit",
+                return_value=MagicMock(blocked=False, cost=None, credit=None),
+            ) as mock_credit,
         ):
             prepared = ep._prepare_tool_batch(
                 self.agent,
@@ -2063,17 +2079,17 @@ class DailyLimitMessageOnlyModeTests(TestCase):
 
     @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
+        "api.agent.core.credit_gating.TaskCreditService.check_and_consume_credit_for_owner",
         return_value={"success": True, "credit": None},
     )
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+        "api.agent.core.credit_gating.TaskCreditService.calculate_available_tasks_for_owner",
         return_value=Decimal("5"),
     )
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing.get_agent_daily_credit_state")
     @patch("api.agent.core.event_processing.get_agent_tools")
-    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.credit_gating.settings.GOBII_PROPRIETARY_MODE", True)
     def test_daily_limit_mode_executes_send_email_without_consuming_credit(
         self,
         mock_get_tools,
@@ -2125,17 +2141,17 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         self.assertIsNone(tool_call.step.completion_id)
 
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
+        "api.agent.core.credit_gating.TaskCreditService.check_and_consume_credit_for_owner",
         return_value={"success": True, "credit": None},
     )
     @patch(
-        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+        "api.agent.core.credit_gating.TaskCreditService.calculate_available_tasks_for_owner",
         return_value=Decimal("0"),
     )
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing.get_agent_daily_credit_state")
     @patch("api.agent.core.event_processing.get_agent_tools")
-    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.credit_gating.settings.GOBII_PROPRIETARY_MODE", True)
     def test_daily_limit_mode_allows_sleep_without_consuming_credit(
         self,
         mock_get_tools,
