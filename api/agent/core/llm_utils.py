@@ -10,7 +10,6 @@ from asgiref.sync import async_to_sync
 
 from django.conf import settings
 import litellm
-import openai
 
 from api.services.system_settings import (
     get_litellm_first_data_timeout_seconds,
@@ -63,10 +62,6 @@ _RETRYABLE_ERRORS = (
     litellm.APIConnectionError,
     litellm.ServiceUnavailableError,
     litellm.RateLimitError,
-    openai.APITimeoutError,
-    openai.APIConnectionError,
-    openai.RateLimitError,
-    openai.InternalServerError,
     EmptyLiteLLMResponseError,
     InvalidLiteLLMResponseError,
 )

@@ -75,30 +75,30 @@ def _responses_response(
     output = []
     if reasoning is not None:
         output.append(
-            {
-                "type": "reasoning",
-                "summary": [{"type": "summary_text", "text": reasoning}],
-            }
+            SimpleNamespace(
+                type="reasoning",
+                summary=[SimpleNamespace(type="summary_text", text=reasoning)],
+            )
         )
     if content is not None:
         output.append(
-            {
-                "type": "message",
-                "status": "completed",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": content, "annotations": []}],
-            }
+            SimpleNamespace(
+                type="message",
+                status="completed",
+                role="assistant",
+                content=[SimpleNamespace(type="output_text", text=content, annotations=[])],
+            )
         )
     for call in tool_calls or []:
         output.append(
-            {
-                "type": "function_call",
-                "id": call.get("id", call.get("call_id")),
-                "call_id": call["call_id"],
-                "name": call["name"],
-                "arguments": call["arguments"],
-                "status": "completed",
-            }
+            SimpleNamespace(
+                type="function_call",
+                id=call.get("id", call.get("call_id")),
+                call_id=call["call_id"],
+                name=call["name"],
+                arguments=call["arguments"],
+                status="completed",
+            )
         )
     return SimpleNamespace(
         id=response_id,
@@ -158,18 +158,16 @@ class RunCompletionReasoningTests(TestCase):
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
-    @patch("api.agent.core.openai_responses.OpenAI")
+    @patch("api.agent.core.openai_responses.litellm.responses")
     def test_first_party_openai_uses_responses_api_with_reasoning_summary(
         self,
-        mock_openai,
+        mock_responses,
         mock_litellm_completion,
     ):
-        client = Mock()
-        client.responses.create.return_value = _responses_response(
+        mock_responses.return_value = _responses_response(
             content="Final answer",
             reasoning="Checked the inputs.",
         )
-        mock_openai.return_value = client
 
         result = run_completion(
             model="openai/gpt-5",
@@ -177,11 +175,12 @@ class RunCompletionReasoningTests(TestCase):
             params={"api_key": "sk-test", "supports_reasoning": True, "reasoning_effort": "low"},
         )
 
-        mock_openai.assert_called_once_with(api_key="sk-test")
         mock_litellm_completion.assert_not_called()
-        _, kwargs = client.responses.create.call_args
+        _, kwargs = mock_responses.call_args
         self.assertEqual(kwargs["model"], "gpt-5")
         self.assertEqual(kwargs["input"], [{"role": "user", "content": "Hello"}])
+        self.assertEqual(kwargs["api_key"], "sk-test")
+        self.assertEqual(kwargs["custom_llm_provider"], "openai")
         self.assertEqual(kwargs["reasoning"], {"summary": "auto", "effort": "low"})
         self.assertEqual(result.choices[0].message.content, "Final answer")
         self.assertEqual(extract_reasoning_content(result), "Checked the inputs.")
@@ -189,8 +188,8 @@ class RunCompletionReasoningTests(TestCase):
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
-    @patch("api.agent.core.openai_responses.OpenAI")
-    def test_openai_compatible_api_base_stays_on_litellm(self, mock_openai, mock_completion):
+    @patch("api.agent.core.openai_responses.litellm.responses")
+    def test_openai_compatible_api_base_stays_on_litellm(self, mock_responses, mock_completion):
         response = make_completion_response(content="compat")
         mock_completion.return_value = response
 
@@ -201,16 +200,14 @@ class RunCompletionReasoningTests(TestCase):
         )
 
         self.assertIs(result, response)
-        mock_openai.assert_not_called()
+        mock_responses.assert_not_called()
         _, kwargs = mock_completion.call_args
         self.assertEqual(kwargs["api_base"], "https://proxy.example/v1")
 
     @tag("batch_event_llm")
-    @patch("api.agent.core.openai_responses.OpenAI")
-    def test_openai_responses_omits_reasoning_when_not_supported(self, mock_openai):
-        client = Mock()
-        client.responses.create.return_value = _responses_response(content="No reasoning")
-        mock_openai.return_value = client
+    @patch("api.agent.core.openai_responses.litellm.responses")
+    def test_openai_responses_omits_reasoning_when_not_supported(self, mock_responses):
+        mock_responses.return_value = _responses_response(content="No reasoning")
 
         run_completion(
             model="openai/gpt-4.1-mini",
@@ -218,14 +215,13 @@ class RunCompletionReasoningTests(TestCase):
             params={"supports_reasoning": False, "reasoning_effort": "high"},
         )
 
-        _, kwargs = client.responses.create.call_args
+        _, kwargs = mock_responses.call_args
         self.assertNotIn("reasoning", kwargs)
 
     @tag("batch_event_llm")
-    @patch("api.agent.core.openai_responses.OpenAI")
-    def test_openai_responses_converts_tools_tool_choice_and_tool_calls(self, mock_openai):
-        client = Mock()
-        client.responses.create.return_value = _responses_response(
+    @patch("api.agent.core.openai_responses.litellm.responses")
+    def test_openai_responses_converts_tools_tool_choice_and_tool_calls(self, mock_responses):
+        mock_responses.return_value = _responses_response(
             content=None,
             tool_calls=[
                 {
@@ -235,7 +231,6 @@ class RunCompletionReasoningTests(TestCase):
                 }
             ],
         )
-        mock_openai.return_value = client
 
         result = run_completion(
             model="openai/gpt-5",
@@ -257,7 +252,7 @@ class RunCompletionReasoningTests(TestCase):
             tool_choice={"type": "function", "function": {"name": "get_weather"}},
         )
 
-        _, kwargs = client.responses.create.call_args
+        _, kwargs = mock_responses.call_args
         self.assertEqual(
             kwargs["tools"],
             [
@@ -291,14 +286,12 @@ class RunCompletionReasoningTests(TestCase):
         )
 
     @tag("batch_event_llm")
-    @patch("api.agent.core.openai_responses.OpenAI")
-    def test_openai_responses_usage_normalizes_for_token_accounting(self, mock_openai):
-        client = Mock()
-        client.responses.create.return_value = _responses_response(
+    @patch("api.agent.core.openai_responses.litellm.responses")
+    def test_openai_responses_usage_normalizes_for_token_accounting(self, mock_responses):
+        mock_responses.return_value = _responses_response(
             content="Usage",
             usage=_responses_usage(prompt_tokens=13, completion_tokens=8, cached_tokens=5),
         )
-        mock_openai.return_value = client
 
         result = run_completion(
             model="openai/gpt-5",
@@ -314,11 +307,10 @@ class RunCompletionReasoningTests(TestCase):
         self.assertEqual(usage.prompt_tokens_details.cached_tokens, 5)
 
     @tag("batch_event_llm")
-    @patch("api.agent.core.openai_responses.OpenAI")
-    def test_openai_responses_streaming_text_and_reasoning_deltas_accumulate(self, mock_openai):
-        client = Mock()
+    @patch("api.agent.core.openai_responses.litellm.responses")
+    def test_openai_responses_streaming_text_and_reasoning_deltas_accumulate(self, mock_responses):
         completed = _responses_response(content="", usage=_responses_usage(prompt_tokens=3, completion_tokens=4))
-        client.responses.create.return_value = iter(
+        mock_responses.return_value = iter(
             [
                 _responses_event("response.created", response=SimpleNamespace(id="resp_stream")),
                 _responses_event("response.reasoning_summary_text.delta", delta="Thinking. "),
@@ -327,7 +319,6 @@ class RunCompletionReasoningTests(TestCase):
                 _responses_event("response.completed", response=completed),
             ]
         )
-        mock_openai.return_value = client
 
         stream = run_completion(
             model="openai/gpt-5",
@@ -344,16 +335,15 @@ class RunCompletionReasoningTests(TestCase):
         self.assertEqual(response.choices[0].message.content, "Hello world")
         self.assertEqual(response.choices[0].message.reasoning_content, "Thinking. ")
         self.assertEqual(response.usage.prompt_tokens, 3)
-        _, kwargs = client.responses.create.call_args
+        _, kwargs = mock_responses.call_args
         self.assertTrue(kwargs["stream"])
         self.assertEqual(kwargs["stream_options"], {"include_usage": True})
 
     @tag("batch_event_llm")
-    @patch("api.agent.core.openai_responses.OpenAI")
-    def test_openai_responses_streaming_function_call_events_accumulate(self, mock_openai):
-        client = Mock()
+    @patch("api.agent.core.openai_responses.litellm.responses")
+    def test_openai_responses_streaming_function_call_events_accumulate(self, mock_responses):
         completed = _responses_response(content=None, usage=_responses_usage())
-        client.responses.create.return_value = iter(
+        mock_responses.return_value = iter(
             [
                 _responses_event("response.created", response=SimpleNamespace(id="resp_stream")),
                 _responses_event(
@@ -378,7 +368,6 @@ class RunCompletionReasoningTests(TestCase):
                 _responses_event("response.completed", response=completed),
             ]
         )
-        mock_openai.return_value = client
 
         stream = run_completion(
             model="openai/gpt-5",
@@ -411,8 +400,70 @@ class RunCompletionReasoningTests(TestCase):
                 }
             ],
         )
-        _, kwargs = client.responses.create.call_args
+        _, kwargs = mock_responses.call_args
         self.assertEqual(kwargs["stream_options"], {"include_usage": True})
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.openai_responses.litellm.responses")
+    def test_openai_responses_streaming_rate_limit_failure_retries(self, mock_responses):
+        completed = _responses_response(content="", usage=_responses_usage(prompt_tokens=2, completion_tokens=3))
+        mock_responses.side_effect = [
+            iter(
+                [
+                    _responses_event(
+                        "response.failed",
+                        response=SimpleNamespace(
+                            error=SimpleNamespace(code="rate_limit_exceeded", message="slow down")
+                        ),
+                    )
+                ]
+            ),
+            iter(
+                [
+                    _responses_event("response.created", response=SimpleNamespace(id="resp_retry")),
+                    _responses_event("response.output_text.delta", delta="Retried"),
+                    _responses_event("response.completed", response=completed),
+                ]
+            ),
+        ]
+
+        accumulator = StreamAccumulator()
+        for chunk in run_completion(
+            model="openai/gpt-5",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={"supports_reasoning": True},
+            stream=True,
+        ):
+            accumulator.ingest_chunk(chunk)
+
+        response = accumulator.build_response(model="openai/gpt-5", provider="openai")
+        self.assertEqual(response.choices[0].message.content, "Retried")
+        self.assertEqual(mock_responses.call_count, 2)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.openai_responses.litellm.responses")
+    def test_openai_responses_streaming_final_chunk_preserves_finish_reason_without_usage(self, mock_responses):
+        completed = SimpleNamespace(id="resp_done", status="completed", output_text="", output=[], usage=None)
+        mock_responses.return_value = iter(
+            [
+                _responses_event("response.created", response=SimpleNamespace(id="resp_done")),
+                _responses_event("response.completed", response=completed),
+            ]
+        )
+
+        accumulator = StreamAccumulator()
+        for chunk in run_completion(
+            model="openai/gpt-5",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={"supports_reasoning": True},
+            stream=True,
+        ):
+            accumulator.ingest_chunk(chunk)
+
+        response = accumulator.build_response(model="openai/gpt-5", provider="openai")
+        self.assertEqual(response.choices[0].finish_reason, "stop")
+        self.assertIsNone(response.usage)
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")

@@ -3,15 +3,23 @@ from collections import deque
 from types import SimpleNamespace
 from typing import Any, Iterable, Optional
 
-from openai import OpenAI
+import litellm
 
 
-def read_attr(obj: Any, key: str, default: Any = None) -> Any:
-    if obj is None:
-        return default
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+_PASSTHROUGH_REQUEST_KWARGS = (
+    "temperature",
+    "parallel_tool_calls",
+    "safety_identifier",
+    "store",
+    "stream",
+    "timeout",
+    "top_p",
+    "user",
+    "extra_headers",
+    "extra_query",
+    "extra_body",
+    "api_key",
+)
 
 
 def should_use_openai_responses(model: str, kwargs: dict[str, Any]) -> bool:
@@ -40,9 +48,7 @@ def create_openai_responses_completion(
         supports_reasoning=supports_reasoning,
         reasoning_effort=reasoning_effort,
     )
-    api_key = kwargs.get("api_key")
-    client = OpenAI(api_key=api_key) if api_key else OpenAI()
-    response = client.responses.create(**request_kwargs)
+    response = litellm.responses(**request_kwargs)
     if request_kwargs.get("stream"):
         return OpenAIResponsesStream(response, model=model)
     return normalize_openai_response(response, model=model)
@@ -60,19 +66,10 @@ def _build_responses_request_kwargs(
     request_kwargs: dict[str, Any] = {
         "model": _strip_openai_prefix(model),
         "input": _convert_messages(messages),
+        "custom_llm_provider": "openai",
     }
-
-    _copy_if_present(kwargs, request_kwargs, "temperature")
-    _copy_if_present(kwargs, request_kwargs, "parallel_tool_calls")
-    _copy_if_present(kwargs, request_kwargs, "safety_identifier")
-    _copy_if_present(kwargs, request_kwargs, "store")
-    _copy_if_present(kwargs, request_kwargs, "stream")
-    _copy_if_present(kwargs, request_kwargs, "timeout")
-    _copy_if_present(kwargs, request_kwargs, "top_p")
-    _copy_if_present(kwargs, request_kwargs, "user")
-    _copy_if_present(kwargs, request_kwargs, "extra_headers")
-    _copy_if_present(kwargs, request_kwargs, "extra_query")
-    _copy_if_present(kwargs, request_kwargs, "extra_body")
+    for key in _PASSTHROUGH_REQUEST_KWARGS:
+        _copy_if_present(kwargs, request_kwargs, key)
 
     max_output_tokens = kwargs.get("max_output_tokens")
     if max_output_tokens is None:
@@ -121,13 +118,13 @@ def _strip_openai_prefix(model: str) -> str:
 def _convert_messages(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     converted: list[dict[str, Any]] = []
     for message in messages:
-        role = read_attr(message, "role")
+        role = message.get("role")
         if role == "tool":
             converted.append(
                 {
                     "type": "function_call_output",
-                    "call_id": read_attr(message, "tool_call_id") or read_attr(message, "id") or "",
-                    "output": _coerce_text(read_attr(message, "content")),
+                    "call_id": message.get("tool_call_id") or message.get("id") or "",
+                    "output": _coerce_text(message.get("content")),
                 }
             )
             continue
@@ -135,17 +132,17 @@ def _convert_messages(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]
             converted.append(
                 {
                     "type": "function_call_output",
-                    "call_id": read_attr(message, "name") or read_attr(message, "id") or "",
-                    "output": _coerce_text(read_attr(message, "content")),
+                    "call_id": message.get("name") or message.get("id") or "",
+                    "output": _coerce_text(message.get("content")),
                 }
             )
             continue
 
-        content = read_attr(message, "content")
+        content = message.get("content")
         if role == "assistant":
             if content:
                 converted.append({"role": "assistant", "content": _assistant_content_text(content)})
-            for tool_call in _coerce_tool_calls(read_attr(message, "tool_calls")):
+            for tool_call in _coerce_tool_calls(message.get("tool_calls")):
                 converted.append(_convert_prior_tool_call(tool_call))
             continue
 
@@ -223,14 +220,24 @@ def _assistant_content_text(content: Any) -> str:
 
 
 def _convert_prior_tool_call(tool_call: Any) -> dict[str, Any]:
-    function = read_attr(tool_call, "function") or {}
-    call_id = read_attr(tool_call, "id") or read_attr(tool_call, "call_id") or ""
+    if not isinstance(tool_call, dict):
+        return {
+            "type": "function_call",
+            "call_id": "",
+            "id": "",
+            "name": "",
+            "arguments": _coerce_text(tool_call),
+        }
+    function = tool_call.get("function") or {}
+    if not isinstance(function, dict):
+        function = {}
+    call_id = tool_call.get("id") or tool_call.get("call_id") or ""
     return {
         "type": "function_call",
         "call_id": call_id,
         "id": call_id,
-        "name": read_attr(function, "name") or read_attr(tool_call, "name") or "",
-        "arguments": read_attr(function, "arguments") or read_attr(tool_call, "arguments") or "",
+        "name": function.get("name") or tool_call.get("name") or "",
+        "arguments": function.get("arguments") or tool_call.get("arguments") or "",
     }
 
 
@@ -291,8 +298,8 @@ def normalize_openai_response(response: Any, *, model: str) -> Any:
     content = _extract_response_content(response)
     reasoning_content = _extract_response_reasoning(response)
     tool_calls = _extract_response_tool_calls(response)
-    usage = _normalize_usage(read_attr(response, "usage"))
-    response_id = _coerce_optional_str(read_attr(response, "id"))
+    usage = _normalize_usage(getattr(response, "usage", None))
+    response_id = _coerce_optional_str(getattr(response, "id", None))
     message = SimpleNamespace(
         role="assistant",
         content=content,
@@ -312,17 +319,17 @@ def normalize_openai_response(response: Any, *, model: str) -> Any:
 
 
 def _extract_response_content(response: Any) -> Optional[str]:
-    output_text = read_attr(response, "output_text")
+    output_text = getattr(response, "output_text", None)
     if isinstance(output_text, str) and output_text:
         return output_text
 
     parts: list[str] = []
-    for item in read_attr(response, "output", []) or []:
-        if read_attr(item, "type") != "message":
+    for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) != "message":
             continue
-        for content_part in read_attr(item, "content", []) or []:
-            if read_attr(content_part, "type") == "output_text":
-                text = read_attr(content_part, "text")
+        for content_part in getattr(item, "content", []) or []:
+            if getattr(content_part, "type", None) == "output_text":
+                text = getattr(content_part, "text", None)
                 if isinstance(text, str):
                     parts.append(text)
     return "".join(parts) if parts else None
@@ -330,11 +337,11 @@ def _extract_response_content(response: Any) -> Optional[str]:
 
 def _extract_response_reasoning(response: Any) -> Optional[str]:
     parts: list[str] = []
-    for item in read_attr(response, "output", []) or []:
-        if read_attr(item, "type") != "reasoning":
+    for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) != "reasoning":
             continue
-        for summary_part in read_attr(item, "summary", []) or []:
-            text = read_attr(summary_part, "text")
+        for summary_part in getattr(item, "summary", []) or []:
+            text = getattr(summary_part, "text", None)
             if isinstance(text, str) and text.strip():
                 parts.append(text)
     return "\n".join(parts) if parts else None
@@ -342,17 +349,17 @@ def _extract_response_reasoning(response: Any) -> Optional[str]:
 
 def _extract_response_tool_calls(response: Any) -> list[dict[str, Any]]:
     tool_calls: list[dict[str, Any]] = []
-    for item in read_attr(response, "output", []) or []:
-        if read_attr(item, "type") != "function_call":
+    for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) != "function_call":
             continue
-        call_id = read_attr(item, "call_id") or read_attr(item, "id") or f"function_call_{len(tool_calls)}"
+        call_id = getattr(item, "call_id", None) or getattr(item, "id", None) or f"function_call_{len(tool_calls)}"
         tool_calls.append(
             {
                 "id": call_id,
                 "type": "function",
                 "function": {
-                    "name": read_attr(item, "name") or "",
-                    "arguments": read_attr(item, "arguments") or "",
+                    "name": getattr(item, "name", None) or "",
+                    "arguments": getattr(item, "arguments", None) or "",
                 },
             }
         )
@@ -362,15 +369,15 @@ def _extract_response_tool_calls(response: Any) -> list[dict[str, Any]]:
 def _normalize_usage(usage: Any) -> Any:
     if usage is None:
         return None
-    input_tokens = read_attr(usage, "input_tokens")
-    output_tokens = read_attr(usage, "output_tokens")
-    total_tokens = read_attr(usage, "total_tokens")
-    input_details = read_attr(usage, "input_tokens_details")
-    cached_tokens = read_attr(input_details, "cached_tokens", 0) if input_details is not None else 0
+    input_tokens = getattr(usage, "input_tokens", None)
+    output_tokens = getattr(usage, "output_tokens", None)
+    total_tokens = getattr(usage, "total_tokens", None)
+    input_details = getattr(usage, "input_tokens_details", None)
+    cached_tokens = getattr(input_details, "cached_tokens", 0) if input_details is not None else 0
     prompt_tokens_details = SimpleNamespace(cached_tokens=cached_tokens)
-    output_details = read_attr(usage, "output_tokens_details")
+    output_details = getattr(usage, "output_tokens_details", None)
     completion_tokens_details = SimpleNamespace(
-        reasoning_tokens=read_attr(output_details, "reasoning_tokens", 0) if output_details is not None else 0
+        reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) if output_details is not None else 0
     )
     return SimpleNamespace(
         prompt_tokens=input_tokens,
@@ -382,12 +389,12 @@ def _normalize_usage(usage: Any) -> Any:
 
 
 def _finish_reason_from_response(response: Any) -> Optional[str]:
-    status = read_attr(response, "status")
+    status = getattr(response, "status", None)
     if status == "completed":
         return "stop"
     if status == "incomplete":
-        details = read_attr(response, "incomplete_details")
-        reason = read_attr(details, "reason")
+        details = getattr(response, "incomplete_details", None)
+        reason = getattr(details, "reason", None)
         return reason or "incomplete"
     return status
 
@@ -469,13 +476,13 @@ class OpenAIResponsesStream:
         self.close()
 
     def _ingest_event(self, event: Any) -> None:
-        event_type = read_attr(event, "type")
+        event_type = getattr(event, "type", None)
         if event_type == "response.created":
-            response = read_attr(event, "response")
-            self._response_id = _coerce_optional_str(read_attr(response, "id")) or self._response_id
+            response = getattr(event, "response", None)
+            self._response_id = _coerce_optional_str(getattr(response, "id", None)) or self._response_id
             return
         if event_type == "response.output_text.delta":
-            delta = read_attr(event, "delta")
+            delta = getattr(event, "delta", None)
             if delta:
                 self._saw_content_delta = True
                 self._pending_chunks.append(
@@ -483,7 +490,7 @@ class OpenAIResponsesStream:
                 )
             return
         if event_type == "response.reasoning_summary_text.delta":
-            delta = read_attr(event, "delta")
+            delta = getattr(event, "delta", None)
             if delta:
                 self._saw_reasoning_delta = True
                 self._pending_chunks.append(
@@ -491,54 +498,58 @@ class OpenAIResponsesStream:
                 )
             return
         if event_type == "response.function_call_arguments.delta":
-            call_id = read_attr(event, "item_id") or f"function_call_{read_attr(event, 'output_index', 0)}"
-            delta = read_attr(event, "delta")
+            output_index = getattr(event, "output_index", 0)
+            call_id = getattr(event, "item_id", None) or f"function_call_{output_index}"
+            delta = getattr(event, "delta", None)
             if delta:
                 self._tool_argument_delta_seen.add(str(call_id))
                 self._append_tool_call_delta(
                     call_id=str(call_id),
-                    name=read_attr(event, "name") or "",
+                    name=getattr(event, "name", None) or "",
                     arguments=str(delta),
-                    index=read_attr(event, "output_index", 0) or 0,
+                    index=output_index or 0,
                 )
             return
         if event_type == "response.function_call_arguments.done":
-            call_id = read_attr(event, "item_id") or f"function_call_{read_attr(event, 'output_index', 0)}"
-            arguments = "" if str(call_id) in self._tool_argument_delta_seen else read_attr(event, "arguments") or ""
+            output_index = getattr(event, "output_index", 0)
+            call_id = getattr(event, "item_id", None) or f"function_call_{output_index}"
+            arguments = "" if str(call_id) in self._tool_argument_delta_seen else getattr(event, "arguments", None) or ""
             self._append_tool_call(
                 call_id=str(call_id),
-                name=read_attr(event, "name") or "",
+                name=getattr(event, "name", None) or "",
                 arguments=arguments,
-                index=read_attr(event, "output_index", 0) or 0,
+                index=output_index or 0,
             )
             return
         if event_type == "response.output_item.done":
-            item = read_attr(event, "item")
-            if read_attr(item, "type") == "function_call":
-                call_id = read_attr(item, "call_id") or read_attr(item, "id") or f"function_call_{read_attr(event, 'output_index', 0)}"
+            item = getattr(event, "item", None)
+            if getattr(item, "type", None) == "function_call":
+                output_index = getattr(event, "output_index", 0)
+                call_id = getattr(item, "call_id", None) or getattr(item, "id", None) or f"function_call_{output_index}"
                 self._append_tool_call(
                     call_id=call_id,
-                    name=read_attr(item, "name") or "",
-                    arguments=read_attr(item, "arguments") or "",
-                    index=read_attr(event, "output_index", 0) or 0,
+                    name=getattr(item, "name", None) or "",
+                    arguments=getattr(item, "arguments", None) or "",
+                    index=output_index or 0,
                 )
             return
         if event_type == "response.completed":
-            response = read_attr(event, "response")
-            self._response_id = _coerce_optional_str(read_attr(response, "id")) or self._response_id
+            response = getattr(event, "response", None)
+            self._response_id = _coerce_optional_str(getattr(response, "id", None)) or self._response_id
             self._append_final_response_chunks(response, finish_reason="stop")
             return
         if event_type == "response.incomplete":
-            response = read_attr(event, "response")
-            self._response_id = _coerce_optional_str(read_attr(response, "id")) or self._response_id
+            response = getattr(event, "response", None)
+            self._response_id = _coerce_optional_str(getattr(response, "id", None)) or self._response_id
             self._append_final_response_chunks(response, finish_reason=_finish_reason_from_response(response))
             return
         if event_type == "response.failed":
-            response = read_attr(event, "response")
-            error = read_attr(response, "error")
-            raise RuntimeError(read_attr(error, "message") or "OpenAI Responses stream failed")
+            response = getattr(event, "response", None)
+            error = getattr(response, "error", None)
+            _raise_litellm_stream_error(error, "OpenAI Responses stream failed")
         if event_type == "error":
-            raise RuntimeError(read_attr(event, "message") or "OpenAI Responses stream error")
+            error = getattr(event, "error", None)
+            _raise_litellm_stream_error(error or event, "OpenAI Responses stream error")
 
     def _append_tool_call(self, *, call_id: str, name: str, arguments: str, index: int) -> None:
         if call_id in self._emitted_tool_calls:
@@ -595,21 +606,38 @@ class OpenAIResponsesStream:
                 arguments=tool_call["function"]["arguments"],
                 index=index,
             )
-        usage = _normalize_usage(read_attr(response, "usage"))
-        if usage is not None:
-            self._pending_chunks.append(
-                _chat_stream_chunk(
-                    model=self._model,
-                    usage=usage,
-                    response_id=self._response_id,
-                    finish_reason=finish_reason,
-                )
+        usage = _normalize_usage(getattr(response, "usage", None))
+        self._pending_chunks.append(
+            _chat_stream_chunk(
+                model=self._model,
+                usage=usage,
+                response_id=self._response_id,
+                finish_reason=finish_reason,
             )
+        )
+
+
+def _raise_litellm_stream_error(error: Any, default_message: str) -> None:
+    if isinstance(error, dict):
+        code = error.get("code")
+        message = error.get("message") or default_message
+    else:
+        code = getattr(error, "code", None)
+        message = getattr(error, "message", None) or default_message
+    if code == "rate_limit_exceeded":
+        raise litellm.RateLimitError(message=message, llm_provider="openai", model="openai/responses")
+    if code == "internal_error":
+        raise litellm.ServiceUnavailableError(message=message, llm_provider="openai", model="openai/responses")
+    raise litellm.APIError(
+        status_code=400,
+        message=f"{message} (code={code or 'unknown'})",
+        llm_provider="openai",
+        model="openai/responses",
+    )
 
 
 __all__ = [
     "create_openai_responses_completion",
     "normalize_openai_response",
-    "read_attr",
     "should_use_openai_responses",
 ]

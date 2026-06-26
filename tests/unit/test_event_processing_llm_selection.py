@@ -59,23 +59,21 @@ class TestEventProcessingLLMSelection(TestCase):
         call_args = mock_completion.call_args
         self.assertEqual(call_args.kwargs['model'], "vertex_ai/gemini-2.5-pro")
 
-    @patch('api.agent.core.openai_responses.OpenAI')
-    def test_parallel_tool_calls_flag_is_passed(self, mock_openai):
+    @patch('api.agent.core.openai_responses.litellm.responses')
+    def test_parallel_tool_calls_flag_is_passed(self, mock_responses):
         """_completion_with_failover passes parallel_tool_calls when endpoint enables it."""
-        client = Mock()
-        client.responses.create.return_value = SimpleNamespace(
+        mock_responses.return_value = SimpleNamespace(
             id="resp_parallel",
             status="completed",
             output_text="ok",
             output=[
-                {
-                    "type": "message",
-                    "content": [{"type": "output_text", "text": "ok"}],
-                }
+                SimpleNamespace(
+                    type="message",
+                    content=[SimpleNamespace(type="output_text", text="ok")],
+                )
             ],
             usage=None,
         )
-        mock_openai.return_value = client
 
         messages = [{"role": "user", "content": "hello"}]
         tools = [
@@ -105,7 +103,7 @@ class TestEventProcessingLLMSelection(TestCase):
         from api.agent.core.event_processing import _completion_with_failover
         _completion_with_failover(messages, tools, failover_configs=failover_configs, agent_id="agent-1")
 
-        kwargs = client.responses.create.call_args.kwargs
+        kwargs = mock_responses.call_args.kwargs
         self.assertIn('parallel_tool_calls', kwargs)
         self.assertTrue(kwargs['parallel_tool_calls'])
         self.assertEqual(kwargs["model"], "gpt-4.1")
