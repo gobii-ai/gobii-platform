@@ -19,6 +19,7 @@ import fnmatch
 import contextlib
 import contextvars
 import sys
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from typing import Callable, Dict, Any, Iterable, List, Optional, Tuple
@@ -1878,12 +1879,39 @@ class MCPToolManager:
 
         return definitions
 
-    @staticmethod
-    def _extract_tool_result_content(result: Any) -> Any:
+    @classmethod
+    def _json_safe_mcp_data(cls, value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            try:
+                return cls._json_safe_mcp_data(model_dump(mode="json"))
+            except TypeError:
+                return cls._json_safe_mcp_data(model_dump())
+
+        dict_dump = getattr(value, "dict", None)
+        if callable(dict_dump):
+            return cls._json_safe_mcp_data(dict_dump())
+
+        if isinstance(value, Mapping):
+            return {
+                str(key): cls._json_safe_mcp_data(item)
+                for key, item in value.items()
+            }
+
+        if isinstance(value, (list, tuple, set)):
+            return [cls._json_safe_mcp_data(item) for item in value]
+
+        return value
+
+    @classmethod
+    def _extract_tool_result_content(cls, result: Any) -> Any:
         if isinstance(result, dict) and "result" in result:
             return result.get("result")
         if getattr(result, "data", None) is not None:
-            return result.data
+            return cls._json_safe_mcp_data(result.data)
         for block in getattr(result, "content", None) or []:
             if hasattr(block, "text"):
                 return block.text

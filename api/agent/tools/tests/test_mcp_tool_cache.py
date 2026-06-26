@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from django.test import SimpleTestCase, tag, override_settings
 from django.utils import timezone
+from pydantic import BaseModel
 
 from api.agent.tools.mcp_manager import (
     MCPServerRuntime,
@@ -415,6 +416,85 @@ class MCPToolCacheTests(SimpleTestCase):
 
         client.list_tools.assert_awaited_once()
         self.assertEqual([tool.full_name for tool in tools], ["google_sheets-add-row"])
+
+
+@tag("batch_mcp_tools")
+class MCPToolResultDataNormalizationTests(SimpleTestCase):
+    def test_pydantic_data_result_is_normalized_to_json_safe_primitives(self):
+        class Project(BaseModel):
+            description: str
+            location: str
+            name: str
+            owner: str
+            updated: str
+            url: str
+
+        class Root(BaseModel):
+            count: int
+            projects: list[Project]
+
+        manager = MCPToolManager()
+        raw_result = SimpleNamespace(
+            data=Root(
+                count=1,
+                projects=[
+                    Project(
+                        description="",
+                        location="",
+                        name="Product Manager",
+                        owner="",
+                        updated="",
+                        url="https://www.linkedin.com/talent/hire/2063754842/overview",
+                    )
+                ],
+            ),
+            content=[SimpleNamespace(text="fallback text should not be used")],
+        )
+
+        result = manager._finalize_mcp_result("linkedin-recruiter", "list-projects", raw_result)
+
+        self.assertEqual(
+            result["result"],
+            {
+                "count": 1,
+                "projects": [
+                    {
+                        "description": "",
+                        "location": "",
+                        "name": "Product Manager",
+                        "owner": "",
+                        "updated": "",
+                        "url": "https://www.linkedin.com/talent/hire/2063754842/overview",
+                    }
+                ],
+            },
+        )
+        serialized = json.dumps(result)
+        self.assertNotIn("Root(", serialized)
+        self.assertNotIn("Project(", serialized)
+
+    def test_nested_model_containers_are_normalized_recursively(self):
+        class Item(BaseModel):
+            name: str
+            rank: int
+
+        manager = MCPToolManager()
+        raw_result = SimpleNamespace(
+            data={
+                "primary": Item(name="alpha", rank=1),
+                "items": [Item(name="beta", rank=2)],
+                "tuple_items": (Item(name="gamma", rank=3),),
+                "set_items": {"delta"},
+            },
+        )
+
+        result = manager._finalize_mcp_result("example", "nested-data", raw_result)
+
+        self.assertEqual(result["result"]["primary"], {"name": "alpha", "rank": 1})
+        self.assertEqual(result["result"]["items"], [{"name": "beta", "rank": 2}])
+        self.assertEqual(result["result"]["tuple_items"], [{"name": "gamma", "rank": 3}])
+        self.assertEqual(sorted(result["result"]["set_items"]), ["delta"])
+        json.dumps(result)
 
 
 @tag("batch_mcp_tools")
