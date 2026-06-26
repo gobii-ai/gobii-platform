@@ -3582,7 +3582,7 @@ function ActionsSection({
           )}
         </section>
 
-        <section className={embedded ? 'px-0 py-5' : 'p-6 sm:p-8'}>
+        <section className={embedded ? 'px-4 py-5 sm:px-5' : 'p-6 sm:p-8'}>
           <div className="flex gap-x-4">
             <div className="flex-shrink-0">
               <div className={embedded ? 'flex h-12 w-12 items-center justify-center rounded-full border border-rose-300/25 bg-rose-950/35 text-rose-200' : 'flex items-center justify-center w-12 h-12 rounded-full bg-red-100 border-4 border-red-50'}>

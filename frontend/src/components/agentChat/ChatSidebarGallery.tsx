@@ -87,7 +87,6 @@ function GalleryCard({
             className="agent-gallery-card__avatar"
             imageClassName="agent-gallery-card__avatar-image"
             textClassName="agent-gallery-card__avatar-text"
-            fallbackStyle={{ background: 'linear-gradient(135deg, #6d28d9, #1e1145)' }}
           />
           <div className="agent-gallery-card__hero-meta">
             <span className="agent-gallery-card__name">{agent.name || 'Agent'}</span>
