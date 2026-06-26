@@ -1,5 +1,5 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, Ref } from 'react'
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, KeyRound, Loader2, Mail, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
 
@@ -22,6 +22,11 @@ import { track, AnalyticsEvent } from '../../util/analytics'
 import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
 import { sanitizeHtml } from '../../util/sanitize'
+import {
+  clearAgentChatMessageDraft,
+  readAgentChatMessageDraft,
+  writeAgentChatMessageDraft,
+} from '../../util/agentChatDraftStorage'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { PlanningState } from '../../types/agentRoster'
 import { useModal } from '../../hooks/useModal'
@@ -551,7 +556,7 @@ export const AgentComposer = memo(function AgentComposer({
   compact = false,
   externalShellRef,
 }: AgentComposerProps) {
-  const [body, setBody] = useState('')
+  const [body, setBody] = useState(() => readAgentChatMessageDraft(agentId))
   const [attachments, setAttachments] = useState<File[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
@@ -1002,6 +1007,33 @@ export const AgentComposer = memo(function AgentComposer({
     [MAX_COMPOSER_HEIGHT],
   )
 
+  const moveTextareaCursorToEnd = useCallback((bodyLength?: number) => {
+    const node = textareaRef.current
+    if (!node) {
+      return
+    }
+    const cursorPosition = bodyLength ?? node.value.length
+    try {
+      node.setSelectionRange(cursorPosition, cursorPosition)
+    } catch {
+      // Selection updates are best-effort because the draft itself is already restored.
+    }
+  }, [])
+
+  const restoreMessageDraft = useCallback(() => {
+    const draft = readAgentChatMessageDraft(agentId)
+    setBody(draft)
+    requestAnimationFrame(() => {
+      adjustTextareaHeight(true)
+      moveTextareaCursorToEnd(draft.length)
+    })
+  }, [adjustTextareaHeight, agentId, moveTextareaCursorToEnd])
+
+  const updateMessageDraft = useCallback((nextBody: string) => {
+    setBody(nextBody)
+    writeAgentChatMessageDraft(agentId, nextBody)
+  }, [agentId])
+
   useEffect(() => {
     adjustTextareaHeight()
   }, [body, adjustTextareaHeight])
@@ -1108,9 +1140,10 @@ export const AgentComposer = memo(function AgentComposer({
     // Use a small delay to ensure the DOM is ready after navigation
     const timer = setTimeout(() => {
       textareaRef.current?.focus()
+      moveTextareaCursorToEnd()
     }, 100)
     return () => clearTimeout(timer)
-  }, [autoFocus, focusKey])
+  }, [autoFocus, focusKey, moveTextareaCursorToEnd])
 
   useEffect(() => {
     const node = shellRef.current
@@ -1171,14 +1204,12 @@ export const AgentComposer = memo(function AgentComposer({
     submitShortcutHint,
   ].filter(Boolean).join(' · ')
 
-  const wasUsingMainComposerHumanInputRef = useRef(false)
-  useEffect(() => {
-    if (wasUsingMainComposerHumanInputRef.current && !activeHumanInputUsesMainComposer) {
-      setBody('')
-      requestAnimationFrame(() => adjustTextareaHeight(true))
+  useLayoutEffect(() => {
+    if (activeHumanInputUsesMainComposer) {
+      return
     }
-    wasUsingMainComposerHumanInputRef.current = activeHumanInputUsesMainComposer
-  }, [activeHumanInputUsesMainComposer, adjustTextareaHeight])
+    restoreMessageDraft()
+  }, [activeHumanInputUsesMainComposer, agentId, restoreMessageDraft])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1425,7 +1456,7 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [busyHumanInputRequestId, disabled, isSending, onDismissHumanInput, syncDraftHumanInputResponses])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!activeHumanInputUsesMainComposer || !activeHumanInputRequest) {
       return
     }
@@ -1505,6 +1536,7 @@ export const AgentComposer = memo(function AgentComposer({
         setIsSending(true)
         await onSubmit(trimmed, attachmentsSnapshot)
         setBody('')
+        clearAgentChatMessageDraft(agentId)
         setAttachments([])
         setAttachmentError(null)
         if (fileInputRef.current) {
@@ -1518,6 +1550,7 @@ export const AgentComposer = memo(function AgentComposer({
       }
     } else {
       setBody('')
+      clearAgentChatMessageDraft(agentId)
       setAttachments([])
       setAttachmentError(null)
       if (fileInputRef.current) {
@@ -1527,6 +1560,7 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [
     adjustTextareaHeight,
+    agentId,
     attachments,
     body,
     disabled,
@@ -1747,20 +1781,11 @@ export const AgentComposer = memo(function AgentComposer({
     if (!item) {
       return
     }
-    const leavingMainComposerHumanInput = activeHumanInputUsesMainComposer
-      && (
-        item.kind !== 'human_input'
-        || item.requestId !== activeHumanInputRequest?.id
-      )
     setActivePendingActionId(item.actionId)
     if (item.kind === 'human_input') {
       setActiveHumanInputRequestId(item.requestId)
     } else {
       setActiveHumanInputRequestId(null)
-    }
-    if (leavingMainComposerHumanInput) {
-      setBody('')
-      requestAnimationFrame(() => adjustTextareaHeight(true))
     }
   }
 
@@ -2128,9 +2153,11 @@ export const AgentComposer = memo(function AgentComposer({
                   value={body}
                   onChange={(event) => {
                     const nextValue = event.target.value
-                    setBody(nextValue)
                     if (activeHumanInputUsesMainComposer && activeHumanInputRequest) {
+                      setBody(nextValue)
                       handleDraftHumanInputFreeTextChange(activeHumanInputRequest.id, nextValue)
+                    } else {
+                      updateMessageDraft(nextValue)
                     }
                   }}
                   onKeyDown={handleKeyDown}
