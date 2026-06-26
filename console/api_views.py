@@ -5578,6 +5578,10 @@ class LLMProviderListCreateAPIView(SystemAdminAPIView):
         api_key_value = payload.get("api_key")
         if api_key_value:
             provider.api_key_encrypted = SecretsEncryption.encrypt_value(api_key_value)
+        try:
+            provider.full_clean()
+        except ValidationError as exc:
+            return HttpResponseBadRequest(_format_validation_error(exc))
         provider.save()
         return _json_ok(provider_id=str(provider.id))
 

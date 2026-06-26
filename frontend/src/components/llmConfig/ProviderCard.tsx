@@ -232,7 +232,7 @@ export function ProviderCard({ provider, handlers, isBusy, testStatuses, showMod
                         <button type="button" className={button.secondary} onClick={() => handlers.onTestEndpoint(endpoint).catch(() => {})} disabled={testBusy}>
                           {testBusy ? <Loader2 className="size-4 animate-spin" /> : 'Test'}
                         </button>
-                        <button className={button.secondary} onClick={() => openAddEndpointModal(endpoint.type, endpoint)} disabled={creatingEndpoint}>
+                        <button type="button" className={button.secondary} onClick={() => openAddEndpointModal(endpoint.type, endpoint)} disabled={creatingEndpoint}>
                           {creatingEndpoint ? <Loader2 className="size-4 animate-spin" /> : <Copy className="size-4" />}
                           Clone
                         </button>

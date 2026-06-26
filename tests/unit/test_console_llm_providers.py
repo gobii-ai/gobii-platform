@@ -65,6 +65,17 @@ class ConsoleLLMProviderTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn(b"Provider key already exists", response.content)
 
+    def test_create_provider_rejects_invalid_key_slug(self):
+        response = self.client.post(
+            reverse("console_llm_providers"),
+            data=json.dumps({"display_name": "Bad Key", "key": "bad key"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b"Enter a valid", response.content)
+        self.assertFalse(LLMProvider.objects.filter(display_name="Bad Key").exists())
+
     def test_create_provider_rejects_invalid_browser_backend(self):
         response = self.client.post(
             reverse("console_llm_providers"),

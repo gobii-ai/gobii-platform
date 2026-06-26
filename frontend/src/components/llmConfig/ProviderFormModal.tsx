@@ -84,8 +84,9 @@ export function ProviderFormModal({ onCreate, onClose, busy }: ProviderFormModal
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Provider key</span>
           <input
+            type="text"
             value={key}
-            onChange={(event) => setKey(event.currentTarget.value)}
+            onChange={(event) => setKey(event.currentTarget.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
             className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             placeholder="openrouter"
           />
