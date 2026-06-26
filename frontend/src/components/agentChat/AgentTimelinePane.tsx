@@ -177,7 +177,7 @@ export function AgentTimelinePane({
                 </div>
               ) : showOlderLoadButton && onLoadOlder ? (
                 <div className="timeline-load-control" data-side="older" data-state="ready">
-                  <button type="button" className="timeline-load-button" onClick={onLoadOlder}>
+                  <button type="button" className="agent-chat-button timeline-load-button" onClick={onLoadOlder}>
                     <span className="timeline-load-indicator" aria-hidden="true" />
                     <span className="timeline-load-label">Load older activity</span>
                   </button>
@@ -309,7 +309,7 @@ export function AgentTimelinePane({
 
       <button
         id="jump-to-latest"
-        className="jump-to-latest"
+        className="agent-chat-button jump-to-latest"
         type="button"
         aria-label="Jump to latest"
         aria-hidden={showJumpButton ? 'false' : 'true'}

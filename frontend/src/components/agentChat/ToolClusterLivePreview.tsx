@@ -1284,7 +1284,7 @@ export function ToolClusterLivePreview({
               <motion.div
                 key={entry.id}
                 layout={shouldAnimateIncoming}
-                className="tool-cluster-live-preview__entry"
+                className="agent-chat-surface tool-cluster-live-preview__entry"
                 data-active={isHighlighted ? 'true' : 'false'}
                 data-kind={item.activity.kind}
                 data-has-results={searchItems.length > 0 ? 'true' : 'false'}
@@ -1322,7 +1322,7 @@ export function ToolClusterLivePreview({
                 ) : null}
                 {linkedInProfile ? (
                   <motion.span
-                    className="tool-cluster-live-preview__profile-avatar"
+                    className="agent-chat-avatar tool-cluster-live-preview__profile-avatar"
                     animate={reduceMotion || !isHighlighted ? undefined : { scale: [1, 1.06, 1] }}
                     transition={reduceMotion || !isHighlighted ? undefined : { duration: 0.96, repeat: Infinity, ease: 'easeInOut' }}
                   >
@@ -1331,10 +1331,10 @@ export function ToolClusterLivePreview({
                         src={linkedInProfile.avatarUrl}
                         alt={linkedInProfile.displayName}
                         loading="lazy"
-                        className="tool-cluster-live-preview__profile-avatar-image"
+                        className="agent-chat-avatar__image tool-cluster-live-preview__profile-avatar-image"
                       />
                     ) : (
-                      <span className="tool-cluster-live-preview__profile-avatar-fallback">{linkedInProfile.initials}</span>
+                      <span className="agent-chat-avatar__text tool-cluster-live-preview__profile-avatar-fallback">{linkedInProfile.initials}</span>
                     )}
                     {isHighlighted ? (
                       <motion.span

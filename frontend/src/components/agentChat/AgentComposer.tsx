@@ -24,6 +24,7 @@ import { appendReturnTo } from '../../util/returnTo'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { PlanningState } from '../../types/agentRoster'
 import { useModal } from '../../hooks/useModal'
+import { AgentChatMenuItem } from './uiPrimitives'
 
 // Detect if user is on macOS
 function isMacOS(): boolean {
@@ -363,7 +364,7 @@ function ComposerActionMenu({
   return (
     <DialogTrigger isOpen={open} onOpenChange={setOpen}>
       <Button
-        className="composer-action-trigger"
+        className="agent-chat-button composer-action-trigger"
         aria-label="More composer actions"
         isDisabled={disabled}
       >
@@ -371,7 +372,7 @@ function ComposerActionMenu({
       </Button>
       <Popover className="composer-action-popover" placement="top start" offset={10}>
         <Dialog className="composer-action-menu">
-          <button
+          <AgentChatMenuItem
             type="button"
             className="composer-action-item"
             onClick={() => {
@@ -384,11 +385,11 @@ function ComposerActionMenu({
               <Paperclip className="h-3.5 w-3.5" />
             </span>
             <span className="composer-action-item-label">Upload Files</span>
-          </button>
+          </AgentChatMenuItem>
           {appsAction ? (
             <>
               <div className="composer-action-divider" aria-hidden="true" />
-              <button
+              <AgentChatMenuItem
                 type="button"
                 className="composer-action-item"
                 onClick={() => {
@@ -405,7 +406,7 @@ function ComposerActionMenu({
                   )}
                 </span>
                 <span className="composer-action-item-label">Apps</span>
-              </button>
+              </AgentChatMenuItem>
             </>
           ) : null}
         </Dialog>

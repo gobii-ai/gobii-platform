@@ -1,4 +1,5 @@
 import type { ToolEntryDisplay } from './tooling/types'
+import { AgentChatPill } from './uiPrimitives'
 
 type ToolProviderBadgeProps = {
   entry: ToolEntryDisplay
@@ -43,8 +44,8 @@ export function ToolProviderBadge({ entry, className }: ToolProviderBadgeProps) 
     classes.push(className)
   }
   return (
-    <span className={classes.join(' ')} title={provider.title}>
+    <AgentChatPill className={classes.join(' ')} title={provider.title}>
       {provider.label}
-    </span>
+    </AgentChatPill>
   )
 }

@@ -4,7 +4,6 @@ import { ArrowLeftRight, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRight
 import type { ConsoleContext } from '../../api/context'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
-import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { ChatSidebarGallery } from './ChatSidebarGallery'
@@ -22,6 +21,7 @@ import {
   SIDEBAR_MOBILE_BREAKPOINT_PX,
   type AgentDrawerViewMode,
 } from './sidebarMode'
+import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
 
 const SEARCH_THRESHOLD = 6
 
@@ -361,15 +361,15 @@ export const ChatSidebar = memo(function ChatSidebar({
 
     return (
       <>
-        <button
-          type="button"
+        <AgentChatButton
           className="agent-fab"
+          variant="solid"
           onClick={() => setDrawerOpen(true)}
           aria-label="Switch agent"
           aria-expanded={drawerOpen}
           style={fabStyle}
         >
-          <AgentAvatarBadge
+          <AgentChatAvatar
             name={activeAgent?.name || 'Agent'}
             avatarUrl={activeAgent?.avatarUrl}
             className="agent-fab-avatar"
@@ -379,7 +379,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           <span className="agent-fab-switch-badge" aria-hidden="true">
             <ArrowLeftRight className="h-2.5 w-2.5" />
           </span>
-        </button>
+        </AgentChatButton>
 
         <AgentChatMobileSheet
           open={drawerOpen}

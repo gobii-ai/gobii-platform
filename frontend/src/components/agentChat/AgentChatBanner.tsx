@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from '
 import { Check, CreditCard, EllipsisVertical, ListTodo, Mail, MessageSquare, Settings, Share2, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
-import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { normalizeHexColor } from '../../util/color'
 import { track } from '../../util/analytics'
@@ -11,6 +10,7 @@ import type { PlanSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
 import type { SignupPreviewState } from '../../types/agentRoster'
 import type { AgentChatSidebarMode } from './sidebarMode'
+import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem } from './uiPrimitives'
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 
@@ -250,7 +250,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
       >
         {/* Left: Avatar + Info */}
         <div className="banner-left">
-          <AgentAvatarBadge
+          <AgentChatAvatar
             name={trimmedName}
             avatarUrl={agentAvatarUrl}
             className="banner-avatar"
@@ -300,28 +300,32 @@ export const AgentChatBanner = memo(function AgentChatBanner({
         {/* Right: Upgrade button + Close button */}
         <div className="banner-right">
           {showPurchaseSeatsCta ? (
-            <button
-              type="button"
+            <AgentChatButton
               className="banner-upgrade"
+              tone="warning"
+              variant="solid"
+              size="sm"
               onClick={onPurchaseSeats}
               aria-label="Purchase Seats"
               title="Purchase Seats"
             >
               <CreditCard size={14} strokeWidth={2} />
               <span>Purchase Seats</span>
-            </button>
+            </AgentChatButton>
           ) : null}
           {showUpgradeButton && (
-            <button
-              type="button"
+            <AgentChatButton
               className="banner-upgrade"
+              tone="warning"
+              variant="solid"
+              size="sm"
               onClick={handleBannerUpgradeClick}
               aria-label={upgradeButtonLabel}
               title={upgradeButtonLabel}
             >
               <Zap size={14} strokeWidth={2} />
               <span>{upgradeButtonLabel}</span>
-            </button>
+            </AgentChatButton>
           )}
           {onPlanOpen ? (
             <button
@@ -346,9 +350,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             </button>
           ) : null}
           {showShareButton ? (
-            <button
-              type="button"
+            <AgentChatButton
               className="banner-share banner-desktop-only"
+              variant="soft"
+              size="sm"
               onClick={() => handleShareClick('banner_desktop')}
               aria-label={shareLabel}
               title={shareLabel}
@@ -357,12 +362,13 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             >
               <UserPlus size={14} strokeWidth={2} />
               <span className="banner-share-label">Collaborate</span>
-            </button>
+            </AgentChatButton>
           ) : null}
           {showPublicShareButton ? (
-            <button
-              type="button"
+            <AgentChatButton
               className="banner-share banner-desktop-only"
+              variant="soft"
+              size="sm"
               onClick={handlePublicShareClick}
               aria-label={publicShareLabel}
               title={publicShareLabel}
@@ -371,7 +377,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             >
               <Share2 size={14} strokeWidth={2} />
               <span className="banner-share-label">Share</span>
-            </button>
+            </AgentChatButton>
           ) : null}
           {showAuditButton ? (
             <a
@@ -388,7 +394,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
           {showMobileOverflow ? (
             <DialogTrigger isOpen={overflowMenuOpen} onOpenChange={setOverflowMenuOpen}>
               <Button
-                className="banner-settings banner-mobile-only"
+                className="agent-chat-button banner-settings banner-mobile-only"
                 aria-label="More actions"
               >
                 <EllipsisVertical size={16} />
@@ -400,7 +406,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                       <div className="banner-overflow-heading">Actions</div>
                       <div className="banner-overflow-items">
                         {showShareButton ? (
-                          <button
+                          <AgentChatMenuItem
                             type="button"
                             className="banner-overflow-item"
                             onClick={() => {
@@ -419,10 +425,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                             <span className="banner-overflow-item-copy">
                               <span className="banner-overflow-item-label">Collaborate</span>
                             </span>
-                          </button>
+                          </AgentChatMenuItem>
                         ) : null}
                         {showPublicShareButton ? (
-                          <button
+                          <AgentChatMenuItem
                             type="button"
                             className="banner-overflow-item"
                             onClick={() => {
@@ -441,10 +447,11 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                             <span className="banner-overflow-item-copy">
                               <span className="banner-overflow-item-label">Share</span>
                             </span>
-                          </button>
+                          </AgentChatMenuItem>
                         ) : null}
                         {showAuditButton ? (
-                          <a
+                          <AgentChatMenuItem
+                            as="a"
                             className="banner-overflow-item"
                             href={auditUrl ?? undefined}
                             target="_blank"
@@ -457,10 +464,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                             <span className="banner-overflow-item-copy">
                               <span className="banner-overflow-item-label">Audit timeline</span>
                             </span>
-                          </a>
+                          </AgentChatMenuItem>
                         ) : null}
                         {showSettingsButton ? (
-                          <button
+                          <AgentChatMenuItem
                             type="button"
                             className="banner-overflow-item"
                             onClick={() => {
@@ -479,7 +486,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                             <span className="banner-overflow-item-copy">
                               <span className="banner-overflow-item-label">Settings</span>
                             </span>
-                          </button>
+                          </AgentChatMenuItem>
                         ) : null}
                       </div>
                     </div>
@@ -489,9 +496,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             </DialogTrigger>
           ) : null}
           {showSettingsButton ? (
-            <button
-              type="button"
+            <AgentChatButton
               className="banner-settings banner-desktop-only"
+              variant="ghost"
+              size="sm"
               data-alert={hardLimitReached ? 'true' : 'false'}
               onClick={() => handleSettingsClick('banner_desktop')}
               aria-label={resolvedSettingsLabel}
@@ -503,17 +511,18 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               {showAttentionDot ? (
                 <span className="banner-settings-dot" data-alert={hardLimitReached ? 'true' : 'false'} />
               ) : null}
-            </button>
+            </AgentChatButton>
           ) : null}
           {onClose ? (
-            <button
-              type="button"
+            <AgentChatButton
               className="banner-close"
+              variant="ghost"
+              size="sm"
               onClick={handleCloseClick}
               aria-label="Close"
             >
               <X size={16} strokeWidth={1.75} />
-            </button>
+            </AgentChatButton>
           ) : null}
         </div>
 

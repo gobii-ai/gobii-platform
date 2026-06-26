@@ -1,9 +1,8 @@
 import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
-import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentEmptyState, AgentListSectionHeader } from './ChatSidebarParts'
-import { AgentChatIconButton, AgentChatPill, joinClassNames } from './uiPrimitives'
+import { AgentChatAvatar, AgentChatIconButton, AgentChatPill, joinClassNames } from './uiPrimitives'
 
 type ChatSidebarGalleryProps = {
   variant: 'sidebar' | 'drawer'
@@ -82,7 +81,7 @@ function GalleryCard({
       >
         <div className="agent-gallery-card__hero">
           <span className="agent-gallery-card__hero-glow" aria-hidden="true" />
-          <AgentAvatarBadge
+          <AgentChatAvatar
             name={agent.name || 'Agent'}
             avatarUrl={agent.avatarUrl}
             className="agent-gallery-card__avatar"

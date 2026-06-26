@@ -1,4 +1,6 @@
-import type { ButtonHTMLAttributes, ElementType, HTMLAttributes, ReactNode } from 'react'
+import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ElementType, HTMLAttributes, ReactNode } from 'react'
+import type { CSSProperties } from 'react'
+import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 
 export type AgentChatTone = 'neutral' | 'info' | 'success' | 'warning' | 'critical'
 
@@ -13,6 +15,8 @@ type PolymorphicSurfaceProps = {
   className?: string
   children: ReactNode
 } & HTMLAttributes<HTMLElement>
+  & ButtonHTMLAttributes<HTMLButtonElement>
+  & AnchorHTMLAttributes<HTMLAnchorElement>
 
 export function AgentChatSurface({
   as: Component = 'div',
@@ -120,5 +124,82 @@ export function AgentChatIconButton({
     >
       {children}
     </button>
+  )
+}
+
+type ButtonProps = {
+  tone?: AgentChatTone
+  variant?: 'ghost' | 'soft' | 'solid'
+  size?: 'sm' | 'md'
+} & ButtonHTMLAttributes<HTMLButtonElement>
+
+export function AgentChatButton({
+  tone = 'neutral',
+  variant = 'soft',
+  size = 'md',
+  className,
+  children,
+  ...rest
+}: ButtonProps) {
+  return (
+    <button
+      type="button"
+      className={joinClassNames('agent-chat-button', className)}
+      data-tone={tone}
+      data-variant={variant}
+      data-size={size}
+      {...rest}
+    >
+      {children}
+    </button>
+  )
+}
+
+type MenuItemProps = {
+  as?: ElementType
+  className?: string
+  children: ReactNode
+} & ButtonHTMLAttributes<HTMLButtonElement> & HTMLAttributes<HTMLAnchorElement>
+  & AnchorHTMLAttributes<HTMLAnchorElement>
+
+export function AgentChatMenuItem({
+  as: Component = 'button',
+  className,
+  children,
+  ...rest
+}: MenuItemProps) {
+  return (
+    <Component className={joinClassNames('agent-chat-menu-item', className)} {...rest}>
+      {children}
+    </Component>
+  )
+}
+
+type AvatarProps = {
+  name: string
+  avatarUrl?: string | null
+  className?: string
+  imageClassName?: string
+  textClassName?: string
+  fallbackStyle?: CSSProperties
+}
+
+export function AgentChatAvatar({
+  name,
+  avatarUrl,
+  className,
+  imageClassName,
+  textClassName,
+  fallbackStyle,
+}: AvatarProps) {
+  return (
+    <AgentAvatarBadge
+      name={name}
+      avatarUrl={avatarUrl}
+      className={joinClassNames('agent-chat-avatar', className)}
+      imageClassName={joinClassNames('agent-chat-avatar__image', imageClassName)}
+      textClassName={joinClassNames('agent-chat-avatar__text', textClassName)}
+      fallbackStyle={fallbackStyle}
+    />
   )
 }
