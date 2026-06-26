@@ -3296,6 +3296,15 @@ def _should_skip_processing_for_inactive_or_deleted_agent(
     return True
 
 
+def _close_stale_stream(stream: Any) -> None:
+    close = getattr(stream, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            logger.debug("Failed to close stale orchestrator stream", exc_info=True)
+
+
 def _stream_completion_with_broadcast(
     *,
     model: str,
@@ -3316,14 +3325,6 @@ def _stream_completion_with_broadcast(
     canceled = False
     stream = None
 
-    def _close_stream() -> None:
-        close = getattr(stream, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                logger.debug("Failed to close stale orchestrator stream", exc_info=True)
-
     try:
         if stale_prompt_checker and stale_prompt_checker():
             canceled = True
@@ -3342,7 +3343,7 @@ def _stream_completion_with_broadcast(
         for chunk in stream:
             if stale_prompt_checker and stale_prompt_checker():
                 canceled = True
-                _close_stream()
+                _close_stale_stream(stream)
                 if stream_broadcaster:
                     stream_broadcaster.cancel()
                 raise OrchestratorPromptStale("Prompt became stale during streaming completion.")
@@ -4339,6 +4340,249 @@ def _plan_state_for_sleep_log(agent: PersistentAgent, *, warn_unfinished: bool =
         return "unknown"
 
 
+def _current_human_inbound_generation(agent_id: Union[str, UUID], redis_client) -> int:
+    return get_human_inbound_generation(agent_id, client=redis_client)
+
+
+def _is_orchestrator_prompt_stale(
+    *,
+    agent_id: Union[str, UUID],
+    accepted_human_generation: int,
+    redis_client,
+) -> bool:
+    return _current_human_inbound_generation(agent_id, redis_client) > accepted_human_generation
+
+
+def _mark_human_generation_consumed_if_current(
+    *,
+    agent_id: Union[str, UUID],
+    accepted_human_generation: int,
+    redis_client,
+) -> None:
+    if accepted_human_generation <= 0:
+        return
+    if _is_orchestrator_prompt_stale(
+        agent_id=agent_id,
+        accepted_human_generation=accepted_human_generation,
+        redis_client=redis_client,
+    ):
+        return
+    mark_human_inbound_generation_consumed(
+        agent_id,
+        accepted_human_generation,
+        client=redis_client,
+    )
+    if not _is_orchestrator_prompt_stale(
+        agent_id=agent_id,
+        accepted_human_generation=accepted_human_generation,
+        redis_client=redis_client,
+    ):
+        remove_pending_agent(agent_id, client=redis_client)
+
+
+class _HumanGenerationTracker:
+    def __init__(
+        self,
+        *,
+        agent_id: Union[str, UUID],
+        accepted_human_generation: int,
+        redis_client,
+    ):
+        self.agent_id = agent_id
+        self.accepted_human_generation = accepted_human_generation
+        self.redis_client = redis_client
+
+    def is_prompt_stale(self) -> bool:
+        return _is_orchestrator_prompt_stale(
+            agent_id=self.agent_id,
+            accepted_human_generation=self.accepted_human_generation,
+            redis_client=self.redis_client,
+        )
+
+    def mark_consumed_if_current(self) -> None:
+        _mark_human_generation_consumed_if_current(
+            agent_id=self.agent_id,
+            accepted_human_generation=self.accepted_human_generation,
+            redis_client=self.redis_client,
+        )
+
+
+class _PromptArchiveAttacher:
+    def __init__(self, prompt_archive_id: Any):
+        self.prompt_archive_id = prompt_archive_id
+        self.attached = False
+
+    def attach(self, step: PersistentAgentStep) -> None:
+        if not self.prompt_archive_id or self.attached:
+            return
+        try:
+            updated = PersistentAgentPromptArchive.objects.filter(
+                id=self.prompt_archive_id,
+                step__isnull=True,
+            ).update(step=step)
+            if updated:
+                self.attached = True
+        except Exception:
+            logger.exception(
+                "Failed to link prompt archive %s to step %s",
+                self.prompt_archive_id,
+                getattr(step, "id", None),
+            )
+
+
+def _token_usage_fields(token_usage: Optional[dict], response: Any) -> dict:
+    return completion_kwargs_from_usage(
+        token_usage,
+        completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+        response=response,
+    )
+
+
+class _CompletionAttacher:
+    def __init__(
+        self,
+        *,
+        agent: PersistentAgent,
+        eval_run_id: Optional[str],
+        iteration_tools: list[dict],
+        thinking_content: str | None,
+        billing_snapshot: dict[str, Any],
+        token_usage_fields: dict[str, Any],
+        suppress_step_completion_billing: bool,
+    ):
+        self.agent = agent
+        self.eval_run_id = eval_run_id
+        self.iteration_tools = iteration_tools
+        self.thinking_content = thinking_content
+        self.billing_snapshot = billing_snapshot
+        self.token_usage_fields = token_usage_fields
+        self.suppress_step_completion_billing = suppress_step_completion_billing
+        self.completion: Optional[PersistentAgentCompletion] = None
+
+    def ensure(self) -> PersistentAgentCompletion:
+        if self.completion is None:
+            self.completion = PersistentAgentCompletion.objects.create(
+                agent=self.agent,
+                eval_run_id=self.eval_run_id,
+                llm_tool_names=_tool_definition_names_for_completion(self.iteration_tools),
+                thinking_content=self.thinking_content,
+                **self.billing_snapshot,
+                **self.token_usage_fields,
+            )
+        return self.completion
+
+    def attach(self, step_kwargs: dict) -> None:
+        if self.suppress_step_completion_billing:
+            return
+        step_kwargs["completion"] = self.ensure()
+
+
+def _persist_reasoning_step(
+    *,
+    agent: PersistentAgent,
+    reasoning_source: Optional[str],
+    attach_completion: Callable[[dict], None],
+    attach_prompt_archive: Callable[[PersistentAgentStep], None],
+) -> Optional[PersistentAgentStep]:
+    reasoning_text = (reasoning_source or "").strip()
+    if not reasoning_text:
+        return None
+    return _create_attached_step(
+        agent=agent,
+        description=internal_reasoning.build_internal_reasoning_description(reasoning_text),
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+    )
+
+
+def _apply_agent_config_updates(
+    *,
+    agent: PersistentAgent,
+    config_snapshot: Any,
+    attach_completion: Callable[[dict], None],
+    attach_prompt_archive: Callable[[PersistentAgentStep], None],
+) -> bool:
+    config_apply = apply_sqlite_agent_config_updates(agent, config_snapshot)
+    if not config_apply.errors:
+        return False
+    for error in config_apply.errors:
+        _record_attached_step(
+            agent=agent,
+            description=f"Agent config update failed: {error}",
+            attach_completion=attach_completion,
+            attach_prompt_archive=attach_prompt_archive,
+            failure_message="Failed to persist config update error step for agent %s",
+            failure_args=(agent.id,),
+        )
+    return True
+
+
+def _apply_skill_updates(
+    *,
+    agent: PersistentAgent,
+    skills_snapshot: Any,
+    attach_completion: Callable[[dict], None],
+    attach_prompt_archive: Callable[[PersistentAgentStep], None],
+) -> tuple[bool, bool]:
+    skill_apply = apply_sqlite_skill_updates(agent, skills_snapshot)
+
+    if not skill_apply.errors:
+        return False, bool(skill_apply.changed)
+
+    for error in skill_apply.errors:
+        _record_attached_step(
+            agent=agent,
+            description=f"Skill update failed: {error}",
+            attach_completion=attach_completion,
+            attach_prompt_archive=attach_prompt_archive,
+            failure_message="Failed to persist skill update error step for agent %s",
+            failure_args=(agent.id,),
+        )
+    return True, bool(skill_apply.changed)
+
+
+@dataclass(frozen=True)
+class _RuntimeUpdateResult:
+    followup_required: bool
+    tools: list[dict]
+
+
+def _apply_runtime_updates(
+    *,
+    agent: PersistentAgent,
+    config_snapshot: Any,
+    skills_snapshot: Any,
+    tools: list[dict],
+    attach_completion: Callable[[dict], None],
+    attach_prompt_archive: Callable[[PersistentAgentStep], None],
+) -> _RuntimeUpdateResult:
+    if not get_sqlite_db_path():
+        logger.debug(
+            "Agent %s: skipping runtime SQLite reconciliation (no db path).",
+            agent.id,
+        )
+        return _RuntimeUpdateResult(followup_required=False, tools=tools)
+
+    config_errors = _apply_agent_config_updates(
+        agent=agent,
+        config_snapshot=config_snapshot,
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+    )
+    skill_errors, skills_changed = _apply_skill_updates(
+        agent=agent,
+        skills_snapshot=skills_snapshot,
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+    )
+    if skills_changed:
+        tools = get_agent_tools(agent)
+    return _RuntimeUpdateResult(
+        followup_required=config_errors or skill_errors,
+        tools=tools,
+    )
+
+
 def _process_agent_events_locked(
     persistent_agent_id: Union[str, UUID],
     span,
@@ -4667,9 +4911,6 @@ def _run_agent_loop(
     continuation_notice: Optional[str] = None
     empty_response_loop_retries = 0
 
-    def _current_human_inbound_generation() -> int:
-        return get_human_inbound_generation(agent.id, client=redis_client)
-
     try:
         for i in range(max_remaining):
             previous_planning_state = current_planning_state
@@ -4768,7 +5009,7 @@ def _run_agent_loop(
                     judge_trigger_reasons.append("burn_rate_tier_step_down")
                 maybe_run_agent_judge(agent, tools=tools, extra_trigger_reasons=judge_trigger_reasons)
 
-                prompt_human_generation = _current_human_inbound_generation()
+                prompt_human_generation = _current_human_inbound_generation(agent.id, redis_client)
                 config_snapshot = seed_sqlite_agent_config(agent)
                 skills_snapshot = seed_sqlite_skills(agent)
                 current_notice = continuation_notice
@@ -4813,8 +5054,7 @@ def _run_agent_loop(
                     history, fitted_token_count, prompt_archive_id = prompt_context_result
                     prompt_metadata = {}
                 prompt_allows_implied_send = bool(prompt_metadata.get("prompt_allows_implied_send", True))
-                prompt_archive_attached = False
-                latest_human_generation = _current_human_inbound_generation()
+                latest_human_generation = _current_human_inbound_generation(agent.id, redis_client)
                 if latest_human_generation > prompt_human_generation:
                     logger.info(
                         "Agent %s: human input generation changed from %s to %s while building prompt; rebuilding.",
@@ -4829,6 +5069,12 @@ def _run_agent_loop(
                     continue
 
                 accepted_human_generation = latest_human_generation
+                human_generation_tracker = _HumanGenerationTracker(
+                    agent_id=agent.id,
+                    accepted_human_generation=accepted_human_generation,
+                    redis_client=redis_client,
+                )
+                prompt_archive_attacher = _PromptArchiveAttacher(prompt_archive_id)
 
                 # Atomically consume one global step only after accepting the prompt.
                 if budget_ctx is not None:
@@ -4845,47 +5091,7 @@ def _run_agent_loop(
                             logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
                         return cumulative_token_usage
 
-                def _is_orchestrator_prompt_stale() -> bool:
-                    return _current_human_inbound_generation() > accepted_human_generation
-
-                def _mark_accepted_human_generation_consumed() -> None:
-                    if accepted_human_generation <= 0:
-                        return
-                    if _is_orchestrator_prompt_stale():
-                        return
-                    mark_human_inbound_generation_consumed(
-                        agent.id,
-                        accepted_human_generation,
-                        client=redis_client,
-                    )
-                    if not _is_orchestrator_prompt_stale():
-                        remove_pending_agent(agent.id, client=redis_client)
-
-                def _attach_prompt_archive(step: PersistentAgentStep) -> None:
-                    nonlocal prompt_archive_attached
-                    if not prompt_archive_id or prompt_archive_attached:
-                        return
-                    try:
-                        updated = PersistentAgentPromptArchive.objects.filter(
-                            id=prompt_archive_id,
-                            step__isnull=True,
-                        ).update(step=step)
-                        if updated:
-                            prompt_archive_attached = True
-                    except Exception:
-                        logger.exception(
-                            "Failed to link prompt archive %s to step %s",
-                            prompt_archive_id,
-                            getattr(step, "id", None),
-                        )
-
-                def _token_usage_fields(token_usage: Optional[dict], response: Any) -> dict:
-                    """Return sanitized token usage values for step creation."""
-                    return completion_kwargs_from_usage(
-                        token_usage,
-                        completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
-                        response=response,
-                    )
+                stale_prompt_checker = human_generation_tracker.is_prompt_stale
 
                 # Use the fitted token count from promptree for LLM selection
                 # This fixes the bug where we were using joined message token count
@@ -4974,7 +5180,7 @@ def _run_agent_loop(
                         preferred_config=preferred_config,
                         stream_broadcaster=stream_broadcaster,
                         allow_streamed_content=prompt_allows_implied_send,
-                        stale_prompt_checker=_is_orchestrator_prompt_stale,
+                        stale_prompt_checker=stale_prompt_checker,
                     )
                     empty_response_loop_retries = 0
                     if heartbeat:
@@ -4999,7 +5205,7 @@ def _run_agent_loop(
                         )
 
                 except OrchestratorPromptStale:
-                    latest_human_generation = _current_human_inbound_generation()
+                    latest_human_generation = _current_human_inbound_generation(agent.id, redis_client)
                     logger.info(
                         "Agent %s: discarded stale orchestrator completion for generation %s; latest is %s.",
                         agent.id,
@@ -5058,96 +5264,27 @@ def _run_agent_loop(
                 thinking_content = extract_reasoning_content(response)
                 msg = response.choices[0].message
                 token_usage_fields = _token_usage_fields(token_usage, response)
-                completion: Optional[PersistentAgentCompletion] = None
-
-                def _ensure_completion() -> PersistentAgentCompletion:
-                    nonlocal completion
-                    if completion is None:
-                        completion = PersistentAgentCompletion.objects.create(
-                            agent=agent,
-                            eval_run_id=eval_run_id,
-                            llm_tool_names=_tool_definition_names_for_completion(iteration_tools),
-                            thinking_content=thinking_content,
-                            **billing_snapshot,
-                            **token_usage_fields,
-                        )
-                    return completion
 
                 suppress_step_completion_billing = is_daily_hard_limit_message_only_mode(
                     daily_state
                 )
+                completion_attacher = _CompletionAttacher(
+                    agent=agent,
+                    eval_run_id=eval_run_id,
+                    iteration_tools=iteration_tools,
+                    thinking_content=thinking_content,
+                    billing_snapshot=billing_snapshot,
+                    token_usage_fields=token_usage_fields,
+                    suppress_step_completion_billing=suppress_step_completion_billing,
+                )
+                _attach_completion = completion_attacher.attach
+                _attach_prompt_archive = prompt_archive_attacher.attach
 
                 # Persist completion immediately so token usage isn't lost if execution exits early.
                 # In daily-limit message-only mode we keep the completion record, but we do not
                 # attach it to steps because PersistentAgentStep.save() would otherwise consume
                 # more task credits via completion billing.
-                _ensure_completion()
-
-                def _attach_completion(step_kwargs: dict) -> None:
-                    if suppress_step_completion_billing:
-                        return
-                    completion_obj = _ensure_completion()
-                    step_kwargs["completion"] = completion_obj
-
-                def _persist_reasoning_step(reasoning_source: Optional[str]) -> Optional[PersistentAgentStep]:
-                    reasoning_text = (reasoning_source or "").strip()
-                    if not reasoning_text:
-                        return None
-                    return _create_attached_step(
-                        agent=agent,
-                        description=internal_reasoning.build_internal_reasoning_description(reasoning_text),
-                        attach_completion=_attach_completion,
-                        attach_prompt_archive=_attach_prompt_archive,
-                    )
-
-                def _apply_agent_config_updates() -> bool:
-                    config_apply = apply_sqlite_agent_config_updates(agent, config_snapshot)
-                    if not config_apply.errors:
-                        return False
-                    for error in config_apply.errors:
-                        _record_attached_step(
-                            agent=agent,
-                            description=f"Agent config update failed: {error}",
-                            attach_completion=_attach_completion,
-                            attach_prompt_archive=_attach_prompt_archive,
-                            failure_message="Failed to persist config update error step for agent %s",
-                            failure_args=(agent.id,),
-                        )
-                    return True
-
-                def _apply_skill_updates() -> tuple[bool, bool]:
-                    """Apply skill updates and return (had_errors, changed)."""
-                    skill_apply = apply_sqlite_skill_updates(agent, skills_snapshot)
-
-                    if not skill_apply.errors:
-                        return False, bool(skill_apply.changed)
-
-                    for error in skill_apply.errors:
-                        _record_attached_step(
-                            agent=agent,
-                            description=f"Skill update failed: {error}",
-                            attach_completion=_attach_completion,
-                            attach_prompt_archive=_attach_prompt_archive,
-                            failure_message="Failed to persist skill update error step for agent %s",
-                            failure_args=(agent.id,),
-                        )
-                    return True, bool(skill_apply.changed)
-
-                def _apply_runtime_updates() -> bool:
-                    # Some unit tests call _run_agent_loop directly without agent_sqlite_db().
-                    # In that mode, reconciliation has no SQLite state to diff against.
-                    if not get_sqlite_db_path():
-                        logger.debug(
-                            "Agent %s: skipping runtime SQLite reconciliation (no db path).",
-                            agent.id,
-                        )
-                        return False
-                    config_errors = _apply_agent_config_updates()
-                    skill_errors, skills_changed = _apply_skill_updates()
-                    if skills_changed:
-                        nonlocal tools
-                        tools = get_agent_tools(agent)
-                    return config_errors or skill_errors
+                completion_attacher.ensure()
 
                 msg_content = _extract_message_content(msg)
                 raw_message_text = (msg_content or "").strip()
@@ -5225,12 +5362,26 @@ def _run_agent_loop(
                 if not reasoning_source and not implied_send:
                     reasoning_source = msg_content
 
-                reasoning_step = _persist_reasoning_step(reasoning_source)
+                reasoning_step = _persist_reasoning_step(
+                    agent=agent,
+                    reasoning_source=reasoning_source,
+                    attach_completion=_attach_completion,
+                    attach_prompt_archive=_attach_prompt_archive,
+                )
 
                 if not tool_calls:
-                    if _apply_runtime_updates():
+                    runtime_updates = _apply_runtime_updates(
+                        agent=agent,
+                        config_snapshot=config_snapshot,
+                        skills_snapshot=skills_snapshot,
+                        tools=tools,
+                        attach_completion=_attach_completion,
+                        attach_prompt_archive=_attach_prompt_archive,
+                    )
+                    tools = runtime_updates.tools
+                    if runtime_updates.followup_required:
                         reasoning_only_streak = 0
-                        _mark_accepted_human_generation_consumed()
+                        human_generation_tracker.mark_consumed_if_current()
                         continue
                     if not message_text and not thinking_content:
                         plan_state = _plan_state_for_sleep_log(agent)
@@ -5242,7 +5393,7 @@ def _run_agent_loop(
                             type(msg_content).__name__,
                             len(msg_content) if msg_content else 0,
                         )
-                        _mark_accepted_human_generation_consumed()
+                        human_generation_tracker.mark_consumed_if_current()
                         _attempt_cycle_close_for_sleep(agent, budget_ctx)
                         return cumulative_token_usage
                     if reasoning_step is not None:
@@ -5279,10 +5430,10 @@ def _run_agent_loop(
                             plan_state,
                             message_text or thinking_content or "(none)",
                         )
-                        _mark_accepted_human_generation_consumed()
+                        human_generation_tracker.mark_consumed_if_current()
                         _attempt_cycle_close_for_sleep(agent, budget_ctx)
                         return cumulative_token_usage
-                    _mark_accepted_human_generation_consumed()
+                    human_generation_tracker.mark_consumed_if_current()
                     continue
 
                 reasoning_only_streak = 0
@@ -5323,7 +5474,7 @@ def _run_agent_loop(
                 all_calls_sleep = prepared_batch.all_calls_sleep
 
                 if _should_stop_for_eval_policy(agent, budget_ctx=budget_ctx, span=iter_span):
-                    _mark_accepted_human_generation_consumed()
+                    human_generation_tracker.mark_consumed_if_current()
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
 
@@ -5374,18 +5525,27 @@ def _run_agent_loop(
                                 agent.id,
                             )
                             _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    _mark_accepted_human_generation_consumed()
+                    human_generation_tracker.mark_consumed_if_current()
                     return cumulative_token_usage
 
-                if _apply_runtime_updates():
+                runtime_updates = _apply_runtime_updates(
+                    agent=agent,
+                    config_snapshot=config_snapshot,
+                    skills_snapshot=skills_snapshot,
+                    tools=tools,
+                    attach_completion=_attach_completion,
+                    attach_prompt_archive=_attach_prompt_archive,
+                )
+                tools = runtime_updates.tools
+                if runtime_updates.followup_required:
                     followup_required = True
 
                 if _should_stop_for_eval_policy(agent, budget_ctx=budget_ctx, span=iter_span):
-                    _mark_accepted_human_generation_consumed()
+                    human_generation_tracker.mark_consumed_if_current()
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
 
-                _mark_accepted_human_generation_consumed()
+                human_generation_tracker.mark_consumed_if_current()
 
                 if finalized_batch.terminal_message_delivery_ok or finalized_batch.human_input_request_ok:
                     pending_reply_after_progress = False
