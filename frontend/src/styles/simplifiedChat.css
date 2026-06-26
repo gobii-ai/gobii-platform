@@ -1,27 +1,4 @@
-/* ============================================================
-   Simplified Chat UI — iMessage-style collapsed events,
-   typing indicator, and entry animations.
-   Scoped under .simplified-chat parent where applicable.
-   ============================================================ */
-
-/* ---- Timeline Inner — less margin on large screens ---- */
-
-@media (min-width: 1024px) {
-  .simplified-chat #timeline-inner {
-    max-width: min(64rem, 100%);
-    padding-left: 2rem;
-    padding-right: 2rem;
-  }
-
-  .simplified-chat ~ .composer-shell {
-    padding-left: 2rem;
-    padding-right: 2rem;
-  }
-
-  .simplified-chat ~ .composer-shell .composer-surface {
-    width: min(64rem, 100%);
-  }
-}
+/* Timeline helper styles for collapsed events, inline status cards, and typing indicator. */
 
 /* ---- Collapsed Event Group Pill ---- */
 
@@ -280,32 +257,6 @@
   color: var(--color-slate-600, #475569);
 }
 
-/* ---- iMessage-style Bubble Arrows & Spacing ---- */
-
-/* Constrain widths so messages don't span full width */
-.simplified-chat .chat-bubble--agent {
-  max-width: 85%;
-}
-
-.simplified-chat .chat-bubble--user {
-  max-width: 80%;
-}
-
-/* Add horizontal padding so bubbles don't touch container edges */
-.simplified-chat .chat-event.is-agent {
-  padding-right: 48px;
-}
-
-.simplified-chat .chat-event.is-user {
-  padding-left: 48px;
-}
-
-/* Position bubbles relative for the arrow pseudo-elements */
-.simplified-chat .chat-bubble {
-  position: relative;
-}
-
-
 /* Responsive: tighter padding on small screens */
 @media (max-width: 640px) {
   .inline-status-card {
@@ -315,45 +266,6 @@
 
   .inline-status-card__detail {
     max-width: none;
-  }
-
-  .simplified-chat .chat-bubble--agent,
-  .simplified-chat .chat-bubble--user {
-    max-width: 100%;
-  }
-
-  .simplified-chat .chat-event.is-agent {
-    padding-right: 24px;
-  }
-
-  .simplified-chat .chat-event.is-user {
-    padding-left: 24px;
-  }
-}
-
-/* ---- Smooth Position Transitions ---- */
-
-/* Existing items glide up when new content arrives */
-.simplified-chat-vitem {
-  max-width: 100%;
-  overflow-x: clip;
-}
-
-/* ---- New Item Entry Animation ---- */
-
-/* The latest item slides in from below */
-.simplified-chat [data-animate-entry="true"] > * {
-  animation: messageSlideIn 0.3s ease-out both;
-}
-
-@keyframes messageSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -370,13 +282,5 @@
     background: none;
     -webkit-text-fill-color: currentColor;
     color: var(--color-slate-600, #475569);
-  }
-
-  .simplified-chat [data-animate-entry="true"] > * {
-    animation: none;
-  }
-
-  .simplified-chat-vitem {
-    overflow-x: clip;
   }
 }
