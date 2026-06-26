@@ -1,4 +1,4 @@
-import { ChevronDown, KeyRound, Loader2, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
+import { ChevronDown, Copy, KeyRound, Loader2, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -51,12 +51,13 @@ export function ProviderCard({ provider, handlers, isBusy, testStatuses, showMod
     }
   }
 
-  const openAddEndpointModal = (type: llmApi.ProviderEndpoint['type']) => {
+  const openAddEndpointModal = (type: llmApi.ProviderEndpoint['type'], sourceEndpoint?: ProviderEndpointCard) => {
     showModal((onClose) => createPortal(
       <ProviderEndpointModal
         mode="create"
         providerName={provider.name}
         type={type}
+        sourceEndpoint={sourceEndpoint}
         busy={creatingEndpoint}
         onClose={onClose}
         onSubmit={async (values) => {
@@ -231,6 +232,10 @@ export function ProviderCard({ provider, handlers, isBusy, testStatuses, showMod
                         <button type="button" className={button.secondary} onClick={() => handlers.onTestEndpoint(endpoint).catch(() => {})} disabled={testBusy}>
                           {testBusy ? <Loader2 className="size-4 animate-spin" /> : 'Test'}
                         </button>
+                        <button type="button" className={button.secondary} onClick={() => openAddEndpointModal(endpoint.type, endpoint)} disabled={creatingEndpoint}>
+                          {creatingEndpoint ? <Loader2 className="size-4 animate-spin" /> : <Copy className="size-4" />}
+                          Clone
+                        </button>
                         <button className={button.secondary} onClick={() => openEndpointEditor(endpoint)}>
                           {isEditing ? 'Close' : 'Edit'}
                         </button>
@@ -275,6 +280,10 @@ export function ProviderCard({ provider, handlers, isBusy, testStatuses, showMod
         {activeTab === 'settings' && (
           <div className="space-y-4 text-sm text-slate-600">
             <div>
+              <p className="font-semibold text-slate-900/90">Provider key</p>
+              <p className="text-xs text-slate-500 break-all">{provider.key}</p>
+            </div>
+            <div>
               <p className="font-semibold text-slate-900/90">Environment fallback</p>
               <p className="text-xs text-slate-500 break-all">{provider.fallback}</p>
             </div>
@@ -282,6 +291,10 @@ export function ProviderCard({ provider, handlers, isBusy, testStatuses, showMod
               <div>
                 <p className="text-xs text-slate-500 uppercase">Backend</p>
                 <p className="font-medium text-slate-900/90">{provider.backend}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase">Model prefix</p>
+                <p className="font-medium text-slate-900/90">{provider.modelPrefix || '—'}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 uppercase">Safety identifiers</p>
@@ -330,6 +343,7 @@ type ProviderEndpointFormProps = {
   type: llmApi.ProviderEndpoint['type']
   endpoint?: ProviderEndpointCard
   saving?: boolean
+  submitLabel?: string
   onSave?: (values: EndpointFormValues) => Promise<void> | void
   onSubmit?: (values: EndpointFormValues & { key?: string }) => Promise<void> | void
   onCancel?: () => void
@@ -345,9 +359,10 @@ function ProviderEndpointForm({
   onCancel,
   onClose,
   saving,
+  submitLabel,
 }: ProviderEndpointFormProps) {
   const isCreate = mode === 'create'
-  const [key, setKey] = useState('')
+  const [key, setKey] = useState(isCreate && endpoint?.key ? `${endpoint.key}-copy` : '')
   const [model, setModel] = useState(endpoint?.name ?? '')
   const [pricingModel, setPricingModel] = useState(endpoint?.litellm_pricing_model ?? '')
   const [temperature, setTemperature] = useState(endpoint?.temperature?.toString() ?? '')
@@ -360,8 +375,8 @@ function ProviderEndpointForm({
   const [supportsVision, setSupportsVision] = useState(Boolean(endpoint?.supports_vision))
   const [supportsImageToImage, setSupportsImageToImage] = useState(Boolean(endpoint?.supports_image_to_image))
   const [supportsImageToVideo, setSupportsImageToVideo] = useState(Boolean(endpoint?.supports_image_to_video))
-  const [supportsToolChoice, setSupportsToolChoice] = useState(isCreate ? true : Boolean(endpoint?.supports_tool_choice))
-  const [parallelTools, setParallelTools] = useState(isCreate ? true : Boolean(endpoint?.use_parallel_tool_calls))
+  const [supportsToolChoice, setSupportsToolChoice] = useState(endpoint?.supports_tool_choice ?? true)
+  const [parallelTools, setParallelTools] = useState(endpoint?.use_parallel_tool_calls ?? true)
   const [allowImpliedSend, setAllowImpliedSend] = useState(endpoint?.allow_implied_send ?? true)
   const [supportsReasoning, setSupportsReasoning] = useState(Boolean(endpoint?.supports_reasoning))
   const [reasoningEffort, setReasoningEffort] = useState(endpoint?.reasoning_effort ?? '')
@@ -565,7 +580,7 @@ function ProviderEndpointForm({
         <button className={button.secondary} onClick={onCancel || onClose} disabled={isSubmitting}>Cancel</button>
         <button className={button.primary} onClick={handleSubmit} disabled={isCreate ? (!key || !model || isSubmitting) : isSubmitting}>
           {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : isCreate ? <Plus className="size-4" /> : null}
-          {isCreate ? 'Add endpoint' : 'Save changes'}
+          {isCreate ? (submitLabel ?? 'Add endpoint') : 'Save changes'}
         </button>
       </div>
     </div>
@@ -576,13 +591,14 @@ type ProviderEndpointModalProps = {
   mode: 'create'
   providerName: string
   type: llmApi.ProviderEndpoint['type']
+  sourceEndpoint?: ProviderEndpointCard
   busy?: boolean
   onSubmit: (values: EndpointFormValues & { key?: string }) => Promise<void> | void
   onClose: () => void
 }
 
-function ProviderEndpointModal({ providerName, type, onSubmit, onClose, busy }: ProviderEndpointModalProps) {
-  const title = `Add ${endpointTypeLabels[type]} endpoint`
+function ProviderEndpointModal({ providerName, type, sourceEndpoint, onSubmit, onClose, busy }: ProviderEndpointModalProps) {
+  const title = sourceEndpoint ? `Clone ${endpointTypeLabels[type]} endpoint` : `Add ${endpointTypeLabels[type]} endpoint`
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
@@ -598,7 +614,9 @@ function ProviderEndpointModal({ providerName, type, onSubmit, onClose, busy }: 
           <ProviderEndpointForm
             mode="create"
             type={type}
+            endpoint={sourceEndpoint}
             saving={busy}
+            submitLabel={sourceEndpoint ? 'Clone endpoint' : 'Add endpoint'}
             onClose={onClose}
             onSubmit={onSubmit}
           />

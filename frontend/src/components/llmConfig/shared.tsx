@@ -129,6 +129,7 @@ export type TokenRange = {
 
 export type ProviderEndpointCard = {
   id: string
+  key: string
   name: string
   enabled: boolean
   litellm_pricing_model?: string | null
@@ -155,11 +156,13 @@ export type ProviderEndpointCard = {
 export type ProviderCardData = {
   id: string
   name: string
+  key: string
   status: string
   backend: string
   fallback: string
   enabled: boolean
   envVar?: string
+  modelPrefix: string
   supportsSafety: boolean
   vertexProject: string
   vertexLocation: string
@@ -461,6 +464,22 @@ export type AsyncFeedback = {
   dismissNotice: (id: string) => void
 }
 
+function feedbackErrorMessage(error: unknown) {
+  if (error instanceof HttpError) {
+    if (typeof error.body === 'string' && error.body.trim()) {
+      return error.body
+    }
+    if (typeof error.body === 'object' && error.body && 'message' in error.body) {
+      return String((error.body as { message?: unknown }).message || error.message)
+    }
+    if (typeof error.body === 'object' && error.body && 'error' in error.body) {
+      return String((error.body as { error?: unknown }).error || error.message)
+    }
+    return error.message
+  }
+  return error instanceof Error ? error.message : 'Request failed'
+}
+
 export function useAsyncFeedback(): AsyncFeedback {
   const [busyCounts, setBusyCounts] = useState<Record<string, number>>({})
   const [labelCounts, setLabelCounts] = useState<Record<string, number>>({})
@@ -506,7 +525,7 @@ export function useAsyncFeedback(): AsyncFeedback {
       }
       return result
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Request failed'
+      const message = feedbackErrorMessage(error)
       const notice: ActivityNotice = {
         id: `notice-${noticeSeqRef.current += 1}`,
         intent: 'error',
@@ -903,16 +922,19 @@ export function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] 
   return input.map((provider) => ({
     id: provider.id,
     name: provider.name,
+    key: provider.key,
     status: provider.status,
     backend: provider.browser_backend,
     fallback: provider.env_var || 'Not configured',
     envVar: provider.env_var,
+    modelPrefix: provider.model_prefix,
     supportsSafety: provider.supports_safety_identifier,
     vertexProject: provider.vertex_project,
     vertexLocation: provider.vertex_location,
     enabled: provider.enabled,
     endpoints: provider.endpoints.map((endpoint) => ({
       id: endpoint.id,
+      key: endpoint.key,
       name: endpoint.model,
       enabled: endpoint.enabled,
       litellm_pricing_model: endpoint.litellm_pricing_model ?? null,

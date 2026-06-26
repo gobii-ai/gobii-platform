@@ -260,6 +260,7 @@ def build_llm_overview() -> dict[str, Any]:
                 "key": provider.key,
                 "enabled": bool(provider.enabled),
                 "env_var": provider.env_var_name,
+                "model_prefix": provider.model_prefix,
                 "browser_backend": provider.browser_backend,
                 "supports_safety_identifier": provider.supports_safety_identifier,
                 "vertex_project": provider.vertex_project,

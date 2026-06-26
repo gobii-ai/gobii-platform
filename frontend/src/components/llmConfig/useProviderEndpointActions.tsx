@@ -141,6 +141,19 @@ export function useProviderEndpointActions({
       },
     )
   }
+
+  const handleProviderCreate = (payload: llmApi.ProviderCreatePayload) => {
+    return runMutation(
+      () => llmApi.createProvider(payload),
+      {
+        successMessage: 'Provider added',
+        label: 'Adding provider...',
+        busyKey: actionKey('provider', 'create'),
+        context: payload.display_name,
+        rethrow: true,
+      },
+    )
+  }
   
   const handleProviderAddEndpoint = (
     provider: ProviderCardData,
@@ -319,5 +332,5 @@ export function useProviderEndpointActions({
     onTestEndpoint: handleProviderTestEndpoint,
   }
 
-  return { endpointTestStatuses, providerHandlers }
+  return { endpointTestStatuses, providerHandlers, onCreateProvider: handleProviderCreate }
 }

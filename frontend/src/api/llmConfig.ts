@@ -54,12 +54,28 @@ export type Provider = {
   key: string
   enabled: boolean
   env_var: string
+  model_prefix: string
   browser_backend: string
   supports_safety_identifier: boolean
   vertex_project: string
   vertex_location: string
   status: string
   endpoints: ProviderEndpoint[]
+}
+
+export type ProviderBrowserBackend = 'OPENAI' | 'ANTHROPIC' | 'GOOGLE' | 'OPENAI_COMPAT'
+
+export type ProviderCreatePayload = {
+  display_name: string
+  key: string
+  api_key?: string
+  env_var_name?: string
+  model_prefix?: string
+  browser_backend: ProviderBrowserBackend
+  supports_safety_identifier: boolean
+  vertex_project?: string
+  vertex_location?: string
+  enabled: boolean
 }
 
 export type TierEndpoint = {
@@ -181,6 +197,10 @@ function withCsrf(json?: unknown, method: string = 'POST') {
 
 export function updateProvider(providerId: string, payload: Record<string, unknown>) {
   return jsonRequest(`${base}/providers/${providerId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function createProvider(payload: ProviderCreatePayload) {
+  return jsonRequest(`${base}/providers/`, withCsrf(payload))
 }
 
 const endpointPaths = {

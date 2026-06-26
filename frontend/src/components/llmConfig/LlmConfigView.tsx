@@ -23,6 +23,7 @@ import {
 import { SectionCard } from './SectionCard'
 import { StatCard } from './StatCard'
 import { ProviderCard } from './ProviderCard'
+import { ProviderFormModal } from './ProviderFormModal'
 import { ActivityDock, RangeSection, TierCard, TierGroupSection } from './RoutingSections'
 import { PerformanceTestingPanel } from './PerformanceTestingPanel'
 import { actionKey, button } from './shared'
@@ -182,6 +183,23 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
         <SectionCard
           title="Provider inventory"
           description="Toggle providers on/off, rotate keys, and review exposed endpoints."
+          actions={
+            <button
+              type="button"
+              className={button.primary}
+              onClick={() => showModal((onClose) => (
+                <ProviderFormModal
+                  onCreate={providerState.onCreateProvider}
+                  onClose={onClose}
+                  busy={feedback.isBusy(actionKey('provider', 'create'))}
+                />
+              ))}
+              disabled={feedback.isBusy(actionKey('provider', 'create'))}
+            >
+              <Plus className="size-4" />
+              Add provider
+            </button>
+          }
         >
           <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
             {data.providers.map((provider) => (
