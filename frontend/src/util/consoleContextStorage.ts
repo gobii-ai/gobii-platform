@@ -16,12 +16,22 @@ const LEGACY_LOCAL_STORAGE_KEYS = {
   name: 'contextName',
 }
 
+function isUsableStorage(storage: Storage | null): storage is Storage {
+  return Boolean(
+    storage
+    && typeof storage.getItem === 'function'
+    && typeof storage.setItem === 'function'
+    && typeof storage.removeItem === 'function'
+  )
+}
+
 function getLocalStorage(): Storage | null {
   if (typeof window === 'undefined') {
     return null
   }
   try {
-    return window.localStorage
+    const storage = window.localStorage
+    return isUsableStorage(storage) ? storage : null
   } catch {
     return null
   }
@@ -32,14 +42,14 @@ function getSessionStorage(): Storage | null {
     return null
   }
   try {
-    return window.sessionStorage
+    const storage = window.sessionStorage
+    return isUsableStorage(storage) ? storage : null
   } catch {
     return null
   }
 }
 
-export function readStoredConsoleContext(): StoredConsoleContext | null {
-  const storage = getSessionStorage()
+function readContextFromStorage(storage: Storage | null): StoredConsoleContext | null {
   if (!storage) {
     return null
   }
@@ -56,8 +66,24 @@ export function readStoredConsoleContext(): StoredConsoleContext | null {
   }
 }
 
-export function storeConsoleContext(context: StoredConsoleContext): void {
-  const storage = getSessionStorage()
+function readLegacyContextFromStorage(storage: Storage | null): StoredConsoleContext | null {
+  if (!storage) {
+    return null
+  }
+  const type = storage.getItem(LEGACY_LOCAL_STORAGE_KEYS.type)
+  const id = storage.getItem(LEGACY_LOCAL_STORAGE_KEYS.id)
+  if (!type || !id) {
+    return null
+  }
+  const name = storage.getItem(LEGACY_LOCAL_STORAGE_KEYS.name)
+  return {
+    type,
+    id,
+    name: name && name.trim() ? name : null,
+  }
+}
+
+function writeContextToStorage(storage: Storage | null, context: StoredConsoleContext): void {
   if (!storage) {
     return
   }
@@ -68,6 +94,21 @@ export function storeConsoleContext(context: StoredConsoleContext): void {
   } else {
     storage.removeItem(STORAGE_KEYS.name)
   }
+}
+
+export function readStoredConsoleContext(): StoredConsoleContext | null {
+  const sessionContext = readContextFromStorage(getSessionStorage())
+  if (sessionContext) {
+    return sessionContext
+  }
+
+  const localStorageRef = getLocalStorage()
+  return readContextFromStorage(localStorageRef) ?? readLegacyContextFromStorage(localStorageRef)
+}
+
+export function storeConsoleContext(context: StoredConsoleContext): void {
+  writeContextToStorage(getSessionStorage(), context)
+  writeContextToStorage(getLocalStorage(), context)
 }
 
 export function clearStoredConsoleContext(): void {
