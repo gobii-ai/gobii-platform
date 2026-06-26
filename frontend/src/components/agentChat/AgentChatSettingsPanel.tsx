@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ExternalLink, Settings } from 'lucide-react'
+import { Slider as AriaSlider, SliderThumb, SliderTrack } from 'react-aria-components'
 
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
 import { AgentIntelligenceSlider } from '../common/AgentIntelligenceSlider'
@@ -329,19 +330,36 @@ export function AgentChatSettingsPanel({
           ) : dailyCredits ? (
             <>
               <div className="agent-settings-slider">
-                <label htmlFor="daily-credit-limit" className="agent-settings-input-label">
+                <span id="daily-credit-limit-label" className="agent-settings-input-label">
                   Adjust soft target
-                </label>
-                <input
+                </span>
+                <AriaSlider
+                  aria-labelledby="daily-credit-limit-label"
                   id="daily-credit-limit"
-                  type="range"
-                  min={sliderMin}
-                  max={sliderMax}
+                  className="agent-settings-range"
+                  minValue={sliderMin}
+                  maxValue={sliderMax}
                   step={sliderStep}
                   value={sliderValue}
-                  onChange={(event) => updateSliderValue(Number(event.target.value))}
-                  className="agent-settings-range"
-                />
+                  onChange={(value: number | number[]) => {
+                    const numeric = Array.isArray(value) ? value[0] : value
+                    if (typeof numeric === 'number') {
+                      updateSliderValue(numeric)
+                    }
+                  }}
+                >
+                  <SliderTrack className="agent-settings-slider-track">
+                    {({ state }) => {
+                      const percent = Math.min(Math.max(state.getThumbPercent(0) * 100, 0), 100)
+                      return (
+                        <>
+                          <div className="agent-settings-slider-fill" style={{ width: `${percent}%` }} />
+                          <SliderThumb index={0} className="agent-settings-slider-thumb" />
+                        </>
+                      )
+                    }}
+                  </SliderTrack>
+                </AriaSlider>
                 <div className="agent-settings-slider-hint">
                   <span>{sliderValue === sliderEmptyValue ? 'Unlimited' : `${Math.round(sliderValue)} credits/day`}</span>
                   <span>Unlimited</span>
