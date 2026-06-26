@@ -2,6 +2,7 @@
 Unit tests for event processing LLM selection and token estimation.
 """
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -58,19 +59,23 @@ class TestEventProcessingLLMSelection(TestCase):
         call_args = mock_completion.call_args
         self.assertEqual(call_args.kwargs['model'], "vertex_ai/gemini-2.5-pro")
 
-    @patch('api.agent.core.llm_utils.litellm.completion')
-    def test_parallel_tool_calls_flag_is_passed(self, mock_completion):
+    @patch('api.agent.core.openai_responses.OpenAI')
+    def test_parallel_tool_calls_flag_is_passed(self, mock_openai):
         """_completion_with_failover passes parallel_tool_calls when endpoint enables it."""
-        from unittest.mock import MagicMock
-        mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_message = MagicMock()
-        mock_message.content = "ok"
-        setattr(mock_message, 'tool_calls', [])
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
-        mock_response.model_extra = {}
-        mock_completion.return_value = mock_response
+        client = Mock()
+        client.responses.create.return_value = SimpleNamespace(
+            id="resp_parallel",
+            status="completed",
+            output_text="ok",
+            output=[
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "ok"}],
+                }
+            ],
+            usage=None,
+        )
+        mock_openai.return_value = client
 
         messages = [{"role": "user", "content": "hello"}]
         tools = [
@@ -100,13 +105,10 @@ class TestEventProcessingLLMSelection(TestCase):
         from api.agent.core.event_processing import _completion_with_failover
         _completion_with_failover(messages, tools, failover_configs=failover_configs, agent_id="agent-1")
 
-        self.assertTrue(mock_completion.called)
-        kwargs = mock_completion.call_args.kwargs
+        kwargs = client.responses.create.call_args.kwargs
         self.assertIn('parallel_tool_calls', kwargs)
         self.assertTrue(kwargs['parallel_tool_calls'])
-        # drop_params helps avoid provider rejections
-        self.assertIn('drop_params', kwargs)
-        self.assertTrue(kwargs['drop_params'])
+        self.assertEqual(kwargs["model"], "gpt-4.1")
 
     @patch('api.agent.core.event_processing.run_completion')
     def test_completion_with_failover_attaches_selected_allow_implied_send_hint_to_response(self, mock_run_completion):

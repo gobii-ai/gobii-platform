@@ -5,7 +5,9 @@ from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings, tag
 import litellm
 
+from api.agent.core.llm_streaming import StreamAccumulator
 from api.agent.core.llm_utils import InvalidLiteLLMResponseError, run_completion
+from api.agent.core.token_usage import extract_reasoning_content, extract_token_usage
 from tests.utils.token_usage import make_completion_response
 
 
@@ -51,6 +53,66 @@ class _AsyncClosableBlockingFirstChunkStream(_BlockingFirstChunkStream):
         self.released.set()
 
 
+def _responses_usage(prompt_tokens=11, completion_tokens=7, cached_tokens=3, reasoning_tokens=2):
+    return SimpleNamespace(
+        input_tokens=prompt_tokens,
+        output_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        input_tokens_details=SimpleNamespace(cached_tokens=cached_tokens),
+        output_tokens_details=SimpleNamespace(reasoning_tokens=reasoning_tokens),
+    )
+
+
+def _responses_response(
+    *,
+    content="Result",
+    reasoning=None,
+    tool_calls=None,
+    usage=None,
+    response_id="resp_test",
+    status="completed",
+):
+    output = []
+    if reasoning is not None:
+        output.append(
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": reasoning}],
+            }
+        )
+    if content is not None:
+        output.append(
+            {
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": content, "annotations": []}],
+            }
+        )
+    for call in tool_calls or []:
+        output.append(
+            {
+                "type": "function_call",
+                "id": call.get("id", call.get("call_id")),
+                "call_id": call["call_id"],
+                "name": call["name"],
+                "arguments": call["arguments"],
+                "status": "completed",
+            }
+        )
+    return SimpleNamespace(
+        id=response_id,
+        status=status,
+        output_text=content,
+        output=output,
+        usage=usage or _responses_usage(),
+    )
+
+
+def _responses_event(event_type, **kwargs):
+    return SimpleNamespace(type=event_type, **kwargs)
+
+
 class RunCompletionReasoningTests(TestCase):
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
@@ -93,6 +155,264 @@ class RunCompletionReasoningTests(TestCase):
         _, kwargs = mock_completion.call_args
         self.assertEqual(kwargs.get("reasoning_effort"), "low")
         self.assertEqual(kwargs.get("allowed_openai_params"), ["extra_body", "reasoning_effort"])
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    @patch("api.agent.core.openai_responses.OpenAI")
+    def test_first_party_openai_uses_responses_api_with_reasoning_summary(
+        self,
+        mock_openai,
+        mock_litellm_completion,
+    ):
+        client = Mock()
+        client.responses.create.return_value = _responses_response(
+            content="Final answer",
+            reasoning="Checked the inputs.",
+        )
+        mock_openai.return_value = client
+
+        result = run_completion(
+            model="openai/gpt-5",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={"api_key": "sk-test", "supports_reasoning": True, "reasoning_effort": "low"},
+        )
+
+        mock_openai.assert_called_once_with(api_key="sk-test")
+        mock_litellm_completion.assert_not_called()
+        _, kwargs = client.responses.create.call_args
+        self.assertEqual(kwargs["model"], "gpt-5")
+        self.assertEqual(kwargs["input"], [{"role": "user", "content": "Hello"}])
+        self.assertEqual(kwargs["reasoning"], {"summary": "auto", "effort": "low"})
+        self.assertEqual(result.choices[0].message.content, "Final answer")
+        self.assertEqual(extract_reasoning_content(result), "Checked the inputs.")
+        self.assertEqual(result.response_id, "resp_test")
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    @patch("api.agent.core.openai_responses.OpenAI")
+    def test_openai_compatible_api_base_stays_on_litellm(self, mock_openai, mock_completion):
+        response = make_completion_response(content="compat")
+        mock_completion.return_value = response
+
+        result = run_completion(
+            model="openai/custom-model",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={"api_key": "sk-test", "api_base": "https://proxy.example/v1", "supports_reasoning": True},
+        )
+
+        self.assertIs(result, response)
+        mock_openai.assert_not_called()
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs["api_base"], "https://proxy.example/v1")
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.openai_responses.OpenAI")
+    def test_openai_responses_omits_reasoning_when_not_supported(self, mock_openai):
+        client = Mock()
+        client.responses.create.return_value = _responses_response(content="No reasoning")
+        mock_openai.return_value = client
+
+        run_completion(
+            model="openai/gpt-4.1-mini",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={"supports_reasoning": False, "reasoning_effort": "high"},
+        )
+
+        _, kwargs = client.responses.create.call_args
+        self.assertNotIn("reasoning", kwargs)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.openai_responses.OpenAI")
+    def test_openai_responses_converts_tools_tool_choice_and_tool_calls(self, mock_openai):
+        client = Mock()
+        client.responses.create.return_value = _responses_response(
+            content=None,
+            tool_calls=[
+                {
+                    "call_id": "call_weather",
+                    "name": "get_weather",
+                    "arguments": '{"city":"Boston"}',
+                }
+            ],
+        )
+        mock_openai.return_value = client
+
+        result = run_completion(
+            model="openai/gpt-5",
+            messages=[
+                {"role": "user", "content": "Weather?"},
+                {"role": "tool", "tool_call_id": "call_previous", "content": "previous output"},
+            ],
+            params={"supports_reasoning": True},
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get weather",
+                        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+                    },
+                }
+            ],
+            tool_choice={"type": "function", "function": {"name": "get_weather"}},
+        )
+
+        _, kwargs = client.responses.create.call_args
+        self.assertEqual(
+            kwargs["tools"],
+            [
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": [],
+                    },
+                    "strict": False,
+                }
+            ],
+        )
+        self.assertEqual(kwargs["tool_choice"], {"type": "function", "name": "get_weather"})
+        self.assertEqual(
+            kwargs["input"][1],
+            {"type": "function_call_output", "call_id": "call_previous", "output": "previous output"},
+        )
+        self.assertEqual(
+            result.choices[0].message.tool_calls,
+            [
+                {
+                    "id": "call_weather",
+                    "type": "function",
+                    "function": {"name": "get_weather", "arguments": '{"city":"Boston"}'},
+                }
+            ],
+        )
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.openai_responses.OpenAI")
+    def test_openai_responses_usage_normalizes_for_token_accounting(self, mock_openai):
+        client = Mock()
+        client.responses.create.return_value = _responses_response(
+            content="Usage",
+            usage=_responses_usage(prompt_tokens=13, completion_tokens=8, cached_tokens=5),
+        )
+        mock_openai.return_value = client
+
+        result = run_completion(
+            model="openai/gpt-5",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={"supports_reasoning": True},
+        )
+
+        token_usage, usage = extract_token_usage(result)
+        self.assertEqual(token_usage["prompt_tokens"], 13)
+        self.assertEqual(token_usage["completion_tokens"], 8)
+        self.assertEqual(token_usage["total_tokens"], 21)
+        self.assertEqual(token_usage["cached_tokens"], 5)
+        self.assertEqual(usage.prompt_tokens_details.cached_tokens, 5)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.openai_responses.OpenAI")
+    def test_openai_responses_streaming_text_and_reasoning_deltas_accumulate(self, mock_openai):
+        client = Mock()
+        completed = _responses_response(content="", usage=_responses_usage(prompt_tokens=3, completion_tokens=4))
+        client.responses.create.return_value = iter(
+            [
+                _responses_event("response.created", response=SimpleNamespace(id="resp_stream")),
+                _responses_event("response.reasoning_summary_text.delta", delta="Thinking. "),
+                _responses_event("response.output_text.delta", delta="Hello"),
+                _responses_event("response.output_text.delta", delta=" world"),
+                _responses_event("response.completed", response=completed),
+            ]
+        )
+        mock_openai.return_value = client
+
+        stream = run_completion(
+            model="openai/gpt-5",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={"supports_reasoning": True},
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+
+        accumulator = StreamAccumulator()
+        for chunk in stream:
+            accumulator.ingest_chunk(chunk)
+        response = accumulator.build_response(model="openai/gpt-5", provider="openai")
+        self.assertEqual(response.choices[0].message.content, "Hello world")
+        self.assertEqual(response.choices[0].message.reasoning_content, "Thinking. ")
+        self.assertEqual(response.usage.prompt_tokens, 3)
+        _, kwargs = client.responses.create.call_args
+        self.assertTrue(kwargs["stream"])
+        self.assertEqual(kwargs["stream_options"], {"include_usage": True})
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.openai_responses.OpenAI")
+    def test_openai_responses_streaming_function_call_events_accumulate(self, mock_openai):
+        client = Mock()
+        completed = _responses_response(content=None, usage=_responses_usage())
+        client.responses.create.return_value = iter(
+            [
+                _responses_event("response.created", response=SimpleNamespace(id="resp_stream")),
+                _responses_event(
+                    "response.function_call_arguments.delta",
+                    item_id="call_weather",
+                    output_index=0,
+                    delta='{"city":',
+                ),
+                _responses_event(
+                    "response.function_call_arguments.delta",
+                    item_id="call_weather",
+                    output_index=0,
+                    delta='"Boston"}',
+                ),
+                _responses_event(
+                    "response.function_call_arguments.done",
+                    item_id="call_weather",
+                    output_index=0,
+                    name="get_weather",
+                    arguments='{"city":"Boston"}',
+                ),
+                _responses_event("response.completed", response=completed),
+            ]
+        )
+        mock_openai.return_value = client
+
+        stream = run_completion(
+            model="openai/gpt-5",
+            messages=[{"role": "user", "content": "Weather?"}],
+            params={"supports_reasoning": True},
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get weather",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+            stream=True,
+        )
+
+        accumulator = StreamAccumulator()
+        for chunk in stream:
+            accumulator.ingest_chunk(chunk)
+        response = accumulator.build_response(model="openai/gpt-5", provider="openai")
+        self.assertEqual(
+            response.choices[0].message.tool_calls,
+            [
+                {
+                    "id": "call_weather",
+                    "type": "function",
+                    "function": {"name": "get_weather", "arguments": '{"city":"Boston"}'},
+                }
+            ],
+        )
+        _, kwargs = client.responses.create.call_args
+        self.assertEqual(kwargs["stream_options"], {"include_usage": True})
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")

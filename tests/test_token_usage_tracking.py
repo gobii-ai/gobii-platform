@@ -247,7 +247,7 @@ class TokenUsageTrackingTest(TestCase):
             response, token_usage = _completion_with_failover(
                 messages=[{"role": "user", "content": "Cost please"}],
                 tools=[],
-                failover_configs=[("openai", "openai/gpt-4o", {})],
+                failover_configs=[("openai", "openai/gpt-4o", {"api_base": "https://proxy.example/v1"})],
                 agent_id=str(self.agent.id),
             )
 
@@ -280,7 +280,9 @@ class TokenUsageTrackingTest(TestCase):
             response, token_usage = _completion_with_failover(
                 messages=[{"role": "user", "content": "Hi"}],
                 tools=[],
-                failover_configs=[("openai-provider", "openai/gpt-4o-mini", {})],
+                failover_configs=[
+                    ("openai-provider", "openai/gpt-4o-mini", {"api_base": "https://proxy.example/v1"})
+                ],
                 agent_id=str(self.agent.id),
             )
 

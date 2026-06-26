@@ -10,12 +10,14 @@ from asgiref.sync import async_to_sync
 
 from django.conf import settings
 import litellm
+import openai
 
 from api.services.system_settings import (
     get_litellm_first_data_timeout_seconds,
     get_litellm_timeout_seconds,
 )
 from api.utils.json_schema import sanitize_tool_parameters_schema_for_llm
+from .openai_responses import create_openai_responses_completion, should_use_openai_responses
 from .token_usage import extract_reasoning_content
 _HINT_KEYS = (
     "supports_temperature",
@@ -61,6 +63,10 @@ _RETRYABLE_ERRORS = (
     litellm.APIConnectionError,
     litellm.ServiceUnavailableError,
     litellm.RateLimitError,
+    openai.APITimeoutError,
+    openai.APIConnectionError,
+    openai.RateLimitError,
+    openai.InternalServerError,
     EmptyLiteLLMResponseError,
     InvalidLiteLLMResponseError,
 )
@@ -118,7 +124,7 @@ class _FirstDataTimeoutStream:
                 raise exc
             self.close()
             logger.warning(
-                "LiteLLM request failed with %s; retrying (%d/%d)",
+                "LLM request failed with %s; retrying (%d/%d)",
                 type(exc).__name__,
                 self._attempt,
                 self._max_attempts,
@@ -149,7 +155,7 @@ class _FirstDataTimeoutStream:
             self._timed_out = True
             self.close()
             raise litellm.Timeout(
-                message=f"LiteLLM stream produced no data within {self._timeout_seconds} seconds",
+                message=f"LLM stream produced no data within {self._timeout_seconds} seconds",
                 model=self._model,
                 llm_provider=self._provider or "unknown",
             )
@@ -446,6 +452,7 @@ def run_completion(
     reasoning_effort = hints.get("reasoning_effort", None)
 
     extra_reasoning_effort = extra_kwargs.get("reasoning_effort")
+    selected_reasoning_effort = extra_reasoning_effort or reasoning_effort
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": list(messages),
@@ -455,26 +462,15 @@ def run_completion(
 
     kwargs.pop("reasoning_effort", None)
     if supports_reasoning:
-        allowed_openai_params = kwargs.get("allowed_openai_params")
-        if allowed_openai_params is None:
-            allowed_openai_params = []
-        elif isinstance(allowed_openai_params, str):
-            allowed_openai_params = [allowed_openai_params]
-        else:
-            allowed_openai_params = list(allowed_openai_params)
-        if "reasoning_effort" not in allowed_openai_params:
-            allowed_openai_params.append("reasoning_effort")
-        kwargs["allowed_openai_params"] = allowed_openai_params
-
-        selected_reasoning_effort = extra_reasoning_effort or reasoning_effort
         if selected_reasoning_effort:
             kwargs["reasoning_effort"] = selected_reasoning_effort
 
     if drop_params:
         kwargs["drop_params"] = True
 
+    sanitized_tools = sanitize_tools_for_llm(tools) if tools else None
     if tools:
-        kwargs["tools"] = sanitize_tools_for_llm(tools)
+        kwargs["tools"] = sanitized_tools
         if tool_choice_supported:
             kwargs.setdefault("tool_choice", "auto")
     else:
@@ -489,6 +485,19 @@ def run_completion(
     if kwargs.get("timeout") is None:
         kwargs["timeout"] = get_litellm_timeout_seconds()
 
+    use_openai_responses = should_use_openai_responses(model, kwargs)
+    if supports_reasoning and not use_openai_responses:
+        allowed_openai_params = kwargs.get("allowed_openai_params")
+        if allowed_openai_params is None:
+            allowed_openai_params = []
+        elif isinstance(allowed_openai_params, str):
+            allowed_openai_params = [allowed_openai_params]
+        else:
+            allowed_openai_params = list(allowed_openai_params)
+        if "reasoning_effort" not in allowed_openai_params:
+            allowed_openai_params.append("reasoning_effort")
+        kwargs["allowed_openai_params"] = allowed_openai_params
+
     max_attempts = max(1, int(getattr(settings, "LITELLM_MAX_RETRIES", 2)))
     backoff_seconds = float(getattr(settings, "LITELLM_RETRY_BACKOFF_SECONDS", 1.0))
 
@@ -497,11 +506,39 @@ def run_completion(
         provider_hint = kwargs.get("provider")
     if not isinstance(provider_hint, str):
         provider_hint = None
+    if use_openai_responses and provider_hint is None:
+        provider_hint = "openai"
 
     for attempt in range(1, max_attempts + 1):
         try:
             duration_ms = None
-            if not kwargs.get("stream"):
+            if use_openai_responses:
+                def _create_openai_response():
+                    return create_openai_responses_completion(
+                        model=model,
+                        messages=kwargs["messages"],
+                        kwargs=kwargs,
+                        tools=sanitized_tools,
+                        supports_reasoning=bool(supports_reasoning),
+                        reasoning_effort=selected_reasoning_effort,
+                    )
+
+                if not kwargs.get("stream"):
+                    start_time = time.monotonic()
+                    response = _create_openai_response()
+                    duration_ms = int(round((time.monotonic() - start_time) * 1000))
+                else:
+                    response = _create_openai_response()
+                    response = _wrap_stream_with_first_data_timeout(
+                        response,
+                        create_stream=_create_openai_response,
+                        model=model,
+                        provider=provider_hint,
+                        initial_attempt=attempt,
+                        max_attempts=max_attempts,
+                        backoff_seconds=backoff_seconds,
+                    )
+            elif not kwargs.get("stream"):
                 start_time = time.monotonic()
                 response = litellm.completion(**kwargs)
                 duration_ms = int(round((time.monotonic() - start_time) * 1000))
@@ -525,7 +562,7 @@ def run_completion(
             if attempt >= max_attempts:
                 raise
             logger.warning(
-                "LiteLLM request failed with %s; retrying (%d/%d)",
+                "LLM request failed with %s; retrying (%d/%d)",
                 type(exc).__name__,
                 attempt,
                 max_attempts,
