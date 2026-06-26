@@ -21,10 +21,12 @@ import contextvars
 import sys
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 from urllib.parse import urlparse
 from typing import Callable, Dict, Any, Iterable, List, Optional, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, UTC
+from dataclasses import asdict, dataclass, field, is_dataclass
+from datetime import date, datetime, time, timedelta, UTC
+from uuid import UUID
 
 import requests
 
@@ -1883,6 +1885,15 @@ class MCPToolManager:
     def _json_safe_mcp_data(cls, value: Any) -> Any:
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
+
+        if isinstance(value, (datetime, date, time)):
+            return value.isoformat()
+
+        if isinstance(value, (Decimal, UUID)):
+            return str(value)
+
+        if is_dataclass(value) and not isinstance(value, type):
+            return cls._json_safe_mcp_data(asdict(value))
 
         model_dump = getattr(value, "model_dump", None)
         if callable(model_dump):

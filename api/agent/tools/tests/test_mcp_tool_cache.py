@@ -1,8 +1,11 @@
 import asyncio
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, time
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 from django.test import SimpleTestCase, tag, override_settings
 from django.utils import timezone
@@ -494,6 +497,46 @@ class MCPToolResultDataNormalizationTests(SimpleTestCase):
         self.assertEqual(result["result"]["items"], [{"name": "beta", "rank": 2}])
         self.assertEqual(result["result"]["tuple_items"], [{"name": "gamma", "rank": 3}])
         self.assertEqual(sorted(result["result"]["set_items"]), ["delta"])
+        json.dumps(result)
+
+    def test_standard_json_hostile_types_are_normalized(self):
+        @dataclass
+        class Event:
+            id: UUID
+            amount: Decimal
+            created_at: datetime
+            event_date: date
+            event_time: time
+
+        manager = MCPToolManager()
+        raw_result = SimpleNamespace(
+            data={
+                "event": Event(
+                    id=UUID("12345678-1234-5678-1234-567812345678"),
+                    amount=Decimal("10.50"),
+                    created_at=datetime(2026, 6, 26, 18, 35, 0, tzinfo=UTC),
+                    event_date=date(2026, 6, 26),
+                    event_time=time(18, 35, 0),
+                ),
+                "ids": {UUID("87654321-4321-8765-4321-876543218765")},
+                "amounts": [Decimal("1.25")],
+            },
+        )
+
+        result = manager._finalize_mcp_result("example", "standard-types", raw_result)
+
+        self.assertEqual(
+            result["result"]["event"],
+            {
+                "id": "12345678-1234-5678-1234-567812345678",
+                "amount": "10.50",
+                "created_at": "2026-06-26T18:35:00+00:00",
+                "event_date": "2026-06-26",
+                "event_time": "18:35:00",
+            },
+        )
+        self.assertEqual(result["result"]["amounts"], ["1.25"])
+        self.assertEqual(result["result"]["ids"], ["87654321-4321-8765-4321-876543218765"])
         json.dumps(result)
 
 
