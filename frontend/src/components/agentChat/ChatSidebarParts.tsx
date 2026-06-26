@@ -3,35 +3,10 @@ import { Check, Search, Star, X } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
+import { joinClassNames } from './uiPrimitives'
 
 type SearchVariant = 'drawer' | 'sidebar'
 type SortVariant = SearchVariant
-
-const SEARCH_VARIANTS: Record<
-  SearchVariant,
-  {
-    containerClass: string
-    iconClass: string
-    inputClass: string
-    clearClass: string
-    placeholder: string
-  }
-> = {
-  drawer: {
-    containerClass: 'agent-drawer-search',
-    iconClass: 'agent-drawer-search-icon',
-    inputClass: 'agent-drawer-search-input',
-    clearClass: 'agent-drawer-search-clear',
-    placeholder: 'Search agents...',
-  },
-  sidebar: {
-    containerClass: 'chat-sidebar-search',
-    iconClass: 'chat-sidebar-search-icon',
-    inputClass: 'chat-sidebar-search-input',
-    clearClass: 'chat-sidebar-search-clear',
-    placeholder: 'Search...',
-  },
-}
 
 type AgentSearchInputProps = {
   variant: SearchVariant
@@ -41,14 +16,13 @@ type AgentSearchInputProps = {
 }
 
 export function AgentSearchInput({ variant, value, onChange, onClear }: AgentSearchInputProps) {
-  const styles = SEARCH_VARIANTS[variant]
   return (
-    <div className={styles.containerClass}>
-      <Search className={styles.iconClass} aria-hidden="true" />
+    <div className="agent-roster-search" data-variant={variant}>
+      <Search className="agent-roster-search__icon" aria-hidden="true" />
       <input
         type="text"
-        className={styles.inputClass}
-        placeholder={styles.placeholder}
+        className="agent-roster-search__input"
+        placeholder={variant === 'drawer' ? 'Search agents...' : 'Search...'}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         autoComplete="off"
@@ -58,7 +32,7 @@ export function AgentSearchInput({ variant, value, onChange, onClear }: AgentSea
       {value ? (
         <button
           type="button"
-          className={styles.clearClass}
+          className="agent-roster-search__clear"
           onClick={onClear}
           aria-label="Clear search"
         >
@@ -76,13 +50,11 @@ type AgentSortToggleProps = {
 }
 
 export function AgentSortToggle({ variant, value, onChange }: AgentSortToggleProps) {
-  const containerClass = variant === 'drawer' ? 'agent-drawer-sort-toggle' : 'chat-sidebar-sort-toggle'
-  const buttonClass = variant === 'drawer' ? 'agent-drawer-sort-toggle-button' : 'chat-sidebar-sort-toggle-button'
   return (
-    <div className={containerClass} role="group" aria-label="Sort agents">
+    <div className="agent-roster-sort" data-variant={variant} role="group" aria-label="Sort agents">
       <button
         type="button"
-        className={buttonClass}
+        className="agent-roster-sort__button"
         data-active={value === 'recent' ? 'true' : 'false'}
         onClick={() => onChange('recent')}
       >
@@ -90,7 +62,7 @@ export function AgentSortToggle({ variant, value, onChange }: AgentSortTogglePro
       </button>
       <button
         type="button"
-        className={buttonClass}
+        className="agent-roster-sort__button"
         data-active={value === 'alphabetical' ? 'true' : 'false'}
         onClick={() => onChange('alphabetical')}
       >
@@ -130,8 +102,11 @@ export function AgentEmptyState({
   }
 
   if (!message) return null
-  const className = variant === 'drawer' ? 'agent-drawer-empty' : 'chat-sidebar-agent-empty'
-  return <div className={className}>{message}</div>
+  return (
+    <div className="agent-roster-empty" data-variant={variant}>
+      {message}
+    </div>
+  )
 }
 
 type AgentListSectionHeaderProps = {
@@ -141,9 +116,8 @@ type AgentListSectionHeaderProps = {
 }
 
 export function AgentListSectionHeader({ variant, label, count }: AgentListSectionHeaderProps) {
-  const className = variant === 'drawer' ? 'agent-drawer-section-header' : 'chat-sidebar-subsection-header'
   return (
-    <div className={className}>
+    <div className="agent-roster-section-header" data-variant={variant}>
       <span>{label}</span>
       <span>{count}</span>
     </div>
@@ -161,31 +135,6 @@ type AgentListItemProps = {
   collapsed?: boolean
   showFavoriteToggle?: boolean
   accentColor?: string | null
-}
-
-const ITEM_STYLES = {
-  drawer: {
-    buttonClass: 'agent-drawer-item',
-    avatarWrapClass: 'agent-drawer-item-avatar-wrap',
-    avatarClass: 'agent-drawer-item-avatar',
-    imageClass: 'agent-drawer-item-avatar-image',
-    textClass: 'agent-drawer-item-avatar-text',
-    metaClass: 'agent-drawer-item-meta',
-    nameClass: 'agent-drawer-item-name',
-    descClass: 'agent-drawer-item-desc',
-    stateClass: 'agent-drawer-item-state',
-  },
-  sidebar: {
-    buttonClass: 'chat-sidebar-agent',
-    avatarWrapClass: 'chat-sidebar-agent-avatar-wrap',
-    avatarClass: 'chat-sidebar-agent-avatar',
-    imageClass: 'chat-sidebar-agent-avatar-image',
-    textClass: 'chat-sidebar-agent-avatar-text',
-    metaClass: 'chat-sidebar-agent-meta',
-    nameClass: 'chat-sidebar-agent-name',
-    descClass: 'chat-sidebar-agent-desc',
-    stateClass: 'chat-sidebar-agent-state',
-  },
 }
 
 export function AgentWorkingIndicator({ label = true }: { label?: boolean }) {
@@ -213,7 +162,6 @@ export function AgentListItem({
   showFavoriteToggle = true,
   accentColor,
 }: AgentListItemProps) {
-  const styles = ITEM_STYLES[variant]
   const accentStyle = accentColor
     ? ({ '--agent-accent': accentColor } as CSSProperties)
     : undefined
@@ -248,80 +196,82 @@ export function AgentListItem({
   return (
     <button
       type="button"
-      className={styles.buttonClass}
+      className={joinClassNames('agent-roster-item', collapsed && variant === 'sidebar' && 'agent-roster-item--collapsed')}
+      data-variant={variant}
       data-active={isActive ? 'true' : 'false'}
       data-switching={isSwitching ? 'true' : 'false'}
       data-enabled={agent.isActive ? 'true' : 'false'}
       data-working={isWorking ? 'true' : 'false'}
       data-unread={hasUnread ? 'true' : 'false'}
+      data-collapsed={collapsed && variant === 'sidebar' ? 'true' : 'false'}
       onClick={() => onSelect(agent)}
       title={variant === 'sidebar' && collapsed ? (hasUnread ? `${collapsedTitle} • Unread` : collapsedTitle) : undefined}
       style={accentStyle}
       role="listitem"
       aria-current={isActive ? 'page' : undefined}
     >
-      <span className={variant === 'drawer' ? 'agent-drawer-item-leading' : 'chat-sidebar-agent-leading'}>
+      <span className="agent-roster-item__leading">
         {showUnreadSlot ? (
-          <span className={variant === 'drawer' ? 'agent-drawer-item-unread-slot' : 'chat-sidebar-agent-unread-slot'}>
+          <span className="agent-roster-item__unread-slot">
             {hasUnread ? (
               <span
-                className={variant === 'drawer' ? 'agent-drawer-item-unread-dot' : 'chat-sidebar-agent-unread-dot'}
+                className="agent-roster-item__unread-dot"
                 aria-label="Unread message"
                 title="Unread message"
               />
             ) : null}
           </span>
         ) : null}
-        <span className={styles.avatarWrapClass}>
+        <span className="agent-roster-item__avatar-wrap">
           <AgentAvatarBadge
             name={agent.name || 'Agent'}
             avatarUrl={agent.avatarUrl}
-            className={styles.avatarClass}
-            imageClassName={styles.imageClass}
-            textClassName={styles.textClass}
+            className="agent-roster-item__avatar"
+            imageClassName="agent-roster-item__avatar-image"
+            textClassName="agent-roster-item__avatar-text"
           />
           {showCollapsedUnreadBadge ? (
             <span
-              className="chat-sidebar-agent-unread-badge"
+              className="agent-roster-item__unread-badge"
               aria-label="Unread message"
               title="Unread message"
             />
           ) : null}
           {variant === 'sidebar' && collapsed && isWorking ? (
-            <span className="chat-sidebar-agent-working-badge" aria-hidden="true">
+            <span className="agent-roster-item__working-badge" aria-hidden="true">
               <AgentWorkingIndicator label={false} />
             </span>
           ) : null}
         </span>
       </span>
       {showMeta ? (
-        <span className={styles.metaClass}>
-          <span className={styles.nameClass}>{agent.name || 'Agent'}</span>
+        <span className="agent-roster-item__meta">
+          <span className="agent-roster-item__name">{agent.name || 'Agent'}</span>
           {hasPendingRequests ? (
             <span className="agent-roster-pending-pill">
               {pendingRequestCount} {pendingRequestCount === 1 ? 'request' : 'requests'}
             </span>
           ) : isWorking ? (
-            <span className={styles.descClass}>
+            <span className="agent-roster-item__desc">
               <AgentWorkingIndicator />
             </span>
           ) : miniDescription ? (
-            <span className={styles.descClass} title={hoverDescription}>
+            <span className="agent-roster-item__desc" title={hoverDescription}>
               {miniDescription}
             </span>
           ) : !agent.isActive ? (
-            <span className={styles.stateClass}>Paused</span>
+            <span className="agent-roster-item__state">Paused</span>
           ) : null}
         </span>
       ) : null}
       {showFavoriteButton || (variant === 'drawer' && isActive) ? (
-        <span className={variant === 'drawer' ? 'agent-drawer-item-trailing' : 'chat-sidebar-agent-trailing'}>
+        <span className="agent-roster-item__trailing">
           {variant === 'drawer' && isActive ? (
-            <Check className="agent-drawer-item-check" aria-hidden="true" />
+            <Check className="agent-roster-item__check" aria-hidden="true" />
           ) : null}
           {showFavoriteButton ? (
             <span
-              className={variant === 'drawer' ? 'agent-drawer-item-favorite' : 'chat-sidebar-agent-favorite'}
+              className="agent-roster-item__favorite"
               data-active={isFavorite ? 'true' : 'false'}
               onClick={handleToggleFavorite}
               onKeyDown={handleFavoriteKeyDown}

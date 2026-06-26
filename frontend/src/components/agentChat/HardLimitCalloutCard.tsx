@@ -3,6 +3,7 @@ import { AlertTriangle, ExternalLink, Settings, Zap } from 'lucide-react'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { appendReturnTo } from '../../util/returnTo'
+import { AgentChatSectionCard } from './uiPrimitives'
 
 type HardLimitCalloutCardProps = {
   onOpenSettings: () => void
@@ -24,7 +25,7 @@ export function HardLimitCalloutCard({
   const upgradeHref = upgradeUrl ? appendReturnTo(upgradeUrl) : null
 
   return (
-    <div className="timeline-event hard-limit-callout">
+    <AgentChatSectionCard className="timeline-event hard-limit-callout" tone="warning">
       <div className="hard-limit-callout-header">
         <span className="hard-limit-callout-icon" aria-hidden="true">
           <AlertTriangle size={16} />
@@ -72,6 +73,6 @@ export function HardLimitCalloutCard({
           </div>
         ) : null}
       </div>
-    </div>
+    </AgentChatSectionCard>
   )
 }

@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { AlertTriangle, CreditCard, PlusSquare, X, Zap } from 'lucide-react'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import { AgentChatSectionCard } from './uiPrimitives'
 
 type TaskCreditsCalloutCardProps = {
   onOpenPacks?: () => void
@@ -31,7 +32,10 @@ export function TaskCreditsCalloutCard({
   const isNoOrgSeats = billingIssue === 'no_org_seats'
 
   return (
-    <div className={`timeline-event hard-limit-callout${isOutOfCredits || isNoOrgSeats ? ' hard-limit-callout--critical' : ''}`}>
+    <AgentChatSectionCard
+      className="timeline-event hard-limit-callout"
+      tone={isOutOfCredits || isNoOrgSeats ? 'critical' : 'warning'}
+    >
       {onDismiss ? (
         <button
           type="button"
@@ -86,6 +90,6 @@ export function TaskCreditsCalloutCard({
           </button>
         </div>
       ) : null}
-    </div>
+    </AgentChatSectionCard>
   )
 }

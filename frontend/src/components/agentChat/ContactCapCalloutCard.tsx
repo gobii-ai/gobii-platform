@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { AlertTriangle, Users, X, Zap } from 'lucide-react'
 
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import { AgentChatSectionCard } from './uiPrimitives'
 
 type ContactCapCalloutCardProps = {
   onOpenPacks?: () => void
@@ -26,7 +27,7 @@ export function ContactCapCalloutCard({
   }, [ensureAuthenticated, openUpgradeModal])
 
   return (
-    <div className="timeline-event hard-limit-callout">
+    <AgentChatSectionCard className="timeline-event hard-limit-callout" tone="warning">
       {onDismiss ? (
         <button
           type="button"
@@ -65,6 +66,6 @@ export function ContactCapCalloutCard({
           ) : null}
         </div>
       ) : null}
-    </div>
+    </AgentChatSectionCard>
   )
 }

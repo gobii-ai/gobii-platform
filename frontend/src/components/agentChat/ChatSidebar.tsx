@@ -458,7 +458,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           ) : null}
           {!showSettingsView && drawerViewMode === 'gallery' ? (
             showCustomGalleryShellPanel ? (
-              <div className="agent-drawer-gallery-scroll">
+              <div className="agent-gallery-scroll" data-variant="drawer">
                 {galleryShellPanel}
               </div>
             ) : (
@@ -590,7 +590,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               {embeddedSettingsPanel}
             </div>
           ) : showCustomGalleryShellPanel ? (
-            <div className="chat-sidebar-gallery-scroll">
+            <div className="agent-gallery-scroll" data-variant="sidebar">
               {galleryShellPanel}
             </div>
           ) : galleryMode ? (

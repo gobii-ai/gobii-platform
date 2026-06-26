@@ -3,6 +3,7 @@ import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentEmptyState, AgentListSectionHeader } from './ChatSidebarParts'
+import { joinClassNames } from './uiPrimitives'
 
 type ChatSidebarGalleryProps = {
   variant: 'sidebar' | 'drawer'
@@ -21,61 +22,6 @@ type ChatSidebarGalleryProps = {
   createAgentButtonDisabled?: boolean
   createAgentDisabledReason?: string | null
 }
-
-const SURFACE_STYLES = {
-  sidebar: {
-    scrollClass: 'chat-sidebar-gallery-scroll',
-    createClass: 'chat-sidebar-gallery-create',
-    sectionClass: 'chat-sidebar-gallery-section',
-    gridClass: 'chat-sidebar-gallery-grid',
-    cardClass: 'chat-sidebar-gallery-card',
-    heroClass: 'chat-sidebar-gallery-card-hero',
-    heroMetaClass: 'chat-sidebar-gallery-card-hero-meta',
-    favoriteClass: 'chat-sidebar-gallery-card-favorite',
-    topActionsClass: 'chat-sidebar-gallery-card-top-actions',
-    iconActionClass: 'chat-sidebar-gallery-card-icon-action',
-    bodyButtonClass: 'chat-sidebar-gallery-card-button',
-    avatarClass: 'chat-sidebar-gallery-card-avatar',
-    avatarImageClass: 'chat-sidebar-gallery-card-avatar-image',
-    avatarTextClass: 'chat-sidebar-gallery-card-avatar-text',
-    nameClass: 'chat-sidebar-gallery-card-name',
-    miniClass: 'chat-sidebar-gallery-card-mini',
-    tagsClass: 'chat-sidebar-gallery-card-tags',
-    footerClass: 'chat-sidebar-gallery-card-footer',
-    primaryActionClass: 'chat-sidebar-gallery-card-primary-action',
-    channelRowClass: 'chat-sidebar-gallery-card-channel-row',
-    channelActionClass: 'chat-sidebar-gallery-card-channel-action',
-    channelEmailClass: 'chat-sidebar-gallery-card-channel-action chat-sidebar-gallery-card-channel-action--email',
-    channelSmsClass: 'chat-sidebar-gallery-card-channel-action chat-sidebar-gallery-card-channel-action--sms',
-    channelChatClass: 'chat-sidebar-gallery-card-channel-action chat-sidebar-gallery-card-channel-action--chat',
-  },
-  drawer: {
-    scrollClass: 'agent-drawer-gallery-scroll',
-    createClass: 'agent-drawer-gallery-create',
-    sectionClass: 'agent-drawer-gallery-section',
-    gridClass: 'agent-drawer-gallery-grid',
-    cardClass: 'agent-drawer-gallery-card',
-    heroClass: 'agent-drawer-gallery-card-hero',
-    heroMetaClass: 'agent-drawer-gallery-card-hero-meta',
-    favoriteClass: 'agent-drawer-gallery-card-favorite',
-    topActionsClass: 'agent-drawer-gallery-card-top-actions',
-    iconActionClass: 'agent-drawer-gallery-card-icon-action',
-    bodyButtonClass: 'agent-drawer-gallery-card-button',
-    avatarClass: 'agent-drawer-gallery-card-avatar',
-    avatarImageClass: 'agent-drawer-gallery-card-avatar-image',
-    avatarTextClass: 'agent-drawer-gallery-card-avatar-text',
-    nameClass: 'agent-drawer-gallery-card-name',
-    miniClass: 'agent-drawer-gallery-card-mini',
-    tagsClass: 'agent-drawer-gallery-card-tags',
-    footerClass: 'agent-drawer-gallery-card-footer',
-    primaryActionClass: 'agent-drawer-gallery-card-primary-action',
-    channelRowClass: 'agent-drawer-gallery-card-channel-row',
-    channelActionClass: 'agent-drawer-gallery-card-channel-action',
-    channelEmailClass: 'agent-drawer-gallery-card-channel-action agent-drawer-gallery-card-channel-action--email',
-    channelSmsClass: 'agent-drawer-gallery-card-channel-action agent-drawer-gallery-card-channel-action--sms',
-    channelChatClass: 'agent-drawer-gallery-card-channel-action agent-drawer-gallery-card-channel-action--chat',
-  },
-} as const
 
 type GalleryCardProps = {
   agent: AgentRosterEntry
@@ -98,7 +44,6 @@ function GalleryCard({
   onConfigureAgent,
   onToggleAgentFavorite,
 }: GalleryCardProps) {
-  const styles = SURFACE_STYLES[variant]
   const isSignupPreviewAgent = !agent.isCollaborator && Boolean(agent.signupPreviewState) && agent.signupPreviewState !== 'none'
   const showSmsAction = Boolean(agent.sms) && !isSignupPreviewAgent
   const showEmailAction = Boolean(agent.email) && !isSignupPreviewAgent
@@ -109,15 +54,16 @@ function GalleryCard({
 
   return (
     <article
-      className={styles.cardClass}
+      className="agent-gallery-card"
+      data-variant={variant}
       data-active={isActive ? 'true' : 'false'}
       data-switching={isSwitching ? 'true' : 'false'}
       role="listitem"
     >
-      <div className={styles.topActionsClass}>
+      <div className="agent-gallery-card__top-actions">
         <button
           type="button"
-          className={styles.favoriteClass}
+          className="agent-gallery-card__favorite"
           data-active={isFavorite ? 'true' : 'false'}
           onClick={() => onToggleAgentFavorite?.(agent.id)}
           disabled={!onToggleAgentFavorite}
@@ -130,36 +76,36 @@ function GalleryCard({
 
       <button
         type="button"
-        className={styles.bodyButtonClass}
+        className="agent-gallery-card__button"
         onClick={() => onSelectAgent?.(agent)}
         aria-current={isActive ? 'page' : undefined}
       >
-        <div className={styles.heroClass}>
-          <span className="chat-sidebar-gallery-card-hero-glow" aria-hidden="true" />
+        <div className="agent-gallery-card__hero">
+          <span className="agent-gallery-card__hero-glow" aria-hidden="true" />
           <AgentAvatarBadge
             name={agent.name || 'Agent'}
             avatarUrl={agent.avatarUrl}
-            className={styles.avatarClass}
-            imageClassName={styles.avatarImageClass}
-            textClassName={styles.avatarTextClass}
+            className="agent-gallery-card__avatar"
+            imageClassName="agent-gallery-card__avatar-image"
+            textClassName="agent-gallery-card__avatar-text"
             fallbackStyle={{ background: 'linear-gradient(135deg, #6d28d9, #1e1145)' }}
           />
-          <div className={styles.heroMetaClass}>
-            <span className={styles.nameClass}>{agent.name || 'Agent'}</span>
+          <div className="agent-gallery-card__hero-meta">
+            <span className="agent-gallery-card__name">{agent.name || 'Agent'}</span>
             {pendingRequestCount > 0 ? (
               <span className="agent-roster-pending-pill">
                 {pendingRequestCount} {pendingRequestCount === 1 ? 'request' : 'requests'}
               </span>
             ) : miniDescription ? (
-              <span className={styles.miniClass}>{miniDescription}</span>
+              <span className="agent-gallery-card__mini">{miniDescription}</span>
             ) : null}
           </div>
         </div>
 
         {agent.displayTags.length > 0 ? (
-          <div className={styles.tagsClass}>
+          <div className="agent-gallery-card__tags">
             {agent.displayTags.map((tag) => (
-              <span key={tag} className="chat-sidebar-gallery-card-tag">
+              <span key={tag} className="agent-gallery-card__tag">
                 {tag}
               </span>
             ))}
@@ -167,12 +113,12 @@ function GalleryCard({
         ) : null}
       </button>
 
-      <div className={styles.footerClass}>
+      <div className="agent-gallery-card__footer">
         {showConfigureAction ? (
           onConfigureAgent ? (
             <button
               type="button"
-              className={styles.primaryActionClass}
+              className="agent-gallery-card__primary-action"
               onClick={() => onConfigureAgent(agent)}
               disabled={isSwitching}
             >
@@ -180,21 +126,21 @@ function GalleryCard({
               <span>Configure</span>
             </button>
           ) : agent.detailUrl ? (
-            <a className={styles.primaryActionClass} href={agent.detailUrl}>
+            <a className="agent-gallery-card__primary-action" href={agent.detailUrl}>
               <Settings className="h-3.5 w-3.5" />
               <span>Configure</span>
             </a>
           ) : null
         ) : null}
-        <div className={styles.channelRowClass}>
+        <div className="agent-gallery-card__channel-row">
           {showEmailAction && agent.email ? (
-            <a className={styles.channelEmailClass} href={`mailto:${agent.email}`} title={agent.email}>
+            <a className="agent-gallery-card__channel-action" data-channel="email" href={`mailto:${agent.email}`} title={agent.email}>
               <Mail className="h-3.5 w-3.5" />
               <span>Email</span>
             </a>
           ) : null}
           {showSmsAction && agent.sms ? (
-            <a className={styles.channelSmsClass} href={`sms:${agent.sms}`} title={agent.sms}>
+            <a className="agent-gallery-card__channel-action" data-channel="sms" href={`sms:${agent.sms}`} title={agent.sms}>
               <MessageSquare className="h-3.5 w-3.5" />
               <span>SMS</span>
             </a>
@@ -202,7 +148,8 @@ function GalleryCard({
           {showChatAction ? (
           <button
             type="button"
-            className={styles.channelChatClass}
+            className="agent-gallery-card__channel-action"
+            data-channel="chat"
             onClick={() => onSelectAgent?.(agent)}
             disabled={isSwitching}
           >
@@ -233,7 +180,6 @@ export function ChatSidebarGallery({
   createAgentButtonDisabled = false,
   createAgentDisabledReason = null,
 }: ChatSidebarGalleryProps) {
-  const styles = SURFACE_STYLES[variant]
   const favoriteAgentIdSet = new Set(favoriteAgentIds)
   const favoriteAgents = agents.filter((agent) => favoriteAgentIdSet.has(agent.id))
   const allAgents = agents.filter((agent) => !favoriteAgentIdSet.has(agent.id))
@@ -241,11 +187,12 @@ export function ChatSidebarGallery({
   const showAllSection = allAgents.length > 0 || !showFavoritesSection
 
   return (
-    <div className={styles.scrollClass}>
+    <div className="agent-gallery-scroll" data-variant={variant}>
       {onCreateAgent ? (
         <button
           type="button"
-          className={styles.createClass}
+          className="agent-gallery-create"
+          data-variant={variant}
           onClick={onCreateAgent}
           disabled={createAgentButtonDisabled}
           aria-disabled={createAgentButtonDisabled ? 'true' : undefined}
@@ -266,9 +213,9 @@ export function ChatSidebarGallery({
       />
 
       {showFavoritesSection ? (
-        <section className={styles.sectionClass}>
+        <section className="agent-gallery-section" data-variant={variant}>
           <AgentListSectionHeader variant={variant} label="Favorites" count={favoriteAgents.length} />
-          <div className={styles.gridClass} role="list">
+          <div className={joinClassNames('agent-gallery-grid', variant === 'drawer' && 'agent-gallery-grid--drawer')} role="list">
             {favoriteAgents.map((agent) => (
               <GalleryCard
                 key={agent.id}
@@ -287,13 +234,13 @@ export function ChatSidebarGallery({
       ) : null}
 
       {showAllSection && allAgents.length > 0 ? (
-        <section className={styles.sectionClass}>
+        <section className="agent-gallery-section" data-variant={variant}>
           <AgentListSectionHeader
             variant={variant}
             label={showFavoritesSection ? 'All agents' : 'Agents'}
             count={allAgents.length}
           />
-          <div className={styles.gridClass} role="list">
+          <div className={joinClassNames('agent-gallery-grid', variant === 'drawer' && 'agent-gallery-grid--drawer')} role="list">
             {allAgents.map((agent) => (
               <GalleryCard
                 key={agent.id}
