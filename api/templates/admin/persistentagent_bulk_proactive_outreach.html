@@ -1,0 +1,72 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' 'api' %}">API</a>
+    &rsaquo; <a href="{% url 'admin:api_persistentagent_changelist' %}">{% trans 'Persistent Agents' %}</a>
+    &rsaquo; Bulk Proactive Outreach
+  </div>
+{% endblock %}
+
+{% block content %}
+  <h1>Bulk Proactive Outreach</h1>
+  <p>Paste persistent agent IDs to record a proactive outreach trigger and queue processing for each eligible agent.</p>
+  <p class="help">Inactive agents and inactive owners are blocked by the same checks used by single-agent force outreach.</p>
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      <div class="form-row">
+        <label for="id_agent_ids"><strong>Persistent Agent IDs</strong></label>
+        <textarea name="agent_ids" id="id_agent_ids" rows="10" cols="80" placeholder="One persistent agent ID per line">{{ agent_ids|default_if_none:'' }}</textarea>
+      </div>
+      <div class="form-row">
+        <label for="id_reason"><strong>Reason</strong></label>
+        <textarea name="reason" id="id_reason" rows="3" cols="80" placeholder="Why are you triggering this outreach batch?">{{ reason|default_if_none:'' }}</textarea>
+      </div>
+    </fieldset>
+    <fieldset class="module aligned">
+      <div class="form-row">
+        <label for="id_dry_run">
+          <input type="checkbox" name="dry_run" id="id_dry_run" value="1" {% if dry_run %}checked{% endif %}>
+          Dry run only
+        </label>
+      </div>
+      <div class="form-row">
+        <label for="id_skip_recent">
+          <input type="checkbox" name="skip_recent" id="id_skip_recent" value="1" {% if skip_recent %}checked{% endif %}>
+          Skip agents with a proactive trigger in the last 6 hours
+        </label>
+      </div>
+    </fieldset>
+    <div class="submit-row">
+      <a class="button" href="{% url 'admin:api_persistentagent_changelist' %}">Cancel</a>
+      <button type="submit" class="button default">Run Bulk Outreach</button>
+    </div>
+  </form>
+
+  {% if results %}
+    <h2>Results</h2>
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Status</th>
+          <th scope="col">Agent ID</th>
+          <th scope="col">Agent</th>
+          <th scope="col">Message</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in results %}
+          <tr>
+            <td>{{ item.status }}</td>
+            <td><code>{{ item.agent_id }}</code></td>
+            <td>{{ item.agent_name|default:"-" }}</td>
+            <td>{{ item.message }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

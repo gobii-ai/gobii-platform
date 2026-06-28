@@ -1,8 +1,10 @@
 from datetime import timedelta
 from decimal import Decimal
+from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
@@ -142,6 +144,99 @@ class ProactiveActivationServiceTests(TestCase):
         processed = schedule_proactive_agents_task(batch_size=3)
         self.assertEqual(processed, 1)
         mock_delay.assert_called_once_with(str(self.agent_a.id))
+
+    @patch("api.services.bulk_proactive_outreach.process_agent_events_task.delay")
+    def test_force_proactive_agents_command_dry_run_does_not_queue(self, mock_delay):
+        stdout = StringIO()
+
+        call_command(
+            "force_proactive_agents",
+            "--agent-id",
+            str(self.agent_a.id),
+            "--dry-run",
+            stdout=stdout,
+        )
+
+        mock_delay.assert_not_called()
+        self.assertIn("dry_run", stdout.getvalue())
+        self.assertFalse(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent_a,
+                code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+            ).exists()
+        )
+
+    @patch("api.services.bulk_proactive_outreach.process_agent_events_task.delay")
+    def test_force_proactive_agents_command_dry_run_reports_blocked_agents(self, mock_delay):
+        self.agent_a.is_active = False
+        self.agent_a.save(update_fields=["is_active"])
+        stdout = StringIO()
+
+        call_command(
+            "force_proactive_agents",
+            "--agent-id",
+            str(self.agent_a.id),
+            "--dry-run",
+            stdout=stdout,
+        )
+
+        mock_delay.assert_not_called()
+        output = stdout.getvalue()
+        self.assertIn("blocked=1", output)
+        self.assertNotIn("dry_run=1", output)
+        self.assertFalse(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent_a,
+                code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+            ).exists()
+        )
+
+    @patch("api.services.bulk_proactive_outreach.process_agent_events_task.delay")
+    def test_force_proactive_agents_command_queues_valid_unique_ids(self, mock_delay):
+        stdout = StringIO()
+
+        call_command(
+            "force_proactive_agents",
+            "--agent-id",
+            str(self.agent_a.id),
+            "--agent-id",
+            str(self.agent_b.id),
+            "--agent-id",
+            str(self.agent_b.id),
+            "--initiated-by",
+            "admin@example.com",
+            "--reason",
+            "Batch test",
+            stdout=stdout,
+        )
+
+        self.assertEqual(mock_delay.call_count, 2)
+        mock_delay.assert_any_call(str(self.agent_a.id))
+        mock_delay.assert_any_call(str(self.agent_b.id))
+        self.assertEqual(
+            PersistentAgentSystemStep.objects.filter(
+                code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+            ).count(),
+            2,
+        )
+        output = stdout.getvalue()
+        self.assertIn("queued=2", output)
+        self.assertIn("duplicate=1", output)
+
+    @patch("api.services.bulk_proactive_outreach.process_agent_events_task.delay")
+    def test_force_proactive_agents_command_skips_recent_by_default(self, mock_delay):
+        ProactiveActivationService.force_trigger(self.agent_a, initiated_by="test")
+        stdout = StringIO()
+
+        call_command(
+            "force_proactive_agents",
+            "--agent-id",
+            str(self.agent_a.id),
+            stdout=stdout,
+        )
+
+        mock_delay.assert_not_called()
+        self.assertIn("skipped_recent=1", stdout.getvalue())
 
     @override_settings(GOBII_RELEASE_ENV="staging")
     @patch("api.services.proactive_activation.ProactiveActivationService.trigger_agents")
