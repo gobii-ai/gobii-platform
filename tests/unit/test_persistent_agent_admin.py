@@ -22,6 +22,8 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentMessage,
     PersistentAgentSkill,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
     PersistentAgentSystemMessageBroadcast,
 )
@@ -148,6 +150,69 @@ class PersistentAgentAdminTests(TestCase):
         self.assertNotContains(response, 'id="id_only_active"')
         self.assertContains(response, 'id="id_only_with_user" value="1" checked')
         self.assertNotContains(response, 'id="id_skip_expired" value="1" checked')
+
+    def test_change_list_shows_bulk_proactive_outreach_link(self):
+        response = self.client.get(reverse("admin:api_persistentagent_changelist"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Bulk Proactive Outreach")
+        self.assertContains(response, reverse("admin:api_persistentagent_bulk_proactive_outreach"))
+
+    def test_bulk_proactive_outreach_page_renders_form(self):
+        url = reverse("admin:api_persistentagent_bulk_proactive_outreach")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Bulk Proactive Outreach")
+        self.assertContains(response, "Persistent Agent IDs")
+        self.assertContains(response, 'id="id_dry_run" value="1" checked')
+        self.assertContains(response, 'id="id_skip_recent" value="1" checked')
+
+    @patch("api.services.bulk_proactive_outreach.process_agent_events_task.delay")
+    def test_bulk_proactive_outreach_post_queues_valid_ids(self, mock_delay):
+        url = reverse("admin:api_persistentagent_bulk_proactive_outreach")
+
+        response = self.client.post(
+            url,
+            data={
+                "agent_ids": str(self.persistent_agent.id),
+                "reason": "Admin batch",
+                "skip_recent": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_delay.assert_called_once_with(str(self.persistent_agent.id))
+        self.assertContains(response, "queued")
+        self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.persistent_agent,
+                code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+            ).exists()
+        )
+
+    @patch("api.services.bulk_proactive_outreach.process_agent_events_task.delay")
+    def test_bulk_proactive_outreach_post_skips_recent_trigger(self, mock_delay):
+        step = PersistentAgentStep.objects.create(agent=self.persistent_agent, description="Proactive trigger")
+        PersistentAgentSystemStep.objects.create(
+            step=step,
+            code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+            notes="{}",
+        )
+        url = reverse("admin:api_persistentagent_bulk_proactive_outreach")
+
+        response = self.client.post(
+            url,
+            data={
+                "agent_ids": str(self.persistent_agent.id),
+                "reason": "Admin batch",
+                "skip_recent": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_delay.assert_not_called()
+        self.assertContains(response, "skipped_recent")
 
     def test_trigger_processing_skips_inactive_agents_by_default(self):
         inactive_agent = self._create_agent(is_active=False, name="Inactive Agent")

@@ -11,6 +11,7 @@ from django.db.models.expressions import OuterRef, Exists
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
+from api.services.bulk_proactive_outreach import trigger_bulk_proactive_outreach
 from api.services.proactive_activation import ProactiveActivationService
 from api.services.skill_analytics import track_global_agent_skill_event
 from api.services.owner_execution_pause import (
@@ -3663,6 +3664,11 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 name='api_persistentagent_trigger_processing',
             ),
             path(
+                'bulk-proactive-outreach/',
+                self.admin_site.admin_view(self.bulk_proactive_outreach_view),
+                name='api_persistentagent_bulk_proactive_outreach',
+            ),
+            path(
                 'reschedule/',
                 self.admin_site.admin_view(self.reschedule_view),
                 name='api_persistentagent_reschedule',
@@ -3992,6 +3998,61 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             )
 
         return HttpResponseRedirect(changelist_url)
+
+    def bulk_proactive_outreach_view(self, request):
+        """Force proactive outreach for a pasted list of persistent agent IDs."""
+        base_context = {
+            **self.admin_site.each_context(request),
+            "title": "Bulk Proactive Outreach",
+            "agent_ids": "",
+            "reason": "Manual bulk proactive outreach.",
+            "dry_run": True,
+            "skip_recent": True,
+            "results": None,
+            "opts": self.model._meta,
+        }
+
+        if request.method != "POST":
+            return TemplateResponse(
+                request,
+                "admin/persistentagent_bulk_proactive_outreach.html",
+                base_context,
+            )
+
+        agent_ids = request.POST.get("agent_ids", "")
+        reason = (request.POST.get("reason") or "").strip()
+        dry_run = request.POST.get("dry_run") is not None
+        skip_recent = request.POST.get("skip_recent") is not None
+        initiated_by = request.user.email or request.user.get_username()
+
+        result = trigger_bulk_proactive_outreach(
+            agent_ids,
+            initiated_by=initiated_by,
+            reason=reason or "Manual bulk proactive outreach.",
+            dry_run=dry_run,
+            skip_recent=skip_recent,
+        )
+
+        counts = result.counts
+        summary = ", ".join(f"{status}: {count}" for status, count in sorted(counts.items())) or "none"
+        if dry_run:
+            self.message_user(request, f"Bulk proactive outreach dry run complete: {summary}", level=messages.WARNING)
+        else:
+            self.message_user(request, f"Bulk proactive outreach complete: {summary}", level=messages.SUCCESS)
+
+        context = {
+            **base_context,
+            "agent_ids": agent_ids,
+            "reason": reason,
+            "dry_run": dry_run,
+            "skip_recent": skip_recent,
+            "results": result.items,
+        }
+        return TemplateResponse(
+            request,
+            "admin/persistentagent_bulk_proactive_outreach.html",
+            context,
+        )
 
     def reschedule_view(self, request):
         """Bulk reschedule persistent agents by ID and cron string."""
