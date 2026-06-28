@@ -82,6 +82,19 @@ def trigger_bulk_proactive_outreach(
             )
             continue
 
+        try:
+            ProactiveActivationService.validate_force_trigger_agent(agent)
+        except ValueError as exc:
+            results.append(
+                BulkProactiveOutreachItem(
+                    agent_id=parsed.agent_id,
+                    status="blocked",
+                    message=str(exc) or "Cannot trigger proactive outreach for this agent.",
+                    agent_name=agent.name,
+                )
+            )
+            continue
+
         if dry_run:
             results.append(
                 BulkProactiveOutreachItem(

@@ -276,10 +276,7 @@ class ProactiveActivationService:
         reason: str | None = None,
     ) -> ProactiveTriggerResult:
         """Trigger proactive outreach for an agent without cooldown checks."""
-        if not cls._is_owner_active(agent):
-            raise ValueError("Cannot trigger proactive outreach for an inactive user or organization.")
-        if not agent.is_active or agent.life_state != PersistentAgent.LifeState.ACTIVE:
-            raise ValueError("Cannot trigger proactive outreach for an inactive agent.")
+        cls.validate_force_trigger_agent(agent)
 
         now = timezone.now()
         remaining = cls._daily_credit_remaining(agent)
@@ -291,6 +288,14 @@ class ProactiveActivationService:
             metadata["force_reason"] = reason[:512]
 
         return cls._record_trigger(agent, now, metadata)
+
+    @classmethod
+    def validate_force_trigger_agent(cls, agent: PersistentAgent) -> None:
+        """Raise ValueError when an agent cannot be force-triggered."""
+        if not cls._is_owner_active(agent):
+            raise ValueError("Cannot trigger proactive outreach for an inactive user or organization.")
+        if not agent.is_active or agent.life_state != PersistentAgent.LifeState.ACTIVE:
+            raise ValueError("Cannot trigger proactive outreach for an inactive agent.")
 
     @staticmethod
     def _get_redis_client():
