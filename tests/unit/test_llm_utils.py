@@ -111,7 +111,8 @@ class RunCompletionReasoningTests(TestCase):
         self.assertEqual(kwargs["model"], "openai/responses/gpt-5")
         self.assertEqual(kwargs["messages"], [{"role": "user", "content": "Hello"}])
         self.assertEqual(kwargs["api_key"], "sk-test")
-        self.assertEqual(kwargs["reasoning_effort"], {"summary": "auto", "effort": "low"})
+        self.assertEqual(kwargs["reasoning_effort"], {"summary": "detailed", "effort": "low"})
+        self.assertEqual(kwargs["extra_body"]["reasoning_effort"], {"summary": "detailed", "effort": "low"})
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
@@ -156,7 +157,40 @@ class RunCompletionReasoningTests(TestCase):
         self.assertEqual(kwargs["api_version"], "v1")
         self.assertEqual(kwargs["api_key"], "azure-key")
         self.assertEqual(kwargs["custom_llm_provider"], "azure")
-        self.assertEqual(kwargs["reasoning_effort"], {"summary": "auto", "effort": "low"})
+        self.assertEqual(kwargs["reasoning_effort"], {"summary": "detailed", "effort": "low"})
+        self.assertEqual(kwargs["extra_body"]["reasoning_effort"], {"summary": "detailed", "effort": "low"})
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_responses_bridge_converts_forced_function_tool_choice(self, mock_completion):
+        response = make_completion_response(content="ok")
+        mock_completion.return_value = response
+
+        run_completion(
+            model="azure/responses/gpt-5-deployment",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={
+                "api_key": "azure-key",
+                "api_base": "https://example.openai.azure.com",
+                "api_version": "v1",
+                "custom_llm_provider": "azure",
+            },
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "enable_system_skills",
+                        "description": "Enable system skills",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+            tool_choice={"type": "function", "function": {"name": "enable_system_skills"}},
+        )
+
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs["tool_choice"], {"type": "function", "function": {"name": "enable_system_skills"}})
+        self.assertEqual(kwargs["extra_body"]["tool_choice"], {"type": "function", "name": "enable_system_skills"})
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")

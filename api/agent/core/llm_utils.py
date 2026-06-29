@@ -483,8 +483,17 @@ def run_completion(
     use_responses_bridge = responses_bridge_model is not None
     if use_responses_bridge:
         kwargs["model"] = responses_bridge_model
+        extra_body = kwargs.get("extra_body")
+        extra_body = dict(extra_body) if isinstance(extra_body, dict) else {}
+        responses_tool_choice = _litellm_responses_bridge_tool_choice(kwargs.get("tool_choice"))
+        if responses_tool_choice is not None:
+            extra_body["tool_choice"] = responses_tool_choice
         if supports_reasoning and selected_reasoning_effort and isinstance(selected_reasoning_effort, str):
-            kwargs["reasoning_effort"] = {"effort": selected_reasoning_effort, "summary": "auto"}
+            reasoning_params = {"effort": selected_reasoning_effort, "summary": "detailed"}
+            kwargs["reasoning_effort"] = reasoning_params
+            extra_body["reasoning_effort"] = reasoning_params
+        if extra_body:
+            kwargs["extra_body"] = extra_body
     if supports_reasoning and not use_responses_bridge:
         allowed_openai_params = kwargs.get("allowed_openai_params")
         if allowed_openai_params is None:
@@ -565,6 +574,20 @@ def _litellm_responses_bridge_model(model: str, kwargs: dict[str, Any]) -> str |
     if model.startswith("gpt-"):
         return f"openai/responses/{model}"
     return None
+
+
+def _litellm_responses_bridge_tool_choice(tool_choice: Any) -> Any:
+    if not isinstance(tool_choice, dict):
+        return None
+    if tool_choice.get("type") != "function":
+        return None
+    function_choice = tool_choice.get("function")
+    if not isinstance(function_choice, dict):
+        return None
+    function_name = function_choice.get("name")
+    if not isinstance(function_name, str) or not function_name:
+        return None
+    return {"type": "function", "name": function_name}
 
 
 __all__ = [
