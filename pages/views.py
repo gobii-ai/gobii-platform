@@ -1441,7 +1441,15 @@ class HomeAgentSpawnView(TemplateView):
                 redirect_params["context_id"] = resolved_context.current_context.id
 
             if request.user.is_authenticated:
-                if trial_onboarding_requested and not can_user_use_personal_agents_and_api(request.user):
+                in_personal_context = (
+                    resolved_context is None
+                    or resolved_context.current_context.type == "personal"
+                )
+                if (
+                    trial_onboarding_requested
+                    and in_personal_context
+                    and not can_user_use_personal_agents_and_api(request.user)
+                ):
                     set_trial_onboarding_intent(
                         request,
                         target=trial_onboarding_target,

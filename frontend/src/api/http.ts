@@ -90,7 +90,9 @@ function requestHasExplicitConsoleContext(input: RequestInfo | URL): boolean {
           typeof Request !== 'undefined' && input instanceof Request ? input.url : String(input),
           typeof window !== 'undefined' ? window.location.href : 'http://localhost/',
         )
-    return Boolean(url.searchParams.get('context_type') && url.searchParams.get('context_id'))
+    const type = url.searchParams.get('context_type')
+    const id = url.searchParams.get('context_id')
+    return Boolean(id && (type === 'personal' || type === 'organization'))
   } catch {
     return false
   }

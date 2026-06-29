@@ -1155,6 +1155,53 @@ class HomePageTests(TestCase):
         self.assertEqual(session.get("context_id"), str(user.id))
         self.assertEqual(session.get("agent_charter"), "Custom charter")
 
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_authenticated_home_spawn_does_not_set_personal_trial_state_for_org_context(self):
+        user = get_user_model().objects.create_user(
+            username="home_spawn_org_context@example.com",
+            email="home_spawn_org_context@example.com",
+            password="password123",
+        )
+        organization = Organization.objects.create(
+            name="Homepage Spawn Org",
+            slug="homepage-spawn-org",
+            created_by=user,
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": "Create an org-owned agent",
+                "context_type": "organization",
+                "context_id": str(organization.id),
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("spawn"), ["1"])
+        self.assertEqual(params.get("context_type"), ["organization"])
+        self.assertEqual(params.get("context_id"), [str(organization.id)])
+
+        session = self.client.session
+        self.assertEqual(session.get("context_type"), "organization")
+        self.assertEqual(session.get("context_id"), str(organization.id))
+        self.assertEqual(session.get("agent_charter"), "Create an org-owned agent")
+        self.assertNotIn(TRIAL_ONBOARDING_PENDING_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_TARGET_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, session)
+
     def test_home_spawn_redirects_to_login(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
