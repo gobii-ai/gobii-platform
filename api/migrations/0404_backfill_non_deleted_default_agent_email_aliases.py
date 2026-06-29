@@ -2,7 +2,7 @@
 
 import re
 
-from django.db import IntegrityError, migrations
+from django.db import IntegrityError, migrations, transaction
 from django.utils.crypto import get_random_string
 
 
@@ -10,6 +10,8 @@ def _build_base_username(name: str) -> str:
     base_username = (name or "").lower().strip()
     base_username = re.sub(r"\s+", ".", base_username)
     base_username = re.sub(r"[^\w.]", "", base_username)
+    base_username = re.sub(r"\.+", ".", base_username)
+    base_username = base_username.strip(".")
     if not base_username:
         base_username = "agent"
     return base_username
@@ -38,6 +40,9 @@ def _generate_unique_email_address(Endpoint, display_name: str, domain: str) -> 
 def backfill_non_deleted_default_agent_email_aliases(apps, schema_editor):
     from django.conf import settings
 
+    if not settings.ENABLE_DEFAULT_AGENT_EMAIL:
+        return
+
     domain = (settings.DEFAULT_AGENT_EMAIL_DOMAIN or "").strip().lower()
     if not domain:
         return
@@ -56,48 +61,58 @@ def backfill_non_deleted_default_agent_email_aliases(apps, schema_editor):
     )
 
     for agent_id, agent_name in agents:
-        if Endpoint.objects.filter(
-            channel="email",
-            owner_agent_id=agent_id,
-            address__iendswith=suffix,
-        ).exists():
-            continue
-
-        display_name = (agent_name or "").strip() or "Agent"
-        is_primary = not Endpoint.objects.filter(
-            channel="email",
-            owner_agent_id=agent_id,
-            is_primary=True,
-        ).exists()
-
-        endpoint = None
-        for _ in range(3):
-            try:
-                email_address = _generate_unique_email_address(
-                    Endpoint,
-                    display_name=display_name,
-                    domain=domain,
+        with transaction.atomic():
+            display_name = (agent_name or "").strip() or "Agent"
+            existing_endpoint = Endpoint.objects.filter(
+                channel="email",
+                owner_agent_id=agent_id,
+                address__iendswith=suffix,
+            ).first()
+            if existing_endpoint is not None:
+                EmailMeta.objects.get_or_create(
+                    endpoint_id=existing_endpoint.id,
+                    defaults={
+                        "display_name": display_name,
+                        "verified": True,
+                    },
                 )
-                endpoint = Endpoint.objects.create(
-                    owner_agent_id=agent_id,
-                    channel="email",
-                    address=email_address.lower(),
-                    is_primary=is_primary,
-                )
-                break
-            except IntegrityError:
                 continue
 
-        if endpoint is None:
-            continue
+            is_primary = not Endpoint.objects.filter(
+                channel="email",
+                owner_agent_id=agent_id,
+                is_primary=True,
+            ).exists()
 
-        EmailMeta.objects.get_or_create(
-            endpoint_id=endpoint.id,
-            defaults={
-                "display_name": display_name,
-                "verified": True,
-            },
-        )
+            endpoint = None
+            for _ in range(3):
+                try:
+                    with transaction.atomic():
+                        email_address = _generate_unique_email_address(
+                            Endpoint,
+                            display_name=display_name,
+                            domain=domain,
+                        )
+                        endpoint = Endpoint.objects.create(
+                            owner_agent_id=agent_id,
+                            channel="email",
+                            address=email_address.lower(),
+                            is_primary=is_primary,
+                        )
+                    break
+                except IntegrityError:
+                    continue
+
+            if endpoint is None:
+                continue
+
+            EmailMeta.objects.get_or_create(
+                endpoint_id=endpoint.id,
+                defaults={
+                    "display_name": display_name,
+                    "verified": True,
+                },
+            )
 
 
 class Migration(migrations.Migration):

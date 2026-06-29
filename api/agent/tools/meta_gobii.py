@@ -931,48 +931,49 @@ def _tool_create_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
     if schedule == "":
         schedule = None
 
-    try:
-        result = PersistentAgentProvisioningService.provision(
-            user=invoking_agent.user,
-            organization=invoking_agent.organization,
-            name=_optional_string(params.get("name"), "name"),
-            charter=_optional_string(params.get("charter"), "charter") or "",
-            schedule=schedule,
-            is_active=_optional_bool(params.get("is_active", True), "is_active"),
-            whitelist_policy=_optional_choice(
-                params.get("whitelist_policy"),
-                "whitelist_policy",
-                {choice[0] for choice in PersistentAgent.WhitelistPolicy.choices},
-                allow_missing=True,
-            ),
-            preferred_llm_tier=preferred_tier,
-            planning_state=PersistentAgent.PlanningState.SKIPPED,
-        )
-    except PersistentAgentProvisioningError:
-        raise
+    with transaction.atomic():
+        try:
+            result = PersistentAgentProvisioningService.provision(
+                user=invoking_agent.user,
+                organization=invoking_agent.organization,
+                name=_optional_string(params.get("name"), "name"),
+                charter=_optional_string(params.get("charter"), "charter") or "",
+                schedule=schedule,
+                is_active=_optional_bool(params.get("is_active", True), "is_active"),
+                whitelist_policy=_optional_choice(
+                    params.get("whitelist_policy"),
+                    "whitelist_policy",
+                    {choice[0] for choice in PersistentAgent.WhitelistPolicy.choices},
+                    allow_missing=True,
+                ),
+                preferred_llm_tier=preferred_tier,
+                planning_state=PersistentAgent.PlanningState.SKIPPED,
+            )
+        except PersistentAgentProvisioningError:
+            raise
 
-    agent = result.agent
-    ensure_default_agent_email_endpoint(agent, is_primary=True)
+        agent = result.agent
+        ensure_default_agent_email_endpoint(agent, is_primary=True)
 
-    update_fields: list[str] = []
-    if "daily_credit_limit" in params and agent.daily_credit_limit != daily_credit_limit:
-        agent.daily_credit_limit = daily_credit_limit
-        update_fields.append("daily_credit_limit")
-    if "proactive_opt_in" in params:
-        proactive_opt_in = _optional_bool(params.get("proactive_opt_in"), "proactive_opt_in")
-        if agent.proactive_opt_in != proactive_opt_in:
-            agent.proactive_opt_in = proactive_opt_in
-            update_fields.append("proactive_opt_in")
-    if update_fields:
-        agent.full_clean()
-        agent.save(update_fields=update_fields)
+        update_fields: list[str] = []
+        if "daily_credit_limit" in params and agent.daily_credit_limit != daily_credit_limit:
+            agent.daily_credit_limit = daily_credit_limit
+            update_fields.append("daily_credit_limit")
+        if "proactive_opt_in" in params:
+            proactive_opt_in = _optional_bool(params.get("proactive_opt_in"), "proactive_opt_in")
+            if agent.proactive_opt_in != proactive_opt_in:
+                agent.proactive_opt_in = proactive_opt_in
+                update_fields.append("proactive_opt_in")
+        if update_fields:
+            agent.full_clean()
+            agent.save(update_fields=update_fields)
 
-    def _queue_initial_processing() -> None:
-        from api.agent.tasks import process_agent_events_task
+        def _queue_initial_processing() -> None:
+            from api.agent.tasks import process_agent_events_task
 
-        process_agent_events_task.delay(str(agent.id))
+            process_agent_events_task.delay(str(agent.id))
 
-    transaction.on_commit(_queue_initial_processing)
+        transaction.on_commit(_queue_initial_processing)
     return {"status": "ok", "agent": _serialize_agent(agent)}
 
 

@@ -280,6 +280,8 @@ def generate_unique_agent_email(agent_name: str, max_attempts: int = 100) -> str
     base_username = (agent_name or "").lower().strip()
     base_username = re.sub(r"\s+", ".", base_username)
     base_username = re.sub(r"[^\w.]", "", base_username)
+    base_username = re.sub(r"\.+", ".", base_username)
+    base_username = base_username.strip(".")
     if not base_username:
         base_username = "agent"
 
