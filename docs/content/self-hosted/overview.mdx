@@ -50,6 +50,23 @@ docker compose --profile beat --profile email up --build
 
 For inbound email configuration, see [Email And SMS](/using-gobii/email-and-sms).
 
+## Worker queues
+
+Gobii uses separate Celery queues for background work and interactive web chat:
+
+- `celery`: default worker queue for email, SMS, Discord, schedules, pending drains, admin jobs, and other background processing.
+- `celery.single_instance`: default worker queue for scheduled maintenance tasks that should not overlap.
+- `agent_interactive`: interactive worker queue for console/web chat message processing.
+
+Run both workers in deployments that enable web chat. The interactive worker should use low concurrency and `--prefetch-multiplier=1` so one pod does not reserve an interactive message behind another long-running task. The default Docker Compose stack includes an `interactive-worker` service; if you run Celery outside Compose, start one explicitly:
+
+```bash
+celery -A config worker -l info -Q celery,celery.single_instance
+celery -A config worker -l info -Q agent_interactive --concurrency=1 --prefetch-multiplier=1
+```
+
+The `gobii.agent.process_events.queue_latency` OpenTelemetry histogram records seconds from enqueue to worker start with a `celery.queue` attribute. Use it to alert on sustained `agent_interactive` queue delays.
+
 ## Operational capabilities to plan
 
 Depending on which Gobii features you enable, your deployment may also need:

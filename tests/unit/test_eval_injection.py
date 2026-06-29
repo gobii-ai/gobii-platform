@@ -32,8 +32,8 @@ class EvalInjectionTests(TestCase):
         body = "Hello from test"
         sender_id = -123
         
-        # We patch process_agent_events_task to ensure it's NOT called
-        with patch("api.agent.tasks.process_agent_events_task.delay") as mock_task:
+        # We patch the interactive enqueue helper to ensure it's NOT called.
+        with patch("api.agent.tasks.enqueue_interactive_process_agent_events") as mock_task:
             with self.captureOnCommitCallbacks(execute=True):
                 msg, conv = inject_internal_web_message(
                     agent_id=self.agent.id,
@@ -60,7 +60,7 @@ class EvalInjectionTests(TestCase):
         """Test injecting a message triggers processing by default."""
         body = "Trigger me"
         
-        with patch("api.agent.tasks.process_agent_events_task.delay") as mock_task:
+        with patch("api.agent.tasks.enqueue_interactive_process_agent_events") as mock_task:
             with self.captureOnCommitCallbacks(execute=True):
                 msg, conv = inject_internal_web_message(
                     agent_id=self.agent.id,

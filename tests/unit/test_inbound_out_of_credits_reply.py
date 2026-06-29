@@ -448,12 +448,12 @@ class InboundDailyCreditsWebChatTests(TestCase):
 
     @tag("batch_agent_chat")
     @override_settings(PUBLIC_SITE_URL="https://example.com")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
     def test_daily_limit_web_queues_processing_without_sending_notice(
         self,
         mock_calc,
-        mock_delay,
+        mock_enqueue,
     ):
         self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
@@ -474,7 +474,7 @@ class InboundDailyCreditsWebChatTests(TestCase):
             with self.captureOnCommitCallbacks(execute=True):
                 ingest_inbound_message(CommsChannel.WEB, parsed)
 
-        mock_delay.assert_called_once()
+        mock_enqueue.assert_called_once()
         mock_calc.assert_called_once()
         self.assertFalse(
             PersistentAgentMessage.objects.filter(

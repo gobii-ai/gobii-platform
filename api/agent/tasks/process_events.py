@@ -13,7 +13,7 @@ from uuid import UUID
 from typing import Any, Dict, Optional, Sequence
 
 from celery import Task, shared_task
-from opentelemetry import baggage, trace
+from opentelemetry import baggage, metrics, trace
 import redis
 from waffle import switch_is_active
 from django.conf import settings
@@ -47,6 +47,55 @@ from ..core.processing_flags import (
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
+
+AGENT_DEFAULT_PROCESSING_QUEUE = "celery"
+AGENT_INTERACTIVE_PROCESSING_QUEUE = "agent_interactive"
+PROCESS_AGENT_EVENTS_QUEUED_AT_KWARG = "_queued_at_ts"
+PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG = "_queued_queue"
+_queue_latency_histogram = None
+
+
+def _process_agent_events_queue_latency_histogram():
+    global _queue_latency_histogram
+    provider = metrics.get_meter_provider()
+    meter = provider.get_meter("gobii.agent.tasks")
+    provider_class = provider.__class__.__name__
+    if provider_class in {"_ProxyMeterProvider", "ProxyMeterProvider", "NoOpMeterProvider"}:
+        return meter.create_histogram(
+            "gobii.agent.process_events.queue_latency",
+            unit="s",
+            description="Seconds between process_agent_events_task enqueue and worker start.",
+        )
+    if _queue_latency_histogram is None:
+        _queue_latency_histogram = meter.create_histogram(
+            "gobii.agent.process_events.queue_latency",
+            unit="s",
+            description="Seconds between process_agent_events_task enqueue and worker start.",
+        )
+    return _queue_latency_histogram
+
+
+def _record_process_agent_events_queue_latency(
+    queued_at_ts: float | int | str | None,
+    *,
+    queue: str | None,
+) -> float | None:
+    if queued_at_ts is None:
+        return None
+    try:
+        queued_at = float(queued_at_ts)
+    except (TypeError, ValueError):
+        return None
+    latency_seconds = max(0.0, time.time() - queued_at)
+    queue_name = str(queue or "unknown")
+    _process_agent_events_queue_latency_histogram().record(
+        latency_seconds,
+        attributes={
+            "celery.queue": queue_name,
+            "celery.task_name": "api.agent.tasks.process_agent_events",
+        },
+    )
+    return latency_seconds
 
 
 def schedule_unseen_web_chat_followup(message) -> None:
@@ -115,10 +164,35 @@ class ProcessAgentEventsTaskBase(Task):
 
     def apply_async(self, args=None, kwargs=None, **options):
         agent_id = _extract_agent_id(args, kwargs)
+        kwargs = dict(kwargs or {})
+        kwargs.setdefault(PROCESS_AGENT_EVENTS_QUEUED_AT_KWARG, time.time())
+        kwargs.setdefault(
+            PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG,
+            str(options.get("queue") or AGENT_DEFAULT_PROCESSING_QUEUE),
+        )
         if agent_id:
             set_processing_queued_flag(agent_id)
             _broadcast_processing_state(agent_id)
         return super().apply_async(args=args, kwargs=kwargs, **options)
+
+
+def enqueue_interactive_process_agent_events(
+    persistent_agent_id: str,
+    *,
+    inbound_generation: int | str | None = None,
+    eval_run_id: str | None = None,
+) -> None:
+    """Queue interactive agent processing on the low-latency queue."""
+    kwargs: dict[str, Any] = {}
+    if inbound_generation is not None:
+        kwargs["inbound_generation"] = inbound_generation
+    if eval_run_id is not None:
+        kwargs["eval_run_id"] = eval_run_id
+    process_agent_events_task.apply_async(
+        args=[str(persistent_agent_id)],
+        kwargs=kwargs,
+        queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+    )
 
 
 @shared_task(
@@ -139,6 +213,8 @@ def process_agent_events_task(
     eval_stop_policy: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: str | None = None,
     inbound_generation: int | str | None = None,
+    _queued_at_ts: float | int | str | None = None,
+    _queued_queue: str | None = None,
 ) -> None:  # noqa: D401, ANN001
     """Celery task that triggers event processing for one persistent agent."""
     from api.evals.execution import set_current_eval_routing_profile
@@ -152,6 +228,14 @@ def process_agent_events_task(
     baggage.set_baggage("persistent_agent.id", str(persistent_agent_id))
 
     delivery_info = getattr(self.request, "delivery_info", {}) or {}
+    task_queue = delivery_info.get("routing_key") or _queued_queue or AGENT_DEFAULT_PROCESSING_QUEUE
+    queue_latency_seconds = _record_process_agent_events_queue_latency(
+        _queued_at_ts,
+        queue=str(task_queue),
+    )
+    span.set_attribute("celery.queue", str(task_queue))
+    if queue_latency_seconds is not None:
+        span.set_attribute("celery.queue_latency_seconds", queue_latency_seconds)
     redelivered = bool(getattr(self.request, "redelivered", False)) or bool(
         delivery_info.get("redelivered")
     )

@@ -4949,12 +4949,12 @@ class HumanInboundGenerationTests(TestCase):
         before = get_human_inbound_generation(self.agent.id)
         expected = before + 1
 
-        with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
+        with patch("api.agent.tasks.enqueue_interactive_process_agent_events") as mock_enqueue:
             with self.captureOnCommitCallbacks(execute=True):
                 self._ingest(CommsChannel.WEB, self.web_user_address, self.web_agent_address)
 
         self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
-        mock_delay.assert_called_once_with(
+        mock_enqueue.assert_called_once_with(
             str(self.agent.id),
             inbound_generation=expected,
         )
