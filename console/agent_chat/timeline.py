@@ -458,83 +458,6 @@ def _friendly_tool_label(tool_name: str | None, labels: Mapping[str, str] | None
     return tool_name.replace("_", " ").title()
 
 
-TOOL_ICON_LIBRARY: dict[str, dict[str, object]] = {
-    "email": {
-        "iconPaths": [
-            "M3 8l9 6 9-6",
-            "M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z",
-        ],
-        "iconBg": "bg-indigo-50",
-        "iconColor": "text-indigo-600",
-    },
-    "slack": {
-        "iconPaths": [
-            "M7 9h4a2 2 0 002-2V5a2 2 0 10-4 0v2H7a2 2 0 100 4z",
-            "M9 17v-4a2 2 0 00-2-2H5a2 2 0 100 4h2v2a2 2 0 104 0z",
-            "M15 7v2h2a2 2 0 100-4h-2V5a2 2 0 10-4 0v2a2 2 0 002 2z",
-            "M15 15h-2v2a2 2 0 104 0v-2a2 2 0 00-2-2z",
-        ],
-        "iconBg": "bg-fuchsia-50",
-        "iconColor": "text-fuchsia-600",
-    },
-    "browser": {
-        "iconPaths": [
-            "M4 6h16a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z",
-            "M2 10h20",
-        ],
-        "iconBg": "bg-emerald-50",
-        "iconColor": "text-emerald-600",
-    },
-    "database": {
-        "iconPaths": [
-            "M5 7c0-2.21 3.582-4 8-4s8 1.79 8 4-3.582 4-8 4-8-1.79-8-4z",
-            "M5 12c0 2.21 3.582 4 8 4s8-1.79 8-4",
-            "M5 17c0 2.21 3.582 4 8 4s8-1.79 8-4",
-        ],
-        "iconBg": "bg-sky-50",
-        "iconColor": "text-sky-600",
-    },
-    "doc": {
-        "iconPaths": [
-            "M7 4h7l5 5v11a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z",
-            "M14 3v6h6",
-        ],
-        "iconBg": "bg-amber-50",
-        "iconColor": "text-amber-600",
-    },
-    "default": {
-        "iconPaths": [
-            "M4 6h16",
-            "M4 12h16",
-            "M4 18h16",
-        ],
-        "iconBg": "bg-slate-100",
-        "iconColor": "text-slate-600",
-    },
-}
-
-
-def _tool_icon_for(name: str | None) -> dict[str, object]:
-    if not name:
-        return TOOL_ICON_LIBRARY["default"].copy()
-    lower = name.lower()
-    if "email" in lower or "mail" in lower:
-        key = "email"
-    elif "slack" in lower or "discord" in lower:
-        key = "slack"
-    elif any(word in lower for word in ("http", "browser", "crawl", "fetch")):
-        key = "browser"
-    elif any(word in lower for word in ("sql", "database", "db")):
-        key = "database"
-    elif any(word in lower for word in ("doc", "sheet", "drive", "notion")):
-        key = "doc"
-    else:
-        key = "default"
-    data = TOOL_ICON_LIBRARY[key].copy()
-    data.setdefault("iconPaths", TOOL_ICON_LIBRARY["default"]["iconPaths"])
-    return data
-
-
 def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.UUID | None) -> dict:
     size_label = None
     try:
@@ -800,16 +723,15 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     step = env.step
     tool_call = env.tool_call
     tool_name = tool_call.tool_name or ""
-    meta = _tool_icon_for(tool_name)
-    meta["label"] = _friendly_tool_label(tool_name, labels)
+    label = _friendly_tool_label(tool_name, labels)
     status = getattr(tool_call, "status", None) or "complete"
     entry: dict = {
         "id": str(step.id),
         "cursor": env.cursor.encode(),
         "timestamp": _format_timestamp(step.created_at),
-        "caption": step.description or meta["label"],
+        "caption": step.description or label,
         "toolName": tool_name,
-        "meta": meta,
+        "meta": {"label": label},
         "parameters": tool_call.tool_params,
         "result": serialize_human_input_tool_result(step, tool_call.result)
         if tool_name == "request_human_input"

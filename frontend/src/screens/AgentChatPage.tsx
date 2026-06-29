@@ -1239,6 +1239,7 @@ export function AgentChatPage({
   const timelineLoadingOlder = !isNewAgent ? timelineQuery.isFetchingPreviousPage : false
   const timelineLoadingNewer = !isNewAgent ? timelineQuery.isFetchingNextPage : false
   const initialLoading = !isNewAgent && timelineQuery.isLoading
+  const timelineInitialReady = isNewAgent || !timelineQuery.isLoading
 
   const statusExpansionTargets = useMemo(
     () => findLatestStatusExpansionTargets(timelineEvents),
@@ -2105,6 +2106,7 @@ export function AgentChatPage({
     allowAgentRefresh,
     rosterAgents,
   })
+  const allowDeferredAgentPanelRequests = allowAgentPanelRequests && timelineInitialReady
   const {
     data: quickSettingsPayload,
     isLoading: quickSettingsLoading,
@@ -2112,13 +2114,13 @@ export function AgentChatPage({
     refetch: refetchQuickSettings,
     updateQuickSettings,
     updating: quickSettingsUpdating,
-  } = useAgentQuickSettings(activeAgentId, { enabled: allowAgentPanelRequests })
+  } = useAgentQuickSettings(activeAgentId, { enabled: allowDeferredAgentPanelRequests })
   const {
     data: addonsPayload,
     refetch: refetchAddons,
     updateAddons,
     updating: addonsUpdating,
-  } = useAgentAddons(activeAgentId, { enabled: allowAgentPanelRequests })
+  } = useAgentAddons(activeAgentId, { enabled: allowDeferredAgentPanelRequests })
   const contextSwitcher = useMemo(() => {
     if (!showContextSwitcher) {
       return null
@@ -2945,6 +2947,7 @@ export function AgentChatPage({
   const insightsQueryEnabled = Boolean(
     activeAgentId
     && allowAgentRefresh
+    && timelineInitialReady
     && !isNewAgent
     && !isCollaboratorOnly
     && !showSignupPreviewPanel,
