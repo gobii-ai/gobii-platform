@@ -20,6 +20,8 @@ from waffle.testutils import override_flag, override_switch
 from api.models import (
     BrowserUseAgent,
     MCPServerConfig,
+    Organization,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentTemplate,
     UserBilling,
@@ -1062,6 +1064,143 @@ class HomePageTests(TestCase):
         self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
         self.assertEqual(session["agent_charter_source"], "user")
         self.assertEqual(session["agent_charter"], "Custom charter")
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    def test_authenticated_home_spawn_redirects_to_app_spawn_flow(self):
+        user = get_user_model().objects.create_user(
+            username="home_spawn_auth@example.com",
+            email="home_spawn_auth@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": "Custom charter",
+                "preferred_llm_tier": "premium",
+                "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
+                "return_to": "/",
+                "embed": "1",
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("spawn"), ["1"])
+        self.assertEqual(params.get("return_to"), ["/"])
+        self.assertEqual(params.get("embed"), ["1"])
+        self.assertEqual(params.get("context_type"), ["personal"])
+        self.assertEqual(params.get("context_id"), [str(user.id)])
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), "Custom charter")
+        self.assertEqual(session.get("agent_charter_source"), "user")
+        self.assertEqual(session.get("context_type"), "personal")
+        self.assertEqual(session.get("context_id"), str(user.id))
+        self.assertEqual(session.get(page_views.PREFERRED_LLM_TIER_SESSION_KEY), "premium")
+        self.assertEqual(
+            session.get(page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
+            ["slack", "trello"],
+        )
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    def test_authenticated_home_spawn_respects_posted_personal_context(self):
+        user = get_user_model().objects.create_user(
+            username="home_spawn_context@example.com",
+            email="home_spawn_context@example.com",
+            password="password123",
+        )
+        organization = Organization.objects.create(
+            name="Homepage Context Org",
+            slug="homepage-context-org",
+            created_by=user,
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        self.client.force_login(user)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
+        response = self.client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": "Custom charter",
+                "context_type": "personal",
+                "context_id": str(user.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("spawn"), ["1"])
+        self.assertEqual(params.get("context_type"), ["personal"])
+        self.assertEqual(params.get("context_id"), [str(user.id)])
+
+        session = self.client.session
+        self.assertEqual(session.get("context_type"), "personal")
+        self.assertEqual(session.get("context_id"), str(user.id))
+        self.assertEqual(session.get("agent_charter"), "Custom charter")
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_authenticated_home_spawn_does_not_set_personal_trial_state_for_org_context(self):
+        user = get_user_model().objects.create_user(
+            username="home_spawn_org_context@example.com",
+            email="home_spawn_org_context@example.com",
+            password="password123",
+        )
+        organization = Organization.objects.create(
+            name="Homepage Spawn Org",
+            slug="homepage-spawn-org",
+            created_by=user,
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": "Create an org-owned agent",
+                "context_type": "organization",
+                "context_id": str(organization.id),
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("spawn"), ["1"])
+        self.assertEqual(params.get("context_type"), ["organization"])
+        self.assertEqual(params.get("context_id"), [str(organization.id)])
+
+        session = self.client.session
+        self.assertEqual(session.get("context_type"), "organization")
+        self.assertEqual(session.get("context_id"), str(organization.id))
+        self.assertEqual(session.get("agent_charter"), "Create an org-owned agent")
+        self.assertNotIn(TRIAL_ONBOARDING_PENDING_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_TARGET_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, session)
 
     def test_home_spawn_redirects_to_login(self):
         session = self.client.session

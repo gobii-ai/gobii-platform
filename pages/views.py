@@ -10,6 +10,7 @@ from django.http.response import JsonResponse
 from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
 from django.core import signing
+from django.core.exceptions import PermissionDenied
 from django.core.mail import send_mail
 from django.contrib import messages
 from django.utils.decorators import method_decorator
@@ -148,6 +149,7 @@ from api.services.native_integrations import list_native_integration_providers
 from api.pipedream_app_utils import normalize_app_slugs
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from middleware.utm_capture import UTMTrackingMiddleware
+from console.context_helpers import build_console_context, resolve_console_context
 from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import (
     render_public_template_markdown,
@@ -1364,6 +1366,27 @@ class HomeAgentSpawnView(TemplateView):
             request.POST.get("trial_onboarding_target"),
             default=TRIAL_ONBOARDING_TARGET_AGENT_UI,
         )
+        resolved_context = None
+        if request.user.is_authenticated:
+            context_type = (request.POST.get("context_type") or "").strip()
+            context_id = (request.POST.get("context_id") or "").strip()
+            context_override = (
+                {"type": context_type, "id": context_id}
+                if context_type and context_id
+                else None
+            )
+            try:
+                resolved_context = (
+                    resolve_console_context(
+                        request.user,
+                        request.session,
+                        override=context_override,
+                    )
+                    if context_override
+                    else build_console_context(request)
+                )
+            except PermissionDenied:
+                resolved_context = build_console_context(request)
         
         if form.is_valid():
             return_to = normalize_return_to(request, request.POST.get("return_to"))
@@ -1372,6 +1395,10 @@ class HomeAgentSpawnView(TemplateView):
             embed = (request.POST.get("embed") or "").lower() in {"1", "true", "yes", "on"}
             if return_to:
                 request.session[IMMERSIVE_RETURN_TO_SESSION_KEY] = return_to
+            if resolved_context is not None:
+                request.session["context_type"] = resolved_context.current_context.type
+                request.session["context_id"] = resolved_context.current_context.id
+                request.session["context_name"] = resolved_context.current_context.name
 
             # Clear any previously selected pretrained worker so we treat this as a fresh custom charter
             request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
@@ -1404,18 +1431,36 @@ class HomeAgentSpawnView(TemplateView):
                     }
                 )
             
-            next_url = reverse('agent_quick_spawn')
             redirect_params = {}
             if return_to:
                 redirect_params["return_to"] = return_to
             if embed:
                 redirect_params["embed"] = "1"
-            if redirect_params:
-                next_url = f"{next_url}?{urlencode(redirect_params)}"
+            if resolved_context is not None:
+                redirect_params["context_type"] = resolved_context.current_context.type
+                redirect_params["context_id"] = resolved_context.current_context.id
 
             if request.user.is_authenticated:
-                # User is already logged in, go directly to agent creation
-                return redirect(next_url)
+                in_personal_context = (
+                    resolved_context is None
+                    or resolved_context.current_context.type == "personal"
+                )
+                if (
+                    trial_onboarding_requested
+                    and in_personal_context
+                    and not can_user_use_personal_agents_and_api(request.user)
+                ):
+                    set_trial_onboarding_intent(
+                        request,
+                        target=trial_onboarding_target,
+                    )
+                    set_trial_onboarding_requires_plan_selection(request, required=True)
+                app_redirect_params = {**redirect_params, "spawn": "1"}
+                app_next_url = append_query_params(
+                    f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                    app_redirect_params,
+                )
+                return redirect(app_next_url)
             _track_web_event_for_request(
                 request,
                 event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
