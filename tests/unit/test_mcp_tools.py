@@ -1227,12 +1227,35 @@ class MCPToolManagerTests(TestCase):
         self.manager._tools_cache = {self.config_id: [tool1]}
         self.manager._initialized = True
         
-        with patch.object(self.manager, 'get_tools_for_agent', return_value=[tool1]):
+        with patch.object(self.manager, 'get_tools_for_agent', return_value=[tool1]) as mock_get_tools:
             definitions = self.manager.get_enabled_tools_definitions(agent)
         
         self.assertEqual(len(definitions), 1)
         self.assertEqual(definitions[0]["function"]["name"], "mcp_test_tool1")
         self.assertEqual(definitions[0]["function"]["description"], "Test tool 1")
+        mock_init.assert_not_called()
+        mock_get_tools.assert_called_once_with(agent, allowed_config_ids={self.config_id})
+
+    @patch('api.agent.tools.mcp_manager.MCPToolManager.initialize')
+    def test_get_enabled_tools_definitions_skips_static_tools_without_mcp_discovery(self, mock_init):
+        """Static enabled tools should not force MCP server discovery."""
+        User = get_user_model()
+        user = User.objects.create_user(username='static-tools@example.com')
+        browser_agent = create_test_browser_agent(user)
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="static-agent",
+            charter="Test",
+            browser_use_agent=browser_agent,
+        )
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+
+        with patch.object(self.manager, 'get_tools_for_agent') as mock_get_tools:
+            definitions = self.manager.get_enabled_tools_definitions(agent)
+
+        self.assertEqual(definitions, [])
+        mock_init.assert_not_called()
+        mock_get_tools.assert_not_called()
         
     @patch('api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop')
     @patch('api.agent.tools.mcp_manager.MCPToolManager._execute_async')

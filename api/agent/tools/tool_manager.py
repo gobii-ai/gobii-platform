@@ -1007,7 +1007,12 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
     if row:
         row.last_used_at = now
         row.usage_count = (row.usage_count or 0) + 1
-        row.save(update_fields=["last_used_at", "usage_count"])
+        updates = ["last_used_at", "usage_count"]
+        if tool_name in BUILTIN_TOOL_REGISTRY and row.tool_server != "builtin":
+            row.tool_server = "builtin"
+            row.tool_name = tool_name
+            updates.extend(["tool_server", "tool_name"])
+        row.save(update_fields=list(dict.fromkeys(updates)))
         _ensure_system_skill_enabled_for_builtin_tool_name(agent, tool_name)
         return {
             "status": "success",
@@ -1020,6 +1025,8 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
         row = PersistentAgentEnabledTool.objects.create(
             agent=agent,
             tool_full_name=tool_name,
+            tool_server="builtin" if tool_name in BUILTIN_TOOL_REGISTRY else "",
+            tool_name=tool_name if tool_name in BUILTIN_TOOL_REGISTRY else "",
             last_used_at=now,
             usage_count=1,
         )

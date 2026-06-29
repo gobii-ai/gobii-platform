@@ -680,6 +680,51 @@ class MCPToolManager:
 
         return True
 
+    def _refresh_servers_by_config_id(self, config_ids: set[str]) -> bool:
+        """Refresh only the specified MCP server configs without touching others."""
+        if not config_ids:
+            return True
+
+        try:
+            configs = list(
+                MCPServerConfig.objects.filter(
+                    is_active=True,
+                    id__in=list(config_ids),
+                ).select_related("oauth_credential")
+            )
+        except Exception:  # pragma: no cover - defensive DB access
+            logger.exception("Failed to refresh MCP servers for ids: %s", sorted(config_ids))
+            return False
+
+        refreshed_ids: set[str] = set()
+        latest_seen: Optional[datetime] = None
+
+        for cfg in configs:
+            runtime = self._build_runtime_from_config(cfg)
+            refreshed_ids.add(runtime.config_id)
+
+            prior = self._server_cache.get(runtime.config_id)
+            prior_oauth_updated = getattr(prior, "oauth_updated_at", None) if prior else None
+            if prior and prior.updated_at == runtime.updated_at and prior_oauth_updated == runtime.oauth_updated_at:
+                continue
+
+            self._safe_register_runtime(runtime)
+            if cfg.updated_at and (latest_seen is None or cfg.updated_at > latest_seen):
+                latest_seen = cfg.updated_at
+
+        for config_id in config_ids - refreshed_ids:
+            self._discard_client(config_id)
+            self._server_cache.pop(config_id, None)
+
+        # This is a targeted refresh for prompt/tool execution paths. Do not
+        # mark the global catalog initialized, or later broad catalog callers
+        # may see only this subset.
+        marker = latest_seen or timezone.now()
+        if self._last_refresh_marker is None or marker > self._last_refresh_marker:
+            self._last_refresh_marker = marker
+
+        return True
+
     def _discard_client(self, config_id: str) -> None:
         client = self._clients.pop(config_id, None)
         if client:
@@ -1814,12 +1859,14 @@ class MCPToolManager:
         agent: PersistentAgent,
         *,
         allowed_server_names: Optional[Iterable[str]] = None,
+        allowed_config_ids: Optional[Iterable[str]] = None,
     ) -> List[MCPToolInfo]:
         """Return MCP tools that the given agent may access."""
 
         needs_refresh = (not self._initialized) or self._needs_refresh()
         missing_names: set[str] = set()
         allowed_set = None
+        allowed_config_set = None
         if allowed_server_names is not None:
             allowed_set = {
                 str(name).lower()
@@ -1828,8 +1875,22 @@ class MCPToolManager:
             }
             if not allowed_set:
                 return []
+        if allowed_config_ids is not None:
+            allowed_config_set = {
+                str(config_id)
+                for config_id in allowed_config_ids
+                if config_id and str(config_id).strip()
+            }
+            if not allowed_config_set:
+                return []
 
-        if allowed_set is None:
+        if allowed_config_set is not None:
+            current_ids = set(self._server_cache.keys())
+            missing_ids = allowed_config_set - current_ids
+            if needs_refresh or missing_ids:
+                if not self._refresh_servers_by_config_id(allowed_config_set):
+                    return []
+        elif allowed_set is None:
             if needs_refresh and not self.initialize():
                 return []
         else:
@@ -1840,6 +1901,8 @@ class MCPToolManager:
                     return []
 
         configs = agent_accessible_server_configs(agent)
+        if allowed_config_set is not None:
+            configs = [cfg for cfg in configs if str(getattr(cfg, "id", "")) in allowed_config_set]
         if allowed_set is not None:
             configs = [cfg for cfg in configs if str(getattr(cfg, "name", "")).lower() in allowed_set]
 
@@ -1904,19 +1967,56 @@ class MCPToolManager:
     
     def get_enabled_tools_definitions(self, agent: PersistentAgent) -> List[Dict[str, Any]]:
         """Get OpenAI-format tool definitions for enabled MCP tools."""
-        if not self._initialized:
-            self.initialize()
-
-        enabled_names = list(
+        enabled_rows = list(
             PersistentAgentEnabledTool.objects.filter(agent=agent)
-            .values_list("tool_full_name", flat=True)
+            .only("tool_full_name", "tool_server", "server_config_id")
         )
+
+        enabled_names: list[str] = []
+        allowed_config_ids: set[str] = set()
+        allowed_server_names: set[str] = set()
+        for row in enabled_rows:
+            tool_name = row.tool_full_name
+            tool_server = (row.tool_server or "").strip()
+            server_config_id = str(row.server_config_id) if row.server_config_id else ""
+
+            if server_config_id:
+                enabled_names.append(tool_name)
+                allowed_config_ids.add(server_config_id)
+                continue
+
+            if tool_server and tool_server not in {"builtin", "custom", "eval"}:
+                enabled_names.append(tool_name)
+                allowed_server_names.add(tool_server)
+                continue
+
+            # Older MCP rows may not have denormalized metadata. Only infer the
+            # server for canonical mcp_<server>_<tool> names; blank non-MCP rows
+            # are builtins/custom tools and should not force broad discovery.
+            if not tool_server and tool_name.startswith("mcp_"):
+                parts = tool_name.split("_", 2)
+                if len(parts) == 3 and parts[1]:
+                    enabled_names.append(tool_name)
+                    allowed_server_names.add(parts[1])
+
         if not enabled_names:
             return []
 
         definitions: List[Dict[str, Any]] = []
         enabled_set = set(enabled_names)
-        for tool_info in self.get_tools_for_agent(agent):
+        tools = (
+            self.get_tools_for_agent(agent, allowed_config_ids=allowed_config_ids)
+            if allowed_config_ids
+            else []
+        )
+        if allowed_server_names:
+            seen_tool_names = {tool.full_name for tool in tools}
+            tools.extend(
+                tool
+                for tool in self.get_tools_for_agent(agent, allowed_server_names=allowed_server_names)
+                if tool.full_name not in seen_tool_names
+            )
+        for tool_info in tools:
             if tool_info.full_name in enabled_set:
                 parameters = tool_info.parameters
                 if tool_info.tool_name in MCP_WILL_CONTINUE_TOOL_NAMES:
