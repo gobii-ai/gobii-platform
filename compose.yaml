@@ -141,7 +141,7 @@ services:
       redis:
         condition: service_healthy
     command: >-
-      bash -lc "set -a && source /config/django.env && exec celery -A config worker -l info -Q celery"
+      bash -lc "set -a && source /config/django.env && exec celery -A config worker -l info -Q celery,celery.single_instance"
     volumes:
       - runtime-config:/config:ro
       - media-data:/app/mediafiles

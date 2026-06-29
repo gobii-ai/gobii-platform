@@ -131,7 +131,7 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile  # relative to platform directory
-    command: celery -A config worker -l info -Q celery
+    command: celery -A config worker -l info -Q celery,celery.single_instance
     environment:
       <<: *app-sandbox-env
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}

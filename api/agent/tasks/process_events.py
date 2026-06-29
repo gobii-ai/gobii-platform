@@ -9,7 +9,6 @@ business logic to the event processing module.
 import logging
 import os
 import time
-from functools import lru_cache
 from uuid import UUID
 from typing import Any, Dict, Optional, Sequence
 
@@ -53,16 +52,27 @@ AGENT_DEFAULT_PROCESSING_QUEUE = "celery"
 AGENT_INTERACTIVE_PROCESSING_QUEUE = "agent_interactive"
 PROCESS_AGENT_EVENTS_QUEUED_AT_KWARG = "_queued_at_ts"
 PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG = "_queued_queue"
+_queue_latency_histogram = None
 
 
-@lru_cache(maxsize=1)
 def _process_agent_events_queue_latency_histogram():
-    meter = metrics.get_meter("gobii.agent.tasks")
-    return meter.create_histogram(
-        "gobii.agent.process_events.queue_latency",
-        unit="s",
-        description="Seconds between process_agent_events_task enqueue and worker start.",
-    )
+    global _queue_latency_histogram
+    provider = metrics.get_meter_provider()
+    meter = provider.get_meter("gobii.agent.tasks")
+    provider_class = provider.__class__.__name__
+    if provider_class in {"_ProxyMeterProvider", "ProxyMeterProvider", "NoOpMeterProvider"}:
+        return meter.create_histogram(
+            "gobii.agent.process_events.queue_latency",
+            unit="s",
+            description="Seconds between process_agent_events_task enqueue and worker start.",
+        )
+    if _queue_latency_histogram is None:
+        _queue_latency_histogram = meter.create_histogram(
+            "gobii.agent.process_events.queue_latency",
+            unit="s",
+            description="Seconds between process_agent_events_task enqueue and worker start.",
+        )
+    return _queue_latency_histogram
 
 
 def _record_process_agent_events_queue_latency(

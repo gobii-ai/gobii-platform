@@ -235,9 +235,8 @@ def shutdown_tracing() -> None:
     """
     global _tracer_provider, _meter_provider
     
-    if _tracer_provider is None:
-        logger.debug("OpenTelemetry: No tracer provider to shutdown")
     if _meter_provider is None and _tracer_provider is None:
+        logger.debug("OpenTelemetry: No active providers to shutdown")
         return
 
     if _meter_provider is not None:

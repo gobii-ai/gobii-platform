@@ -787,7 +787,7 @@ def ingest_inbound_message(
                     process_agent_events_task,
                 )
                 # Top-level trigger: no budget context provided
-                if channel_val == CommsChannel.WEB:
+                if is_interrupting_human_input:
                     enqueue_interactive_process_agent_events(
                         str(owner_id),
                         inbound_generation=inbound_generation,

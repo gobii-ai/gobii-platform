@@ -299,7 +299,7 @@ Gobii keeps the default boot path simple, then lets you add worker roles as need
 | Email listeners | `docker compose --profile email up` | IMAP idlers for inbound email automation |
 | Observability | `docker compose --profile obs up` | Flower + OTEL collector services |
 
-The default worker consumes the `celery` queue. The interactive worker consumes `agent_interactive` and is required for low-latency console/web chat replies; keep at least one interactive worker running anywhere web chat is enabled.
+The default worker consumes `celery` and `celery.single_instance`. The interactive worker consumes `agent_interactive` and is required for low-latency console/web chat replies; keep at least one interactive worker running anywhere web chat is enabled.
 
 ## Production Use Cases
 
@@ -348,7 +348,7 @@ docker compose -f docker-compose.dev.yaml up
 uv run uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000
 
 # workers (macOS-safe config)
-uv run celery -A config worker -l info -Q celery --pool=threads --concurrency=4
+uv run celery -A config worker -l info -Q celery,celery.single_instance --pool=threads --concurrency=4
 uv run celery -A config worker -l info -Q agent_interactive --pool=threads --concurrency=1 --prefetch-multiplier=1
 ```
 
