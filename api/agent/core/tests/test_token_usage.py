@@ -55,6 +55,37 @@ class ModelNormalizationTests(SimpleTestCase):
 
         self.assertEqual(model, "deepseek/deepseek-chat")
 
+    def test_azure_responses_api_prefixes_deployment_for_persistent_llm_routing(self):
+        provider = SimpleNamespace(
+            key="azure",
+            model_prefix="",
+            browser_backend=LLMProvider.BrowserBackend.OPENAI_COMPAT,
+        )
+
+        model = normalize_model_name(
+            provider,
+            "gpt-5-deployment",
+            api_base="https://example.openai.azure.com",
+            responses_api=True,
+        )
+
+        self.assertEqual(model, "azure/responses/gpt-5-deployment")
+
+    def test_azure_prefixing_requires_responses_api_mode(self):
+        provider = SimpleNamespace(
+            key="azure",
+            model_prefix="",
+            browser_backend=LLMProvider.BrowserBackend.OPENAI_COMPAT,
+        )
+
+        model = normalize_model_name(
+            provider,
+            "text-embedding-3-large",
+            api_base="https://example.openai.azure.com",
+        )
+
+        self.assertEqual(model, "openai/text-embedding-3-large")
+
 
 @tag("batch_token_usage")
 class CostBreakdownPricingModelTests(SimpleTestCase):

@@ -10,11 +10,20 @@ OPENAI_BACKENDS = {
 }
 
 
+AZURE_PROVIDER_KEYS = {"azure", "azure_openai"}
+
+
+def _is_azure_provider(provider: Optional[LLMProvider]) -> bool:
+    provider_key = (getattr(provider, "key", "") or "").strip().lower()
+    return provider_key in AZURE_PROVIDER_KEYS
+
+
 def normalize_model_name(
     provider: Optional[LLMProvider],
     raw_model: str,
     *,
     api_base: str | None = None,
+    responses_api: bool = False,
 ) -> str:
     """Return the model identifier with any required provider prefixes applied.
 
@@ -27,6 +36,13 @@ def normalize_model_name(
     model = (raw_model or "").strip()
     if not model:
         return model
+
+    if responses_api and _is_azure_provider(provider) and api_base:
+        if model.startswith("azure/"):
+            return model
+        if model.startswith("responses/"):
+            return f"azure/{model}"
+        return f"azure/responses/{model}"
 
     if provider is not None:
         # Only apply the provider's static prefix (e.g. "openrouter/") if we

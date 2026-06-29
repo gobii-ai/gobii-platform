@@ -18,17 +18,25 @@ _PASSTHROUGH_REQUEST_KWARGS = (
     "extra_headers",
     "extra_query",
     "extra_body",
+    "api_base",
+    "api_version",
     "api_key",
 )
 
 
 def should_use_openai_responses(model: str, kwargs: dict[str, Any]) -> bool:
-    if not isinstance(model, str) or not model.startswith("openai/"):
+    if not isinstance(model, str):
+        return False
+    provider = kwargs.get("custom_llm_provider") or kwargs.get("provider")
+    if model.startswith("azure/responses/"):
+        return True
+    if provider == "azure":
+        return True
+    if provider not in (None, "openai"):
         return False
     if kwargs.get("api_base"):
         return False
-    provider = kwargs.get("custom_llm_provider") or kwargs.get("provider")
-    return provider in (None, "openai")
+    return provider == "openai" or model.startswith("openai/") or model.startswith("gpt-")
 
 
 def create_openai_responses_completion(
@@ -64,9 +72,9 @@ def _build_responses_request_kwargs(
     reasoning_effort: Any = None,
 ) -> dict[str, Any]:
     request_kwargs: dict[str, Any] = {
-        "model": _strip_openai_prefix(model),
+        "model": _strip_responses_provider_prefix(model, kwargs),
         "input": _convert_messages(messages),
-        "custom_llm_provider": "openai",
+        "custom_llm_provider": _resolve_responses_provider(model, kwargs),
     }
     for key in _PASSTHROUGH_REQUEST_KWARGS:
         _copy_if_present(kwargs, request_kwargs, key)
@@ -113,6 +121,20 @@ def _copy_if_present(source: dict[str, Any], target: dict[str, Any], key: str) -
 
 def _strip_openai_prefix(model: str) -> str:
     return model[len("openai/"):] if model.startswith("openai/") else model
+
+
+def _resolve_responses_provider(model: str, kwargs: dict[str, Any]) -> str:
+    provider = kwargs.get("custom_llm_provider") or kwargs.get("provider")
+    if provider == "azure" or model.startswith("azure/"):
+        return "azure"
+    return "openai"
+
+
+def _strip_responses_provider_prefix(model: str, kwargs: dict[str, Any]) -> str:
+    provider = _resolve_responses_provider(model, kwargs)
+    if provider == "azure" and model.startswith("azure/"):
+        return model[len("azure/"):]
+    return _strip_openai_prefix(model)
 
 
 def _convert_messages(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:

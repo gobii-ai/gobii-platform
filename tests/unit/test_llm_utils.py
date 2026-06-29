@@ -205,6 +205,33 @@ class RunCompletionReasoningTests(TestCase):
         self.assertEqual(kwargs["api_base"], "https://proxy.example/v1")
 
     @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    @patch("api.agent.core.openai_responses.litellm.responses")
+    def test_azure_responses_uses_azure_provider(self, mock_responses, mock_litellm_completion):
+        mock_responses.return_value = _responses_response(content="Azure answer")
+
+        result = run_completion(
+            model="azure/responses/gpt-5-deployment",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={
+                "api_key": "azure-key",
+                "api_base": "https://example.openai.azure.com",
+                "custom_llm_provider": "azure",
+                "supports_reasoning": True,
+                "reasoning_effort": "low",
+            },
+        )
+
+        mock_litellm_completion.assert_not_called()
+        _, kwargs = mock_responses.call_args
+        self.assertEqual(kwargs["model"], "responses/gpt-5-deployment")
+        self.assertEqual(kwargs["api_base"], "https://example.openai.azure.com")
+        self.assertEqual(kwargs["api_key"], "azure-key")
+        self.assertEqual(kwargs["custom_llm_provider"], "azure")
+        self.assertEqual(kwargs["reasoning"], {"summary": "auto", "effort": "low"})
+        self.assertEqual(result.choices[0].message.content, "Azure answer")
+
+    @tag("batch_event_llm")
     @patch("api.agent.core.openai_responses.litellm.responses")
     def test_openai_responses_omits_reasoning_when_not_supported(self, mock_responses):
         mock_responses.return_value = _responses_response(content="No reasoning")

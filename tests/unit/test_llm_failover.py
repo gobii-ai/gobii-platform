@@ -346,6 +346,45 @@ class TestLLMFailover(TestCase):
         self.assertEqual(model, 'openai/gpt-5')
         self.assertEqual(params.get("temperature"), 1.0)
 
+    def test_azure_persistent_endpoint_routes_to_responses_api(self):
+        clear_llm_db()
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+        PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+        PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='azure',
+            display_name='Azure OpenAI',
+            enabled=True,
+            env_var_name='AZURE_OPENAI_API_KEY',
+            browser_backend='OPENAI_COMPAT',
+        )
+        endpoint = PersistentModelEndpoint.objects.create(
+            key='azure_gpt5',
+            provider=provider,
+            enabled=True,
+            litellm_model='gpt-5-deployment',
+            api_base='https://example.openai.azure.com',
+            supports_tool_choice=True,
+            supports_reasoning=True,
+        )
+
+        token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
+        tier = PersistentLLMTier.objects.create(token_range=token_range, order=1)
+        PersistentTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=1.0)
+
+        with mock.patch.dict(os.environ, {"AZURE_OPENAI_API_KEY": "azure-key"}, clear=True):
+            configs = get_llm_config_with_failover(token_count=0)
+
+        self.assertTrue(configs)
+        _, model, params = configs[0]
+        self.assertEqual(model, 'azure/responses/gpt-5-deployment')
+        self.assertEqual(params.get("api_base"), 'https://example.openai.azure.com')
+        self.assertEqual(params.get("api_key"), 'azure-key')
+        self.assertEqual(params.get("custom_llm_provider"), 'azure')
+
     def test_reasoning_effort_override_respected(self):
         clear_llm_db()
         LLMProvider = apps.get_model('api', 'LLMProvider')
