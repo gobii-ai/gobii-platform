@@ -1239,7 +1239,6 @@ export function AgentChatPage({
   const timelineLoadingOlder = !isNewAgent ? timelineQuery.isFetchingPreviousPage : false
   const timelineLoadingNewer = !isNewAgent ? timelineQuery.isFetchingNextPage : false
   const initialLoading = !isNewAgent && timelineQuery.isLoading
-  const timelineInitialReady = isNewAgent || !timelineQuery.isLoading
 
   const statusExpansionTargets = useMemo(
     () => findLatestStatusExpansionTargets(timelineEvents),
@@ -2106,7 +2105,7 @@ export function AgentChatPage({
     allowAgentRefresh,
     rosterAgents,
   })
-  const allowDeferredAgentPanelRequests = allowAgentPanelRequests && timelineInitialReady
+  const allowDeferredAgentPanelRequests = allowAgentPanelRequests && !initialLoading
   const {
     data: quickSettingsPayload,
     isLoading: quickSettingsLoading,
@@ -2947,7 +2946,7 @@ export function AgentChatPage({
   const insightsQueryEnabled = Boolean(
     activeAgentId
     && allowAgentRefresh
-    && timelineInitialReady
+    && !initialLoading
     && !isNewAgent
     && !isCollaboratorOnly
     && !showSignupPreviewPanel,
