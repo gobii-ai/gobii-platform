@@ -18,6 +18,7 @@ from api.agent.tools.mcp_manager import (
     PipedreamToolCacheContext,
     SandboxToolCacheContext,
 )
+from api.agent.tools.tool_manager import ToolCatalogEntry, execute_enabled_tool
 from api.services.mcp_tool_cache import (
     get_cached_mcp_tool_definitions,
     invalidate_mcp_tool_cache,
@@ -542,11 +543,104 @@ class MCPToolResultDataNormalizationTests(SimpleTestCase):
 
 @tag("batch_mcp_tools")
 class MCPToolErrorNormalizationTests(SimpleTestCase):
+    def _stdio_runtime(self) -> MCPServerRuntime:
+        return MCPServerRuntime(
+            config_id="cache-test-id",
+            name="brightdata",
+            display_name="Bright Data",
+            description="",
+            command="npx",
+            args=["-y", "@brightdata/mcp@2.9.5"],
+            url=None,
+            auth_method="none",
+            env={"API_TOKEN": "secret"},
+            headers={},
+            prefetch_apps=[],
+            scope="platform",
+            organization_id=None,
+            user_id=None,
+            updated_at=timezone.now(),
+        )
+
     def _tool_error_result(self, message: str):
         return SimpleNamespace(
             is_error=True,
             content=[SimpleNamespace(text=message)],
         )
+
+    def test_brightdata_always_routes_to_isolated_mcp_execution(self):
+        entry = ToolCatalogEntry(
+            provider="mcp",
+            full_name="mcp_brightdata_search_engine",
+            description="Bright Data Search",
+            parameters={"type": "object", "properties": {}},
+            tool_server="brightdata",
+            tool_name="search_engine",
+            server_config_id="cache-test-id",
+        )
+
+        with patch("api.agent.tools.tool_manager.resolve_tool_entry", return_value=entry), patch(
+            "api.agent.tools.tool_manager.PersistentAgentEnabledTool.objects.filter"
+        ) as filter_mock, patch(
+            "api.agent.tools.tool_manager.execute_mcp_tool_isolated",
+            return_value={"status": "success", "result": "ok"},
+        ) as isolated_mock, patch(
+            "api.agent.tools.tool_manager.execute_mcp_tool",
+            return_value={"status": "error", "message": "shared path should not run"},
+        ) as shared_mock:
+            filter_mock.return_value.exists.return_value = True
+
+            result = execute_enabled_tool(
+                SimpleNamespace(id="agent-id"),
+                "mcp_brightdata_search_engine",
+                {"query": "gobii"},
+            )
+
+        self.assertEqual(result["status"], "success")
+        isolated_mock.assert_called_once()
+        shared_mock.assert_not_called()
+
+    def test_mcp_session_death_response_evicts_stdio_execution_clients_only(self):
+        manager = MCPToolManager()
+        runtime = self._stdio_runtime()
+        manager._clients[runtime.config_id] = object()
+        manager._stdio_proxy_clients[f"{runtime.config_id}:agent:one:http://proxy"] = object()
+        manager._tools_cache[runtime.config_id] = ["cached-tools"]
+        manager._tool_cache_fingerprints[runtime.config_id] = "fingerprint"
+
+        with patch.object(manager, "_close_client_sync") as close_mock:
+            result = manager._handle_mcp_session_death_response(
+                runtime,
+                {"status": "error", "message": "Connection closed"},
+                evict_client=True,
+            )
+
+        self.assertTrue(result["retryable"])
+        self.assertNotIn(runtime.config_id, manager._clients)
+        self.assertFalse(manager._stdio_proxy_clients)
+        self.assertEqual(manager._tools_cache[runtime.config_id], ["cached-tools"])
+        self.assertEqual(manager._tool_cache_fingerprints[runtime.config_id], "fingerprint")
+        self.assertEqual(close_mock.call_count, 2)
+
+    def test_non_session_brightdata_error_does_not_evict_stdio_execution_clients(self):
+        manager = MCPToolManager()
+        runtime = self._stdio_runtime()
+        client = object()
+        manager._clients[runtime.config_id] = client
+        manager._tools_cache[runtime.config_id] = ["cached-tools"]
+
+        result = manager._handle_mcp_session_death_response(
+            runtime,
+            {
+                "status": "error",
+                "message": "Bright Data returned an empty scrape_as_markdown result.",
+            },
+            evict_client=True,
+        )
+
+        self.assertNotIn("retryable", result)
+        self.assertIs(manager._clients[runtime.config_id], client)
+        self.assertEqual(manager._tools_cache[runtime.config_id], ["cached-tools"])
 
     def test_pipedream_google_sheets_retry_blob_is_normalized(self):
         manager = MCPToolManager()

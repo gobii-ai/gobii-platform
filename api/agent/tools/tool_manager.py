@@ -1421,7 +1421,7 @@ def execute_enabled_tool(
         params = _normalize_tool_params_unicode_escapes(params)
 
     if entry.provider == "mcp":
-        if isolated_mcp and resolved_name.startswith("mcp_brightdata_"):
+        if resolved_name.startswith("mcp_brightdata_"):
             result = execute_mcp_tool_isolated(agent, resolved_name, params)
         else:
             result = execute_mcp_tool(agent, resolved_name, params)
