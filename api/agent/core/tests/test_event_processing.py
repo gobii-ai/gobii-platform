@@ -21,6 +21,7 @@ from api.agent.core.event_processing import (
     _contact_permission_params_from_misrouted_human_input,
     _ensure_credit_for_tool,
     _process_agent_events_locked,
+    _infer_retryable_from_text,
     _is_warning_status,
     _normalize_error_result,
     _normalize_tool_params,
@@ -626,6 +627,15 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
 
 @tag("batch_event_processing")
 class PeerMessageToolHandlingTests(SimpleTestCase):
+    def test_mcp_session_death_errors_are_retryable(self):
+        self.assertTrue(_infer_retryable_from_text("Connection closed"))
+        self.assertTrue(_infer_retryable_from_text("Event loop is closed"))
+        self.assertTrue(
+            _infer_retryable_from_text(
+                "Client failed to connect: Server session was closed unexpectedly"
+            )
+        )
+
     def test_debounced_and_throttled_results_require_followup(self):
         self.assertTrue(_is_warning_status({"status": "debounced"}))
         self.assertTrue(_is_warning_status({"status": "throttled"}))

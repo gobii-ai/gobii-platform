@@ -133,6 +133,12 @@ MCP_WILL_CONTINUE_TOOL_NAMES = {
 BRIGHTDATA_NON_JSON_ERROR = "Unexpected non-JSON response from Bright Data"
 BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV = "WEB_UNLOCKER_ZONE_FALLBACK"
 BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY = "brightdata_search_fallback_zone_env"
+MCP_SESSION_DEATH_ERROR_SNIPPETS = (
+    "connection closed",
+    "server session was closed",
+    "event loop is closed",
+    "client failed to connect",
+)
 MCP_TOOL_SUCCESS_SENTINEL = "Tool executed successfully"
 
 def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -686,6 +692,43 @@ class MCPToolManager:
             self._tools_cache.pop(slot_key, None)
             self._tool_cache_fingerprints.pop(slot_key, None)
 
+    def _discard_execution_clients(self, config_id: str) -> None:
+        client = self._clients.pop(config_id, None)
+        if client:
+            self._close_client_sync(client, context=config_id)
+        self._discard_scoped_stdio_proxy_clients(f"{config_id}:")
+
+    @staticmethod
+    def _is_mcp_session_death_message(message: Any) -> bool:
+        if not isinstance(message, str):
+            return False
+        lower = message.lower()
+        return any(snippet in lower for snippet in MCP_SESSION_DEATH_ERROR_SNIPPETS)
+
+    def _handle_mcp_session_death_response(
+        self,
+        runtime: Optional[MCPServerRuntime],
+        response: Dict[str, Any],
+        *,
+        evict_client: bool,
+    ) -> Dict[str, Any]:
+        if not isinstance(response, dict) or response.get("status") != "error":
+            return response
+        if not self._is_mcp_session_death_message(str(response.get("message") or "")):
+            return response
+
+        if evict_client and runtime and self._is_stdio_runtime(runtime):
+            logger.info(
+                "Discarding MCP stdio execution client for %s after session closure: %s",
+                runtime.name,
+                response.get("message"),
+            )
+            self._discard_execution_clients(runtime.config_id)
+
+        updated = dict(response)
+        updated["retryable"] = True
+        return updated
+
     def _update_refresh_marker(self, runtime: MCPServerRuntime) -> None:
         marker = runtime.updated_at or timezone.now()
         if self._last_refresh_marker is None or marker > self._last_refresh_marker:
@@ -777,6 +820,16 @@ class MCPToolManager:
         if runtime.name == self.PIPEDREAM_RUNTIME_NAME:
             return bool(self._get_pipedream_access_token())
         return False
+
+    def is_platform_brightdata_config(self, config_id: Optional[str]) -> bool:
+        if not config_id:
+            return False
+        runtime = self._server_cache.get(str(config_id))
+        return bool(
+            runtime
+            and runtime.name == "brightdata"
+            and runtime.scope == MCPServerConfig.Scope.PLATFORM
+        )
 
     def _safe_register_runtime(self, runtime: MCPServerRuntime) -> bool:
         try:
@@ -2268,15 +2321,25 @@ class MCPToolManager:
             with mcp_result_owner_context(None):
                 result = self._adapt_tool_result(runtime.name, info.tool_name, result)
 
-            return self._finalize_mcp_result(
+            response = self._finalize_mcp_result(
                 runtime.name,
                 info.tool_name,
                 result,
                 use_success_sentinel=False,
             )
+            return self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=True,
+            )
         except Exception as exc:
             logger.error("Failed to execute platform MCP tool %s/%s: %s", server_name, tool_name, exc)
-            return {"status": "error", "message": str(exc)}
+            response = {"status": "error", "message": str(exc)}
+            return self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=True,
+            )
 
     def _dispatch_sandbox_mcp_request(
         self,
@@ -2497,6 +2560,11 @@ class MCPToolManager:
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
             
             response = self._finalize_mcp_result(server_name, actual_tool_name, result)
+            response = self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=True,
+            )
             if response.get("status") == "error":
                 return response
             content = response.get("result")
@@ -2643,10 +2711,15 @@ class MCPToolManager:
             
         except Exception as e:
             logger.error(f"Failed to execute MCP tool {tool_name}: {e}")
-            return {
+            response = {
                 "status": "error",
-                "message": str(e)
+                "message": str(e),
             }
+            return self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=True,
+            )
 
     def execute_mcp_tool_isolated(
         self,
@@ -2748,12 +2821,22 @@ class MCPToolManager:
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
 
             response = self._finalize_mcp_result(server_name, actual_tool_name, result)
+            response = self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=False,
+            )
             if will_continue_work is False:
                 response["auto_sleep_ok"] = True
             return response
         except Exception as exc:
             logger.error("Failed to execute isolated MCP tool %s: %s", tool_name, exc)
-            return {"status": "error", "message": str(exc)}
+            response = {"status": "error", "message": str(exc)}
+            return self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=False,
+            )
     
     def _adapt_tool_result(self, server_name: str, tool_name: str, result: Any):
         """Run the tool response through any registered adapters."""
