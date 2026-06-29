@@ -821,6 +821,16 @@ class MCPToolManager:
             return bool(self._get_pipedream_access_token())
         return False
 
+    def is_platform_brightdata_config(self, config_id: Optional[str]) -> bool:
+        if not config_id:
+            return False
+        runtime = self._server_cache.get(str(config_id))
+        return bool(
+            runtime
+            and runtime.name == "brightdata"
+            and runtime.scope == MCPServerConfig.Scope.PLATFORM
+        )
+
     def _safe_register_runtime(self, runtime: MCPServerRuntime) -> bool:
         try:
             self._register_server(runtime)

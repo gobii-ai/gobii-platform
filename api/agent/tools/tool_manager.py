@@ -1282,6 +1282,13 @@ def is_pipedream_mcp_tool(agent: PersistentAgent, tool_name: str) -> bool:
     return bool(entry and _is_pipedream_entry(entry))
 
 
+def _should_execute_mcp_tool_isolated(entry: ToolCatalogEntry) -> bool:
+    if not entry.full_name.startswith("mcp_brightdata_"):
+        return False
+    manager = _get_manager()
+    return manager.is_platform_brightdata_config(entry.server_config_id)
+
+
 def auto_enable_heuristic_tools(
     agent: PersistentAgent,
     text: str,
@@ -1421,7 +1428,7 @@ def execute_enabled_tool(
         params = _normalize_tool_params_unicode_escapes(params)
 
     if entry.provider == "mcp":
-        if resolved_name.startswith("mcp_brightdata_"):
+        if _should_execute_mcp_tool_isolated(entry):
             result = execute_mcp_tool_isolated(agent, resolved_name, params)
         else:
             result = execute_mcp_tool(agent, resolved_name, params)

@@ -568,7 +568,7 @@ class MCPToolErrorNormalizationTests(SimpleTestCase):
             content=[SimpleNamespace(text=message)],
         )
 
-    def test_brightdata_always_routes_to_isolated_mcp_execution(self):
+    def test_platform_brightdata_routes_to_isolated_mcp_execution(self):
         entry = ToolCatalogEntry(
             provider="mcp",
             full_name="mcp_brightdata_search_engine",
@@ -590,6 +590,49 @@ class MCPToolErrorNormalizationTests(SimpleTestCase):
         ) as shared_mock:
             filter_mock.return_value.exists.return_value = True
 
+            with patch(
+                "api.agent.tools.tool_manager._get_manager",
+                return_value=SimpleNamespace(
+                    is_platform_brightdata_config=lambda config_id: True,
+                ),
+            ):
+                result = execute_enabled_tool(
+                    SimpleNamespace(id="agent-id"),
+                    "mcp_brightdata_search_engine",
+                    {"query": "gobii"},
+                )
+
+        self.assertEqual(result["status"], "success")
+        isolated_mock.assert_called_once()
+        shared_mock.assert_not_called()
+
+    def test_non_platform_brightdata_preserves_shared_mcp_execution(self):
+        entry = ToolCatalogEntry(
+            provider="mcp",
+            full_name="mcp_brightdata_search_engine",
+            description="User Bright Data Search",
+            parameters={"type": "object", "properties": {}},
+            tool_server="brightdata",
+            tool_name="search_engine",
+            server_config_id="user-brightdata-config-id",
+        )
+
+        with patch("api.agent.tools.tool_manager.resolve_tool_entry", return_value=entry), patch(
+            "api.agent.tools.tool_manager.PersistentAgentEnabledTool.objects.filter"
+        ) as filter_mock, patch(
+            "api.agent.tools.tool_manager.execute_mcp_tool_isolated",
+            return_value={"status": "error", "message": "isolated path should not run"},
+        ) as isolated_mock, patch(
+            "api.agent.tools.tool_manager.execute_mcp_tool",
+            return_value={"status": "success", "result": "ok"},
+        ) as shared_mock, patch(
+            "api.agent.tools.tool_manager._get_manager",
+            return_value=SimpleNamespace(
+                is_platform_brightdata_config=lambda config_id: False,
+            ),
+        ):
+            filter_mock.return_value.exists.return_value = True
+
             result = execute_enabled_tool(
                 SimpleNamespace(id="agent-id"),
                 "mcp_brightdata_search_engine",
@@ -597,8 +640,8 @@ class MCPToolErrorNormalizationTests(SimpleTestCase):
             )
 
         self.assertEqual(result["status"], "success")
-        isolated_mock.assert_called_once()
-        shared_mock.assert_not_called()
+        isolated_mock.assert_not_called()
+        shared_mock.assert_called_once()
 
     def test_mcp_session_death_response_evicts_stdio_execution_clients_only(self):
         manager = MCPToolManager()
