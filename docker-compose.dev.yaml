@@ -131,7 +131,45 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile  # relative to platform directory
-    command: celery -A config worker -l info
+    command: celery -A config worker -l info -Q celery
+    environment:
+      <<: *app-sandbox-env
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
+      GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-gobii}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
+      BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      XDG_DATA_HOME: /tmp/.chrome
+      XDG_CONFIG_HOME: /tmp/.chrome
+      XDG_CACHE_HOME: /tmp/.chrome
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    shm_size: 2gb
+    profiles: ["worker"]
+
+  interactive-worker:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile  # relative to platform directory
+    command: celery -A config worker -l info -Q agent_interactive --concurrency=${INTERACTIVE_CELERY_CONCURRENCY:-1} --prefetch-multiplier=1
     environment:
       <<: *app-sandbox-env
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}

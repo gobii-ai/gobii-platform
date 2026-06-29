@@ -782,9 +782,17 @@ def ingest_inbound_message(
                     inbound_generation = bump_human_inbound_generation(owner_id)
                 if should_skip_processing:
                     return
-                from api.agent.tasks import process_agent_events_task
+                from api.agent.tasks import (
+                    enqueue_interactive_process_agent_events,
+                    process_agent_events_task,
+                )
                 # Top-level trigger: no budget context provided
-                if inbound_generation is None:
+                if channel_val == CommsChannel.WEB:
+                    enqueue_interactive_process_agent_events(
+                        str(owner_id),
+                        inbound_generation=inbound_generation,
+                    )
+                elif inbound_generation is None:
                     process_agent_events_task.delay(str(owner_id))
                 else:
                     process_agent_events_task.delay(str(owner_id), inbound_generation=inbound_generation)
@@ -932,9 +940,9 @@ def inject_internal_web_message(
     def _trigger_processing() -> None:
         if not trigger_processing:
             return
-        from api.agent.tasks import process_agent_events_task
+        from api.agent.tasks import enqueue_interactive_process_agent_events
         inbound_generation = bump_human_inbound_generation(agent.id)
-        process_agent_events_task.delay(
+        enqueue_interactive_process_agent_events(
             str(agent.id),
             eval_run_id=eval_run_id,
             inbound_generation=inbound_generation,

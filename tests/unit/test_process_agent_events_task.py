@@ -3,7 +3,16 @@ from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, tag
 
-from api.agent.tasks.process_events import process_agent_events_task, queue_agent_process_events_batch_task
+from api.agent.tasks.process_events import (
+    AGENT_DEFAULT_PROCESSING_QUEUE,
+    AGENT_INTERACTIVE_PROCESSING_QUEUE,
+    PROCESS_AGENT_EVENTS_QUEUED_AT_KWARG,
+    PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG,
+    enqueue_interactive_process_agent_events,
+    process_agent_events_task,
+    queue_agent_process_events_batch_task,
+    _record_process_agent_events_queue_latency,
+)
 
 
 class ProcessAgentEventsTaskTests(SimpleTestCase):
@@ -30,6 +39,94 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
         mock_broadcast.assert_called_once_with(agent_id)
         mock_super.assert_called_once()
         self.assertEqual(result, "ok")
+
+    @tag("batch_agent_chat")
+    def test_apply_async_stamps_enqueue_metadata(self):
+        agent_id = "agent-apply-async-test"
+
+        with patch("api.agent.tasks.process_events.time.time", return_value=123.45), \
+             patch("api.agent.tasks.process_events.set_processing_queued_flag"), \
+             patch("api.agent.tasks.process_events._broadcast_processing_state"), \
+             patch("celery.app.task.Task.apply_async", return_value="ok") as mock_super:
+            result = process_agent_events_task.apply_async(
+                args=(agent_id,),
+                kwargs={"inbound_generation": 4},
+                queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+            )
+
+        mock_super.assert_called_once_with(
+            args=(agent_id,),
+            kwargs={
+                "inbound_generation": 4,
+                PROCESS_AGENT_EVENTS_QUEUED_AT_KWARG: 123.45,
+                PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG: AGENT_INTERACTIVE_PROCESSING_QUEUE,
+            },
+            queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+        )
+        self.assertEqual(result, "ok")
+
+    @tag("batch_agent_chat")
+    def test_apply_async_defaults_enqueue_queue_metadata(self):
+        agent_id = "agent-apply-async-test"
+
+        with patch("api.agent.tasks.process_events.time.time", return_value=234.56), \
+             patch("api.agent.tasks.process_events.set_processing_queued_flag"), \
+             patch("api.agent.tasks.process_events._broadcast_processing_state"), \
+             patch("celery.app.task.Task.apply_async", return_value="ok") as mock_super:
+            process_agent_events_task.apply_async(args=(agent_id,))
+
+        call_kwargs = mock_super.call_args.kwargs["kwargs"]
+        self.assertEqual(call_kwargs[PROCESS_AGENT_EVENTS_QUEUED_AT_KWARG], 234.56)
+        self.assertEqual(call_kwargs[PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG], AGENT_DEFAULT_PROCESSING_QUEUE)
+
+    @tag("batch_agent_chat")
+    def test_record_process_agent_events_queue_latency(self):
+        histogram = Mock()
+
+        with patch("api.agent.tasks.process_events.time.time", return_value=130.0), \
+             patch(
+                 "api.agent.tasks.process_events._process_agent_events_queue_latency_histogram",
+                 return_value=histogram,
+             ):
+            latency = _record_process_agent_events_queue_latency(
+                100.0,
+                queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+            )
+
+        self.assertEqual(latency, 30.0)
+        histogram.record.assert_called_once_with(
+            30.0,
+            attributes={
+                "celery.queue": AGENT_INTERACTIVE_PROCESSING_QUEUE,
+                "celery.task_name": "api.agent.tasks.process_agent_events",
+            },
+        )
+
+    @tag("batch_agent_chat")
+    def test_enqueue_interactive_process_agent_events_uses_interactive_queue(self):
+        agent_id = "33333333-3333-3333-3333-333333333333"
+
+        with patch("api.agent.tasks.process_events.process_agent_events_task.apply_async") as mock_apply_async:
+            enqueue_interactive_process_agent_events(agent_id, inbound_generation=7)
+
+        mock_apply_async.assert_called_once_with(
+            args=[agent_id],
+            kwargs={"inbound_generation": 7},
+            queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+        )
+
+    @tag("batch_agent_chat")
+    def test_enqueue_interactive_process_agent_events_omits_empty_generation(self):
+        agent_id = "44444444-4444-4444-4444-444444444444"
+
+        with patch("api.agent.tasks.process_events.process_agent_events_task.apply_async") as mock_apply_async:
+            enqueue_interactive_process_agent_events(agent_id)
+
+        mock_apply_async.assert_called_once_with(
+            args=[agent_id],
+            kwargs={},
+            queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+        )
 
     @tag("batch_agent_chat")
     def test_redelivered_clears_stale_lock(self):

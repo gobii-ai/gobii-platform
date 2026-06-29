@@ -13,19 +13,23 @@ logger = logging.getLogger(__name__)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, SpanProcessor, Span, Status, StatusCode
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry._logs import set_logger_provider
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from typing import Optional
-from opentelemetry import trace, baggage, context
+from opentelemetry import trace, baggage, context, metrics
 from contextlib import contextmanager
 
 tracer = trace.get_tracer("gobii.utils")
 
 # Global reference to the tracer provider for cleanup
 _tracer_provider: Optional[TracerProvider] = None
+_meter_provider: Optional[MeterProvider] = None
 
 # Flag indicating whether tracing was actually initialised (provider installed).
 # Local tests disable tracing; in that case we suppress noisy INFO logs.
@@ -87,7 +91,7 @@ def init_tracing(service_name: GobiiService) -> None:
     - OTEL_BSP_MAX_QUEUE_SIZE=1024                  # Small queue (if using batch)
     - OTEL_BSP_MAX_EXPORT_BATCH_SIZE=256            # Smaller than default 512
     """
-    global _tracer_provider
+    global _tracer_provider, _meter_provider
     
     logger.debug(f"OpenTelemetry: Initializing OTEL tracer for {service_name.value}")
 
@@ -190,9 +194,28 @@ def init_tracing(service_name: GobiiService) -> None:
         logger.debug("OpenTelemetry: UserIdAttributeProcessor added to TracerProvider")
         trace.set_tracer_provider(provider)
         logger.debug("OpenTelemetry: provider set as the global tracer provider")
+
+        metric_export_interval_ms = int(os.getenv("OTEL_METRIC_EXPORT_INTERVAL", "60000"))
+        metric_export_timeout_ms = int(os.getenv("OTEL_METRIC_EXPORT_TIMEOUT", "30000"))
+        metric_reader = PeriodicExportingMetricReader(
+            OTLPMetricExporter(
+                endpoint=settings.OTEL_EXPORTER_OTLP_ENDPOINT,
+                insecure=settings.OTEL_EXPORTER_OTLP_INSECURE,
+            ),
+            export_interval_millis=metric_export_interval_ms,
+            export_timeout_millis=metric_export_timeout_ms,
+        )
+        meter_provider = MeterProvider(resource=res, metric_readers=[metric_reader])
+        metrics.set_meter_provider(meter_provider)
+        logger.debug(
+            "OpenTelemetry: MeterProvider set with export_interval=%sms, export_timeout=%sms",
+            metric_export_interval_ms,
+            metric_export_timeout_ms,
+        )
         
         # Store reference for cleanup
         _tracer_provider = provider
+        _meter_provider = meter_provider
 
         # Mark tracing as active so helper functions can adjust logging verbosity
         global _TRACING_ACTIVE
@@ -210,10 +233,25 @@ def shutdown_tracing() -> None:
     Uses a separate thread with a timeout to prevent indefinite blocking
     during Celery worker shutdown.
     """
-    global _tracer_provider
+    global _tracer_provider, _meter_provider
     
     if _tracer_provider is None:
         logger.debug("OpenTelemetry: No tracer provider to shutdown")
+    if _meter_provider is None and _tracer_provider is None:
+        return
+
+    if _meter_provider is not None:
+        logger.debug("OpenTelemetry: Starting meter provider shutdown...")
+        try:
+            _meter_provider.force_flush(timeout_millis=3000)
+            _meter_provider.shutdown()
+            logger.debug("OpenTelemetry: Meter provider shutdown completed successfully")
+        except Exception as e:
+            logger.error(f"OpenTelemetry: Error during meter provider shutdown: {e}")
+        finally:
+            _meter_provider = None
+
+    if _tracer_provider is None:
         return
         
     logger.debug("OpenTelemetry: Starting tracer provider shutdown...")

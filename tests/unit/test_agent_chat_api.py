@@ -1915,7 +1915,7 @@ class AgentChatAPITests(TestCase):
     @tag("batch_agent_chat")
     @patch("console.api_views.Analytics.track_event")
     def test_message_post_records_analytics(self, mock_track_event):
-        with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
+        with patch("api.agent.tasks.enqueue_interactive_process_agent_events") as mock_enqueue:
             with self.captureOnCommitCallbacks(execute=True):
                 response = self.client.post(
                     f"/console/api/agents/{self.agent.id}/messages/",
@@ -1924,7 +1924,7 @@ class AgentChatAPITests(TestCase):
                 )
                 self.assertEqual(response.status_code, 201)
 
-        mock_delay.assert_called()
+        mock_enqueue.assert_called()
 
         self.assertEqual(mock_track_event.call_count, 1)
         self.assertEqual(mock_track_event.call_args.kwargs.get("event"), AnalyticsEvent.WEB_CHAT_MESSAGE_SENT)
@@ -2157,7 +2157,7 @@ class AgentChatAPITests(TestCase):
     @tag("batch_agent_chat")
     @patch("api.agent.comms.message_service.emit_configured_custom_capi_event")
     def test_message_post_emits_inbound_message_custom_event(self, mock_emit_custom_event):
-        with patch("api.agent.tasks.process_agent_events_task.delay"):
+        with patch("api.agent.tasks.enqueue_interactive_process_agent_events"):
             with self.captureOnCommitCallbacks(execute=True):
                 response = self.client.post(
                     f"/console/api/agents/{self.agent.id}/messages/",
@@ -2196,7 +2196,7 @@ class AgentChatAPITests(TestCase):
             msg_channel=CommsChannel.WEB,
         )
 
-        with patch("api.agent.tasks.process_agent_events_task.delay"):
+        with patch("api.agent.tasks.enqueue_interactive_process_agent_events"):
             with self.captureOnCommitCallbacks(execute=True):
                 ingest_inbound_message(CommsChannel.WEB, parsed)
 
@@ -2731,8 +2731,8 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(message.to_endpoint.address, self.user_address)
 
     @tag("batch_agent_chat")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
-    def test_message_post_creates_console_message(self, mock_delay):
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
+    def test_message_post_creates_console_message(self, mock_enqueue):
         body = "Run weekly summary"
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(
@@ -2787,8 +2787,8 @@ class AgentChatAPITests(TestCase):
 
     @override_settings(MAX_FILE_SIZE=20)
     @tag("batch_agent_chat")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
-    def test_message_post_accepts_under_limit_attachment(self, mock_delay):
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
+    def test_message_post_accepts_under_limit_attachment(self, mock_enqueue):
         attachment = SimpleUploadedFile("notes.txt", b"hello world", content_type="text/plain")
 
         with self.captureOnCommitCallbacks(execute=True):
@@ -2809,7 +2809,7 @@ class AgentChatAPITests(TestCase):
         )
         self.assertIsNotNone(stored)
         self.assertEqual(stored.conversation.address, self.user_address)
-        mock_delay.assert_called()
+        mock_enqueue.assert_called()
 
     @override_settings(MAX_FILE_SIZE=5)
     @tag("batch_agent_chat")

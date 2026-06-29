@@ -7,6 +7,7 @@ by Celery autodiscovery when Django starts.
 
 # Re-export task symbols so `celery -A proj inspect registered` shows them.
 from .process_events import (  # noqa: F401
+    enqueue_interactive_process_agent_events,
     process_agent_cron_trigger_task,
     process_discord_inbound_debounce_task,
     process_agent_events_task,

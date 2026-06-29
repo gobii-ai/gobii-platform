@@ -141,7 +141,32 @@ services:
       redis:
         condition: service_healthy
     command: >-
-      bash -lc "set -a && source /config/django.env && exec celery -A config worker -l info"
+      bash -lc "set -a && source /config/django.env && exec celery -A config worker -l info -Q celery"
+    volumes:
+      - runtime-config:/config:ro
+      - media-data:/app/mediafiles
+      - static-data:/app/staticfiles
+    shm_size: 2gb
+    restart: unless-stopped
+
+  interactive-worker:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    environment:
+      <<: *app-sandbox-env
+    depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >-
+      bash -lc "set -a && source /config/django.env && exec celery -A config worker -l info -Q agent_interactive --concurrency=${INTERACTIVE_CELERY_CONCURRENCY:-1} --prefetch-multiplier=1"
     volumes:
       - runtime-config:/config:ro
       - media-data:/app/mediafiles
