@@ -135,7 +135,7 @@ BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV = "WEB_UNLOCKER_ZONE_FALLBACK"
 BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY = "brightdata_search_fallback_zone_env"
 MCP_SESSION_DEATH_ERROR_SNIPPETS = (
     "connection closed",
-    "server session was closed unexpectedly",
+    "server session was closed",
     "event loop is closed",
     "client failed to connect",
 )

@@ -492,6 +492,7 @@ def _infer_retryable_from_text(message: str) -> bool:
             "temporary",
             "temporarily",
             "connection closed",
+            "event loop is closed",
             "rate limit",
             "too many requests",
             "connection reset",

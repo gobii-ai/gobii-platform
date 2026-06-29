@@ -629,6 +629,7 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
 class PeerMessageToolHandlingTests(SimpleTestCase):
     def test_mcp_session_death_errors_are_retryable(self):
         self.assertTrue(_infer_retryable_from_text("Connection closed"))
+        self.assertTrue(_infer_retryable_from_text("Event loop is closed"))
         self.assertTrue(
             _infer_retryable_from_text(
                 "Client failed to connect: Server session was closed unexpectedly"
