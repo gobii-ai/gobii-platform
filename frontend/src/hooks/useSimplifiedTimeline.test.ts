@@ -20,9 +20,6 @@ function stepCluster(cursor: string, toolNames: string[]): ToolClusterEvent {
       caption: toolName,
       meta: {
         label: toolName,
-        iconPaths: [],
-        iconBg: '',
-        iconColor: '',
       },
       parameters: {},
       result: null,

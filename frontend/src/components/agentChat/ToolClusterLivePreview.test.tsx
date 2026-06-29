@@ -26,9 +26,6 @@ function clusterForRequest(url: string, method = 'GET'): ToolClusterEvent {
         toolName: 'http_request',
         meta: {
           label: 'API request',
-          iconPaths: [],
-          iconBg: '',
-          iconColor: '',
         },
         parameters: { method, url },
         result: '{}',
@@ -55,9 +52,6 @@ function clusterForApplyPatch(): ToolClusterEvent {
         toolName: 'apply_patch',
         meta: {
           label: 'Apply patch',
-          iconPaths: [],
-          iconBg: '',
-          iconColor: '',
         },
         parameters: {
           patch: [

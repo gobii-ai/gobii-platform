@@ -51,9 +51,6 @@ export type AgentMessage = {
 
 export type ToolMeta = {
   label: string
-  iconPaths: string[]
-  iconBg: string
-  iconColor: string
 }
 
 export type ToolCallStatus = 'pending' | 'complete' | 'error'

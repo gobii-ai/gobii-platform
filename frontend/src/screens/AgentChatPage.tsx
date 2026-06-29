@@ -2105,6 +2105,7 @@ export function AgentChatPage({
     allowAgentRefresh,
     rosterAgents,
   })
+  const allowDeferredAgentPanelRequests = allowAgentPanelRequests && !initialLoading
   const {
     data: quickSettingsPayload,
     isLoading: quickSettingsLoading,
@@ -2112,13 +2113,13 @@ export function AgentChatPage({
     refetch: refetchQuickSettings,
     updateQuickSettings,
     updating: quickSettingsUpdating,
-  } = useAgentQuickSettings(activeAgentId, { enabled: allowAgentPanelRequests })
+  } = useAgentQuickSettings(activeAgentId, { enabled: allowDeferredAgentPanelRequests })
   const {
     data: addonsPayload,
     refetch: refetchAddons,
     updateAddons,
     updating: addonsUpdating,
-  } = useAgentAddons(activeAgentId, { enabled: allowAgentPanelRequests })
+  } = useAgentAddons(activeAgentId, { enabled: allowDeferredAgentPanelRequests })
   const contextSwitcher = useMemo(() => {
     if (!showContextSwitcher) {
       return null
@@ -2945,6 +2946,7 @@ export function AgentChatPage({
   const insightsQueryEnabled = Boolean(
     activeAgentId
     && allowAgentRefresh
+    && !initialLoading
     && !isNewAgent
     && !isCollaboratorOnly
     && !showSignupPreviewPanel,
