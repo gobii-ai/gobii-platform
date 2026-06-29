@@ -550,7 +550,7 @@ class MCPToolErrorNormalizationTests(SimpleTestCase):
             display_name="Bright Data",
             description="",
             command="npx",
-            args=["-y", "@brightdata/mcp@2.9.5"],
+            args=["-y", "@brightdata/mcp@2.11.0"],
             url=None,
             auth_method="none",
             env={"API_TOKEN": "secret"},
