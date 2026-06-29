@@ -135,6 +135,19 @@ export function storeConsoleContext(context: StoredConsoleContext): void {
   writeContextToStorage(getLocalStorage(), context)
 }
 
+export function storeConsoleContextFromUrlSearch(search?: string): StoredConsoleContext | null {
+  const rawSearch = search ?? (typeof window === 'undefined' ? '' : window.location.search)
+  const params = new URLSearchParams(rawSearch)
+  const type = (params.get('context_type') || '').trim()
+  const id = (params.get('context_id') || '').trim()
+  if ((type !== 'personal' && type !== 'organization') || !id) {
+    return null
+  }
+  const context = { type, id, name: null }
+  storeConsoleContext(context)
+  return context
+}
+
 export function clearStoredConsoleContext(): void {
   const sessionStorageRef = getSessionStorage()
   if (sessionStorageRef) {

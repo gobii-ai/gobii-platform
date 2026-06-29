@@ -76,7 +76,24 @@ function resolvePathname(input: RequestInfo | URL): string | null {
 
 function shouldApplyConsoleContextHeaders(input: RequestInfo | URL): boolean {
   const requestPathname = resolvePathname(input)
+  if (requestHasExplicitConsoleContext(input)) {
+    return false
+  }
   return !requestPathname || !isMarketingContextHeaderPath(requestPathname)
+}
+
+function requestHasExplicitConsoleContext(input: RequestInfo | URL): boolean {
+  try {
+    const url = input instanceof URL
+      ? input
+      : new URL(
+          typeof Request !== 'undefined' && input instanceof Request ? input.url : String(input),
+          typeof window !== 'undefined' ? window.location.href : 'http://localhost/',
+        )
+    return Boolean(url.searchParams.get('context_type') && url.searchParams.get('context_id'))
+  } catch {
+    return false
+  }
 }
 
 export function buildLoginUrl(nextUrl?: string): string {

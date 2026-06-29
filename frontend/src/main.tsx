@@ -6,6 +6,7 @@ import { I18nProvider } from 'react-aria-components'
 import { Loader2 } from 'lucide-react'
 import type { LibraryAgentsPayload } from './api/library'
 import { initializeSubscriptionStore } from './stores/subscriptionStore'
+import { storeConsoleContextFromUrlSearch } from './util/consoleContextStorage'
 import './index.css'
 import './styles/consoleShell.css'
 
@@ -36,6 +37,8 @@ if (!mountNode) {
 const rootNode = mountNode
 const appName = mountNode.dataset.app ?? 'immersive-app'
 const shouldInitializeSubscriptionStore = appName !== 'library'
+
+storeConsoleContextFromUrlSearch()
 
 if (shouldInitializeSubscriptionStore) {
   // Initialize subscription state from data attributes

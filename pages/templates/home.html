@@ -478,6 +478,8 @@
             <input type="hidden" name="source_page" value="home_hero">
             <input type="hidden" name="trial_onboarding" value="1">
             <input type="hidden" name="trial_onboarding_target" value="agent_ui">
+            <input type="hidden" name="context_type" id="agent-context-type" value="{{ current_context.type|default:'personal' }}">
+            <input type="hidden" name="context_id" id="agent-context-id" value="{{ current_context.id|default:user.id }}">
             <div id="homepage-integrations-selected-fields">
               {% for app_slug in homepage_integrations_initial_selected_app_slugs %}
                 <input type="hidden" name="selected_pipedream_app_slugs" value="{{ app_slug }}" />
@@ -1632,6 +1634,46 @@
     </script>
 
     {% include "partials/_immersive_overlay.html" %}
+
+    <script>
+      (function () {
+        const STORAGE_KEYS = {
+          type: 'gobii:console:context-type',
+          id: 'gobii:console:context-id',
+        };
+        const LEGACY_KEYS = {
+          type: 'contextType',
+          id: 'contextId',
+        };
+
+        function readStoredContextValue(key) {
+          try {
+            return window.sessionStorage.getItem(STORAGE_KEYS[key])
+              || window.localStorage.getItem(STORAGE_KEYS[key])
+              || window.localStorage.getItem(LEGACY_KEYS[key])
+              || '';
+          } catch (error) {
+            return '';
+          }
+        }
+
+        document.addEventListener('submit', function (event) {
+          const form = event.target;
+          if (!(form instanceof HTMLFormElement) || form.id !== 'create-agent-form') {
+            return;
+          }
+          const contextTypeInput = form.querySelector('#agent-context-type');
+          const contextIdInput = form.querySelector('#agent-context-id');
+          const contextType = readStoredContextValue('type');
+          const contextId = readStoredContextValue('id');
+          if (!contextType || !contextId || !contextTypeInput || !contextIdInput) {
+            return;
+          }
+          contextTypeInput.value = contextType;
+          contextIdInput.value = contextId;
+        }, true);
+      })();
+    </script>
 
     <script>
       (function () {
