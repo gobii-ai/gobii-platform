@@ -382,6 +382,7 @@ class TestLLMFailover(TestCase):
         _, model, params = configs[0]
         self.assertEqual(model, 'azure/responses/gpt-5-deployment')
         self.assertEqual(params.get("api_base"), 'https://example.openai.azure.com')
+        self.assertEqual(params.get("api_version"), 'v1')
         self.assertEqual(params.get("api_key"), 'azure-key')
         self.assertEqual(params.get("custom_llm_provider"), 'azure')
 

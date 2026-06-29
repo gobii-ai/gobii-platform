@@ -943,6 +943,7 @@ def _build_completion_params(
             params["preset"] = openrouter_preset
     if model.startswith("azure/"):
         params["custom_llm_provider"] = "azure"
+        params["api_version"] = "v1"
 
     if api_base:
         params["api_base"] = api_base

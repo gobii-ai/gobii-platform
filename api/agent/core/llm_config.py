@@ -897,18 +897,23 @@ def _build_weighted_failover_configs(
             if openrouter_preset:
                 params["preset"] = openrouter_preset
 
+        api_base = (getattr(endpoint, "api_base", "") or "").strip()
         if effective_model.startswith("azure/"):
             params["custom_llm_provider"] = "azure"
+            params["api_version"] = "v1"
+            if api_base:
+                params["api_base"] = api_base
+        elif effective_model.startswith("openai/") and api_base:
+            params["api_base"] = api_base
 
-        if effective_model.startswith(("openai/", "azure/")) and getattr(endpoint, "api_base", None):
-            params["api_base"] = endpoint.api_base
+        if params.get("api_base"):
             logger.info(
                 "DB LLM endpoint configured with api_base: endpoint=%s provider=%s "
                 "model=%s api_base=%s has_key=%s tier_type=%s",
                 endpoint.key,
                 provider.key,
                 effective_model,
-                endpoint.api_base,
+                params["api_base"],
                 bool(params.get("api_key")),
                 tier_label,
             )

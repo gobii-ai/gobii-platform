@@ -216,6 +216,7 @@ class RunCompletionReasoningTests(TestCase):
             params={
                 "api_key": "azure-key",
                 "api_base": "https://example.openai.azure.com",
+                "api_version": "v1",
                 "custom_llm_provider": "azure",
                 "supports_reasoning": True,
                 "reasoning_effort": "low",
@@ -226,6 +227,7 @@ class RunCompletionReasoningTests(TestCase):
         _, kwargs = mock_responses.call_args
         self.assertEqual(kwargs["model"], "responses/gpt-5-deployment")
         self.assertEqual(kwargs["api_base"], "https://example.openai.azure.com")
+        self.assertEqual(kwargs["api_version"], "v1")
         self.assertEqual(kwargs["api_key"], "azure-key")
         self.assertEqual(kwargs["custom_llm_provider"], "azure")
         self.assertEqual(kwargs["reasoning"], {"summary": "auto", "effort": "low"})
