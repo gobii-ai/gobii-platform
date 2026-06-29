@@ -16,7 +16,6 @@ from api.services.system_settings import (
     get_litellm_timeout_seconds,
 )
 from api.utils.json_schema import sanitize_tool_parameters_schema_for_llm
-from .openai_responses import create_openai_responses_completion, should_use_openai_responses
 from .token_usage import extract_reasoning_content
 _HINT_KEYS = (
     "supports_temperature",
@@ -480,8 +479,13 @@ def run_completion(
     if kwargs.get("timeout") is None:
         kwargs["timeout"] = get_litellm_timeout_seconds()
 
-    use_openai_responses = should_use_openai_responses(model, kwargs)
-    if supports_reasoning and not use_openai_responses:
+    responses_bridge_model = _litellm_responses_bridge_model(model, kwargs)
+    use_responses_bridge = responses_bridge_model is not None
+    if use_responses_bridge:
+        kwargs["model"] = responses_bridge_model
+        if supports_reasoning and selected_reasoning_effort and isinstance(selected_reasoning_effort, str):
+            kwargs["reasoning_effort"] = {"effort": selected_reasoning_effort, "summary": "auto"}
+    if supports_reasoning and not use_responses_bridge:
         allowed_openai_params = kwargs.get("allowed_openai_params")
         if allowed_openai_params is None:
             allowed_openai_params = []
@@ -501,39 +505,13 @@ def run_completion(
         provider_hint = kwargs.get("provider")
     if not isinstance(provider_hint, str):
         provider_hint = None
-    if use_openai_responses and provider_hint is None:
+    if use_responses_bridge and provider_hint is None:
         provider_hint = "openai"
 
     for attempt in range(1, max_attempts + 1):
         try:
             duration_ms = None
-            if use_openai_responses:
-                def _create_openai_response():
-                    return create_openai_responses_completion(
-                        model=model,
-                        messages=kwargs["messages"],
-                        kwargs=kwargs,
-                        tools=sanitized_tools,
-                        supports_reasoning=bool(supports_reasoning),
-                        reasoning_effort=selected_reasoning_effort,
-                    )
-
-                if not kwargs.get("stream"):
-                    start_time = time.monotonic()
-                    response = _create_openai_response()
-                    duration_ms = int(round((time.monotonic() - start_time) * 1000))
-                else:
-                    response = _create_openai_response()
-                    response = _wrap_stream_with_first_data_timeout(
-                        response,
-                        create_stream=_create_openai_response,
-                        model=model,
-                        provider=provider_hint,
-                        initial_attempt=attempt,
-                        max_attempts=max_attempts,
-                        backoff_seconds=backoff_seconds,
-                    )
-            elif not kwargs.get("stream"):
+            if not kwargs.get("stream"):
                 start_time = time.monotonic()
                 response = litellm.completion(**kwargs)
                 duration_ms = int(round((time.monotonic() - start_time) * 1000))
@@ -564,6 +542,29 @@ def run_completion(
             )
             if backoff_seconds > 0:
                 time.sleep(backoff_seconds * (2 ** (attempt - 1)))
+
+
+def _litellm_responses_bridge_model(model: str, kwargs: dict[str, Any]) -> str | None:
+    if not isinstance(model, str):
+        return None
+    provider = kwargs.get("custom_llm_provider") or kwargs.get("provider")
+    if model.startswith(("azure/responses/", "openai/responses/")):
+        return model
+    if model.startswith("responses/"):
+        if provider in {"azure", "azure_openai"}:
+            return f"azure/{model}"
+        if provider in (None, "openai") and not kwargs.get("api_base"):
+            return f"openai/{model}"
+        return None
+    if provider in {"azure", "azure_openai"}:
+        return f"azure/responses/{model.removeprefix('azure/')}"
+    if provider not in (None, "openai") or kwargs.get("api_base"):
+        return None
+    if model.startswith("openai/"):
+        return f"openai/responses/{model.removeprefix('openai/')}"
+    if model.startswith("gpt-"):
+        return f"openai/responses/{model}"
+    return None
 
 
 __all__ = [
