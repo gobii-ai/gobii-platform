@@ -573,6 +573,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         from api.services.persistent_agents import (
+            ensure_default_agent_email_endpoint,
             PersistentAgentProvisioningError,
             PersistentAgentProvisioningService,
         )
@@ -630,6 +631,16 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
                 resolved_endpoint = self._resolve_preferred_endpoint_channel(agent, preferred_channel)
                 agent.preferred_contact_endpoint = resolved_endpoint
                 agent.save(update_fields=['preferred_contact_endpoint'])
+
+            try:
+                ensure_default_agent_email_endpoint(agent, is_primary=True)
+            except PersistentAgentProvisioningError as exc:
+                detail = exc.args[0] if exc.args else str(exc)
+                if isinstance(detail, dict):
+                    raise serializers.ValidationError(detail) from exc
+                if isinstance(detail, list):
+                    raise serializers.ValidationError(detail) from exc
+                raise serializers.ValidationError({'non_field_errors': [str(exc)]}) from exc
 
             # If incoming payload explicitly provided fields that differ from defaults,
             # ensure they are persisted after provisioning.

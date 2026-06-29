@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import Client, TestCase, tag
+from django.test import Client, TestCase, override_settings, tag
 
 from api.models import (
     AgentPeerLink,
@@ -548,6 +548,18 @@ class PersistentAgentAPITests(TestCase):
         self._analytics_patcher = patch('api.views.Analytics.track_event')
         self.analytics_mock = self._analytics_patcher.start()
         self.addCleanup(self._analytics_patcher.stop)
+        self._serializer_personal_access_patcher = patch(
+            'api.serializers.can_user_use_personal_agents_and_api',
+            return_value=True,
+        )
+        self._serializer_personal_access_patcher.start()
+        self.addCleanup(self._serializer_personal_access_patcher.stop)
+        self._views_personal_access_patcher = patch(
+            'api.views.can_user_use_personal_agents_and_api',
+            return_value=True,
+        )
+        self._views_personal_access_patcher.start()
+        self.addCleanup(self._views_personal_access_patcher.stop)
 
     def _create_agent_via_api(self, payload: dict | None = None) -> dict:
         data = {
@@ -562,14 +574,21 @@ class PersistentAgentAPITests(TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         return response.json()
 
+    @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
     def test_create_agent_via_api(self):
-        payload = self._create_agent_via_api()
+        payload = self._create_agent_via_api({'name': 'API @ Persistent Agent'})
         agent = PersistentAgent.objects.get(id=payload['id'])
-        self.assertEqual(agent.name, 'API Persistent Agent')
+        self.assertEqual(agent.name, 'API @ Persistent Agent')
         self.assertEqual(agent.charter, 'Automate product updates')
         self.assertEqual(agent.schedule, '0 9 * * 1')
         self.assertTrue(agent.is_active)
         self.assertEqual(agent.user_id, self.user.id)
+        agent_email_endpoint = agent.comms_endpoints.get(channel=CommsChannel.EMAIL)
+        self.assertTrue(agent_email_endpoint.is_primary)
+        self.assertEqual(agent_email_endpoint.address, "api.persistent.agent@agents.test")
+        email_meta = PersistentAgentEmailEndpoint.objects.get(endpoint=agent_email_endpoint)
+        self.assertTrue(email_meta.verified)
+        self.assertEqual(email_meta.display_name, "API @ Persistent Agent")
         self.process_events_mock.assert_called_with(str(agent.id))
 
     def test_create_agent_duplicate_name_returns_validation_error(self):
@@ -708,13 +727,22 @@ class PersistentAgentAPITests(TestCase):
         payload = self._create_agent_via_api({'name': 'Original Agent'})
         agent = PersistentAgent.objects.get(id=payload['id'])
 
-        endpoint = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=agent,
-            channel=CommsChannel.EMAIL,
-            address='agent@example.com',
-            is_primary=True,
+        endpoint = (
+            agent.comms_endpoints
+            .filter(channel=CommsChannel.EMAIL)
+            .order_by('-is_primary')
+            .first()
         )
-        email_meta = PersistentAgentEmailEndpoint.objects.create(endpoint=endpoint, display_name='')
+        if endpoint is None:
+            endpoint = PersistentAgentCommsEndpoint.objects.create(
+                owner_agent=agent,
+                channel=CommsChannel.EMAIL,
+                address='agent@example.com',
+                is_primary=True,
+            )
+        email_meta, _ = PersistentAgentEmailEndpoint.objects.get_or_create(endpoint=endpoint)
+        email_meta.display_name = ''
+        email_meta.save(update_fields=['display_name'])
 
         update_response = self.client.patch(
             f'{PERSISTENT_AGENT_BASE_URL}{agent.id}/',
@@ -898,6 +926,7 @@ class PersistentAgentAPITests(TestCase):
     def test_message_no_endpoint_returns_400(self):
         payload = self._create_agent_via_api({'name': 'No Endpoint Agent'})
         agent = PersistentAgent.objects.get(id=payload['id'])
+        agent.comms_endpoints.filter(channel=CommsChannel.EMAIL).delete()
 
         message_body = {
             'channel': 'email',

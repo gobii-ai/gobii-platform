@@ -3,7 +3,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.agent.core.prompt_context import get_agent_tools
@@ -23,6 +23,7 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentEmailEndpoint,
     PersistentAgentMessage,
     PersistentAgentSystemSkillState,
 )
@@ -222,6 +223,7 @@ class MetaGobiiDirectToolTests(TestCase):
         self.assertEqual(denied["status"], "error")
         self.assertIn("not found or inaccessible", denied["message"].lower())
 
+    @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("api.agent.tools.meta_gobii.AgentService.has_agents_available", return_value=True)
     @patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True)
@@ -263,6 +265,12 @@ class MetaGobiiDirectToolTests(TestCase):
         self.assertIsNone(child.organization_id)
         self.assertEqual(child.daily_credit_limit, 12)
         self.assertEqual(child.planning_state, PersistentAgent.PlanningState.SKIPPED)
+        agent_email_endpoint = child.comms_endpoints.get(channel=CommsChannel.EMAIL)
+        self.assertTrue(agent_email_endpoint.is_primary)
+        self.assertEqual(agent_email_endpoint.address, "sales.gobii@agents.test")
+        email_meta = PersistentAgentEmailEndpoint.objects.get(endpoint=agent_email_endpoint)
+        self.assertTrue(email_meta.verified)
+        self.assertEqual(email_meta.display_name, "Sales Gobii")
         mock_delay.assert_called_with(str(child.id))
 
     @patch("api.services.agent_settings_resume.process_agent_events_task.delay")
