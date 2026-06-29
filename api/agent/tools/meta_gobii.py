@@ -47,6 +47,7 @@ from api.services.daily_credit_limits import (
 )
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.persistent_agents import (
+    ensure_default_agent_email_endpoint,
     PersistentAgentProvisioningError,
     PersistentAgentProvisioningService,
 )
@@ -951,6 +952,8 @@ def _tool_create_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
         raise
 
     agent = result.agent
+    ensure_default_agent_email_endpoint(agent, is_primary=True)
+
     update_fields: list[str] = []
     if "daily_credit_limit" in params and agent.daily_credit_limit != daily_credit_limit:
         agent.daily_credit_limit = daily_credit_limit
