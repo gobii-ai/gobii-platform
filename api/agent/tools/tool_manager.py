@@ -1012,7 +1012,7 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
             row.tool_server = "builtin"
             row.tool_name = tool_name
             updates.extend(["tool_server", "tool_name"])
-        row.save(update_fields=list(dict.fromkeys(updates)))
+        row.save(update_fields=updates)
         _ensure_system_skill_enabled_for_builtin_tool_name(agent, tool_name)
         return {
             "status": "success",

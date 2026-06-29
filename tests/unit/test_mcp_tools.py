@@ -723,6 +723,120 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(tools, [])
         self.assertEqual(observed_agents, [agent])
 
+    def test_refresh_servers_by_config_id_does_not_advance_global_marker_for_unchanged_runtime(self):
+        runtime = self.manager._build_runtime_from_config(self.server_config)
+        old_marker = timezone.now() - timedelta(days=1)
+        self.manager._initialized = True
+        self.manager._last_refresh_marker = old_marker
+        self.manager._server_cache = {runtime.config_id: runtime}
+
+        with patch.object(self.manager, "_safe_register_runtime") as mock_register:
+            self.assertTrue(self.manager._refresh_servers_by_config_id({runtime.config_id}))
+
+        mock_register.assert_not_called()
+        self.assertEqual(self.manager._last_refresh_marker, old_marker)
+
+    def test_get_tools_for_agent_refreshes_config_ids_and_server_names_independently(self):
+        config_id = str(uuid.uuid4())
+        named_config_id = str(uuid.uuid4())
+        runtime_by_id = MCPServerRuntime(
+            config_id=config_id,
+            name="server-by-id",
+            display_name="Server By ID",
+            description="",
+            command=None,
+            args=[],
+            url="https://example.com/by-id",
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=datetime.now(UTC),
+        )
+        runtime_by_name = MCPServerRuntime(
+            config_id=named_config_id,
+            name="server-by-name",
+            display_name="Server By Name",
+            description="",
+            command=None,
+            args=[],
+            url="https://example.com/by-name",
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=datetime.now(UTC),
+        )
+        tool_by_id = MCPToolInfo(
+            config_id,
+            "mcp_server-by-id_tool",
+            "server-by-id",
+            "tool",
+            "By ID",
+            {},
+        )
+        tool_by_name = MCPToolInfo(
+            named_config_id,
+            "mcp_server-by-name_tool",
+            "server-by-name",
+            "tool",
+            "By Name",
+            {},
+        )
+        self.manager._initialized = True
+        self.manager._tools_cache = {
+            config_id: [tool_by_id],
+            named_config_id: [tool_by_name],
+        }
+
+        def refresh_by_config_id(_config_ids):
+            self.manager._server_cache[config_id] = runtime_by_id
+            return True
+
+        def refresh_by_name(_server_names):
+            self.manager._server_cache[named_config_id] = runtime_by_name
+            return True
+
+        agent = SimpleNamespace(id=uuid.uuid4())
+        configs = [
+            SimpleNamespace(id=config_id, name=runtime_by_id.name),
+            SimpleNamespace(id=named_config_id, name=runtime_by_name.name),
+        ]
+        with patch.object(self.manager, "_needs_refresh", return_value=False), patch(
+            "api.agent.tools.mcp_manager.agent_accessible_server_configs",
+            return_value=configs,
+        ), patch.object(
+            self.manager,
+            "_refresh_servers_by_config_id",
+            side_effect=refresh_by_config_id,
+        ) as mock_refresh_ids, patch.object(
+            self.manager,
+            "_refresh_servers_by_name",
+            side_effect=refresh_by_name,
+        ) as mock_refresh_names, patch.object(
+            self.manager,
+            "_ensure_runtime_registered",
+            return_value=True,
+        ):
+            tools = self.manager.get_tools_for_agent(
+                agent,
+                allowed_config_ids={config_id},
+                allowed_server_names={runtime_by_name.name},
+            )
+
+        mock_refresh_ids.assert_called_once_with({config_id})
+        mock_refresh_names.assert_called_once_with({runtime_by_name.name})
+        self.assertEqual(
+            {tool.full_name for tool in tools},
+            {tool_by_id.full_name, tool_by_name.full_name},
+        )
+
     @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.mcp_manager.SandboxComputeService")
     def test_execute_mcp_tool_sandbox_path_does_not_require_local_registration(

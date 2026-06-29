@@ -717,11 +717,8 @@ class MCPToolManager:
             self._server_cache.pop(config_id, None)
 
         # This is a targeted refresh for prompt/tool execution paths. Do not
-        # mark the global catalog initialized, or later broad catalog callers
-        # may see only this subset.
-        marker = latest_seen or timezone.now()
-        if self._last_refresh_marker is None or marker > self._last_refresh_marker:
-            self._last_refresh_marker = marker
+        # mark the global catalog initialized or advance the global freshness
+        # marker, or later broad catalog callers may skip needed full refreshes.
 
         return True
 
@@ -1890,21 +1887,27 @@ class MCPToolManager:
             if needs_refresh or missing_ids:
                 if not self._refresh_servers_by_config_id(allowed_config_set):
                     return []
-        elif allowed_set is None:
-            if needs_refresh and not self.initialize():
-                return []
-        else:
+        if allowed_set is not None:
             current_names = {runtime.name.lower() for runtime in self._server_cache.values()}
             missing_names = allowed_set - current_names
             if needs_refresh or missing_names:
                 if not self._refresh_servers_by_name(allowed_set):
                     return []
+        if allowed_config_set is None and allowed_set is None:
+            if needs_refresh and not self.initialize():
+                return []
 
         configs = agent_accessible_server_configs(agent)
-        if allowed_config_set is not None:
-            configs = [cfg for cfg in configs if str(getattr(cfg, "id", "")) in allowed_config_set]
-        if allowed_set is not None:
-            configs = [cfg for cfg in configs if str(getattr(cfg, "name", "")).lower() in allowed_set]
+        if allowed_config_set is not None and allowed_set is not None:
+            configs = [
+                cfg
+                for cfg in configs
+                if str(cfg.id) in allowed_config_set or str(cfg.name).lower() in allowed_set
+            ]
+        elif allowed_config_set is not None:
+            configs = [cfg for cfg in configs if str(cfg.id) in allowed_config_set]
+        elif allowed_set is not None:
+            configs = [cfg for cfg in configs if str(cfg.name).lower() in allowed_set]
 
         desired_ids = {str(cfg.id) for cfg in configs}
 
