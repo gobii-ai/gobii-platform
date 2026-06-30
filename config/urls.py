@@ -284,6 +284,7 @@ from console.views import (
     get_billing_settings,
     get_user_plan_api,
     cancel_subscription,
+    churnkey_pause_subscription,
     sync_billing_subscription_state,
     resume_subscription,
     grant_credits,
@@ -738,6 +739,7 @@ urlpatterns = [
 
     path('billing/settings/update/', update_billing_settings, name='update_billing_settings'),
     path('billing/settings/cancel-subscription/', cancel_subscription, name='cancel_subscription'),
+    path('billing/settings/churnkey/pause-subscription/', churnkey_pause_subscription, name='churnkey_pause_subscription'),
     path('billing/settings/sync-subscription-state/', sync_billing_subscription_state, name='sync_billing_subscription_state'),
     path('billing/settings/resume-subscription/', resume_subscription, name='resume_subscription'),
     path('billing/addons/task-packs/', update_task_pack_quantity, name='update_task_pack_quantity'),

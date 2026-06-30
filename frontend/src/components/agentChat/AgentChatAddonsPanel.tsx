@@ -3,7 +3,7 @@ import { ExternalLink, PlusSquare, ShieldAlert } from 'lucide-react'
 
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
 import { ConfirmDialog } from '../../screens/billing/ConfirmDialog'
-import type { AddonPackOption, ContactCapInfo, TrialInfo } from '../../types/agentAddons'
+import type { AccountPauseInfo, AddonPackOption, ContactCapInfo, TrialInfo } from '../../types/agentAddons'
 
 const MAX_ADDON_PACK_QUANTITY = 999
 
@@ -27,6 +27,7 @@ type AgentChatAddonsPanelProps = {
   taskPackUpdating?: boolean
   onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
   taskQuota?: TaskQuotaInfo | null
+  accountPause?: AccountPauseInfo | null
   manageBillingUrl?: string | null
   onClose: () => void
 }
@@ -43,6 +44,7 @@ export function AgentChatAddonsPanel({
   taskPackUpdating = false,
   onUpdateTaskPacks,
   taskQuota,
+  accountPause = null,
   manageBillingUrl = null,
   onClose,
 }: AgentChatAddonsPanelProps) {
@@ -53,6 +55,13 @@ export function AgentChatAddonsPanel({
   const mountedRef = useRef(true)
   const resolvedMode = mode ?? 'contacts'
   const isTaskMode = resolvedMode === 'tasks'
+  const accountPaused = Boolean(accountPause?.paused)
+  const accountPauseScheduled = Boolean(accountPause?.scheduled && !accountPause?.paused)
+  const billingPausedReason = accountPaused
+    ? 'Billing changes are unavailable while your account is paused.'
+    : accountPauseScheduled
+      ? 'Billing changes are unavailable while your account pause is scheduled.'
+      : null
 
   useEffect(() => {
     mountedRef.current = true
@@ -112,6 +121,10 @@ export function AgentChatAddonsPanel({
   }, [activeOptions, packQuantities, trial?.isTrialing])
 
   const performPackUpdate = useCallback(async (): Promise<boolean> => {
+    if (billingPausedReason) {
+      setPackError(billingPausedReason)
+      return false
+    }
     const update = isTaskMode ? onUpdateTaskPacks : onUpdateContactPacks
     if (!update) return false
     setPackError(null)
@@ -122,7 +135,7 @@ export function AgentChatAddonsPanel({
       setPackError(`Unable to update ${isTaskMode ? 'task' : 'contact'} packs. Try again.`)
       return false
     }
-  }, [isTaskMode, onClose, onUpdateContactPacks, onUpdateTaskPacks, packQuantities])
+  }, [billingPausedReason, isTaskMode, onUpdateContactPacks, onUpdateTaskPacks, packQuantities])
 
   const handlePackSave = useCallback(async () => {
     if (isTrialAddonPurchase) {
@@ -136,7 +149,11 @@ export function AgentChatAddonsPanel({
   }, [isTrialAddonPurchase, onClose, performPackUpdate])
 
   const packUpdating = isTaskMode ? taskPackUpdating : contactPackUpdating
-  const canUpdatePacks = isTaskMode ? Boolean(onUpdateTaskPacks) : Boolean(onUpdateContactPacks)
+  const canUpdatePacks = (
+    isTaskMode
+      ? Boolean(onUpdateTaskPacks)
+      : Boolean(onUpdateContactPacks)
+  ) && !billingPausedReason
   const packHasChanges = activeOptions.some((option) => {
     const nextQty = packQuantities[option.priceId] ?? 0
     return nextQty !== option.quantity
@@ -234,7 +251,7 @@ export function AgentChatAddonsPanel({
                     type="button"
                     className="agent-settings-pack-button"
                     onClick={() => handlePackAdjust(option.priceId, -1)}
-                    disabled={packUpdating || quantity <= 0}
+                    disabled={!canUpdatePacks || packUpdating || quantity <= 0}
                     aria-label={`Decrease ${isTaskMode ? 'task' : 'contact'} pack quantity`}
                   >
                     -
@@ -246,7 +263,7 @@ export function AgentChatAddonsPanel({
                     type="button"
                     className="agent-settings-pack-button"
                     onClick={() => handlePackAdjust(option.priceId, 1)}
-                    disabled={packUpdating || quantity >= MAX_ADDON_PACK_QUANTITY}
+                    disabled={!canUpdatePacks || packUpdating || quantity >= MAX_ADDON_PACK_QUANTITY}
                     aria-label={`Increase ${isTaskMode ? 'task' : 'contact'} pack quantity`}
                   >
                     +
@@ -257,6 +274,9 @@ export function AgentChatAddonsPanel({
           })}
         </div>
         {packError ? <p className="agent-settings-error">{packError}</p> : null}
+        {billingPausedReason && !packError ? (
+          <p className="agent-settings-error">{billingPausedReason}</p>
+        ) : null}
         <div className="agent-settings-metrics">
           <div>
             <span className="agent-settings-metric-label">Pack price</span>

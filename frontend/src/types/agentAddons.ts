@@ -47,8 +47,10 @@ export type BillingStatusInfo = {
 
 export type AccountPauseInfo = {
   paused: boolean
+  scheduled?: boolean
   reason?: string | null
   resumeAt?: string | null
+  effectiveAt?: string | null
   manageBillingUrl?: string | null
 }
 

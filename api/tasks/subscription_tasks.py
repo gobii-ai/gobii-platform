@@ -17,6 +17,7 @@ from util.subscription_helper import (
 )
 from billing.services import BillingService
 from constants.grant_types import GrantTypeChoices
+from api.services.owner_execution_pause import apply_customer_account_pause_transitions
 
 # --------------------------------------------------------------------------- #
 #  Optional djstripe import
@@ -32,6 +33,14 @@ except Exception:  # pragma: no cover - optional dependency
     DJSTRIPE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(name="api.tasks.apply_customer_account_pause_transitions")
+def apply_customer_account_pause_transitions_task() -> dict[str, int]:
+    with traced("BILLING Apply Customer Account Pause Transitions"):
+        result = apply_customer_account_pause_transitions()
+        logger.info("apply_customer_account_pause_transitions: %s", result)
+        return result
 
 
 @shared_task(name="api.tasks.grant_monthly_free_credits")

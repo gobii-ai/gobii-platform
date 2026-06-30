@@ -121,10 +121,117 @@ def is_owner_customer_account_paused(owner) -> bool:
 
 def get_owner_account_pause_state(owner) -> dict[str, Any]:
     state = get_owner_execution_pause_state(owner)
+    billing = _get_billing_record(owner)
+    scheduled_effective_at = (
+        getattr(billing, "scheduled_customer_pause_effective_at", None)
+        if billing is not None
+        else None
+    )
+    scheduled_resume_at = (
+        getattr(billing, "scheduled_customer_pause_resume_at", None)
+        if billing is not None
+        else None
+    )
+    scheduled_subscription_id = (
+        str(getattr(billing, "scheduled_customer_pause_subscription_id", "") or "").strip()
+        if billing is not None
+        else ""
+    )
+    scheduled = bool(scheduled_effective_at and scheduled_resume_at)
     return {
         **state,
         "customer_paused": bool(state["paused"] and is_customer_account_pause_reason(state["reason"])),
+        "scheduled": scheduled,
+        "scheduled_effective_at": scheduled_effective_at if scheduled else None,
+        "scheduled_resume_at": scheduled_resume_at if scheduled else None,
+        "scheduled_subscription_id": scheduled_subscription_id if scheduled else "",
     }
+
+
+def schedule_customer_account_pause(
+    owner,
+    *,
+    effective_at,
+    resume_at,
+    subscription_id: str,
+    source: str = "unknown",
+) -> bool:
+    if owner is None or _owner_type_label(owner) != "user":
+        return False
+
+    billing = _get_billing_record(owner, create=True)
+    if billing is None or not _billing_supports_scheduled_customer_pause(billing):
+        return False
+
+    normalized_subscription_id = str(subscription_id or "").strip()
+    if not effective_at or not resume_at or not normalized_subscription_id:
+        return False
+
+    state_changed = (
+        getattr(billing, "scheduled_customer_pause_effective_at", None) != effective_at
+        or getattr(billing, "scheduled_customer_pause_resume_at", None) != resume_at
+        or (
+            str(getattr(billing, "scheduled_customer_pause_subscription_id", "") or "").strip()
+            != normalized_subscription_id
+        )
+    )
+    if state_changed:
+        billing.scheduled_customer_pause_effective_at = effective_at
+        billing.scheduled_customer_pause_resume_at = resume_at
+        billing.scheduled_customer_pause_subscription_id = normalized_subscription_id
+        billing.save(
+            update_fields=[
+                "scheduled_customer_pause_effective_at",
+                "scheduled_customer_pause_resume_at",
+                "scheduled_customer_pause_subscription_id",
+            ]
+        )
+
+    logger.info(
+        "Scheduled customer account pause for user %s (subscription=%s effective_at=%s resume_at=%s source=%s changed=%s)",
+        getattr(owner, "id", None),
+        normalized_subscription_id,
+        effective_at,
+        resume_at,
+        source,
+        state_changed,
+    )
+    return state_changed
+
+
+def clear_scheduled_customer_account_pause(
+    owner,
+    *,
+    subscription_id: str | None = None,
+    source: str = "unknown",
+) -> bool:
+    if owner is None or _owner_type_label(owner) != "user":
+        return False
+
+    billing = _get_billing_record(owner)
+    if billing is None or not _billing_supports_scheduled_customer_pause(billing):
+        return False
+
+    normalized_subscription_id = str(subscription_id or "").strip()
+    existing_subscription_id = str(
+        getattr(billing, "scheduled_customer_pause_subscription_id", "") or ""
+    ).strip()
+    if (
+        normalized_subscription_id
+        and existing_subscription_id
+        and existing_subscription_id != normalized_subscription_id
+    ):
+        return False
+
+    state_changed = _clear_scheduled_customer_pause_for_billing(billing)
+    if state_changed:
+        logger.info(
+            "Cleared scheduled customer account pause for user %s (subscription=%s source=%s)",
+            getattr(owner, "id", None),
+            existing_subscription_id,
+            source,
+        )
+    return state_changed
 
 
 def pause_owner_execution(
@@ -297,15 +404,22 @@ def resume_owner_execution_by_ref(
 
 def get_customer_account_pause_from_subscription(subscription_payload: Any) -> dict[str, Any]:
     pause_collection = _stripe_object_field(subscription_payload, "pause_collection")
+    subscription_id = str(_stripe_object_field(subscription_payload, "id") or "").strip()
     if not pause_collection:
         return {
             "paused": False,
+            "effective_at": None,
             "resume_at": None,
+            "subscription_id": subscription_id,
         }
 
     return {
         "paused": True,
+        "effective_at": _coerce_datetime(
+            _stripe_object_field(subscription_payload, "current_period_end")
+        ),
         "resume_at": _coerce_datetime(_stripe_object_field(pause_collection, "resumes_at")),
+        "subscription_id": subscription_id,
     }
 
 
@@ -323,9 +437,24 @@ def sync_owner_customer_account_pause(
     current_reason = current_state["reason"]
 
     if pause_state["paused"]:
-        if current_reason and not (
-            is_customer_account_pause_reason(current_reason)
-            or is_billing_recovery_resumable_pause_reason(current_reason)
+        effective_at = pause_state.get("effective_at")
+        if (
+            _owner_type_label(owner) == "user"
+            and effective_at is not None
+            and effective_at > timezone.now()
+        ):
+            return schedule_customer_account_pause(
+                owner,
+                effective_at=effective_at,
+                resume_at=pause_state["resume_at"],
+                subscription_id=pause_state.get("subscription_id") or "",
+                source=source,
+            )
+
+        if (
+            current_state["paused"]
+            and current_reason
+            and not is_customer_account_pause_reason(current_reason)
         ):
             return False
 
@@ -333,6 +462,11 @@ def sync_owner_customer_account_pause(
             current_state["paused_at"]
             if is_customer_account_pause_reason(current_reason) and current_state["paused_at"] is not None
             else None
+        )
+        clear_scheduled_customer_account_pause(
+            owner,
+            subscription_id=pause_state.get("subscription_id") or None,
+            source=source,
         )
         return pause_owner_execution(
             owner,
@@ -342,10 +476,95 @@ def sync_owner_customer_account_pause(
             resume_at=pause_state["resume_at"],
         )
 
+    scheduled_cleared = clear_scheduled_customer_account_pause(
+        owner,
+        subscription_id=pause_state.get("subscription_id") or None,
+        source=source,
+    )
     if is_customer_account_pause_reason(current_reason):
-        return resume_owner_execution(owner, source=source)
+        return bool(resume_owner_execution(owner, source=source) or scheduled_cleared)
 
-    return False
+    return scheduled_cleared
+
+
+def apply_customer_account_pause_transitions(*, now=None, limit: int = 500) -> dict[str, int]:
+    now = now or timezone.now()
+    limit = max(1, int(limit or 500))
+    UserBilling = apps.get_model("api", "UserBilling")
+
+    result = {
+        "scheduled_applied": 0,
+        "scheduled_expired": 0,
+        "scheduled_blocked": 0,
+        "active_resumed": 0,
+    }
+
+    expired_qs = (
+        UserBilling.objects.select_related("user")
+        .filter(
+            scheduled_customer_pause_effective_at__isnull=False,
+            scheduled_customer_pause_resume_at__isnull=False,
+            scheduled_customer_pause_resume_at__lte=now,
+        )
+        .order_by("scheduled_customer_pause_resume_at")[:limit]
+    )
+    for billing in list(expired_qs):
+        if _clear_scheduled_customer_pause_for_billing(billing):
+            result["scheduled_expired"] += 1
+
+    due_qs = (
+        UserBilling.objects.select_related("user")
+        .filter(
+            scheduled_customer_pause_effective_at__isnull=False,
+            scheduled_customer_pause_resume_at__isnull=False,
+            scheduled_customer_pause_effective_at__lte=now,
+            scheduled_customer_pause_resume_at__gt=now,
+        )
+        .order_by("scheduled_customer_pause_effective_at")[:limit]
+    )
+    for billing in list(due_qs):
+        current_reason = str(getattr(billing, "execution_pause_reason", "") or "")
+        if (
+            getattr(billing, "execution_paused", False)
+            and not is_customer_account_pause_reason(current_reason)
+        ):
+            result["scheduled_blocked"] += 1
+            continue
+
+        user = getattr(billing, "user", None)
+        if user is None:
+            result["scheduled_blocked"] += 1
+            continue
+
+        pause_owner_execution(
+            user,
+            EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
+            source="api.tasks.apply_customer_account_pause_transitions",
+            paused_at=billing.scheduled_customer_pause_effective_at,
+            resume_at=billing.scheduled_customer_pause_resume_at,
+        )
+        if _clear_scheduled_customer_pause_for_billing(billing):
+            result["scheduled_applied"] += 1
+
+    resume_qs = (
+        UserBilling.objects.select_related("user")
+        .filter(
+            execution_paused=True,
+            execution_pause_reason=EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
+            execution_pause_resume_at__isnull=False,
+            execution_pause_resume_at__lte=now,
+        )
+        .order_by("execution_pause_resume_at")[:limit]
+    )
+    for billing in list(resume_qs):
+        user = getattr(billing, "user", None)
+        if user is not None and resume_owner_execution(
+            user,
+            source="api.tasks.apply_customer_account_pause_transitions",
+        ):
+            result["active_resumed"] += 1
+
+    return result
 
 
 def _owner_type_label(owner) -> str:
@@ -411,6 +630,42 @@ def _get_billing_model_and_filters(owner):
         return BillingModel, {"organization": owner}, owner_type
 
     raise TypeError(f"Unsupported owner type: {owner.__class__.__name__}")
+
+
+def _billing_supports_scheduled_customer_pause(billing) -> bool:
+    return all(
+        hasattr(billing, field)
+        for field in (
+            "scheduled_customer_pause_effective_at",
+            "scheduled_customer_pause_resume_at",
+            "scheduled_customer_pause_subscription_id",
+        )
+    )
+
+
+def _clear_scheduled_customer_pause_for_billing(billing) -> bool:
+    if billing is None or not _billing_supports_scheduled_customer_pause(billing):
+        return False
+
+    state_changed = bool(
+        getattr(billing, "scheduled_customer_pause_effective_at", None)
+        or getattr(billing, "scheduled_customer_pause_resume_at", None)
+        or str(getattr(billing, "scheduled_customer_pause_subscription_id", "") or "").strip()
+    )
+    if not state_changed:
+        return False
+
+    billing.scheduled_customer_pause_effective_at = None
+    billing.scheduled_customer_pause_resume_at = None
+    billing.scheduled_customer_pause_subscription_id = ""
+    billing.save(
+        update_fields=[
+            "scheduled_customer_pause_effective_at",
+            "scheduled_customer_pause_resume_at",
+            "scheduled_customer_pause_subscription_id",
+        ]
+    )
+    return True
 
 
 def _iter_active_owner_agent_ids(owner):

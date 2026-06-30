@@ -39,6 +39,7 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
 )
+from api.services.owner_execution_pause import get_owner_account_pause_state
 try:
     import stripe
 except Exception:  # pragma: no cover - optional dependency
@@ -483,6 +484,24 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
             raise BillingUpdateError("context_mismatch", status=400)
         return owner_obj, "user"
 
+    def _has_personal_billing_mutation(payload_dict) -> bool:
+        if (payload_dict.get("planTarget") or "").strip():
+            return True
+        if payload_dict.get("addonQuantities") or payload_dict.get("dedicatedIps"):
+            return True
+        return False
+
+    def _guard_scheduled_customer_pause(payload_dict, owner_obj, owner_type_str) -> None:
+        if owner_type_str != "user" or not _has_personal_billing_mutation(payload_dict):
+            return
+        pause_state = get_owner_account_pause_state(owner_obj)
+        if pause_state.get("scheduled") and not pause_state.get("customer_paused"):
+            raise BillingUpdateError(
+                "customer_pause_scheduled",
+                status=400,
+                detail="Billing changes are unavailable while an account pause is scheduled.",
+            )
+
     def _apply_seats(payload_dict, owner_obj, owner_type_str, response_dict):
         seats_target = payload_dict.get("seatsTarget", None)
         cancel_seat_schedule = bool(payload_dict.get("cancelSeatSchedule", False))
@@ -804,6 +823,7 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
             raise BillingUpdateError("stripe_disabled", status=404)
 
         response_payload: dict[str, object] = {"ok": True}
+        _guard_scheduled_customer_pause(payload, owner, owner_type)
 
         _apply_plan(payload, owner, owner_type, response_payload)
         _apply_seats(payload, owner, owner_type, response_payload)

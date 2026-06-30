@@ -12,6 +12,7 @@ type ExtraTasksSectionProps = {
 export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
   const initial = initialData.extraTasks
   const accountPaused = Boolean(initialData.accountPause?.paused)
+  const accountPauseScheduled = Boolean(initialData.accountPause?.scheduled && !initialData.accountPause?.paused)
   const isTrialing = Boolean(initialData.trial?.isTrialing)
   const eligible = useMemo(() => {
     if (isTrialing) return false
@@ -40,13 +41,15 @@ export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
     setError(null)
   }, [initial])
 
-  const canModify = Boolean(settings.canModify) && !busy && !accountPaused
+  const canModify = Boolean(settings.canModify) && !busy && !accountPaused && !accountPauseScheduled
   const disabledReason = accountPaused
     ? 'Billing changes are unavailable while your account is paused.'
+    : accountPauseScheduled
+      ? 'Billing changes are unavailable while your account pause is scheduled.'
     : null
 
   const postUpdate = useCallback(async (payload: { enabled: boolean; infinite: boolean; maxTasks: number }) => {
-    if (accountPaused) {
+    if (accountPaused || accountPauseScheduled) {
       return
     }
     setBusy(true)
@@ -85,7 +88,7 @@ export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
         setBusy(false)
       }
     }
-  }, [accountPaused, settings.endpoints.updateUrl])
+  }, [accountPaused, accountPauseScheduled, settings.endpoints.updateUrl])
 
   const handleEnabledChange = useCallback(async (nextEnabled: boolean) => {
     const next = {
