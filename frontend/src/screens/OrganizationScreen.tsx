@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEv
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Building2, Pencil, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
+import { createOrganization, type ConsoleContext } from '../api/context'
 import {
   currentOrganizationTemplatesQueryKey,
   createOrganizationTemplate,
@@ -33,6 +34,7 @@ import { ModalForm } from '../components/common/ModalForm'
 import { CustomInstructionsSection } from '../components/settings/CustomInstructionsSection'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
 import { navigateWithinApp } from '../util/appNavigation'
+import { storeConsoleContext } from '../util/consoleContextStorage'
 
 type ConfirmAction = {
   kind: 'remove-member'
@@ -107,16 +109,33 @@ function formatTemplateTier(template: OrganizationTemplate, config?: LlmIntellig
 }
 
 function publishOrganizationContext(data: CurrentOrganizationPayload) {
+  publishConsoleContext({
+    type: 'organization',
+    id: data.organization.id,
+    name: data.organization.name,
+  })
+}
+
+function publishConsoleContext(context: ConsoleContext) {
   if (typeof window === 'undefined') {
     return
   }
+  storeConsoleContext(context)
   window.dispatchEvent(new CustomEvent('gobii:console-context-updated', {
-    detail: {
-      type: 'organization',
-      id: data.organization.id,
-      name: data.organization.name,
-    },
+    detail: context,
   }))
+}
+
+function isNoOrganizationContextError(error: unknown): boolean {
+  if (!(error instanceof HttpError) || error.status !== 404) {
+    return false
+  }
+  const body = error.body
+  return Boolean(
+    body
+    && typeof body === 'object'
+    && (body as { error?: unknown }).error === 'Switch to an organization context first.',
+  )
 }
 
 function buildBillingPathForCurrentAppRoute(): string {
@@ -186,6 +205,58 @@ function ConfirmOrganizationActionModal({
       onConfirm={handleConfirm}
       localError={error}
     />
+  )
+}
+
+function CreateOrganizationModal({
+  name,
+  errors,
+  busy,
+  onNameChange,
+  onClose,
+  onSubmit,
+}: {
+  name: string
+  errors: string[]
+  busy: boolean
+  onNameChange: (name: string) => void
+  onClose: () => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}) {
+  return (
+    <ModalForm
+      id="organization-create-team-form"
+      title="Create Team"
+      subtitle="Create an organization workspace for shared agents, members, and pooled credits."
+      onClose={onClose}
+      onSubmit={onSubmit}
+      widthClass="sm:max-w-lg"
+      icon={Building2}
+      iconBgClass="bg-blue-100"
+      iconColorClass="text-blue-600"
+      dismissible={!busy}
+      submitLabel="Create Team"
+      submittingLabel="Creating..."
+      submitting={busy}
+      errorMessages={errors}
+    >
+      <div>
+        <label htmlFor="organization-create-team-name" className="block text-sm font-medium text-slate-700">
+          Team Name
+        </label>
+        <input
+          id="organization-create-team-name"
+          type="text"
+          required
+          value={name}
+          onChange={(event) => onNameChange(event.target.value)}
+          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          placeholder="Acme Operations"
+          autoFocus
+          disabled={busy}
+        />
+      </div>
+    </ModalForm>
   )
 }
 
@@ -435,10 +506,65 @@ function TemplateEditorModal({
   )
 }
 
+function OrganizationEmptyState({
+  onCreateOrganization,
+}: {
+  onCreateOrganization: () => void
+}) {
+  return (
+    <div className="profile-screen profile-screen--embedded organization-screen organization-screen--empty">
+      <header className="profile-screen__header organization-screen__empty-hero">
+        <div className="profile-screen__title-icon" aria-hidden="true">
+          <Users className="h-5 w-5" />
+        </div>
+        <div className="organization-screen__empty-copy">
+          <p className="profile-screen__eyebrow">Teams</p>
+          <h1>Create your team workspace</h1>
+          <p className="profile-screen__muted">
+            Shared agents, templates, setup, members, and pooled task credits can live together in one place.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="profile-screen__button profile-screen__button--primary organization-screen__empty-action"
+          onClick={onCreateOrganization}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Create Team
+        </button>
+      </header>
+
+      <section className="profile-screen__section organization-screen__empty-section">
+        <div className="organization-screen__empty-row">
+          <span className="organization-screen__empty-number">01</span>
+          <div>
+            <h2>Start with shared ownership</h2>
+            <p className="profile-screen__muted">Invite teammates into the same workspace instead of rebuilding setup across accounts.</p>
+          </div>
+        </div>
+        <div className="organization-screen__empty-row">
+          <span className="organization-screen__empty-number">02</span>
+          <div>
+            <h2>Pool usage across seats</h2>
+            <p className="profile-screen__muted">Team task credits are managed at the organization level so usage follows the work.</p>
+          </div>
+        </div>
+        <div className="organization-screen__empty-row">
+          <span className="organization-screen__empty-number">03</span>
+          <div>
+            <h2>Manage the account from one place</h2>
+            <p className="profile-screen__muted">Members, templates, billing, and organization preferences stay connected.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export function OrganizationScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['current-organization'] as const, [])
-  const { data, error, isLoading } = useQuery({
+  const { data, error, isFetching, isLoading } = useQuery({
     queryKey,
     queryFn: ({ signal }) => fetchCurrentOrganization(signal),
   })
@@ -484,6 +610,16 @@ export function OrganizationScreen() {
   const [templateMessage, setTemplateMessage] = useState<string | null>(null)
   const [templateBusy, setTemplateBusy] = useState(false)
   const [templateLaunchBusyId, setTemplateLaunchBusyId] = useState<string | null>(null)
+  const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
+  const [createOrganizationName, setCreateOrganizationName] = useState('')
+  const [createOrganizationErrors, setCreateOrganizationErrors] = useState<string[]>([])
+  const [creatingOrganization, setCreatingOrganization] = useState(false)
+
+  const openCreateOrganizationModal = useCallback(() => {
+    setCreateOrganizationName('')
+    setCreateOrganizationErrors([])
+    setCreateOrganizationOpen(true)
+  }, [])
 
   useEffect(() => {
     if (data) {
@@ -728,6 +864,29 @@ export function OrganizationScreen() {
     }
   }
 
+  const handleCreateOrganizationSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const nextName = createOrganizationName.trim()
+    if (!nextName) {
+      setCreateOrganizationErrors(['Team name is required.'])
+      return
+    }
+    setCreatingOrganization(true)
+    setCreateOrganizationErrors([])
+    try {
+      const created = await createOrganization(nextName)
+      publishConsoleContext(created.context)
+      setCreateOrganizationOpen(false)
+      setCreateOrganizationName('')
+      await queryClient.invalidateQueries({ queryKey })
+      await queryClient.invalidateQueries({ queryKey: templateQueryKey })
+    } catch (err) {
+      setCreateOrganizationErrors(formatErrors(err, 'Unable to create team.'))
+    } finally {
+      setCreatingOrganization(false)
+    }
+  }
+
   const handleLaunchTemplate = async (template: OrganizationTemplate) => {
     setTemplateLaunchBusyId(template.id)
     setTemplateErrors([])
@@ -761,11 +920,45 @@ export function OrganizationScreen() {
     )
   }
 
+  const createOrganizationModal = createOrganizationOpen ? (
+    <CreateOrganizationModal
+      name={createOrganizationName}
+      errors={createOrganizationErrors}
+      busy={creatingOrganization}
+      onNameChange={setCreateOrganizationName}
+      onClose={() => {
+        if (!creatingOrganization) {
+          setCreateOrganizationOpen(false)
+        }
+      }}
+      onSubmit={handleCreateOrganizationSubmit}
+    />
+  ) : null
+
+  if (isFetching && !data && !error) {
+    return (
+      <div className="profile-screen profile-screen--embedded">
+        <section className="profile-screen__section">
+          <p className="profile-screen__muted">Loading organization...</p>
+        </section>
+      </div>
+    )
+  }
+
+  if (!data && (!error || isNoOrganizationContextError(error))) {
+    return (
+      <>
+        <OrganizationEmptyState onCreateOrganization={openCreateOrganizationModal} />
+        {createOrganizationModal}
+      </>
+    )
+  }
+
   if (error || !data) {
     return (
       <SettingsBanner
         variant="embedded"
-        title="Organization Context Required"
+        title="Organization Unavailable"
         subtitle={formatErrors(error, 'Switch to an organization context to manage organization settings.')[0]}
       />
     )
@@ -797,6 +990,14 @@ export function OrganizationScreen() {
           <p className="profile-screen__eyebrow">Organization</p>
           <h1>{data.organization.name}</h1>
         </div>
+        <button
+          type="button"
+          className="profile-screen__button profile-screen__button--secondary organization-screen__header-action"
+          onClick={openCreateOrganizationModal}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Create Team
+        </button>
       </header>
 
       {!canEditOrganization && !canManageMembers ? (
@@ -1195,6 +1396,7 @@ export function OrganizationScreen() {
           onSubmit={handleTemplateEditorSubmit}
         />
       ) : null}
+      {createOrganizationModal}
     </div>
   )
 }
