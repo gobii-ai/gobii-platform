@@ -2,15 +2,18 @@
 {% if settings.GOBII_PROPRIETARY_MODE %}
 # Gobii
 
-> Gobii helps recruiting teams source candidates in the tools they already use.
+> Gobii provides shared AI agent workspaces for teams that want agents to do real business work across their tools.
 
-Gobii helps recruiting teams turn role briefs into completed sourcing work. It researches candidates, prepares shortlists, writes hiring-manager briefs, and hands off results in tools like LinkedIn Recruiter, Greenhouse, and Google Sheets.
+Gobii helps teams create, run, and manage AI agents for work across the web, files, spreadsheets, inboxes, APIs, and connected business systems. Gobii for Teams adds shared agents, pooled task credits, private templates, shared credentials, roles, invites, seats, and one team bill.
+
+Recruiting operations are a major Gobii solution: recruiting teams can turn role briefs into completed sourcing work, including candidate research, shortlists, hiring-manager briefs, and handoff in tools like LinkedIn Recruiter, Greenhouse, and Google Sheets.
 
 Managed LinkedIn Recruiter automation is available through sales.
 
 ## Core Pages
 
-- [Gobii homepage]({{ base_url }}/): Source candidates in the tools recruiting teams already use.
+- [Gobii homepage]({{ base_url }}/): AI agents that work across the tools teams already use.
+- [Gobii for Teams]({{ base_url }}/teams/): Shared AI agent workspaces with pooled task credits, private templates, shared credentials, roles, seats, and team billing.
 - [Solutions]({{ base_url }}/solutions/): AI agent solution pages for teams.
 - [Developers]({{ base_url }}/solutions/engineering/): Gobii developer platform and API overview.
 - [Pricing]({{ base_url }}/pricing/): Self-serve pricing plans, including Pro and Scale.
@@ -19,6 +22,9 @@ Managed LinkedIn Recruiter automation is available through sales.
 
 ## Important Use Cases
 
+- Shared AI agent workspaces for small and medium teams
+- Shared agents, private templates, pooled task credits, and team billing
+- Delegated web, file, spreadsheet, email, API, and integration workflows
 - Recruiting operations
 - Candidate sourcing
 - Candidate profile research
@@ -42,8 +48,14 @@ Managed LinkedIn Recruiter automation is available through sales.
 
 ## Product Positioning
 
-Gobii is not a generic template directory or chatbot-only interface. It is a focused recruiting operations product that uses AI agents to perform sourcing, candidate research, shortlist preparation, and handoff work inside the software recruiting teams already use.
+Gobii is not a generic template directory or chatbot-only interface. It is an AI agent workspace for teams that need agents to perform delegated work across connected tools. Recruiting operations are an important solution area, not the whole product.
 
+## Gobii for Teams
+
+- Gobii for Teams gives small and medium teams one shared workspace for their AI agents.
+- Team seats are $50 per seat per month and each seat contributes 1,000 pooled task credits to the shared workspace.
+- Teams can share agents, private templates, credentials, integrations, API keys, secrets, MCP servers, roles, invites, seats, billing, and usage visibility.
+- Gobii for Teams is self-serve and can be a path into enterprise deployments for larger teams.
 
 ## Recruiting Operations
 
@@ -63,21 +75,22 @@ Gobii is not a generic template directory or chatbot-only interface. It is a foc
 {% else %}
 # Gobii
 
-> Gobii provides AI agents for recruiting operations.
+> Gobii provides AI agents for delegated work across web, files, spreadsheets, integrations, and business tools.
 
-Gobii helps recruiting teams automate repetitive sourcing, candidate research, shortlist preparation, and workflow handoff across the tools they already use.
+Gobii helps people create and run agents that can browse, use tools, process files, work with spreadsheets, call APIs, and complete structured tasks across connected systems.
 
-Gobii is focused on recruiting operations: paste a job description, then have AI agents research candidates, prepare a shortlist, and generate hiring-manager briefs.
+Gobii also supports recruiting operations workflows: paste a job description, then have AI agents research candidates, prepare a shortlist, and generate hiring-manager briefs.
 
 ## Core Pages
 
-- [Gobii homepage]({{ base_url }}/): AI agents for recruiting operations.
+- [Gobii homepage]({{ base_url }}/): AI agents for delegated work across connected tools.
 - [Pricing]({{ base_url }}/pricing/): Self-serve pricing plans, including Pro and Scale.
 - [Documentation](https://docs.gobii.ai/): Documentation for Gobii agents and integrations.
 - [Full Context]({{ base_url }}/llms-full.txt): More detailed information for LLMs.
 
 ## Important Use Cases
 
+- AI agents for delegated web, file, spreadsheet, email, API, and integration workflows
 - Recruiting operations
 - Candidate sourcing
 - Candidate profile research
@@ -101,7 +114,7 @@ Gobii is focused on recruiting operations: paste a job description, then have AI
 
 ## Product Positioning
 
-Gobii is not a generic template directory or chatbot-only interface. It is a focused recruiting operations product that uses AI agents to perform sourcing, candidate research, shortlist preparation, and handoff work.
+Gobii is not a generic template directory or chatbot-only interface. It is an AI agent platform for delegated work across connected tools. Recruiting operations are one supported workflow area.
 
 
 ## Recruiting Operations

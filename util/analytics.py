@@ -778,6 +778,7 @@ class Analytics:
 
 PAGE_META = {
     "/pricing/":                        ("Marketing",  "Pricing"),
+    "/teams/":                          ("Marketing",  "Teams"),
     "/accounts/login/":                 ("Auth",       "Login"),
     "/accounts/logout/":                ("Auth",       "Logout"),
     "/accounts/signup/":                ("Auth",       "Sign Up"),

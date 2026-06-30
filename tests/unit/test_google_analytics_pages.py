@@ -84,6 +84,14 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertContains(response, 'let gaPageTitle = "Marketing - Home";')
         self.assertContains(response, "gtag('config', 'G-TEST123', gtagConfig);")
 
+    @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123", GOBII_PROPRIETARY_MODE=True)
+    def test_teams_page_uses_teams_page_meta_for_analytics(self):
+        response = self.client.get("/teams/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'let gaPageTitle = "Marketing - Teams";')
+        self.assertContains(response, 'let pageCategory = "Marketing";')
+        self.assertContains(response, 'let pageName = "Teams";')
+
     @override_settings(
         DEBUG=True,
         SEGMENT_WEB_WRITE_KEY="segment-web-test",

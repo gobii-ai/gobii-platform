@@ -1894,8 +1894,8 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "http://testserver/llms-full.txt")
         self.assertContains(response, "https://docs.gobii.ai/")
-        self.assertContains(response, "Gobii provides AI agents for recruiting operations")
-        self.assertContains(response, "AI agents for recruiting operations")
+        self.assertContains(response, "Gobii provides AI agents for delegated work across web, files, spreadsheets, integrations, and business tools")
+        self.assertContains(response, "AI agents for delegated work across connected tools")
         self.assertContains(response, "## Recruiting Operations")
         self.assertNotContains(response, "http://testserver/solutions/")
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
@@ -1903,12 +1903,14 @@ class LlmsTxtTests(TestCase):
         self.assertNotContains(response, "LinkedIn")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_llms_txt_uses_proprietary_sourcing_copy(self):
+    def test_llms_txt_uses_proprietary_platform_and_teams_copy(self):
         response = self.client.get("/llms.txt")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/plain")
-        self.assertContains(response, "Gobii helps recruiting teams source candidates in the tools they already use")
+        self.assertContains(response, "Gobii provides shared AI agent workspaces for teams")
+        self.assertContains(response, "Gobii for Teams adds shared agents, pooled task credits")
+        self.assertContains(response, "http://testserver/teams/")
         self.assertContains(response, "LinkedIn Recruiter, Greenhouse, and Google Sheets")
         self.assertContains(response, "http://testserver/solutions/")
         self.assertContains(response, "http://testserver/solutions/engineering/")
@@ -1924,7 +1926,7 @@ class LlmsTxtTests(TestCase):
         self.assertEqual(response["Content-Type"], "text/plain")
         self.assertContains(response, "# Gobii")
         self.assertContains(response, "## Overview")
-        self.assertContains(response, "automate repetitive sourcing, candidate research")
+        self.assertContains(response, "create and run agents that can browse, use tools, process files")
         self.assertContains(response, "## Recruiting Operations")
         self.assertContains(response, "Public template and solution pages are no longer the primary product surface.")
         self.assertNotContains(response, "http://testserver/solutions/")
@@ -1933,12 +1935,14 @@ class LlmsTxtTests(TestCase):
         self.assertNotContains(response, "LinkedIn")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_llms_full_txt_uses_proprietary_sourcing_copy(self):
+    def test_llms_full_txt_uses_proprietary_platform_and_teams_copy(self):
         response = self.client.get("/llms-full.txt")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/plain")
-        self.assertContains(response, "turn role briefs into completed sourcing work")
+        self.assertContains(response, "Gobii helps teams create, run, and manage AI agents")
+        self.assertContains(response, "Teams: http://testserver/teams/")
+        self.assertContains(response, "Self-serve team pricing is $50 per seat per month")
         self.assertContains(response, "LinkedIn Recruiter, Greenhouse, and Google Sheets")
         self.assertContains(response, "## Recruiting Operations")
         self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")

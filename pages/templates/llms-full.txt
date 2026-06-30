@@ -2,15 +2,18 @@
 {% if settings.GOBII_PROPRIETARY_MODE %}
 # Gobii
 
-> Gobii helps recruiting teams source candidates in the tools they already use.
+> Gobii provides shared AI agent workspaces for teams that want agents to do real business work across their tools.
 
 ## Overview
 
-Gobii helps recruiting teams turn role briefs into completed sourcing work. Users enter the role, and Gobii researches candidates, prepares shortlists, writes hiring-manager briefs, and hands off results in tools like LinkedIn Recruiter, Greenhouse, and Google Sheets. Managed LinkedIn Recruiter automation is available through sales.
+Gobii helps teams create, run, and manage AI agents for work across the web, files, spreadsheets, inboxes, APIs, and connected business systems. Gobii for Teams adds shared agents, pooled task credits, private templates, shared credentials, roles, invites, seats, usage visibility, and one team bill.
+
+Recruiting operations are a major Gobii solution: users enter a role, and Gobii researches candidates, prepares shortlists, writes hiring-manager briefs, and hands off results in tools like LinkedIn Recruiter, Greenhouse, and Google Sheets. Managed LinkedIn Recruiter automation is available through sales.
 
 ## Important URLs
 
 - Gobii home: {{ base_url }}/
+- Teams: {{ base_url }}/teams/
 - Solutions: {{ base_url }}/solutions/
 - Developers: {{ base_url }}/solutions/engineering/
 - Documentation: https://docs.gobii.ai/
@@ -25,11 +28,17 @@ The public documentation at https://docs.gobii.ai/ is the primary source for set
 
 ## Agent Platform
 
-Gobii agents are designed for delegated recruiting operations work that may involve browsing, tool use, structured outputs, files, spreadsheets, and scheduled or asynchronous tasks. User-specific data, credentials, and private task details should be treated as sensitive and should not be inferred from public pages.
+Gobii agents are designed for delegated work that may involve browsing, tool use, structured outputs, files, spreadsheets, APIs, connected applications, and scheduled or asynchronous tasks. User-specific data, credentials, and private task details should be treated as sensitive and should not be inferred from public pages.
+
+## Gobii for Teams
+
+Gobii for Teams is the shared workspace for small and medium teams using Gobii together. Teams can share agents, private templates, credentials, integrations, API keys, secrets, MCP servers, roles, invites, seats, billing, and usage visibility.
+
+Self-serve team pricing is $50 per seat per month. Each paid seat contributes 1,000 task credits to one shared team pool, so ten seats create a 10,000-credit workspace. Gobii for Teams is also a gateway to enterprise deployment for larger organizations that need additional support, controls, or procurement.
 
 ## Recruiting Operations
 
-Gobii is focused on recruiting operations: enter a role brief, then have AI agents research candidates, prepare a shortlist, generate hiring-manager briefs, and hand off results in the recruiting software the team already uses.
+Gobii supports recruiting operations: enter a role brief, then have AI agents research candidates, prepare a shortlist, generate hiring-manager briefs, and hand off results in the recruiting software the team already uses.
 
 ## Policies
 
@@ -64,11 +73,11 @@ Gobii is open-source software; the source code is available at https://github.co
 {% else %}
 # Gobii
 
-> Gobii provides AI agents for recruiting operations.
+> Gobii provides AI agents for delegated work across web, files, spreadsheets, integrations, and business tools.
 
 ## Overview
 
-Gobii helps recruiting teams automate repetitive sourcing, candidate research, shortlist preparation, and workflow handoff across the tools they already use. Users enter the role, and Gobii agents research candidates, prepare recruiter-reviewable shortlists, and generate hiring-manager briefs.
+Gobii helps people create and run agents that can browse, use tools, process files, work with spreadsheets, call APIs, and complete structured tasks across connected systems. Recruiting operations are one supported workflow area: users can enter a role, and Gobii agents can research candidates, prepare recruiter-reviewable shortlists, and generate hiring-manager briefs.
 
 ## Important URLs
 
@@ -85,11 +94,11 @@ The public documentation at https://docs.gobii.ai/ is the primary source for set
 
 ## Agent Platform
 
-Gobii agents are designed for delegated recruiting operations work that may involve browsing, tool use, structured outputs, files, spreadsheets, and scheduled or asynchronous tasks. User-specific data, credentials, and private task details should be treated as sensitive and should not be inferred from public pages.
+Gobii agents are designed for delegated work that may involve browsing, tool use, structured outputs, files, spreadsheets, and scheduled or asynchronous tasks. User-specific data, credentials, and private task details should be treated as sensitive and should not be inferred from public pages.
 
 ## Recruiting Operations
 
-Gobii is focused on recruiting operations: enter a job description, then have AI agents research candidates, prepare a shortlist, and generate hiring-manager briefs. Public template and solution pages are no longer the primary product surface.
+Gobii supports recruiting operations: enter a job description, then have AI agents research candidates, prepare a shortlist, and generate hiring-manager briefs. Public template and solution pages are no longer the primary product surface.
 
 ## Policies
 

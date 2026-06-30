@@ -1,21 +1,26 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Gobii for Teams | Shared AI Agent Workspaces{% endblock %}
+{% block title %}Shared AI Agent Workspaces for Growing Teams | Gobii{% endblock %}
 
 {% block head_extras %}
 {{ block.super }}
-<meta name="description" content="Gobii for Teams gives small and medium teams shared AI agents, pooled task credits, team billing, private templates, and shared credentials for $50 per seat per month.">
+<meta name="description" content="Gobii for Teams gives growing teams shared AI agents, pooled task credits, private templates, shared credentials, and one simple team bill.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Gobii for Teams">
-<meta property="og:description" content="Shared AI agent workspaces with pooled task credits, team billing, private templates, and shared setup.">
+<meta property="og:title" content="Shared AI Agent Workspaces for Growing Teams | Gobii">
+<meta property="og:description" content="Gobii for Teams gives growing teams shared AI agents, pooled task credits, private templates, shared credentials, and one simple team bill.">
 <meta property="og:url" content="{{ canonical_url }}">
 <meta property="og:site_name" content="Gobii">
-<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/solutions/sales-hero.jpg' %}">
+<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/teams-og-1200x630.jpg' %}">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Gobii for Teams shared AI agent workspace">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Gobii for Teams">
-<meta name="twitter:description" content="Shared AI agent workspaces with pooled task credits and transparent per-seat pricing.">
-<meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/solutions/sales-hero.jpg' %}">
+<meta name="twitter:title" content="Shared AI Agent Workspaces for Growing Teams | Gobii">
+<meta name="twitter:description" content="Gobii for Teams gives growing teams shared AI agents, pooled task credits, private templates, shared credentials, and one simple team bill.">
+<meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/teams-og-1200x630.jpg' %}">
+<meta name="twitter:image:alt" content="Gobii for Teams shared AI agent workspace">
 <style>
   .teams-panel {
     position: relative;
@@ -96,23 +101,49 @@
   }
 </style>
 <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "Product",
-    "name": "Gobii for Teams",
-    "description": "A shared Gobii workspace for teams using AI agents, pooled task credits, private templates, shared credentials, roles, invites, and billing.",
-    "brand": {
-      "@type": "Brand",
-      "name": "Gobii"
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://gobii.ai/teams/#webpage",
+      "url": "https://gobii.ai/teams/",
+      "name": "Gobii for Teams",
+      "description": "Shared AI agent workspaces for teams with pooled task credits, private templates, shared credentials, roles, invites, and billing.",
+      "mainEntity": { "@id": "https://gobii.ai/teams/#software" }
     },
-    "offers": {
-      "@type": "Offer",
-      "price": "{{ team_offer.price_per_seat }}",
-      "priceCurrency": "USD",
-      "description": "{{ team_offer.price_per_seat_display }} per seat per month with {{ team_offer.credits_per_seat_display }} pooled task credits per seat."
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://gobii.ai/teams/#breadcrumbs",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://gobii.ai/" },
+        { "@type": "ListItem", "position": 2, "name": "Teams", "item": "https://gobii.ai/teams/" }
+      ]
     },
-    "url": "{{ canonical_url|escapejs }}"
-  }
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://gobii.ai/teams/#software",
+      "name": "Gobii for Teams",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "brand": { "@type": "Brand", "name": "Gobii" },
+      "offers": {
+        "@type": "Offer",
+        "price": "{{ team_offer.price_per_seat }}",
+        "priceCurrency": "USD",
+        "url": "https://gobii.ai/teams/",
+        "availability": "https://schema.org/InStock"
+      },
+      "featureList": [
+        "Shared AI agents",
+        "Pooled task credits",
+        "Private templates",
+        "Shared credentials and integrations",
+        "Roles, invites, seats, and team billing"
+      ]
+    }
+  ]
+}
 </script>
 {% endblock %}
 
