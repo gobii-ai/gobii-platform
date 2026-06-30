@@ -197,7 +197,7 @@ class PricingPageCtaCopyTests(TestCase):
 
         self.assertEqual(plans[1]["cta_url"], reverse("proprietary:startup_checkout"))
         self.assertEqual(plans[2]["cta_url"], reverse("proprietary:scale_checkout"))
-        self.assertEqual(plans[3]["cta_url"], "/app/organization")
+        self.assertEqual(plans[3]["cta_url"], "/app/team")
 
         content = response.content.decode()
         analytics_pos = content.index('data-analytics-cta-id="pricing_free_oss_plan"')

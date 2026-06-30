@@ -3277,7 +3277,7 @@ export function AgentChatPage({
   const apiKeysUrl = '/app/api-keys'
   const profileUrl = '/app/profile'
   const organizationUrl = effectiveContext?.type === 'organization'
-    ? '/app/organization'
+    ? '/app/team'
     : null
   const secretsUrl = '/app/secrets'
   const integrationsUrl = '/app/integrations'

@@ -18,6 +18,7 @@ APP_PROTECTED_PATH_PREFIX = f"{APP_PATH_PREFIX}/agents"
 APP_BILLING_PATH_PREFIX = f"{APP_PATH_PREFIX}/billing"
 APP_API_KEYS_PATH_PREFIX = f"{APP_PATH_PREFIX}/api-keys"
 APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX = f"{APP_PATH_PREFIX}/agent-collaborator-invites"
+APP_TEAM_PATH_PREFIX = f"{APP_PATH_PREFIX}/team"
 APP_ORGANIZATION_PATH_PREFIX = f"{APP_PATH_PREFIX}/organization"
 APP_ORGANIZATION_INVITES_PATH_PREFIX = f"{APP_PATH_PREFIX}/organizations/invites"
 APP_PROFILE_PATH_PREFIX = f"{APP_PATH_PREFIX}/profile"
@@ -272,6 +273,10 @@ class AppShellMiddleware:
                 redirect_to_login(request.get_full_path(), login_url=reverse("account_login"))
             )
 
+        canonical_redirect = self._canonical_redirect_path(request)
+        if canonical_redirect is not None:
+            return self._with_robots_header(HttpResponseRedirect(canonical_redirect))
+
         if request.user.is_authenticated:
             self._apply_context_query(request)
 
@@ -308,6 +313,20 @@ class AppShellMiddleware:
         return response
 
     @staticmethod
+    def _canonical_redirect_path(request) -> str | None:
+        if request.path == APP_ORGANIZATION_PATH_PREFIX:
+            target_path = APP_TEAM_PATH_PREFIX
+        elif request.path.startswith(f"{APP_ORGANIZATION_PATH_PREFIX}/"):
+            target_path = f"{APP_TEAM_PATH_PREFIX}{request.path[len(APP_ORGANIZATION_PATH_PREFIX):]}"
+        else:
+            return None
+
+        query_string = request.META.get("QUERY_STRING")
+        if query_string:
+            return f"{target_path}?{query_string}"
+        return target_path
+
+    @staticmethod
     def _legacy_console_redirect(request) -> str | None:
         if not settings.LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED:
             return None
@@ -328,6 +347,8 @@ class AppShellMiddleware:
             or path.startswith(f"{APP_API_KEYS_PATH_PREFIX}/")
             or path == APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX
             or path.startswith(f"{APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX}/")
+            or path == APP_TEAM_PATH_PREFIX
+            or path.startswith(f"{APP_TEAM_PATH_PREFIX}/")
             or path == APP_ORGANIZATION_PATH_PREFIX
             or path.startswith(f"{APP_ORGANIZATION_PATH_PREFIX}/")
             or path == APP_ORGANIZATION_INVITES_PATH_PREFIX

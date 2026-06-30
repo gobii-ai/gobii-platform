@@ -75,7 +75,7 @@
     <!-- Actions Section -->
     <div class="p-2">
       {% flag "organizations" %}
-      <a href="/app/organization"
+      <a href="/app/team"
          class="flex items-center gap-3 px-2 py-2 text-sm text-gray-700 rounded-md hover:bg-gray-50 transition-colors">
         <i aria-hidden="true" data-lucide="plus" class="w-4 h-4 text-gray-500"></i>
         <span>Create or Join Organization</span>
@@ -180,7 +180,7 @@
             // If currently on an organization detail page, redirect to the selected org
             const isOrgDetail = /^\/console\/organizations\/[^/]+\/$/.test(window.location.pathname);
             if (isOrgDetail && type === 'organization') {
-              window.location = `/app/organization?context_type=organization&context_id=${encodeURIComponent(id)}`;
+              window.location = `/app/team?context_type=organization&context_id=${encodeURIComponent(id)}`;
               return;
             }
 

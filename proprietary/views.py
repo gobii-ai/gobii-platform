@@ -179,7 +179,7 @@ class ProprietaryModeRequiredMixin:
         return super().dispatch(request, *args, **kwargs)
 
 
-TEAM_START_URL = "/app/organization"
+TEAM_START_URL = "/app/team"
 
 
 def _coerce_plan_int(value, default=0):

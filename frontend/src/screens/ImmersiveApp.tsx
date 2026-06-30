@@ -87,7 +87,7 @@ const AGENT_SHELL_PAGE_CONFIG: Record<AgentShellPage, AgentShellPageConfig> = {
     render: ({ layout, refreshKey }) => <ImmersiveProfilePage layout={layout} refreshKey={refreshKey} />,
   },
   organization: {
-    path: '/app/organization',
+    path: '/app/team',
     render: ({ layout, refreshKey }) => <ImmersiveOrganizationPage layout={layout} refreshKey={refreshKey} />,
   },
   secrets: {
@@ -185,7 +185,7 @@ function parseRoute(pathname: string): AppRoute {
     return { kind: 'profile' }
   }
 
-  if (parts[0] === 'organization') {
+  if (parts[0] === 'team' || parts[0] === 'organization') {
     return { kind: 'organization' }
   }
 
@@ -266,7 +266,7 @@ function getAnalyticsPath(route: AppRoute, pathname: string): string {
     return '/app/profile'
   }
   if (route.kind === 'organization') {
-    return '/app/organization'
+    return '/app/team'
   }
   if (route.kind === 'organization-invite-accept') {
     return '/app/organizations/invites/:token/accept'
