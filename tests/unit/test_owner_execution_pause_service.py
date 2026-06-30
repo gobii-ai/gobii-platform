@@ -236,6 +236,40 @@ class OwnerExecutionPauseAnalyticsTests(TestCase):
         self.assertEqual(state["reason"], "")
         self.assertIsNone(state["resume_at"])
 
+    @patch("api.services.owner_execution_pause.Analytics.track_event")
+    def test_active_customer_pause_replaces_billing_recovery_pause(self, mock_track_event):
+        paused_at = timezone.now().replace(microsecond=0)
+        resume_at = paused_at + timedelta(days=7)
+        self.user.billing.execution_paused = True
+        self.user.billing.execution_pause_reason = EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY
+        self.user.billing.execution_paused_at = paused_at
+        self.user.billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
+        )
+
+        changed = sync_owner_customer_account_pause(
+            self.user,
+            subscription_payload={
+                "id": "sub_active_pause",
+                "pause_collection": {
+                    "behavior": "void",
+                    "resumes_at": int(resume_at.timestamp()),
+                },
+            },
+            source="stripe.customer.subscription.updated.pause_collection",
+        )
+
+        self.assertTrue(changed)
+        self.user.billing.refresh_from_db()
+        self.assertTrue(self.user.billing.execution_paused)
+        self.assertEqual(self.user.billing.execution_pause_reason, EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE)
+        self.assertEqual(self.user.billing.execution_pause_resume_at, resume_at)
+        mock_track_event.assert_not_called()
+
     def test_sync_customer_pause_with_future_period_schedules_without_pausing(self):
         effective_at = (timezone.now() + timedelta(days=30)).replace(microsecond=0)
         resume_at = effective_at + timedelta(days=30)
