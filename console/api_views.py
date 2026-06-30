@@ -166,6 +166,7 @@ from api.services.signup_preview import (
     resume_signup_preview_agent_if_eligible,
 )
 from api.services.agent_planning import skip_agent_planning
+from api.services.agent_credit_forecasts import serialize_agent_credit_forecast
 from api.services.referral_service import ReferralService
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
@@ -3880,6 +3881,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "agent_avatar_url": agent.get_avatar_thumbnail_url(),
             "signup_preview_state": agent.signup_preview_state,
             "planning_state": agent.planning_state,
+            "credit_forecast": serialize_agent_credit_forecast(agent),
             **_pending_action_payload(agent, request.user),
         }
         return JsonResponse(payload)
@@ -7507,6 +7509,7 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
                 "signup_preview_state": agent.signup_preview_state,
                 "planning_state": agent.planning_state,
+                "credit_forecast": serialize_agent_credit_forecast(agent),
             }
         )
 

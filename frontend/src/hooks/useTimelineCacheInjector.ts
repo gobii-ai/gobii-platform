@@ -1,7 +1,14 @@
 import type { QueryClient, InfiniteData } from '@tanstack/react-query'
 
 import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
-import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRequest, ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
+import type {
+  CreditForecast,
+  PendingActionRequest,
+  PendingHumanInputAction,
+  PendingHumanInputRequest,
+  ProcessingSnapshot,
+  TimelineEvent,
+} from '../types/agentChat'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import { compareTimelineCursors } from '../util/timelineCursor'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
@@ -285,6 +292,15 @@ export function updateAgentIdentityInCache(
         : null
       if (planningState !== (current.planning_state ?? null)) {
         next.planning_state = planningState
+        changed = true
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'credit_forecast')) {
+      const creditForecast = payload.credit_forecast && typeof payload.credit_forecast === 'object'
+        ? payload.credit_forecast as CreditForecast
+        : null
+      if (creditForecast !== current.credit_forecast) {
+        next.credit_forecast = creditForecast
         changed = true
       }
     }

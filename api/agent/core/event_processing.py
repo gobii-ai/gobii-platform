@@ -176,6 +176,7 @@ from ...models import (
     PersistentAgentStep,
     PersistentAgentCompletion,
     PersistentAgentError,
+    PersistentAgentHumanInputRequest,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
@@ -1806,11 +1807,16 @@ def _should_skip_stale_planning_mode_after_terminal_delivery(
     *,
     followup_required: bool,
 ) -> bool:
+    has_pending_human_input = PersistentAgentHumanInputRequest.objects.filter(
+        agent=agent,
+        status=PersistentAgentHumanInputRequest.Status.PENDING,
+    ).exists()
     return (
         agent.planning_state == PersistentAgent.PlanningState.PLANNING
         and not followup_required
         and finalized_batch.terminal_message_delivery_ok
         and not finalized_batch.human_input_request_ok
+        and not has_pending_human_input
     )
 
 

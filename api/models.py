@@ -7688,6 +7688,101 @@ class PersistentAgent(models.Model):
             return self.__class__.objects.filter(pk=self.pk).delete()
 
 
+class HistoricalAgentCostSample(models.Model):
+    """Historical lifecycle credit sample used for agent-level forecasting."""
+
+    class Confidence(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_sample_id = models.CharField(max_length=255, unique=True)
+    source_agent_id = models.UUIDField(db_index=True)
+    source_database = models.CharField(max_length=128, blank=True)
+    agent_name = models.CharField(max_length=255, blank=True)
+    charter_text = models.TextField(blank=True)
+    planning_plan = models.TextField(blank=True)
+    schedule_summary = models.CharField(max_length=255, blank=True)
+    enabled_tools = models.JSONField(default=list, blank=True)
+    owner_type = models.CharField(max_length=32, blank=True)
+    tier_key = models.CharField(max_length=32, blank=True, db_index=True)
+    tier_credit_multiplier = models.DecimalField(max_digits=8, decimal_places=3, default=Decimal("1.000"))
+    setup_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    first_run_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    daily_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    monthly_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    normalized_setup_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    normalized_first_run_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    normalized_daily_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    normalized_monthly_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    sample_confidence = models.CharField(max_length=16, choices=Confidence.choices, default=Confidence.LOW)
+    charged_step_count = models.PositiveIntegerField(default=0)
+    tool_call_count = models.PositiveIntegerField(default=0)
+    observation_days = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    embedding_text = models.TextField(blank=True)
+    embedding_text_hash = models.CharField(max_length=64, blank=True, db_index=True)
+    embedding_model = models.CharField(max_length=128, blank=True)
+    embedding_dimension = models.PositiveIntegerField(null=True, blank=True, db_index=True)
+    source_metadata = models.JSONField(default=dict, blank=True)
+    created_at_source = models.DateTimeField(null=True, blank=True)
+    planning_completed_at_source = models.DateTimeField(null=True, blank=True)
+    last_observed_at_source = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-last_observed_at_source", "-created_at_source"]
+        indexes = [
+            models.Index(fields=["embedding_dimension", "-last_observed_at_source"], name="agent_cost_emb_dim_recent_idx"),
+            models.Index(fields=["source_database", "source_agent_id"], name="agent_cost_source_agent_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"HistoricalAgentCostSample<{self.source_sample_id}>"
+
+
+class PersistentAgentCreditForecast(models.Model):
+    """Latest persisted credit forecast for a current persistent agent."""
+
+    class Confidence(models.TextChoices):
+        NONE = "none", "None"
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+
+    class WarningLevel(models.TextChoices):
+        NONE = "none", "None"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+
+    agent = models.OneToOneField(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="credit_forecast",
+    )
+    setup_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    per_run_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    daily_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    monthly_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    confidence = models.CharField(max_length=16, choices=Confidence.choices, default=Confidence.NONE)
+    sample_count = models.PositiveIntegerField(default=0)
+    warning_level = models.CharField(max_length=16, choices=WarningLevel.choices, default=WarningLevel.NONE)
+    warning_reasons = models.JSONField(default=list, blank=True)
+    embedding_text = models.TextField(blank=True)
+    embedding_model = models.CharField(max_length=128, blank=True)
+    estimated_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-estimated_at"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"PersistentAgentCreditForecast<{self.agent_id}>"
+
+
 class PersistentAgentKanbanCard(models.Model):
     """Kanban card assigned to a persistent agent."""
 

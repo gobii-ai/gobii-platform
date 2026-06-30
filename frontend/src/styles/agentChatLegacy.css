@@ -2917,6 +2917,101 @@
     font-size: 0.65rem;
     text-transform: uppercase;
 }
+.agent-chat-section-card.credit-forecast-event {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.85rem;
+    align-items: start;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.95rem 1rem;
+    border-color: rgba(124, 76, 160, 0.28);
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.94) 0%, rgba(245, 232, 255, 0.88) 100%);
+    color: #3d2551;
+}
+.agent-chat-section-card.credit-forecast-event[data-tone='warning'] {
+    border-color: rgba(175, 118, 36, 0.34);
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.94) 0%, rgba(255, 246, 218, 0.92) 100%);
+    color: #4e3410;
+}
+.agent-chat-section-card.credit-forecast-event[data-tone='critical'] {
+    border-color: rgba(185, 69, 55, 0.35);
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.94) 0%, rgba(255, 234, 229, 0.92) 100%);
+    color: #5b2119;
+}
+.credit-forecast-event__icon-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: 0.7rem;
+    background: rgba(124, 76, 160, 0.12);
+    color: #7c4ca0;
+}
+.credit-forecast-event[data-tone='warning'] .credit-forecast-event__icon-wrap {
+    background: rgba(175, 118, 36, 0.14);
+    color: #9a681f;
+}
+.credit-forecast-event[data-tone='critical'] .credit-forecast-event__icon-wrap {
+    background: rgba(185, 69, 55, 0.14);
+    color: #aa3f32;
+}
+.credit-forecast-event__content {
+    min-width: 0;
+}
+.credit-forecast-event__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+.credit-forecast-event__eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: currentColor;
+    font-size: 0.76rem;
+    font-weight: 760;
+    line-height: 1.15;
+}
+.credit-forecast-event__metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+    margin-top: 0.65rem;
+}
+.credit-forecast-event__metric {
+    min-width: 0;
+    border: 1px solid rgba(124, 76, 160, 0.14);
+    border-radius: 0.65rem;
+    background: rgba(255, 255, 255, 0.58);
+    padding: 0.55rem 0.65rem;
+}
+.credit-forecast-event[data-tone='warning'] .credit-forecast-event__metric {
+    border-color: rgba(175, 118, 36, 0.18);
+}
+.credit-forecast-event[data-tone='critical'] .credit-forecast-event__metric {
+    border-color: rgba(185, 69, 55, 0.18);
+}
+.credit-forecast-event__metric-label {
+    display: block;
+    color: rgba(61, 37, 81, 0.68);
+    font-size: 0.64rem;
+    font-weight: 700;
+    line-height: 1;
+    text-transform: uppercase;
+}
+.credit-forecast-event__metric-value {
+    display: block;
+    margin-top: 0.3rem;
+    color: currentColor;
+    font-size: 0.9rem;
+    font-weight: 800;
+    line-height: 1.15;
+}
 @media (max-width: 640px) {
     .scheduled-resume-card {
         grid-template-columns: auto 1fr;
@@ -2924,6 +3019,18 @@
     .scheduled-resume-card__pill {
         grid-column: 1 / -1;
         justify-self: flex-start;
+    }
+    .credit-forecast-event {
+        width: 100%;
+        grid-template-columns: auto 1fr;
+    }
+    .credit-forecast-event__header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.45rem;
+    }
+    .credit-forecast-event__metrics {
+        grid-template-columns: 1fr;
     }
 }
 .agent-chat-section-card.starter-prompts-card {

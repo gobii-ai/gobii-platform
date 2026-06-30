@@ -31,6 +31,7 @@ import type {
   ProcessingWebTask,
   StreamState,
   PlanSnapshot,
+  CreditForecast,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -220,6 +221,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
   autoFocusComposer?: boolean
   planSnapshot?: PlanSnapshot | null
+  creditForecast?: CreditForecast | null
   footer?: ReactNode
   galleryShellPage?: SelectionShellPage
   galleryShellPanel?: ReactNode
@@ -416,6 +418,7 @@ export function AgentChatLayout({
   onSidebarNotificationsEnabledChange,
   autoFocusComposer = false,
   planSnapshot,
+  creditForecast = null,
   footer,
   galleryShellPage = 'agents',
   galleryShellPanel = null,
@@ -581,6 +584,7 @@ export function AgentChatLayout({
   const [reportSubmitting, setReportSubmitting] = useState(false)
   const [reportError, setReportError] = useState<string | null>(null)
   const planPanelMode = agentId ? agentPlanPanelModes[agentId] ?? 'hidden' : defaultPlanPanelMode
+  const timelineCreditForecast = planningState === 'completed' ? creditForecast : null
   const hasStoredPlanPanelMode = agentId
     ? Object.prototype.hasOwnProperty.call(agentPlanPanelModes, agentId)
     : defaultPlanPanelMode !== 'hidden'
@@ -1613,6 +1617,7 @@ export function AgentChatLayout({
             composerDisabled={composerDisabled}
             contactCapOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0 ? () => handleAddonsOpen('contacts') : undefined}
             contactCapShowUpgrade={contactPackShowUpgrade}
+            creditForecast={timelineCreditForecast}
             events={timelineRenderEvents}
             hardLimitShowUpsell={hardLimitShowUpsell}
             hardLimitUpgradeUrl={hardLimitUpgradeUrl}

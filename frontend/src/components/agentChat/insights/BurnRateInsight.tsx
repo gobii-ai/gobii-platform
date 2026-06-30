@@ -60,7 +60,7 @@ function UsageGauge({
 
   if (usage.unlimited) {
     return (
-      <div className="usage-gauge-card usage-gauge-card--unlimited">
+      <div className={`usage-gauge-card usage-gauge-card--${icon} usage-gauge-card--unlimited`}>
         <div className="usage-gauge-card__unlimited-stat">
           <span className="usage-gauge-card__value">{formatCredits(usage.used)}</span>
           <span className="usage-gauge-card__unit">credits</span>
@@ -79,7 +79,7 @@ function UsageGauge({
   }
 
   return (
-    <div className="usage-gauge-card">
+    <div className={`usage-gauge-card usage-gauge-card--${icon}`}>
       <div className="usage-gauge-card__chart">
         <InsightGauge
           value={displayValue}
@@ -132,7 +132,12 @@ export function BurnRateInsight({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.08 }}
       >
-        <UsageGauge title="Today" usage={metadata.todayUsage} icon="today" onAdjust={onOpenQuickSettings} />
+        <UsageGauge
+          title="Today"
+          usage={metadata.todayUsage}
+          icon="today"
+          onAdjust={onOpenQuickSettings}
+        />
         <UsageGauge
           title="This month"
           usage={metadata.monthUsage}
