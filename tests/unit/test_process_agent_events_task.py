@@ -129,6 +129,64 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
         )
 
     @tag("batch_agent_chat")
+    def test_interactive_delivery_applies_interactive_loop_controls(self):
+        agent_id = "55555555-5555-5555-5555-555555555555"
+
+        with patch(
+            "api.agent.tasks.process_events.is_human_inbound_generation_consumed",
+            return_value=False,
+        ), \
+             patch("api.agent.tasks.process_events.is_agent_pending", return_value=False), \
+             patch("api.agent.tasks.process_events.clear_processing_queued_flag"), \
+             patch("api.agent.tasks.process_events._broadcast_processing_state"), \
+             patch("api.agent.tasks.process_events.ReferralService.check_and_grant_deferred_referral_credits"), \
+             patch("api.models.PersistentAgent.objects.select_related") as mock_select_related, \
+             patch("api.agent.tasks.process_events.process_agent_events") as mock_process:
+            mock_select_related.return_value.filter.return_value.first.return_value = None
+            process_agent_events_task.push_request(
+                delivery_info={"routing_key": AGENT_INTERACTIVE_PROCESSING_QUEUE},
+                id="interactive-task",
+            )
+            try:
+                process_agent_events_task.run(agent_id)
+            finally:
+                process_agent_events_task.pop_request()
+
+        call_kwargs = mock_process.call_args.kwargs
+        self.assertEqual(call_kwargs["max_loop_iterations"], 10)
+        self.assertEqual(call_kwargs["max_iterations_followup_delay_seconds"], 0)
+        self.assertEqual(call_kwargs["max_iterations_followup_queue"], AGENT_DEFAULT_PROCESSING_QUEUE)
+
+    @tag("batch_agent_chat")
+    def test_default_delivery_leaves_loop_controls_unset(self):
+        agent_id = "66666666-6666-6666-6666-666666666666"
+
+        with patch(
+            "api.agent.tasks.process_events.is_human_inbound_generation_consumed",
+            return_value=False,
+        ), \
+             patch("api.agent.tasks.process_events.is_agent_pending", return_value=False), \
+             patch("api.agent.tasks.process_events.clear_processing_queued_flag"), \
+             patch("api.agent.tasks.process_events._broadcast_processing_state"), \
+             patch("api.agent.tasks.process_events.ReferralService.check_and_grant_deferred_referral_credits"), \
+             patch("api.models.PersistentAgent.objects.select_related") as mock_select_related, \
+             patch("api.agent.tasks.process_events.process_agent_events") as mock_process:
+            mock_select_related.return_value.filter.return_value.first.return_value = None
+            process_agent_events_task.push_request(
+                delivery_info={"routing_key": AGENT_DEFAULT_PROCESSING_QUEUE},
+                id="default-task",
+            )
+            try:
+                process_agent_events_task.run(agent_id)
+            finally:
+                process_agent_events_task.pop_request()
+
+        call_kwargs = mock_process.call_args.kwargs
+        self.assertIsNone(call_kwargs["max_loop_iterations"])
+        self.assertIsNone(call_kwargs["max_iterations_followup_delay_seconds"])
+        self.assertIsNone(call_kwargs["max_iterations_followup_queue"])
+
+    @tag("batch_agent_chat")
     def test_redelivered_clears_stale_lock(self):
         agent_id = "11111111-1111-1111-1111-111111111111"
         fake_redis = SimpleNamespace(delete=Mock(return_value=1))

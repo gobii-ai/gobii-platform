@@ -228,6 +228,18 @@ _EMAIL_ADDRESS_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.
 _E164_PHONE_CANDIDATE_RE = re.compile(r"\+\d[\d\s().-]{6,}\d")
 _CONTACT_APPROVAL_TERMS = ("do you want", "want me", "should i", "may i", "can i", "ok to", "okay to", "permission", "approve", "confirm", "authorize")
 _CONTACT_SEND_TERMS = ("text", "sms", "email", "e-mail", "message", "contact")
+
+
+def _coerce_loop_iteration_limit(value: int | None) -> int:
+    if value is None:
+        return MAX_AGENT_LOOP_ITERATIONS
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = MAX_AGENT_LOOP_ITERATIONS
+    return max(1, min(MAX_AGENT_LOOP_ITERATIONS, parsed))
+
+
 TOOL_ERROR_TYPE_MAX_BYTES = 120
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
 MESSAGE_TOOL_NAMES = set(DAILY_LIMIT_MESSAGE_TOOL_NAMES)
@@ -925,7 +937,14 @@ def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, sp
         logger.error("Failed to schedule pending drain task: %s", exc)
 
 
-def _schedule_agent_follow_up(*, agent_id: Union[str, UUID], delay_seconds: int, span=None, reason: str) -> None:
+def _schedule_agent_follow_up(
+    *,
+    agent_id: Union[str, UUID],
+    delay_seconds: int,
+    span=None,
+    reason: str,
+    queue: str | None = None,
+) -> None:
     """Schedule a direct follow-up for a single agent without going through pending-drain."""
     if django_settings.CELERY_TASK_ALWAYS_EAGER and delay_seconds > 0:
         logger.info(
@@ -938,10 +957,13 @@ def _schedule_agent_follow_up(*, agent_id: Union[str, UUID], delay_seconds: int,
     try:
         from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
 
-        process_agent_events_task.apply_async(
-            args=[str(agent_id)],
-            countdown=delay_seconds,
-        )
+        apply_async_kwargs = {
+            "args": [str(agent_id)],
+            "countdown": delay_seconds,
+        }
+        if queue is not None:
+            apply_async_kwargs["queue"] = queue
+        process_agent_events_task.apply_async(**apply_async_kwargs)
         if span is not None:
             span.add_event(f"{reason} follow-up scheduled")
     except Exception:
@@ -4810,6 +4832,9 @@ def process_agent_events(
     eval_stop_policy: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: Optional[str] = None,
     inbound_generation: int | str | None = None,
+    max_loop_iterations: int | None = None,
+    max_iterations_followup_delay_seconds: int | None = None,
+    max_iterations_followup_queue: str | None = None,
     worker_pid: Optional[int] = None,
 ) -> None:
     """Process all outstanding events for a persistent agent."""
@@ -5033,6 +5058,9 @@ def process_agent_events(
                 span,
                 lock_extender=lock_extender,
                 heartbeat=heartbeat,
+                max_loop_iterations=max_loop_iterations,
+                max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
+                max_iterations_followup_queue=max_iterations_followup_queue,
             )
 
     except Exception as e:
@@ -5120,6 +5148,9 @@ def _process_agent_events_locked(
     *,
     lock_extender: Optional[_LockExtender] = None,
     heartbeat: Optional[_ProcessingHeartbeat] = None,
+    max_loop_iterations: int | None = None,
+    max_iterations_followup_delay_seconds: int | None = None,
+    max_iterations_followup_queue: str | None = None,
 ) -> Optional[PersistentAgent]:
     """Core event processing logic, called while holding the distributed lock."""
     budget_ctx = get_budget_context()
@@ -5423,6 +5454,9 @@ def _process_agent_events_locked(
             run_sequence_number=run_sequence_number,
             lock_extender=lock_extender,
             heartbeat=heartbeat,
+            max_loop_iterations=max_loop_iterations,
+            max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
+            max_iterations_followup_queue=max_iterations_followup_queue,
         )
 
         sys_step.notes = "simplified"
@@ -5453,6 +5487,9 @@ def _run_agent_loop(
     run_sequence_number: Optional[int] = None,
     lock_extender: Optional[_LockExtender] = None,
     heartbeat: Optional[_ProcessingHeartbeat] = None,
+    max_loop_iterations: int | None = None,
+    max_iterations_followup_delay_seconds: int | None = None,
+    max_iterations_followup_queue: str | None = None,
 ) -> dict:
     """The core tool‑calling loop for a persistent agent.
     
@@ -5517,15 +5554,17 @@ def _run_agent_loop(
         "provider": None
     }
 
+    effective_max_loop_iterations = _coerce_loop_iteration_limit(max_loop_iterations)
     span.set_attribute("MAX_AGENT_LOOP_ITERATIONS", MAX_AGENT_LOOP_ITERATIONS)
+    span.set_attribute("agent.loop.max_iterations", effective_max_loop_iterations)
 
     # Determine remaining steps from the shared budget (if any)
     budget_ctx = get_budget_context()
     eval_run_id = getattr(budget_ctx, "eval_run_id", None) if budget_ctx is not None else None
-    max_remaining = MAX_AGENT_LOOP_ITERATIONS
+    max_remaining = effective_max_loop_iterations
     if budget_ctx is not None:
         steps_used = AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
-        max_remaining = max(0, min(MAX_AGENT_LOOP_ITERATIONS, budget_ctx.max_steps - steps_used))
+        max_remaining = max(0, min(effective_max_loop_iterations, budget_ctx.max_steps - steps_used))
         span.set_attribute("budget.max_steps", budget_ctx.max_steps)
         span.set_attribute("budget.steps_used", steps_used)
         span.set_attribute("budget.depth", budget_ctx.depth)
@@ -5658,7 +5697,7 @@ def _run_agent_loop(
                     prompt_context_result = build_prompt_context(
                         agent,
                         current_iteration=i + 1,
-                        max_iterations=MAX_AGENT_LOOP_ITERATIONS,
+                        max_iterations=effective_max_loop_iterations,
                         reasoning_only_streak=reasoning_only_streak,
                         is_first_run=is_first_run,
                         daily_credit_state=daily_state,
@@ -5677,7 +5716,7 @@ def _run_agent_loop(
                             "agent_id": str(agent.id),
                             "run_sequence_number": run_sequence_number,
                             "iteration": i + 1,
-                            "max_iterations": MAX_AGENT_LOOP_ITERATIONS,
+                            "max_iterations": effective_max_loop_iterations,
                             "is_first_run": is_first_run,
                             "reasoning_only_streak": reasoning_only_streak,
                             "has_continuation_notice": bool(current_notice),
@@ -6435,16 +6474,20 @@ def _run_agent_loop(
                     agent.id,
                     exc_info=True,
                 )
-            pending_settings = get_pending_drain_settings(settings)
-            delay_seconds = max(
-                int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
-                int(pending_settings.pending_drain_delay_seconds),
-            )
+            if max_iterations_followup_delay_seconds is None:
+                pending_settings = get_pending_drain_settings(settings)
+                delay_seconds = max(
+                    int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
+                    int(pending_settings.pending_drain_delay_seconds),
+                )
+            else:
+                delay_seconds = max(0, int(max_iterations_followup_delay_seconds))
             _schedule_agent_follow_up(
                 agent_id=agent.id,
                 delay_seconds=delay_seconds,
                 span=span,
                 reason="Max iterations",
+                queue=max_iterations_followup_queue,
             )
             _attempt_cycle_close_for_sleep(agent, budget_ctx)
 

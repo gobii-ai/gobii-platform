@@ -213,6 +213,9 @@ def process_agent_events_task(
     eval_stop_policy: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: str | None = None,
     inbound_generation: int | str | None = None,
+    max_loop_iterations: int | None = None,
+    max_iterations_followup_delay_seconds: int | None = None,
+    max_iterations_followup_queue: str | None = None,
     _queued_at_ts: float | int | str | None = None,
     _queued_queue: str | None = None,
 ) -> None:  # noqa: D401, ANN001
@@ -236,6 +239,15 @@ def process_agent_events_task(
     span.set_attribute("celery.queue", str(task_queue))
     if queue_latency_seconds is not None:
         span.set_attribute("celery.queue_latency_seconds", queue_latency_seconds)
+    if task_queue == AGENT_INTERACTIVE_PROCESSING_QUEUE:
+        if max_loop_iterations is None:
+            max_loop_iterations = settings.AGENT_INTERACTIVE_MAX_LOOP_ITERATIONS
+        if max_iterations_followup_delay_seconds is None:
+            max_iterations_followup_delay_seconds = (
+                settings.AGENT_INTERACTIVE_MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS
+            )
+        if max_iterations_followup_queue is None:
+            max_iterations_followup_queue = AGENT_DEFAULT_PROCESSING_QUEUE
     redelivered = bool(getattr(self.request, "redelivered", False)) or bool(
         delivery_info.get("redelivered")
     )
@@ -337,6 +349,9 @@ def process_agent_events_task(
             eval_stop_policy=eval_stop_policy,
             burn_follow_up_token=burn_follow_up_token,
             inbound_generation=inbound_generation,
+            max_loop_iterations=max_loop_iterations,
+            max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
+            max_iterations_followup_queue=max_iterations_followup_queue,
             worker_pid=current_worker_pid,
         )
     except ValidationError as exc:
