@@ -451,7 +451,10 @@ def sync_owner_customer_account_pause(
         if (
             current_state["paused"]
             and current_reason
-            and not is_customer_account_pause_reason(current_reason)
+            and not (
+                is_customer_account_pause_reason(current_reason)
+                or is_billing_recovery_resumable_pause_reason(current_reason)
+            )
         ):
             return False
 
