@@ -1,12 +1,12 @@
 ---
-title: Contacts
-sidebar_label: Contacts
-description: "Manage the email, SMS, and chat contact points that let users and systems communicate with Gobii agents."
+title: "Contacts & Access"
+sidebar_label: "Contacts & Access"
+description: "Manage the email, SMS, and chat contact points that let users and systems communicate with Gobii agents. Contact slots are shared between allowlist entries and collaborators."
 ---
 
 import Link from '@docusaurus/Link';
 
-## What are agent contacts?
+## What are contacts & access?
 
 Contacts are the people and systems your Gobii agent can communicate with. By default, every agent can talk to its owner — but you can add additional contacts to loop in teammates, clients, or external systems.
 
@@ -54,7 +54,9 @@ Common patterns:
 
 ## Contact limits
 
-The number of additional contacts you can add per agent depends on your plan. The limit is displayed on your agent settings page and on the [pricing page](https://gobii.ai/pricing/).
+The number of additional contacts you can add per agent depends on your plan. The limit is displayed on your agent settings page as **"contact slots"** and on the [pricing page](https://gobii.ai/pricing/).
+
+Contact slots are shared between **allowlist entries** (external contacts your agent can message) and **collaborators** (teammates who can chat and exchange files with your agent). Adding a collaborator consumes a contact slot just like adding an external contact.
 
 Upgrading your plan increases the contact cap. Contact packs are also available as add-ons if you need more contacts without changing plans.
 
@@ -74,10 +76,11 @@ Your agent's available channels depend on what's configured in its settings. See
 
 If your agent is owned by an organization, contacts can be managed at the org level for consistency across multiple agents. See [Organizations](/core-concepts/organizations) and [Contact Access](/admin-and-teams/contact-access-and-allowlists) for details on org-wide contact management.
 
-## Managing contacts
+## Managing contacts & access
 
-- **View contacts**: Agent settings page shows all current contacts and their permissions
-- **Add contacts**: Use the agent settings page or ask your agent to request permission
+- **View contacts**: The **Contacts & Access** section on the agent settings page shows all current contacts, their permissions, and collaborators
+- **Add contacts**: Click **Add Contact** on the agent settings page, or ask your agent to request permission
+- **Add collaborators**: Click **Add Collaborator** to invite teammates who can chat and exchange files
 - **Remove contacts**: Revoke access from the agent settings page at any time
 - **Modify permissions**: Toggle inbound/outbound independently without removing the contact
 
