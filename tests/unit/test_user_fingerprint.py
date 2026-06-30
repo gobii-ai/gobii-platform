@@ -466,6 +466,69 @@ class UserFingerprintVisitTests(TestCase):
         FINGERPRINT_SERVER_API_URL="https://api.fpjs.io",
         FINGERPRINT_SERVER_API_TIMEOUT_SECONDS=5,
     )
+    @patch("api.services.user_fingerprint.Analytics.identify")
+    @patch("api.services.user_fingerprint.requests.get")
+    def test_fetch_user_fingerprint_visit_task_skips_identify_when_refreshed_visit_is_not_latest(
+        self,
+        requests_get_mock,
+        identify_mock,
+    ):
+        user = self._create_user("fingerprint-stale-identify@example.com")
+        older_visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="older-request",
+            fingerprint_visitor_id="visitor-older",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+        )
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="newer-request",
+            fingerprint_visitor_id="visitor-newer",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+            event_timestamp=timezone.now(),
+            fetched_at=timezone.now(),
+            suspect_score=2,
+            country_code="US",
+            raw_payload={"event_id": "newer-server-event"},
+        )
+        requests_get_mock.return_value = SimpleNamespace(
+            status_code=200,
+            text="",
+            json=lambda: {
+                "event_id": "older-server-event",
+                "timestamp": 1775923616488,
+                "identification": {
+                    "visitor_id": "visitor-older",
+                    "confidence": {"score": 0.99},
+                    "visitor_found": True,
+                    "first_seen_at": 1775923616488,
+                },
+                "ip_info": {
+                    "v4": {
+                        "geolocation": {
+                            "country_code": "VN",
+                            "country_name": "Vietnam",
+                        },
+                    }
+                },
+                "suspect_score": 9,
+            },
+        )
+
+        fetch_user_fingerprint_visit_task(older_visit.id)
+
+        older_visit.refresh_from_db()
+        self.assertEqual(older_visit.fetch_status, UserFingerprintVisitFetchStatusChoices.SUCCEEDED)
+        self.assertEqual(older_visit.country_code, "VN")
+        identify_mock.assert_not_called()
+
+    @override_settings(
+        FINGERPRINT_SERVER_API_KEY="fp_secret",
+        FINGERPRINT_SERVER_API_URL="https://api.fpjs.io",
+        FINGERPRINT_SERVER_API_TIMEOUT_SECONDS=5,
+    )
     @patch("api.services.user_fingerprint.requests.get")
     def test_refresh_user_fingerprint_visit_prefers_server_event_id(self, requests_get_mock):
         user = self._create_user("fingerprint-followup-fetch@example.com")
