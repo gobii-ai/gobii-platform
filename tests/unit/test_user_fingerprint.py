@@ -25,7 +25,7 @@ from api.services.user_fingerprint import (
     get_latest_user_fingerprint_visit,
     refresh_user_fingerprint_visit,
     stage_user_fingerprint_visit,
-    sync_recent_user_fingerprint_visits_to_analytics,
+    sync_latest_user_fingerprint_visit_to_analytics,
     sync_user_fingerprint_visit_to_analytics,
 )
 from api.tasks.fingerprint_tasks import fetch_user_fingerprint_visit_task
@@ -699,8 +699,8 @@ class UserFingerprintVisitTests(TestCase):
         identify_mock.assert_not_called()
 
     @patch("api.services.user_fingerprint.Analytics.identify")
-    def test_sync_recent_user_fingerprint_visits_to_analytics_sends_recent_succeeded_visits(self, identify_mock):
-        user = self._create_user("fingerprint-sync-recent@example.com")
+    def test_sync_latest_user_fingerprint_visit_to_analytics_sends_latest_succeeded_visit(self, identify_mock):
+        user = self._create_user("fingerprint-sync-latest@example.com")
         now = timezone.now()
         for index in range(4):
             UserFingerprintVisit.objects.create(
@@ -725,15 +725,11 @@ class UserFingerprintVisitTests(TestCase):
             country_code="CA",
         )
 
-        synced_count = sync_recent_user_fingerprint_visits_to_analytics(user)
+        synced_count = sync_latest_user_fingerprint_visit_to_analytics(user)
 
-        self.assertEqual(synced_count, 3)
-        self.assertEqual(identify_mock.call_count, 3)
-        synced_scores = [
-            call.args[1]["fingerprint_suspect_score"]
-            for call in identify_mock.call_args_list
-        ]
-        self.assertEqual(synced_scores, [0.0, 1.0, 2.0])
+        self.assertEqual(synced_count, 1)
+        identify_mock.assert_called_once()
+        self.assertEqual(identify_mock.call_args.args[1]["fingerprint_suspect_score"], 0.0)
 
     def test_latest_succeeded_visit_uses_fetched_at_when_event_timestamp_is_missing(self):
         user = self._create_user("fingerprint-helper-null-ts@example.com")
