@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEv
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Building2, Pencil, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
-import { createOrganization, type ConsoleContext } from '../api/context'
+import { createOrganization, type ConsoleContext, type ConsoleContextOption } from '../api/context'
 import {
   currentOrganizationTemplatesQueryKey,
   createOrganizationTemplate,
@@ -33,6 +33,7 @@ import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceS
 import { ModalForm } from '../components/common/ModalForm'
 import { CustomInstructionsSection } from '../components/settings/CustomInstructionsSection'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
+import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { navigateWithinApp } from '../util/appNavigation'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 
@@ -136,6 +137,13 @@ function isNoOrganizationContextError(error: unknown): boolean {
     && typeof body === 'object'
     && (body as { error?: unknown }).error === 'Switch to an organization context first.',
   )
+}
+
+function shouldRetryCurrentOrganizationQuery(failureCount: number, error: unknown): boolean {
+  if (isNoOrganizationContextError(error)) {
+    return false
+  }
+  return failureCount < 3
 }
 
 function buildBillingPathForCurrentAppRoute(): string {
@@ -507,10 +515,23 @@ function TemplateEditorModal({
 }
 
 function OrganizationEmptyState({
+  organizations,
+  organizationsLoading,
+  switchingOrganizationId,
+  switchError,
+  onSwitchOrganization,
   onCreateOrganization,
 }: {
+  organizations: ConsoleContextOption[]
+  organizationsLoading: boolean
+  switchingOrganizationId: string | null
+  switchError: string | null
+  onSwitchOrganization: (organization: ConsoleContextOption) => void
   onCreateOrganization: () => void
 }) {
+  const hasOrganizations = organizations.length > 0
+  const isCheckingOrganizations = organizationsLoading && !hasOrganizations
+
   return (
     <div className="profile-screen profile-screen--embedded organization-screen organization-screen--empty">
       <header className="profile-screen__header organization-screen__empty-hero">
@@ -519,9 +540,13 @@ function OrganizationEmptyState({
         </div>
         <div className="organization-screen__empty-copy">
           <p className="profile-screen__eyebrow">Teams</p>
-          <h1>Create your team workspace</h1>
+          <h1>{hasOrganizations || isCheckingOrganizations ? 'Choose a team workspace' : 'Create your team workspace'}</h1>
           <p className="profile-screen__muted">
-            Shared agents, templates, setup, members, and pooled task credits can live together in one place.
+            {isCheckingOrganizations
+              ? 'You are in your personal workspace. Looking for teams you can manage.'
+              : hasOrganizations
+              ? 'You are in your personal workspace. Switch to a team to manage members, templates, setup, and pooled task credits.'
+              : 'Shared agents, templates, setup, members, and pooled task credits can live together in one place.'}
           </p>
         </div>
         <button
@@ -535,27 +560,57 @@ function OrganizationEmptyState({
       </header>
 
       <section className="profile-screen__section organization-screen__empty-section">
-        <div className="organization-screen__empty-row">
-          <span className="organization-screen__empty-number">01</span>
-          <div>
-            <h2>Start with shared ownership</h2>
-            <p className="profile-screen__muted">Invite teammates into the same workspace instead of rebuilding setup across accounts.</p>
-          </div>
-        </div>
-        <div className="organization-screen__empty-row">
-          <span className="organization-screen__empty-number">02</span>
-          <div>
-            <h2>Pool usage across seats</h2>
-            <p className="profile-screen__muted">Team task credits are managed at the team level so usage follows the work.</p>
-          </div>
-        </div>
-        <div className="organization-screen__empty-row">
-          <span className="organization-screen__empty-number">03</span>
-          <div>
-            <h2>Manage the account from one place</h2>
-            <p className="profile-screen__muted">Members, templates, billing, and team preferences stay connected.</p>
-          </div>
-        </div>
+        {organizationsLoading ? (
+          <p className="profile-screen__muted">Loading teams...</p>
+        ) : hasOrganizations ? (
+          organizations.map((organization, index) => {
+            const isSwitching = switchingOrganizationId === organization.id
+            return (
+              <div key={organization.id} className="organization-screen__empty-row">
+                <span className="organization-screen__empty-number">{String(index + 1).padStart(2, '0')}</span>
+                <div>
+                  <h2>{organization.name}</h2>
+                  <p className="profile-screen__muted">
+                    {organization.role ? `${organization.role} access` : 'Team workspace'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="profile-screen__button profile-screen__button--secondary"
+                  onClick={() => onSwitchOrganization(organization)}
+                  disabled={isSwitching}
+                >
+                  {isSwitching ? 'Opening...' : 'Open Team'}
+                </button>
+              </div>
+            )
+          })
+        ) : (
+          <>
+            <div className="organization-screen__empty-row">
+              <span className="organization-screen__empty-number">01</span>
+              <div>
+                <h2>Start with shared ownership</h2>
+                <p className="profile-screen__muted">Invite teammates into the same workspace instead of rebuilding setup across accounts.</p>
+              </div>
+            </div>
+            <div className="organization-screen__empty-row">
+              <span className="organization-screen__empty-number">02</span>
+              <div>
+                <h2>Pool usage across seats</h2>
+                <p className="profile-screen__muted">Team task credits are managed at the team level so usage follows the work.</p>
+              </div>
+            </div>
+            <div className="organization-screen__empty-row">
+              <span className="organization-screen__empty-number">03</span>
+              <div>
+                <h2>Manage the account from one place</h2>
+                <p className="profile-screen__muted">Members, templates, billing, and team preferences stay connected.</p>
+              </div>
+            </div>
+          </>
+        )}
+        {switchError ? <p className="profile-screen__feedback profile-screen__feedback--error">{switchError}</p> : null}
       </section>
     </div>
   )
@@ -567,11 +622,23 @@ export function OrganizationScreen() {
   const { data, error, isFetching, isLoading } = useQuery({
     queryKey,
     queryFn: ({ signal }) => fetchCurrentOrganization(signal),
+    retry: shouldRetryCurrentOrganizationQuery,
   })
+  const noOrganizationContext = !data && isNoOrganizationContextError(error)
   const templateQueryKey = useMemo(
     () => currentOrganizationTemplatesQueryKey(data?.organization.id),
     [data?.organization.id],
   )
+  const handleTeamContextSwitched = useCallback(() => {
+    queryClient.setQueryData(queryKey, undefined)
+    queryClient.setQueryData(templateQueryKey, undefined)
+    void queryClient.invalidateQueries({ queryKey })
+    void queryClient.invalidateQueries({ queryKey: templateQueryKey })
+  }, [queryClient, queryKey, templateQueryKey])
+  const teamContextSwitcher = useConsoleContextSwitcher({
+    enabled: noOrganizationContext,
+    onSwitched: handleTeamContextSwitched,
+  })
   const {
     data: templateData,
     error: templateQueryError,
@@ -945,10 +1012,26 @@ export function OrganizationScreen() {
     )
   }
 
-  if (!data && (!error || isNoOrganizationContextError(error))) {
+  if (!data && (!error || noOrganizationContext)) {
     return (
       <>
-        <OrganizationEmptyState onCreateOrganization={openCreateOrganizationModal} />
+        <OrganizationEmptyState
+          organizations={teamContextSwitcher.data?.organizations ?? []}
+          organizationsLoading={
+            teamContextSwitcher.isLoading
+            || (noOrganizationContext && !teamContextSwitcher.data && !teamContextSwitcher.error)
+          }
+          switchingOrganizationId={
+            teamContextSwitcher.isSwitching && teamContextSwitcher.data?.context.type === 'organization'
+              ? teamContextSwitcher.data.context.id
+              : null
+          }
+          switchError={teamContextSwitcher.error}
+          onSwitchOrganization={(organization) => {
+            void teamContextSwitcher.switchContext(organization)
+          }}
+          onCreateOrganization={openCreateOrganizationModal}
+        />
         {createOrganizationModal}
       </>
     )
