@@ -23,8 +23,11 @@ from api.services.user_fingerprint import (
     get_fp_tor,
     get_fp_vpn,
     get_latest_user_fingerprint_visit,
+    identify_user_fingerprint_visit,
     refresh_user_fingerprint_visit,
     stage_user_fingerprint_visit,
+    sync_latest_user_fingerprint_visit_to_analytics,
+    sync_user_fingerprint_visit_to_analytics,
 )
 from api.tasks.fingerprint_tasks import fetch_user_fingerprint_visit_task
 
@@ -278,8 +281,9 @@ class UserFingerprintVisitTests(TestCase):
         FINGERPRINT_SERVER_API_URL="https://api.fpjs.io",
         FINGERPRINT_SERVER_API_TIMEOUT_SECONDS=5,
     )
+    @patch("api.services.user_fingerprint.Analytics.identify")
     @patch("api.services.user_fingerprint.requests.get")
-    def test_fetch_user_fingerprint_visit_task_stores_normalized_payload(self, requests_get_mock):
+    def test_fetch_user_fingerprint_visit_task_stores_normalized_payload(self, requests_get_mock, identify_mock):
         user = self._create_user("fingerprint-fetch@example.com")
         visit = UserFingerprintVisit.objects.create(
             user=user,
@@ -373,6 +377,153 @@ class UserFingerprintVisitTests(TestCase):
         self.assertEqual(visit.asn_name, "VNPT Corp")
         self.assertIsNotNone(visit.event_timestamp)
         self.assertEqual(visit.raw_payload["event_id"], payload["event_id"])
+        identify_mock.assert_called_once()
+        identify_user_id, identify_traits = identify_mock.call_args.args
+        self.assertEqual(identify_user_id, user.id)
+        self.assertEqual(identify_traits["fingerprint_suspect_score"], 7)
+        self.assertEqual(identify_traits["fingerprint_country_code"], "VN")
+        self.assertEqual(identify_traits["fingerprint_country_name"], "Vietnam")
+        self.assertTrue(identify_traits["fingerprint_vpn"])
+        self.assertTrue(identify_traits["fingerprint_proxy"])
+        self.assertFalse(identify_traits["fingerprint_tor"])
+        self.assertEqual(identify_traits["fingerprint_bot"], "not_detected")
+        self.assertTrue(identify_traits["fingerprint_tampering"])
+        self.assertTrue(identify_traits["fingerprint_high_activity_device"])
+        self.assertFalse(identify_traits["fingerprint_datacenter"])
+        self.assertEqual(identify_traits["fingerprint_visitor_confidence_score"], 0.97)
+        self.assertEqual(identify_traits["fingerprint_proxy_type"], "data_center")
+        self.assertTrue(identify_traits["fingerprint_ip_blocklist_attack_source"])
+        self.assertFalse(identify_traits["fingerprint_ip_blocklist_email_spam"])
+        self.assertFalse(identify_traits["fingerprint_replayed"])
+        self.assertFalse(identify_traits["fingerprint_visitor_found"])
+        self.assertIsNotNone(identify_traits["fingerprint_event_at"])
+        self.assertIsNotNone(identify_traits["fingerprint_fetched_at"])
+        self.assertNotIn("fingerprint_visitor_id", identify_traits)
+        self.assertNotIn("fingerprint_ip_address", identify_traits)
+
+    @override_settings(
+        FINGERPRINT_SERVER_API_KEY="fp_secret",
+        FINGERPRINT_SERVER_API_URL="https://api.fpjs.io",
+        FINGERPRINT_SERVER_API_TIMEOUT_SECONDS=5,
+    )
+    @patch("api.services.user_fingerprint.logger.exception")
+    @patch("api.services.user_fingerprint.Analytics.identify", side_effect=RuntimeError("analytics down"))
+    @patch("api.services.user_fingerprint.requests.get")
+    def test_fetch_user_fingerprint_visit_task_keeps_visit_succeeded_when_analytics_identify_fails(
+        self,
+        requests_get_mock,
+        identify_mock,
+        logger_exception_mock,
+    ):
+        user = self._create_user("fingerprint-analytics-failure@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-456",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+        )
+        requests_get_mock.return_value = SimpleNamespace(
+            status_code=200,
+            text="",
+            json=lambda: {
+                "event_id": "server-event-789",
+                "timestamp": 1775923616488,
+                "identification": {
+                    "visitor_id": "visitor-123",
+                    "confidence": {"score": 0.88},
+                    "visitor_found": True,
+                    "first_seen_at": 1775923616488,
+                },
+                "ip_info": {
+                    "v4": {
+                        "geolocation": {
+                            "country_code": "US",
+                            "country_name": "United States",
+                        },
+                        "datacenter_result": False,
+                    }
+                },
+                "suspect_score": 4,
+                "vpn": {"result": False},
+                "proxy": {"result": False},
+                "tor": {"result": False},
+                "tampering": {"result": False},
+                "high_activity_device": False,
+            },
+        )
+
+        fetch_user_fingerprint_visit_task(visit.id)
+
+        visit.refresh_from_db()
+        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.SUCCEEDED)
+        self.assertEqual(visit.error_message, "")
+        self.assertEqual(visit.country_code, "US")
+        identify_mock.assert_called_once()
+        logger_exception_mock.assert_called_once()
+
+    @override_settings(
+        FINGERPRINT_SERVER_API_KEY="fp_secret",
+        FINGERPRINT_SERVER_API_URL="https://api.fpjs.io",
+        FINGERPRINT_SERVER_API_TIMEOUT_SECONDS=5,
+    )
+    @patch("api.services.user_fingerprint.Analytics.identify")
+    @patch("api.services.user_fingerprint.requests.get")
+    def test_fetch_user_fingerprint_visit_task_skips_identify_when_refreshed_visit_is_not_latest(
+        self,
+        requests_get_mock,
+        identify_mock,
+    ):
+        user = self._create_user("fingerprint-stale-identify@example.com")
+        older_visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="older-request",
+            fingerprint_visitor_id="visitor-older",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+        )
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="newer-request",
+            fingerprint_visitor_id="visitor-newer",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+            event_timestamp=timezone.now(),
+            fetched_at=timezone.now(),
+            suspect_score=2,
+            country_code="US",
+            raw_payload={"event_id": "newer-server-event"},
+        )
+        requests_get_mock.return_value = SimpleNamespace(
+            status_code=200,
+            text="",
+            json=lambda: {
+                "event_id": "older-server-event",
+                "timestamp": 1775923616488,
+                "identification": {
+                    "visitor_id": "visitor-older",
+                    "confidence": {"score": 0.99},
+                    "visitor_found": True,
+                    "first_seen_at": 1775923616488,
+                },
+                "ip_info": {
+                    "v4": {
+                        "geolocation": {
+                            "country_code": "VN",
+                            "country_name": "Vietnam",
+                        },
+                    }
+                },
+                "suspect_score": 9,
+            },
+        )
+
+        fetch_user_fingerprint_visit_task(older_visit.id)
+
+        older_visit.refresh_from_db()
+        self.assertEqual(older_visit.fetch_status, UserFingerprintVisitFetchStatusChoices.SUCCEEDED)
+        self.assertEqual(older_visit.country_code, "VN")
+        identify_mock.assert_not_called()
 
     @override_settings(
         FINGERPRINT_SERVER_API_KEY="fp_secret",
@@ -592,6 +743,83 @@ class UserFingerprintVisitTests(TestCase):
         self.assertTrue(get_fp_tampering(user))
         self.assertIsNone(get_fp_high_activity(user))
         self.assertEqual(get_fp_bot(user), "not_detected")
+
+    @patch("api.services.user_fingerprint.Analytics.identify")
+    def test_sync_user_fingerprint_visit_to_analytics_skips_unsucceeded_visit(self, identify_mock):
+        user = self._create_user("fingerprint-sync-pending@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-pending",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+            suspect_score=8.0,
+            country_code="US",
+        )
+
+        synced = sync_user_fingerprint_visit_to_analytics(visit)
+
+        self.assertFalse(synced)
+        identify_mock.assert_not_called()
+
+    @patch("api.services.user_fingerprint.logger.exception")
+    @patch("api.services.user_fingerprint.Analytics.identify")
+    def test_identify_user_fingerprint_visit_catches_trait_building_failures(
+        self,
+        identify_mock,
+        logger_exception_mock,
+    ):
+        user = self._create_user("fingerprint-identify-bad-values@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-success",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+            event_timestamp=timezone.now(),
+            fetched_at=timezone.now(),
+            suspect_score=8.0,
+            country_code="US",
+        )
+
+        identified = identify_user_fingerprint_visit(visit, None)
+
+        self.assertFalse(identified)
+        identify_mock.assert_not_called()
+        logger_exception_mock.assert_called_once()
+
+    @patch("api.services.user_fingerprint.Analytics.identify")
+    def test_sync_latest_user_fingerprint_visit_to_analytics_sends_latest_succeeded_visit(self, identify_mock):
+        user = self._create_user("fingerprint-sync-latest@example.com")
+        now = timezone.now()
+        for index in range(4):
+            UserFingerprintVisit.objects.create(
+                user=user,
+                source=SIGNAL_SOURCE_SIGNUP,
+                fingerprint_event_id=f"request-success-{index}",
+                fingerprint_visitor_id="visitor-123",
+                fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+                event_timestamp=now - timedelta(hours=index),
+                fetched_at=now - timedelta(hours=index),
+                suspect_score=float(index),
+                country_code="US",
+            )
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-failed",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.FAILED,
+            event_timestamp=now + timedelta(hours=1),
+            suspect_score=99.0,
+            country_code="CA",
+        )
+
+        synced_count = sync_latest_user_fingerprint_visit_to_analytics(user)
+
+        self.assertEqual(synced_count, 1)
+        identify_mock.assert_called_once()
+        self.assertEqual(identify_mock.call_args.args[1]["fingerprint_suspect_score"], 0.0)
 
     def test_latest_succeeded_visit_uses_fetched_at_when_event_timestamp_is_missing(self):
         user = self._create_user("fingerprint-helper-null-ts@example.com")

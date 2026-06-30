@@ -18,6 +18,7 @@ from api.models import (
     UserFingerprintVisitFetchStatusChoices,
     UserIdentitySignalTypeChoices,
 )
+from util.analytics import Analytics
 
 
 logger = logging.getLogger(__name__)
@@ -259,6 +260,138 @@ def get_fp_bot(user) -> str | None:
     if visit is None:
         return None
     return _optional_clean_string(visit.bot)
+
+
+def _analytics_datetime(value: Any) -> str | None:
+    if isinstance(value, dt.datetime):
+        return value.isoformat()
+    return _optional_clean_string(value)
+
+
+def build_user_fingerprint_analytics_traits(values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "fingerprint_suspect_score": values.get("suspect_score"),
+        "fingerprint_country_code": _optional_clean_string(values.get("country_code")),
+        "fingerprint_country_name": _optional_clean_string(values.get("country_name")),
+        "fingerprint_vpn": values.get("vpn"),
+        "fingerprint_proxy": values.get("proxy"),
+        "fingerprint_tor": values.get("tor"),
+        "fingerprint_bot": _optional_clean_string(values.get("bot")),
+        "fingerprint_tampering": values.get("tampering"),
+        "fingerprint_high_activity_device": values.get("high_activity_device"),
+        "fingerprint_datacenter": values.get("datacenter"),
+        "fingerprint_visitor_confidence_score": values.get("visitor_confidence_score"),
+        "fingerprint_proxy_type": _optional_clean_string(values.get("proxy_type")),
+        "fingerprint_ip_blocklist_attack_source": values.get("ip_blocklist_attack_source"),
+        "fingerprint_ip_blocklist_email_spam": values.get("ip_blocklist_email_spam"),
+        "fingerprint_replayed": values.get("replayed"),
+        "fingerprint_visitor_found": values.get("visitor_found"),
+        "fingerprint_event_at": _analytics_datetime(values.get("event_timestamp")),
+        "fingerprint_fetched_at": _analytics_datetime(values.get("fetched_at")),
+    }
+
+
+def _latest_succeeded_user_fingerprint_visit_id(user_id: int) -> int | None:
+    return (
+        UserFingerprintVisit.objects.filter(
+            user_id=user_id,
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+        )
+        .annotate(
+            latest_observed_at=Coalesce(
+                "event_timestamp",
+                "fetched_at",
+                "last_fetch_attempt_at",
+                "created_at",
+            )
+        )
+        .order_by("-latest_observed_at", "-id")
+        .values_list("id", flat=True)
+        .first()
+    )
+
+
+def is_latest_succeeded_user_fingerprint_visit(visit: UserFingerprintVisit) -> bool:
+    if not visit or not getattr(visit, "pk", None) or not getattr(visit, "user_id", None):
+        return False
+
+    return _latest_succeeded_user_fingerprint_visit_id(visit.user_id) == visit.pk
+
+
+def identify_user_fingerprint_visit(visit: UserFingerprintVisit, values: dict[str, Any] | None) -> bool:
+    if not is_latest_succeeded_user_fingerprint_visit(visit):
+        return False
+
+    try:
+        if values is None:
+            raise ValueError("Fingerprint analytics values are missing.")
+        traits = build_user_fingerprint_analytics_traits(values)
+        Analytics.identify(visit.user_id, traits)
+    except Exception:
+        # The durable Fingerprint row is already saved; downstream analytics
+        # failures should not make Celery refetch the same event.
+        logger.exception(
+            "Failed to identify Fingerprint analytics traits for user %s visit %s",
+            visit.user_id,
+            visit.pk,
+        )
+        return False
+    return True
+
+
+def _user_fingerprint_visit_analytics_values(visit: UserFingerprintVisit) -> dict[str, Any]:
+    return {
+        "suspect_score": visit.suspect_score,
+        "country_code": visit.country_code,
+        "country_name": visit.country_name,
+        "vpn": visit.vpn,
+        "proxy": visit.proxy,
+        "tor": visit.tor,
+        "bot": visit.bot,
+        "tampering": visit.tampering,
+        "high_activity_device": visit.high_activity_device,
+        "datacenter": visit.datacenter,
+        "visitor_confidence_score": visit.visitor_confidence_score,
+        "proxy_type": visit.proxy_type,
+        "ip_blocklist_attack_source": visit.ip_blocklist_attack_source,
+        "ip_blocklist_email_spam": visit.ip_blocklist_email_spam,
+        "replayed": visit.replayed,
+        "visitor_found": visit.visitor_found,
+        "event_timestamp": visit.event_timestamp,
+        "fetched_at": visit.fetched_at,
+    }
+
+
+def sync_user_fingerprint_visit_to_analytics(visit: UserFingerprintVisit) -> bool:
+    if visit.fetch_status != UserFingerprintVisitFetchStatusChoices.SUCCEEDED:
+        return False
+
+    return identify_user_fingerprint_visit(visit, _user_fingerprint_visit_analytics_values(visit))
+
+
+def sync_latest_user_fingerprint_visit_to_analytics(user) -> int:
+    if not user or not getattr(user, "pk", None):
+        return 0
+
+    visit = (
+        UserFingerprintVisit.objects.filter(
+            user=user,
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+        )
+        .annotate(
+            latest_observed_at=Coalesce(
+                "event_timestamp",
+                "fetched_at",
+                "last_fetch_attempt_at",
+                "created_at",
+            )
+        )
+        .order_by("-latest_observed_at", "-id")
+        .first()
+    )
+    if visit is None:
+        return 0
+    return 1 if sync_user_fingerprint_visit_to_analytics(visit) else 0
 
 
 def _fingerprint_processing_stale_after() -> dt.timedelta:

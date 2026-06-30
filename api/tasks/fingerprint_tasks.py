@@ -9,6 +9,7 @@ from api.services.user_fingerprint import (
     FingerprintConfigurationError,
     FingerprintRetryableError,
     FingerprintTerminalError,
+    identify_user_fingerprint_visit,
     refresh_user_fingerprint_visit,
 )
 
@@ -49,7 +50,8 @@ def fetch_user_fingerprint_visit_task(self, visit_id: int) -> None:
     visit.refresh_from_db()
 
     try:
-        refresh_user_fingerprint_visit(visit)
+        updates = refresh_user_fingerprint_visit(visit)
+        identify_user_fingerprint_visit(visit, updates)
     except FingerprintConfigurationError as exc:
         UserFingerprintVisit.objects.filter(pk=visit.pk).update(
             fetch_status=UserFingerprintVisitFetchStatusChoices.NOT_CONFIGURED,
