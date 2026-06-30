@@ -29,6 +29,7 @@ from .proxy_tasks import (
 )
 
 from .subscription_tasks import (
+    apply_customer_account_pause_transitions_task,  # noqa: F401
     grant_monthly_free_credits,  # noqa: F401
 )
 

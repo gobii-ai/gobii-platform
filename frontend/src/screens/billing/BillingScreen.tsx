@@ -116,6 +116,7 @@ async function waitForChurnKeyReady(timeoutMs = 1500): Promise<boolean> {
 function computeAddonsDisabledReason(initialData: BillingInitialData): string | null {
   if (!initialData.canManageBilling) return 'You do not have permission to manage billing.'
   if (initialData.accountPause?.paused) return 'Billing changes are unavailable while your account is paused.'
+  if (initialData.accountPause?.scheduled) return 'Billing changes are unavailable while your account pause is scheduled.'
   if (initialData.addonsDisabled) return 'Add-ons are unavailable for this subscription.'
   if (initialData.contextType === 'organization' && initialData.seats.purchased <= 0) {
     return 'Purchase at least one seat to manage add-ons.'
@@ -126,6 +127,7 @@ function computeAddonsDisabledReason(initialData: BillingInitialData): string | 
 function computeDedicatedInteractable(initialData: BillingInitialData): boolean {
   if (!initialData.canManageBilling) return false
   if (initialData.accountPause?.paused) return false
+  if (initialData.accountPause?.scheduled) return false
   if (!initialData.dedicatedIps.allowed) return false
   if (initialData.contextType === 'organization' && initialData.seats.purchased <= 0) return false
   return true
@@ -134,6 +136,7 @@ function computeDedicatedInteractable(initialData: BillingInitialData): boolean 
 function computeAddonsInteractable(initialData: BillingInitialData): boolean {
   if (!initialData.canManageBilling) return false
   if (initialData.accountPause?.paused) return false
+  if (initialData.accountPause?.scheduled) return false
   if (initialData.addonsDisabled) return false
   if (initialData.contextType === 'organization' && initialData.seats.purchased <= 0) return false
   return true
@@ -156,6 +159,7 @@ function isDraftDirty(initialData: BillingInitialData, draft: BillingDraftState)
 export function BillingScreen({ initialData }: BillingScreenProps) {
   const isOrg = initialData.contextType === 'organization'
   const accountPaused = Boolean(initialData.accountPause?.paused)
+  const accountPauseScheduled = Boolean(initialData.accountPause?.scheduled && !initialData.accountPause?.paused)
   const trialEndsLabel = useMemo(() => {
     const iso = initialData.trial?.trialEndsAtIso
     if (!iso) return null
@@ -262,7 +266,11 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     }
   }, [])
 
-  const showPlanAction = !isOrg && isProprietaryMode && initialData.contextType === 'personal'
+  const showPlanAction = !isOrg
+    && isProprietaryMode
+    && initialData.contextType === 'personal'
+    && !accountPaused
+    && !accountPauseScheduled
   const handlePlanActionClick = useCallback(() => {
     if (!showPlanAction) return
     if (initialData.paidSubscriber) {
@@ -402,6 +410,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   }, [addonsInteractable, dedicatedInteractable, draft, initialData, submitSave, trialConfirmOpen])
 
   const cancelUrl = initialData.contextType === 'personal' ? initialData.endpoints.cancelSubscriptionUrl : undefined
+  const churnKeyPauseUrl = initialData.contextType === 'personal' ? initialData.endpoints.churnKeyPauseUrl : undefined
   const churnKeySyncUrl = initialData.contextType === 'personal' ? initialData.endpoints.churnKeySyncUrl : undefined
   const resumeUrl = initialData.contextType === 'personal' ? initialData.endpoints.resumeSubscriptionUrl : undefined
   const cancelAction = useConfirmPostAction({ url: cancelUrl, defaultErrorMessage: 'Unable to cancel subscription.' })
@@ -468,6 +477,38 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         mode: churnKeyConfig.mode,
         provider: churnKeyConfig.provider,
         record: true,
+        handlePause: async (_customer, data) => {
+          if (!churnKeyPauseUrl || !churnKeyConfig.subscriptionId) {
+            throw new Error('Unable to schedule pause from this billing session.')
+          }
+          const pauseDuration = data?.pauseDuration
+          const result = await jsonRequest<{
+            success: boolean
+            error?: string
+            scheduledEffectiveAt?: string
+            scheduledResumeAt?: string
+          }>(churnKeyPauseUrl, {
+            method: 'POST',
+            includeCsrf: true,
+            json: {
+              subscriptionId: churnKeyConfig.subscriptionId,
+              pauseDuration,
+              pauseInterval: data?.pauseInterval ?? 'month',
+            },
+          })
+          if (!result?.success) {
+            throw new Error(result?.error ?? 'Unable to schedule pause.')
+          }
+          markMutation()
+          track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
+            ...churnKeyAnalyticsBase,
+            action: 'pause',
+            pauseDuration,
+            scheduledEffectiveAt: result.scheduledEffectiveAt ?? null,
+            scheduledResumeAt: result.scheduledResumeAt ?? null,
+          })
+          return result
+        },
         onCancel: (_customer, surveyResponse) => {
           markMutation()
           shouldSyncSubscriptionState = true
@@ -475,15 +516,6 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
             ...churnKeyAnalyticsBase,
             action: 'cancel',
             surveyResponse: surveyResponse ?? null,
-          })
-        },
-        onPause: (_customer, data) => {
-          markMutation()
-          shouldSyncSubscriptionState = true
-          track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
-            ...churnKeyAnalyticsBase,
-            action: 'pause',
-            pauseDuration: data?.pauseDuration ?? null,
           })
         },
         onDiscount: (_customer, coupon) => {
@@ -573,7 +605,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       })
       openCancelDialog()
     }
-  }, [churnKeyAnalyticsBase, churnKeyConfig, churnKeySyncUrl, openCancelDialog])
+  }, [churnKeyAnalyticsBase, churnKeyConfig, churnKeyPauseUrl, churnKeySyncUrl, openCancelDialog])
 
   const closeCancelDialog = useCallback(() => {
     if (cancelActionBusy) return
@@ -596,11 +628,18 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         <BillingHeader
           initialData={initialData}
           onChangePlan={showPlanAction ? handlePlanActionClick : undefined}
-          onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? openCancelFlow : undefined}
+          onCancel={
+            !isOrg
+              && initialData.contextType === 'personal'
+              && initialData.paidSubscriber
+              && !accountPauseScheduled
+              ? openCancelFlow
+              : undefined
+          }
           onResume={!isOrg
             && initialData.contextType === 'personal'
             && initialData.paidSubscriber
-            && (initialData.cancelAtPeriodEnd || accountPaused)
+            && (initialData.cancelAtPeriodEnd || accountPaused || accountPauseScheduled)
             && initialData.endpoints.resumeSubscriptionUrl
             ? resumeAction.openDialog
             : undefined}
@@ -739,17 +778,19 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
 
       <ConfirmDialog
         open={resumeAction.open}
-        title={accountPaused ? 'Resume now?' : 'Resume subscription?'}
+        title={accountPauseScheduled ? 'Cancel scheduled pause?' : accountPaused ? 'Resume now?' : 'Resume subscription?'}
         description={
           <>
-            {accountPaused
-              ? 'Your billing pause will end immediately and your subscription will resume normal collection.'
-              : 'Your subscription will stay active and renew normally.'}
+            {accountPauseScheduled
+              ? 'Your subscription will renew normally and the scheduled account pause will be removed.'
+              : accountPaused
+                ? 'Your billing pause will end immediately and your subscription will resume normal collection.'
+                : 'Your subscription will stay active and renew normally.'}
             {resumeAction.error ? <div className="mt-2 text-sm font-semibold text-rose-700">{resumeAction.error}</div> : null}
           </>
         }
-        confirmLabel={accountPaused ? 'Resume now' : 'Resume subscription'}
-        cancelLabel={accountPaused ? 'Keep paused' : 'Keep cancellation'}
+        confirmLabel={accountPauseScheduled ? 'Cancel pause' : accountPaused ? 'Resume now' : 'Resume subscription'}
+        cancelLabel={accountPauseScheduled ? 'Keep pause' : accountPaused ? 'Keep paused' : 'Keep cancellation'}
         icon={<ShieldAlert className="h-5 w-5" />}
         busy={resumeAction.busy}
         onConfirm={() => resumeAction.confirm()}

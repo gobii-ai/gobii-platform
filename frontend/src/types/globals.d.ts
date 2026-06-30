@@ -89,7 +89,7 @@ type ChurnKeyInitOptions = {
   mode: ChurnKeyMode
   provider: ChurnKeyProvider
   record?: boolean
-  handlePause?: (customer: unknown, data: { pauseDuration: number }) => Promise<unknown>
+  handlePause?: (customer: unknown, data: { pauseDuration: number; pauseInterval?: string }) => Promise<unknown>
   handleCancel?: (
     customer: unknown,
     surveyResponse?: string,
@@ -105,7 +105,7 @@ type ChurnKeyInitOptions = {
   onStepChange?: (newStep?: ChurnKeyStep, oldStep?: ChurnKeyStep) => void
   onClose?: (sessionResults?: ChurnKeySessionResults) => void
   onCancel?: (customer?: unknown, surveyResponse?: string) => void
-  onPause?: (customer?: unknown, data?: { pauseDuration?: number }) => void
+  onPause?: (customer?: unknown, data?: { pauseDuration?: number; pauseInterval?: string }) => void
   onDiscount?: (customer?: unknown, coupon?: unknown) => void
   onPlanChange?: (customer?: unknown, data?: { planId?: string }) => void
   onTrialExtension?: (customer?: unknown, data?: { trialExtensionDays?: number }) => void

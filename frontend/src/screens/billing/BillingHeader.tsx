@@ -30,6 +30,7 @@ export function BillingHeader({
   const isOrg = initialData.contextType === 'organization'
   const accountPause = initialData.accountPause ?? null
   const accountPaused = Boolean(accountPause?.paused)
+  const accountPauseScheduled = Boolean(accountPause?.scheduled && !accountPause?.paused)
   const seatCount = isOrg ? (seatTarget ?? initialData.seats.purchased) : null
   const basePlanName = isOrg
     ? `${seatCount} seat${seatCount === 1 ? '' : 's'}`
@@ -76,6 +77,20 @@ export function BillingHeader({
     }).format(d)
   })()
 
+  const scheduledPauseEffectiveLabel = (() => {
+    const iso = accountPause?.effectiveAt
+    if (!iso) return null
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return null
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d)
+  })()
+
   return (
     <section className="card" data-section="billing-plan">
       <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
@@ -109,7 +124,7 @@ export function BillingHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {initialData.contextType === 'personal' && onChangePlan && !accountPaused ? (
+          {initialData.contextType === 'personal' && onChangePlan && !accountPaused && !accountPauseScheduled ? (
             <button
               type="button"
               onClick={onChangePlan}
@@ -123,6 +138,7 @@ export function BillingHeader({
             && initialData.paidSubscriber
             && !initialData.cancelAtPeriodEnd
             && !accountPaused
+            && !accountPauseScheduled
             && onCancel ? (
               <button
                 type="button"
@@ -147,7 +163,7 @@ export function BillingHeader({
 
           {initialData.contextType === 'personal'
             && initialData.paidSubscriber
-            && (initialData.cancelAtPeriodEnd || accountPaused)
+            && (initialData.cancelAtPeriodEnd || accountPaused || accountPauseScheduled)
             && onResume ? (
               <button
                 type="button"
@@ -155,7 +171,7 @@ export function BillingHeader({
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               >
                 <RotateCcw className="h-4 w-4" />
-                {accountPaused ? 'Resume now' : 'Resume subscription'}
+                {accountPauseScheduled ? 'Cancel pause' : accountPaused ? 'Resume now' : 'Resume subscription'}
               </button>
             ) : null}
 
@@ -196,7 +212,9 @@ export function BillingHeader({
           <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Status</div>
             <div className="mt-1 text-sm font-semibold text-slate-900">
-              {accountPaused
+              {accountPauseScheduled
+                ? (scheduledPauseEffectiveLabel ? `Pauses on ${scheduledPauseEffectiveLabel}` : 'Pause scheduled')
+                : accountPaused
                 ? (pausedUntilLabel ? `Paused until ${pausedUntilLabel}` : 'Paused')
                 : isTrialing
                 ? (trialEndsLabel ? `Trial until ${trialEndsLabel}` : 'Trial')
@@ -206,11 +224,17 @@ export function BillingHeader({
         </div>
       ) : null}
 
-      {accountPaused ? (
+      {accountPaused || accountPauseScheduled ? (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          {pausedUntilLabel
-            ? `Your account is paused until ${pausedUntilLabel}. Execution and new work stay disabled until billing resumes.`
-            : 'Your account is paused. Execution and new work stay disabled until billing resumes.'}
+          {accountPauseScheduled
+            ? (
+              scheduledPauseEffectiveLabel
+                ? `Your account is scheduled to pause on ${scheduledPauseEffectiveLabel}${pausedUntilLabel ? ` and resume on ${pausedUntilLabel}` : ''}. Billing changes are disabled unless you cancel the scheduled pause.`
+                : 'Your account pause is scheduled. Billing changes are disabled unless you cancel the scheduled pause.'
+            )
+            : pausedUntilLabel
+              ? `Your account is paused until ${pausedUntilLabel}. Execution and new work stay disabled until billing resumes.`
+              : 'Your account is paused. Execution and new work stay disabled until billing resumes.'}
         </div>
       ) : null}
 
