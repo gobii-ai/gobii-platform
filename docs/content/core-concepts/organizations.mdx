@@ -4,17 +4,115 @@ sidebar_label: "Organizations"
 description: "Organize Gobii agents, seats, billing, permissions, and shared automation workflows across a team."
 ---
 
-## Organizations & Seats
+import Link from '@docusaurus/Link';
 
-Gobii supports multi-user organizations with:
+## What is an organization?
 
-- Shared agents
-- Shared task credits
-- Seat-based billing
-- Usage analytics
+An organization in Gobii is a shared workspace where teams can own agents, manage billing, control access, and collaborate on automation workflows — without tying everything to a single person's account.
 
-Roles can include:
+Think of it as the team layer: personal agents live in your individual account, while organization agents belong to the team and survive membership changes.
 
-- **Owner** – workspace + billing control
-- **Admin** – manage agents, members, and credits
-- **Member** – run tasks, view logs
+## Why use an organization?
+
+| Capability | Personal account | Organization |
+|---|---|---|
+| Agent ownership | Tied to you | Owned by the team |
+| Billing | Per-user | Centralized, per-org |
+| Task credits | Your pool only | Shared across members |
+| Member roles | N/A | Owner, Admin, Member |
+| Secrets & credentials | Yours alone | Org-scoped (global secrets) |
+| MCP servers | Yours alone | Org-scoped servers available |
+| Continuity | Lost if you leave | Survives membership changes |
+
+Organizations are especially useful when:
+
+- Multiple people need to interact with the same agents
+- You want billing and usage centralized for a team or department
+- Agents represent company workflows, not personal projects
+- You need role-based access control (who can edit vs. who can view)
+
+## Roles and permissions
+
+Organizations use three role levels. Exact permissions may vary by plan, but the model is:
+
+### Owner
+
+Full control over the workspace. Owners can:
+
+- Manage billing, plans, and payment methods
+- Add or remove members and change roles
+- Transfer agent ownership
+- Delete the organization
+
+### Admin
+
+Day-to-day administration including billing access. Admins can:
+
+- Create and configure organization agents
+- Manage members (but not owners)
+- View usage and task credit consumption
+- Manage billing, plans, and payment methods
+- Manage org-scoped secrets, MCP servers, and contacts
+
+### Member
+
+Run and interact with organization agents. Members can:
+
+- Chat with agents they have access to
+- View task history and logs for those agents
+- Use org resources (credits, secrets, MCP servers) within granted scope
+
+## Seats
+
+Seats control how many people can belong to an organization. Each member with a role occupies a seat. Billing is typically per-seat, so adding members may affect your plan cost.
+
+Before adding seats, consider:
+
+- Who needs full org membership vs. collaborator access to a single agent
+- Which agents should move from personal to org ownership
+- Whether seasonal or temporary members need seats
+
+## Agent ownership and transfer
+
+Agents can be owned personally or by an organization. Organization-owned agents are visible to all members (subject to role permissions) and remain available even if the original creator leaves.
+
+When transferring an agent to org ownership, review:
+
+- **Charter and personality**: Remove any personal references or context
+- **Secrets and credentials**: Personal secrets won't transfer — use org-scoped global secrets instead
+- **Contacts and channels**: Ensure outbound contacts are appropriate for team use
+- **Connected apps**: Verify integrations still authenticate correctly after transfer
+
+## Organization-scoped resources
+
+Organizations unlock several shared resources:
+
+### Global secrets
+Credentials stored at the org level are available to all org agents. This avoids duplicating API keys across agents. See [Global Secrets](/admin-and-teams/global-secrets).
+
+### Organization MCP servers
+MCP servers configured for the org must be explicitly assigned to agents before they can be used. Unassigned org agents cannot access org-level MCP servers. See [Organization MCP Servers](/admin-and-teams/organization-mcp-servers).
+
+### Shared contacts
+Org-level contact allowlists and endpoints simplify compliance and avoid per-agent contact management.
+
+## Billing and usage
+
+Organization billing is centralized. Usage — task credits consumed, browser tasks run, contacts used — rolls up across all org agents and appears in the billing dashboard for owners and admins.
+
+See [Usage and Billing](/admin-and-teams/usage-and-billing) for details.
+
+## Managing your organization
+
+Organization management happens in the Gobii console at `https://gobii.ai/console/organizations/`. The admin guide covers day-to-day operations:
+
+- [Organizations and Seats](/admin-and-teams/organizations-and-seats) — adding members, managing seats, assigning agents
+- [Global Secrets](/admin-and-teams/global-secrets) — org-wide credentials
+- [Organization MCP Servers](/admin-and-teams/organization-mcp-servers) — shared tool servers
+- [Usage and Billing](/admin-and-teams/usage-and-billing) — monitoring consumption
+
+## Next steps
+
+- [Create your first agent](/start-here/create-your-first-gobii)
+- [Understand agents](/core-concepts/agents)
+- [Learn about task credits](/core-concepts/task-credits)
