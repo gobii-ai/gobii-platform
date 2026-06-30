@@ -61,16 +61,7 @@ class TestEventProcessingLLMSelection(TestCase):
     @patch('api.agent.core.llm_utils.litellm.completion')
     def test_parallel_tool_calls_flag_is_passed(self, mock_completion):
         """_completion_with_failover passes parallel_tool_calls when endpoint enables it."""
-        from unittest.mock import MagicMock
-        mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_message = MagicMock()
-        mock_message.content = "ok"
-        setattr(mock_message, 'tool_calls', [])
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
-        mock_response.model_extra = {}
-        mock_completion.return_value = mock_response
+        mock_completion.return_value = make_completion_response(content="ok")
 
         messages = [{"role": "user", "content": "hello"}]
         tools = [
@@ -100,13 +91,10 @@ class TestEventProcessingLLMSelection(TestCase):
         from api.agent.core.event_processing import _completion_with_failover
         _completion_with_failover(messages, tools, failover_configs=failover_configs, agent_id="agent-1")
 
-        self.assertTrue(mock_completion.called)
         kwargs = mock_completion.call_args.kwargs
         self.assertIn('parallel_tool_calls', kwargs)
         self.assertTrue(kwargs['parallel_tool_calls'])
-        # drop_params helps avoid provider rejections
-        self.assertIn('drop_params', kwargs)
-        self.assertTrue(kwargs['drop_params'])
+        self.assertEqual(kwargs["model"], "openai/responses/gpt-4.1")
 
     @patch('api.agent.core.event_processing.run_completion')
     def test_completion_with_failover_attaches_selected_allow_implied_send_hint_to_response(self, mock_run_completion):

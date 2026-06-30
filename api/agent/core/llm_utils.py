@@ -11,6 +11,7 @@ from asgiref.sync import async_to_sync
 from django.conf import settings
 import litellm
 
+from api.llm.utils import is_openai_model_name
 from api.services.system_settings import (
     get_litellm_first_data_timeout_seconds,
     get_litellm_timeout_seconds,
@@ -118,7 +119,7 @@ class _FirstDataTimeoutStream:
                 raise exc
             self.close()
             logger.warning(
-                "LiteLLM request failed with %s; retrying (%d/%d)",
+                "LLM request failed with %s; retrying (%d/%d)",
                 type(exc).__name__,
                 self._attempt,
                 self._max_attempts,
@@ -149,7 +150,7 @@ class _FirstDataTimeoutStream:
             self._timed_out = True
             self.close()
             raise litellm.Timeout(
-                message=f"LiteLLM stream produced no data within {self._timeout_seconds} seconds",
+                message=f"LLM stream produced no data within {self._timeout_seconds} seconds",
                 model=self._model,
                 llm_provider=self._provider or "unknown",
             )
@@ -446,6 +447,7 @@ def run_completion(
     reasoning_effort = hints.get("reasoning_effort", None)
 
     extra_reasoning_effort = extra_kwargs.get("reasoning_effort")
+    selected_reasoning_effort = extra_reasoning_effort or reasoning_effort
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": list(messages),
@@ -454,27 +456,19 @@ def run_completion(
     }
 
     kwargs.pop("reasoning_effort", None)
-    if supports_reasoning:
-        allowed_openai_params = kwargs.get("allowed_openai_params")
-        if allowed_openai_params is None:
-            allowed_openai_params = []
-        elif isinstance(allowed_openai_params, str):
-            allowed_openai_params = [allowed_openai_params]
-        else:
-            allowed_openai_params = list(allowed_openai_params)
-        if "reasoning_effort" not in allowed_openai_params:
-            allowed_openai_params.append("reasoning_effort")
-        kwargs["allowed_openai_params"] = allowed_openai_params
-
-        selected_reasoning_effort = extra_reasoning_effort or reasoning_effort
-        if selected_reasoning_effort:
-            kwargs["reasoning_effort"] = selected_reasoning_effort
+    if (
+        supports_reasoning
+        and selected_reasoning_effort
+        and not (_is_azure_non_openai_model(model, kwargs) and selected_reasoning_effort == "none")
+    ):
+        kwargs["reasoning_effort"] = selected_reasoning_effort
 
     if drop_params:
         kwargs["drop_params"] = True
 
+    sanitized_tools = sanitize_tools_for_llm(tools) if tools else None
     if tools:
-        kwargs["tools"] = sanitize_tools_for_llm(tools)
+        kwargs["tools"] = sanitized_tools
         if tool_choice_supported:
             kwargs.setdefault("tool_choice", "auto")
     else:
@@ -489,6 +483,33 @@ def run_completion(
     if kwargs.get("timeout") is None:
         kwargs["timeout"] = get_litellm_timeout_seconds()
 
+    responses_bridge_model = _litellm_responses_bridge_model(model, kwargs)
+    use_responses_bridge = responses_bridge_model is not None
+    if use_responses_bridge:
+        kwargs["model"] = responses_bridge_model
+        extra_body = kwargs.get("extra_body")
+        extra_body = dict(extra_body) if isinstance(extra_body, dict) else {}
+        responses_tool_choice = _litellm_responses_bridge_tool_choice(kwargs.get("tool_choice"))
+        if responses_tool_choice is not None:
+            extra_body["tool_choice"] = responses_tool_choice
+        if supports_reasoning and selected_reasoning_effort and isinstance(selected_reasoning_effort, str):
+            reasoning_params = {"effort": selected_reasoning_effort, "summary": "detailed"}
+            kwargs["reasoning_effort"] = reasoning_params
+            extra_body["reasoning_effort"] = reasoning_params
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+    if "reasoning_effort" in kwargs and not use_responses_bridge:
+        allowed_openai_params = kwargs.get("allowed_openai_params")
+        if allowed_openai_params is None:
+            allowed_openai_params = []
+        elif isinstance(allowed_openai_params, str):
+            allowed_openai_params = [allowed_openai_params]
+        else:
+            allowed_openai_params = list(allowed_openai_params)
+        if "reasoning_effort" not in allowed_openai_params:
+            allowed_openai_params.append("reasoning_effort")
+        kwargs["allowed_openai_params"] = allowed_openai_params
+
     max_attempts = max(1, int(getattr(settings, "LITELLM_MAX_RETRIES", 2)))
     backoff_seconds = float(getattr(settings, "LITELLM_RETRY_BACKOFF_SECONDS", 1.0))
 
@@ -497,6 +518,8 @@ def run_completion(
         provider_hint = kwargs.get("provider")
     if not isinstance(provider_hint, str):
         provider_hint = None
+    if use_responses_bridge and provider_hint is None:
+        provider_hint = "openai"
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -525,13 +548,59 @@ def run_completion(
             if attempt >= max_attempts:
                 raise
             logger.warning(
-                "LiteLLM request failed with %s; retrying (%d/%d)",
+                "LLM request failed with %s; retrying (%d/%d)",
                 type(exc).__name__,
                 attempt,
                 max_attempts,
             )
             if backoff_seconds > 0:
                 time.sleep(backoff_seconds * (2 ** (attempt - 1)))
+
+
+def _litellm_responses_bridge_model(model: str, kwargs: dict[str, Any]) -> str | None:
+    if not isinstance(model, str):
+        return None
+    provider = kwargs.get("custom_llm_provider") or kwargs.get("provider")
+    if model.startswith("azure/responses/"):
+        return model
+    if model.startswith("openai/responses/"):
+        return model
+    if model.startswith("responses/"):
+        if provider in {"azure", "azure_openai"}:
+            return f"azure/{model}" if is_openai_model_name(model) else None
+        if provider in (None, "openai") and not kwargs.get("api_base"):
+            return f"openai/{model}"
+        return None
+    if provider in {"azure", "azure_openai"}:
+        if _is_azure_non_openai_model(model, kwargs):
+            return None
+        return model if model.startswith("azure/responses/") else f"azure/responses/{model.split('/', 1)[-1]}"
+    if provider not in (None, "openai") or kwargs.get("api_base"):
+        return None
+    if model.startswith("openai/"):
+        return f"openai/responses/{model.removeprefix('openai/')}"
+    if model.startswith("gpt-"):
+        return f"openai/responses/{model}"
+    return None
+
+
+def _is_azure_non_openai_model(model: str, kwargs: dict[str, Any]) -> bool:
+    provider = kwargs.get("custom_llm_provider") or kwargs.get("provider")
+    return provider in {"azure", "azure_openai"} and not is_openai_model_name(model)
+
+
+def _litellm_responses_bridge_tool_choice(tool_choice: Any) -> Any:
+    if not isinstance(tool_choice, dict):
+        return None
+    if tool_choice.get("type") != "function":
+        return None
+    function_choice = tool_choice.get("function")
+    if not isinstance(function_choice, dict):
+        return None
+    function_name = function_choice.get("name")
+    if not isinstance(function_name, str) or not function_name:
+        return None
+    return {"type": "function", "name": function_name}
 
 
 __all__ = [

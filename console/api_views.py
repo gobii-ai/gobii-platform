@@ -882,6 +882,7 @@ def _build_completion_params(
     base_attr: str,
     default_temperature: float = 0.1,
     default_max_tokens: int = 96,
+    responses_api: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     if not getattr(endpoint, "enabled", False):
         raise ValueError("Endpoint is disabled")
@@ -894,7 +895,12 @@ def _build_completion_params(
     if not raw_model:
         raise ValueError("Endpoint does not specify a model identifier")
     api_base = (getattr(endpoint, base_attr, "") or "").strip() or None
-    model = normalize_model_name(provider, raw_model, api_base=api_base)
+    model = normalize_model_name(
+        provider,
+        raw_model,
+        api_base=api_base,
+        responses_api=responses_api,
+    )
     pricing_model = normalize_pricing_model(endpoint, provider)
 
     supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
@@ -935,6 +941,9 @@ def _build_completion_params(
         openrouter_preset = (getattr(endpoint, "openrouter_preset", "") or "").strip()
         if openrouter_preset:
             params["preset"] = openrouter_preset
+    if model.startswith("azure/"):
+        params["custom_llm_provider"] = "azure"
+        params["api_version"] = "v1"
 
     if api_base:
         params["api_base"] = api_base
@@ -988,13 +997,22 @@ def _extract_completion_preview(response: Any) -> str:
     return (content or "").strip()
 
 
-def _run_completion_test(endpoint, provider: LLMProvider, *, model_attr: str, base_attr: str, default_max_tokens: int) -> dict[str, Any]:
+def _run_completion_test(
+    endpoint,
+    provider: LLMProvider,
+    *,
+    model_attr: str,
+    base_attr: str,
+    default_max_tokens: int,
+    responses_api: bool = False,
+) -> dict[str, Any]:
     model, params = _build_completion_params(
         endpoint,
         provider,
         model_attr=model_attr,
         base_attr=base_attr,
         default_max_tokens=default_max_tokens,
+        responses_api=responses_api,
     )
     started = time.monotonic()
     response = run_completion(model=model, messages=_TEST_COMPLETION_MESSAGES, params=params, drop_params=True)
@@ -1265,6 +1283,7 @@ def _run_llm_performance_sample(
         model_attr="litellm_model",
         base_attr="api_base",
         default_max_tokens=256,
+        responses_api=True,
     )
     started = time.monotonic()
     try:
@@ -5669,6 +5688,7 @@ class LLMEndpointTestAPIView(SystemAdminAPIView):
                     model_attr="litellm_model",
                     base_attr="api_base",
                     default_max_tokens=128,
+                    responses_api=True,
                 )
             elif kind == "browser":
                 endpoint = get_object_or_404(BrowserModelEndpoint, pk=endpoint_id)
@@ -5741,6 +5761,7 @@ class LLMPerformanceTestAPIView(SystemAdminAPIView):
                 model_attr="litellm_model",
                 base_attr="api_base",
                 default_max_tokens=256,
+                responses_api=True,
             )
         except ValueError as exc:
             return JsonResponse(

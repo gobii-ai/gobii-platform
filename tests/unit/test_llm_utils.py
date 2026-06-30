@@ -96,6 +96,155 @@ class RunCompletionReasoningTests(TestCase):
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_first_party_openai_uses_litellm_responses_bridge(self, mock_completion):
+        response = make_completion_response(content="Final answer")
+        mock_completion.return_value = response
+
+        result = run_completion(
+            model="openai/gpt-5",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={"api_key": "sk-test", "supports_reasoning": True, "reasoning_effort": "low"},
+        )
+
+        self.assertIs(result, response)
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs["model"], "openai/responses/gpt-5")
+        self.assertEqual(kwargs["messages"], [{"role": "user", "content": "Hello"}])
+        self.assertEqual(kwargs["api_key"], "sk-test")
+        self.assertEqual(kwargs["reasoning_effort"], {"summary": "detailed", "effort": "low"})
+        self.assertEqual(kwargs["extra_body"]["reasoning_effort"], {"summary": "detailed", "effort": "low"})
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_openai_compatible_api_base_stays_on_completion_model(self, mock_completion):
+        response = make_completion_response(content="compat")
+        mock_completion.return_value = response
+
+        result = run_completion(
+            model="openai/custom-model",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={"api_key": "sk-test", "api_base": "https://proxy.example/v1", "supports_reasoning": True},
+        )
+
+        self.assertIs(result, response)
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs["model"], "openai/custom-model")
+        self.assertEqual(kwargs["api_base"], "https://proxy.example/v1")
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_azure_responses_uses_litellm_responses_bridge(self, mock_completion):
+        response = make_completion_response(content="Azure answer")
+        mock_completion.return_value = response
+
+        result = run_completion(
+            model="azure/responses/gpt-5-deployment",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={
+                "api_key": "azure-key",
+                "api_base": "https://example.openai.azure.com",
+                "api_version": "v1",
+                "custom_llm_provider": "azure",
+                "supports_reasoning": True,
+                "reasoning_effort": "low",
+            },
+        )
+
+        self.assertIs(result, response)
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs["model"], "azure/responses/gpt-5-deployment")
+        self.assertEqual(kwargs["api_base"], "https://example.openai.azure.com")
+        self.assertEqual(kwargs["api_version"], "v1")
+        self.assertEqual(kwargs["api_key"], "azure-key")
+        self.assertEqual(kwargs["custom_llm_provider"], "azure")
+        self.assertEqual(kwargs["reasoning_effort"], {"summary": "detailed", "effort": "low"})
+        self.assertEqual(kwargs["extra_body"]["reasoning_effort"], {"summary": "detailed", "effort": "low"})
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_azure_non_openai_model_uses_chat_completions_with_reasoning_effort(self, mock_completion):
+        response = make_completion_response(content="Azure DeepSeek answer")
+        mock_completion.return_value = response
+
+        result = run_completion(
+            model="azure/deepseek-v4-flash",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={
+                "api_key": "azure-key",
+                "api_base": "https://example.services.ai.azure.com",
+                "api_version": "v1",
+                "custom_llm_provider": "azure",
+                "supports_reasoning": True,
+                "reasoning_effort": "medium",
+            },
+        )
+
+        self.assertIs(result, response)
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs["model"], "azure/deepseek-v4-flash")
+        self.assertEqual(kwargs["reasoning_effort"], "medium")
+        self.assertEqual(kwargs["allowed_openai_params"], ["reasoning_effort"])
+        self.assertNotIn("extra_body", kwargs)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_azure_non_openai_model_respects_reasoning_effort_none(self, mock_completion):
+        response = make_completion_response(content="Azure DeepSeek answer")
+        mock_completion.return_value = response
+
+        run_completion(
+            model="azure/deepseek-v4-flash",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={
+                "api_key": "azure-key",
+                "api_base": "https://example.services.ai.azure.com",
+                "api_version": "v1",
+                "custom_llm_provider": "azure",
+                "supports_reasoning": True,
+                "reasoning_effort": "none",
+            },
+        )
+
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs["model"], "azure/deepseek-v4-flash")
+        self.assertNotIn("reasoning_effort", kwargs)
+        self.assertNotIn("extra_body", kwargs)
+        self.assertNotIn("allowed_openai_params", kwargs)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_responses_bridge_converts_forced_function_tool_choice(self, mock_completion):
+        response = make_completion_response(content="ok")
+        mock_completion.return_value = response
+
+        run_completion(
+            model="azure/responses/gpt-5-deployment",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={
+                "api_key": "azure-key",
+                "api_base": "https://example.openai.azure.com",
+                "api_version": "v1",
+                "custom_llm_provider": "azure",
+            },
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "enable_system_skills",
+                        "description": "Enable system skills",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+            tool_choice={"type": "function", "function": {"name": "enable_system_skills"}},
+        )
+
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs["tool_choice"], {"type": "function", "function": {"name": "enable_system_skills"}})
+        self.assertEqual(kwargs["extra_body"]["tool_choice"], {"type": "function", "name": "enable_system_skills"})
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
     def test_allow_implied_send_hint_is_not_forwarded(self, mock_completion):
         run_completion(
             model="mock-model",

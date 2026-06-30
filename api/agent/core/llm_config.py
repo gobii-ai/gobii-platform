@@ -897,15 +897,23 @@ def _build_weighted_failover_configs(
             if openrouter_preset:
                 params["preset"] = openrouter_preset
 
-        if effective_model.startswith("openai/") and getattr(endpoint, "api_base", None):
-            params["api_base"] = endpoint.api_base
+        api_base = (getattr(endpoint, "api_base", "") or "").strip()
+        if effective_model.startswith("azure/"):
+            params["custom_llm_provider"] = "azure"
+            params["api_version"] = "v1"
+            if api_base:
+                params["api_base"] = api_base
+        elif effective_model.startswith("openai/") and api_base:
+            params["api_base"] = api_base
+
+        if params.get("api_base"):
             logger.info(
                 "DB LLM endpoint configured with api_base: endpoint=%s provider=%s "
                 "model=%s api_base=%s has_key=%s tier_type=%s",
                 endpoint.key,
                 provider.key,
                 effective_model,
-                endpoint.api_base,
+                params["api_base"],
                 bool(params.get("api_key")),
                 tier_label,
             )
@@ -960,7 +968,12 @@ def _collect_failover_configs(
             raw_model = endpoint.litellm_model or ""
             api_base_value = getattr(endpoint, "api_base", None)
             has_api_base = bool(api_base_value)
-            effective_model = normalize_model_name(provider, raw_model, api_base=api_base_value)
+            effective_model = normalize_model_name(
+                provider,
+                raw_model,
+                api_base=api_base_value,
+                responses_api=True,
+            )
             effective_pricing_model = normalize_pricing_model(endpoint, provider)
 
             is_openai_compat = effective_model.startswith("openai/") and has_api_base
@@ -1377,7 +1390,12 @@ def _build_profile_endpoint_config(
         return None
 
     raw_model = (getattr(endpoint, "litellm_model", "") or "").strip()
-    effective_model = normalize_model_name(provider, raw_model, api_base=api_base_value)
+    effective_model = normalize_model_name(
+        provider,
+        raw_model,
+        api_base=api_base_value,
+        responses_api=True,
+    )
     if not effective_model:
         return None
     effective_pricing_model = normalize_pricing_model(endpoint, provider)
