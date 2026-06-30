@@ -18,6 +18,7 @@ from api.models import (
     UserFingerprintVisitFetchStatusChoices,
     UserIdentitySignalTypeChoices,
 )
+from util.analytics import Analytics
 
 
 logger = logging.getLogger(__name__)
@@ -259,6 +260,49 @@ def get_fp_bot(user) -> str | None:
     if visit is None:
         return None
     return _optional_clean_string(visit.bot)
+
+
+def _analytics_datetime(value: Any) -> str | None:
+    if isinstance(value, dt.datetime):
+        return value.isoformat()
+    return _optional_clean_string(value)
+
+
+def build_user_fingerprint_analytics_traits(values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "fingerprint_suspect_score": values.get("suspect_score"),
+        "fingerprint_country_code": _optional_clean_string(values.get("country_code")),
+        "fingerprint_country_name": _optional_clean_string(values.get("country_name")),
+        "fingerprint_vpn": values.get("vpn"),
+        "fingerprint_proxy": values.get("proxy"),
+        "fingerprint_tor": values.get("tor"),
+        "fingerprint_bot": _optional_clean_string(values.get("bot")),
+        "fingerprint_tampering": values.get("tampering"),
+        "fingerprint_high_activity_device": values.get("high_activity_device"),
+        "fingerprint_datacenter": values.get("datacenter"),
+        "fingerprint_visitor_confidence_score": values.get("visitor_confidence_score"),
+        "fingerprint_proxy_type": _optional_clean_string(values.get("proxy_type")),
+        "fingerprint_ip_blocklist_attack_source": values.get("ip_blocklist_attack_source"),
+        "fingerprint_ip_blocklist_email_spam": values.get("ip_blocklist_email_spam"),
+        "fingerprint_replayed": values.get("replayed"),
+        "fingerprint_visitor_found": values.get("visitor_found"),
+        "fingerprint_event_at": _analytics_datetime(values.get("event_timestamp")),
+        "fingerprint_fetched_at": _analytics_datetime(values.get("fetched_at")),
+    }
+
+
+def identify_user_fingerprint_visit(visit: UserFingerprintVisit, values: dict[str, Any]) -> None:
+    traits = build_user_fingerprint_analytics_traits(values)
+    try:
+        Analytics.identify(visit.user_id, traits)
+    except Exception:
+        # The durable Fingerprint row is already saved; downstream analytics
+        # failures should not make Celery refetch the same event.
+        logger.exception(
+            "Failed to identify Fingerprint analytics traits for user %s visit %s",
+            visit.user_id,
+            visit.pk,
+        )
 
 
 def _fingerprint_processing_stale_after() -> dt.timedelta:
