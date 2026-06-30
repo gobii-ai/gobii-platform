@@ -8,6 +8,10 @@ import Link from '@docusaurus/Link';
 
 ## What are dedicated IPs?
 
+:::note Plan requirement
+Dedicated IPs require a **paid Gobii plan**. On the Free plan, the dedicated IPs section shows "requires a paid plan" and the assignment dropdown is hidden. Upgrade your plan to enable this feature.
+:::
+
 By default, the IP address your Gobii agent uses to access the internet can change between tasks. For most use cases this is fine — but when your agent needs to connect to services behind a firewall or VPN, a shifting IP becomes a problem.
 
 A **dedicated IP** is a fixed, static IP address assigned exclusively to your agent. Once assigned, all of your agent's outbound traffic — browser tasks, API calls, web scraping — originates from that single, consistent address.
@@ -49,8 +53,8 @@ Dedicated IPs are billed as a recurring add-on. Pricing and availability depend 
 Once you have dedicated IPs on your account:
 
 1. Open the agent's configuration page at `https://gobii.ai/app/agents/{id}/settings`
-2. Find the **Dedicated IP** setting
-3. Select an available IP from the dropdown
+2. Find the **Dedicated IPs** section
+3. Select an available IP from the dropdown (the dropdown only appears when IPs are provisioned on your account)
 4. Save your changes
 
 The assignment takes effect immediately. Your agent's next task will use the new dedicated IP.
