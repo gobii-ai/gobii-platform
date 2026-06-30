@@ -71,6 +71,38 @@ class ModelNormalizationTests(SimpleTestCase):
 
         self.assertEqual(model, "azure/responses/gpt-5-deployment")
 
+    def test_azure_responses_api_keeps_non_openai_model_on_completion_route(self):
+        provider = SimpleNamespace(
+            key="azure",
+            model_prefix="",
+            browser_backend=LLMProvider.BrowserBackend.OPENAI_COMPAT,
+        )
+
+        model = normalize_model_name(
+            provider,
+            "deepseek-v4-flash",
+            api_base="https://example.services.ai.azure.com",
+            responses_api=True,
+        )
+
+        self.assertEqual(model, "azure/deepseek-v4-flash")
+
+    def test_azure_non_openai_responses_prefix_is_not_generated_from_raw_model(self):
+        provider = SimpleNamespace(
+            key="azure",
+            model_prefix="",
+            browser_backend=LLMProvider.BrowserBackend.OPENAI_COMPAT,
+        )
+
+        model = normalize_model_name(
+            provider,
+            "responses/deepseek-v4-flash",
+            api_base="https://example.services.ai.azure.com",
+            responses_api=True,
+        )
+
+        self.assertEqual(model, "azure/deepseek-v4-flash")
+
     def test_azure_prefixing_requires_responses_api_mode(self):
         provider = SimpleNamespace(
             key="azure",

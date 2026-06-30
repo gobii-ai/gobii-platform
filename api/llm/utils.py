@@ -11,11 +11,19 @@ OPENAI_BACKENDS = {
 
 
 AZURE_PROVIDER_KEYS = {"azure", "azure_openai"}
+OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
 
 
 def _is_azure_provider(provider: Optional[LLMProvider]) -> bool:
     provider_key = (getattr(provider, "key", "") or "").strip().lower()
     return provider_key in AZURE_PROVIDER_KEYS
+
+
+def is_openai_model_name(model: str | None) -> bool:
+    normalized = (model or "").strip().lower()
+    parts = [part for part in normalized.split("/") if part]
+    model_name = parts[-1] if parts else normalized
+    return model_name.startswith(OPENAI_MODEL_PREFIXES)
 
 
 def normalize_model_name(
@@ -38,6 +46,9 @@ def normalize_model_name(
         return model
 
     if responses_api and _is_azure_provider(provider) and api_base:
+        if not is_openai_model_name(model):
+            deployment = model.split("/")[-1]
+            return model if model.startswith("azure/") and not model.startswith("azure/responses/") else f"azure/{deployment}"
         if model.startswith("azure/"):
             return model
         if model.startswith("responses/"):
@@ -77,4 +88,4 @@ def _safe_getattr(source: object | None, attr: str, default=None):
     return getattr(source, attr, default)
 
 
-__all__ = ["normalize_model_name", "normalize_pricing_model"]
+__all__ = ["is_openai_model_name", "normalize_model_name", "normalize_pricing_model"]

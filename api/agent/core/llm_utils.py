@@ -11,6 +11,7 @@ from asgiref.sync import async_to_sync
 from django.conf import settings
 import litellm
 
+from api.llm.utils import is_openai_model_name
 from api.services.system_settings import (
     get_litellm_first_data_timeout_seconds,
     get_litellm_timeout_seconds,
@@ -456,7 +457,7 @@ def run_completion(
 
     kwargs.pop("reasoning_effort", None)
     if supports_reasoning:
-        if selected_reasoning_effort:
+        if selected_reasoning_effort and _completion_supports_reasoning_effort(model, kwargs):
             kwargs["reasoning_effort"] = selected_reasoning_effort
 
     if drop_params:
@@ -494,7 +495,7 @@ def run_completion(
             extra_body["reasoning_effort"] = reasoning_params
         if extra_body:
             kwargs["extra_body"] = extra_body
-    if supports_reasoning and not use_responses_bridge:
+    if supports_reasoning and not use_responses_bridge and _completion_supports_reasoning_effort(model, kwargs):
         allowed_openai_params = kwargs.get("allowed_openai_params")
         if allowed_openai_params is None:
             allowed_openai_params = []
@@ -557,16 +558,20 @@ def _litellm_responses_bridge_model(model: str, kwargs: dict[str, Any]) -> str |
     if not isinstance(model, str):
         return None
     provider = kwargs.get("custom_llm_provider") or kwargs.get("provider")
-    if model.startswith(("azure/responses/", "openai/responses/")):
+    if model.startswith("azure/responses/"):
+        return model
+    if model.startswith("openai/responses/"):
         return model
     if model.startswith("responses/"):
         if provider in {"azure", "azure_openai"}:
-            return f"azure/{model}"
+            return f"azure/{model}" if is_openai_model_name(model) else None
         if provider in (None, "openai") and not kwargs.get("api_base"):
             return f"openai/{model}"
         return None
     if provider in {"azure", "azure_openai"}:
-        return f"azure/responses/{model.removeprefix('azure/')}"
+        if not is_openai_model_name(model):
+            return None
+        return model if model.startswith("azure/responses/") else f"azure/responses/{model.split('/', 1)[-1]}"
     if provider not in (None, "openai") or kwargs.get("api_base"):
         return None
     if model.startswith("openai/"):
@@ -574,6 +579,13 @@ def _litellm_responses_bridge_model(model: str, kwargs: dict[str, Any]) -> str |
     if model.startswith("gpt-"):
         return f"openai/responses/{model}"
     return None
+
+
+def _completion_supports_reasoning_effort(model: str, kwargs: dict[str, Any]) -> bool:
+    provider = kwargs.get("custom_llm_provider") or kwargs.get("provider")
+    if provider in {"azure", "azure_openai"}:
+        return is_openai_model_name(model)
+    return True
 
 
 def _litellm_responses_bridge_tool_choice(tool_choice: Any) -> Any:
