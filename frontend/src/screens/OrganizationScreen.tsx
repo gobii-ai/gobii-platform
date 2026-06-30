@@ -122,28 +122,16 @@ function publishConsoleContext(context: ConsoleContext) {
     return
   }
   storeConsoleContext(context)
-  window.dispatchEvent(new CustomEvent('gobii:console-context-updated', {
-    detail: context,
-  }))
+  window.dispatchEvent(new CustomEvent('gobii:console-context-updated', { detail: context }))
 }
 
 function isNoOrganizationContextError(error: unknown): boolean {
-  if (!(error instanceof HttpError) || error.status !== 404) {
-    return false
-  }
-  const body = error.body
-  return Boolean(
-    body
-    && typeof body === 'object'
-    && (body as { error?: unknown }).error === 'Switch to an organization context first.',
-  )
+  const body = error instanceof HttpError && error.status === 404 ? error.body : null
+  return Boolean(body && typeof body === 'object' && (body as { error?: unknown }).error === 'Switch to an organization context first.')
 }
 
 function shouldRetryCurrentOrganizationQuery(failureCount: number, error: unknown): boolean {
-  if (isNoOrganizationContextError(error)) {
-    return false
-  }
-  return failureCount < 3
+  return !isNoOrganizationContextError(error) && failureCount < 3
 }
 
 function buildBillingPathForCurrentAppRoute(): string {
@@ -216,42 +204,24 @@ function ConfirmOrganizationActionModal({
   )
 }
 
-function CreateOrganizationModal({
-  name,
-  errors,
-  busy,
-  onNameChange,
-  onClose,
-  onSubmit,
-}: {
-  name: string
-  errors: string[]
-  busy: boolean
-  onNameChange: (name: string) => void
-  onClose: () => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
-}) {
+type CreateOrganizationModalProps = { name: string; errors: string[]; busy: boolean; onNameChange: (name: string) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }
+
+function CreateOrganizationModal({ name, errors, busy, onNameChange, onClose, onSubmit }: CreateOrganizationModalProps) {
   return (
     <ModalForm
       id="organization-create-team-form"
       title="Create Team"
-      subtitle="Create a team workspace for shared agents, members, and pooled credits."
       onClose={onClose}
       onSubmit={onSubmit}
       widthClass="sm:max-w-lg"
-      icon={Building2}
-      iconBgClass="bg-blue-100"
-      iconColorClass="text-blue-600"
       dismissible={!busy}
       submitLabel="Create Team"
       submittingLabel="Creating..."
       submitting={busy}
       errorMessages={errors}
     >
-      <div>
-        <label htmlFor="organization-create-team-name" className="block text-sm font-medium text-slate-700">
-          Team Name
-        </label>
+      <label htmlFor="organization-create-team-name" className="block text-sm font-medium text-slate-700">
+        Team Name
         <input
           id="organization-create-team-name"
           type="text"
@@ -263,7 +233,7 @@ function CreateOrganizationModal({
           autoFocus
           disabled={busy}
         />
-      </div>
+      </label>
     </ModalForm>
   )
 }
@@ -531,6 +501,10 @@ function OrganizationEmptyState({
 }) {
   const hasOrganizations = organizations.length > 0
   const isCheckingOrganizations = organizationsLoading && !hasOrganizations
+  const title = hasOrganizations || isCheckingOrganizations ? 'Choose a team workspace' : 'Create your team workspace'
+  const description = hasOrganizations
+    ? 'You are in your personal workspace. Switch to a team to manage members, templates, setup, and pooled task credits.'
+    : 'Shared agents, templates, setup, members, and pooled task credits can live together in one place.'
 
   return (
     <div className="profile-screen profile-screen--embedded organization-screen organization-screen--empty">
@@ -540,13 +514,9 @@ function OrganizationEmptyState({
         </div>
         <div className="organization-screen__empty-copy">
           <p className="profile-screen__eyebrow">Teams</p>
-          <h1>{hasOrganizations || isCheckingOrganizations ? 'Choose a team workspace' : 'Create your team workspace'}</h1>
+          <h1>{title}</h1>
           <p className="profile-screen__muted">
-            {isCheckingOrganizations
-              ? 'You are in your personal workspace. Looking for teams you can manage.'
-              : hasOrganizations
-              ? 'You are in your personal workspace. Switch to a team to manage members, templates, setup, and pooled task credits.'
-              : 'Shared agents, templates, setup, members, and pooled task credits can live together in one place.'}
+            {isCheckingOrganizations ? 'You are in your personal workspace. Looking for teams you can manage.' : description}
           </p>
         </div>
         <button
@@ -563,16 +533,13 @@ function OrganizationEmptyState({
         {organizationsLoading ? (
           <p className="profile-screen__muted">Loading teams...</p>
         ) : hasOrganizations ? (
-          organizations.map((organization, index) => {
+          organizations.map((organization) => {
             const isSwitching = switchingOrganizationId === organization.id
             return (
               <div key={organization.id} className="organization-screen__empty-row">
-                <span className="organization-screen__empty-number">{String(index + 1).padStart(2, '0')}</span>
                 <div>
                   <h2>{organization.name}</h2>
-                  <p className="profile-screen__muted">
-                    {organization.role ? `${organization.role} access` : 'Team workspace'}
-                  </p>
+                  {organization.role ? <p className="profile-screen__muted">{organization.role} access</p> : null}
                 </div>
                 <button
                   type="button"
@@ -586,29 +553,7 @@ function OrganizationEmptyState({
             )
           })
         ) : (
-          <>
-            <div className="organization-screen__empty-row">
-              <span className="organization-screen__empty-number">01</span>
-              <div>
-                <h2>Start with shared ownership</h2>
-                <p className="profile-screen__muted">Invite teammates into the same workspace instead of rebuilding setup across accounts.</p>
-              </div>
-            </div>
-            <div className="organization-screen__empty-row">
-              <span className="organization-screen__empty-number">02</span>
-              <div>
-                <h2>Pool usage across seats</h2>
-                <p className="profile-screen__muted">Team task credits are managed at the team level so usage follows the work.</p>
-              </div>
-            </div>
-            <div className="organization-screen__empty-row">
-              <span className="organization-screen__empty-number">03</span>
-              <div>
-                <h2>Manage the account from one place</h2>
-                <p className="profile-screen__muted">Members, templates, billing, and team preferences stay connected.</p>
-              </div>
-            </div>
-          </>
+          <p className="profile-screen__muted">Create a team to start sharing agents, templates, setup, members, and pooled task credits.</p>
         )}
         {switchError ? <p className="profile-screen__feedback profile-screen__feedback--error">{switchError}</p> : null}
       </section>
@@ -977,7 +922,7 @@ export function OrganizationScreen() {
     }
   }, [billingUrl])
 
-  if (isLoading) {
+  if (isLoading || (isFetching && !data && !error)) {
     return (
       <div className="profile-screen profile-screen--embedded">
         <section className="profile-screen__section">
@@ -1001,16 +946,6 @@ export function OrganizationScreen() {
       onSubmit={handleCreateOrganizationSubmit}
     />
   ) : null
-
-  if (isFetching && !data && !error) {
-    return (
-      <div className="profile-screen profile-screen--embedded">
-        <section className="profile-screen__section">
-          <p className="profile-screen__muted">Loading team...</p>
-        </section>
-      </div>
-    )
-  }
 
   if (!data && (!error || noOrganizationContext)) {
     return (
@@ -1073,14 +1008,6 @@ export function OrganizationScreen() {
           <p className="profile-screen__eyebrow">Team</p>
           <h1>{data.organization.name}</h1>
         </div>
-        <button
-          type="button"
-          className="profile-screen__button profile-screen__button--secondary organization-screen__header-action"
-          onClick={openCreateOrganizationModal}
-        >
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Create Team
-        </button>
       </header>
 
       {!canEditOrganization && !canManageMembers ? (
