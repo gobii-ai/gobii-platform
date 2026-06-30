@@ -51,6 +51,8 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
+    PersistentAgentHumanInputRequest,
     PersistentAgentKanbanCard,
     PersistentAgentMessage,
     PersistentAgentStep,
@@ -422,6 +424,65 @@ class MessageToolExplicitContinuationTests(TestCase):
         self.assertTrue(finalized.terminal_message_delivery_ok)
         self.assertFalse(finalized.followup_required)
         self.assertTrue(
+            _should_skip_stale_planning_mode_after_terminal_delivery(
+                self.agent,
+                finalized,
+                followup_required=finalized.followup_required,
+            )
+        )
+
+    def test_planning_mode_terminal_message_with_pending_human_input_does_not_skip(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state"])
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address="web:user:test",
+        )
+        PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=conversation,
+            question="Which scope should I use?",
+            requested_via_channel=CommsChannel.WEB,
+        )
+        prepared = _PreparedToolExecution(
+            idx=1,
+            tool_name="send_chat_message",
+            tool_params={"body": "I asked a few questions above.", "will_continue_work": False},
+            exec_params={"body": "I asked a few questions above.", "will_continue_work": False},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call_1",
+            explicit_continue=False,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason=None,
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [
+                _ToolExecutionOutcome(
+                    prepared=prepared,
+                    result={
+                        "status": "ok",
+                        "message": "Web chat message sent.",
+                        "message_id": str(uuid4()),
+                        "auto_sleep_ok": True,
+                    },
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+            ],
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.terminal_message_delivery_ok)
+        self.assertFalse(finalized.followup_required)
+        self.assertFalse(
             _should_skip_stale_planning_mode_after_terminal_delivery(
                 self.agent,
                 finalized,

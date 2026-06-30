@@ -19,7 +19,29 @@ vi.mock('./AgentComposer', () => ({
 }))
 
 vi.mock('./TimelineEventItem', () => ({
-  TimelineEventItem: ({ event, onMessageLinkClick }: { event?: { messageLinkHref?: string | null }, onMessageLinkClick?: (href: string) => boolean | void }) => {
+  TimelineEventItem: ({
+    event,
+    onMessageLinkClick,
+  }: {
+    event?: {
+      kind?: string
+      messageLinkHref?: string | null
+      forecast?: {
+        dailyCredits?: number | null
+        monthlyCredits?: number | null
+      }
+    }
+    onMessageLinkClick?: (href: string) => boolean | void
+  }) => {
+    if (event?.kind === 'inline-credit-forecast' && event.forecast) {
+      return (
+        <div data-testid="credit-forecast-timeline-event">
+          <span>Estimated cost</span>
+          {typeof event.forecast.dailyCredits === 'number' ? <span>{event.forecast.dailyCredits} credits</span> : null}
+          {typeof event.forecast.monthlyCredits === 'number' ? <span>{event.forecast.monthlyCredits} credits</span> : null}
+        </div>
+      )
+    }
     const href = event?.messageLinkHref
     if (!href) {
       return null
@@ -322,6 +344,31 @@ describe('AgentChatLayout upgrade modal gating', () => {
     await waitFor(() => {
       expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(false)
     })
+  })
+
+  it('renders the post-planning credit forecast as a persistent timeline event', () => {
+    renderAgentChatLayout({
+      agentId: 'agent-forecast',
+      planningState: 'completed',
+      creditForecast: {
+        setupCredits: 24,
+        perRunCredits: 8,
+        dailyCredits: 8,
+        monthlyCredits: 240,
+        confidence: 'medium',
+        sampleCount: 5,
+        warningLevel: 'medium',
+        warningReasons: ['recurring schedule', 'low remaining credits'],
+        estimatedAt: '2026-06-30T12:00:00Z',
+      },
+    })
+
+    expect(screen.getByText('Estimated cost')).toBeInTheDocument()
+    expect(screen.getByText('8 credits')).toBeInTheDocument()
+    expect(screen.getByText('240 credits')).toBeInTheDocument()
+    expect(screen.queryByText('Usage watch')).not.toBeInTheDocument()
+    expect(screen.queryByText('recurring schedule, low remaining credits')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Dismiss credit forecast' })).not.toBeInTheDocument()
   })
 
   it('renders the signup preview panel instead of the composer when requested', () => {

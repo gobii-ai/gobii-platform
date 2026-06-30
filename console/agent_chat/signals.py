@@ -28,6 +28,7 @@ from api.models import (
     PersistentAgentSystemMessage,
 )
 from api.services.signup_preview import transition_agent_to_signup_preview_waiting
+from api.services.agent_credit_forecasts import serialize_agent_credit_forecast
 from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
 from console.agent_audit.serializers import (
     serialize_completion,
@@ -105,6 +106,7 @@ def emit_agent_profile_update(
         "short_description": agent.short_description or "",
         "signup_preview_state": agent.signup_preview_state,
         "planning_state": agent.planning_state,
+        "credit_forecast": serialize_agent_credit_forecast(agent),
         "timestamp": timezone.now().isoformat(),
     }
     if processing_active is not None:

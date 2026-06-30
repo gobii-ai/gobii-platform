@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { TimelineEvent, ToolCallEntry, ToolClusterEvent } from '../types/agentChat'
+import type { CreditForecast, TimelineEvent, ToolCallEntry, ToolClusterEvent } from '../types/agentChat'
 import { isClusterRenderable, transformToolCluster } from '../components/agentChat/tooling/toolRegistry'
 import { buildActionCountLabel, flattenTimelineEventsToEntries } from '../components/agentChat/activityEntryUtils'
 import type { StatusExpansionTargets } from '../components/agentChat/statusExpansion'
@@ -34,10 +34,17 @@ export type InlineScheduleUpdate = {
   entry: ToolCallEntry
 }
 
+export type InlineCreditForecast = {
+  kind: 'inline-credit-forecast'
+  cursor: string
+  forecast: CreditForecast
+}
+
 export type SimplifiedTimelineItem =
   | TimelineEvent
   | CollapsedEventGroup
   | InlineScheduleUpdate
+  | InlineCreditForecast
 
 export type CollapseDetailedStatusRunsOptions = {
   keepTrailingActivityExpanded?: boolean

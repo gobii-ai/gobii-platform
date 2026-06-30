@@ -106,6 +106,18 @@ export type ProcessingSnapshot = {
   nextScheduledAt?: string | null
 }
 
+export type CreditForecast = {
+  setupCredits: number | null
+  perRunCredits: number | null
+  dailyCredits: number | null
+  monthlyCredits: number | null
+  confidence: 'none' | 'low' | 'medium' | 'high'
+  sampleCount: number
+  warningLevel: 'none' | 'medium' | 'high'
+  warningReasons: string[]
+  estimatedAt?: string | null
+}
+
 export type AgentMessageNotificationWorkspace = {
   type: 'personal' | 'organization'
   id: string

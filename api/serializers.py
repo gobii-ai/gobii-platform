@@ -323,6 +323,7 @@ class PersistentAgentListSerializer(serializers.ModelSerializer):
         allow_null=True,
         format='hex_verbose',
     )
+    credit_forecast = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = PersistentAgent
@@ -346,9 +347,15 @@ class PersistentAgentListSerializer(serializers.ModelSerializer):
             'preferred_contact_endpoint_id',
             'proactive_opt_in',
             'proactive_last_trigger_at',
+            'credit_forecast',
         ]
         read_only_fields = fields
         ref_name = "PersistentAgentList"
+
+    def get_credit_forecast(self, obj):
+        from api.services.agent_credit_forecasts import serialize_agent_credit_forecast
+
+        return serialize_agent_credit_forecast(obj)
 
 class PreferredEndpointInputField(serializers.Field):
     default_error_messages = {
@@ -408,6 +415,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
     )
     available_mcp_servers = serializers.SerializerMethodField(read_only=True)
     personal_mcp_server_ids = serializers.SerializerMethodField(read_only=True)
+    credit_forecast = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = PersistentAgent
@@ -440,6 +448,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'enabled_personal_server_ids',
             'available_mcp_servers',
             'personal_mcp_server_ids',
+            'credit_forecast',
         ]
         read_only_fields = (
             'id',
@@ -457,8 +466,14 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'proactive_last_trigger_at',
             'available_mcp_servers',
             'personal_mcp_server_ids',
+            'credit_forecast',
         )
         ref_name = "PersistentAgentDetail"
+
+    def get_credit_forecast(self, obj):
+        from api.services.agent_credit_forecasts import serialize_agent_credit_forecast
+
+        return serialize_agent_credit_forecast(obj)
 
     def validate_preferred_contact_endpoint(self, value):
         if value is None:

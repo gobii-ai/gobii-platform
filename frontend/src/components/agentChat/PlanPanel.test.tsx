@@ -33,5 +33,7 @@ describe('PlanPanel', () => {
     expect(row).toHaveAttribute('data-work-state', 'active')
     expect(container.querySelector('.lucide-loader-circle')).toBeInTheDocument()
     expect(container.querySelector('.lucide-circle-pause')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Est\./i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/credits/i)).not.toBeInTheDocument()
   })
 })
