@@ -2312,7 +2312,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
         self.mock_capi.reset_mock()
         sub, payload = self._mock_subscription(quantity=2, billing_reason=None)
         mock_sync.return_value = sub
-        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 1000}
         event = _build_djstripe_event(payload, event_type="customer.subscription.created")
 
         invoice_payload = {
@@ -2352,7 +2352,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         sub, payload = self._mock_subscription(quantity=5, billing_reason=None, payload_invoice="in_seat_add")
         mock_sync.return_value = sub
-        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 1000}
         event = _build_djstripe_event(payload, event_type="customer.subscription.created")
 
         invoice_payload = {
@@ -2388,7 +2388,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         sub, payload = self._mock_subscription(quantity=3, billing_reason=None, payload_invoice="in_upgrade")
         mock_sync.return_value = sub
-        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 1000}
         event = _build_djstripe_event(payload)
 
         invoice_payload = {
@@ -2426,7 +2426,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         sub, payload = self._mock_subscription(quantity=1, billing_reason=None, payload_invoice="in_downgrade")
         mock_sync.return_value = sub
-        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 1000}
         event = _build_djstripe_event(payload)
 
         invoice_payload = {
@@ -2460,7 +2460,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
 
         sub, payload = self._mock_subscription(quantity=3, billing_reason="subscription_cycle", payload_invoice="in_cycle")
         mock_sync.return_value = sub
-        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 1000}
         event = _build_djstripe_event(payload)
 
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
@@ -2494,7 +2494,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
         sub, payload = self._mock_subscription(quantity=2, billing_reason="subscription_update")
         payload["items"]["data"][0]["price"]["id"] = "price_org_team"
         mock_sync.return_value = sub
-        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 1000}
 
         event = _build_djstripe_event(payload)
 
@@ -2533,7 +2533,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
         })
 
         mock_sync.return_value = sub
-        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 1000}
 
         event = _build_djstripe_event(payload)
 
@@ -2564,7 +2564,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
         payload["metadata"] = {ORG_OVERAGE_STATE_META_KEY: ORG_OVERAGE_STATE_DETACHED_PENDING}
 
         mock_sync.return_value = sub
-        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 1000}
 
         billing = self.org.billing
         billing.purchased_seats = 2
@@ -2607,7 +2607,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
         payload["metadata"] = {ORG_OVERAGE_STATE_META_KEY: ORG_OVERAGE_STATE_DETACHED_PENDING}
 
         mock_sync.return_value = sub
-        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500}
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 1000}
 
         billing = self.org.billing
         billing.purchased_seats = 2

@@ -12,13 +12,14 @@ from pages.views import (
     TeamView,
     TermsOfServiceView,
 )
-from .views import PricingView, SupportView, ContactView, BlogIndexView, BlogPostView, PrequalifyView
+from .views import PricingView, SupportView, ContactView, BlogIndexView, BlogPostView, PrequalifyView, TeamsView
 
 # Keep names consistent with pages app so existing {% url 'proprietary:...'%} still work
 app_name = "proprietary"
 
 urlpatterns = [
     path("pricing/", PricingView.as_view(), name="pricing"),
+    path("teams/", TeamsView.as_view(), name="teams"),
     path("qualify/", PrequalifyView.as_view(), name="prequalify"),
     path("support/", SupportView.as_view(), name="support"),
     path("contact/", ContactView.as_view(), name="contact"),

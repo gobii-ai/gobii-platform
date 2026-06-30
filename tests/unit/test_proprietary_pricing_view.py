@@ -142,6 +142,21 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertContains(response, "Choose the plan that fits your team.")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_teams_page_renders_self_serve_team_offer(self):
+        response = self.client.get(reverse("proprietary:teams"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Gobii for Teams")
+        self.assertContains(response, "One shared workspace for your AI agent team")
+        self.assertContains(response, "$50")
+        self.assertContains(response, "1,000 pooled task credits per seat")
+        self.assertContains(response, "Ten seats create a 10,000 shared credit pool.")
+        self.assertContains(response, 'href="/accounts/signup/?next=%2Fapp%2Forganization"')
+        self.assertContains(response, 'data-auth-modal-url="/accounts/modal/signup/?next=%2Fapp%2Forganization"')
+        self.assertContains(response, 'data-analytics-cta-id="teams_hero_start"')
+        self.assertContains(response, 'data-analytics-cta-tracking-enabled="true"')
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
     def test_pricing_page_renders_free_oss_plan(
         self,
@@ -158,7 +173,7 @@ class PricingPageCtaCopyTests(TestCase):
         plans = response.context["pricing_plans"]
         self.assertEqual(
             [plan["code"] for plan in plans],
-            ["free_oss", PlanNames.STARTUP, PlanNames.SCALE],
+            ["free_oss", PlanNames.STARTUP, PlanNames.SCALE, PlanNames.ORG_TEAM],
         )
         self.assertTrue(response.context["pricing_grid_has_free_oss_plan"])
 
@@ -182,6 +197,7 @@ class PricingPageCtaCopyTests(TestCase):
 
         self.assertEqual(plans[1]["cta_url"], reverse("proprietary:startup_checkout"))
         self.assertEqual(plans[2]["cta_url"], reverse("proprietary:scale_checkout"))
+        self.assertEqual(plans[3]["cta_url"], "/app/organization")
 
         content = response.content.decode()
         analytics_pos = content.index('data-analytics-cta-id="pricing_free_oss_plan"')

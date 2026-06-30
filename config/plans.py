@@ -65,7 +65,7 @@ PLAN_CONFIG = {
     PlanNames.ORG_TEAM: {
         "id": "org_team",
         "monthly_task_credits": 2000,
-        "credits_per_seat": 500,
+        "credits_per_seat": 1000,
         "api_rate_limit": 2000,
         "product_id": "",
         "seat_price_id": "",

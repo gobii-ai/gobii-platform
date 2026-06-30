@@ -4,7 +4,10 @@ from smtplib import SMTPException
 from email.utils import formataddr
 
 from anymail.exceptions import AnymailAPIError
-from billing.plan_resolver import get_active_public_plan_monthly_task_credits
+from billing.plan_resolver import (
+    get_active_public_plan_context,
+    get_active_public_plan_monthly_task_credits,
+)
 from django.conf import settings
 from django.contrib import sitemaps
 from django.http import HttpResponse, Http404, JsonResponse
@@ -175,6 +178,62 @@ class ProprietaryModeRequiredMixin:
             raise Http404()
         return super().dispatch(request, *args, **kwargs)
 
+
+TEAM_START_URL = "/app/organization"
+
+
+def _coerce_plan_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_team_offer_context():
+    team_plan_context = get_active_public_plan_context(PlanNames.ORG_TEAM, is_org=True)
+    team_config = get_plan_config(PlanNames.ORG_TEAM) or {}
+    price_per_seat = _coerce_plan_int(
+        team_config.get("price_per_seat") or team_config.get("price"),
+        default=50,
+    )
+    credits_per_seat = _coerce_plan_int(
+        team_plan_context.get("credits_per_seat") or team_config.get("credits_per_seat"),
+        default=1000,
+    )
+    api_rate_limit = _coerce_plan_int(
+        team_plan_context.get("api_rate_limit") or team_config.get("api_rate_limit"),
+        default=2000,
+    )
+    max_contacts_per_agent = _coerce_plan_int(
+        team_plan_context.get("max_contacts_per_agent") or team_config.get("max_contacts_per_agent"),
+        default=50,
+    )
+
+    return {
+        "price_per_seat": price_per_seat,
+        "price_per_seat_display": f"${price_per_seat:,}",
+        "credits_per_seat": credits_per_seat,
+        "credits_per_seat_display": f"{credits_per_seat:,}",
+        "example_ten_seat_credits_display": f"{credits_per_seat * 10:,}",
+        "api_rate_limit": api_rate_limit,
+        "api_rate_limit_display": f"{api_rate_limit:,}",
+        "max_contacts_per_agent": max_contacts_per_agent,
+        "max_contacts_per_agent_display": f"{max_contacts_per_agent:,}",
+        "start_url": TEAM_START_URL,
+        "signup_next": TEAM_START_URL,
+    }
+
+
+class TeamsView(ProprietaryModeRequiredMixin, TemplateView):
+    template_name = "teams.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["team_offer"] = _get_team_offer_context()
+        context["canonical_url"] = self.request.build_absolute_uri(self.request.path)
+        return context
+
+
 class PricingView(ProprietaryModeRequiredMixin, TemplateView):
     template_name = "pricing.html"
 
@@ -329,8 +388,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         # Get plan prices from config (refreshed from StripeConfig)
         startup_config = get_plan_config(PlanNames.STARTUP) or {}
         scale_config = get_plan_config(PlanNames.SCALE) or {}
+        team_offer = _get_team_offer_context()
         startup_price = startup_config.get("price", 50)
         scale_price = scale_config.get("price", 250)
+        team_price = team_offer["price_per_seat"]
 
         # Pricing cards data - new 3-tier structure
         startup_features = []
@@ -362,6 +423,13 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "1,500 requests/min API throughput",
             ]
         )
+
+        team_features = [
+            f"{team_offer['credits_per_seat_display']} pooled task credits per seat",
+            "Shared agents and private templates",
+            "Shared credentials, integrations, API keys, and secrets",
+            "Roles, invites, and team billing",
+        ]
 
         startup_uses_trial_copy = startup_cta_text.startswith("Start ")
         scale_uses_trial_copy = scale_cta_text.startswith("Start ")
@@ -417,6 +485,29 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "cta_variant": "primary",
                 "disabled": False,
             },
+            {
+                "code": PlanNames.ORG_TEAM,
+                "name": "Team",
+                "price": team_price,
+                "price_label": f"${team_price}",
+                "price_prefix": "$",
+                "price_amount": team_price,
+                "desc": "For shared team workspaces",
+                "task_credits": None,
+                "tasks": None,
+                "pricing_model": "per seat / month",
+                "highlight": False,
+                "badge": "New",
+                "cta_disabled": False,
+                "current_plan": False,
+                "trial_cancel_text": None,
+                "features": team_features,
+                "cta": "Start a Team",
+                "cta_url": team_offer["start_url"],
+                "cta_variant": "primary",
+                "analytics_intent": "start_team",
+                "disabled": False,
+            },
         ]
 
         pricing_plans.insert(
@@ -456,23 +547,33 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         context["pricing_plans"] = pricing_plans
         context["pricing_grid_has_free_oss_plan"] = True
+        context["team_offer"] = team_offer
 
         # Plan limits pulled from plan configuration to keep the table in sync
         max_contacts_per_agent = [
             str(PLAN_CONFIG.get(PlanNames.STARTUP, {}).get("max_contacts_per_agent", "—")),
             str(PLAN_CONFIG.get(PlanNames.SCALE, {}).get("max_contacts_per_agent", "—")),
+            team_offer["max_contacts_per_agent_display"],
         ]
 
         # Comparison table rows - updated for new tiers
+        context["comparison_plan_labels"] = ["Pro", "Scale", "Team"]
         context["comparison_rows"] = [
-            ["Tasks included", f"{startup_task_credits_display}/month", f"{scale_task_credits_display}/month"],
-            ["Cost per additional task", "$0.10", "$0.04"],
-            ["API rate limit (requests/min)", "600", "1,500"],
+            [
+                "Tasks included",
+                f"{startup_task_credits_display}/month",
+                f"{scale_task_credits_display}/month",
+                f"{team_offer['credits_per_seat_display']} pooled/seat/month",
+            ],
+            ["Cost per additional task", "$0.10", "$0.04", "Metered overage available"],
+            ["API rate limit (requests/min)", "600", "1,500", team_offer["api_rate_limit_display"]],
             ["Max contacts per agent", *max_contacts_per_agent],
-            ["Agents never expire or turn off", "✓", "✓"],
-            ["Priority task execution", "✓", "✓"],
-            ["Batch scheduling & queueing", "—", "✓"],
-            ["Support", "Email & chat", "Dedicated channel"],
+            ["Agents never expire or turn off", "✓", "✓", "✓"],
+            ["Priority task execution", "✓", "✓", "✓"],
+            ["Batch scheduling & queueing", "—", "✓", "✓"],
+            ["Shared agents and private templates", "—", "—", "✓"],
+            ["Team roles and invites", "—", "—", "✓"],
+            ["Support", "Email & chat", "Dedicated channel", "Priority support"],
         ]
 
         # FAQs
@@ -486,7 +587,9 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 (
                     f"Pro includes {startup_task_credits_display} tasks per month, then charges "
                     f"$0.10 for each additional task. Scale includes {scale_task_credits_display} "
-                    "tasks per month with $0.04 pricing after that."
+                    "tasks per month with $0.04 pricing after that. Team is "
+                    f"{team_offer['price_per_seat_display']} per seat per month, and each seat adds "
+                    f"{team_offer['credits_per_seat_display']} pooled task credits to the team workspace."
                 ),
             ),
             (
