@@ -46,11 +46,12 @@ Full control over the workspace. Owners can:
 
 ### Admin
 
-Day-to-day management without billing access. Admins can:
+Day-to-day administration including billing access. Admins can:
 
 - Create and configure organization agents
 - Manage members (but not owners)
 - View usage and task credit consumption
+- Manage billing, plans, and payment methods
 - Manage org-scoped secrets, MCP servers, and contacts
 
 ### Member
@@ -90,7 +91,7 @@ Organizations unlock several shared resources:
 Credentials stored at the org level are available to all org agents. This avoids duplicating API keys across agents. See [Global Secrets](/admin-and-teams/global-secrets).
 
 ### Organization MCP servers
-MCP servers configured for the org can be used by any org agent. See [Organization MCP Servers](/admin-and-teams/organization-mcp-servers).
+MCP servers configured for the org must be explicitly assigned to agents before they can be used. Unassigned org agents cannot access org-level MCP servers. See [Organization MCP Servers](/admin-and-teams/organization-mcp-servers).
 
 ### Shared contacts
 Org-level contact allowlists and endpoints simplify compliance and avoid per-agent contact management.
