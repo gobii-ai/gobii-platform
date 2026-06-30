@@ -306,10 +306,10 @@ function getAnalyticsTitle(route: AppRoute): string {
     return 'Profile · Gobii'
   }
   if (route.kind === 'organization') {
-    return 'Organization · Gobii'
+    return 'Team · Gobii'
   }
   if (route.kind === 'organization-invite-accept') {
-    return 'Organization Invite · Gobii'
+    return 'Team Invite · Gobii'
   }
   if (route.kind === 'agent-collaborator-invite') {
     return route.action === 'accept' ? 'Agent Invite · Gobii' : 'Decline Agent Invite · Gobii'

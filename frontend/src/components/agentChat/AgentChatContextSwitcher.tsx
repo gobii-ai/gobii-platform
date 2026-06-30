@@ -157,7 +157,7 @@ export function AgentChatContextSwitcher({
               </ListBoxSection>
               {organizationOptions.length ? (
                 <ListBoxSection className="chat-context-switcher__section">
-                  <Header className="chat-context-switcher__heading">Organizations</Header>
+                  <Header className="chat-context-switcher__heading">Teams</Header>
                   {organizationOptions.map((option) => (
                     <ListBoxItem
                       key={option.key}
@@ -192,7 +192,7 @@ export function AgentChatContextSwitcher({
                 onClick={handleCreateOrganizationPress}
               >
                 <Plus className="chat-context-switcher__item-icon" aria-hidden="true" />
-                <span>Add Organization</span>
+                <span>Add Team</span>
               </button>
             ) : null}
             {errorMessage ? <div className="chat-context-switcher__error">{errorMessage}</div> : null}

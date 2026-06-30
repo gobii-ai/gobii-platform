@@ -102,7 +102,7 @@ export function OrganizationInviteAcceptPage({ token, onNavigate }: Organization
   }, [status])
 
   const title = status === 'accepted'
-    ? `Joined ${payload?.organization?.name ?? 'organization'}`
+    ? `Joined ${payload?.organization?.name ?? 'team'}`
     : status === 'loading'
       ? 'Accepting invite'
       : status === 'issue'
@@ -110,9 +110,9 @@ export function OrganizationInviteAcceptPage({ token, onNavigate }: Organization
         : 'Could not accept invite'
 
   const message = status === 'accepted'
-    ? 'Opening your organization workspace.'
+    ? 'Opening your team workspace.'
     : status === 'loading'
-      ? 'Checking the invite and preparing your organization workspace.'
+      ? 'Checking the invite and preparing your team workspace.'
       : status === 'issue'
         ? issueMessage(payload)
         : (errorMessage ?? 'Unable to accept this invite.')
@@ -127,7 +127,7 @@ export function OrganizationInviteAcceptPage({ token, onNavigate }: Organization
     <section className="immersive-invite-page">
       <div className={`immersive-invite-card immersive-invite-card--${status}`}>
         <div className="immersive-invite-card__icon">{icon}</div>
-        <p className="immersive-invite-card__eyebrow">Organization Invite</p>
+        <p className="immersive-invite-card__eyebrow">Team Invite</p>
         <h1 className="immersive-invite-card__title">{title}</h1>
         <p className="immersive-invite-card__message">{message}</p>
         {status !== 'loading' ? (

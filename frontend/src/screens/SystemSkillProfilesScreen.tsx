@@ -46,7 +46,7 @@ export function SystemSkillProfilesScreen({
   const profiles = data?.profiles ?? []
   const isOrganizationScope = (data?.owner_scope || ownerScope) === 'organization'
   const description = isOrganizationScope
-    ? 'Manage reusable encrypted profiles for this organization.'
+    ? 'Manage reusable encrypted profiles for this team.'
     : 'Manage reusable encrypted profiles for your account.'
   const bootstrapProfile = profiles.length === 1 && !profiles[0]?.complete ? profiles[0] : null
   const primaryActionLabel = bootstrapProfile ? 'Complete Setup' : profiles.length > 0 ? 'Add Another Profile' : 'Add Profile'

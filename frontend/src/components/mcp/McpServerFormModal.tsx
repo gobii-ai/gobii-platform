@@ -221,7 +221,7 @@ export function McpServerFormModal({
   const formTitle =
     mode === 'create' ? 'Add MCP Server' : `Edit ${server?.displayName ?? 'MCP Server'}`
   const ownerLabelText =
-    ownerScope === 'platform' ? 'the platform' : ownerScope === 'organization' ? 'your organization' : 'your workspace'
+    ownerScope === 'platform' ? 'the platform' : ownerScope === 'organization' ? 'your team' : 'your workspace'
   const modalSubtitle =
     mode === 'create'
       ? `Connect a new MCP integration for ${ownerLabelText}.`
@@ -475,7 +475,7 @@ export function McpServerFormModal({
 
           {ownerScope === 'organization' && (
             <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-              Only members with manage permissions can update organization servers.
+              Only members with manage permissions can update team servers.
             </div>
           )}
 

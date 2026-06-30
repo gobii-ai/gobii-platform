@@ -17,7 +17,7 @@ export const SELECTION_SHELL_PAGE_LABELS: Record<SelectionShellPage, string> = {
   agents: 'My Agents',
   billing: 'Billing',
   profile: 'Profile',
-  organization: 'Organization',
+  organization: 'Team',
   secrets: 'Secrets',
   usage: 'Usage',
   integrations: 'Integrations',

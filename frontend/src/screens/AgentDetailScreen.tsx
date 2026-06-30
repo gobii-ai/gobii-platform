@@ -2442,7 +2442,7 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
     <div className="space-y-5">
       <div className="space-y-1">
         <p className="text-xs text-gray-500">
-          By default, the agent owner and organization members can communicate with this agent. You can add additional contacts below.
+          By default, the agent owner and team members can communicate with this agent. You can add additional contacts below.
           Note: Multi-recipient messaging is limited to email only.
         </p>
         <p className="text-xs text-slate-600">Contact slots include allowlist entries and collaborators.</p>
@@ -2731,7 +2731,7 @@ function IntegrationsSection({
         <div>
           <h3 className="text-base font-semibold text-gray-800">MCP Servers</h3>
           <p className="text-sm text-gray-500">
-            Platform MCP servers are always enabled. Enable or disable organization servers per agent, and configure optional personal
+            Platform MCP servers are always enabled. Enable or disable team servers per agent, and configure optional personal
             servers when applicable.
           </p>
         </div>
@@ -2755,7 +2755,7 @@ function IntegrationsSection({
 
           {mcpServers.organization.length > 0 && (
             <div className="space-y-3">
-              <h4 className="text-sm font-semibold text-gray-700">Organization Servers</h4>
+              <h4 className="text-sm font-semibold text-gray-700">Team Servers</h4>
               {isOrgAgent ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   {mcpServers.organization.map((server) => {
@@ -2777,7 +2777,7 @@ function IntegrationsSection({
                   })}
                 </div>
               ) : (
-                <p className="text-sm text-gray-500">Organization MCP servers can be managed when the agent belongs to an organization.</p>
+                <p className="text-sm text-gray-500">Team MCP servers can be managed when the agent belongs to a team.</p>
               )}
             </div>
           )}
@@ -3471,8 +3471,8 @@ function ActionsSection({
         {features.organizations && reassignment.enabled && (
           <section className={sectionBodyClassName}>
             <div>
-              <h3 className="text-base font-semibold text-gray-800">Organization Assignment</h3>
-              <p className="text-sm text-gray-500">Switch this agent between your personal workspace and an organization you manage.</p>
+              <h3 className="text-base font-semibold text-gray-800">Team Assignment</h3>
+              <p className="text-sm text-gray-500">Switch this agent between your personal workspace and a team you manage.</p>
             </div>
             {agent.organization ? (
               <div className="space-y-3">
@@ -3499,7 +3499,7 @@ function ActionsSection({
                     onChange={(event) => onOrgChange(event.target.value)}
                     className="py-2 border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500"
                   >
-                    <option value="">Select organization...</option>
+                    <option value="">Select team...</option>
                     {reassignment.organizations.map((org) => (
                       <option key={org.id} value={org.id}>
                         {org.name}
@@ -3512,10 +3512,10 @@ function ActionsSection({
                     className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                     disabled={!selectedOrgId || reassigning}
                   >
-                    Assign to Organization
+                    Assign to Team
                   </button>
                 </div>
-                <p className="text-xs text-gray-500">Name must be unique within the selected organization.</p>
+                <p className="text-xs text-gray-500">Name must be unique within the selected team.</p>
               </div>
             )}
             {reassignError && <div className="text-xs text-red-600">{reassignError}</div>}
