@@ -23,7 +23,7 @@ from api.services.user_fingerprint import (
     FingerprintConfigurationError,
     FingerprintTerminalError,
     enqueue_user_fingerprint_visit_refresh,
-    sync_recent_user_fingerprint_visits_to_analytics,
+    sync_latest_user_fingerprint_visit_to_analytics,
     sync_user_fingerprint_visit_to_analytics,
 )
 from api.services.daily_credit_limits import (
@@ -2367,7 +2367,7 @@ class UserFingerprintVisitAdmin(admin.ModelAdmin):
         if skipped_count:
             self.message_user(
                 request,
-                f"Synced {synced_count} Fingerprint visit(s) to analytics; skipped {skipped_count} non-succeeded visit(s).",
+                f"Synced {synced_count} Fingerprint visit(s) to analytics; skipped {skipped_count} non-latest or non-succeeded visit(s).",
                 level=messages.WARNING,
             )
         else:
@@ -2613,7 +2613,7 @@ class CustomUserAdmin(UserAdmin):
     # Keep lightweight inlines only (flags, referral, agents); omit heavy TaskCredit inline.
     inlines = [UserFlagsInlineForUser, UserReferralInlineForUser, BrowserUseAgentInlineForUser]
 
-    actions = ['queue_rollup_for_selected_users', 'sync_recent_fingerprint_visits_for_selected_users']
+    actions = ['queue_rollup_for_selected_users', 'sync_latest_fingerprint_visit_for_selected_users']
 
     def _configured_user_flag_definitions(self) -> list[UserFlagDefinition]:
         return list(UserFlagDefinition.objects.filter(choice_options__isnull=True).order_by("slug"))
@@ -2662,12 +2662,12 @@ class CustomUserAdmin(UserAdmin):
                 continue
         self.message_user(request, f"Queued rollup for {queued} user(s).", level=messages.INFO)
 
-    @admin.action(description="Sync recent Fingerprint analytics for selected users")
-    def sync_recent_fingerprint_visits_for_selected_users(self, request, queryset):
+    @admin.action(description="Sync latest Fingerprint analytics for selected users")
+    def sync_latest_fingerprint_visit_for_selected_users(self, request, queryset):
         synced_count = 0
         user_count = 0
         for user in queryset:
-            user_synced_count = sync_recent_user_fingerprint_visits_to_analytics(user)
+            user_synced_count = sync_latest_user_fingerprint_visit_to_analytics(user)
             if user_synced_count:
                 user_count += 1
                 synced_count += user_synced_count
@@ -2675,7 +2675,7 @@ class CustomUserAdmin(UserAdmin):
         if synced_count:
             self.message_user(
                 request,
-                f"Synced {synced_count} recent Fingerprint visit(s) for {user_count} user(s).",
+                f"Synced latest Fingerprint visit for {user_count} user(s).",
                 level=messages.SUCCESS,
             )
         else:
