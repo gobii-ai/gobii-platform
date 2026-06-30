@@ -318,12 +318,14 @@ def is_latest_succeeded_user_fingerprint_visit(visit: UserFingerprintVisit) -> b
     return _latest_succeeded_user_fingerprint_visit_id(visit.user_id) == visit.pk
 
 
-def identify_user_fingerprint_visit(visit: UserFingerprintVisit, values: dict[str, Any]) -> bool:
+def identify_user_fingerprint_visit(visit: UserFingerprintVisit, values: dict[str, Any] | None) -> bool:
     if not is_latest_succeeded_user_fingerprint_visit(visit):
         return False
 
-    traits = build_user_fingerprint_analytics_traits(values)
     try:
+        if values is None:
+            raise ValueError("Fingerprint analytics values are missing.")
+        traits = build_user_fingerprint_analytics_traits(values)
         Analytics.identify(visit.user_id, traits)
     except Exception:
         # The durable Fingerprint row is already saved; downstream analytics

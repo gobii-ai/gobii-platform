@@ -23,6 +23,7 @@ from api.services.user_fingerprint import (
     get_fp_tor,
     get_fp_vpn,
     get_latest_user_fingerprint_visit,
+    identify_user_fingerprint_visit,
     refresh_user_fingerprint_visit,
     stage_user_fingerprint_visit,
     sync_latest_user_fingerprint_visit_to_analytics,
@@ -760,6 +761,32 @@ class UserFingerprintVisitTests(TestCase):
 
         self.assertFalse(synced)
         identify_mock.assert_not_called()
+
+    @patch("api.services.user_fingerprint.logger.exception")
+    @patch("api.services.user_fingerprint.Analytics.identify")
+    def test_identify_user_fingerprint_visit_catches_trait_building_failures(
+        self,
+        identify_mock,
+        logger_exception_mock,
+    ):
+        user = self._create_user("fingerprint-identify-bad-values@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-success",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+            event_timestamp=timezone.now(),
+            fetched_at=timezone.now(),
+            suspect_score=8.0,
+            country_code="US",
+        )
+
+        identified = identify_user_fingerprint_visit(visit, None)
+
+        self.assertFalse(identified)
+        identify_mock.assert_not_called()
+        logger_exception_mock.assert_called_once()
 
     @patch("api.services.user_fingerprint.Analytics.identify")
     def test_sync_latest_user_fingerprint_visit_to_analytics_sends_latest_succeeded_visit(self, identify_mock):
