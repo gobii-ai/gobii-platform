@@ -305,6 +305,63 @@ def identify_user_fingerprint_visit(visit: UserFingerprintVisit, values: dict[st
         )
 
 
+def _user_fingerprint_visit_analytics_values(visit: UserFingerprintVisit) -> dict[str, Any]:
+    return {
+        "suspect_score": visit.suspect_score,
+        "country_code": visit.country_code,
+        "country_name": visit.country_name,
+        "vpn": visit.vpn,
+        "proxy": visit.proxy,
+        "tor": visit.tor,
+        "bot": visit.bot,
+        "tampering": visit.tampering,
+        "high_activity_device": visit.high_activity_device,
+        "datacenter": visit.datacenter,
+        "visitor_confidence_score": visit.visitor_confidence_score,
+        "proxy_type": visit.proxy_type,
+        "ip_blocklist_attack_source": visit.ip_blocklist_attack_source,
+        "ip_blocklist_email_spam": visit.ip_blocklist_email_spam,
+        "replayed": visit.replayed,
+        "visitor_found": visit.visitor_found,
+        "event_timestamp": visit.event_timestamp,
+        "fetched_at": visit.fetched_at,
+    }
+
+
+def sync_user_fingerprint_visit_to_analytics(visit: UserFingerprintVisit) -> bool:
+    if visit.fetch_status != UserFingerprintVisitFetchStatusChoices.SUCCEEDED:
+        return False
+
+    identify_user_fingerprint_visit(visit, _user_fingerprint_visit_analytics_values(visit))
+    return True
+
+
+def sync_recent_user_fingerprint_visits_to_analytics(user, *, limit: int = 3) -> int:
+    if not user or not getattr(user, "pk", None) or limit <= 0:
+        return 0
+
+    visits = (
+        UserFingerprintVisit.objects.filter(
+            user=user,
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+        )
+        .annotate(
+            latest_observed_at=Coalesce(
+                "event_timestamp",
+                "fetched_at",
+                "last_fetch_attempt_at",
+                "created_at",
+            )
+        )
+        .order_by("-latest_observed_at", "-id")[:limit]
+    )
+    synced_count = 0
+    for visit in visits:
+        if sync_user_fingerprint_visit_to_analytics(visit):
+            synced_count += 1
+    return synced_count
+
+
 def _fingerprint_processing_stale_after() -> dt.timedelta:
     stale_after_seconds = max(int(settings.FINGERPRINT_SERVER_PROCESSING_STALE_SECONDS), 60)
     return dt.timedelta(seconds=stale_after_seconds)

@@ -25,6 +25,8 @@ from api.services.user_fingerprint import (
     get_latest_user_fingerprint_visit,
     refresh_user_fingerprint_visit,
     stage_user_fingerprint_visit,
+    sync_recent_user_fingerprint_visits_to_analytics,
+    sync_user_fingerprint_visit_to_analytics,
 )
 from api.tasks.fingerprint_tasks import fetch_user_fingerprint_visit_task
 
@@ -677,6 +679,61 @@ class UserFingerprintVisitTests(TestCase):
         self.assertTrue(get_fp_tampering(user))
         self.assertIsNone(get_fp_high_activity(user))
         self.assertEqual(get_fp_bot(user), "not_detected")
+
+    @patch("api.services.user_fingerprint.Analytics.identify")
+    def test_sync_user_fingerprint_visit_to_analytics_skips_unsucceeded_visit(self, identify_mock):
+        user = self._create_user("fingerprint-sync-pending@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-pending",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+            suspect_score=8.0,
+            country_code="US",
+        )
+
+        synced = sync_user_fingerprint_visit_to_analytics(visit)
+
+        self.assertFalse(synced)
+        identify_mock.assert_not_called()
+
+    @patch("api.services.user_fingerprint.Analytics.identify")
+    def test_sync_recent_user_fingerprint_visits_to_analytics_sends_recent_succeeded_visits(self, identify_mock):
+        user = self._create_user("fingerprint-sync-recent@example.com")
+        now = timezone.now()
+        for index in range(4):
+            UserFingerprintVisit.objects.create(
+                user=user,
+                source=SIGNAL_SOURCE_SIGNUP,
+                fingerprint_event_id=f"request-success-{index}",
+                fingerprint_visitor_id="visitor-123",
+                fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+                event_timestamp=now - timedelta(hours=index),
+                fetched_at=now - timedelta(hours=index),
+                suspect_score=float(index),
+                country_code="US",
+            )
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-failed",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.FAILED,
+            event_timestamp=now + timedelta(hours=1),
+            suspect_score=99.0,
+            country_code="CA",
+        )
+
+        synced_count = sync_recent_user_fingerprint_visits_to_analytics(user)
+
+        self.assertEqual(synced_count, 3)
+        self.assertEqual(identify_mock.call_count, 3)
+        synced_scores = [
+            call.args[1]["fingerprint_suspect_score"]
+            for call in identify_mock.call_args_list
+        ]
+        self.assertEqual(synced_scores, [0.0, 1.0, 2.0])
 
     def test_latest_succeeded_visit_uses_fetched_at_when_event_timestamp_is_missing(self):
         user = self._create_user("fingerprint-helper-null-ts@example.com")

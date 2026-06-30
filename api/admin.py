@@ -23,6 +23,8 @@ from api.services.user_fingerprint import (
     FingerprintConfigurationError,
     FingerprintTerminalError,
     enqueue_user_fingerprint_visit_refresh,
+    sync_recent_user_fingerprint_visits_to_analytics,
+    sync_user_fingerprint_visit_to_analytics,
 )
 from api.services.daily_credit_limits import (
     calculate_daily_credit_slider_bounds,
@@ -2223,6 +2225,7 @@ class UserIdentitySignalAdmin(admin.ModelAdmin):
 @admin.register(UserFingerprintVisit)
 class UserFingerprintVisitAdmin(admin.ModelAdmin):
     change_form_template = "admin/userfingerprintvisit_change_form.html"
+    actions = ("sync_selected_visits_to_analytics",)
     list_display = (
         "user",
         "source",
@@ -2350,6 +2353,29 @@ class UserFingerprintVisitAdmin(admin.ModelAdmin):
                 )
 
         return HttpResponseRedirect(reverse("admin:api_userfingerprintvisit_change", args=[visit.pk]))
+
+    @admin.action(description="Sync selected Fingerprint visits to analytics")
+    def sync_selected_visits_to_analytics(self, request, queryset):
+        synced_count = 0
+        skipped_count = 0
+        for visit in queryset.select_related("user"):
+            if sync_user_fingerprint_visit_to_analytics(visit):
+                synced_count += 1
+            else:
+                skipped_count += 1
+
+        if skipped_count:
+            self.message_user(
+                request,
+                f"Synced {synced_count} Fingerprint visit(s) to analytics; skipped {skipped_count} non-succeeded visit(s).",
+                level=messages.WARNING,
+            )
+        else:
+            self.message_user(
+                request,
+                f"Synced {synced_count} Fingerprint visit(s) to analytics.",
+                level=messages.SUCCESS,
+            )
 
     def has_add_permission(self, request):
         return False
@@ -2587,7 +2613,7 @@ class CustomUserAdmin(UserAdmin):
     # Keep lightweight inlines only (flags, referral, agents); omit heavy TaskCredit inline.
     inlines = [UserFlagsInlineForUser, UserReferralInlineForUser, BrowserUseAgentInlineForUser]
 
-    actions = ['queue_rollup_for_selected_users']
+    actions = ['queue_rollup_for_selected_users', 'sync_recent_fingerprint_visits_for_selected_users']
 
     def _configured_user_flag_definitions(self) -> list[UserFlagDefinition]:
         return list(UserFlagDefinition.objects.filter(choice_options__isnull=True).order_by("slug"))
@@ -2635,6 +2661,29 @@ class CustomUserAdmin(UserAdmin):
                 logging.error("Failed to queue rollup for user %s: %s", user.id, e)
                 continue
         self.message_user(request, f"Queued rollup for {queued} user(s).", level=messages.INFO)
+
+    @admin.action(description="Sync recent Fingerprint analytics for selected users")
+    def sync_recent_fingerprint_visits_for_selected_users(self, request, queryset):
+        synced_count = 0
+        user_count = 0
+        for user in queryset:
+            user_synced_count = sync_recent_user_fingerprint_visits_to_analytics(user)
+            if user_synced_count:
+                user_count += 1
+                synced_count += user_synced_count
+
+        if synced_count:
+            self.message_user(
+                request,
+                f"Synced {synced_count} recent Fingerprint visit(s) for {user_count} user(s).",
+                level=messages.SUCCESS,
+            )
+        else:
+            self.message_user(
+                request,
+                "No succeeded Fingerprint visits found for selected user(s).",
+                level=messages.WARNING,
+            )
 
     def get_queryset(self, request):
         """Annotate credit totals to avoid N+1 queries in the changelist."""
