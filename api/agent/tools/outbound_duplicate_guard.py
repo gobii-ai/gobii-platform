@@ -7,31 +7,24 @@ to detect recent duplicate sends before persisting a new message.
 
 import logging
 import math
-import os
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Dict, Optional, Sequence
 from uuid import UUID
 
-from django.db.models import Prefetch, Q
+from django.db.models import Q
 from django.utils import timezone
 
-from ...encryption import SecretsEncryption
-from ...llm.utils import normalize_model_name
+from ...services.embeddings import generate_embeddings
 from ...services.tool_settings import (
     DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
     get_tool_settings_for_owner,
     normalize_duplicate_similarity_threshold,
 )
 from ...models import (
-    EmbeddingsLLMTier,
-    EmbeddingsTierEndpoint,
     PersistentAgent,
     PersistentAgentMessage,
 )
-from ...evals.execution import get_current_eval_routing_profile
-
-import litellm
 
 logger = logging.getLogger(__name__)
 
@@ -112,176 +105,13 @@ def _cosine_from_dense(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _extract_embeddings(response: Any) -> list[list[float]]:
-    data = getattr(response, "data", None)
-    if data is None and isinstance(response, dict):
-        data = response.get("data")
-    if not data:
-        raise ValueError("embedding response missing data")
-
-    embeddings: list[list[float]] = []
-    for entry in data:
-        embedding = getattr(entry, "embedding", None)
-        if embedding is None and isinstance(entry, dict):
-            embedding = entry.get("embedding")
-        if embedding is None:
-            raise ValueError("embedding response missing embedding vector")
-        embeddings.append([float(value) for value in embedding])
-    return embeddings
-
-
-def _resolve_provider_api_key(provider) -> Optional[str]:
-    if provider is None:
-        return None
-    if not getattr(provider, "enabled", True):
-        return None
-
-    api_key: Optional[str] = None
-
-    if getattr(provider, "api_key_encrypted", None):
-        try:
-            api_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
-        except Exception as exc:  # pragma: no cover - depends on env configuration
-            logger.warning(
-                "Failed to decrypt embeddings API key for provider %s: %s",
-                getattr(provider, "key", "unknown"),
-                exc,
-            )
-            return None # Return None in case of decryption failure
-
-    if not api_key and getattr(provider, "env_var_name", None):
-        env_val = os.getenv(provider.env_var_name)
-        if env_val:
-            api_key = env_val
-
-    return api_key or None
-
-
-def _score_embeddings_for_endpoint(
-    tier: EmbeddingsLLMTier,
-    endpoint,
-    left: str,
-    right: str,
-) -> Optional[float]:
-    if endpoint is None or not getattr(endpoint, "enabled", False):
-        return None
-
-    provider = getattr(endpoint, "provider", None)
-    if provider is not None and not getattr(provider, "enabled", True):
-        return None
-
-    if litellm is None:
-        return None
-
-    raw_model = getattr(endpoint, "litellm_model", "").strip()
-    model_name = normalize_model_name(provider, raw_model, api_base=getattr(endpoint, "api_base", None))
-    if not model_name:
-        return None
-
-    params: Dict[str, Any] = {}
-    api_key = _resolve_provider_api_key(provider)
-    if api_key:
-        params["api_key"] = api_key
-
-    api_base = getattr(endpoint, "api_base", "").strip()
-    if api_base:
-        params["api_base"] = api_base
-        params["api_key"] = "sk-noauth" # Set api_key only if api_base is present
-
-    if provider is not None and "google" in getattr(provider, "key", ""):
-        project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
-        location = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
-        params["vertex_project"] = project
-        params["vertex_location"] = location
-
-    if "api_key" not in params and not api_base:
-        # No credentials available; skip this tier.
-        return None
-
-    try:
-        response = litellm.embedding(model=model_name, input=[left, right], **params)
-        embeddings = _extract_embeddings(response)
-        if len(embeddings) < 2:
-            raise ValueError("embedding response missing comparison vectors")
-        cosine = _cosine_from_dense(embeddings[0], embeddings[1])
-        ratio = (cosine + 1.0) / 2.0
-        return max(0.0, min(1.0, ratio))
-    except Exception as exc:  # pragma: no cover - depends on external API
-        logger.warning(
-            "Embeddings tier %s (%s) failed: %s",
-            tier.order,
-            getattr(endpoint, "key", "unknown"),
-            exc,
-        )
-        return None
-
-
 def _embedding_similarity(left: str, right: str, routing_profile=None) -> Optional[float]:
-    if litellm is None:
+    result = generate_embeddings([left, right], routing_profile=routing_profile)
+    if result is None or len(result.vectors) < 2:
         return None
-
-    # Try profile-based config first, then fall back to legacy
-    result = _embedding_similarity_from_profile(left, right, routing_profile)
-    if result is not None:
-        return result
-
-    return _embedding_similarity_from_legacy(left, right)
-
-
-def _embedding_similarity_from_profile(left: str, right: str, routing_profile=None) -> Optional[float]:
-    """Get embeddings similarity using an LLMRoutingProfile's embeddings config."""
-    try:
-        from ...models import LLMRoutingProfile, ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint
-
-        # Resolve the profile to use
-        profile = routing_profile
-        if profile is None:
-            profile = get_current_eval_routing_profile()
-        if profile is None:
-            profile = LLMRoutingProfile.objects.filter(is_active=True).first()
-
-        if profile is None:
-            return None  # Fall back to legacy
-
-        tier_prefetch = Prefetch(
-            "tier_endpoints",
-            queryset=ProfileEmbeddingsTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
-        )
-        tiers = ProfileEmbeddingsTier.objects.filter(profile=profile).prefetch_related(tier_prefetch).order_by("order")
-
-        for tier in tiers:
-            tier_endpoints = [
-                entry for entry in tier.tier_endpoints.all()
-                if entry.weight > 0
-            ]
-            for entry in tier_endpoints:
-                ratio = _score_embeddings_for_endpoint(tier, entry.endpoint, left, right)
-                if ratio is not None:
-                    return ratio
-        return None
-
-    except Exception:
-        logger.debug("Error getting embeddings config from profile", exc_info=True)
-        return None
-
-
-def _embedding_similarity_from_legacy(left: str, right: str) -> Optional[float]:
-    """Get embeddings similarity using legacy EmbeddingsLLMTier config."""
-    tier_prefetch = Prefetch(
-        "tier_endpoints",
-        queryset=EmbeddingsTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
-    )
-    tiers = EmbeddingsLLMTier.objects.prefetch_related(tier_prefetch).order_by("order")
-    for tier in tiers:
-        tier_endpoints = [
-            entry for entry in tier.tier_endpoints.all()
-            if entry.weight > 0
-        ]
-        for entry in tier_endpoints:
-            ratio = _score_embeddings_for_endpoint(tier, entry.endpoint, left, right)
-            if ratio is not None:
-                return ratio
-    return None
+    cosine = _cosine_from_dense(result.vectors[0], result.vectors[1])
+    ratio = (cosine + 1.0) / 2.0
+    return max(0.0, min(1.0, ratio))
 
 
 def _resolve_similarity_threshold(agent: PersistentAgent, similarity_threshold: Optional[float]) -> float:

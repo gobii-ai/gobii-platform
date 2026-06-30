@@ -37,9 +37,6 @@ function buildForecastMetrics(forecast: CreditForecast): ForecastMetric[] {
   if (metrics.length === 0 && isPositiveForecastValue(forecast.perRunCredits)) {
     metrics.push({ label: 'Per run', value: `${formatCredits(forecast.perRunCredits)} credits` })
   }
-  if (metrics.length === 0 && isPositiveForecastValue(forecast.setupCredits)) {
-    metrics.push({ label: 'Setup', value: `${formatCredits(forecast.setupCredits)} credits` })
-  }
 
   return metrics
 }

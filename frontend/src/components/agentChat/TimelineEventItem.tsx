@@ -53,7 +53,7 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   if (event.kind === 'inline-schedule') {
     return <InlineScheduleCard entry={event.entry} />
   }
-  if (event.kind === 'inline-credit-forecast') {
+  if (event.kind === 'credit_forecast') {
     return <CreditForecastTimelineCard forecast={event.forecast} />
   }
   if (event.kind === 'message') {

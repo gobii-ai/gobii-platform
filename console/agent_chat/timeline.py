@@ -36,6 +36,7 @@ from api.models import (
     BrowserUseAgentTaskQuerySet,
     CommsChannel,
     PersistentAgent,
+    PersistentAgentCreditForecast,
     PersistentAgentKanbanEvent,
     PersistentAgentCompletion,
     PersistentAgentMessage,
@@ -168,7 +169,7 @@ TimelineDirection = Literal["initial", "older", "newer"]
 @dataclass(slots=True)
 class CursorPayload:
     value: int
-    kind: Literal["message", "step", "thinking", "kanban", "plan"]
+    kind: Literal["message", "step", "thinking", "kanban", "plan", "credit_forecast"]
     identifier: str
 
     def encode(self) -> str:
@@ -213,6 +214,13 @@ class PlanEnvelope:
     sort_key: tuple[int, str, str]
     cursor: CursorPayload
     event: PersistentAgentKanbanEvent
+
+
+@dataclass(slots=True)
+class CreditForecastEnvelope:
+    sort_key: tuple[int, str, str]
+    cursor: CursorPayload
+    forecast: PersistentAgentCreditForecast
 
 
 @dataclass(slots=True)
@@ -882,6 +890,25 @@ def _plan_event_queryset(
     return list(qs[:limit])
 
 
+def _credit_forecast_queryset(
+    agent: PersistentAgent,
+    direction: TimelineDirection,
+    cursor: CursorPayload | None,
+) -> Sequence[PersistentAgentCreditForecast]:
+    qs = PersistentAgentCreditForecast.objects.filter(agent=agent).order_by("-estimated_at", "-agent_id")
+    if direction == "older" and cursor is not None:
+        qs = qs.filter(estimated_at__lte=_dt_from_cursor(cursor))
+    elif direction == "newer" and cursor is not None:
+        dt = _dt_from_cursor(cursor)
+        if cursor.kind == "credit_forecast":
+            qs = qs.filter(
+                Q(estimated_at__gt=dt) | Q(estimated_at=dt, agent_id__gt=cursor.identifier)
+            )
+        else:
+            qs = qs.filter(estimated_at__gt=dt)
+    return list(qs[:1])
+
+
 def _dt_from_cursor(cursor: CursorPayload) -> datetime:
     micros = cursor.value
     return datetime.fromtimestamp(micros / 1_000_000, tz=dt_timezone.utc)
@@ -960,15 +987,31 @@ def _envelop_plan_events(events: Iterable[PersistentAgentKanbanEvent]) -> list[P
     return envelopes
 
 
+def _envelop_credit_forecasts(forecasts: Iterable[PersistentAgentCreditForecast]) -> list[CreditForecastEnvelope]:
+    envelopes: list[CreditForecastEnvelope] = []
+    for forecast in forecasts:
+        sort_value = _microsecond_epoch(forecast.estimated_at)
+        identifier = str(forecast.agent_id)
+        cursor = CursorPayload(value=sort_value, kind="credit_forecast", identifier=identifier)
+        envelopes.append(
+            CreditForecastEnvelope(
+                sort_key=(sort_value, "credit_forecast", identifier),
+                cursor=cursor,
+                forecast=forecast,
+            )
+        )
+    return envelopes
+
+
 def _filter_by_direction(
-    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope],
+    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | CreditForecastEnvelope],
     direction: TimelineDirection,
     cursor: CursorPayload | None,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | CreditForecastEnvelope]:
     if not cursor or direction == "initial":
         return list(envelopes)
     pivot = (cursor.value, cursor.kind, cursor.identifier)
-    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope] = []
+    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | CreditForecastEnvelope] = []
     for env in envelopes:
         key = env.sort_key
         if direction == "older" and key < pivot:
@@ -979,10 +1022,10 @@ def _filter_by_direction(
 
 
 def _truncate_for_direction(
-    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope],
+    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | CreditForecastEnvelope],
     direction: TimelineDirection,
     limit: int,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | CreditForecastEnvelope]:
     if not envelopes:
         return []
     if direction == "older":
@@ -1061,7 +1104,15 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
         except Exception:
             pass
 
-    return message_exists or step_exists or completion_exists or plan_event_exists
+    forecast_exists = PersistentAgentCreditForecast.objects.filter(agent=agent, estimated_at__lt=dt).exists()
+    if cursor.kind == "credit_forecast":
+        forecast_exists = forecast_exists or PersistentAgentCreditForecast.objects.filter(
+            agent=agent,
+            estimated_at=dt,
+            agent_id__lt=cursor.identifier,
+        ).exists()
+
+    return message_exists or step_exists or completion_exists or plan_event_exists or forecast_exists
 
 
 def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> bool:
@@ -1133,7 +1184,15 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
         except Exception:
             pass
 
-    return message_exists or step_exists or completion_exists or plan_event_exists
+    forecast_exists = PersistentAgentCreditForecast.objects.filter(agent=agent, estimated_at__gt=dt).exists()
+    if cursor.kind == "credit_forecast":
+        forecast_exists = forecast_exists or PersistentAgentCreditForecast.objects.filter(
+            agent=agent,
+            estimated_at=dt,
+            agent_id__gt=cursor.identifier,
+        ).exists()
+
+    return message_exists or step_exists or completion_exists or plan_event_exists or forecast_exists
 
 
 WEB_TASK_ACTIVE_STATUSES = (
@@ -1344,13 +1403,14 @@ def fetch_timeline_window(
     step_envelopes = _envelop_steps(_steps_queryset(agent, direction, cursor_payload))
     thinking_envelopes = _envelop_thinking(_thinking_queryset(agent, direction, cursor_payload))
     plan_envelopes = _envelop_plan_events(_plan_event_queryset(agent, direction, cursor_payload))
+    forecast_envelopes = _envelop_credit_forecasts(_credit_forecast_queryset(agent, direction, cursor_payload))
     if direction == "initial" and not plan_envelopes:
         baseline_event = ensure_plan_baseline_event(agent)
         if baseline_event:
             plan_envelopes = _envelop_plan_events([baseline_event])
 
-    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope] = sorted(
-        [*message_envelopes, *step_envelopes, *thinking_envelopes, *plan_envelopes],
+    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | CreditForecastEnvelope] = sorted(
+        [*message_envelopes, *step_envelopes, *thinking_envelopes, *plan_envelopes, *forecast_envelopes],
         key=lambda env: env.sort_key,
     )
 
@@ -1381,6 +1441,8 @@ def fetch_timeline_window(
             timeline_events.append(_serialize_thinking(env))
         elif isinstance(env, PlanEnvelope):
             timeline_events.append(serialize_persisted_plan_event(env, agent_name))
+        elif isinstance(env, CreditForecastEnvelope):
+            timeline_events.append(serialize_credit_forecast_event(env))
         else:
             timeline_events.append(_serialize_message(env, user_lookup))
     if cluster_buffer:
@@ -1442,6 +1504,27 @@ def build_tool_cluster_from_steps(steps: Sequence[PersistentAgentStep]) -> dict:
         env.tool_call.tool_name for env in envelopes if env.tool_call
     )
     return _build_cluster(envelopes, label_map)
+
+
+def serialize_credit_forecast_event(forecast_or_env: PersistentAgentCreditForecast | CreditForecastEnvelope) -> dict:
+    from api.services.agent_credit_forecasts import serialize_credit_forecast
+
+    if isinstance(forecast_or_env, CreditForecastEnvelope):
+        env = forecast_or_env
+    else:
+        forecast = forecast_or_env
+        sort_value = _microsecond_epoch(forecast.estimated_at)
+        env = CreditForecastEnvelope(
+            sort_key=(sort_value, "credit_forecast", str(forecast.agent_id)),
+            cursor=CursorPayload(value=sort_value, kind="credit_forecast", identifier=str(forecast.agent_id)),
+            forecast=forecast,
+        )
+    return {
+        "kind": "credit_forecast",
+        "cursor": env.cursor.encode(),
+        "timestamp": _format_timestamp(env.forecast.estimated_at),
+        "forecast": serialize_credit_forecast(env.forecast),
+    }
 
 
 def serialize_persisted_plan_event(env: PlanEnvelope, agent_name: str) -> dict:

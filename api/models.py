@@ -7691,11 +7691,6 @@ class PersistentAgent(models.Model):
 class HistoricalAgentCostSample(models.Model):
     """Historical lifecycle credit sample used for agent-level forecasting."""
 
-    class Confidence(models.TextChoices):
-        LOW = "low", "Low"
-        MEDIUM = "medium", "Medium"
-        HIGH = "high", "High"
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source_sample_id = models.CharField(max_length=255, unique=True)
     source_agent_id = models.UUIDField(db_index=True)
@@ -7708,15 +7703,9 @@ class HistoricalAgentCostSample(models.Model):
     owner_type = models.CharField(max_length=32, blank=True)
     tier_key = models.CharField(max_length=32, blank=True, db_index=True)
     tier_credit_multiplier = models.DecimalField(max_digits=8, decimal_places=3, default=Decimal("1.000"))
-    setup_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
-    first_run_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
-    daily_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
-    monthly_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
-    normalized_setup_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     normalized_first_run_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     normalized_daily_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     normalized_monthly_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
-    sample_confidence = models.CharField(max_length=16, choices=Confidence.choices, default=Confidence.LOW)
     charged_step_count = models.PositiveIntegerField(default=0)
     tool_call_count = models.PositiveIntegerField(default=0)
     observation_days = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
@@ -7745,12 +7734,6 @@ class HistoricalAgentCostSample(models.Model):
 class PersistentAgentCreditForecast(models.Model):
     """Latest persisted credit forecast for a current persistent agent."""
 
-    class Confidence(models.TextChoices):
-        NONE = "none", "None"
-        LOW = "low", "Low"
-        MEDIUM = "medium", "Medium"
-        HIGH = "high", "High"
-
     class WarningLevel(models.TextChoices):
         NONE = "none", "None"
         MEDIUM = "medium", "Medium"
@@ -7762,16 +7745,10 @@ class PersistentAgentCreditForecast(models.Model):
         primary_key=True,
         related_name="credit_forecast",
     )
-    setup_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     per_run_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     daily_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     monthly_credits = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
-    confidence = models.CharField(max_length=16, choices=Confidence.choices, default=Confidence.NONE)
-    sample_count = models.PositiveIntegerField(default=0)
     warning_level = models.CharField(max_length=16, choices=WarningLevel.choices, default=WarningLevel.NONE)
-    warning_reasons = models.JSONField(default=list, blank=True)
-    embedding_text = models.TextField(blank=True)
-    embedding_model = models.CharField(max_length=128, blank=True)
     estimated_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

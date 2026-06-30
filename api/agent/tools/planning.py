@@ -60,8 +60,13 @@ def execute_end_planning(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     forecast = persist_agent_credit_forecast(updated_agent)
 
-    from console.agent_chat.signals import emit_agent_planning_state_update, emit_agent_usage_update
+    from console.agent_chat.signals import (
+        emit_agent_credit_forecast_timeline_event,
+        emit_agent_planning_state_update,
+        emit_agent_usage_update,
+    )
 
+    emit_agent_credit_forecast_timeline_event(updated_agent)
     emit_agent_planning_state_update(updated_agent)
     emit_agent_usage_update(updated_agent)
 

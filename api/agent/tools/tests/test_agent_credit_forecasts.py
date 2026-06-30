@@ -46,16 +46,14 @@ class AgentCreditForecastEstimatorTests(TestCase):
             planning_plan="Review vendor email daily and send a concise summary.",
         )
 
-    def _sample(self, suffix: str, *, normalized_setup: str, normalized_run: str) -> HistoricalAgentCostSample:
+    def _sample(self, suffix: str, *, normalized_run: str) -> HistoricalAgentCostSample:
         return HistoricalAgentCostSample.objects.create(
             source_sample_id=f"sample-{suffix}",
             source_agent_id=self.agent.id,
             tier_credit_multiplier=Decimal("1.00"),
-            normalized_setup_credits=Decimal(normalized_setup),
             normalized_first_run_credits=Decimal(normalized_run),
             normalized_daily_credits=Decimal(normalized_run),
             normalized_monthly_credits=Decimal(normalized_run) * Decimal("30"),
-            sample_confidence=HistoricalAgentCostSample.Confidence.HIGH,
             embedding_dimension=2,
             embedding_text="historical agent",
         )
@@ -64,37 +62,33 @@ class AgentCreditForecastEstimatorTests(TestCase):
     @patch("api.services.agent_credit_forecasts.find_similar_agent_samples")
     @patch("api.services.agent_credit_forecasts.generate_embedding")
     def test_no_data_fallback_persists_empty_forecast(self, mock_embedding, mock_find, mock_available):
-        mock_embedding.return_value = EmbeddingResult(vector=[0.1, 0.2], model="test-embedding")
+        mock_embedding.return_value = EmbeddingResult(vectors=[[0.1, 0.2]], model="test-embedding")
         mock_find.return_value = []
         mock_available.return_value = Decimal("1000")
 
         forecast = persist_agent_credit_forecast(self.agent)
 
-        self.assertEqual(forecast.confidence, PersistentAgentCreditForecast.Confidence.NONE)
-        self.assertEqual(forecast.sample_count, 0)
-        self.assertIsNone(forecast.setup_credits)
+        self.assertIsNone(forecast.per_run_credits)
         self.assertEqual(forecast.warning_level, PersistentAgentCreditForecast.WarningLevel.NONE)
 
     @patch("api.services.agent_credit_forecasts.TaskCreditService.calculate_available_tasks_for_owner")
     @patch("api.services.agent_credit_forecasts.find_similar_agent_samples")
     @patch("api.services.agent_credit_forecasts.generate_embedding")
     def test_tier_multiplier_applies_to_normalized_p80_estimates(self, mock_embedding, mock_find, mock_available):
-        mock_embedding.return_value = EmbeddingResult(vector=[0.1, 0.2], model="test-embedding")
+        mock_embedding.return_value = EmbeddingResult(vectors=[[0.1, 0.2]], model="test-embedding")
         mock_available.return_value = Decimal("1000")
         samples = [
-            SimilarAgentSample(self._sample("a", normalized_setup="10", normalized_run="4"), distance=0.05),
-            SimilarAgentSample(self._sample("b", normalized_setup="20", normalized_run="8"), distance=0.05),
-            SimilarAgentSample(self._sample("c", normalized_setup="30", normalized_run="12"), distance=0.05),
+            SimilarAgentSample(self._sample("a", normalized_run="4"), distance=0.05),
+            SimilarAgentSample(self._sample("b", normalized_run="8"), distance=0.05),
+            SimilarAgentSample(self._sample("c", normalized_run="12"), distance=0.05),
         ]
         mock_find.return_value = samples
 
         forecast = estimate_agent_credit_forecast(self.agent)
 
-        self.assertEqual(forecast.setup_credits, Decimal("60"))
         self.assertEqual(forecast.per_run_credits, Decimal("24"))
         self.assertEqual(forecast.daily_credits, Decimal("0"))
         self.assertEqual(forecast.monthly_credits, Decimal("0"))
-        self.assertEqual(forecast.confidence, PersistentAgentCreditForecast.Confidence.MEDIUM)
 
     @patch("api.services.agent_credit_forecasts.TaskCreditService.calculate_available_tasks_for_owner")
     @patch("api.services.agent_credit_forecasts.find_similar_agent_samples")
@@ -102,10 +96,10 @@ class AgentCreditForecastEstimatorTests(TestCase):
     def test_schedule_frequency_converts_per_run_into_daily_and_monthly(self, mock_embedding, mock_find, mock_available):
         self.agent.schedule = "@every 12h"
         self.agent.save(update_fields=["schedule"])
-        mock_embedding.return_value = EmbeddingResult(vector=[0.1, 0.2], model="test-embedding")
+        mock_embedding.return_value = EmbeddingResult(vectors=[[0.1, 0.2]], model="test-embedding")
         mock_available.return_value = Decimal("1000")
         mock_find.return_value = [
-            SimilarAgentSample(self._sample("schedule", normalized_setup="5", normalized_run="10"), distance=0.01)
+            SimilarAgentSample(self._sample("schedule", normalized_run="10"), distance=0.01)
         ]
 
         forecast = estimate_agent_credit_forecast(self.agent)
@@ -121,9 +115,9 @@ class AgentCreditForecastEstimatorTests(TestCase):
     def test_affordability_warning_thresholds(self, mock_embedding, mock_find, mock_available):
         self.agent.schedule = "@daily"
         self.agent.save(update_fields=["schedule"])
-        mock_embedding.return_value = EmbeddingResult(vector=[0.1, 0.2], model="test-embedding")
+        mock_embedding.return_value = EmbeddingResult(vectors=[[0.1, 0.2]], model="test-embedding")
         mock_find.return_value = [
-            SimilarAgentSample(self._sample("warning", normalized_setup="20", normalized_run="20"), distance=0.01)
+            SimilarAgentSample(self._sample("warning", normalized_run="20"), distance=0.01)
         ]
 
         mock_available.return_value = Decimal("2000")
@@ -132,7 +126,6 @@ class AgentCreditForecastEstimatorTests(TestCase):
         mock_available.return_value = Decimal("10")
         high = estimate_agent_credit_forecast(self.agent)
         self.assertEqual(high.warning_level, "high")
-        self.assertIn("low remaining credits", high.warning_reasons)
 
         mock_available.return_value = Decimal("5000")
         self.assertEqual(estimate_agent_credit_forecast(self.agent).warning_level, "none")
@@ -154,6 +147,7 @@ class AgentCreditForecastIntegrationTests(TestCase):
 
     @patch("console.agent_chat.signals.emit_agent_usage_update")
     @patch("console.agent_chat.signals.emit_agent_planning_state_update")
+    @patch("console.agent_chat.signals.emit_agent_credit_forecast_timeline_event")
     @patch("api.services.agent_credit_forecasts.TaskCreditService.calculate_available_tasks_for_owner")
     @patch("api.services.agent_credit_forecasts.find_similar_agent_samples")
     @patch("api.services.agent_credit_forecasts.generate_embedding")
@@ -162,6 +156,7 @@ class AgentCreditForecastIntegrationTests(TestCase):
         mock_embedding,
         mock_find,
         mock_available,
+        _mock_forecast_emit,
         _mock_planning_emit,
         _mock_usage_emit,
     ):
@@ -169,15 +164,13 @@ class AgentCreditForecastIntegrationTests(TestCase):
             source_sample_id="end-planning-sample",
             source_agent_id=self.agent.id,
             tier_credit_multiplier=Decimal("1.00"),
-            normalized_setup_credits=Decimal("8"),
             normalized_first_run_credits=Decimal("3"),
             normalized_daily_credits=Decimal("3"),
             normalized_monthly_credits=Decimal("90"),
-            sample_confidence=HistoricalAgentCostSample.Confidence.HIGH,
             embedding_dimension=2,
             embedding_text="historical planning agent",
         )
-        mock_embedding.return_value = EmbeddingResult(vector=[0.1, 0.2], model="test-embedding")
+        mock_embedding.return_value = EmbeddingResult(vectors=[[0.1, 0.2]], model="test-embedding")
         mock_find.return_value = [SimilarAgentSample(sample, distance=0.01)]
         mock_available.return_value = Decimal("1000")
 
@@ -187,7 +180,6 @@ class AgentCreditForecastIntegrationTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["credit_forecast"]["setupCredits"], 8)
         self.assertEqual(result["credit_forecast"]["dailyCredits"], 3)
         self.assertEqual(result["schedule"], "@daily")
         self.agent.refresh_from_db()
@@ -227,13 +219,12 @@ class AgentCreditForecastIntegrationTests(TestCase):
                 "enabled_tools": ["gmail.search"],
                 "charged_step_count": 6,
                 "tool_call_count": 2,
-                "setup_credits": Decimal("4"),
                 "first_run_credits": Decimal("7"),
                 "observed_total_credits": Decimal("30"),
                 "observation_days": Decimal("3"),
             }
         ]
-        mock_embedding.return_value = EmbeddingResult(vector=[0.1, 0.2], model="test-embedding")
+        mock_embedding.return_value = EmbeddingResult(vectors=[[0.1, 0.2]], model="test-embedding")
 
         call_command(
             "seed_agent_credit_forecast_samples",
@@ -246,7 +237,7 @@ class AgentCreditForecastIntegrationTests(TestCase):
         )
 
         sample = HistoricalAgentCostSample.objects.get(source_sample_id=f"agent:{self.agent.id}")
-        self.assertEqual(sample.first_run_credits, Decimal("7"))
-        self.assertEqual(sample.daily_credits, Decimal("10"))
-        self.assertEqual(sample.monthly_credits, Decimal("300"))
+        self.assertEqual(sample.normalized_first_run_credits, Decimal("7"))
+        self.assertEqual(sample.normalized_daily_credits, Decimal("10"))
+        self.assertEqual(sample.normalized_monthly_credits, Decimal("300"))
         mock_set_embedding.assert_called_once()
