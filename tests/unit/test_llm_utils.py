@@ -162,7 +162,7 @@ class RunCompletionReasoningTests(TestCase):
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
-    def test_azure_non_openai_model_does_not_use_responses_bridge_or_reasoning_effort(self, mock_completion):
+    def test_azure_non_openai_model_uses_chat_completions_with_reasoning_effort(self, mock_completion):
         response = make_completion_response(content="Azure DeepSeek answer")
         mock_completion.return_value = response
 
@@ -180,6 +180,31 @@ class RunCompletionReasoningTests(TestCase):
         )
 
         self.assertIs(result, response)
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs["model"], "azure/deepseek-v4-flash")
+        self.assertEqual(kwargs["reasoning_effort"], "medium")
+        self.assertEqual(kwargs["allowed_openai_params"], ["reasoning_effort"])
+        self.assertNotIn("extra_body", kwargs)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_azure_non_openai_model_respects_reasoning_effort_none(self, mock_completion):
+        response = make_completion_response(content="Azure DeepSeek answer")
+        mock_completion.return_value = response
+
+        run_completion(
+            model="azure/deepseek-v4-flash",
+            messages=[{"role": "user", "content": "Hello"}],
+            params={
+                "api_key": "azure-key",
+                "api_base": "https://example.services.ai.azure.com",
+                "api_version": "v1",
+                "custom_llm_provider": "azure",
+                "supports_reasoning": True,
+                "reasoning_effort": "none",
+            },
+        )
+
         _, kwargs = mock_completion.call_args
         self.assertEqual(kwargs["model"], "azure/deepseek-v4-flash")
         self.assertNotIn("reasoning_effort", kwargs)

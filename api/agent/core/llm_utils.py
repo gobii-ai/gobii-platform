@@ -456,9 +456,12 @@ def run_completion(
     }
 
     kwargs.pop("reasoning_effort", None)
-    if supports_reasoning:
-        if selected_reasoning_effort and _completion_supports_reasoning_effort(model, kwargs):
-            kwargs["reasoning_effort"] = selected_reasoning_effort
+    if (
+        supports_reasoning
+        and selected_reasoning_effort
+        and not (_is_azure_non_openai_model(model, kwargs) and selected_reasoning_effort == "none")
+    ):
+        kwargs["reasoning_effort"] = selected_reasoning_effort
 
     if drop_params:
         kwargs["drop_params"] = True
@@ -495,7 +498,7 @@ def run_completion(
             extra_body["reasoning_effort"] = reasoning_params
         if extra_body:
             kwargs["extra_body"] = extra_body
-    if supports_reasoning and not use_responses_bridge and _completion_supports_reasoning_effort(model, kwargs):
+    if "reasoning_effort" in kwargs and not use_responses_bridge:
         allowed_openai_params = kwargs.get("allowed_openai_params")
         if allowed_openai_params is None:
             allowed_openai_params = []
@@ -569,7 +572,7 @@ def _litellm_responses_bridge_model(model: str, kwargs: dict[str, Any]) -> str |
             return f"openai/{model}"
         return None
     if provider in {"azure", "azure_openai"}:
-        if not is_openai_model_name(model):
+        if _is_azure_non_openai_model(model, kwargs):
             return None
         return model if model.startswith("azure/responses/") else f"azure/responses/{model.split('/', 1)[-1]}"
     if provider not in (None, "openai") or kwargs.get("api_base"):
@@ -581,11 +584,9 @@ def _litellm_responses_bridge_model(model: str, kwargs: dict[str, Any]) -> str |
     return None
 
 
-def _completion_supports_reasoning_effort(model: str, kwargs: dict[str, Any]) -> bool:
+def _is_azure_non_openai_model(model: str, kwargs: dict[str, Any]) -> bool:
     provider = kwargs.get("custom_llm_provider") or kwargs.get("provider")
-    if provider in {"azure", "azure_openai"}:
-        return is_openai_model_name(model)
-    return True
+    return provider in {"azure", "azure_openai"} and not is_openai_model_name(model)
 
 
 def _litellm_responses_bridge_tool_choice(tool_choice: Any) -> Any:
