@@ -10,10 +10,12 @@ from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
     EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
     EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
+    apply_customer_account_pause_transitions,
     get_owner_account_pause_state,
     pause_owner_execution,
     pause_owner_execution_by_ref,
     resume_owner_execution,
+    schedule_customer_account_pause,
     sync_owner_customer_account_pause,
 )
 from util.analytics import AnalyticsEvent, AnalyticsSource
@@ -233,6 +235,134 @@ class OwnerExecutionPauseAnalyticsTests(TestCase):
         self.assertFalse(state["customer_paused"])
         self.assertEqual(state["reason"], "")
         self.assertIsNone(state["resume_at"])
+
+    def test_sync_customer_pause_with_future_period_schedules_without_pausing(self):
+        effective_at = (timezone.now() + timedelta(days=30)).replace(microsecond=0)
+        resume_at = effective_at + timedelta(days=30)
+
+        changed = sync_owner_customer_account_pause(
+            self.user,
+            subscription_payload={
+                "id": "sub_future_pause",
+                "current_period_end": int(effective_at.timestamp()),
+                "pause_collection": {
+                    "behavior": "void",
+                    "resumes_at": int(resume_at.timestamp()),
+                },
+            },
+            source="stripe.customer.subscription.updated.pause_collection",
+        )
+
+        self.assertTrue(changed)
+        state = get_owner_account_pause_state(self.user)
+        self.assertFalse(state["paused"])
+        self.assertFalse(state["customer_paused"])
+        self.assertTrue(state["scheduled"])
+        self.assertEqual(state["scheduled_effective_at"], effective_at)
+        self.assertEqual(state["scheduled_resume_at"], resume_at)
+        self.assertEqual(state["scheduled_subscription_id"], "sub_future_pause")
+
+    def test_sync_removed_pause_collection_clears_scheduled_pause(self):
+        effective_at = (timezone.now() + timedelta(days=30)).replace(microsecond=0)
+        resume_at = effective_at + timedelta(days=30)
+        schedule_customer_account_pause(
+            self.user,
+            effective_at=effective_at,
+            resume_at=resume_at,
+            subscription_id="sub_future_pause",
+            source="test",
+        )
+
+        changed = sync_owner_customer_account_pause(
+            self.user,
+            subscription_payload={"id": "sub_future_pause", "pause_collection": None},
+            source="stripe.customer.subscription.updated.pause_collection",
+        )
+
+        self.assertTrue(changed)
+        state = get_owner_account_pause_state(self.user)
+        self.assertFalse(state["scheduled"])
+        self.assertIsNone(state["scheduled_effective_at"])
+        self.assertIsNone(state["scheduled_resume_at"])
+
+    @patch("api.services.owner_execution_pause.AgentLifecycleService.shutdown")
+    @patch("api.services.owner_execution_pause.Analytics.track_event")
+    def test_apply_due_scheduled_pause_flips_owner_to_customer_pause(
+        self,
+        mock_track_event,
+        mock_shutdown,
+    ):
+        now = timezone.now().replace(microsecond=0)
+        effective_at = now - timedelta(minutes=1)
+        resume_at = now + timedelta(days=30)
+        agent = self._create_agent(name="Scheduled Pause Agent")
+        schedule_customer_account_pause(
+            self.user,
+            effective_at=effective_at,
+            resume_at=resume_at,
+            subscription_id="sub_due_pause",
+            source="test",
+        )
+
+        result = apply_customer_account_pause_transitions(now=now)
+
+        self.assertEqual(result["scheduled_applied"], 1)
+        self.user.billing.refresh_from_db()
+        self.assertTrue(self.user.billing.execution_paused)
+        self.assertEqual(self.user.billing.execution_pause_reason, EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE)
+        self.assertEqual(self.user.billing.execution_paused_at, effective_at)
+        self.assertEqual(self.user.billing.execution_pause_resume_at, resume_at)
+        self.assertIsNone(self.user.billing.scheduled_customer_pause_effective_at)
+        self.assertIsNone(self.user.billing.scheduled_customer_pause_resume_at)
+        self.assertEqual(self.user.billing.scheduled_customer_pause_subscription_id, "")
+        mock_shutdown.assert_called_once()
+        self.assertEqual(str(mock_shutdown.call_args.args[0]), str(agent.id))
+
+    @patch("api.services.owner_execution_pause.Analytics.track_event")
+    def test_apply_due_active_customer_pause_resumes_owner(self, mock_track_event):
+        now = timezone.now().replace(microsecond=0)
+        pause_owner_execution(
+            self.user,
+            EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
+            source="test",
+            resume_at=now - timedelta(seconds=1),
+            trigger_agent_cleanup=False,
+        )
+
+        result = apply_customer_account_pause_transitions(now=now)
+
+        self.assertEqual(result["active_resumed"], 1)
+        self.user.billing.refresh_from_db()
+        self.assertFalse(self.user.billing.execution_paused)
+        self.assertEqual(self.user.billing.execution_pause_reason, "")
+
+    def test_due_scheduled_pause_does_not_overwrite_billing_delinquency(self):
+        now = timezone.now().replace(microsecond=0)
+        self.user.billing.execution_paused = True
+        self.user.billing.execution_pause_reason = EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY
+        self.user.billing.execution_paused_at = now - timedelta(days=1)
+        self.user.billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
+        )
+        schedule_customer_account_pause(
+            self.user,
+            effective_at=now - timedelta(minutes=1),
+            resume_at=now + timedelta(days=30),
+            subscription_id="sub_blocked_pause",
+            source="test",
+        )
+
+        result = apply_customer_account_pause_transitions(now=now)
+
+        self.assertEqual(result["scheduled_blocked"], 1)
+        self.user.billing.refresh_from_db()
+        self.assertTrue(self.user.billing.execution_paused)
+        self.assertEqual(self.user.billing.execution_pause_reason, EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY)
+        self.assertIsNotNone(self.user.billing.scheduled_customer_pause_effective_at)
 
     @patch("api.agent.comms.outbound_delivery.deliver_agent_sms")
     @patch("api.agent.comms.outbound_delivery.deliver_agent_email")

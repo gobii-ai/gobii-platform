@@ -4418,6 +4418,24 @@ class UserBilling(models.Model):
         blank=True,
         help_text="When a customer-requested account pause is expected to resume, if known.",
     )
+    scheduled_customer_pause_effective_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="When a customer-requested account pause should begin after the paid period ends.",
+    )
+    scheduled_customer_pause_resume_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When a scheduled customer-requested account pause should resume.",
+    )
+    scheduled_customer_pause_subscription_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Stripe subscription ID for the pending customer-requested account pause.",
+    )
 
     def __str__(self):
         return f"Billing for {self.user.email}"

@@ -31,7 +31,13 @@ import type { SignupPreviewState } from '../../types/agentRoster'
 import type { TemplateRecommendation } from '../../api/agentSpawnIntent'
 import { isContinuationUpgradeModalSource, selectSubscriptionState, subscriptionActions, type PlanTier } from '../../store/subscriptionSlice'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
-import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
+import type {
+  AccountPauseInfo,
+  AddonPackOption,
+  ContactCapInfo,
+  ContactCapStatus,
+  TrialInfo,
+} from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import type { StatusExpansionTargets } from './statusExpansion'
@@ -203,6 +209,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
   onStopProcessing?: () => void | Promise<void>
   addonsTrial?: TrialInfo | null
+  addonsAccountPause?: AccountPauseInfo | null
   taskQuota?: TaskQuotaInfo | null
   showPurchaseSeatsPrompt?: boolean
   showTaskCreditsWarning?: boolean
@@ -316,6 +323,7 @@ export function AgentChatLayout({
   onUpdateTaskPacks,
   onStopProcessing,
   addonsTrial = null,
+  addonsAccountPause = null,
   taskQuota = null,
   showPurchaseSeatsPrompt = false,
   showTaskCreditsWarning = false,
@@ -1489,6 +1497,7 @@ export function AgentChatLayout({
         taskPackUpdating={taskPackUpdating}
         onUpdateTaskPacks={onUpdateTaskPacks}
         taskQuota={taskQuota}
+        accountPause={addonsAccountPause}
         manageBillingUrl={contactPackManageUrl}
       />
       <main className={mainClassName} data-sidebar-mode={sidebarMode} data-plan-mode={workspacePlanMode}>

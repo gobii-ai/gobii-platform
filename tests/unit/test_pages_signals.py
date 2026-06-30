@@ -1922,6 +1922,46 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(self.billing.execution_pause_resume_at, resume_at)
 
     @tag("batch_pages")
+    def test_active_subscription_update_with_future_pause_collection_schedules_owner_customer_pause(self):
+        effective_at = (timezone.now() + timedelta(days=30)).replace(microsecond=0)
+        resume_at = effective_at + timedelta(days=30)
+        payload = _build_event_payload(status="active", billing_reason="subscription_update")
+        payload["current_period_end"] = int(effective_at.timestamp())
+        payload["pause_collection"] = {
+            "behavior": "void",
+            "resumes_at": int(resume_at.timestamp()),
+        }
+        event = _build_djstripe_event(
+            payload,
+            event_type="customer.subscription.updated",
+            previous_attributes={"pause_collection": None},
+            event_id="evt_customer_pause_scheduled",
+        )
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.status = "active"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.resume_owner_execution", wraps=real_resume_owner_execution) as mock_resume_owner:
+
+            handle_subscription_event(event)
+
+        mock_resume_owner.assert_not_called()
+        self.billing.refresh_from_db()
+        self.assertFalse(self.billing.execution_paused)
+        self.assertEqual(self.billing.execution_pause_reason, "")
+        self.assertEqual(self.billing.scheduled_customer_pause_effective_at, effective_at)
+        self.assertEqual(self.billing.scheduled_customer_pause_resume_at, resume_at)
+        self.assertEqual(self.billing.scheduled_customer_pause_subscription_id, "sub_123")
+
+    @tag("batch_pages")
     def test_active_subscription_update_clears_customer_pause_when_pause_collection_removed(self):
         resume_at = (timezone.now() + timedelta(days=7)).replace(microsecond=0)
         self.billing.execution_paused = True

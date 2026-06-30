@@ -1,11 +1,12 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.urls import reverse
+from django.utils import timezone
 from waffle.testutils import override_switch
 
 from api.models import (
@@ -171,6 +172,40 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertIn("support@gobii.ai", payload.get("detail", ""))
 
     @patch("console.billing_update_service.stripe_status")
+    def test_personal_billing_mutation_rejects_scheduled_customer_pause(self, mock_stripe_status):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        self.user.billing.scheduled_customer_pause_effective_at = timezone.now() + timedelta(days=7)
+        self.user.billing.scheduled_customer_pause_resume_at = timezone.now() + timedelta(days=37)
+        self.user.billing.scheduled_customer_pause_subscription_id = "sub_scheduled"
+        self.user.billing.save(
+            update_fields=[
+                "scheduled_customer_pause_effective_at",
+                "scheduled_customer_pause_resume_at",
+                "scheduled_customer_pause_subscription_id",
+            ]
+        )
+
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.user.id)
+        session["context_name"] = self.user.get_full_name() or self.user.email
+        session.save()
+
+        resp = self.client.post(
+            self.url,
+            data=json.dumps({
+                "ownerType": "user",
+                "addonQuantities": {"price_task_pack": 1},
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        payload = resp.json()
+        self.assertEqual(payload.get("error"), "customer_pause_scheduled")
+        self.assertIn("pause is scheduled", payload.get("detail", ""))
+
+    @patch("console.billing_update_service.stripe_status")
     def test_org_addons_rejected_without_seats(self, mock_stripe_status):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
 
@@ -264,14 +299,22 @@ class ConsoleBillingUpdateApiTests(TestCase):
         "console.billing_update_service.get_or_create_stripe_customer",
         return_value=SimpleNamespace(id="cus_plan_change"),
     )
+    @patch("console.billing_update_service.get_stripe_settings")
     @patch("console.billing_update_service.stripe_status")
     def test_plan_change_without_active_subscription_redirects_to_checkout(
         self,
         mock_stripe_status,
+        mock_get_stripe_settings,
         _mock_get_customer,
         mock_ensure_single_subscription,
     ):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            scale_price_id="price_scale",
+            startup_additional_task_price_id="price_startup_meter",
+            scale_additional_task_price_id="price_scale_meter",
+        )
 
         session = self.client.session
         session["context_type"] = "personal"
@@ -421,18 +464,26 @@ class ConsoleBillingUpdateApiTests(TestCase):
         "console.billing_update_service.get_or_create_stripe_customer",
         return_value=SimpleNamespace(id="cus_plan_change"),
     )
+    @patch("console.billing_update_service.get_stripe_settings")
     @patch("util.subscription_helper.Subscription.sync_from_stripe_data", side_effect=RuntimeError("sync failure"))
     @patch("console.billing_update_service.stripe_status")
     def test_plan_change_sync_failures_are_best_effort(
         self,
         mock_stripe_status,
         _mock_subscription_sync,
+        mock_get_stripe_settings,
         _mock_get_customer,
         _mock_ensure_single_subscription,
         mock_retrieve_subscription,
         _mock_assign_key,
     ):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            scale_price_id="price_scale",
+            startup_additional_task_price_id="price_startup_meter",
+            scale_additional_task_price_id="price_scale_meter",
+        )
         mock_retrieve_subscription.return_value = {
             "id": "sub_plan_change",
             "latest_invoice": None,

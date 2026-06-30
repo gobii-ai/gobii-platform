@@ -840,6 +840,14 @@ CELERY_BEAT_SCHEDULE = {
             "routing_key": "celery.single_instance",  # Use single instance routing to prevent overlaps
         },
     },
+    "apply-customer-account-pause-transitions": {
+        "task": "api.tasks.apply_customer_account_pause_transitions",
+        "schedule": crontab(minute="*"),
+        "options": {
+            "expires": 300,
+            "routing_key": "celery.single_instance",
+        },
+    },
     "prune-prompt-archives": {
         "task": "api.tasks.maintenance_tasks.prune_prompt_archives",
         "schedule": crontab(minute=15, hour=2),  # Nightly cleanup at 02:15 UTC

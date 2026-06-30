@@ -3510,6 +3510,46 @@ class ConsoleViewsTest(TestCase):
         mock_agent_resume.assert_not_called()
 
     @tag("batch_console_agents_management")
+    def test_agent_addons_api_rejects_scheduled_customer_pause(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        self.user.billing.scheduled_customer_pause_effective_at = timezone.now() + timedelta(days=7)
+        self.user.billing.scheduled_customer_pause_resume_at = timezone.now() + timedelta(days=37)
+        self.user.billing.scheduled_customer_pause_subscription_id = "sub_scheduled"
+        self.user.billing.save(
+            update_fields=[
+                "scheduled_customer_pause_effective_at",
+                "scheduled_customer_pause_resume_at",
+                "scheduled_customer_pause_subscription_id",
+            ]
+        )
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Scheduled Pause Addons API Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Scheduled Pause Addons API Agent",
+            charter="Task pack blocked flow",
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse("console_agent_addons", kwargs={"agent_id": agent.id})
+        body = {"taskPacks": {"quantities": {"price_task_pack": 1}}}
+
+        with patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.api_views.update_task_pack_quantities") as mock_update_task:
+            response = self.client.post(
+                url,
+                data=json.dumps(body),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("pause is scheduled", response.json().get("error", ""))
+        mock_update_task.assert_not_called()
+
+    @tag("batch_console_agents_management")
     def test_agent_addons_context_resolves_personal_plan_payload(self):
         from api.models import PersistentAgent, BrowserUseAgent
         from console import api_views as console_api_views

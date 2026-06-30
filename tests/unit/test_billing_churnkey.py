@@ -103,3 +103,15 @@ class BillingChurnKeyTests(TestCase):
                 "provider": "stripe",
             },
         )
+        self.assertEqual(payload["endpoints"]["churnKeyPauseUrl"], reverse("churnkey_pause_subscription"))
+        self.assertEqual(
+            payload["accountPause"],
+            {
+                "paused": False,
+                "scheduled": False,
+                "reason": None,
+                "resumeAt": None,
+                "effectiveAt": None,
+                "manageBillingUrl": None,
+            },
+        )

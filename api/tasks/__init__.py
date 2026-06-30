@@ -21,7 +21,10 @@ from .proxy_tasks import (
     _update_or_create_proxy_record,  # noqa: F401
 )
 
-from .subscription_tasks import grant_monthly_free_credits  # noqa: F401
+from .subscription_tasks import (
+    apply_customer_account_pause_transitions_task,  # noqa: F401
+    grant_monthly_free_credits,  # noqa: F401
+)
 
 from .maintenance_tasks import cleanup_temp_files, garbage_collect_timed_out_tasks, prune_prompt_archives  # noqa: F401
 
