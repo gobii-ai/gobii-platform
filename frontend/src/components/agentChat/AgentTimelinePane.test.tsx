@@ -6,7 +6,7 @@ import type { CreditForecast, TimelineEvent } from '../../types/agentChat'
 
 vi.mock('./TimelineEventItem', () => ({
   TimelineEventItem: ({ event }: { event: { kind: string, message?: { id?: string }, forecast?: CreditForecast } }) => {
-    if (event.kind === 'inline-credit-forecast') {
+    if (event.kind === 'credit_forecast') {
       return <div data-testid="timeline-rendered-event">forecast</div>
     }
     if (event.kind === 'message') {
@@ -61,26 +61,27 @@ function messageEvent(id: string, timestamp: string): TimelineEvent {
 }
 
 const baseForecast: CreditForecast = {
-  setupCredits: 1,
   perRunCredits: 8,
   dailyCredits: 8,
   monthlyCredits: 240,
-  confidence: 'high',
-  sampleCount: 25,
   warningLevel: 'none',
-  warningReasons: [],
   estimatedAt: '2026-06-30T12:05:00Z',
 }
 
 describe('AgentTimelinePane', () => {
-  it('renders credit forecasts at their estimated timestamp before pinned schedule events', () => {
+  it('renders credit forecast timeline events before pinned schedule events', () => {
     render(
       <AgentTimelinePane
         agentFirstName="Agent"
         autoScrollPinned
-        creditForecast={baseForecast}
         events={[
           messageEvent('before', '2026-06-30T12:00:00Z'),
+          {
+            kind: 'credit_forecast',
+            cursor: 'forecast',
+            timestamp: '2026-06-30T12:05:00Z',
+            forecast: baseForecast,
+          },
           messageEvent('after', '2026-06-30T12:10:00Z'),
         ]}
         onHardLimitOpenSettings={vi.fn()}

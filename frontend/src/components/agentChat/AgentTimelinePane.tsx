@@ -10,7 +10,7 @@ import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { StarterPromptSuggestions, type StarterPrompt } from './StarterPromptSuggestions'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
-import type { AgentMessage, CreditForecast, StreamState } from '../../types/agentChat'
+import type { AgentMessage, StreamState } from '../../types/agentChat'
 import type { StatusExpansionTargets } from './statusExpansion'
 
 function timelineEventKey(event: SimplifiedTimelineItem): string {
@@ -20,81 +20,7 @@ function timelineEventKey(event: SimplifiedTimelineItem): string {
   if (event.kind === 'steps' && event.entries.length > 0) {
     return `cluster:${event.entries[0].id}`
   }
-  if (event.kind === 'inline-credit-forecast') {
-    return event.cursor
-  }
   return event.cursor
-}
-
-function getTimelineItemTimestamp(event: SimplifiedTimelineItem): string | null {
-  if (event.kind === 'message') {
-    return event.message.timestamp ?? null
-  }
-  if (event.kind === 'steps') {
-    return event.latestTimestamp ?? event.earliestTimestamp ?? null
-  }
-  if (event.kind === 'thinking' || event.kind === 'plan' || event.kind === 'kanban') {
-    return event.timestamp ?? null
-  }
-  if (event.kind === 'inline-schedule') {
-    return event.entry.timestamp ?? null
-  }
-  if (event.kind === 'inline-credit-forecast') {
-    return event.forecast.estimatedAt ?? null
-  }
-  if (event.kind === 'collapsed-group') {
-    for (let index = event.events.length - 1; index >= 0; index -= 1) {
-      const nestedTimestamp = getTimelineItemTimestamp(event.events[index] as SimplifiedTimelineItem)
-      if (nestedTimestamp) {
-        return nestedTimestamp
-      }
-    }
-  }
-  return null
-}
-
-function insertCreditForecastEvent(
-  events: SimplifiedTimelineItem[],
-  creditForecast: CreditForecast | null,
-): SimplifiedTimelineItem[] {
-  if (!creditForecast) {
-    return events
-  }
-
-  const forecastTimestamp = creditForecast.estimatedAt
-  const forecastEvent: SimplifiedTimelineItem = {
-    kind: 'inline-credit-forecast',
-    cursor: `credit-forecast:${forecastTimestamp ?? 'latest'}`,
-    forecast: creditForecast,
-  }
-
-  if (!forecastTimestamp) {
-    return [...events, forecastEvent]
-  }
-
-  const forecastTime = Date.parse(forecastTimestamp)
-  if (!Number.isFinite(forecastTime)) {
-    return [...events, forecastEvent]
-  }
-
-  const insertIndex = events.findIndex((event) => {
-    const timestamp = getTimelineItemTimestamp(event)
-    if (!timestamp) {
-      return false
-    }
-    const eventTime = Date.parse(timestamp)
-    return Number.isFinite(eventTime) && eventTime > forecastTime
-  })
-
-  if (insertIndex === -1) {
-    return [...events, forecastEvent]
-  }
-
-  return [
-    ...events.slice(0, insertIndex),
-    forecastEvent,
-    ...events.slice(insertIndex),
-  ]
 }
 
 type AgentTimelinePaneProps = {
@@ -105,7 +31,6 @@ type AgentTimelinePaneProps = {
   composerDisabled?: boolean
   contactCapOpenPacks?: () => void
   contactCapShowUpgrade?: boolean
-  creditForecast?: CreditForecast | null
   events: SimplifiedTimelineItem[]
   hardLimitShowUpsell?: boolean
   hardLimitUpgradeUrl?: string | null
@@ -168,7 +93,6 @@ export function AgentTimelinePane({
   composerDisabled = false,
   contactCapOpenPacks,
   contactCapShowUpgrade = false,
-  creditForecast = null,
   events,
   hardLimitShowUpsell = false,
   hardLimitUpgradeUrl = null,
@@ -222,10 +146,7 @@ export function AgentTimelinePane({
   viewerEmail,
   viewerUserId,
 }: AgentTimelinePaneProps) {
-  const timelineEvents = useMemo(
-    () => insertCreditForecastEvent(events, creditForecast),
-    [creditForecast, events],
-  )
+  const timelineEvents = useMemo(() => events, [events])
 
   const lastRenderedIndex = useMemo(() => {
     for (let index = timelineEvents.length - 1; index >= 0; index -= 1) {

@@ -768,7 +768,6 @@ type AgentSwitchMeta = {
   processingActive?: boolean
   signupPreviewState?: SignupPreviewState | null
   planningState?: PlanningState | null
-  creditForecast?: CreditForecast | null
 }
 
 function normalizeSignupPreviewState(value: unknown): SignupPreviewState {
@@ -1140,7 +1139,6 @@ export function AgentChatPage({
       : getInitialAgentChatSidebarMode()
   ))
   const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
-  const [creditForecastByAgentId, setCreditForecastByAgentId] = useState<Record<string, CreditForecast | null>>({})
   const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
   const effectiveContext = contextData?.context ?? null
   const contextMatchesAgent = !contextLookupAgentId || contextResolvedForAgentId === contextLookupAgentId
@@ -1234,12 +1232,6 @@ export function AgentChatPage({
     const processingActive = snapshot?.active ?? initialPageResponse.processing_active
     if (processingActive !== undefined) {
       store.updateProcessing(snapshot ?? { active: processingActive, webTasks: [] })
-    }
-    if (Object.prototype.hasOwnProperty.call(initialPageResponse, 'credit_forecast')) {
-      setCreditForecastByAgentId((current) => ({
-        ...current,
-        [activeAgentId]: initialPageResponse.credit_forecast ?? null,
-      }))
     }
     // Update agent identity from timeline response
     const name = initialPageResponse.agent_name ?? null
@@ -1426,7 +1418,6 @@ export function AgentChatPage({
       const hasProcessingActive = Object.prototype.hasOwnProperty.call(rawPayload, 'processing_active')
       const hasSignupPreviewState = Object.prototype.hasOwnProperty.call(rawPayload, 'signup_preview_state')
       const hasPlanningState = Object.prototype.hasOwnProperty.call(rawPayload, 'planning_state')
-      const hasCreditForecast = Object.prototype.hasOwnProperty.call(rawPayload, 'credit_forecast')
       const hasUnreadAgentMessage = Object.prototype.hasOwnProperty.call(rawPayload, 'has_unread_agent_message')
       const hasLatestAgentMessageId = Object.prototype.hasOwnProperty.call(rawPayload, 'latest_agent_message_id')
       const hasLatestAgentMessageAt = Object.prototype.hasOwnProperty.call(rawPayload, 'latest_agent_message_at')
@@ -1443,19 +1434,9 @@ export function AgentChatPage({
         && !hasProcessingActive
         && !hasSignupPreviewState
         && !hasPlanningState
-        && !hasCreditForecast
         && !hasMessageReadState
       ) {
         return
-      }
-      if (hasCreditForecast) {
-        const forecast = rawPayload.credit_forecast && typeof rawPayload.credit_forecast === 'object'
-          ? rawPayload.credit_forecast as CreditForecast
-          : null
-        setCreditForecastByAgentId((current) => ({
-          ...current,
-          [agentIdFromEvent]: forecast,
-        }))
       }
       if (hasAvatar) {
         const avatarFromEvent = typeof rawPayload.agent_avatar_url === 'string' ? rawPayload.agent_avatar_url : null
@@ -2126,9 +2107,6 @@ export function AgentChatPage({
   const resolvedAgentEmail = activeRosterMeta?.email ?? pendingAgentEmail ?? agentEmail ?? null
   const resolvedAgentSms = activeRosterMeta?.sms ?? agentSms ?? null
   const effectivePlanningState = isStoreSynced ? planningState : (activeRosterMeta?.planningState ?? 'skipped')
-  const activeCreditForecast = activeAgentId
-    ? creditForecastByAgentId[activeAgentId] ?? initialPageResponse?.credit_forecast ?? null
-    : null
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
@@ -4305,7 +4283,6 @@ export function AgentChatPage({
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
         planSnapshot={latestPlanSnapshot}
-        creditForecast={activeCreditForecast}
         {...chatLayoutSidebarProps}
         onComposerFocus={handleComposerFocus}
         onComposerRequestScrollToBottom={scrollToBottom}

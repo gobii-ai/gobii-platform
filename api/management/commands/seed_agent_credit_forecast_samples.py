@@ -59,14 +59,6 @@ SELECT
         FROM api_persistentagentstep step
         WHERE step.agent_id = agent.id
           AND step.credits_cost IS NOT NULL
-          AND step.created_at >= agent.created_at
-          AND step.created_at < COALESCE(agent.planning_completed_at, agent.created_at + INTERVAL '2 hours')
-    ), 0) AS setup_credits,
-    COALESCE((
-        SELECT SUM(step.credits_cost)
-        FROM api_persistentagentstep step
-        WHERE step.agent_id = agent.id
-          AND step.credits_cost IS NOT NULL
           AND step.created_at >= COALESCE(agent.planning_completed_at, agent.created_at)
           AND step.created_at < COALESCE(agent.planning_completed_at, agent.created_at) + INTERVAL '1 day'
     ), 0) AS first_run_credits,
@@ -103,15 +95,19 @@ class Command(BaseCommand):
         rows = list(_fetch_source_rows(source_database_url, limit))
         upserted = 0
         embedded = 0
+        samples = []
         with transaction.atomic():
             for row in rows:
                 sample = _upsert_sample(row, source_database_url)
+                samples.append(sample)
                 upserted += 1
-                if generate_embeddings:
-                    embedding = generate_embedding(sample.embedding_text)
-                    if embedding is not None:
-                        set_historical_sample_embedding(sample, embedding)
-                        embedded += 1
+
+        if generate_embeddings:
+            for sample in samples:
+                embedding = generate_embedding(sample.embedding_text)
+                if embedding is not None:
+                    set_historical_sample_embedding(sample, embedding)
+                    embedded += 1
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -139,7 +135,6 @@ def _fetch_source_rows(source_database_url: str, limit: int):
 
 def _upsert_sample(row: dict, source_database_url: str) -> HistoricalAgentCostSample:
     multiplier = _positive_decimal(row.get("tier_credit_multiplier")) or Decimal("1.000")
-    setup = _decimal(row.get("setup_credits")) or Decimal("0")
     first_run = _decimal(row.get("first_run_credits")) or Decimal("0")
     observed_total = _decimal(row.get("observed_total_credits")) or Decimal("0")
     observation_days = _positive_decimal(row.get("observation_days")) or Decimal("1")
@@ -172,15 +167,9 @@ def _upsert_sample(row: dict, source_database_url: str) -> HistoricalAgentCostSa
         "owner_type": owner_type,
         "tier_key": tier_key,
         "tier_credit_multiplier": multiplier,
-        "setup_credits": setup,
-        "first_run_credits": first_run,
-        "daily_credits": daily,
-        "monthly_credits": monthly,
-        "normalized_setup_credits": setup / multiplier,
         "normalized_first_run_credits": first_run / multiplier,
         "normalized_daily_credits": daily / multiplier,
         "normalized_monthly_credits": monthly / multiplier,
-        "sample_confidence": _sample_confidence(row),
         "charged_step_count": int(row.get("charged_step_count") or 0),
         "tool_call_count": int(row.get("tool_call_count") or 0),
         "observation_days": observation_days,
@@ -198,16 +187,6 @@ def _upsert_sample(row: dict, source_database_url: str) -> HistoricalAgentCostSa
         defaults=defaults,
     )
     return sample
-
-
-def _sample_confidence(row: dict) -> str:
-    charged_steps = int(row.get("charged_step_count") or 0)
-    observation_days = _positive_decimal(row.get("observation_days")) or Decimal("0")
-    if charged_steps >= 20 and observation_days >= Decimal("7"):
-        return HistoricalAgentCostSample.Confidence.HIGH
-    if charged_steps >= 5 and observation_days >= Decimal("1"):
-        return HistoricalAgentCostSample.Confidence.MEDIUM
-    return HistoricalAgentCostSample.Confidence.LOW
 
 
 def _decimal(value) -> Decimal | None:

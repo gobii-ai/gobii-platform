@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { CreditForecast, TimelineEvent, ToolCallEntry, ToolClusterEvent } from '../types/agentChat'
+import type { TimelineEvent, ToolCallEntry, ToolClusterEvent } from '../types/agentChat'
 import { isClusterRenderable, transformToolCluster } from '../components/agentChat/tooling/toolRegistry'
 import { buildActionCountLabel, flattenTimelineEventsToEntries } from '../components/agentChat/activityEntryUtils'
 import type { StatusExpansionTargets } from '../components/agentChat/statusExpansion'
@@ -34,17 +34,10 @@ export type InlineScheduleUpdate = {
   entry: ToolCallEntry
 }
 
-export type InlineCreditForecast = {
-  kind: 'inline-credit-forecast'
-  cursor: string
-  forecast: CreditForecast
-}
-
 export type SimplifiedTimelineItem =
   | TimelineEvent
   | CollapsedEventGroup
   | InlineScheduleUpdate
-  | InlineCreditForecast
 
 export type CollapseDetailedStatusRunsOptions = {
   keepTrailingActivityExpanded?: boolean
@@ -66,6 +59,7 @@ export function isScheduleEntry(entry: ToolCallEntry): boolean {
 
 function isRenderableCollapsedEvent(event: TimelineEvent): boolean {
   if (event.kind === 'plan' || event.kind === 'kanban') return false
+  if (event.kind === 'credit_forecast') return false
   if (event.kind !== 'steps') return true
   return isClusterRenderable(transformToolCluster(event))
 }
@@ -228,6 +222,12 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
     }
 
     if (event.kind === 'plan' || event.kind === 'kanban') {
+      continue
+    }
+
+    if (event.kind === 'credit_forecast') {
+      flush()
+      result.push(event)
       continue
     }
 

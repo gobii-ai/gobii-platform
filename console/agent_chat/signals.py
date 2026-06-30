@@ -57,6 +57,7 @@ from .timeline import (
     build_processing_snapshot,
     build_tool_cluster_from_steps,
     is_chat_hidden_message,
+    serialize_credit_forecast_event,
     serialize_plan_event,
     serialize_message_event,
     serialize_processing_snapshot,
@@ -263,6 +264,17 @@ def emit_agent_usage_update(agent: PersistentAgent) -> None:
     for user_id, viewer in viewers_by_id.items():
         if user_can_manage_agent_settings(viewer, agent, allow_delinquent_personal_chat=True):
             send_user_group_event(str(agent.id), user_id, "usage_update_event", payload)
+
+
+def emit_agent_credit_forecast_timeline_event(agent: PersistentAgent) -> None:
+    if not agent or not getattr(agent, "id", None):
+        return
+    try:
+        forecast = agent.credit_forecast
+    except PersistentAgent.credit_forecast.RelatedObjectDoesNotExist:
+        return
+    payload = serialize_credit_forecast_event(forecast)
+    _send(_group_name(agent.id), "timeline_event", payload, agent_id=str(agent.id))
 
 
 def _broadcast_audit_event(agent_id: str | None, payload: dict) -> None:

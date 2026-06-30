@@ -33,7 +33,7 @@ vi.mock('./TimelineEventItem', () => ({
     }
     onMessageLinkClick?: (href: string) => boolean | void
   }) => {
-    if (event?.kind === 'inline-credit-forecast' && event.forecast) {
+    if (event?.kind === 'credit_forecast' && event.forecast) {
       return (
         <div data-testid="credit-forecast-timeline-event">
           <span>Estimated cost</span>
@@ -350,24 +350,24 @@ describe('AgentChatLayout upgrade modal gating', () => {
     renderAgentChatLayout({
       agentId: 'agent-forecast',
       planningState: 'completed',
-      creditForecast: {
-        setupCredits: 24,
-        perRunCredits: 8,
-        dailyCredits: 8,
-        monthlyCredits: 240,
-        confidence: 'medium',
-        sampleCount: 5,
-        warningLevel: 'medium',
-        warningReasons: ['recurring schedule', 'low remaining credits'],
-        estimatedAt: '2026-06-30T12:00:00Z',
-      },
+      events: [{
+        kind: 'credit_forecast',
+        cursor: 'forecast',
+        timestamp: '2026-06-30T12:00:00Z',
+        forecast: {
+          perRunCredits: 8,
+          dailyCredits: 8,
+          monthlyCredits: 240,
+          warningLevel: 'medium',
+          estimatedAt: '2026-06-30T12:00:00Z',
+        },
+      }],
     })
 
     expect(screen.getByText('Estimated cost')).toBeInTheDocument()
     expect(screen.getByText('8 credits')).toBeInTheDocument()
     expect(screen.getByText('240 credits')).toBeInTheDocument()
     expect(screen.queryByText('Usage watch')).not.toBeInTheDocument()
-    expect(screen.queryByText('recurring schedule, low remaining credits')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Dismiss credit forecast' })).not.toBeInTheDocument()
   })
 
