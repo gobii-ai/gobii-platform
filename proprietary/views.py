@@ -190,7 +190,7 @@ def _coerce_plan_int(value, default=0):
 
 
 def _get_team_offer_context():
-    team_plan_context = get_active_public_plan_context(PlanNames.ORG_TEAM, is_org=True)
+    team_plan_context = get_active_public_plan_context(PlanNames.ORG_TEAM, is_org=True) or {}
     team_config = get_plan_config(PlanNames.ORG_TEAM) or {}
     price_per_seat = _coerce_plan_int(
         team_config.get("price_per_seat") or team_config.get("price"),

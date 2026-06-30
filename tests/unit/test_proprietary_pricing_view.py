@@ -203,6 +203,28 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertIn("Pooled task credits", software["featureList"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_active_public_plan_context", return_value=None)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_team_offer_uses_static_defaults_when_public_plan_context_is_missing(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_active_public_plan_context,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        teams_response = self.client.get(reverse("proprietary:teams"))
+        pricing_response = self.client.get(reverse("proprietary:pricing"))
+
+        for response in (teams_response, pricing_response):
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, "$50")
+            self.assertContains(response, "1,000")
+            self.assertContains(response, "2,000")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
     def test_pricing_page_renders_free_oss_plan(
         self,

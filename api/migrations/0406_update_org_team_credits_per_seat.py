@@ -1,4 +1,5 @@
 from django.db import migrations
+from django.db.models import Q
 
 
 ORG_TEAM_PLAN_CODE = "org_team"
@@ -23,8 +24,13 @@ def _set_org_team_credits_per_seat(apps, schema_editor, credits_per_seat):
         },
     )
 
-    plan_versions = PlanVersion.objects.using(db_alias).filter(
-        legacy_plan_code=ORG_TEAM_PLAN_CODE,
+    plan_versions = (
+        PlanVersion.objects.using(db_alias)
+        .filter(
+            Q(legacy_plan_code__iexact=ORG_TEAM_PLAN_CODE)
+            | Q(plan__slug__iexact=ORG_TEAM_PLAN_CODE, plan__is_org=True),
+        )
+        .distinct()
     )
     for plan_version in plan_versions.iterator():
         PlanVersionEntitlement.objects.using(db_alias).update_or_create(
