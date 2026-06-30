@@ -291,7 +291,37 @@ def build_user_fingerprint_analytics_traits(values: dict[str, Any]) -> dict[str,
     }
 
 
-def identify_user_fingerprint_visit(visit: UserFingerprintVisit, values: dict[str, Any]) -> None:
+def _latest_succeeded_user_fingerprint_visit_id(user_id: int) -> int | None:
+    return (
+        UserFingerprintVisit.objects.filter(
+            user_id=user_id,
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+        )
+        .annotate(
+            latest_observed_at=Coalesce(
+                "event_timestamp",
+                "fetched_at",
+                "last_fetch_attempt_at",
+                "created_at",
+            )
+        )
+        .order_by("-latest_observed_at", "-id")
+        .values_list("id", flat=True)
+        .first()
+    )
+
+
+def is_latest_succeeded_user_fingerprint_visit(visit: UserFingerprintVisit) -> bool:
+    if not visit or not getattr(visit, "pk", None) or not getattr(visit, "user_id", None):
+        return False
+
+    return _latest_succeeded_user_fingerprint_visit_id(visit.user_id) == visit.pk
+
+
+def identify_user_fingerprint_visit(visit: UserFingerprintVisit, values: dict[str, Any]) -> bool:
+    if not is_latest_succeeded_user_fingerprint_visit(visit):
+        return False
+
     traits = build_user_fingerprint_analytics_traits(values)
     try:
         Analytics.identify(visit.user_id, traits)
@@ -303,6 +333,8 @@ def identify_user_fingerprint_visit(visit: UserFingerprintVisit, values: dict[st
             visit.user_id,
             visit.pk,
         )
+        return False
+    return True
 
 
 def _user_fingerprint_visit_analytics_values(visit: UserFingerprintVisit) -> dict[str, Any]:
@@ -332,15 +364,14 @@ def sync_user_fingerprint_visit_to_analytics(visit: UserFingerprintVisit) -> boo
     if visit.fetch_status != UserFingerprintVisitFetchStatusChoices.SUCCEEDED:
         return False
 
-    identify_user_fingerprint_visit(visit, _user_fingerprint_visit_analytics_values(visit))
-    return True
+    return identify_user_fingerprint_visit(visit, _user_fingerprint_visit_analytics_values(visit))
 
 
-def sync_recent_user_fingerprint_visits_to_analytics(user, *, limit: int = 3) -> int:
-    if not user or not getattr(user, "pk", None) or limit <= 0:
+def sync_latest_user_fingerprint_visit_to_analytics(user) -> int:
+    if not user or not getattr(user, "pk", None):
         return 0
 
-    visits = (
+    visit = (
         UserFingerprintVisit.objects.filter(
             user=user,
             fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
@@ -353,13 +384,12 @@ def sync_recent_user_fingerprint_visits_to_analytics(user, *, limit: int = 3) ->
                 "created_at",
             )
         )
-        .order_by("-latest_observed_at", "-id")[:limit]
+        .order_by("-latest_observed_at", "-id")
+        .first()
     )
-    synced_count = 0
-    for visit in visits:
-        if sync_user_fingerprint_visit_to_analytics(visit):
-            synced_count += 1
-    return synced_count
+    if visit is None:
+        return 0
+    return 1 if sync_user_fingerprint_visit_to_analytics(visit) else 0
 
 
 def _fingerprint_processing_stale_after() -> dt.timedelta:
