@@ -48,7 +48,7 @@ export function AgentCreateSplitButton({
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const launchBusy = Boolean(menu.launchBusyTemplateId)
-  const menuCreateDisabled = Boolean(createAgentDisabledReason || launchBusy)
+  const menuCreateDisabled = Boolean(createAgentButtonDisabled || launchBusy)
   const footerLabel = menu.canManageTemplates ? 'Manage team templates' : 'View organization'
 
   const closeMenu = useCallback(() => setOpen(false), [])
@@ -70,8 +70,13 @@ export function AgentCreateSplitButton({
     if (menuCreateDisabled) {
       return
     }
+    if (createAgentDisabled) {
+      closeMenu()
+      onCreateAgent()
+      return
+    }
     menu.onLaunchTemplate(template)
-  }, [menu, menuCreateDisabled])
+  }, [closeMenu, createAgentDisabled, menu, menuCreateDisabled, onCreateAgent])
 
   return (
     <div
@@ -118,6 +123,7 @@ export function AgentCreateSplitButton({
             className="agent-create-menu__item"
             onClick={handleBlankAgent}
             disabled={menuCreateDisabled}
+            aria-disabled={createAgentDisabled ? 'true' : undefined}
             title={createAgentDisabledReason ?? undefined}
           >
             <Plus className="agent-create-menu__item-icon" aria-hidden="true" />
@@ -159,6 +165,7 @@ export function AgentCreateSplitButton({
                     className="agent-create-menu__item agent-create-menu__template"
                     onClick={() => handleTemplateLaunch(template)}
                     disabled={disabled}
+                    aria-disabled={createAgentDisabled ? 'true' : undefined}
                     title={createAgentDisabledReason ?? undefined}
                   >
                     {launching ? (

@@ -128,6 +128,17 @@ export function currentOrganizationTemplatesQueryKey(organizationId?: string | n
   return ['current-organization-templates', organizationId ?? 'current'] as const
 }
 
+function organizationContextHeaders(organizationId?: string | null): HeadersInit | undefined {
+  const id = organizationId?.trim()
+  if (!id) {
+    return undefined
+  }
+  return {
+    'X-Gobii-Context-Type': 'organization',
+    'X-Gobii-Context-Id': id,
+  }
+}
+
 export function fetchCurrentOrganization(signal?: AbortSignal): Promise<CurrentOrganizationPayload> {
   return jsonFetch<CurrentOrganizationPayload>(CURRENT_ORGANIZATION_URL, { signal })
 }
@@ -200,15 +211,25 @@ export function removeOrganizationMember(userId: string): Promise<CurrentOrganiz
   })
 }
 
-export function fetchCurrentOrganizationTemplates(signal?: AbortSignal): Promise<CurrentOrganizationTemplatesPayload> {
-  return jsonFetch<CurrentOrganizationTemplatesPayload>(CURRENT_ORGANIZATION_TEMPLATES_URL, { signal })
+export function fetchCurrentOrganizationTemplates(
+  signal?: AbortSignal,
+  organizationId?: string | null,
+): Promise<CurrentOrganizationTemplatesPayload> {
+  return jsonFetch<CurrentOrganizationTemplatesPayload>(CURRENT_ORGANIZATION_TEMPLATES_URL, {
+    signal,
+    headers: organizationContextHeaders(organizationId),
+  })
 }
 
-export function createOrganizationTemplate(sourceAgentId: string): Promise<CurrentOrganizationTemplatesPayload> {
+export function createOrganizationTemplate(
+  sourceAgentId: string,
+  organizationId?: string | null,
+): Promise<CurrentOrganizationTemplatesPayload> {
   return jsonRequest<CurrentOrganizationTemplatesPayload>(CURRENT_ORGANIZATION_TEMPLATES_URL, {
     method: 'POST',
     json: { sourceAgentId },
     includeCsrf: true,
+    headers: organizationContextHeaders(organizationId),
   })
 }
 
@@ -240,16 +261,24 @@ export function updateOrganizationTemplate(
   })
 }
 
-export function deactivateOrganizationTemplate(templateId: string): Promise<CurrentOrganizationTemplatesPayload> {
+export function deactivateOrganizationTemplate(
+  templateId: string,
+  organizationId?: string | null,
+): Promise<CurrentOrganizationTemplatesPayload> {
   return jsonRequest<CurrentOrganizationTemplatesPayload>(`/console/api/organization/templates/${templateId}/`, {
     method: 'DELETE',
     includeCsrf: true,
+    headers: organizationContextHeaders(organizationId),
   })
 }
 
-export function launchOrganizationTemplate(templateId: string): Promise<OrganizationTemplateLaunchPayload> {
+export function launchOrganizationTemplate(
+  templateId: string,
+  organizationId?: string | null,
+): Promise<OrganizationTemplateLaunchPayload> {
   return jsonRequest<OrganizationTemplateLaunchPayload>(`/console/api/organization/templates/${templateId}/launch/`, {
     method: 'POST',
     includeCsrf: true,
+    headers: organizationContextHeaders(organizationId),
   })
 }

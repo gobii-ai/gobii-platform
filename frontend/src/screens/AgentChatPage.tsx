@@ -1499,16 +1499,15 @@ export function AgentChatPage({
     forAgentId: rosterQueryAgentId,
     refetchIntervalMs: rosterRefreshIntervalMs,
   })
+  const effectiveOrganizationId = effectiveContext?.type === 'organization' ? effectiveContext.id : null
   const currentOrganizationTemplateQueryKey = useMemo(
-    () => currentOrganizationTemplatesQueryKey(
-      effectiveContext?.type === 'organization' ? effectiveContext.id : null,
-    ),
-    [effectiveContext?.id, effectiveContext?.type],
+    () => currentOrganizationTemplatesQueryKey(effectiveOrganizationId),
+    [effectiveOrganizationId],
   )
   const organizationTemplatesQuery = useQuery({
     queryKey: currentOrganizationTemplateQueryKey,
-    queryFn: ({ signal }) => fetchCurrentOrganizationTemplates(signal),
-    enabled: contextReady && effectiveContext?.type === 'organization',
+    queryFn: ({ signal }) => fetchCurrentOrganizationTemplates(signal, effectiveOrganizationId),
+    enabled: contextReady && Boolean(effectiveOrganizationId),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   })
@@ -2703,10 +2702,14 @@ export function AgentChatPage({
     if (createAgentDisabledReason || teamTemplateLaunchBusyId) {
       return
     }
+    if (!effectiveOrganizationId) {
+      setTeamTemplateLaunchError('Switch to an organization context first.')
+      return
+    }
     setTeamTemplateLaunchBusyId(template.id)
     setTeamTemplateLaunchError(null)
     try {
-      const payload = await launchOrganizationTemplate(template.id)
+      const payload = await launchOrganizationTemplate(template.id, effectiveOrganizationId)
       if (!navigateWithinApp(payload.redirectUrl)) {
         window.location.assign(payload.redirectUrl)
       }
@@ -2715,7 +2718,7 @@ export function AgentChatPage({
     } finally {
       setTeamTemplateLaunchBusyId(null)
     }
-  }, [createAgentDisabledReason, teamTemplateLaunchBusyId])
+  }, [createAgentDisabledReason, effectiveOrganizationId, teamTemplateLaunchBusyId])
 
   const handleJumpToLatest = useCallback(() => {
     const currentAgentId = activeAgentIdRef.current
