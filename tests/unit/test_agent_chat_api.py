@@ -1491,6 +1491,56 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("<p>Status: Ready</p>", rendered_html)
 
     @tag("batch_agent_chat")
+    def test_timeline_serializes_email_subject_only_for_email_messages(self):
+        email_address = "subject-line@example.com"
+
+        email_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+            is_primary=False,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=email_sender,
+            conversation=email_conversation,
+            body="Email body",
+            owner_agent=self.agent,
+            raw_payload={"subject": "  Quarterly update  "},
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            body="Web body",
+            owner_agent=self.agent,
+            raw_payload={"subject": "Do not render"},
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        email_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == "Email body"
+        )
+        web_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == "Web body"
+        )
+
+        self.assertEqual(email_event["message"].get("subject"), "Quarterly update")
+        self.assertIsNone(web_event["message"].get("subject"))
+
+    @tag("batch_agent_chat")
     def test_timeline_uses_preserved_html_for_ingested_imap_email(self):
         recipient_address = f"agent-{self.agent.id}@example.com"
         PersistentAgentCommsEndpoint.objects.create(

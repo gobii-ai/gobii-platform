@@ -266,6 +266,16 @@ def _message_body_html(message: PersistentAgentMessage, channel: str | None, att
     )
 
 
+def _message_subject(message: PersistentAgentMessage, channel: str | None) -> str | None:
+    if not channel or channel.lower() != "email":
+        return None
+    payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+    subject = payload.get("subject")
+    if not isinstance(subject, str):
+        return None
+    return subject.strip() or None
+
+
 def _rewrite_email_cid_image_src(html_body: str, attachments: Sequence[dict]) -> str:
     if not html_body or not attachments:
         return html_body
@@ -582,6 +592,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
         sender_name = source_label
 
     body_html = _message_body_html(message, channel, attachments)
+    subject = _message_subject(message, channel)
 
     return {
         "kind": "message",
@@ -592,6 +603,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
             "cursor": env.cursor.encode(),
             "bodyHtml": body_html,
             "bodyText": message.body or "",
+            "subject": subject,
             "isOutbound": bool(message.is_outbound),
             "channel": channel,
             "attachments": attachments,

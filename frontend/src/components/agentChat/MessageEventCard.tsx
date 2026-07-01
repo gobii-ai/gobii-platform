@@ -166,6 +166,7 @@ export const MessageEventCard = memo(function MessageEventCard({
       ? `${Object.keys(webhookMeta.queryParams).length} query param${Object.keys(webhookMeta.queryParams).length === 1 ? '' : 's'}`
       : null,
   ].filter(Boolean)
+  const emailSubject = channel === 'email' ? message.subject?.trim() : ''
 
   const contentTone = isPeer ? 'text-slate-800' : isAgent ? 'text-slate-800' : ''
 
@@ -225,6 +226,7 @@ export const MessageEventCard = memo(function MessageEventCard({
           ) : null}
           <span className="chat-author-name">{authorLabel}</span>
           {showChannelTag ? <span className={channelTagClass}>{channelLabel}</span> : null}
+          {emailSubject ? <span className="chat-email-subject-inline" title={emailSubject}>{emailSubject}</span> : null}
           <span className="chat-message-meta-slot">
             <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
             {showMessageActions ? (

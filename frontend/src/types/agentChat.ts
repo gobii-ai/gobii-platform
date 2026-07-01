@@ -29,6 +29,7 @@ export type AgentMessage = {
   cursor?: string
   bodyHtml?: string
   bodyText?: string
+  subject?: string | null
   isOutbound?: boolean
   channel?: string
   attachments?: Attachment[]

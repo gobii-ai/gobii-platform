@@ -3201,6 +3201,25 @@
     align-items: center;
     gap: 0.5rem;
 }
+.chat-author-name {
+    flex: 0 0 auto;
+}
+.chat-email-subject-inline {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    color: #334155;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.chat-email-subject-inline::before {
+    content: "•";
+    margin-right: 0.5rem;
+    color: #94a3b8;
+    font-weight: 700;
+}
 .chat-author--user {
     color: #6366f1;
 }
@@ -4446,6 +4465,56 @@
 .tool-cluster-timeline-preview-markdown,
 .tool-cluster-timeline-preview-markdown > p {
     margin: 0;
+}
+.brightdata-snapshot-iframe-panel {
+    overflow: hidden;
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    border-radius: 0.75rem;
+    background: #fff;
+}
+.brightdata-snapshot-iframe {
+    display: block;
+    width: 100%;
+    height: min(520px, 68vh);
+    max-height: 520px;
+    border: 0;
+    background: #fff;
+}
+.brightdata-snapshot-iframe-fallback,
+.brightdata-snapshot-iframe-unavailable {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.65rem 0.85rem;
+    font-size: 0.75rem;
+    color: #64748b;
+}
+.brightdata-snapshot-iframe-fallback {
+    border-top: 1px solid rgba(203, 213, 225, 0.75);
+}
+.brightdata-snapshot-iframe-fallback a {
+    flex: 0 0 auto;
+    font-weight: 700;
+    color: #4f46e5;
+    text-decoration: none;
+}
+.brightdata-snapshot-iframe-fallback a:hover {
+    color: #4338ca;
+    text-decoration: underline;
+}
+.brightdata-snapshot-iframe-unavailable {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    border-radius: 0.75rem;
+    background: rgba(238, 242, 255, 0.58);
+}
+@media (max-width: 767px) {
+    .brightdata-snapshot-iframe {
+        height: min(380px, 58vh);
+        max-height: 380px;
+    }
 }
 .json-view-panel .icon-container {
     display: none !important;

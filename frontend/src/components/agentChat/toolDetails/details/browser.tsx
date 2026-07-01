@@ -19,6 +19,16 @@ function parseHostname(value: string): string | null {
   }
 }
 
+function normalizeHttpUrl(value: string | null): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+  } catch {
+    return null
+  }
+}
+
 function buildFaviconUrl(hostname: string | null): string | null {
   if (!hostname) return null
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`
@@ -137,6 +147,8 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
     pickString(params['start_url']) ||
     pickString(params['target_url']) ||
     pickString(parsedResult?.url)
+  const normalizedTargetUrl = normalizeHttpUrl(targetUrl)
+  const isScrapeAsMarkdown = (entry.toolName || '').toLowerCase().includes('scrape_as_markdown')
 
   const pageTitle =
     pickString(params['title']) ||
@@ -153,6 +165,7 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
 
   const urlLabel = targetUrl || pickString(parsedResult?.url) || 'Web snapshot'
   const hasOutline = sectionItems.length > 0 || linkItems.length > 0
+  const showSnapshotBody = !isScrapeAsMarkdown
 
   return (
     <div className="space-y-3 text-sm text-slate-600">
@@ -209,8 +222,36 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
               />
             </div>
           ) : null}
-          {sanitizedHtml ? <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} /> : null}
-          {!sanitizedHtml && readerText ? (
+          {isScrapeAsMarkdown ? (
+            normalizedTargetUrl ? (
+              <div className="brightdata-snapshot-iframe-panel">
+                <iframe
+                  src={normalizedTargetUrl}
+                  title={pageTitle ? `Preview of ${pageTitle}` : 'Web page preview'}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  className="brightdata-snapshot-iframe"
+                />
+                <div className="brightdata-snapshot-iframe-fallback">
+                  <span>Preview not loading?</span>
+                  <a href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
+                    Open page
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="brightdata-snapshot-iframe-unavailable">
+                <span>Page preview unavailable.</span>
+                {targetUrl ? (
+                  <span className="break-all text-slate-500">{targetUrl}</span>
+                ) : null}
+              </div>
+            )
+          ) : null}
+          {showSnapshotBody && sanitizedHtml ? (
+            <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
+          ) : null}
+          {showSnapshotBody && !sanitizedHtml && readerText ? (
             <MarkdownViewer content={readerText} className="prose prose-sm max-w-none" />
           ) : null}
           {hasOutline ? (
@@ -248,7 +289,7 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
               ) : null}
             </div>
           ) : null}
-          {!sanitizedHtml && !readerText && !hasOutline ? <p className="text-slate-500">No page content returned.</p> : null}
+          {!isScrapeAsMarkdown && !sanitizedHtml && !readerText && !hasOutline ? <p className="text-slate-500">No page content returned.</p> : null}
         </div>
       </div>
     </div>
