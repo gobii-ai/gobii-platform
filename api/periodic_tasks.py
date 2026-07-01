@@ -78,6 +78,13 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    if settings.AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_ENABLED:
+        beat_schedule["agent-credit-forecast-sample-refresh"] = {
+            "task": "api.tasks.refresh_agent_credit_forecast_samples",
+            "schedule": crontab(hour=5, minute=35),
+            "args": [],
+        }
+
     # Proactive agent activation sweep
     beat_schedule["proactive-agent-scan"] = {
         "task": "api.tasks.schedule_proactive_agents",
