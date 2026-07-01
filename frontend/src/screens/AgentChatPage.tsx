@@ -940,6 +940,8 @@ export type AgentChatPageProps = {
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
+  scrollToAgentId?: string | null
+  onScrolledToAgent?: (agentId: string) => void
   showContextSwitcher?: boolean
   persistContextSession?: boolean
   onContextSwitch?: (context: ConsoleContext) => void
@@ -981,6 +983,8 @@ export function AgentChatPage({
   onClose,
   onCreateAgent,
   onAgentCreated,
+  scrollToAgentId = null,
+  onScrolledToAgent,
   showContextSwitcher = false,
   persistContextSession = true,
   onContextSwitch,
@@ -4020,6 +4024,8 @@ export function AgentChatPage({
     embeddedSettingsPanel,
     embeddedSettingsTitle,
     onBackFromEmbeddedSettings: handleExitEmbeddedSettings,
+    scrollToAgentId,
+    onScrolledToAgent,
   }
 
   const activeAuditUrl = useMemo(() => {

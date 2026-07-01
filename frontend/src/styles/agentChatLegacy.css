@@ -7108,6 +7108,11 @@
     -webkit-tap-highlight-color: transparent;
     animation: agent-fab-enter 0.4s ease 0.6s both;
 }
+.agent-chat-button.agent-fab[data-size] {
+    min-height: 0;
+    padding: 0;
+    gap: 0;
+}
 @keyframes agent-fab-enter {
     from {
         opacity: 0;
@@ -7320,6 +7325,9 @@
     --drawer-muted-text: rgba(196, 181, 253, 0.56);
     --drawer-control-bg: rgba(255, 255, 255, 0.08);
     --drawer-purple-border: rgba(167, 139, 250, 0.25);
+}
+.chat-sidebar-mobile-content {
+    display: contents;
 }
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__trigger, .agent-gallery-create) {
     border-color: var(--drawer-purple-border);

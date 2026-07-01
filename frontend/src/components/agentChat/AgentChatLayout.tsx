@@ -230,6 +230,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   embeddedSettingsPanel?: ReactNode
   embeddedSettingsTitle?: string
   onBackFromEmbeddedSettings?: () => void
+  scrollToAgentId?: string | null
+  onScrolledToAgent?: (agentId: string) => void
   dailyCredits?: DailyCreditsInfo | null
   dailyCreditsStatus?: DailyCreditsStatus | null
   dailyCreditsLoading?: boolean
@@ -382,6 +384,8 @@ export function AgentChatLayout({
   activeAgentId,
   insightsPanelExpandedPreference = null,
   switchingAgentId,
+  scrollToAgentId,
+  onScrolledToAgent,
   rosterLoading,
   rosterError,
   onSelectAgent,
@@ -1517,6 +1521,8 @@ export function AgentChatLayout({
         embeddedSettingsPanel={embeddedSettingsPanel}
         embeddedSettingsTitle={embeddedSettingsTitle}
         onBackFromEmbeddedSettings={onBackFromEmbeddedSettings}
+        scrollToAgentId={scrollToAgentId}
+        onScrolledToAgent={onScrolledToAgent}
       />
       {showBanner && (
         <AgentChatBanner

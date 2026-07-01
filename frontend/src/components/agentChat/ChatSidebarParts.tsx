@@ -191,6 +191,7 @@ export function AgentListItem({
     <button
       type="button"
       className={joinClassNames('agent-roster-item', collapsed && variant === 'sidebar' && 'agent-roster-item--collapsed')}
+      data-agent-roster-item-id={agent.id}
       data-variant={variant}
       data-active={isActive ? 'true' : 'false'}
       data-switching={isSwitching ? 'true' : 'false'}
