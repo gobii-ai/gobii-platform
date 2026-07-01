@@ -31,11 +31,9 @@ export type OrganizationTemplate = {
   id: string
   name: string
   tagline: string
+  charter: string
   category: string
   preferredLlmTier: IntelligenceTierKey
-  sourceAgentName: string | null
-  createdBy: string | null
-  scheduleDescription: string | null
 }
 
 export type OrganizationTemplateEditorPayload = {
@@ -43,12 +41,6 @@ export type OrganizationTemplateEditorPayload = {
   tagline: string
   charter: string
   preferredLlmTier: IntelligenceTierKey
-}
-
-export type OrganizationTemplateDetailPayload = {
-  template: OrganizationTemplateEditorPayload & {
-    id: string
-  }
 }
 
 export type OrganizationTemplateSourceAgent = {
@@ -69,7 +61,7 @@ export type CurrentOrganizationTemplatesPayload = {
   llmIntelligence: LlmIntelligenceConfig | null
   created?: boolean
   templateId?: string
-  template?: OrganizationTemplateDetailPayload['template']
+  template?: OrganizationTemplate
 }
 
 export type OrganizationTemplateLaunchPayload = {
@@ -222,32 +214,15 @@ export function fetchCurrentOrganizationTemplates(
 }
 
 export function createOrganizationTemplate(
-  sourceAgentId: string,
+  payload: string | OrganizationTemplateEditorPayload,
   organizationId?: string | null,
 ): Promise<CurrentOrganizationTemplatesPayload> {
   return jsonRequest<CurrentOrganizationTemplatesPayload>(CURRENT_ORGANIZATION_TEMPLATES_URL, {
     method: 'POST',
-    json: { sourceAgentId },
+    json: typeof payload === 'string' ? { sourceAgentId: payload } : payload,
     includeCsrf: true,
     headers: organizationContextHeaders(organizationId),
   })
-}
-
-export function createOrganizationTemplateFromScratch(
-  payload: OrganizationTemplateEditorPayload,
-): Promise<CurrentOrganizationTemplatesPayload> {
-  return jsonRequest<CurrentOrganizationTemplatesPayload>(CURRENT_ORGANIZATION_TEMPLATES_URL, {
-    method: 'POST',
-    json: payload,
-    includeCsrf: true,
-  })
-}
-
-export function fetchOrganizationTemplateDetail(
-  templateId: string,
-  signal?: AbortSignal,
-): Promise<OrganizationTemplateDetailPayload> {
-  return jsonFetch<OrganizationTemplateDetailPayload>(`/console/api/organization/templates/${templateId}/`, { signal })
 }
 
 export function updateOrganizationTemplate(

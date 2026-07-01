@@ -5,9 +5,7 @@ import { Bot, Building2, Pencil, Play, Plus, Save, Send, ShieldAlert, Trash2, Us
 import {
   currentOrganizationTemplatesQueryKey,
   createOrganizationTemplate,
-  createOrganizationTemplateFromScratch,
   deactivateOrganizationTemplate,
-  fetchOrganizationTemplateDetail,
   fetchCurrentOrganization,
   fetchCurrentOrganizationTemplates,
   inviteOrganizationMember,
@@ -391,6 +389,7 @@ function TemplateEditorModal({
             type="text"
             value={draft.name}
             maxLength={255}
+            placeholder="Customer Escalation Brief"
             onChange={(event) => updateDraft('name', event.target.value)}
             className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             disabled={busy}
@@ -403,6 +402,7 @@ function TemplateEditorModal({
             type="text"
             value={draft.tagline}
             maxLength={255}
+            placeholder="Drafts next actions."
             onChange={(event) => updateDraft('tagline', event.target.value)}
             className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             disabled={busy}
@@ -414,6 +414,7 @@ function TemplateEditorModal({
         <textarea
           id="organization-template-charter"
           value={draft.charter}
+          placeholder="Monitor priority accounts, summarize recent customer activity, identify stalled escalations, and recommend the next owner and action."
           onChange={(event) => updateDraft('charter', event.target.value)}
           className="mt-1 block min-h-52 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
           disabled={busy}
@@ -478,7 +479,6 @@ export function OrganizationScreen() {
   const [templateEditorDraft, setTemplateEditorDraft] = useState<OrganizationTemplateEditorPayload>(
     buildBlankTemplateDraft(),
   )
-  const [templateEditorLoadingId, setTemplateEditorLoadingId] = useState<string | null>(null)
   const [templateSourceAgentId, setTemplateSourceAgentId] = useState('')
   const [templateErrors, setTemplateErrors] = useState<string[]>([])
   const [templateMessage, setTemplateMessage] = useState<string | null>(null)
@@ -673,25 +673,17 @@ export function OrganizationScreen() {
     setTemplateEditorMode('create')
   }
 
-  const handleEditTemplate = async (template: OrganizationTemplate) => {
-    setTemplateEditorLoadingId(template.id)
+  const handleEditTemplate = (template: OrganizationTemplate) => {
     setTemplateErrors([])
     setTemplateMessage(null)
-    try {
-      const detail = await fetchOrganizationTemplateDetail(template.id)
-      setTemplateEditorId(template.id)
-      setTemplateEditorDraft({
-        name: detail.template.name,
-        tagline: detail.template.tagline,
-        charter: detail.template.charter,
-        preferredLlmTier: detail.template.preferredLlmTier,
-      })
-      setTemplateEditorMode('edit')
-    } catch (err) {
-      setTemplateErrors(formatErrors(err, 'Unable to load template.'))
-    } finally {
-      setTemplateEditorLoadingId(null)
-    }
+    setTemplateEditorId(template.id)
+    setTemplateEditorDraft({
+      name: template.name,
+      tagline: template.tagline,
+      charter: template.charter,
+      preferredLlmTier: template.preferredLlmTier,
+    })
+    setTemplateEditorMode('edit')
   }
 
   const handleTemplateEditorSubmit = async (event: FormEvent) => {
@@ -723,7 +715,7 @@ export function OrganizationScreen() {
     try {
       const nextData = templateEditorMode === 'edit' && templateEditorId
         ? await updateOrganizationTemplate(templateEditorId, draft)
-        : await createOrganizationTemplateFromScratch(draft)
+        : await createOrganizationTemplate(draft, data?.organization.id)
       updateCachedTemplateData(nextData)
       setTemplateEditorMode(null)
       setTemplateEditorId(null)
@@ -949,7 +941,6 @@ export function OrganizationScreen() {
               <thead>
                 <tr>
                   <th>Template</th>
-                  <th>Source</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -960,10 +951,6 @@ export function OrganizationScreen() {
                       <p className="organization-screen__primary-text">{template.name}</p>
                       <p className="profile-screen__muted">{template.tagline}</p>
                       <p className="profile-screen__muted">Intelligence: {formatTemplateTier(template, templateData?.llmIntelligence ?? null)}</p>
-                    </td>
-                    <td>
-                      <p className="organization-screen__primary-text">{template.sourceAgentName ?? '-'}</p>
-                      {template.createdBy ? <p className="profile-screen__muted">Created by {template.createdBy}</p> : null}
                     </td>
                     <td>
                       <div className="flex flex-wrap justify-end gap-2">
@@ -981,19 +968,19 @@ export function OrganizationScreen() {
                             <button
                               type="button"
                               className="profile-screen__button profile-screen__button--secondary"
-                              onClick={() => void handleEditTemplate(template)}
-                              disabled={templateEditorLoadingId === template.id}
+                              onClick={() => handleEditTemplate(template)}
                             >
                               <Pencil className="h-4 w-4" aria-hidden="true" />
-                              {templateEditorLoadingId === template.id ? 'Loading...' : 'Edit'}
+                              Edit
                             </button>
                             <button
                               type="button"
-                              className="profile-screen__button profile-screen__button--danger"
+                              className="profile-screen__icon-button profile-screen__icon-button--danger"
                               onClick={() => setConfirmAction({ kind: 'deactivate-template', template })}
+                              aria-label={`Deactivate ${template.name}`}
+                              title="Deactivate"
                             >
                               <Trash2 className="h-4 w-4" aria-hidden="true" />
-                              Deactivate
                             </button>
                           </>
                         ) : null}

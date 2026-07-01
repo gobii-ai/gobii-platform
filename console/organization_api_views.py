@@ -205,29 +205,6 @@ def _serialize_organization(org: Organization, membership: OrganizationMembershi
 
 
 def _serialize_organization_template(template: PersistentAgentTemplate) -> dict:
-    source_agent = getattr(template, "source_agent", None)
-    created_by = getattr(template, "created_by", None)
-    preferred_llm_tier = getattr(template, "preferred_llm_tier", None)
-    preferred_llm_tier_key = getattr(preferred_llm_tier, "key", None) or "standard"
-    return {
-        "id": str(template.id),
-        "name": template.display_name,
-        "tagline": template.tagline,
-        "category": template.category or "Custom",
-        "preferredLlmTier": preferred_llm_tier_key,
-        "sourceAgentName": source_agent.name if source_agent else None,
-        "createdBy": (
-            created_by.get_full_name()
-            or created_by.email
-            or created_by.username
-            if created_by
-            else None
-        ),
-        "scheduleDescription": PretrainedWorkerTemplateService.describe_schedule(template.base_schedule),
-    }
-
-
-def _serialize_organization_template_detail(template: PersistentAgentTemplate) -> dict:
     preferred_llm_tier = getattr(template, "preferred_llm_tier", None)
     preferred_llm_tier_key = getattr(preferred_llm_tier, "key", None) or "standard"
     return {
@@ -235,6 +212,7 @@ def _serialize_organization_template_detail(template: PersistentAgentTemplate) -
         "name": template.display_name,
         "tagline": template.tagline,
         "charter": template.charter,
+        "category": template.category or "Custom",
         "preferredLlmTier": preferred_llm_tier_key,
     }
 
@@ -242,7 +220,7 @@ def _serialize_organization_template_detail(template: PersistentAgentTemplate) -
 def _organization_template_queryset(org: Organization):
     return (
         PersistentAgentTemplate.objects
-        .select_related("source_agent", "created_by", "preferred_llm_tier")
+        .select_related("preferred_llm_tier")
         .filter(
             organization=org,
             public_profile__isnull=True,
@@ -597,26 +575,7 @@ class CurrentOrganizationTemplateAPIView(LoginRequiredMixin, View):
 
 
 class CurrentOrganizationTemplateDetailAPIView(LoginRequiredMixin, View):
-    http_method_names = ["get", "patch", "delete"]
-
-    def get(self, request, template_id):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
-        if error:
-            return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage templates.", status=403)
-
-        template = get_object_or_404(
-            PersistentAgentTemplate,
-            id=template_id,
-            organization=org,
-            public_profile__isnull=True,
-            is_active=True,
-        )
-        return JsonResponse({"template": _serialize_organization_template_detail(template)})
+    http_method_names = ["patch", "delete"]
 
     @transaction.atomic
     def patch(self, request, template_id):
@@ -659,7 +618,7 @@ class CurrentOrganizationTemplateDetailAPIView(LoginRequiredMixin, View):
         ])
         return JsonResponse({
             **_serialize_organization_templates(org, membership),
-            "template": _serialize_organization_template_detail(template),
+            "template": _serialize_organization_template(template),
             "templateId": str(template.id),
         })
 

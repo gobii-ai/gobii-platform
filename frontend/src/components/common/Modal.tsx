@@ -95,7 +95,7 @@ export function Modal({
                     </button>
                   ) : null}
                 </div>
-                <div className={`mt-4 max-h-[70vh] overflow-y-auto pr-1 text-left ${bodyClassName}`}>{children}</div>
+                <div className={`mt-4 max-h-[70vh] overflow-y-auto px-1 py-1 text-left ${bodyClassName}`}>{children}</div>
               </div>
             </div>
           </div>

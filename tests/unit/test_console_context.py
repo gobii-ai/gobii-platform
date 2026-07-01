@@ -390,6 +390,7 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertFalse(payload["viewer"]["canManageTemplates"])
         self.assertEqual(payload["sourceAgents"], [])
         self.assertEqual([item["id"] for item in payload["templates"]], [str(template.id)])
+        self.assertEqual(payload["templates"][0]["charter"], template.charter)
 
     def test_current_organization_template_launch_seeds_org_spawn_session(self):
         template = self._create_org_template(preferred_llm_tier=get_intelligence_tier("premium"))
@@ -512,18 +513,10 @@ class CurrentOrganizationAPITests(TestCase):
         payload_template = next(item for item in resp.json()["templates"] if item["id"] == str(template.id))
         self.assertEqual(payload_template["preferredLlmTier"], "premium")
 
-    def test_current_organization_template_detail_get_and_patch_updates_editor_fields(self):
+    def test_current_organization_template_patch_updates_editor_fields(self):
         template = self._create_org_template(preferred_llm_tier=get_intelligence_tier("standard"))
         get_intelligence_tier("max")
         self._login_in_org_context(self.admin)
-
-        detail_resp = self.client.get(
-            reverse("console-current-organization-template-detail", kwargs={"template_id": template.id}),
-        )
-
-        self.assertEqual(detail_resp.status_code, 200)
-        self.assertEqual(detail_resp.json()["template"]["name"], template.display_name)
-        self.assertEqual(detail_resp.json()["template"]["preferredLlmTier"], "standard")
 
         patch_resp = self.client.patch(
             reverse("console-current-organization-template-detail", kwargs={"template_id": template.id}),
@@ -544,6 +537,7 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertEqual(template.charter, "Use these updated template instructions.")
         self.assertEqual(template.preferred_llm_tier.key, "max")
         self.assertEqual(patch_resp.json()["template"]["preferredLlmTier"], "max")
+        self.assertEqual(patch_resp.json()["template"]["charter"], "Use these updated template instructions.")
 
     def test_owner_can_update_organization_name(self):
         self._login_in_org_context(self.owner)
