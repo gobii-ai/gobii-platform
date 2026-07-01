@@ -78,6 +78,28 @@ function shouldInterceptLinkClick(event: ReactMouseEvent<HTMLElement>): boolean 
     && !event.shiftKey
 }
 
+function wrapTablesForHorizontalScroll(value: string): string {
+  if (!value || typeof DOMParser === 'undefined') {
+    return value
+  }
+
+  const parser = new DOMParser()
+  const document = parser.parseFromString(value, 'text/html')
+
+  document.body.querySelectorAll('table').forEach((table) => {
+    if (table.parentElement?.classList.contains('chat-html-table-scroll')) {
+      return
+    }
+
+    const wrapper = document.createElement('div')
+    wrapper.className = 'chat-html-table-scroll'
+    table.parentNode?.insertBefore(wrapper, table)
+    wrapper.appendChild(table)
+  })
+
+  return document.body.innerHTML
+}
+
 export function MessageContent({
   bodyHtml,
   bodyText,
@@ -89,7 +111,7 @@ export function MessageContent({
   // For other channels, bodyText may contain inline HTML like <br> which the markdown renderer handles.
   const htmlSource = useMemo(() => {
     if (bodyHtml && bodyHtml.trim().length > 0) {
-      return sanitizeHtml(bodyHtml)
+      return wrapTablesForHorizontalScroll(sanitizeHtml(bodyHtml))
     }
     return null
   }, [bodyHtml])

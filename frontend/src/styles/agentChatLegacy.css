@@ -3114,7 +3114,16 @@
 }
 .chat-html-content {
     max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+}
+.chat-html-table-scroll {
+    width: 100%;
+    max-width: 100%;
+    margin: 0.75rem 0;
     overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
 }
 .chat-html-content > :first-child {
     margin-top: 0 !important;
@@ -3131,11 +3140,22 @@
     margin-bottom: 0.75rem;
 }
 .chat-html-content table {
-    width: 100%;
-    max-width: 100%;
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
     border-collapse: collapse;
     margin: 0.75rem 0;
     font-size: 0.875rem;
+    table-layout: auto;
+}
+.chat-html-table-scroll table {
+    margin: 0;
+}
+.chat-html-content th,
+.chat-html-content td {
+    overflow-wrap: normal;
+    word-break: normal;
+    white-space: normal;
 }
 .chat-bubble--user .chat-content {
     color: #334155;
