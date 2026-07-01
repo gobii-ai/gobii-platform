@@ -18,7 +18,15 @@ from anymail.exceptions import AnymailError
 from waffle import flag_is_active
 
 from agents.services import PretrainedWorkerTemplateService
-from api.models import Organization, OrganizationInvite, OrganizationMembership, PersistentAgent, PersistentAgentTemplate
+from api.models import (
+    IntelligenceTier,
+    Organization,
+    OrganizationInvite,
+    OrganizationMembership,
+    PersistentAgent,
+    PersistentAgentTemplate,
+)
+from api.agent.core.llm_config import AgentLLMTier
 from api.services.agent_owner_custom_instructions import (
     CUSTOM_INSTRUCTIONS_FIELD,
     CustomInstructionsValidationError,
@@ -36,6 +44,7 @@ from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from console.api_helpers import _parse_json_body as _parse_json_body_or_raise
 from console.context_helpers import build_console_context
 from console.forms import OrganizationForm, OrganizationInviteForm
+from console.views import build_llm_intelligence_props
 from console.agent_creation import (
     AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY,
     AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
@@ -53,6 +62,9 @@ OWNER_EQUIVALENT_ROLES = (
 )
 ORG_CUSTOM_INSTRUCTIONS_FIELD = CUSTOM_INSTRUCTIONS_FIELD
 ORG_MEMBERS_CAN_CREATE_AGENTS_FIELD = "membersCanCreateAgents"
+PREFERRED_LLM_TIER_SESSION_KEY = "agent_preferred_llm_tier"
+TEMPLATE_NAME_MAX_LENGTH = 255
+TEMPLATE_TAGLINE_MAX_LENGTH = 255
 
 
 def _json_error(message: str, *, status: int = 400):
@@ -69,6 +81,13 @@ def _json_field_errors(errors, *, status: int = 400):
         },
         status=status,
     )
+
+
+def _first_payload_value(payload: dict, *keys: str):
+    for key in keys:
+        if key in payload:
+            return payload.get(key)
+    return None
 
 
 def _parse_json_body(request):
@@ -188,11 +207,14 @@ def _serialize_organization(org: Organization, membership: OrganizationMembershi
 def _serialize_organization_template(template: PersistentAgentTemplate) -> dict:
     source_agent = getattr(template, "source_agent", None)
     created_by = getattr(template, "created_by", None)
+    preferred_llm_tier = getattr(template, "preferred_llm_tier", None)
+    preferred_llm_tier_key = getattr(preferred_llm_tier, "key", None) or "standard"
     return {
         "id": str(template.id),
         "name": template.display_name,
         "tagline": template.tagline,
         "category": template.category or "Custom",
+        "preferredLlmTier": preferred_llm_tier_key,
         "sourceAgentName": source_agent.name if source_agent else None,
         "createdBy": (
             created_by.get_full_name()
@@ -205,10 +227,22 @@ def _serialize_organization_template(template: PersistentAgentTemplate) -> dict:
     }
 
 
+def _serialize_organization_template_detail(template: PersistentAgentTemplate) -> dict:
+    preferred_llm_tier = getattr(template, "preferred_llm_tier", None)
+    preferred_llm_tier_key = getattr(preferred_llm_tier, "key", None) or "standard"
+    return {
+        "id": str(template.id),
+        "name": template.display_name,
+        "tagline": template.tagline,
+        "charter": template.charter,
+        "preferredLlmTier": preferred_llm_tier_key,
+    }
+
+
 def _organization_template_queryset(org: Organization):
     return (
         PersistentAgentTemplate.objects
-        .select_related("source_agent", "created_by")
+        .select_related("source_agent", "created_by", "preferred_llm_tier")
         .filter(
             organization=org,
             public_profile__isnull=True,
@@ -223,6 +257,13 @@ def _serialize_source_agent(agent: PersistentAgent) -> dict:
         "id": str(agent.id),
         "name": agent.name or "Untitled Agent",
     }
+
+
+def _template_preferred_llm_tier_key(template: PersistentAgentTemplate) -> str | None:
+    preferred_llm_tier = getattr(template, "preferred_llm_tier", None)
+    tier_key = getattr(preferred_llm_tier, "key", preferred_llm_tier)
+    tier_key = str(tier_key or "").strip().lower()
+    return tier_key or None
 
 
 def _serialize_organization_templates(org: Organization, membership: OrganizationMembership) -> dict:
@@ -252,6 +293,12 @@ def _serialize_organization_templates(org: Organization, membership: Organizatio
             for template in _organization_template_queryset(org)
         ],
         "sourceAgents": source_agents,
+        "llmIntelligence": build_llm_intelligence_props(
+            org,
+            "organization",
+            org,
+            None,
+        ),
     }
 
 
@@ -300,6 +347,53 @@ def _save_members_can_create_agents_setting(org: Organization, enabled: bool) ->
         next_settings.pop(ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS, None)
     org.org_settings = next_settings
     org.save(update_fields=["org_settings", "updated_at"])
+
+
+def _normalize_template_editor_payload(payload: dict, org: Organization):
+    name = str(_first_payload_value(payload, "name", "displayName", "display_name") or "").strip()
+    tagline = str(_first_payload_value(payload, "tagline", "description") or "").strip()
+    charter = str(_first_payload_value(payload, "charter", "instructions") or "").strip()
+    preferred_llm_tier_key = str(
+        _first_payload_value(payload, "preferredLlmTier", "preferred_llm_tier") or ""
+    ).strip().lower()
+
+    errors: dict[str, list[str]] = {}
+    if not name:
+        errors["name"] = ["Name is required."]
+    elif len(name) > TEMPLATE_NAME_MAX_LENGTH:
+        errors["name"] = [f"Name must be {TEMPLATE_NAME_MAX_LENGTH} characters or fewer."]
+
+    if not tagline:
+        errors["tagline"] = ["Short description is required."]
+    elif len(tagline) > TEMPLATE_TAGLINE_MAX_LENGTH:
+        errors["tagline"] = [f"Short description must be {TEMPLATE_TAGLINE_MAX_LENGTH} characters or fewer."]
+
+    if not charter:
+        errors["charter"] = ["Instructions are required."]
+
+    if not preferred_llm_tier_key:
+        default_tier = build_llm_intelligence_props(org, "organization", org, None).get("systemDefaultTier")
+        preferred_llm_tier_key = str(default_tier or AgentLLMTier.STANDARD.value).strip().lower()
+
+    try:
+        AgentLLMTier(preferred_llm_tier_key)
+    except ValueError:
+        errors["preferredLlmTier"] = ["Choose a valid intelligence level."]
+
+    if errors:
+        return None, _json_field_errors(errors)
+
+    preferred_llm_tier = IntelligenceTier.objects.filter(key=preferred_llm_tier_key).first()
+    if preferred_llm_tier is None:
+        return None, _json_field_errors({"preferredLlmTier": ["Choose a valid intelligence level."]})
+
+    return {
+        "display_name": name,
+        "tagline": tagline,
+        "description": tagline,
+        "charter": charter,
+        "preferred_llm_tier": preferred_llm_tier,
+    }, None
 
 
 def _send_invitation_email(request, org: Organization, invite: OrganizationInvite) -> None:
@@ -444,41 +538,130 @@ class CurrentOrganizationTemplateAPIView(LoginRequiredMixin, View):
             return error
 
         source_agent_id = str(payload.get("sourceAgentId") or payload.get("source_agent_id") or "").strip()
-        if not source_agent_id:
-            return _json_error("sourceAgentId is required.", status=400)
-        try:
-            source_agent_uuid = uuid.UUID(source_agent_id)
-        except (TypeError, ValueError, AttributeError):
-            return _json_error("sourceAgentId must be a valid UUID.", status=400)
+        if source_agent_id:
+            try:
+                source_agent_uuid = uuid.UUID(source_agent_id)
+            except (TypeError, ValueError, AttributeError):
+                return _json_error("sourceAgentId must be a valid UUID.", status=400)
 
-        source_agent = get_object_or_404(
-            PersistentAgent.objects.non_eval().alive().select_related("organization"),
-            id=source_agent_uuid,
+            source_agent = get_object_or_404(
+                PersistentAgent.objects.non_eval().alive().select_related("organization"),
+                id=source_agent_uuid,
+                organization=org,
+            )
+            try:
+                result = TemplateCloneService.clone_agent_to_organization_template(
+                    agent=source_agent,
+                    user=request.user,
+                )
+            except TemplateCloneError as exc:
+                return _json_error(str(exc), status=400)
+            except ValidationError as exc:
+                message = exc.messages[0] if getattr(exc, "messages", None) else "Unable to create template."
+                return _json_error(message, status=400)
+
+            return JsonResponse(
+                {
+                    **_serialize_organization_templates(org, membership),
+                    "created": result.created,
+                    "templateId": str(result.template.id),
+                },
+                status=201 if result.created else 200,
+            )
+
+        normalized, error = _normalize_template_editor_payload(payload, org)
+        if error:
+            return error
+
+        template = PersistentAgentTemplate(
+            code=TemplateCloneService._generate_template_code(),
             organization=org,
+            created_by=request.user,
+            category="Custom",
+            recommended_contact_channel="email",
+            **normalized,
         )
         try:
-            result = TemplateCloneService.clone_agent_to_organization_template(
-                agent=source_agent,
-                user=request.user,
-            )
-        except TemplateCloneError as exc:
-            return _json_error(str(exc), status=400)
+            template.full_clean()
         except ValidationError as exc:
-            message = exc.messages[0] if getattr(exc, "messages", None) else "Unable to create template."
-            return _json_error(message, status=400)
-
+            return _json_field_errors(exc.message_dict if hasattr(exc, "message_dict") else {"__all__": exc.messages})
+        template.save()
         return JsonResponse(
             {
                 **_serialize_organization_templates(org, membership),
-                "created": result.created,
-                "templateId": str(result.template.id),
+                "created": True,
+                "templateId": str(template.id),
             },
-            status=201 if result.created else 200,
+            status=201,
         )
 
 
 class CurrentOrganizationTemplateDetailAPIView(LoginRequiredMixin, View):
-    http_method_names = ["delete"]
+    http_method_names = ["get", "patch", "delete"]
+
+    def get(self, request, template_id):
+        try:
+            org, membership, error = _require_current_org(request)
+        except PermissionDenied as exc:
+            return _json_error(str(exc), status=404)
+        if error:
+            return error
+        if membership.role not in MEMBER_MANAGE_ROLES:
+            return _json_error("You do not have permission to manage templates.", status=403)
+
+        template = get_object_or_404(
+            PersistentAgentTemplate.objects.select_related("preferred_llm_tier"),
+            id=template_id,
+            organization=org,
+            public_profile__isnull=True,
+            is_active=True,
+        )
+        return JsonResponse({"template": _serialize_organization_template_detail(template)})
+
+    @transaction.atomic
+    def patch(self, request, template_id):
+        try:
+            org, membership, error = _require_current_org(request)
+        except PermissionDenied as exc:
+            return _json_error(str(exc), status=404)
+        if error:
+            return error
+        if membership.role not in MEMBER_MANAGE_ROLES:
+            return _json_error("You do not have permission to manage templates.", status=403)
+
+        payload, error = _parse_json_body(request)
+        if error:
+            return error
+        normalized, error = _normalize_template_editor_payload(payload, org)
+        if error:
+            return error
+
+        template = get_object_or_404(
+            PersistentAgentTemplate.objects.select_related("preferred_llm_tier"),
+            id=template_id,
+            organization=org,
+            public_profile__isnull=True,
+            is_active=True,
+        )
+        for field, value in normalized.items():
+            setattr(template, field, value)
+        try:
+            template.full_clean()
+        except ValidationError as exc:
+            return _json_field_errors(exc.message_dict if hasattr(exc, "message_dict") else {"__all__": exc.messages})
+        template.save(update_fields=[
+            "display_name",
+            "tagline",
+            "description",
+            "charter",
+            "preferred_llm_tier",
+            "updated_at",
+        ])
+        return JsonResponse({
+            **_serialize_organization_templates(org, membership),
+            "template": _serialize_organization_template_detail(template),
+            "templateId": str(template.id),
+        })
 
     @transaction.atomic
     def delete(self, request, template_id):
@@ -492,7 +675,7 @@ class CurrentOrganizationTemplateDetailAPIView(LoginRequiredMixin, View):
             return _json_error("You do not have permission to manage templates.", status=403)
 
         template = get_object_or_404(
-            PersistentAgentTemplate,
+            PersistentAgentTemplate.objects.select_related("preferred_llm_tier"),
             id=template_id,
             organization=org,
             public_profile__isnull=True,
@@ -517,7 +700,7 @@ class CurrentOrganizationTemplateLaunchAPIView(LoginRequiredMixin, View):
             return _json_error("You do not have permission to create agents for this organization.", status=403)
 
         template = get_object_or_404(
-            PersistentAgentTemplate,
+            PersistentAgentTemplate.objects.select_related("preferred_llm_tier"),
             id=template_id,
             organization=org,
             public_profile__isnull=True,
@@ -531,6 +714,11 @@ class CurrentOrganizationTemplateLaunchAPIView(LoginRequiredMixin, View):
         request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
         request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
         request.session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(org.id)
+        tier_key = _template_preferred_llm_tier_key(template)
+        if tier_key:
+            request.session[PREFERRED_LLM_TIER_SESSION_KEY] = tier_key
+        else:
+            request.session.pop(PREFERRED_LLM_TIER_SESSION_KEY, None)
         request.session.modified = True
         return JsonResponse({
             "templateId": str(template.id),

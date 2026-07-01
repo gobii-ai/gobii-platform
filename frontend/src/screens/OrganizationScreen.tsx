@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Building2, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
+import { Bot, Building2, Pencil, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
 import {
   createOrganizationTemplate,
+  createOrganizationTemplateFromScratch,
   deactivateOrganizationTemplate,
+  fetchOrganizationTemplateDetail,
   fetchCurrentOrganization,
   fetchCurrentOrganizationTemplates,
   inviteOrganizationMember,
@@ -15,18 +17,22 @@ import {
   updateCurrentOrganizationCustomInstructions,
   updateCurrentOrganizationMemberAgentCreation,
   updateCurrentOrganizationName,
+  updateOrganizationTemplate,
   updateOrganizationMemberRole,
   type CurrentOrganizationPayload,
   type CurrentOrganizationTemplatesPayload,
   type OrganizationInvite,
   type OrganizationMember,
   type OrganizationTemplate,
+  type OrganizationTemplateEditorPayload,
 } from '../api/organization'
 import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
+import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { ModalForm } from '../components/common/ModalForm'
 import { CustomInstructionsSection } from '../components/settings/CustomInstructionsSection'
+import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
 import { navigateWithinApp } from '../util/appNavigation'
 
 type ConfirmAction = {
@@ -41,6 +47,7 @@ type ConfirmAction = {
 }
 
 const SOLUTIONS_PARTNER_ROLE = 'solutions_partner'
+const FALLBACK_INTELLIGENCE_TIER: IntelligenceTierKey = 'standard'
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -75,6 +82,29 @@ function formatErrors(error: unknown, fallback: string): string[] {
     return [error.message]
   }
   return [fallback]
+}
+
+function resolveTemplateDefaultTier(config?: LlmIntelligenceConfig | null): IntelligenceTierKey {
+  const options = config?.options ?? []
+  const systemDefault = config?.systemDefaultTier
+  if (systemDefault && options.some((option) => option.key === systemDefault)) {
+    return systemDefault
+  }
+  return options[0]?.key ?? FALLBACK_INTELLIGENCE_TIER
+}
+
+function buildBlankTemplateDraft(config?: LlmIntelligenceConfig | null): OrganizationTemplateEditorPayload {
+  return {
+    name: '',
+    tagline: '',
+    charter: '',
+    preferredLlmTier: resolveTemplateDefaultTier(config),
+  }
+}
+
+function formatTemplateTier(template: OrganizationTemplate, config?: LlmIntelligenceConfig | null): string {
+  const tier = config?.options.find((option) => option.key === template.preferredLlmTier)
+  return tier?.label ?? template.preferredLlmTier
 }
 
 function publishOrganizationContext(data: CurrentOrganizationPayload) {
@@ -308,6 +338,101 @@ function CreateTemplateModal({
   )
 }
 
+function TemplateEditorModal({
+  mode,
+  draft,
+  intelligenceConfig,
+  errors,
+  busy,
+  onDraftChange,
+  onClose,
+  onSubmit,
+}: {
+  mode: 'create' | 'edit'
+  draft: OrganizationTemplateEditorPayload
+  intelligenceConfig: LlmIntelligenceConfig | null
+  errors: string[]
+  busy: boolean
+  onDraftChange: (draft: OrganizationTemplateEditorPayload) => void
+  onClose: () => void
+  onSubmit: (event: FormEvent) => void
+}) {
+  const updateDraft = <K extends keyof OrganizationTemplateEditorPayload>(
+    key: K,
+    value: OrganizationTemplateEditorPayload[K],
+  ) => {
+    onDraftChange({ ...draft, [key]: value })
+  }
+
+  return (
+    <ModalForm
+      id="organization-template-editor-form"
+      title={mode === 'create' ? 'New Template' : 'Edit Template'}
+      onClose={onClose}
+      onSubmit={onSubmit}
+      widthClass="sm:max-w-3xl"
+      icon={Bot}
+      iconBgClass="bg-blue-100"
+      iconColorClass="text-blue-600"
+      dismissible={!busy}
+      submitLabel={mode === 'create' ? 'Create Template' : 'Save Template'}
+      submittingLabel={mode === 'create' ? 'Creating...' : 'Saving...'}
+      submitting={busy}
+      submitDisabled={!draft.name.trim() || !draft.tagline.trim() || !draft.charter.trim()}
+      errorMessages={errors}
+      formClassName="space-y-5"
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label htmlFor="organization-template-name" className="block text-sm font-medium text-slate-700">
+          Name
+          <input
+            id="organization-template-name"
+            type="text"
+            value={draft.name}
+            maxLength={255}
+            onChange={(event) => updateDraft('name', event.target.value)}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            disabled={busy}
+          />
+        </label>
+        <label htmlFor="organization-template-tagline" className="block text-sm font-medium text-slate-700">
+          Short Description
+          <input
+            id="organization-template-tagline"
+            type="text"
+            value={draft.tagline}
+            maxLength={255}
+            onChange={(event) => updateDraft('tagline', event.target.value)}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            disabled={busy}
+          />
+        </label>
+      </div>
+      <label htmlFor="organization-template-charter" className="block text-sm font-medium text-slate-700">
+        Instructions
+        <textarea
+          id="organization-template-charter"
+          value={draft.charter}
+          onChange={(event) => updateDraft('charter', event.target.value)}
+          className="mt-1 block min-h-52 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          disabled={busy}
+        />
+      </label>
+      {intelligenceConfig ? (
+        <div>
+          <span className="mb-2 block text-sm font-medium text-slate-700">Intelligence</span>
+          <AgentIntelligenceSlider
+            currentTier={draft.preferredLlmTier}
+            config={intelligenceConfig}
+            onTierChange={(tier) => updateDraft('preferredLlmTier', tier)}
+            disabled={busy}
+          />
+        </div>
+      ) : null}
+    </ModalForm>
+  )
+}
+
 export function OrganizationScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['current-organization'] as const, [])
@@ -344,6 +469,12 @@ export function OrganizationScreen() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
   const [addMemberOpen, setAddMemberOpen] = useState(false)
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false)
+  const [templateEditorMode, setTemplateEditorMode] = useState<'create' | 'edit' | null>(null)
+  const [templateEditorId, setTemplateEditorId] = useState<string | null>(null)
+  const [templateEditorDraft, setTemplateEditorDraft] = useState<OrganizationTemplateEditorPayload>(
+    buildBlankTemplateDraft(),
+  )
+  const [templateEditorLoadingId, setTemplateEditorLoadingId] = useState<string | null>(null)
   const [templateSourceAgentId, setTemplateSourceAgentId] = useState('')
   const [templateErrors, setTemplateErrors] = useState<string[]>([])
   const [templateMessage, setTemplateMessage] = useState<string | null>(null)
@@ -530,6 +661,77 @@ export function OrganizationScreen() {
     }
   }
 
+  const openNewTemplateEditor = () => {
+    setTemplateErrors([])
+    setTemplateMessage(null)
+    setTemplateEditorId(null)
+    setTemplateEditorDraft(buildBlankTemplateDraft(templateData?.llmIntelligence ?? null))
+    setTemplateEditorMode('create')
+  }
+
+  const handleEditTemplate = async (template: OrganizationTemplate) => {
+    setTemplateEditorLoadingId(template.id)
+    setTemplateErrors([])
+    setTemplateMessage(null)
+    try {
+      const detail = await fetchOrganizationTemplateDetail(template.id)
+      setTemplateEditorId(template.id)
+      setTemplateEditorDraft({
+        name: detail.template.name,
+        tagline: detail.template.tagline,
+        charter: detail.template.charter,
+        preferredLlmTier: detail.template.preferredLlmTier,
+      })
+      setTemplateEditorMode('edit')
+    } catch (err) {
+      setTemplateErrors(formatErrors(err, 'Unable to load template.'))
+    } finally {
+      setTemplateEditorLoadingId(null)
+    }
+  }
+
+  const handleTemplateEditorSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    const draft = {
+      ...templateEditorDraft,
+      name: templateEditorDraft.name.trim(),
+      tagline: templateEditorDraft.tagline.trim(),
+      charter: templateEditorDraft.charter.trim(),
+    }
+    const errors: string[] = []
+    if (!draft.name) {
+      errors.push('Name is required.')
+    }
+    if (!draft.tagline) {
+      errors.push('Short description is required.')
+    }
+    if (!draft.charter) {
+      errors.push('Instructions are required.')
+    }
+    if (errors.length > 0) {
+      setTemplateErrors(errors)
+      return
+    }
+
+    setTemplateBusy(true)
+    setTemplateErrors([])
+    setTemplateMessage(null)
+    try {
+      const nextData = templateEditorMode === 'edit' && templateEditorId
+        ? await updateOrganizationTemplate(templateEditorId, draft)
+        : await createOrganizationTemplateFromScratch(draft)
+      updateCachedTemplateData(nextData)
+      setTemplateEditorMode(null)
+      setTemplateEditorId(null)
+      setTemplateEditorDraft(buildBlankTemplateDraft(templateData?.llmIntelligence ?? null))
+      setTemplateMessage(templateEditorMode === 'edit' ? 'Template saved.' : 'Template created.')
+    } catch (err) {
+      setTemplateErrors(formatErrors(err, 'Unable to save template.'))
+    } finally {
+      setTemplateBusy(false)
+    }
+  }
+
   const handleLaunchTemplate = async (template: OrganizationTemplate) => {
     setTemplateLaunchBusyId(template.id)
     setTemplateErrors([])
@@ -701,21 +903,33 @@ export function OrganizationScreen() {
             </div>
           </div>
           {canManageTemplates ? (
-            <button
-              type="button"
-              className="profile-screen__button profile-screen__button--primary"
-              onClick={() => {
-                setTemplateErrors([])
-                setTemplateMessage(null)
-                setTemplateSourceAgentId(sourceAgents[0]?.id ?? '')
-                setCreateTemplateOpen(true)
-              }}
-              disabled={!sourceAgents.length || templateBusy}
-              title={!sourceAgents.length ? 'Create an organization agent first' : undefined}
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              Create Template
-            </button>
+            <div className="organization-screen__member-actions">
+              {sourceAgents.length ? (
+                <button
+                  type="button"
+                  className="profile-screen__button profile-screen__button--secondary"
+                  onClick={() => {
+                    setTemplateErrors([])
+                    setTemplateMessage(null)
+                    setTemplateSourceAgentId(sourceAgents[0]?.id ?? '')
+                    setCreateTemplateOpen(true)
+                  }}
+                  disabled={templateBusy}
+                >
+                  <Bot className="h-4 w-4" aria-hidden="true" />
+                  Clone Agent
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="profile-screen__button profile-screen__button--primary"
+                onClick={openNewTemplateEditor}
+                disabled={templateBusy}
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                New Template
+              </button>
+            </div>
           ) : null}
         </div>
         {templateMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{templateMessage}</p> : null}
@@ -740,10 +954,8 @@ export function OrganizationScreen() {
                   <tr key={template.id}>
                     <td>
                       <p className="organization-screen__primary-text">{template.name}</p>
-                      <p className="profile-screen__muted">{template.category} - {template.tagline}</p>
-                      {template.scheduleDescription ? (
-                        <p className="profile-screen__muted">{template.scheduleDescription}</p>
-                      ) : null}
+                      <p className="profile-screen__muted">{template.tagline}</p>
+                      <p className="profile-screen__muted">Intelligence: {formatTemplateTier(template, templateData?.llmIntelligence ?? null)}</p>
                     </td>
                     <td>
                       <p className="organization-screen__primary-text">{template.sourceAgentName ?? '-'}</p>
@@ -761,14 +973,25 @@ export function OrganizationScreen() {
                           {templateLaunchBusyId === template.id ? 'Opening...' : 'Use Template'}
                         </button>
                         {canManageTemplates ? (
-                          <button
-                            type="button"
-                            className="profile-screen__button profile-screen__button--danger"
-                            onClick={() => setConfirmAction({ kind: 'deactivate-template', template })}
-                          >
-                            <Trash2 className="h-4 w-4" aria-hidden="true" />
-                            Deactivate
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="profile-screen__button profile-screen__button--secondary"
+                              onClick={() => void handleEditTemplate(template)}
+                              disabled={templateEditorLoadingId === template.id}
+                            >
+                              <Pencil className="h-4 w-4" aria-hidden="true" />
+                              {templateEditorLoadingId === template.id ? 'Loading...' : 'Edit'}
+                            </button>
+                            <button
+                              type="button"
+                              className="profile-screen__button profile-screen__button--danger"
+                              onClick={() => setConfirmAction({ kind: 'deactivate-template', template })}
+                            >
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                              Deactivate
+                            </button>
+                          </>
                         ) : null}
                       </div>
                     </td>
@@ -962,6 +1185,23 @@ export function OrganizationScreen() {
             }
           }}
           onSubmit={handleCreateTemplateSubmit}
+        />
+      ) : null}
+      {templateEditorMode ? (
+        <TemplateEditorModal
+          mode={templateEditorMode}
+          draft={templateEditorDraft}
+          intelligenceConfig={templateData?.llmIntelligence ?? null}
+          errors={templateErrors}
+          busy={templateBusy}
+          onDraftChange={setTemplateEditorDraft}
+          onClose={() => {
+            if (!templateBusy) {
+              setTemplateEditorMode(null)
+              setTemplateEditorId(null)
+            }
+          }}
+          onSubmit={handleTemplateEditorSubmit}
         />
       ) : null}
     </div>

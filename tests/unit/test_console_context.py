@@ -34,6 +34,7 @@ from console.agent_creation import (
 from api.services.organization_permissions import ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS
 from django.utils import timezone
 from constants.plans import PlanNamesChoices
+from tests.utils.llm_seed import get_intelligence_tier
 
 
 User = get_user_model()
@@ -139,28 +140,34 @@ class CurrentOrganizationAPITests(TestCase):
         session["context_name"] = self.org.name
         session.save()
 
-    def _create_org_agent(self, *, name="Ops Agent"):
+    def _create_org_agent(self, *, name="Ops Agent", preferred_llm_tier=None):
         browser_agent = BrowserUseAgent.objects.create(user=self.owner, name=f"{name} Browser")
-        return PersistentAgent.objects.create(
-            user=self.owner,
-            organization=self.org,
-            name=name,
-            charter="Keep the org on track.",
-            browser_use_agent=browser_agent,
-        )
+        agent_kwargs = {
+            "user": self.owner,
+            "organization": self.org,
+            "name": name,
+            "charter": "Keep the org on track.",
+            "browser_use_agent": browser_agent,
+        }
+        if preferred_llm_tier is not None:
+            agent_kwargs["preferred_llm_tier"] = preferred_llm_tier
+        return PersistentAgent.objects.create(**agent_kwargs)
 
-    def _create_org_template(self, *, code="org-context-template"):
-        return PersistentAgentTemplate.objects.create(
-            code=code,
-            organization=self.org,
-            display_name="Org Context Template",
-            tagline="Private workflow",
-            description="Only members of this organization can use it.",
-            charter="Run the private organization workflow.",
-            base_schedule="@daily",
-            category="Operations",
-            is_active=True,
-        )
+    def _create_org_template(self, *, code="org-context-template", preferred_llm_tier=None):
+        template_kwargs = {
+            "code": code,
+            "organization": self.org,
+            "display_name": "Org Context Template",
+            "tagline": "Private workflow",
+            "description": "Only members of this organization can use it.",
+            "charter": "Run the private organization workflow.",
+            "base_schedule": "@daily",
+            "category": "Operations",
+            "is_active": True,
+        }
+        if preferred_llm_tier is not None:
+            template_kwargs["preferred_llm_tier"] = preferred_llm_tier
+        return PersistentAgentTemplate.objects.create(**template_kwargs)
 
     def test_current_organization_api_lists_members_and_invites_for_org_context(self):
         self._login_in_org_context(self.owner)
@@ -385,7 +392,7 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertEqual([item["id"] for item in payload["templates"]], [str(template.id)])
 
     def test_current_organization_template_launch_seeds_org_spawn_session(self):
-        template = self._create_org_template()
+        template = self._create_org_template(preferred_llm_tier=get_intelligence_tier("premium"))
         self.org.org_settings = {ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS: True}
         self.org.save(update_fields=["org_settings"])
         self._login_in_org_context(self.member)
@@ -406,6 +413,7 @@ class CurrentOrganizationAPITests(TestCase):
         self.assertEqual(session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY], template.code)
         self.assertEqual(session[AGENT_TEMPLATE_SOURCE_SESSION_KEY], AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE)
         self.assertEqual(session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY], str(self.org.id))
+        self.assertEqual(session["agent_preferred_llm_tier"], "premium")
 
     def test_current_organization_template_launch_rejects_member_without_creation_setting(self):
         template = self._create_org_template()
@@ -425,7 +433,7 @@ class CurrentOrganizationAPITests(TestCase):
 
     @patch("api.services.template_clone.TemplateCloneService._generate_template")
     def test_current_organization_templates_api_allows_manage_roles_to_create_and_deactivate(self, mock_generate_template):
-        source_agent = self._create_org_agent()
+        source_agent = self._create_org_agent(preferred_llm_tier=get_intelligence_tier("max"))
         mock_generate_template.return_value = {
             "display_name": "Generated Org Template",
             "tagline": "Reusable workflow",
@@ -450,7 +458,11 @@ class CurrentOrganizationAPITests(TestCase):
         template = PersistentAgentTemplate.objects.get(source_agent=source_agent)
         self.assertEqual(template.organization, self.org)
         self.assertIsNone(template.public_profile_id)
-        self.assertIn(str(template.id), [item["id"] for item in create_resp.json()["templates"]])
+        self.assertEqual(template.preferred_llm_tier.key, "max")
+        created_payload = create_resp.json()
+        self.assertIn(str(template.id), [item["id"] for item in created_payload["templates"]])
+        created_template = next(item for item in created_payload["templates"] if item["id"] == str(template.id))
+        self.assertEqual(created_template["preferredLlmTier"], "max")
 
         delete_resp = self.client.delete(
             reverse("console-current-organization-template-detail", kwargs={"template_id": template.id}),
@@ -472,6 +484,66 @@ class CurrentOrganizationAPITests(TestCase):
 
         self.assertEqual(resp.status_code, 403)
         self.assertFalse(PersistentAgentTemplate.objects.filter(source_agent=source_agent).exists())
+
+    def test_current_organization_templates_api_creates_scratch_template(self):
+        get_intelligence_tier("premium")
+        self._login_in_org_context(self.admin)
+
+        resp = self.client.post(
+            reverse("console-current-organization-templates"),
+            data=json.dumps({
+                "name": "Escalation Helper",
+                "tagline": "Keeps customer escalations moving.",
+                "charter": "Review open escalations and draft next actions.",
+                "preferredLlmTier": "premium",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        template = PersistentAgentTemplate.objects.get(display_name="Escalation Helper")
+        self.assertEqual(template.organization, self.org)
+        self.assertIsNone(template.source_agent_id)
+        self.assertEqual(template.tagline, "Keeps customer escalations moving.")
+        self.assertEqual(template.description, "Keeps customer escalations moving.")
+        self.assertEqual(template.charter, "Review open escalations and draft next actions.")
+        self.assertEqual(template.category, "Custom")
+        self.assertEqual(template.preferred_llm_tier.key, "premium")
+        payload_template = next(item for item in resp.json()["templates"] if item["id"] == str(template.id))
+        self.assertEqual(payload_template["preferredLlmTier"], "premium")
+
+    def test_current_organization_template_detail_get_and_patch_updates_editor_fields(self):
+        template = self._create_org_template(preferred_llm_tier=get_intelligence_tier("standard"))
+        get_intelligence_tier("max")
+        self._login_in_org_context(self.admin)
+
+        detail_resp = self.client.get(
+            reverse("console-current-organization-template-detail", kwargs={"template_id": template.id}),
+        )
+
+        self.assertEqual(detail_resp.status_code, 200)
+        self.assertEqual(detail_resp.json()["template"]["name"], template.display_name)
+        self.assertEqual(detail_resp.json()["template"]["preferredLlmTier"], "standard")
+
+        patch_resp = self.client.patch(
+            reverse("console-current-organization-template-detail", kwargs={"template_id": template.id}),
+            data=json.dumps({
+                "name": "Updated Template",
+                "tagline": "Updated short description.",
+                "charter": "Use these updated template instructions.",
+                "preferredLlmTier": "max",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(patch_resp.status_code, 200)
+        template.refresh_from_db()
+        self.assertEqual(template.display_name, "Updated Template")
+        self.assertEqual(template.tagline, "Updated short description.")
+        self.assertEqual(template.description, "Updated short description.")
+        self.assertEqual(template.charter, "Use these updated template instructions.")
+        self.assertEqual(template.preferred_llm_tier.key, "max")
+        self.assertEqual(patch_resp.json()["template"]["preferredLlmTier"], "max")
 
     def test_owner_can_update_organization_name(self):
         self._login_in_org_context(self.owner)

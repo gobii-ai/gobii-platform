@@ -251,6 +251,10 @@ class PretrainedWorkerTemplateService:
             schedule_jitter_minutes=template.schedule_jitter_minutes or 0,
             event_triggers=list(template.event_triggers or []),
             default_tools=list(template.default_tools or []),
+            preferred_llm_tier=(
+                getattr(getattr(template, "preferred_llm_tier", None), "key", None)
+                or "standard"
+            ),
             recommended_contact_channel=template.recommended_contact_channel or "email",
             category=template.category or "",
             hero_image_path=template.hero_image_path or "",
@@ -262,7 +266,10 @@ class PretrainedWorkerTemplateService:
     @classmethod
     def _db_templates(cls, *, include_inactive: bool = False) -> list[PretrainedWorkerTemplateDefinition]:
         Template = apps.get_model("api", "PersistentAgentTemplate")
-        qs = Template.objects.filter(public_profile__isnull=True, organization__isnull=True)
+        qs = Template.objects.select_related("preferred_llm_tier").filter(
+            public_profile__isnull=True,
+            organization__isnull=True,
+        )
         if not include_inactive:
             qs = qs.filter(is_active=True)
         qs = qs.order_by("priority", "display_name")
@@ -287,7 +294,10 @@ class PretrainedWorkerTemplateService:
         normalized = code.strip().lower()
         normalized = cls.CODE_ALIASES.get(normalized, normalized)
         Template = apps.get_model("api", "PersistentAgentTemplate")
-        db_template = Template.objects.filter(code=normalized, is_active=True).first()
+        db_template = Template.objects.select_related("preferred_llm_tier").filter(
+            code=normalized,
+            is_active=True,
+        ).first()
         if db_template:
             organization_id = getattr(organization, "id", organization)
             if db_template.organization_id is None:

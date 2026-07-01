@@ -104,6 +104,7 @@ class TemplateCloneService:
                 schedule_jitter_minutes=cleaned.get("schedule_jitter_minutes", 0),
                 event_triggers=cleaned.get("event_triggers", []),
                 default_tools=cleaned.get("default_tools", []),
+                preferred_llm_tier=agent.preferred_llm_tier,
                 recommended_contact_channel=cleaned.get("recommended_contact_channel", "email"),
                 category=cleaned.get("category", "Custom"),
             )
@@ -150,6 +151,7 @@ class TemplateCloneService:
                 schedule_jitter_minutes=cleaned.get("schedule_jitter_minutes", 0),
                 event_triggers=cleaned.get("event_triggers", []),
                 default_tools=cleaned.get("default_tools", []),
+                preferred_llm_tier=agent.preferred_llm_tier,
                 recommended_contact_channel=cleaned.get("recommended_contact_channel", "email"),
                 category=cleaned.get("category", "Custom"),
             )

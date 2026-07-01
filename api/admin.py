@@ -6171,10 +6171,14 @@ class PublicProfileAdmin(admin.ModelAdmin):
 @admin.register(PersistentAgentTemplate)
 class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     list_display = (
-        'display_name', 'category', 'organization', 'is_official', 'recommended_contact_channel', 'base_schedule',
+        'display_name', 'category', 'organization', 'is_official', 'preferred_llm_tier',
+        'recommended_contact_channel', 'base_schedule',
         'schedule_jitter_minutes', 'priority', 'is_active', 'updated_at'
     )
-    list_filter = ('category', 'organization', 'is_official', 'recommended_contact_channel', 'is_active')
+    list_filter = (
+        'category', 'organization', 'is_official', 'preferred_llm_tier',
+        'recommended_contact_channel', 'is_active',
+    )
     list_editable = ('is_official',)
     search_fields = (
         'display_name', 'tagline', 'seo_meta_description', 'description',
@@ -6212,7 +6216,7 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
             'fields': ('base_schedule', 'schedule_jitter_minutes', 'event_triggers')
         }),
         ('Tools & Communication', {
-            'fields': ('default_tools', 'recommended_contact_channel', 'hero_image_path')
+            'fields': ('default_tools', 'preferred_llm_tier', 'recommended_contact_channel', 'hero_image_path')
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at')

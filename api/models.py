@@ -6378,6 +6378,13 @@ class PersistentAgentTemplate(models.Model):
         blank=True,
         help_text="MCP tool identifiers to enable automatically when hired.",
     )
+    preferred_llm_tier = models.ForeignKey(
+        IntelligenceTier,
+        on_delete=models.PROTECT,
+        related_name="preferred_by_templates",
+        default=_get_default_intelligence_tier_id,
+        help_text="Preferred intelligence tier controlling LLM routing for agents launched from this template.",
+    )
     recommended_contact_channel = models.CharField(
         max_length=16,
         blank=True,
