@@ -610,7 +610,7 @@ class CurrentOrganizationTemplateDetailAPIView(LoginRequiredMixin, View):
             return _json_error("You do not have permission to manage templates.", status=403)
 
         template = get_object_or_404(
-            PersistentAgentTemplate.objects.select_related("preferred_llm_tier"),
+            PersistentAgentTemplate,
             id=template_id,
             organization=org,
             public_profile__isnull=True,
