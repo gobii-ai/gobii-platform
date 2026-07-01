@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Building2, Pencil, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
 import {
+  currentOrganizationTemplatesQueryKey,
   createOrganizationTemplate,
   createOrganizationTemplateFromScratch,
   deactivateOrganizationTemplate,
@@ -440,7 +441,10 @@ export function OrganizationScreen() {
     queryKey,
     queryFn: ({ signal }) => fetchCurrentOrganization(signal),
   })
-  const templateQueryKey = useMemo(() => ['current-organization-templates'] as const, [])
+  const templateQueryKey = useMemo(
+    () => currentOrganizationTemplatesQueryKey(data?.organization.id),
+    [data?.organization.id],
+  )
   const {
     data: templateData,
     error: templateQueryError,

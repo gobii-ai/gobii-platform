@@ -18,6 +18,12 @@ import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { createAgent, updateAgent } from '../api/agents'
 import {
+  currentOrganizationTemplatesQueryKey,
+  fetchCurrentOrganizationTemplates,
+  launchOrganizationTemplate,
+  type OrganizationTemplate,
+} from '../api/organization'
+import {
   stopAgentProcessing,
   fulfillRequestedSecrets,
   removeRequestedSecrets,
@@ -102,6 +108,7 @@ import {
   getAgentChatShellSubview,
 } from '../util/agentChatShellRoutes'
 import { storeConsoleContext } from '../util/consoleContextStorage'
+import { navigateWithinApp } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
 
 function deriveFirstName(agentName?: string | null): string {
@@ -1492,6 +1499,19 @@ export function AgentChatPage({
     forAgentId: rosterQueryAgentId,
     refetchIntervalMs: rosterRefreshIntervalMs,
   })
+  const currentOrganizationTemplateQueryKey = useMemo(
+    () => currentOrganizationTemplatesQueryKey(
+      effectiveContext?.type === 'organization' ? effectiveContext.id : null,
+    ),
+    [effectiveContext?.id, effectiveContext?.type],
+  )
+  const organizationTemplatesQuery = useQuery({
+    queryKey: currentOrganizationTemplateQueryKey,
+    queryFn: ({ signal }) => fetchCurrentOrganizationTemplates(signal),
+    enabled: contextReady && effectiveContext?.type === 'organization',
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  })
   const [agentRosterSortMode, setAgentRosterSortMode] = useState<AgentRosterSortMode>('recent')
   const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([])
   const [insightsPanelExpandedPreference, setInsightsPanelExpandedPreference] = useState<boolean | null>(null)
@@ -2077,6 +2097,8 @@ export function AgentChatPage({
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
   const [createAgentError, setCreateAgentError] = useState<CreateAgentErrorState | null>(null)
   const [createAgentTrialOnboarding, setCreateAgentTrialOnboarding] = useState<TrialOnboardingTarget | null>(null)
+  const [teamTemplateLaunchBusyId, setTeamTemplateLaunchBusyId] = useState<string | null>(null)
+  const [teamTemplateLaunchError, setTeamTemplateLaunchError] = useState<string | null>(null)
   const [sendMessageError, setSendMessageError] = useState<string | null>(null)
   const [stopProcessingBusy, setStopProcessingBusy] = useState(false)
   const [stopProcessingRequested, setStopProcessingRequested] = useState(false)
@@ -2200,6 +2222,11 @@ export function AgentChatPage({
     setCreateAgentTrialOnboarding(null)
     setSendMessageError(null)
   }, [isNewAgent, activeAgentId])
+
+  useEffect(() => {
+    setTeamTemplateLaunchError(null)
+    setTeamTemplateLaunchBusyId(null)
+  }, [effectiveContext?.id, effectiveContext?.type])
 
   useEffect(() => {
     if (!isNewAgent) {
@@ -2671,6 +2698,24 @@ export function AgentChatPage({
     // Fall back to full page navigation for console mode
     window.location.assign('/console/agents/create/quick/')
   }, [createAgentDisabledReason, onCreateAgent])
+
+  const handleLaunchTeamTemplate = useCallback(async (template: OrganizationTemplate) => {
+    if (createAgentDisabledReason || teamTemplateLaunchBusyId) {
+      return
+    }
+    setTeamTemplateLaunchBusyId(template.id)
+    setTeamTemplateLaunchError(null)
+    try {
+      const payload = await launchOrganizationTemplate(template.id)
+      if (!navigateWithinApp(payload.redirectUrl)) {
+        window.location.assign(payload.redirectUrl)
+      }
+    } catch (err) {
+      setTeamTemplateLaunchError(safeErrorMessage(err) || 'Unable to use template.')
+    } finally {
+      setTeamTemplateLaunchBusyId(null)
+    }
+  }, [createAgentDisabledReason, teamTemplateLaunchBusyId])
 
   const handleJumpToLatest = useCallback(() => {
     const currentAgentId = activeAgentIdRef.current
@@ -3286,6 +3331,36 @@ export function AgentChatPage({
     usageSummary?.period?.resetOn,
   ])
   const immersiveShellOpenHandlers = isImmersiveShellPath ? appShellOpenHandlers : null
+  const handleOpenTeamTemplates = useCallback(() => {
+    appShellOpenHandlers.organization()
+  }, [appShellOpenHandlers])
+  const teamTemplateMenuError = teamTemplateLaunchError
+    ?? (organizationTemplatesQuery.error ? safeErrorMessage(organizationTemplatesQuery.error) : null)
+  const teamTemplateMenu = useMemo(() => {
+    if (effectiveContext?.type !== 'organization') {
+      return null
+    }
+    return {
+      templates: organizationTemplatesQuery.data?.templates ?? [],
+      isLoading: organizationTemplatesQuery.isLoading,
+      errorMessage: teamTemplateMenuError,
+      canManageTemplates: Boolean(organizationTemplatesQuery.data?.viewer.canManageTemplates),
+      launchBusyTemplateId: teamTemplateLaunchBusyId,
+      createDisabledReason: createAgentDisabledReason,
+      onLaunchTemplate: handleLaunchTeamTemplate,
+      onOpenTemplates: handleOpenTeamTemplates,
+    }
+  }, [
+    createAgentDisabledReason,
+    effectiveContext?.type,
+    handleLaunchTeamTemplate,
+    handleOpenTeamTemplates,
+    organizationTemplatesQuery.data?.templates,
+    organizationTemplatesQuery.data?.viewer.canManageTemplates,
+    organizationTemplatesQuery.isLoading,
+    teamTemplateLaunchBusyId,
+    teamTemplateMenuError,
+  ])
   const selectionSidebarSettings = useMemo(() => ({
     context: effectiveContext,
     viewerEmail: viewerEmail ?? null,
@@ -3881,6 +3956,7 @@ export function AgentChatPage({
     onCreateAgent: handleCreateAgent,
     createAgentDisabledReason,
     onBlockedCreateAgent: previewCreateAgentBlocked ? handleBlockedCreateAgent : undefined,
+    teamTemplateMenu,
     agentRosterSortMode,
     onAgentRosterSortModeChange: handleAgentRosterSortModeChange,
     onInsightsPanelExpandedPreferenceChange: handleInsightsPanelExpandedPreferenceChange,

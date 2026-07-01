@@ -124,6 +124,10 @@ export type OrganizationInviteAcceptPayload = {
 const CURRENT_ORGANIZATION_URL = '/console/api/organization/'
 const CURRENT_ORGANIZATION_TEMPLATES_URL = '/console/api/organization/templates/'
 
+export function currentOrganizationTemplatesQueryKey(organizationId?: string | null) {
+  return ['current-organization-templates', organizationId ?? 'current'] as const
+}
+
 export function fetchCurrentOrganization(signal?: AbortSignal): Promise<CurrentOrganizationPayload> {
   return jsonFetch<CurrentOrganizationPayload>(CURRENT_ORGANIZATION_URL, { signal })
 }

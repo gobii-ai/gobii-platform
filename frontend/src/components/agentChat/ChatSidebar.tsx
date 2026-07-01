@@ -4,6 +4,7 @@ import { ArrowLeftRight, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRight
 import type { ConsoleContext } from '../../api/context'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
+import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCreateSplitButton'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { ChatSidebarGallery } from './ChatSidebarGallery'
@@ -40,6 +41,7 @@ type ChatSidebarProps = {
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
   onBlockedCreateAgent?: (location: 'sidebar') => void
+  teamTemplateMenu?: TeamTemplateCreateMenu | null
   rosterSortMode?: AgentRosterSortMode
   onRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
@@ -68,6 +70,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onCreateAgent,
   createAgentDisabledReason = null,
   onBlockedCreateAgent,
+  teamTemplateMenu = null,
   rosterSortMode = 'recent',
   onRosterSortModeChange,
   contextSwitcher,
@@ -221,23 +224,34 @@ export const ChatSidebar = memo(function ChatSidebar({
     return (
       <>
         {onCreateAgent ? (
-          <button
-            type="button"
-            className={`chat-sidebar-create-btn${variant === 'drawer' ? ' chat-sidebar-create-btn--drawer' : ''}`}
-            onClick={handleCreateAgent}
-            disabled={createAgentButtonDisabled}
-            aria-disabled={createAgentDisabled ? 'true' : undefined}
-            aria-label="New agent"
-            data-collapsed={collapsedView}
-            title={createAgentDisabledReason ?? undefined}
-          >
-            <span className="chat-sidebar-create-btn-icon">
-              <Plus className="h-4 w-4" />
-            </span>
-            {variant === 'drawer' || !collapsedView ? (
-              <span className="chat-sidebar-create-btn-label">New Agent</span>
-            ) : null}
-          </button>
+          !collapsedView && teamTemplateMenu ? (
+            <AgentCreateSplitButton
+              variant={variant}
+              onCreateAgent={handleCreateAgent}
+              createAgentDisabled={createAgentDisabled}
+              createAgentButtonDisabled={createAgentButtonDisabled}
+              createAgentDisabledReason={createAgentDisabledReason}
+              menu={teamTemplateMenu}
+            />
+          ) : (
+            <button
+              type="button"
+              className={`chat-sidebar-create-btn${variant === 'drawer' ? ' chat-sidebar-create-btn--drawer' : ''}`}
+              onClick={handleCreateAgent}
+              disabled={createAgentButtonDisabled}
+              aria-disabled={createAgentDisabled ? 'true' : undefined}
+              aria-label="New agent"
+              data-collapsed={collapsedView}
+              title={createAgentDisabledReason ?? undefined}
+            >
+              <span className="chat-sidebar-create-btn-icon">
+                <Plus className="h-4 w-4" />
+              </span>
+              {variant === 'drawer' || !collapsedView ? (
+                <span className="chat-sidebar-create-btn-label">New Agent</span>
+              ) : null}
+            </button>
+          )
         ) : null}
 
         <AgentEmptyState
@@ -340,6 +354,7 @@ export const ChatSidebar = memo(function ChatSidebar({
     onToggleAgentFavorite,
     searchQuery,
     switchingAgentId,
+    teamTemplateMenu,
   ])
 
   if (isMobile) {
@@ -469,7 +484,9 @@ export const ChatSidebar = memo(function ChatSidebar({
                 onToggleAgentFavorite={onToggleAgentFavorite}
                 onCreateAgent={onCreateAgent ? handleCreateAgent : undefined}
                 createAgentButtonDisabled={createAgentButtonDisabled}
+                createAgentDisabled={createAgentDisabled}
                 createAgentDisabledReason={createAgentDisabledReason}
+                teamTemplateMenu={teamTemplateMenu}
               />
             )
           ) : !showSettingsView ? (
@@ -601,7 +618,9 @@ export const ChatSidebar = memo(function ChatSidebar({
               onToggleAgentFavorite={onToggleAgentFavorite}
               onCreateAgent={onCreateAgent ? handleCreateAgent : undefined}
               createAgentButtonDisabled={createAgentButtonDisabled}
+              createAgentDisabled={createAgentDisabled}
               createAgentDisabledReason={createAgentDisabledReason}
+              teamTemplateMenu={teamTemplateMenu}
             />
           ) : (
             <div className="chat-sidebar-agent-list" role="list">
