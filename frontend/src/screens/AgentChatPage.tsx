@@ -1053,6 +1053,7 @@ export function AgentChatPage({
     (context: ConsoleContext) => {
       setManuallySelectedContextKey(consoleContextKey(context))
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
+      void queryClient.invalidateQueries({ queryKey: ['current-organization-templates'] })
       if (onContextSwitch) {
         onContextSwitch(context)
         return
@@ -3431,6 +3432,7 @@ export function AgentChatPage({
     onToggleAgentFavorite: handleToggleAgentFavorite,
     onCreateAgent: handleCreateAgent,
     createAgentDisabledReason,
+    teamTemplateMenu,
     rosterSortMode: agentRosterSortMode,
     onRosterSortModeChange: handleAgentRosterSortModeChange,
     desktopMode: selectionSidebarMode,

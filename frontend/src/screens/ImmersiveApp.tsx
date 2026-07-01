@@ -383,6 +383,13 @@ function buildAgentSelectionPath(currentSearch = ''): string {
   return query ? `/app/agents?${query}` : '/app/agents'
 }
 
+function appendContextQuery(path: string, context: ConsoleContext): string {
+  const url = new URL(path, window.location.origin)
+  url.searchParams.set('context_type', context.type)
+  url.searchParams.set('context_id', context.id)
+  return `${url.pathname}${url.search}${url.hash}`
+}
+
 function parseBooleanFlag(value: string | null): boolean {
   if (!value) {
     return false
@@ -810,22 +817,22 @@ export function ImmersiveApp({
   const handleContextSwitch = useCallback((context: ConsoleContext) => {
     setSelectionRefreshKey((current) => current + 1)
     if (route.kind === 'agent-chat') {
-      navigateTo(buildAgentSelectionPath(location.search))
+      navigateTo(appendContextQuery(buildAgentSelectionPath(location.search), context))
       return
     }
     if (route.kind === 'profile' || route.kind === 'organization') {
       navigateTo(
-        context.type === 'organization'
+        appendContextQuery(context.type === 'organization'
           ? AGENT_SHELL_PAGE_CONFIG.organization.path
-          : AGENT_SHELL_PAGE_CONFIG.profile.path,
+          : AGENT_SHELL_PAGE_CONFIG.profile.path, context),
       )
       return
     }
     if (isAgentShellRoute(route)) {
-      navigateTo(AGENT_SHELL_PAGE_CONFIG[route.kind].path)
+      navigateTo(appendContextQuery(AGENT_SHELL_PAGE_CONFIG[route.kind].path, context))
       return
     }
-    navigateTo('/app/agents')
+    navigateTo(appendContextQuery('/app/agents', context))
   }, [location.search, route])
 
   const navigateToShellPage = useCallback((page: AgentShellPage) => {
