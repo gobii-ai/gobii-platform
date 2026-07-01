@@ -73,6 +73,7 @@ const {
     dismissedInsightIds: [],
     insightsPaused: false,
     autoScrollPinned: true,
+    pendingEvents: [] as unknown[],
     setAgentId: vi.fn(),
     sendMessage: vi.fn(),
     receiveRealtimeEvent: vi.fn(),
@@ -182,6 +183,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       apolloNativeTabEnabled,
       hubspotNativeTabEnabled,
       discordNativeTabEnabled,
+      events,
     }: {
       spawnIntentLoading?: boolean
       signupPreviewState?: string
@@ -198,6 +200,13 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       apolloNativeTabEnabled?: boolean
       hubspotNativeTabEnabled?: boolean
       discordNativeTabEnabled?: boolean
+      events?: Array<{
+        kind: string
+        message?: {
+          bodyText?: string
+          status?: string
+        }
+      }>
     }) => {
       const {
         isUpgradeModalOpen,
@@ -217,6 +226,18 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="apollo-native-tab-enabled">{String(Boolean(apolloNativeTabEnabled))}</div>
           <div data-testid="hubspot-native-tab-enabled">{String(Boolean(hubspotNativeTabEnabled))}</div>
           <div data-testid="discord-native-tab-enabled">{String(Boolean(discordNativeTabEnabled))}</div>
+          <div data-testid="timeline-event-count">{events?.length ?? 0}</div>
+          {events?.map((event, index) => (
+            event.kind === 'message' ? (
+              <div
+                key={index}
+                data-testid="timeline-message"
+                data-status={event.message?.status ?? ''}
+              >
+                {event.message?.bodyText ?? ''}
+              </div>
+            ) : null
+          ))}
           <button
             type="button"
             data-testid="configure-agent"
@@ -484,6 +505,10 @@ describe('AgentChatPage trial onboarding', () => {
     timelineState.initialPageResponse = null
     timelineState.isLoading = false
     timelineState.error = null
+    agentChatStoreState.agentId = null
+    agentChatStoreState.pendingEvents = []
+    agentChatStoreState.hasUnseenActivity = false
+    agentChatStoreState.awaitingResponse = false
     rosterState.agents = []
     rosterState.agentChatNotificationsEnabled = true
     agentChatStoreState.signupPreviewState = 'none'
@@ -614,6 +639,72 @@ describe('AgentChatPage trial onboarding', () => {
         'awaiting_signup_completion',
       )
     })
+  })
+
+  it('renders pending optimistic messages for the active agent immediately', async () => {
+    const sentAt = '2026-07-01T12:00:00.000Z'
+    rosterState.agents = [
+      {
+        id: 'agent-1',
+        name: 'Test Agent',
+        avatarUrl: null,
+        isActive: true,
+        processingActive: false,
+        miniDescription: '',
+        shortDescription: '',
+        auditUrl: null,
+        isOrgOwned: false,
+        isCollaborator: false,
+        canManageAgent: true,
+        canManageCollaborators: true,
+        preferredLlmTier: null,
+        email: null,
+        sms: null,
+        lastInteractionAt: null,
+        signupPreviewState: 'none',
+        planningState: 'skipped',
+      },
+    ]
+    agentChatStoreState.agentId = 'agent-1'
+    timelineState.flatEvents = [
+      {
+        kind: 'message',
+        cursor: '1000:message:server-1',
+        message: {
+          id: 'server-1',
+          bodyText: 'Existing message',
+          isOutbound: false,
+          channel: 'web',
+          timestamp: sentAt,
+          relativeTimestamp: null,
+        },
+      },
+    ]
+    agentChatStoreState.pendingEvents = [
+      {
+        kind: 'message',
+        cursor: '2000:message:local-1',
+        message: {
+          id: 'local-1',
+          bodyText: 'Pending hello',
+          isOutbound: false,
+          channel: 'web',
+          timestamp: sentAt,
+          relativeTimestamp: null,
+          clientId: 'local-1',
+          status: 'sending',
+        },
+      },
+    ]
+
+    window.history.pushState({}, '', '/app/agents/agent-1')
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-event-count')).toHaveTextContent('2')
+    })
+    const pendingMessage = screen.getByText('Pending hello')
+    expect(pendingMessage).toHaveAttribute('data-status', 'sending')
   })
 
   it('hydrates and persists the notifications preference from roster data', async () => {
