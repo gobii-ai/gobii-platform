@@ -36,8 +36,6 @@ export type AgentProcessingStatusSection = {
     queuedCount: number
     pendingCount: number
     lockedCount: number
-    heartbeatCount: number
-    queuedOrPendingCount: number
   }
   rows: Array<{
     agentId: string
@@ -77,17 +75,13 @@ export type ComputeStatusSection = {
   summary: {
     runningCount: number
     idleStoppingCount: number
-    stoppedCount: number
     errorCount: number
   }
   rows: Array<{
     agentId: string
     agentName: string
     state: string
-    namespace: string
     podName: string
-    proxyName: string
-    lastActivityAt: string
     leaseExpiresAt: string
   }>
   error?: string
@@ -101,19 +95,14 @@ export type ProxyStatusSection = {
     healthyCount: number
     degradedCount: number
     staleCount: number
-    inactiveCount: number
   }
   rows: Array<{
     proxyId: string
     name: string
     endpoint: string
     classification: string
-    isActive: boolean
     latestStatus: string
     latestCheckedAt: string
-    responseTimeMs: number | null
-    consecutiveHealthFailures: number
-    deactivationReason: string
   }>
   error?: string
 }

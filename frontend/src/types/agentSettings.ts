@@ -6,7 +6,6 @@ export type PrimaryEndpoint = {
 
 export type PendingTransfer = {
   toEmail: string
-  createdAtIso: string
   createdAtDisplay: string
 }
 
@@ -54,7 +53,6 @@ export type DedicatedIpOption = {
   label: string
   inUseElsewhere: boolean
   disabled: boolean
-  assignedNames: string[]
 }
 
 export type DedicatedIpInfo = {
@@ -113,8 +111,6 @@ export type CollaboratorEntry = {
 export type CollaboratorInvite = {
   id: string
   email: string
-  invitedAtIso: string | null
-  expiresAtIso: string | null
 }
 
 export type CollaboratorState = {
@@ -199,7 +195,6 @@ export type AgentInboundWebhook = {
 
 export type AgentSettingsReassignmentInfo = {
   enabled: boolean
-  canReassign: boolean
   organizations: { id: string; name: string }[]
   assignedOrg: AgentOrganization
 }
@@ -213,7 +208,6 @@ export type AgentSettingsUrls = {
   manageFiles: string
   contactRequests: string
   delete: string
-  mcpServersManage: string | null
 }
 
 export type AgentSettingsData = {

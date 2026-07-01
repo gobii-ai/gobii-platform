@@ -785,7 +785,8 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(message_event["message"]["senderAddress"], self.user_address)
         tool_cluster = next(event for event in events if event["kind"] == "steps")
         self.assertEqual(tool_cluster["entries"][0]["toolName"], "send_email")
-        self.assertTrue(payload.get("newest_cursor"))
+        self.assertNotIn("oldest_cursor", payload)
+        self.assertNotIn("newest_cursor", payload)
         self.assertIsNotNone(payload.get("processing_active"))
         snapshot = payload.get("processing_snapshot")
         self.assertIsInstance(snapshot, dict)
@@ -1814,7 +1815,7 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(start_response.status_code, 200)
         start_payload = start_response.json()
         session_key = start_payload["session_key"]
-        self.assertTrue(start_payload["is_visible"])
+        self.assertEqual(set(start_payload.keys()), {"session_key", "ttl_seconds"})
 
         heartbeat_response = self.client.post(
             f"/console/api/agents/{self.agent.id}/web-sessions/heartbeat/",
@@ -1822,7 +1823,9 @@ class AgentChatAPITests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(heartbeat_response.status_code, 200)
-        self.assertFalse(heartbeat_response.json()["is_visible"])
+        heartbeat_payload = heartbeat_response.json()
+        self.assertEqual(set(heartbeat_payload.keys()), {"session_key", "ttl_seconds"})
+        self.assertEqual(heartbeat_payload["session_key"], session_key)
 
         end_response = self.client.post(
             f"/console/api/agents/{self.agent.id}/web-sessions/end/",
@@ -1831,9 +1834,10 @@ class AgentChatAPITests(TestCase):
         )
         self.assertEqual(end_response.status_code, 200)
         end_payload = end_response.json()
-        self.assertIn("ended_at", end_payload)
+        self.assertEqual(set(end_payload.keys()), {"session_key", "ttl_seconds"})
+        self.assertEqual(end_payload["session_key"], session_key)
 
-        # Ending an already-deleted session should still succeed idempotently.
+        # Ending an already-ended session should still succeed idempotently.
         repeat_end = self.client.post(
             f"/console/api/agents/{self.agent.id}/web-sessions/end/",
             data=json.dumps({"session_key": session_key}),
@@ -1841,10 +1845,7 @@ class AgentChatAPITests(TestCase):
         )
         self.assertEqual(repeat_end.status_code, 200)
         repeat_payload = repeat_end.json()
-        self.assertTrue(
-            repeat_payload.get("ended") or repeat_payload.get("ended_at"),
-            repeat_payload,
-        )
+        self.assertEqual(repeat_payload["session_key"], session_key)
 
     @tag("batch_agent_chat")
     def test_web_session_start_creates_distinct_sessions_per_tab(self):

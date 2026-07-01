@@ -27,8 +27,6 @@ export type AgentSuggestionsResponse = {
 
 export type TimelineResponse = {
   events: TimelineEvent[]
-  oldest_cursor: string | null
-  newest_cursor: string | null
   has_more_older: boolean
   has_more_newer: boolean
   processing_active: boolean
@@ -59,11 +57,6 @@ export type AgentMessageReadState = {
 export type AgentWebSessionSnapshot = {
   session_key: string
   ttl_seconds: number
-  expires_at: string
-  last_seen_at: string
-  last_seen_source: string | null
-  is_visible: boolean
-  ended_at?: string
 }
 
 export async function fetchAgentTimeline(

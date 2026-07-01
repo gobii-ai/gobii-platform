@@ -4203,7 +4203,6 @@ class ConsoleViewsTest(TestCase):
             'label': '198.51.100.12',
             'inUseElsewhere': False,
             'disabled': False,
-            'assignedNames': [],
         })
 
         response = self.client.post(url, {

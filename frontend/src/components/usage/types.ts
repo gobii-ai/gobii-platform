@@ -23,14 +23,6 @@ export type UsageSummaryResponse = {
     purchasedSeats: number
   }
   metrics: {
-    tasks: {
-      count: number
-      completed: number
-      in_progress: number
-      pending: number
-      failed: number
-      cancelled: number
-    }
     credits: {
       total: number
       unit: string
@@ -94,7 +86,6 @@ export type UsageTrendMode = 'day' | 'week' | 'month'
 export type UsageTrendBucket = {
   timestamp: string
   current: number
-  previous: number
   agents: Record<string, number>
 }
 
@@ -102,14 +93,6 @@ export type UsageTrendResponse = {
   mode: UsageTrendMode
   resolution: 'hour' | 'day'
   timezone: string
-  current_period: {
-    start: string
-    end: string
-  }
-  previous_period: {
-    start: string
-    end: string
-  }
   buckets: UsageTrendBucket[]
   agents: UsageAgent[]
 }

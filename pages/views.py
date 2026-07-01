@@ -40,7 +40,7 @@ from api.models import (
     TrialPromo,
     UserBilling,
 )
-from api.agent.short_description import build_listing_description, build_mini_description
+from api.agent.short_description import build_listing_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
 from api.services.trial_abuse import (
@@ -171,7 +171,6 @@ from .public_template_urls import (
     public_template_launch_path,
     public_template_route_slug,
 )
-from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .comparisons import (
     COMPARISON_CATALOG,
     COMPARISON_STATUS_PUBLISHED,
@@ -1200,10 +1199,6 @@ class HomePage(TemplateView):
             billing_url = ""
         context['billing_url'] = billing_url
 
-        # Examples data
-        context["simple_examples"] = SIMPLE_EXAMPLES
-        context["rich_examples"] = RICH_EXAMPLES
-
         integrations_payload = get_homepage_integrations_payload()
         builtin_integrations = list(integrations_payload.get("builtins") or [])
         builtin_by_slug = {
@@ -1313,10 +1308,6 @@ class HomePage(TemplateView):
                 agent.listing_description = description
                 agent.listing_description_source = source
                 agent.is_initializing = source == "placeholder"
-
-                mini_description, mini_source = build_mini_description(agent)
-                agent.mini_description = mini_description
-                agent.mini_description_source = mini_source
 
                 if getattr(agent, "life_state", "active") == PersistentAgent.LifeState.EXPIRED:
                     agent.status_label = "Expired"

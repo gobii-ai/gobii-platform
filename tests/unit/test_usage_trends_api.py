@@ -95,7 +95,7 @@ class UsageTrendAPITests(TestCase):
             )
             PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=dt)
 
-    def test_week_mode_returns_current_and_previous_counts(self):
+    def test_week_mode_returns_current_counts(self):
         tz = timezone.get_current_timezone()
         current_period_start = timezone.make_aware(datetime(2024, 1, 8, 0, 0, 0), tz)
         current_period_end = current_period_start + timedelta(days=6)
@@ -123,15 +123,17 @@ class UsageTrendAPITests(TestCase):
 
         self.assertEqual(payload["mode"], "week")
         self.assertEqual(payload["resolution"], "day")
+        self.assertNotIn("current_period", payload)
+        self.assertNotIn("previous_period", payload)
         self.assertEqual(len(payload["buckets"]), 7)
 
         first_bucket = payload["buckets"][0]
         last_bucket = payload["buckets"][-1]
 
         self.assertEqual(first_bucket["current"], 1)
-        self.assertEqual(first_bucket["previous"], 2)
         self.assertEqual(last_bucket["current"], 7)
-        self.assertEqual(last_bucket["previous"], 8)
+        self.assertNotIn("previous", first_bucket)
+        self.assertNotIn("previous", last_bucket)
 
     def test_invalid_mode_returns_error(self):
         response = self.client.get(reverse("console_usage_trends"), {"mode": "year"})
@@ -623,7 +625,8 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertAlmostEqual(payload["metrics"]["tasks"]["count"], 1.0)
+        self.assertNotIn("tasks", payload["metrics"])
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 1.0)
 
     def test_summary_excludes_eval_agents(self):
         now = timezone.now()
@@ -658,7 +661,8 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertAlmostEqual(payload["metrics"]["tasks"]["count"], 1.0)
+        self.assertNotIn("tasks", payload["metrics"])
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 1.0)
 
     def test_personal_context_excludes_org_tasks(self):
         now = timezone.now()
@@ -686,7 +690,8 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertAlmostEqual(payload["metrics"]["tasks"]["count"], 1.0)
+        self.assertNotIn("tasks", payload["metrics"])
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 1.0)
 
     def test_api_filter_limits_summary(self):
         tz = timezone.get_current_timezone()
@@ -710,8 +715,7 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        metrics = payload["metrics"]["tasks"]
-        self.assertAlmostEqual(metrics["count"], 4.0)
+        self.assertNotIn("tasks", payload["metrics"])
         self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 4.0)
 
     def test_persistent_steps_contribute_to_summary(self):
@@ -743,11 +747,7 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        tasks_metrics = payload["metrics"]["tasks"]
-        self.assertAlmostEqual(tasks_metrics["count"], 2.5)
-        self.assertAlmostEqual(tasks_metrics["completed"], 2.5)
-        self.assertAlmostEqual(tasks_metrics["in_progress"], 0.0)
-        self.assertAlmostEqual(tasks_metrics["pending"], 0.0)
+        self.assertNotIn("tasks", payload["metrics"])
         self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 2.5)
 
     def test_summary_uses_credit_ledger_for_consumed_totals(self):

@@ -3576,8 +3576,6 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
         )
         payload = {
             "events": window.events,
-            "oldest_cursor": window.oldest_cursor,
-            "newest_cursor": window.newest_cursor,
             "has_more_older": window.has_more_older,
             "has_more_newer": window.has_more_newer,
             "processing_active": window.processing_active,
@@ -8517,17 +8515,10 @@ def _parse_session_visibility(payload: dict | None) -> bool:
 
 def _session_response(result) -> JsonResponse:
     session = result.session
-    payload = {
+    return JsonResponse({
         "session_key": str(session.session_key),
         "ttl_seconds": result.ttl_seconds,
-        "expires_at": result.expires_at.isoformat(),
-        "last_seen_at": session.last_seen_at.isoformat(),
-        "last_seen_source": session.last_seen_source,
-        "is_visible": session.is_visible,
-    }
-    if session.ended_at:
-        payload["ended_at"] = session.ended_at.isoformat()
-    return JsonResponse(payload)
+    })
 
 
 @method_decorator(csrf_exempt, name="dispatch")
