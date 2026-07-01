@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Bot, Building2, ChevronDown, Loader2, Plus, Sparkles } from 'lucide-react'
 import { Button, Dialog, Popover } from 'react-aria-components'
 
@@ -12,7 +12,6 @@ export type TeamTemplateCreateMenu = {
   launchErrorMessage?: string | null
   canManageTemplates: boolean
   launchBusyTemplateId?: string | null
-  createDisabledReason?: string | null
   onLaunchTemplate: (template: OrganizationTemplate) => void
   onOpenTemplates: () => void
 }
@@ -45,11 +44,14 @@ export function AgentCreateSplitButton({
   menu,
   className,
 }: AgentCreateSplitButtonProps) {
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const triggerRef = useRef<HTMLDivElement | null>(null)
   const [open, setOpen] = useState(false)
   const launchBusy = Boolean(menu.launchBusyTemplateId)
   const menuCreateDisabled = Boolean(createAgentButtonDisabled || launchBusy)
   const footerLabel = menu.canManageTemplates ? 'Manage team templates' : 'View organization'
+  const buttonClassName = variant === 'gallery'
+    ? 'agent-gallery-create'
+    : joinClassNames('chat-sidebar-create-btn', variant === 'drawer' && 'chat-sidebar-create-btn--drawer')
 
   const closeMenu = useCallback(() => setOpen(false), [])
 
@@ -75,14 +77,27 @@ export function AgentCreateSplitButton({
       onCreateAgent()
       return
     }
+    closeMenu()
     menu.onLaunchTemplate(template)
   }, [closeMenu, createAgentDisabled, menu, menuCreateDisabled, onCreateAgent])
 
+  const handleChevronPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!open) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    setOpen(false)
+  }, [open])
+
   return (
     <div
-      className={joinClassNames('agent-create-split', className)}
-      data-variant={variant}
+      ref={triggerRef}
+      className={joinClassNames('agent-create-split', buttonClassName, className)}
+      data-create-variant={variant}
+      data-variant={variant === 'gallery' ? 'sidebar' : variant}
       data-open={open ? 'true' : 'false'}
+      data-disabled={createAgentDisabled ? 'true' : 'false'}
     >
       <button
         type="button"
@@ -92,16 +107,18 @@ export function AgentCreateSplitButton({
         aria-disabled={createAgentDisabled ? 'true' : undefined}
         title={createAgentDisabledReason ?? undefined}
       >
-        <span className="agent-create-split__icon">
+        <span className={variant === 'gallery' ? 'agent-create-split__gallery-icon' : 'chat-sidebar-create-btn-icon'}>
           <Plus className="h-4 w-4" aria-hidden="true" />
         </span>
-        <span className="agent-create-split__label">New Agent</span>
+        <span className={joinClassNames('agent-create-split__label', variant !== 'gallery' && 'chat-sidebar-create-btn-label')}>
+          New Agent
+        </span>
       </button>
       <Button
-        ref={triggerRef}
         className="agent-create-split__chevron"
         aria-label="Choose a team template"
         aria-expanded={open}
+        onPointerDownCapture={handleChevronPointerDownCapture}
         onPress={() => setOpen((current) => !current)}
       >
         <ChevronDown className="h-4 w-4" aria-hidden="true" />
@@ -111,27 +128,29 @@ export function AgentCreateSplitButton({
         isOpen={open}
         onOpenChange={setOpen}
         shouldCloseOnInteractOutside={() => true}
-        placement="bottom start"
-        containerPadding={8}
+        placement="bottom"
+        containerPadding={0}
         isNonModal
         className="agent-create-menu-popover"
+        data-create-variant={variant}
         data-variant={variant}
       >
-        <Dialog className="agent-create-menu" aria-label="Create agent menu">
+        <Dialog className="agent-create-menu sidebar-settings__menu" aria-label="Create agent menu">
           <button
             type="button"
-            className="agent-create-menu__item"
+            className="agent-create-menu__item sidebar-settings__link"
             onClick={handleBlankAgent}
             disabled={menuCreateDisabled}
             aria-disabled={createAgentDisabled ? 'true' : undefined}
             title={createAgentDisabledReason ?? undefined}
           >
-            <Plus className="agent-create-menu__item-icon" aria-hidden="true" />
+            <Plus className="agent-create-menu__item-icon sidebar-settings__link-icon" aria-hidden="true" />
             <span className="agent-create-menu__item-copy">
               <span className="agent-create-menu__item-title">Blank agent</span>
               <span className="agent-create-menu__item-description">Start from a fresh charter.</span>
             </span>
           </button>
+          <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
 
           <div className="agent-create-menu__section-label">
             <Sparkles className="agent-create-menu__section-icon" aria-hidden="true" />
@@ -162,16 +181,16 @@ export function AgentCreateSplitButton({
                   <button
                     key={template.id}
                     type="button"
-                    className="agent-create-menu__item agent-create-menu__template"
+                    className="agent-create-menu__item agent-create-menu__template sidebar-settings__link"
                     onClick={() => handleTemplateLaunch(template)}
                     disabled={disabled}
                     aria-disabled={createAgentDisabled ? 'true' : undefined}
                     title={createAgentDisabledReason ?? undefined}
                   >
                     {launching ? (
-                      <Loader2 className="agent-create-menu__item-icon animate-spin" aria-hidden="true" />
+                      <Loader2 className="agent-create-menu__item-icon sidebar-settings__link-icon animate-spin" aria-hidden="true" />
                     ) : (
-                      <Bot className="agent-create-menu__item-icon" aria-hidden="true" />
+                      <Bot className="agent-create-menu__item-icon sidebar-settings__link-icon" aria-hidden="true" />
                     )}
                     <span className="agent-create-menu__item-copy">
                       <span className="agent-create-menu__item-title">{template.name}</span>
@@ -190,10 +209,10 @@ export function AgentCreateSplitButton({
 
           <button
             type="button"
-            className="agent-create-menu__footer"
+            className="agent-create-menu__footer sidebar-settings__link"
             onClick={handleOpenTemplates}
           >
-            <Building2 className="agent-create-menu__footer-icon" aria-hidden="true" />
+            <Building2 className="agent-create-menu__footer-icon sidebar-settings__link-icon" aria-hidden="true" />
             <span>{footerLabel}</span>
           </button>
         </Dialog>

@@ -931,6 +931,7 @@ export function ImmersiveApp({
         {shouldRenderAgentChatPage ? (
           <AgentChatPage
             agentId={route.kind === 'agent-chat' ? route.agentId : undefined}
+            appLocationSearch={location.search}
             {...baseAgentChatPageProps}
           />
         ) : null}

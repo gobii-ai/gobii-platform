@@ -130,6 +130,19 @@ const APOLLO_NATIVE_SYSTEM_SKILL_KEY = 'apollo_native'
 const HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = 'hubspot_native'
 const DISCORD_NATIVE_SYSTEM_SKILL_KEY = 'discord_native'
 
+function withTemplateLaunchNonce(path: string): string {
+  if (typeof window === 'undefined') {
+    return path
+  }
+  try {
+    const url = new URL(path, window.location.origin)
+    url.searchParams.set('template_launch', String(Date.now()))
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return path
+  }
+}
+
 function timelineHasSystemSkillEnablement(events: TimelineEvent[], skillKey: string): boolean {
   for (const event of events) {
     if (event.kind !== 'steps') {
@@ -940,6 +953,7 @@ export type AgentChatPageProps = {
   onOpenOrganization?: () => void
   onOpenSecrets?: () => void
   onOpenIntegrations?: () => void
+  appLocationSearch?: string
 }
 
 const STREAMING_STALE_MS = 6000
@@ -980,6 +994,7 @@ export function AgentChatPage({
   onOpenOrganization,
   onOpenSecrets,
   onOpenIntegrations,
+  appLocationSearch,
 }: AgentChatPageProps) {
   const [shellPathname, setShellPathname] = useState(() => (
     typeof window === 'undefined' ? '' : window.location.pathname
@@ -2247,14 +2262,15 @@ export function AgentChatPage({
     }
   }, [draftIntelligenceTier, isNewAgent, llmIntelligence?.options, llmIntelligence?.systemDefaultTier])
 
+  const currentLocationSearch = appLocationSearch ?? (typeof window === 'undefined' ? '' : window.location.search)
   const spawnFlow = useMemo(() => {
     if (!isNewAgent || typeof window === 'undefined') {
       return false
     }
-    const params = new URLSearchParams(window.location.search)
+    const params = new URLSearchParams(currentLocationSearch)
     const flag = (params.get('spawn') || '').toLowerCase()
     return flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on'
-  }, [isNewAgent])
+  }, [currentLocationSearch, isNewAgent])
   const onboardingTarget = createAgentTrialOnboarding ?? spawnIntent?.onboarding_target ?? null
   const requiresTrialPlanSelection = Boolean(
     createAgentTrialOnboarding || spawnIntent?.requires_plan_selection,
@@ -2299,7 +2315,7 @@ export function AgentChatPage({
     return () => {
       controller.abort()
     }
-  }, [isNewAgent, spawnFlow])
+  }, [currentLocationSearch, isNewAgent, spawnFlow])
 
   const resolvedIntelligenceTier = useMemo(() => {
     if (isNewAgent) {
@@ -2710,8 +2726,9 @@ export function AgentChatPage({
     setTeamTemplateLaunchError(null)
     try {
       const payload = await launchOrganizationTemplate(template.id, effectiveOrganizationId)
-      if (!navigateWithinApp(payload.redirectUrl)) {
-        window.location.assign(payload.redirectUrl)
+      const redirectUrl = withTemplateLaunchNonce(payload.redirectUrl)
+      if (!navigateWithinApp(redirectUrl)) {
+        window.location.assign(redirectUrl)
       }
     } catch (err) {
       setTeamTemplateLaunchError(safeErrorMessage(err) || 'Unable to use template.')
@@ -3351,12 +3368,10 @@ export function AgentChatPage({
       launchErrorMessage: teamTemplateLaunchError,
       canManageTemplates: Boolean(organizationTemplatesQuery.data?.viewer.canManageTemplates),
       launchBusyTemplateId: teamTemplateLaunchBusyId,
-      createDisabledReason: createAgentDisabledReason,
       onLaunchTemplate: handleLaunchTeamTemplate,
       onOpenTemplates: handleOpenTeamTemplates,
     }
   }, [
-    createAgentDisabledReason,
     effectiveContext?.type,
     handleLaunchTeamTemplate,
     handleOpenTeamTemplates,
