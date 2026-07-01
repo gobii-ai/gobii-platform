@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
 from api.agent.tools.planning import execute_end_planning
 from api.agent.tools.schedule_updater import execute_update_schedule
@@ -199,9 +199,9 @@ class AgentCreditForecastIntegrationTests(TestCase):
         self.assertNotIn("credit_forecast", result)
         mock_persist.assert_not_called()
 
-    @patch("api.management.commands.seed_agent_credit_forecast_samples.set_historical_sample_embedding")
-    @patch("api.management.commands.seed_agent_credit_forecast_samples.generate_embedding")
-    @patch("api.management.commands.seed_agent_credit_forecast_samples._fetch_source_rows")
+    @patch("api.services.agent_credit_forecast_samples.set_historical_sample_embedding")
+    @patch("api.services.agent_credit_forecast_samples.generate_embedding")
+    @patch("api.services.agent_credit_forecast_samples.fetch_source_rows")
     def test_seed_command_imports_mocked_source_rows(self, mock_fetch, mock_embedding, mock_set_embedding):
         mock_fetch.return_value = [
             {
@@ -228,8 +228,6 @@ class AgentCreditForecastIntegrationTests(TestCase):
 
         call_command(
             "seed_agent_credit_forecast_samples",
-            "--source-database-url",
-            "postgresql://readonly.example/db",
             "--limit",
             "1",
             "--generate-embeddings",
@@ -241,3 +239,73 @@ class AgentCreditForecastIntegrationTests(TestCase):
         self.assertEqual(sample.normalized_daily_credits, Decimal("10"))
         self.assertEqual(sample.normalized_monthly_credits, Decimal("300"))
         mock_set_embedding.assert_called_once()
+
+    @patch("api.services.agent_credit_forecast_samples.sample_has_current_embedding", return_value=True)
+    @patch("api.services.agent_credit_forecast_samples.set_historical_sample_embedding")
+    @patch("api.services.agent_credit_forecast_samples.generate_embedding")
+    @patch("api.services.agent_credit_forecast_samples.fetch_source_rows")
+    def test_seed_command_skips_current_embeddings(
+        self,
+        mock_fetch,
+        mock_embedding,
+        mock_set_embedding,
+        _mock_current,
+    ):
+        mock_fetch.return_value = [
+            {
+                "source_agent_id": self.agent.id,
+                "agent_name": "Historical Agent",
+                "charter_text": "Summarize orders.",
+                "planning_plan": "Summarize order email every morning.",
+                "schedule": "@daily",
+                "org_owned": False,
+                "tier_key": "standard",
+                "tier_credit_multiplier": Decimal("1.00"),
+                "created_at_source": self.agent.created_at,
+                "planning_completed_at_source": self.agent.created_at,
+                "last_observed_at_source": self.agent.created_at,
+                "enabled_tools": ["gmail.search"],
+                "charged_step_count": 6,
+                "tool_call_count": 2,
+                "first_run_credits": Decimal("7"),
+                "observed_total_credits": Decimal("30"),
+                "observation_days": Decimal("3"),
+            }
+        ]
+
+        call_command(
+            "seed_agent_credit_forecast_samples",
+            "--limit",
+            "1",
+            "--generate-embeddings",
+            "--skip-existing-embeddings",
+            verbosity=0,
+        )
+
+        mock_embedding.assert_not_called()
+        mock_set_embedding.assert_not_called()
+
+    @override_settings(
+        AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_LIMIT=123,
+        AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_GENERATE_EMBEDDINGS=True,
+        AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_SKIP_EXISTING_EMBEDDINGS=True,
+    )
+    @patch("api.tasks.agent_credit_forecasts.seed_agent_credit_forecast_samples")
+    def test_scheduled_refresh_uses_configured_seed_settings(self, mock_seed):
+        from api.services.agent_credit_forecast_samples import AgentCreditForecastSampleSeedResult
+        from api.tasks.agent_credit_forecasts import refresh_agent_credit_forecast_samples_task
+
+        mock_seed.return_value = AgentCreditForecastSampleSeedResult(
+            upserted=2,
+            embedded=1,
+            skipped_embeddings=1,
+        )
+
+        result = refresh_agent_credit_forecast_samples_task()
+
+        self.assertEqual(result["status"], "ok")
+        mock_seed.assert_called_once_with(
+            limit=123,
+            generate_embeddings=True,
+            skip_existing_embeddings=True,
+        )
