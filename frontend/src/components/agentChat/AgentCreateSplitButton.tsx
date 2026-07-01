@@ -9,6 +9,7 @@ export type TeamTemplateCreateMenu = {
   templates: OrganizationTemplate[]
   isLoading: boolean
   errorMessage?: string | null
+  launchErrorMessage?: string | null
   canManageTemplates: boolean
   launchBusyTemplateId?: string | null
   createDisabledReason?: string | null
@@ -130,6 +131,12 @@ export function AgentCreateSplitButton({
             <Sparkles className="agent-create-menu__section-icon" aria-hidden="true" />
             <span>Team templates</span>
           </div>
+
+          {menu.launchErrorMessage ? (
+            <div className="agent-create-menu__state agent-create-menu__state--error">
+              {menu.launchErrorMessage}
+            </div>
+          ) : null}
 
           {menu.isLoading ? (
             <div className="agent-create-menu__state">

@@ -3334,8 +3334,9 @@ export function AgentChatPage({
   const handleOpenTeamTemplates = useCallback(() => {
     appShellOpenHandlers.organization()
   }, [appShellOpenHandlers])
-  const teamTemplateMenuError = teamTemplateLaunchError
-    ?? (organizationTemplatesQuery.error ? safeErrorMessage(organizationTemplatesQuery.error) : null)
+  const teamTemplateMenuError = organizationTemplatesQuery.error
+    ? safeErrorMessage(organizationTemplatesQuery.error)
+    : null
   const teamTemplateMenu = useMemo(() => {
     if (effectiveContext?.type !== 'organization') {
       return null
@@ -3344,6 +3345,7 @@ export function AgentChatPage({
       templates: organizationTemplatesQuery.data?.templates ?? [],
       isLoading: organizationTemplatesQuery.isLoading,
       errorMessage: teamTemplateMenuError,
+      launchErrorMessage: teamTemplateLaunchError,
       canManageTemplates: Boolean(organizationTemplatesQuery.data?.viewer.canManageTemplates),
       launchBusyTemplateId: teamTemplateLaunchBusyId,
       createDisabledReason: createAgentDisabledReason,
@@ -3359,6 +3361,7 @@ export function AgentChatPage({
     organizationTemplatesQuery.data?.viewer.canManageTemplates,
     organizationTemplatesQuery.isLoading,
     teamTemplateLaunchBusyId,
+    teamTemplateLaunchError,
     teamTemplateMenuError,
   ])
   const selectionSidebarSettings = useMemo(() => ({
