@@ -819,7 +819,7 @@ class HomePageTests(TestCase):
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    def test_home_cta_text_changes_for_authenticated_users(self):
+    def test_home_cta_text_for_authenticated_users(self):
         unauth_response = self.client.get("/")
         self.assertEqual(unauth_response.status_code, 200)
         unauth_soup = BeautifulSoup(unauth_response.content, "html.parser")
@@ -827,7 +827,8 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(unauth_hero_form)
         unauth_hero_button = unauth_hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(unauth_hero_button)
-        self.assertEqual(self._normalized_button_text(unauth_hero_button), "Start Free Trial")
+        self.assertEqual(self._normalized_button_text(unauth_hero_button), "Start Sourcing")
+        self.assertIn("7-day free trial.", unauth_hero_form.find_parent("div").get_text(" ", strip=True))
 
         unauth_card_source = unauth_soup.find(
             "input",
@@ -854,7 +855,7 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(auth_hero_form)
         auth_hero_button = auth_hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(auth_hero_button)
-        self.assertEqual(self._normalized_button_text(auth_hero_button), "Spawn Agent")
+        self.assertEqual(self._normalized_button_text(auth_hero_button), "Start Sourcing")
 
         auth_card_source = auth_soup.find(
             "input",
@@ -901,8 +902,14 @@ class HomePageTests(TestCase):
         soup = BeautifulSoup(response.content, "html.parser")
         page_text = soup.get_text(" ")
         normalized_page_text = re.sub(r"\s+", " ", page_text)
-        normalized_page_text = normalized_page_text.replace(" ,", ",").replace(" ?", "?")
-        self.assertIn("Your Gobii AI team, always on", normalized_page_text)
+        normalized_page_text = (
+            normalized_page_text.replace(" ,", ",").replace(" ?", "?").replace(" .", ".")
+        )
+        self.assertIn("Delegate qualified sourcing to AI employees", normalized_page_text)
+        self.assertIn(
+            "Find leads, candidates, companies, and opportunities on schedule.",
+            normalized_page_text,
+        )
         self.assertIn(
             "Gobii is an AI agent platform that gives businesses always-on virtual coworkers "
             "capable of browser automation, web research, data collection, and workflow execution.",
@@ -924,7 +931,8 @@ class HomePageTests(TestCase):
         self.assertEqual(hero_form.get("data-analytics-intent"), "spawn_agent")
         hero_button = hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(hero_button)
-        self.assertEqual(self._normalized_button_text(hero_button), "Start Free Trial")
+        self.assertEqual(self._normalized_button_text(hero_button), "Start Sourcing")
+        self.assertIn("7-day free trial.", normalized_page_text)
         self.assertIsNone(hero_form.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"}))
         self.assertIsNone(soup.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"}))
         response_text = response.content.decode("utf-8")
@@ -941,8 +949,10 @@ class HomePageTests(TestCase):
             response,
             "I want my Gobii to",
         )
-        self.assertContains(response, " find 200 ideal customers and their emails.")
-        self.assertContains(response, "keep my Salesforce pipeline clean every day.")
+        self.assertContains(response, " source qualified leads and companies for my ICP every Monday.")
+        self.assertContains(response, "find candidates with Python and healthcare AI experience each week.")
+        self.assertNotContains(response, "find 200 ideal customers and their emails")
+        self.assertNotContains(response, "keep my Salesforce pipeline clean every day")
         self.assertNotContains(response, "Paste a role brief")
         self.assertNotContains(response, " parse this job description")
         self.assertNotContains(response, " build a qualified shortlist")
@@ -983,7 +993,8 @@ class HomePageTests(TestCase):
         self.assertEqual(hero_form.get("data-requires-trial"), "true")
         hero_button = hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(hero_button)
-        self.assertEqual(self._normalized_button_text(hero_button), "Start Free Trial")
+        self.assertEqual(self._normalized_button_text(hero_button), "Start Sourcing")
+        self.assertIn("7-day free trial.", hero_form.find_parent("div").get_text(" ", strip=True))
 
         card_source = soup.find(
             "input",
@@ -997,7 +1008,7 @@ class HomePageTests(TestCase):
         self.assertEqual(self._normalized_button_text(card_button), "Start Free Trial")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    def test_home_cta_text_stays_spawn_for_grandfathered_user(self):
+    def test_home_cta_text_stays_sourcing_for_grandfathered_user(self):
         user = get_user_model().objects.create_user(
             username="home_cta_grandfathered@example.com",
             email="home_cta_grandfathered@example.com",
@@ -1015,7 +1026,8 @@ class HomePageTests(TestCase):
         self.assertEqual(hero_form.get("data-requires-trial"), "false")
         hero_button = hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(hero_button)
-        self.assertEqual(self._normalized_button_text(hero_button), "Spawn Agent")
+        self.assertEqual(self._normalized_button_text(hero_button), "Start Sourcing")
+        self.assertNotIn("7-day free trial.", hero_form.find_parent("div").get_text(" ", strip=True))
 
         card_source = soup.find(
             "input",

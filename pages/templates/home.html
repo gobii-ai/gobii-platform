@@ -224,6 +224,31 @@
       }
     }
 
+    #create-agent-form textarea[name="charter"],
+    #charter-ghost {
+      line-height: 1.6;
+    }
+
+    #create-agent-form textarea[name="charter"] {
+      min-height: 6.75rem;
+      padding: 1rem 1.25rem;
+    }
+
+    #charter-ghost {
+      padding: 1rem 1.25rem;
+    }
+
+    @media (min-width: 640px) {
+      #create-agent-form textarea[name="charter"] {
+        min-height: 6.5rem;
+        padding: 1.125rem 1.5rem;
+      }
+
+      #charter-ghost {
+        padding: 1.125rem 1.5rem;
+      }
+    }
+
     {% if homepage_perf_motion_reduction_enabled %}
     @media (pointer: coarse), (max-width: 767px) {
       .gobii-hero-fish-cursor,
@@ -471,7 +496,7 @@
 
       <!-- Agent Spawn Form -->
       {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
-      <div class="max-w-4xl mx-auto relative z-20">
+      <div class="max-w-3xl mx-auto relative z-20">
           <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}" data-requires-trial="{{ home_spawn_requires_trial|yesno:'true,false' }}" data-immersive-form data-lazy-csrf data-analytics-cta-id="home_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
             <input type="hidden" name="return_to" id="agent-return-to" value="">
             <input type="hidden" name="embed" id="agent-embed" value="{% if user.is_authenticated %}1{% else %}0{% endif %}">
@@ -491,10 +516,10 @@
               <!-- Unified input + button container -->
               <div class="backdrop-blur-2xl bg-white/50 border border-white/60 focus-within:border-indigo-500 rounded-2xl overflow-visible relative shadow-xl transition-all duration-300">
                 <!-- Typing prompt overlay -->
-                <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
+                <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
                     <span>I want my Gobii to</span>
-                    <span id="charter-ghost-text"> find 200 ideal customers and their emails.</span>
+                    <span id="charter-ghost-text"> source qualified leads and companies for my ICP every Monday.</span>
                   </div>
                 </div>
 
@@ -639,13 +664,9 @@
 
                     <button
                       type="submit"
-                      class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
+                      class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-5 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
                     >
-                      {% if not user.is_authenticated or home_spawn_requires_trial %}
-                        {% cta_text "cta_homepage_launch_btn_unauth" fallback="Start Free Trial" %}
-                      {% else %}
-                        {% cta_text "cta_homepage_launch_btn_auth" fallback="Spawn Agent" %}
-                      {% endif %}
+                      {% cta_text "cta_homepage_sourcing_btn" fallback="Start Sourcing" %}
                       <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
                       </svg>
@@ -661,6 +682,9 @@
                   </svg>
                   {{ agent_charter_form.charter.errors.0 }}
                 </div>
+              {% endif %}
+              {% if not user.is_authenticated or home_spawn_requires_trial %}
+                <p class="mt-3 text-center text-sm font-medium text-slate-500">7-day free trial.</p>
               {% endif %}
             </div>
 
@@ -1047,22 +1071,16 @@
 
       const homePerf = window.GobiiHomePerf;
       const baseScenarios = [
-        ' find 200 ideal customers and their emails.',
-        ' keep my Salesforce pipeline clean every day.',
-        ' watch new YC and seed startups and add founders to my sheet weekly.',
-        ' track competitor pricing and plan changes daily.',
-        ' pull fresh contacts from company sites and press releases each night.',
-        ' monitor RFP portals for AI and automation opportunities to bid on.',
-        " watch job boards for 'Senior Data Engineer' roles and auto-apply with my profile.",
-        ' track vendor status pages and alert me when SLAs slip.',
-        ' collect buyer intent posts on LinkedIn and Reddit and draft outreach.',
-        ' watch competitor changelogs and docs and summarize product moves weekly.',
-        ' track ecommerce competitors for stock and price changes daily.',
-        ' monitor fintech and regulatory sites and summarize what affects us.',
-        ' help me find a new place to rent.',
-        ' help me find a vacation house.',
-        ' watch for price drops on my wishlist items.',
-        " track flights to my destination and alert me when they're cheap."
+        ' source qualified leads and companies for my ICP every Monday.',
+        ' find candidates with Python and healthcare AI experience each week.',
+        ' monitor RFP portals and surface opportunities worth bidding on.',
+        ' build a weekly list of companies hiring RevOps leaders.',
+        ' enrich prospect accounts with decision makers and buying signals.',
+        ' find seed-stage fintech founders and add verified contacts to my sheet.',
+        ' source product managers from healthcare startups and rank them by fit.',
+        ' watch competitor customer pages and surface expansion opportunities.',
+        ' track new job posts that suggest companies need data tooling.',
+        ' monitor partner directories for agencies that match our ideal profile.'
       ];
 
       function toggleGhostVisibility() {
