@@ -1,4 +1,5 @@
 import { jsonFetch, jsonRequest } from './http'
+import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
 
 export type OrganizationRole = {
   value: string
@@ -31,9 +32,23 @@ export type OrganizationTemplate = {
   name: string
   tagline: string
   category: string
+  preferredLlmTier: IntelligenceTierKey
   sourceAgentName: string | null
   createdBy: string | null
   scheduleDescription: string | null
+}
+
+export type OrganizationTemplateEditorPayload = {
+  name: string
+  tagline: string
+  charter: string
+  preferredLlmTier: IntelligenceTierKey
+}
+
+export type OrganizationTemplateDetailPayload = {
+  template: OrganizationTemplateEditorPayload & {
+    id: string
+  }
 }
 
 export type OrganizationTemplateSourceAgent = {
@@ -51,8 +66,10 @@ export type CurrentOrganizationTemplatesPayload = {
   }
   templates: OrganizationTemplate[]
   sourceAgents: OrganizationTemplateSourceAgent[]
+  llmIntelligence: LlmIntelligenceConfig | null
   created?: boolean
   templateId?: string
+  template?: OrganizationTemplateDetailPayload['template']
 }
 
 export type OrganizationTemplateLaunchPayload = {
@@ -187,6 +204,34 @@ export function createOrganizationTemplate(sourceAgentId: string): Promise<Curre
   return jsonRequest<CurrentOrganizationTemplatesPayload>(CURRENT_ORGANIZATION_TEMPLATES_URL, {
     method: 'POST',
     json: { sourceAgentId },
+    includeCsrf: true,
+  })
+}
+
+export function createOrganizationTemplateFromScratch(
+  payload: OrganizationTemplateEditorPayload,
+): Promise<CurrentOrganizationTemplatesPayload> {
+  return jsonRequest<CurrentOrganizationTemplatesPayload>(CURRENT_ORGANIZATION_TEMPLATES_URL, {
+    method: 'POST',
+    json: payload,
+    includeCsrf: true,
+  })
+}
+
+export function fetchOrganizationTemplateDetail(
+  templateId: string,
+  signal?: AbortSignal,
+): Promise<OrganizationTemplateDetailPayload> {
+  return jsonFetch<OrganizationTemplateDetailPayload>(`/console/api/organization/templates/${templateId}/`, { signal })
+}
+
+export function updateOrganizationTemplate(
+  templateId: string,
+  payload: OrganizationTemplateEditorPayload,
+): Promise<CurrentOrganizationTemplatesPayload> {
+  return jsonRequest<CurrentOrganizationTemplatesPayload>(`/console/api/organization/templates/${templateId}/`, {
+    method: 'PATCH',
+    json: payload,
     includeCsrf: true,
   })
 }

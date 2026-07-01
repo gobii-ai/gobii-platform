@@ -196,6 +196,12 @@ def create_persistent_agent_from_charter(
         )
         if selected_template is None:
             raise ValidationError("This template is no longer available.")
+        if not preferred_llm_tier_key:
+            template_preferred_llm_tier = getattr(selected_template, "preferred_llm_tier", None)
+            preferred_llm_tier_key = (
+                getattr(template_preferred_llm_tier, "key", template_preferred_llm_tier)
+                or None
+            )
 
     owner = organization or request.user
     if get_owner_account_pause_state(owner).get("customer_paused"):

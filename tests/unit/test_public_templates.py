@@ -21,6 +21,7 @@ from api.public_profiles import validate_public_handle
 from api.services.template_clone import TemplateCloneService
 from pages.library_views import LIBRARY_CACHE_KEY, LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY, LIBRARY_OFFICIAL_CACHE_KEY
 from pages.public_template_urls import public_template_route_slug
+from tests.utils.llm_seed import get_intelligence_tier
 
 
 class PublicProfileHandleTests(TestCase):
@@ -109,6 +110,7 @@ class TemplateServiceDbTests(TestCase):
             charter="DB charter",
             base_schedule="@daily",
             recommended_contact_channel="email",
+            preferred_llm_tier=get_intelligence_tier("premium"),
             category="Operations",
             is_active=True,
         )
@@ -116,6 +118,7 @@ class TemplateServiceDbTests(TestCase):
         resolved = PretrainedWorkerTemplateService.get_template_by_code("db-template")
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.display_name, template.display_name)
+        self.assertEqual(resolved.preferred_llm_tier, "premium")
 
 
 class PublicTemplateUrlHelperTests(TestCase):
@@ -256,6 +259,7 @@ class PublicTemplateRouteTests(TestCase):
             description="A curated project manager template.",
             charter="Run the curated project manager template.",
             category="Team Ops",
+            preferred_llm_tier=get_intelligence_tier("premium"),
             is_active=True,
         )
 
@@ -266,6 +270,7 @@ class PublicTemplateRouteTests(TestCase):
             self.client.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
             "project-manager",
         )
+        self.assertEqual(self.client.session.get("agent_preferred_llm_tier"), "premium")
 
     @tag("batch_public_templates")
     def test_organization_scoped_template_is_not_publicly_accessible_by_code(self):

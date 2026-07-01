@@ -13,6 +13,7 @@ class PretrainedWorkerTemplateDefinition:
     schedule_jitter_minutes: int = 0
     event_triggers: List[Dict[str, Any]] = field(default_factory=list)
     default_tools: List[str] = field(default_factory=list)
+    preferred_llm_tier: str = "standard"
     recommended_contact_channel: str = "email"
     category: str = ""
     hero_image_path: str = ""
