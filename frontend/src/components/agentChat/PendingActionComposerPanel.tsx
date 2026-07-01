@@ -38,7 +38,6 @@ type PendingActionComposerPanelProps = {
       decision: 'approve' | 'decline'
       allowInbound: boolean
       allowOutbound: boolean
-      canConfigure: boolean
       smsContactPermissionAttested?: boolean
     }>
   ) => Promise<PendingActionMutationResult | void>
@@ -283,7 +282,6 @@ export function PendingActionComposerPanel({
           decision,
           allowInbound: draft.allowInbound,
           allowOutbound: draft.allowOutbound,
-          canConfigure: false,
           smsContactPermissionAttested: draft.smsContactPermissionAttested,
         },
       ])

@@ -20,7 +20,6 @@ def build_agent_quick_settings_payload(agent, owner=None) -> dict:
     else:
         plan_payload = reconcile_user_plan_from_stripe(agent.user)
     plan_id = str(plan_payload.get("id", "")).lower() if plan_payload else ""
-    plan_name = plan_payload.get("name") if plan_payload else ""
     is_free_plan = plan_id == PlanNamesChoices.FREE.value
 
     if is_free_plan and settings.GOBII_PROPRIETARY_MODE:
@@ -38,8 +37,6 @@ def build_agent_quick_settings_payload(agent, owner=None) -> dict:
         },
         "meta": {
             "plan": {
-                "id": plan_id,
-                "name": plan_name,
                 "isFree": is_free_plan,
             },
             "upgradeUrl": upgrade_url,

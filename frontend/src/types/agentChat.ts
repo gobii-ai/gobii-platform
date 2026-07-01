@@ -168,8 +168,6 @@ export type RequestedSecret = {
   secretType: 'credential' | 'env_var'
   domainPattern: string
   description?: string | null
-  createdAt?: string | null
-  updatedAt?: string | null
 }
 
 export type PendingRequestedSecretsAction = {
@@ -190,11 +188,9 @@ export type PendingContactRequest = {
   purpose?: string | null
   allowInbound: boolean
   allowOutbound: boolean
-  canConfigure: boolean
   smsContactPurpose?: string | null
   smsContactPurposeDetails?: string | null
   smsContactPermissionAttested?: boolean | null
-  smsContactPermissionAttestedAt?: string | null
   requestedAt?: string | null
   expiresAt?: string | null
 }

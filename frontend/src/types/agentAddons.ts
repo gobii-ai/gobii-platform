@@ -62,14 +62,6 @@ export type AgentAddonsResponse = {
   contactPacks?: ContactPackSettings | null
   taskPacks?: TaskPackSettings | null
   trial?: TrialInfo | null
-  plan?: {
-    id?: string | null
-    name?: string | null
-    isFree?: boolean
-    price?: number | null
-    currency?: string | null
-  } | null
-  upgradeUrl?: string | null
   manageBillingUrl?: string | null
 }
 

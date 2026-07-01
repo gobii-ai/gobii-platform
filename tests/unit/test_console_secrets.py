@@ -99,6 +99,23 @@ class ConsoleSecretsTests(TestCase):
         secret.save()
         return secret
 
+    def test_global_secret_list_returns_minimal_secret_shape(self):
+        secret = self._make_global_secret()
+
+        response = self.client.get(reverse("console-global-secret-list"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["secrets"]), 1)
+        secret_payload = payload["secrets"][0]
+        self.assertEqual(secret_payload["id"], str(secret.id))
+        self.assertEqual(
+            set(secret_payload.keys()),
+            {"id", "name", "key", "secret_type", "domain_pattern", "description", "source"},
+        )
+        self.assertNotIn("created_at", secret_payload)
+        self.assertNotIn("updated_at", secret_payload)
+
     def test_create_global_secret_returns_created(self):
         response = self.client.post(
             reverse("console-global-secret-list"),
@@ -194,6 +211,35 @@ class ConsoleSecretsTests(TestCase):
         self.assertTrue(
             PersistentAgentSecret.objects.filter(agent=self.org_agent, name="Database Password").exists()
         )
+
+    def test_agent_secret_list_returns_minimal_and_requested_secret_shapes(self):
+        self._set_org_context()
+        agent_secret = self._make_agent_secret(name="Visible Agent Secret")
+        requested_secret = self._make_agent_secret(
+            name="Requested Agent Secret",
+            requested=True,
+            description="Needed for procurement",
+        )
+
+        response = self.client.get(reverse("console-agent-secret-list", args=[self.org_agent.id]))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        secret_payload = next(item for item in payload["agent_secrets"] if item["id"] == str(agent_secret.id))
+        self.assertEqual(
+            set(secret_payload.keys()),
+            {"id", "name", "key", "secret_type", "domain_pattern", "description", "source"},
+        )
+        self.assertNotIn("requested", secret_payload)
+        self.assertNotIn("created_at", secret_payload)
+        self.assertNotIn("updated_at", secret_payload)
+
+        requested_payload = next(item for item in payload["requested_secrets"] if item["id"] == str(requested_secret.id))
+        self.assertEqual(
+            set(requested_payload.keys()),
+            {"id", "name", "key", "secret_type", "domain_pattern", "description", "created_at"},
+        )
+        self.assertIsNotNone(requested_payload["created_at"])
 
     def test_create_agent_env_var_secret_returns_created(self):
         self._set_org_context()

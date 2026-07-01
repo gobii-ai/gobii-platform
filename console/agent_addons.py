@@ -3,13 +3,12 @@ from datetime import datetime, timedelta
 from typing import Mapping
 
 from django.conf import settings
-from django.urls import NoReverseMatch, reverse
+from django.urls import NoReverseMatch
 from django.utils import timezone
 
 from billing.addons import AddonEntitlementService
 from billing.services import BillingService
 from api.services.owner_execution_pause import get_owner_account_pause_state
-from constants.plans import PlanNamesChoices
 from util.integrations import IntegrationDisabledError, stripe_status
 from util.subscription_helper import (
     _ensure_stripe_ready,
@@ -400,31 +399,14 @@ def build_agent_addons_payload(
     can_open_billing: bool = False,
 ) -> dict:
     plan_payload = None
-    upgrade_url = None
     manage_billing_url = None
     if agent.organization_id:
         plan_payload = get_organization_plan(agent.organization)
     else:
         plan_payload = reconcile_user_plan_from_stripe(agent.user)
     plan_id = str(plan_payload.get("id", "")).lower() if plan_payload else ""
-    plan_name = plan_payload.get("name") if plan_payload else ""
-    plan_price = None
-    if plan_payload:
-        try:
-            raw_price = plan_payload.get("price")
-            plan_price = float(raw_price) if raw_price is not None else None
-        except (TypeError, ValueError):
-            plan_price = None
-    plan_currency = plan_payload.get("currency") if plan_payload else None
-    is_free_plan = plan_id == PlanNamesChoices.FREE.value
     owner = owner or agent.organization or agent.user
     owner_type = "organization" if agent.organization_id else "user"
-
-    if is_free_plan and settings.GOBII_PROPRIETARY_MODE:
-        try:
-            upgrade_url = reverse("proprietary:pricing")
-        except NoReverseMatch:
-            upgrade_url = None
 
     if can_open_billing:
         try:
@@ -486,13 +468,5 @@ def build_agent_addons_payload(
             "isTrialing": bool(is_trialing),
             "trialEndsAtIso": trial_end.isoformat() if trial_end else None,
         },
-        "plan": {
-            "id": plan_id,
-            "name": plan_name,
-            "isFree": is_free_plan,
-            "price": plan_price,
-            "currency": plan_currency,
-        },
-        "upgradeUrl": upgrade_url,
         "manageBillingUrl": manage_billing_url,
     }

@@ -4787,8 +4787,6 @@ def _serialize_agent_fs_node(node: AgentFsNode) -> dict[str, Any]:
         "path": node.path,
         "nodeType": node.node_type,
         "sizeBytes": node.size_bytes,
-        "mimeType": node.mime_type or None,
-        "createdAt": node.created_at.isoformat() if node.created_at else None,
         "updatedAt": node.updated_at.isoformat() if node.updated_at else None,
     }
 
@@ -4809,8 +4807,6 @@ class AgentFsNodeListAPIView(LoginRequiredMixin, View):
                 "path",
                 "node_type",
                 "size_bytes",
-                "mime_type",
-                "created_at",
                 "updated_at",
             )
             .order_by("parent_id", "node_type", "name")
@@ -4838,10 +4834,7 @@ class AgentFsNodeListAPIView(LoginRequiredMixin, View):
         except Exception:
             logger.debug("Failed to emit agent files viewed analytics for agent %s", agent.id, exc_info=True)
 
-        payload = {
-            "filespace": {"id": str(filespace.id), "name": filespace.name},
-            "nodes": [_serialize_agent_fs_node(node) for node in nodes],
-        }
+        payload = {"nodes": [_serialize_agent_fs_node(node) for node in nodes]}
         return JsonResponse(payload)
 
 

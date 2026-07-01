@@ -5,16 +5,10 @@ export type AgentFsNode = {
   path: string
   nodeType: 'dir' | 'file'
   sizeBytes: number | null
-  mimeType: string | null
-  createdAt: string | null
   updatedAt: string | null
 }
 
 export type AgentFilesResponse = {
-  filespace: {
-    id: string
-    name: string
-  }
   nodes: AgentFsNode[]
 }
 

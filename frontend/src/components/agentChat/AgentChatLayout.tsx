@@ -345,7 +345,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
       decision: 'approve' | 'decline'
       allowInbound: boolean
       allowOutbound: boolean
-      canConfigure: boolean
       smsContactPermissionAttested?: boolean
     }>
   ) => Promise<PendingActionMutationResult | void>

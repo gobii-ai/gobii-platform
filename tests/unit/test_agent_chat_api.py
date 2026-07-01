@@ -29,6 +29,7 @@ from api.agent.peer_comm import PeerMessagingService
 from api.agent.tools.plan import PlanFileDeliverable, PlanMessageDeliverable, PlanSnapshot, PlanStepChange
 from api.models import (
     AgentCollaborator,
+    AgentFsNode,
     AgentPeerLink,
     AgentSpawnRequest,
     BrowserUseAgent,
@@ -839,6 +840,39 @@ class AgentChatAPITests(TestCase):
             ["human_input", "spawn_request", "requested_secrets", "contact_requests"],
         )
         self.assertEqual(len(payload.get("pending_human_input_requests", [])), 1)
+        pending_actions = {item.get("kind"): item for item in payload.get("pending_action_requests", [])}
+        requested_secret_payload = pending_actions["requested_secrets"]["secrets"][0]
+        self.assertNotIn("createdAt", requested_secret_payload)
+        self.assertNotIn("updatedAt", requested_secret_payload)
+        contact_request_payload = pending_actions["contact_requests"]["requests"][0]
+        self.assertNotIn("canConfigure", contact_request_payload)
+        self.assertNotIn("smsContactPermissionAttestedAt", contact_request_payload)
+
+    @tag("batch_agent_chat")
+    def test_agent_files_list_returns_minimal_node_shape(self):
+        write_bytes_to_dir(
+            self.agent,
+            b"hello",
+            "/reports/summary.txt",
+            "text/plain",
+        )
+
+        response = self.client.get(reverse("console_agent_fs_list", kwargs={"agent_id": self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertNotIn("filespace", payload)
+        file_payload = next(
+            item
+            for item in payload["nodes"]
+            if item["nodeType"] == AgentFsNode.NodeType.FILE
+        )
+        self.assertEqual(
+            set(file_payload.keys()),
+            {"id", "parentId", "name", "path", "nodeType", "sizeBytes", "updatedAt"},
+        )
+        self.assertNotIn("createdAt", file_payload)
+        self.assertNotIn("mimeType", file_payload)
 
     @tag("batch_agent_chat")
     def test_timeline_filters_manager_only_pending_actions_for_collaborator(self):

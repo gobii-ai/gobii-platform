@@ -49,8 +49,6 @@ def _serialize_requested_secret(secret: PersistentAgentSecret) -> dict:
         "secretType": secret.secret_type,
         "domainPattern": secret.domain_pattern,
         "description": secret.description,
-        "createdAt": secret.created_at.isoformat() if secret.created_at else None,
-        "updatedAt": secret.updated_at.isoformat() if secret.updated_at else None,
     }
 
 
@@ -64,14 +62,9 @@ def _serialize_contact_request(request_obj: CommsAllowlistRequest) -> dict:
         "purpose": request_obj.purpose,
         "allowInbound": bool(request_obj.request_inbound),
         "allowOutbound": bool(request_obj.request_outbound),
-        "canConfigure": bool(request_obj.request_configure),
         "smsContactPurpose": request_obj.sms_contact_purpose,
         "smsContactPurposeDetails": request_obj.sms_contact_purpose_details,
         "smsContactPermissionAttested": request_obj.sms_contact_permission_attested,
-        "smsContactPermissionAttestedAt": (
-            request_obj.sms_contact_permission_attested_at.isoformat()
-            if request_obj.sms_contact_permission_attested_at else None
-        ),
         "requestedAt": request_obj.requested_at.isoformat() if request_obj.requested_at else None,
         "expiresAt": request_obj.expires_at.isoformat() if request_obj.expires_at else None,
     }

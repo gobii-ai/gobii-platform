@@ -164,7 +164,6 @@ function makeContactRequestsAction(): PendingActionRequest {
         purpose: 'Support',
         allowInbound: true,
         allowOutbound: true,
-        canConfigure: false,
       },
     ],
   }

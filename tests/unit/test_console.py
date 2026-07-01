@@ -3029,6 +3029,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(payload['settings']['dailyCredits']['limit'], 5.0)
         self.assertFalse(payload['status']['dailyCredits']['softTargetExceeded'])
         self.assertFalse(payload['status']['dailyCredits']['hardLimitReached'])
+        self.assertEqual(set(payload.get("meta", {}).get("plan", {}).keys()), {"isFree"})
 
     @tag("batch_console_agents_management")
     def test_agent_settings_api_get(self):
@@ -3422,6 +3423,8 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertNotIn("plan", payload)
+        self.assertNotIn("upgradeUrl", payload)
         billing = payload.get("status", {}).get("billing", {})
         self.assertTrue(billing.get("delinquent"))
         self.assertTrue(billing.get("actionable"))
