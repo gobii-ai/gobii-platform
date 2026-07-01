@@ -656,11 +656,58 @@ def _attachment_downloads(attachments: list[dict[str, Any]]) -> list[dict[str, s
     return downloads
 
 
+def _existing_gateway_message_for_subscription(
+    message: DiscordGatewayMessage,
+    subscription: PersistentAgentDiscordChannelSubscription,
+) -> PersistentAgentMessage | None:
+    return (
+        PersistentAgentMessage.objects.filter(
+            owner_agent=subscription.agent,
+            is_outbound=False,
+            raw_payload__subscription_id=str(subscription.id),
+            raw_payload__discord_message_id=message.message_id,
+        )
+        .order_by("timestamp", "id")
+        .first()
+    )
+
+
+def _finalize_gateway_subscription_delivery(
+    *,
+    agent: PersistentAgent,
+    subscription: PersistentAgentDiscordChannelSubscription,
+    message: DiscordGatewayMessage,
+    stored_message: PersistentAgentMessage,
+) -> dict[str, Any]:
+    display_name = f"#{message.channel_name.lstrip('#')}" if message.channel_name else f"Discord {message.channel_id}"
+    if stored_message.conversation_id and display_name:
+        PersistentAgentConversation.objects.filter(id=stored_message.conversation_id).update(display_name=display_name)
+    debounce_result = schedule_discord_inbound_processing(str(agent.id), typing_channel_id=message.channel_id)
+    subscription.record_message()
+    return {
+        "agent_id": str(agent.id),
+        "subscription_id": str(subscription.id),
+        "message_id": str(stored_message.id),
+        "conversation_id": str(stored_message.conversation_id) if stored_message.conversation_id else "",
+        "debounced": bool(debounce_result.get("debounced")),
+        "debounce_seconds": debounce_result.get("debounce_seconds", 0),
+    }
+
+
 def _ingest_gateway_message_for_subscription(
     message: DiscordGatewayMessage,
     subscription: PersistentAgentDiscordChannelSubscription,
 ) -> dict[str, Any]:
     agent = subscription.agent
+    existing_message = _existing_gateway_message_for_subscription(message, subscription)
+    if existing_message is not None:
+        return _finalize_gateway_subscription_delivery(
+            agent=agent,
+            subscription=subscription,
+            message=message,
+            stored_message=existing_message,
+        )
+
     platform_channel_address = discord_channel_address(message.guild_id, message.channel_id)
     conversation_address = discord_conversation_address(agent.id, message.guild_id, message.channel_id)
     source_label_parts = []
@@ -709,19 +756,12 @@ def _ingest_gateway_message_for_subscription(
         filespace_import_mode="sync",
         trigger_processing=False,
     )
-    display_name = f"#{message.channel_name.lstrip('#')}" if message.channel_name else f"Discord {message.channel_id}"
-    if info.message.conversation_id and display_name:
-        PersistentAgentConversation.objects.filter(id=info.message.conversation_id).update(display_name=display_name)
-    debounce_result = schedule_discord_inbound_processing(str(agent.id), typing_channel_id=message.channel_id)
-    subscription.record_message()
-    return {
-        "agent_id": str(agent.id),
-        "subscription_id": str(subscription.id),
-        "message_id": str(info.message.id),
-        "conversation_id": str(info.message.conversation_id) if info.message.conversation_id else "",
-        "debounced": bool(debounce_result.get("debounced")),
-        "debounce_seconds": debounce_result.get("debounce_seconds", 0),
-    }
+    return _finalize_gateway_subscription_delivery(
+        agent=agent,
+        subscription=subscription,
+        message=message,
+        stored_message=info.message,
+    )
 
 
 def _webhook_attachment_filenames(attachments: Iterable[Mapping[str, Any]]) -> list[str]:

@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import requests
 from django.contrib.auth import get_user_model
-from django.db import connection
+from django.db import OperationalError, connection
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -43,7 +43,7 @@ from api.services.discord_bot import (
     start_discord_oauth,
     _webhook_echo_signature,
 )
-from api.management.commands.run_discord_bot import build_gateway_message
+from api.management.commands.run_discord_bot import build_gateway_message, ingest_gateway_message_with_reconnect
 
 
 def _response(payload=None, status_code=200, content=b""):
@@ -92,6 +92,34 @@ class NativeDiscordBotTests(TestCase):
         self.user.is_staff = True
         self.user.save(update_fields=["is_staff"])
         self.client.force_login(self.user)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.management.commands.run_discord_bot.close_old_connections")
+    @patch("api.management.commands.run_discord_bot.ingest_gateway_message")
+    def test_run_discord_bot_retries_once_after_stale_database_connection(self, ingest_mock, close_mock):
+        message = DiscordGatewayMessage(
+            message_id="message-1",
+            channel_id="channel-1",
+            channel_name="general",
+            guild_id="guild-1",
+            guild_name="Guild",
+            author_id="author-1",
+            author_name="Author",
+            content="hello",
+            raw_content="hello",
+            attachments=[],
+            embeds=[],
+        )
+        ingest_mock.side_effect = [
+            OperationalError("the connection is closed"),
+            {"ignored": False, "message_id": "stored-message"},
+        ]
+
+        result = ingest_gateway_message_with_reconnect(message)
+
+        self.assertEqual(result["message_id"], "stored-message")
+        self.assertEqual(ingest_mock.call_count, 2)
+        self.assertEqual(close_mock.call_count, 3)
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
@@ -495,6 +523,62 @@ class NativeDiscordBotTests(TestCase):
             [call.args[0] for call in schedule_mock.call_args_list],
             [str(self.agent.id), str(second_agent.id)],
         )
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_message_reuses_existing_discord_delivery_on_retry(self, schedule_mock):
+        guild = self._guild()
+        second_browser = BrowserUseAgent.objects.create(user=self.user, name="Second Browser")
+        second_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Second Agent",
+            charter="Also handle Discord messages.",
+            browser_use_agent=second_browser,
+        )
+        first_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        second_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=second_agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        message = DiscordGatewayMessage(
+            message_id="500",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="300",
+            author_name="Human",
+            content="hello both agents",
+            attachments=[],
+            embeds=[],
+        )
+
+        first_result = ingest_gateway_message(message)
+        retry_result = ingest_gateway_message(message)
+
+        self.assertFalse(retry_result["ignored"])
+        self.assertEqual(retry_result["subscription_count"], 2)
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(raw_payload__discord_message_id="500").count(),
+            2,
+        )
+        self.assertCountEqual(
+            [delivery["message_id"] for delivery in retry_result["deliveries"]],
+            [delivery["message_id"] for delivery in first_result["deliveries"]],
+        )
+        self.assertCountEqual(
+            [delivery["subscription_id"] for delivery in retry_result["deliveries"]],
+            [str(first_subscription.id), str(second_subscription.id)],
+        )
+        self.assertEqual(schedule_mock.call_count, 4)
 
     @tag("batch_agent_webhooks")
     @override_settings(GOBII_RELEASE_ENV="local")
