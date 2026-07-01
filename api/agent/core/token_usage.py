@@ -405,32 +405,32 @@ def extract_time_to_first_token_ms(response: Any) -> Optional[int]:
     if response is None:
         return None
 
-    duration_ms = None
+    ttft_ms = None
     model_extra = None
 
     if isinstance(response, dict):
-        duration_ms = response.get("time_to_first_token_ms")
-        if duration_ms is None:
-            duration_ms = response.get("_gobii_time_to_first_token_ms")
+        ttft_ms = response.get("time_to_first_token_ms")
+        if ttft_ms is None:
+            ttft_ms = response.get("_gobii_time_to_first_token_ms")
         model_extra = response.get("model_extra")
     else:
-        duration_ms = getattr(response, "time_to_first_token_ms", None)
-        if duration_ms is None:
-            duration_ms = getattr(response, "_gobii_time_to_first_token_ms", None)
+        ttft_ms = getattr(response, "time_to_first_token_ms", None)
+        if ttft_ms is None:
+            ttft_ms = getattr(response, "_gobii_time_to_first_token_ms", None)
         model_extra = getattr(response, "model_extra", None)
 
-    if duration_ms is None and isinstance(model_extra, dict):
-        duration_ms = model_extra.get("time_to_first_token_ms")
-        if duration_ms is None:
-            duration_ms = model_extra.get("ttft_ms")
+    if ttft_ms is None and isinstance(model_extra, dict):
+        ttft_ms = model_extra.get("time_to_first_token_ms")
+        if ttft_ms is None:
+            ttft_ms = model_extra.get("ttft_ms")
 
-    return _coerce_duration_ms(duration_ms)
+    return _coerce_duration_ms(ttft_ms)
 
 
 def completion_tokens_per_second(completion_tokens: Any, request_duration_ms: Any) -> Optional[float]:
     completion_token_count = coerce_int(completion_tokens)
     duration_ms = _coerce_duration_ms(request_duration_ms)
-    if completion_token_count <= 0 or duration_ms is None or duration_ms <= 0:
+    if completion_token_count is None or completion_token_count <= 0 or duration_ms is None or duration_ms <= 0:
         return None
     return round(completion_token_count / (duration_ms / 1000), 2)
 
