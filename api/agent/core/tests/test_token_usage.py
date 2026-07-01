@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
 from django.urls import reverse
 
-from api.agent.core.token_usage import compute_cost_breakdown
+from api.agent.core.token_usage import completion_tokens_per_second, compute_cost_breakdown
 from api.llm.utils import normalize_model_name, normalize_pricing_model
 from api.models import LLMProvider, PersistentModelEndpoint
 from console.llm_serializers import _serialize_persistent_endpoint
@@ -121,6 +121,9 @@ class ModelNormalizationTests(SimpleTestCase):
 
 @tag("batch_token_usage")
 class CostBreakdownPricingModelTests(SimpleTestCase):
+    def test_completion_tokens_per_second_returns_none_when_tokens_missing(self):
+        self.assertIsNone(completion_tokens_per_second(None, 1000))
+
     def test_uses_pricing_model_for_litellm_model_info_without_replacing_model(self):
         token_usage = {
             "model": "openai/deepseek-ai/DeepSeek-V4-Flash",

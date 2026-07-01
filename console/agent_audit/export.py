@@ -227,7 +227,6 @@ def _serialize_completion_chunk(
             prompt_archive=None,
             tool_calls=tool_calls_by_completion_id.get(completion_id, []),
         )
-        completion_payload["request_duration_ms"] = completion.request_duration_ms
         completion_payload["prompt_archive"] = (
             {
                 **(prompt_meta or {}),

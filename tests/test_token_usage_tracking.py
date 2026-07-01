@@ -15,7 +15,7 @@ from api.models import (
     EvalRun,
 )
 from api.agent.core.budget import BudgetContext, set_current_context
-from api.agent.core.event_processing import _completion_with_failover
+from api.agent.core.event_processing import _completion_with_failover, _stream_completion_with_broadcast
 from api.agent.core.compaction import llm_summarise_comms
 from api.agent.core.step_compaction import llm_summarise_steps
 from api.agent.core.token_usage import log_agent_completion
@@ -24,6 +24,7 @@ from api.agent.tasks.agent_tags import _generate_via_llm as generate_tags_via_ll
 from api.agent.tasks.short_description import _generate_via_llm as generate_short_desc_via_llm
 from api.agent.tasks.mini_description import _generate_via_llm as generate_mini_desc_via_llm
 from api.agent.tools.search_tools import _search_with_llm
+from console.agent_audit.serializers import serialize_completion
 from tests.utils.token_usage import make_completion_response
 
 User = get_user_model()
@@ -123,6 +124,7 @@ class TokenUsageTrackingTest(TestCase):
             llm_model="gpt-4",
             llm_provider="openai",
             billed=True,
+            time_to_first_token_ms=123,
             input_cost_total=Decimal("0.000175"),
             input_cost_uncached=Decimal("0.000150"),
             input_cost_cached=Decimal("0.000025"),
@@ -136,6 +138,7 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(completion.cached_tokens, 25)
         self.assertEqual(completion.llm_model, "gpt-4")
         self.assertEqual(completion.llm_provider, "openai")
+        self.assertEqual(completion.time_to_first_token_ms, 123)
         self.assertEqual(completion.input_cost_total, Decimal("0.000175"))
         self.assertEqual(completion.input_cost_uncached, Decimal("0.000150"))
         self.assertEqual(completion.input_cost_cached, Decimal("0.000025"))
@@ -192,6 +195,7 @@ class TokenUsageTrackingTest(TestCase):
         response = make_completion_response(provider="openrouter")
         response.id = "resp_123"
         response.request_duration_ms = 321
+        response.time_to_first_token_ms = 89
 
         log_agent_completion(
             self.agent,
@@ -202,6 +206,70 @@ class TokenUsageTrackingTest(TestCase):
         completion = PersistentAgentCompletion.objects.filter(agent=self.agent).latest("created_at")
         self.assertEqual(completion.response_id, "resp_123")
         self.assertEqual(completion.request_duration_ms, 321)
+        self.assertEqual(completion.time_to_first_token_ms, 89)
+
+    def test_completion_serializer_includes_timing_metrics(self):
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            request_duration_ms=2000,
+            time_to_first_token_ms=250,
+            completion_tokens=50,
+        )
+
+        payload = serialize_completion(completion)
+
+        self.assertEqual(payload["request_duration_ms"], 2000)
+        self.assertEqual(payload["time_to_first_token_ms"], 250)
+        self.assertEqual(payload["completion_tokens_per_second"], 25.0)
+
+    @patch("api.agent.core.event_processing.time.monotonic", side_effect=[1.0, 1.25, 2.0])
+    @patch("api.agent.core.event_processing.run_completion")
+    def test_stream_completion_carries_first_chunk_latency_to_persisted_completion(
+        self,
+        mock_run_completion,
+        _mock_monotonic,
+    ):
+        usage = SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=4,
+            total_tokens=14,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=1),
+        )
+        chunk = SimpleNamespace(
+            id="stream_resp_123",
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content="Hello"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=usage,
+        )
+        mock_run_completion.return_value = iter([chunk])
+
+        response = _stream_completion_with_broadcast(
+            model="test-model",
+            messages=[{"role": "user", "content": "Hi"}],
+            params={},
+            tools=None,
+            provider="test-provider",
+            stream_broadcaster=None,
+        )
+
+        self.assertEqual(response.time_to_first_token_ms, 250)
+        self.assertEqual(response.request_duration_ms, 1000)
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            response=response,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(agent=self.agent).latest("created_at")
+        self.assertEqual(completion.response_id, "stream_resp_123")
+        self.assertEqual(completion.time_to_first_token_ms, 250)
+        self.assertEqual(completion.request_duration_ms, 1000)
 
     @patch(
         "api.services.billing_snapshot.get_billing_snapshot_for_owner",

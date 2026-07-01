@@ -22,6 +22,17 @@ type CompletionCardProps = {
   onToggle?: () => void
 }
 
+function MetricPill({ label, value, suffix = '' }: { label: string; value: number | null | undefined; suffix?: string }) {
+  if (value == null || Number.isNaN(value)) return null
+  const formatted = Number.isInteger(value) ? value.toString() : value.toFixed(2)
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-slate-800">
+      <span className="text-[10px] uppercase tracking-wide text-slate-600">{label}</span>
+      <span className="font-semibold">{formatted}{suffix}</span>
+    </span>
+  )
+}
+
 function CollapsibleTextSection({
   label,
   text,
@@ -164,6 +175,9 @@ export function CompletionCard({
             <TokenPill label="Output" value={completion.completion_tokens} />
             <TokenPill label="Total" value={completion.total_tokens} />
             <TokenPill label="Cached" value={completion.cached_tokens} />
+            <MetricPill label="Duration" value={completion.request_duration_ms} suffix="ms" />
+            <MetricPill label="TTFT" value={completion.time_to_first_token_ms} suffix="ms" />
+            <MetricPill label="Output/s" value={completion.completion_tokens_per_second} />
             {openRouterUrl ? (
               <a
                 href={openRouterUrl}

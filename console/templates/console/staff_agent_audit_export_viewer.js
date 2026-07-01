@@ -191,6 +191,15 @@
       if (completion.total_tokens !== null && completion.total_tokens !== undefined) {
         meta.appendChild(makePill("Total: " + completion.total_tokens));
       }
+      if (completion.request_duration_ms !== null && completion.request_duration_ms !== undefined) {
+        meta.appendChild(makePill("Duration: " + completion.request_duration_ms + " ms"));
+      }
+      if (completion.time_to_first_token_ms !== null && completion.time_to_first_token_ms !== undefined) {
+        meta.appendChild(makePill("TTFT: " + completion.time_to_first_token_ms + " ms"));
+      }
+      if (completion.completion_tokens_per_second !== null && completion.completion_tokens_per_second !== undefined) {
+        meta.appendChild(makePill("Output/s: " + completion.completion_tokens_per_second));
+      }
       if (completion.response_id) {
         meta.appendChild(makePill("Response: " + completion.response_id));
       }

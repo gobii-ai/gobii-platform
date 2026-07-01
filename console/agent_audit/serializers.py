@@ -7,6 +7,7 @@ from django.urls import reverse
 
 from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.human_input_requests import serialize_human_input_tool_result
+from api.agent.core.token_usage import completion_tokens_per_second
 from api.models import (
     PersistentAgentMessage,
     PersistentAgentStep,
@@ -133,6 +134,12 @@ def serialize_completion(completion: PersistentAgentCompletion, prompt_archive: 
         "timestamp": _dt_to_iso(completion.created_at),
         "completion_type": completion.completion_type,
         "response_id": completion.response_id,
+        "request_duration_ms": completion.request_duration_ms,
+        "time_to_first_token_ms": completion.time_to_first_token_ms,
+        "completion_tokens_per_second": completion_tokens_per_second(
+            completion.completion_tokens,
+            completion.request_duration_ms,
+        ),
         "prompt_tokens": completion.prompt_tokens,
         "completion_tokens": completion.completion_tokens,
         "total_tokens": completion.total_tokens,

@@ -12159,6 +12159,11 @@ class PersistentAgentCompletion(models.Model):
         blank=True,
         help_text="Time in milliseconds spent waiting for the completion response.",
     )
+    time_to_first_token_ms = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Time in milliseconds until the first streamed response chunk, when available.",
+    )
 
     prompt_tokens = models.IntegerField(null=True, blank=True)
     completion_tokens = models.IntegerField(null=True, blank=True)

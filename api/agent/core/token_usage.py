@@ -383,18 +383,56 @@ def extract_request_duration_ms(response: Any) -> Optional[int]:
     model_extra = None
 
     if isinstance(response, dict):
-        duration_ms = response.get("request_duration_ms") or response.get("_gobii_request_duration_ms")
+        duration_ms = response.get("request_duration_ms")
+        if duration_ms is None:
+            duration_ms = response.get("_gobii_request_duration_ms")
         model_extra = response.get("model_extra")
     else:
-        duration_ms = getattr(response, "request_duration_ms", None) or getattr(
-            response, "_gobii_request_duration_ms", None
-        )
+        duration_ms = getattr(response, "request_duration_ms", None)
+        if duration_ms is None:
+            duration_ms = getattr(response, "_gobii_request_duration_ms", None)
         model_extra = getattr(response, "model_extra", None)
 
     if duration_ms is None and isinstance(model_extra, dict):
-        duration_ms = model_extra.get("request_duration_ms") or model_extra.get("duration_ms")
+        duration_ms = model_extra.get("request_duration_ms")
+        if duration_ms is None:
+            duration_ms = model_extra.get("duration_ms")
 
     return _coerce_duration_ms(duration_ms)
+
+
+def extract_time_to_first_token_ms(response: Any) -> Optional[int]:
+    if response is None:
+        return None
+
+    ttft_ms = None
+    model_extra = None
+
+    if isinstance(response, dict):
+        ttft_ms = response.get("time_to_first_token_ms")
+        if ttft_ms is None:
+            ttft_ms = response.get("_gobii_time_to_first_token_ms")
+        model_extra = response.get("model_extra")
+    else:
+        ttft_ms = getattr(response, "time_to_first_token_ms", None)
+        if ttft_ms is None:
+            ttft_ms = getattr(response, "_gobii_time_to_first_token_ms", None)
+        model_extra = getattr(response, "model_extra", None)
+
+    if ttft_ms is None and isinstance(model_extra, dict):
+        ttft_ms = model_extra.get("time_to_first_token_ms")
+        if ttft_ms is None:
+            ttft_ms = model_extra.get("ttft_ms")
+
+    return _coerce_duration_ms(ttft_ms)
+
+
+def completion_tokens_per_second(completion_tokens: Any, request_duration_ms: Any) -> Optional[float]:
+    completion_token_count = coerce_int(completion_tokens)
+    duration_ms = _coerce_duration_ms(request_duration_ms)
+    if completion_token_count is None or completion_token_count <= 0 or duration_ms is None or duration_ms <= 0:
+        return None
+    return round(completion_token_count / (duration_ms / 1000), 2)
 
 
 def completion_metadata_from_response(
@@ -402,10 +440,16 @@ def completion_metadata_from_response(
     *,
     response_id: Optional[str] = None,
     request_duration_ms: Optional[int] = None,
+    time_to_first_token_ms: Optional[int] = None,
 ) -> dict:
     resolved_response_id = response_id or extract_response_id(response)
     resolved_duration_ms = (
         request_duration_ms if request_duration_ms is not None else extract_request_duration_ms(response)
+    )
+    resolved_time_to_first_token_ms = (
+        time_to_first_token_ms
+        if time_to_first_token_ms is not None
+        else extract_time_to_first_token_ms(response)
     )
 
     metadata: dict[str, Any] = {}
@@ -413,6 +457,8 @@ def completion_metadata_from_response(
         metadata["response_id"] = resolved_response_id
     if resolved_duration_ms is not None:
         metadata["request_duration_ms"] = resolved_duration_ms
+    if resolved_time_to_first_token_ms is not None:
+        metadata["time_to_first_token_ms"] = resolved_time_to_first_token_ms
     return metadata
 
 
@@ -423,12 +469,14 @@ def completion_kwargs_from_usage(
     response: Any = None,
     response_id: Optional[str] = None,
     request_duration_ms: Optional[int] = None,
+    time_to_first_token_ms: Optional[int] = None,
 ) -> dict:
     base = {"completion_type": completion_type}
     metadata = completion_metadata_from_response(
         response,
         response_id=response_id,
         request_duration_ms=request_duration_ms,
+        time_to_first_token_ms=time_to_first_token_ms,
     )
     if metadata:
         base.update(metadata)
@@ -571,6 +619,7 @@ def log_agent_completion(
     pricing_model: Optional[str] = None,
     response_id: Optional[str] = None,
     request_duration_ms: Optional[int] = None,
+    time_to_first_token_ms: Optional[int] = None,
 ) -> Tuple[Optional[dict], Optional[Any]]:
     """
     Persist an agent completion, optionally deriving token usage and thinking content from a LiteLLM response.
@@ -623,6 +672,7 @@ def log_agent_completion(
                 response=response,
                 response_id=response_id,
                 request_duration_ms=request_duration_ms,
+                time_to_first_token_ms=time_to_first_token_ms,
             ),
         )
     except Exception as exc:
@@ -642,7 +692,9 @@ __all__ = [
     "compute_cost_breakdown",
     "completion_metadata_from_response",
     "completion_kwargs_from_usage",
+    "completion_tokens_per_second",
     "extract_request_duration_ms",
+    "extract_time_to_first_token_ms",
     "extract_response_id",
     "extract_reasoning_content",
     "extract_token_usage",

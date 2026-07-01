@@ -31,6 +31,9 @@ export type AuditCompletionEvent = {
   timestamp: string | null
   completion_type: string
   response_id: string | null
+  request_duration_ms: number | null
+  time_to_first_token_ms: number | null
+  completion_tokens_per_second: number | null
   prompt_tokens: number | null
   completion_tokens: number | null
   total_tokens: number | null
