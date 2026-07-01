@@ -3639,6 +3639,7 @@ def _stream_completion_with_broadcast(
     content_filter = _CanonicalContinuationStreamFilter() if stream_broadcaster else None
     accumulator = StreamAccumulator()
     start_time = time.monotonic()
+    time_to_first_token_ms = None
     canceled = False
     stream = None
 
@@ -3666,6 +3667,8 @@ def _stream_completion_with_broadcast(
             stream_options={"include_usage": True},
         )
         for chunk in stream:
+            if time_to_first_token_ms is None:
+                time_to_first_token_ms = int(round((time.monotonic() - start_time) * 1000))
             if stale_prompt_checker and stale_prompt_checker():
                 canceled = True
                 _close_stream()
@@ -3687,6 +3690,7 @@ def _stream_completion_with_broadcast(
 
     response = accumulator.build_response(model=model, provider=provider)
     response.request_duration_ms = int(round((time.monotonic() - start_time) * 1000))
+    response.time_to_first_token_ms = time_to_first_token_ms
     raise_if_empty_litellm_response(response, model=model, provider=provider)
     raise_if_invalid_litellm_response(response, model=model, provider=provider)
     return response

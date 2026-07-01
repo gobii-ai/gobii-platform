@@ -25,12 +25,11 @@ import { StatCard } from './StatCard'
 import { ProviderCard } from './ProviderCard'
 import { ProviderFormModal } from './ProviderFormModal'
 import { ActivityDock, RangeSection, TierCard, TierGroupSection } from './RoutingSections'
-import { PerformanceTestingPanel } from './PerformanceTestingPanel'
 import { actionKey, button } from './shared'
 import type { LlmConfigController } from './useLlmConfigController'
 
 export function LlmConfigView({ controller }: { controller: LlmConfigController }) {
-  const { data, feedback, modal, showModal, closeModal, statsCards, provider: providerState, routing, performance } = controller
+  const { data, feedback, modal, showModal, closeModal, statsCards, provider: providerState, routing } = controller
   const selectedProfile = data.selectedProfile
   const selectedProfileId = data.selectedProfileId
 
@@ -172,13 +171,6 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
             </div>
           </div>
         </div>
-
-        <PerformanceTestingPanel
-          persistentEndpoints={data.endpointChoices.persistent_endpoints}
-          result={performance.performanceResult}
-          isRunning={feedback.isBusy(actionKey('llm-performance-test'))}
-          onRun={performance.handleRunPerformanceTest}
-        />
 
         <SectionCard
           title="Provider inventory"

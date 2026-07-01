@@ -9,6 +9,7 @@ from django.db.models import Count
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from api.agent.core.token_usage import completion_tokens_per_second
 from api.models import (
     EvalRunTask,
     PersistentAgent,
@@ -425,6 +426,11 @@ def _serialize_completion_debug(
         "llm_provider": completion.llm_provider,
         "llm_tool_names": _sanitize_debug_value(completion.llm_tool_names or [], detail=detail),
         "request_duration_ms": completion.request_duration_ms,
+        "time_to_first_token_ms": completion.time_to_first_token_ms,
+        "completion_tokens_per_second": completion_tokens_per_second(
+            completion.completion_tokens,
+            completion.request_duration_ms,
+        ),
         "usage": {
             "prompt_tokens": completion.prompt_tokens,
             "completion_tokens": completion.completion_tokens,

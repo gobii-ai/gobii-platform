@@ -5,7 +5,6 @@ import { useModal } from '../../hooks/useModal'
 import { useLlmConfigFeedback, type ConfirmDialogConfig, type MutationOptions } from './shared'
 import { ConfirmModalWrapper } from './modals'
 import { useLlmConfigData } from './useLlmConfigData'
-import { useLlmPerformanceRunner } from './useLlmPerformanceRunner'
 import { useProviderEndpointActions } from './useProviderEndpointActions'
 import { useRoutingTierActions } from './useRoutingTierActions'
 
@@ -14,10 +13,6 @@ export function useLlmConfigController() {
   const feedback = useLlmConfigFeedback()
   const [modal, showModal, closeModal] = useModal()
   const data = useLlmConfigData()
-  const performance = useLlmPerformanceRunner({
-    endpointChoices: data.endpointChoices,
-    runWithFeedback: feedback.runWithFeedback,
-  })
 
   const invalidateOverview = () => queryClient.invalidateQueries({ queryKey: ['llm-overview'] })
   const invalidateProfiles = () => queryClient.invalidateQueries({ queryKey: ['llm-routing-profiles'] })
@@ -89,7 +84,7 @@ export function useLlmConfigController() {
     { label: 'Premium tiers', value: stats ? String(stats.premium_persistent_tiers) : '—', hint: 'High-trust failover', icon: <Shield className="size-5" /> },
   ]
 
-  return { data, feedback, modal, showModal, closeModal, statsCards, provider, routing, performance }
+  return { data, feedback, modal, showModal, closeModal, statsCards, provider, routing }
 }
 
 export type LlmConfigController = ReturnType<typeof useLlmConfigController>
