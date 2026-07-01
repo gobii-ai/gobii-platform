@@ -7365,6 +7365,14 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest("contactPacks or taskPacks payload is required")
         if not can_manage_billing:
             return JsonResponse({"error": "You do not have permission to manage add-on packs."}, status=403)
+        owner_type = "organization" if agent.organization_id else "user"
+        if owner_type == "user":
+            pause_state = get_owner_account_pause_state(owner)
+            if pause_state.get("scheduled") and not pause_state.get("customer_paused"):
+                return JsonResponse(
+                    {"error": "Billing changes are unavailable while an account pause is scheduled."},
+                    status=400,
+                )
 
         def _validate_pack_payload(pack_payload: object, label: str) -> dict | HttpResponseBadRequest:
             if not isinstance(pack_payload, dict):
@@ -7378,7 +7386,6 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
             ("contactPacks", contact_pack_payload, update_contact_pack_quantities),
             ("taskPacks", task_pack_payload, update_task_pack_quantities),
         ]
-        owner_type = "organization" if agent.organization_id else "user"
         plan_id = (plan_payload or {}).get("id")
         task_packs_submitted = False
 

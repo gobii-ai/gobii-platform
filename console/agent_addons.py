@@ -151,13 +151,17 @@ def _build_billing_status_payload(owner, owner_type: str, *, can_open_billing: b
 def build_account_pause_payload(owner, *, manage_billing_url: str | None = None) -> dict:
     state = get_owner_account_pause_state(owner)
     customer_paused = bool(state.get("customer_paused"))
+    scheduled = bool(state.get("scheduled"))
     actionable = bool(manage_billing_url)
-    resume_at = state.get("resume_at") if customer_paused else None
+    resume_at = state.get("resume_at") if customer_paused else state.get("scheduled_resume_at")
+    effective_at = state.get("scheduled_effective_at") if scheduled else None
     return {
         "paused": customer_paused,
-        "reason": state.get("reason") if customer_paused else None,
+        "scheduled": scheduled,
+        "reason": state.get("reason") if customer_paused else ("customer_account_pause" if scheduled else None),
         "resumeAt": resume_at.isoformat() if resume_at else None,
-        "manageBillingUrl": manage_billing_url if customer_paused and actionable else None,
+        "effectiveAt": effective_at.isoformat() if effective_at else None,
+        "manageBillingUrl": manage_billing_url if (customer_paused or scheduled) and actionable else None,
     }
 
 

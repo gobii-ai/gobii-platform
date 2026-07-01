@@ -4186,6 +4186,7 @@ export function AgentChatPage({
         taskPackUpdating={addonsUpdating}
         onUpdateTaskPacks={taskPackCanManageBilling ? handleUpdateTaskPacks : undefined}
         addonsTrial={addonsTrial}
+        addonsAccountPause={selectedAgentAccountPause ?? currentContextAccountPause}
         taskQuota={taskQuota}
         showPurchaseSeatsPrompt={organizationHasNoPurchasedSeats}
         showTaskCreditsWarning={showTaskCreditsWarning}

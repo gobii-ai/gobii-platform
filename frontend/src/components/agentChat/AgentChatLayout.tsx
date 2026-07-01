@@ -43,7 +43,13 @@ import {
   type PlanTier,
 } from '../../stores/subscriptionStore'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
-import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
+import type {
+  AccountPauseInfo,
+  AddonPackOption,
+  ContactCapInfo,
+  ContactCapStatus,
+  TrialInfo,
+} from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import type { StatusExpansionTargets } from './statusExpansion'
@@ -257,6 +263,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   stopProcessingBusy?: boolean
   stopProcessingRequested?: boolean
   addonsTrial?: TrialInfo | null
+  addonsAccountPause?: AccountPauseInfo | null
   taskQuota?: TaskQuotaInfo | null
   showPurchaseSeatsPrompt?: boolean
   showTaskCreditsWarning?: boolean
@@ -454,6 +461,7 @@ export function AgentChatLayout({
   stopProcessingBusy = false,
   stopProcessingRequested = false,
   addonsTrial = null,
+  addonsAccountPause = null,
   taskQuota = null,
   showPurchaseSeatsPrompt = false,
   showTaskCreditsWarning = false,
@@ -1601,6 +1609,7 @@ export function AgentChatLayout({
         taskPackUpdating={taskPackUpdating}
         onUpdateTaskPacks={onUpdateTaskPacks}
         taskQuota={taskQuota}
+        accountPause={addonsAccountPause}
         manageBillingUrl={contactPackManageUrl}
       />
       <main className={mainClassName} data-sidebar-mode={sidebarMode} data-plan-mode={workspacePlanMode}>
