@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import requests
 from django.contrib.auth import get_user_model
-from django.db import connection
+from django.db import OperationalError, connection
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -43,7 +43,7 @@ from api.services.discord_bot import (
     start_discord_oauth,
     _webhook_echo_signature,
 )
-from api.management.commands.run_discord_bot import build_gateway_message
+from api.management.commands.run_discord_bot import build_gateway_message, ingest_gateway_message_with_reconnect
 
 
 def _response(payload=None, status_code=200, content=b""):
@@ -92,6 +92,34 @@ class NativeDiscordBotTests(TestCase):
         self.user.is_staff = True
         self.user.save(update_fields=["is_staff"])
         self.client.force_login(self.user)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.management.commands.run_discord_bot.close_old_connections")
+    @patch("api.management.commands.run_discord_bot.ingest_gateway_message")
+    def test_run_discord_bot_retries_once_after_stale_database_connection(self, ingest_mock, close_mock):
+        message = DiscordGatewayMessage(
+            message_id="message-1",
+            channel_id="channel-1",
+            channel_name="general",
+            guild_id="guild-1",
+            guild_name="Guild",
+            author_id="author-1",
+            author_name="Author",
+            content="hello",
+            raw_content="hello",
+            attachments=[],
+            embeds=[],
+        )
+        ingest_mock.side_effect = [
+            OperationalError("the connection is closed"),
+            {"ignored": False, "message_id": "stored-message"},
+        ]
+
+        result = ingest_gateway_message_with_reconnect(message)
+
+        self.assertEqual(result["message_id"], "stored-message")
+        self.assertEqual(ingest_mock.call_count, 2)
+        self.assertEqual(close_mock.call_count, 3)
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")

@@ -5,6 +5,7 @@ import logging
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db import OperationalError, close_old_connections
 
 from api.services.discord_bot import DiscordGatewayMessage, ingest_gateway_message
 
@@ -59,6 +60,22 @@ def build_gateway_message(message) -> DiscordGatewayMessage:
     )
 
 
+def ingest_gateway_message_with_reconnect(gateway_message: DiscordGatewayMessage) -> dict:
+    close_old_connections()
+    try:
+        return ingest_gateway_message(gateway_message)
+    except OperationalError:
+        logger.warning(
+            "Discord bot DB connection failed while ingesting message %s; retrying with a fresh connection.",
+            gateway_message.message_id,
+            exc_info=True,
+        )
+        close_old_connections()
+        return ingest_gateway_message(gateway_message)
+    finally:
+        close_old_connections()
+
+
 class Command(BaseCommand):
     help = "Run the native Gobii Discord bot gateway listener."
 
@@ -93,7 +110,7 @@ class Command(BaseCommand):
                 return
 
             gateway_message = build_gateway_message(message)
-            result = await sync_to_async(ingest_gateway_message, thread_sensitive=True)(gateway_message)
+            result = await sync_to_async(ingest_gateway_message_with_reconnect, thread_sensitive=True)(gateway_message)
             if not result.get("ignored"):
                 logger.info(
                     "Ingested Discord message %s for channel %s",
