@@ -12,6 +12,7 @@ from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils.html import strip_tags, escape
+from django.utils.translation import gettext_lazy as _
 from django.views.generic import TemplateView
 from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
@@ -422,27 +423,27 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             0,
             {
                 "code": "free_oss",
-                "name": "Free",
+                "name": _("Free"),
                 "price": 0,
                 "price_label": "$0",
                 "price_prefix": "$",
                 "price_amount": 0,
-                "desc": "Self-Hosted Agents",
+                "desc": _("Self-Hosted Agents"),
                 "tasks": None,
-                "pricing_model": "Self-hosted, open source",
+                "pricing_model": _("Self-hosted, open source"),
                 "highlight": False,
-                "badge": "Open source",
+                "badge": _("Open source"),
                 "disabled": False,
                 "cta_disabled": False,
                 "current_plan": False,
                 "trial_cancel_text": None,
                 "features": [
-                    "Run on your own computer or server",
-                    "Bring your own AI models",
-                    "Always-on agents with browser automation",
-                    "Open source and MIT licensed",
+                    _("Run on your own computer or server"),
+                    _("Bring your own AI models"),
+                    _("Always-on agents with browser automation"),
+                    _("Open source and MIT licensed"),
                 ],
-                "cta": "View on GitHub",
+                "cta": _("View on GitHub"),
                 "cta_url": "https://github.com/gobii-ai/gobii-platform",
                 "cta_icon": "github",
                 "cta_variant": "outline",

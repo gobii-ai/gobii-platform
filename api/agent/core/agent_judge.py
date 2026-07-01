@@ -703,7 +703,7 @@ def _agent_judge_endpoint_max_input_tokens() -> int | None:
 
 
 def is_agent_judge_enabled_for_agent(agent: PersistentAgent) -> bool:
-    return bool(getattr(agent, "user_id", None))
+    return bool(agent.user_id)
 
 
 def _trigger_reasons(

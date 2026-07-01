@@ -78,7 +78,7 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
 
-    def test_explicit_planning_state_overrides_planning_flag(self):
+    def test_explicit_planning_state_overrides_default(self):
         result = PersistentAgentProvisioningService.provision(
             user=self.user,
             name="Explicitly Skipped Planning Agent",
