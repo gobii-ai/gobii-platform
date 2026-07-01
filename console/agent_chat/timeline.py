@@ -87,6 +87,7 @@ EMAIL_ALLOWED_CSS_PROPERTIES = [
     "gap",
     "line-height",
     "margin",
+    "margin-bottom",
     "margin-top",
     "padding",
     "padding-bottom",

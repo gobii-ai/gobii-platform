@@ -129,7 +129,13 @@ export function MessageContent({
   }, [onLinkClick])
 
   if (htmlSource) {
-    return <div onClick={handleContentClick} dangerouslySetInnerHTML={{ __html: htmlSource }} />
+    return (
+      <div
+        className="not-prose chat-html-content"
+        onClick={handleContentClick}
+        dangerouslySetInnerHTML={{ __html: htmlSource }}
+      />
+    )
   }
 
   if (normalizedText && normalizedText.trim().length > 0) {

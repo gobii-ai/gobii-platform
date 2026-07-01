@@ -12,6 +12,7 @@ const ALLOWED_INLINE_STYLE_PROPERTIES = new Set([
   'gap',
   'line-height',
   'margin',
+  'margin-bottom',
   'margin-top',
   'padding',
   'padding-bottom',

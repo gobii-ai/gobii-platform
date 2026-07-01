@@ -1531,7 +1531,7 @@ class AgentChatAPITests(TestCase):
     @tag("batch_agent_chat")
     def test_timeline_preserves_safe_inline_email_styles(self):
         html_body = (
-            "<div style='background: #f8f9fa; padding: 14px; border-radius: 8px; border-left: 4px solid #1976d2;'>"
+            "<div style='background: #f8f9fa; padding: 14px; border-radius: 8px; border-left: 4px solid #1976d2; margin-bottom: 18px;'>"
             "<strong style='color: #1976d2;'>Consultant Note</strong>"
             "<span style='font-size: 14px; color: #333; line-height: 1.5;'>Styled body</span>"
             "</div>"
@@ -1575,6 +1575,7 @@ class AgentChatAPITests(TestCase):
         self.assertIn("<div style=", rendered_html)
         self.assertIn("background: #f8f9fa", rendered_html)
         self.assertIn("border-left: 4px solid #1976d2", rendered_html)
+        self.assertIn("margin-bottom: 18px", rendered_html)
         self.assertIn("<strong style=", rendered_html)
         self.assertIn("color: #1976d2", rendered_html)
         self.assertIn("<span style=", rendered_html)

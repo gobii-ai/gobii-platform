@@ -371,6 +371,17 @@ def convert_body_to_html_and_plaintext(body: str, *, emit_logs: bool = True) -> 
         has_markdown,
     )
 
+    if has_html and not has_markdown:
+        html_snippet = _normalize_html_tag_line_indentation(normalized_body)
+        html_snippet = _add_table_styles(html_snippet)
+        plaintext = get_text(html_snippet, config).strip()
+        _log(
+            "Email content conversion complete. HTML length: %d, plaintext length: %d",
+            len(html_snippet),
+            len(plaintext),
+        )
+        return html_snippet, plaintext
+
     if has_html or has_markdown:
         render_body = _normalize_html_tag_line_indentation(normalized_body) if has_html else normalized_body
         html_snippet = _render_markdown_html(render_body)

@@ -3112,6 +3112,31 @@
 .chat-content td a:hover {
     text-decoration: underline;
 }
+.chat-html-content {
+    max-width: 100%;
+    overflow-x: auto;
+}
+.chat-html-content > :first-child {
+    margin-top: 0 !important;
+}
+.chat-html-content > :last-child {
+    margin-bottom: 0 !important;
+}
+.chat-html-content p,
+.chat-html-content ul,
+.chat-html-content ol,
+.chat-html-content blockquote,
+.chat-html-content pre {
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+.chat-html-content table {
+    width: 100%;
+    max-width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.875rem;
+}
 .chat-bubble--user .chat-content {
     color: #334155;
 }
