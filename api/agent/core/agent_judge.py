@@ -9,10 +9,8 @@ from datetime import timedelta
 from typing import Any
 
 from django.core.cache import cache
-from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist
 from django.db import DatabaseError, IntegrityError, transaction
 from django.utils import timezone
-from waffle import get_waffle_flag_model
 
 from api.agent.core.llm_config import (
     INPUT_TOKEN_HEADROOM,
@@ -40,7 +38,6 @@ from api.models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
-from constants.feature_flags import PERSISTENT_AGENT_LLM_JUDGE
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
@@ -706,32 +703,7 @@ def _agent_judge_endpoint_max_input_tokens() -> int | None:
 
 
 def is_agent_judge_enabled_for_agent(agent: PersistentAgent) -> bool:
-    if not getattr(agent, "user_id", None):
-        return False
-
-    try:
-        Flag = get_waffle_flag_model()
-        flag = Flag.objects.get(name=PERSISTENT_AGENT_LLM_JUDGE)
-    except ObjectDoesNotExist:
-        return False
-    except (DatabaseError, ImproperlyConfigured):
-        logger.exception(
-            "Failed loading waffle flag '%s' when evaluating judge eligibility for agent %s",
-            PERSISTENT_AGENT_LLM_JUDGE,
-            getattr(agent, "id", None),
-        )
-        return False
-
-    try:
-        return bool(flag.is_active_for_user(agent.user))
-    except (DatabaseError, ImproperlyConfigured, AttributeError):
-        logger.exception(
-            "Error evaluating waffle flag '%s' for user %s (agent %s)",
-            PERSISTENT_AGENT_LLM_JUDGE,
-            getattr(agent, "user_id", None),
-            getattr(agent, "id", None),
-        )
-        return False
+    return bool(getattr(agent, "user_id", None))
 
 
 def _trigger_reasons(

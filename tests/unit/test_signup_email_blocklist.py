@@ -313,8 +313,7 @@ class TrialOnboardingAdapterTests(TestCase):
         middleware.process_request(request)
         request.session.save()
 
-        with override_flag("personal_agent_signup_starter_charter", active=True):
-            redirect_url = get_login_redirect_url(request, signup=True)
+        redirect_url = get_login_redirect_url(request, signup=True)
 
         parsed = urlparse(redirect_url)
         self.assertEqual(parsed.path, f"{IMMERSIVE_APP_BASE_PATH}/agents/new")
@@ -339,9 +338,8 @@ class TrialOnboardingAdapterTests(TestCase):
         middleware.process_request(request)
         request.session.save()
 
-        with override_flag("personal_agent_signup_starter_charter", active=True):
-            context.request = request
-            self.addCleanup(lambda: setattr(context, "request", None))
-            redirect_url = get_login_redirect_url(request, signup=True)
+        context.request = request
+        self.addCleanup(lambda: setattr(context, "request", None))
+        redirect_url = get_login_redirect_url(request, signup=True)
 
         self.assertEqual(redirect_url, next_url)

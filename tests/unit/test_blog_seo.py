@@ -70,7 +70,7 @@ class BlogSeoTests(TestCase):
         og_image = soup.find("meta", property="og:image")["content"]
         og_image_alt = soup.find("meta", property="og:image:alt")["content"]
 
-        self.assertTrue(og_image.endswith("/static/images/noBgBlue.png"))
+        self.assertTrue(og_image.endswith("/static/images/gobii_fish_social_1280x640.png"))
         self.assertEqual(og_image_alt, "Gobii logo")
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],

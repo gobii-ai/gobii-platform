@@ -1,7 +1,6 @@
 # constants/feature_flags.py
 PERSISTENT_AGENTS = "persistent_agents"
 ORGANIZATIONS = "organizations"
-MULTIPLAYER_AGENTS = "multiplayer_agents"
 
 # Soft-expiration for free-plan agents that go inactive
 AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
@@ -12,9 +11,6 @@ AGENT_CRON_THROTTLE = "agent_cron_throttle"
 # Route /support form submissions to Intercom-style email intake.
 SUPPORT_INTERCOM = "support_intercom"
 
-
-# Controls favicon/logo collateral assets across templates and app shell
-FISH_COLLATERAL = "fish_collateral"
 
 # Controls whether the pricing upgrade modal renders in an almost full-screen layout.
 PRICING_MODAL_ALMOST_FULL_SCREEN = "pricing_modal_almost_full_screen"
@@ -38,9 +34,6 @@ CTA_CONTINUE_AGENT_BTN = "cta_continue_agent_btn"
 # Controls whether pricing trial CTA helper text emphasizes no charge during the trial.
 CTA_NO_CHARGE_DURING_TRIAL = "cta_no_charge_during_trial"
 
-# Controls whether /pricing shows the open-source self-serve Free option.
-PRICING_FREE_OSS_PLAN = "pricing_free_oss_plan"
-
 # Controls whether anonymous marketing CTA flows go to signup before continuing.
 CTA_SIGNUP_FIRST = "cta_signup_first"
 
@@ -49,10 +42,6 @@ CTA_SIGNUP_MODAL = "cta_signup_modal"
 
 # Controls crawlable related links on dedicated /solutions/* marketing pages.
 SOLUTION_CRAWLABLE_LINKS = "solution_crawlable_links"
-
-# Controls whether personal no-plan users get a built-in starter charter when
-# entering immersive new-agent flow without saved draft state.
-PERSONAL_AGENT_SIGNUP_STARTER_CHARTER = "personal_agent_signup_starter_charter"
 
 # Controls whether personal no-plan users see the signup preview UI in immersive
 # chat instead of the pricing modal / standard composer flow.
@@ -141,9 +130,8 @@ STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED = "stripe_checkout_tos_consent_required"
 # defers non-critical animation setup.
 HOMEPAGE_PERF_MOTION_REDUCTION = "homepage_perf_motion_reduction"
 
-# Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
-# This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a
-# switch not flag
+# This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. It has to be a
+# switch, not a flag.
 MULTISEND_ENABLED = "multisend_enabled"
 
 # Requires additional SMS contacts to declare compliance metadata before
@@ -161,9 +149,3 @@ OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED = (
 # iMessage-style simplified chat UI — collapses non-message events into compact pills
 SIMPLIFIED_CHAT_UI = "simplified_chat_ui"
 SIMPLIFIED_CHAT_DEFAULT_CONVERSATIONAL = "simplified_chat_default_conversational"
-
-# Controls whether newly provisioned persistent agents start in prompt-led planning mode.
-PERSISTENT_AGENT_PLANNING_MODE = "persistent_agent_planning_mode"
-
-# Controls whether persistent agents run the advisory LLM trajectory judge.
-PERSISTENT_AGENT_LLM_JUDGE = "persistent_agent_llm_judge"

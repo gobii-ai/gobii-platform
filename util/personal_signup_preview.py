@@ -6,7 +6,6 @@ from django.http import HttpRequest
 from constants.feature_flags import (
     PERSONAL_AGENT_SIGNUP_PREVIEW_PROCESSING_LIMIT,
     PERSONAL_AGENT_SIGNUP_PREVIEW_UI,
-    PERSONAL_AGENT_SIGNUP_STARTER_CHARTER,
 )
 from util.onboarding import clear_trial_onboarding_intent, get_trial_onboarding_state
 from util.trial_enforcement import can_user_use_personal_agents_and_api
@@ -24,7 +23,7 @@ SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE = (
 class PersonalSignupPreviewConfig:
     current_context_is_personal: bool
     eligible_user: bool
-    starter_charter_flag_enabled: bool
+    starter_charter_available: bool
     ui_flag_enabled: bool
     processing_limit_flag_enabled: bool
 
@@ -34,7 +33,7 @@ class PersonalSignupPreviewConfig:
 
     @property
     def starter_charter_enabled(self) -> bool:
-        return self.current_context_is_eligible and self.starter_charter_flag_enabled
+        return self.current_context_is_eligible and self.starter_charter_available
 
     @property
     def ui_enabled(self) -> bool:
@@ -77,13 +76,6 @@ def is_personal_signup_preview_feature_enabled(
     return is_waffle_flag_active(flag_name, request, default=False)
 
 
-def is_personal_signup_starter_charter_enabled(request: HttpRequest | None = None) -> bool:
-    return is_personal_signup_preview_feature_enabled(
-        PERSONAL_AGENT_SIGNUP_STARTER_CHARTER,
-        request,
-    )
-
-
 def is_personal_signup_preview_ui_enabled(request: HttpRequest | None = None) -> bool:
     return is_personal_signup_preview_feature_enabled(
         PERSONAL_AGENT_SIGNUP_PREVIEW_UI,
@@ -117,7 +109,7 @@ def resolve_personal_signup_preview(
     return PersonalSignupPreviewConfig(
         current_context_is_personal=current_context_type == "personal",
         eligible_user=can_use_personal_signup_preview(user),
-        starter_charter_flag_enabled=is_personal_signup_starter_charter_enabled(request),
+        starter_charter_available=True,
         ui_flag_enabled=is_personal_signup_preview_ui_enabled(request),
         processing_limit_flag_enabled=is_personal_signup_preview_processing_limit_enabled(request),
     )

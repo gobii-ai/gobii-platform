@@ -139,7 +139,7 @@ from util.attribution_referrers import (
     decode_attribution_value,
 )
 from util.waffle_flags import is_waffle_flag_active, is_waffle_switch_active
-from util.fish_collateral import build_web_manifest_payload, is_fish_collateral_enabled
+from util.fish_collateral import build_web_manifest_payload
 from api.services.pipedream_apps import (
     PipedreamCatalogError,
     PipedreamCatalogService,
@@ -1623,11 +1623,7 @@ class PretrainedWorkerDetailView(ProprietaryPretrainedWorkerOnlyMixin, TemplateV
             reverse('pages:pretrained_worker_detail', kwargs={'slug': self.employee.code})
         )
         home_url = self.request.build_absolute_uri(reverse('pages:home'))
-        default_image_path = (
-            "images/gobii_fish_social_1280x640.png"
-            if is_fish_collateral_enabled()
-            else "images/noBgBlue.png"
-        )
+        default_image_path = "images/gobii_fish_social_1280x640.png"
         default_social_image_url = self.request.build_absolute_uri(static(default_image_path))
         seo_description = (self.employee.description or self.employee.tagline or "").strip()
         social_title = f"{self.employee.display_name} AI Agent Template"
@@ -2589,9 +2585,7 @@ def health_check(request):
 
 class WebManifestView(View):
     def get(self, request, *args, **kwargs):
-        payload = build_web_manifest_payload(
-            fish_collateral_enabled=is_fish_collateral_enabled(),
-        )
+        payload = build_web_manifest_payload()
         response = JsonResponse(payload, content_type="application/manifest+json")
         response["Cache-Control"] = "public, max-age=3600"
         session = getattr(request, "session", None)

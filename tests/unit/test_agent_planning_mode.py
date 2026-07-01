@@ -4,7 +4,6 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
-from waffle.testutils import override_flag
 
 from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
@@ -12,7 +11,6 @@ from api.agent.tools.planning import execute_end_planning
 from api.agent.tools.schedule_updater import execute_update_schedule
 from api.agent.tools.static_tools import PLANNING_MODE_DISABLED_TOOL_NAMES, get_static_tool_definitions
 from api.agent.tools.tool_runtime import execute_runtime_tool_call
-from constants.feature_flags import PERSISTENT_AGENT_PLANNING_MODE
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -80,24 +78,13 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
 
-    def test_provisioning_skips_planning_when_flag_off(self):
-        with override_flag(PERSISTENT_AGENT_PLANNING_MODE, active=False):
-            result = PersistentAgentProvisioningService.provision(
-                user=self.user,
-                name="Provisioned Nonplanning Agent",
-                charter="Research product leads",
-            )
-
-        self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
-
     def test_explicit_planning_state_overrides_planning_flag(self):
-        with override_flag(PERSISTENT_AGENT_PLANNING_MODE, active=True):
-            result = PersistentAgentProvisioningService.provision(
-                user=self.user,
-                name="Explicitly Skipped Planning Agent",
-                charter="Research product leads",
-                planning_state=PersistentAgent.PlanningState.SKIPPED,
-            )
+        result = PersistentAgentProvisioningService.provision(
+            user=self.user,
+            name="Explicitly Skipped Planning Agent",
+            charter="Research product leads",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+        )
 
         self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
 
