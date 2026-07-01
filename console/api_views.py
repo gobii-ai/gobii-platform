@@ -4079,13 +4079,14 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                 return JsonResponse({"error": "Each response must include request_id."}, status=400)
             if decision not in {"approve", "decline"}:
                 return JsonResponse({"error": "decision must be 'approve' or 'decline'."}, status=400)
+            can_configure = response.get("can_configure")
             normalized_responses.append(
                 {
                     "request_id": request_id,
                     "decision": decision,
                     "allow_inbound": bool(response.get("allow_inbound", True)),
                     "allow_outbound": bool(response.get("allow_outbound", True)),
-                    "can_configure": bool(response.get("can_configure", False)),
+                    "can_configure": None if can_configure is None else bool(can_configure),
                     "sms_contact_purpose": (
                         str(response.get("sms_contact_purpose") or "").strip() or None
                     ),
@@ -4169,7 +4170,11 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                             continue
                         request_obj.request_inbound = response["allow_inbound"]
                         request_obj.request_outbound = response["allow_outbound"]
-                        request_obj.request_configure = response["can_configure"]
+                        request_obj.request_configure = (
+                            request_obj.request_configure
+                            if response["can_configure"] is None
+                            else response["can_configure"]
+                        )
                         if request_obj.channel == CommsChannel.SMS:
                             if existing_entry is None and agent.organization_id is not None:
                                 return JsonResponse(
@@ -4796,25 +4801,35 @@ class AgentFsNodeListAPIView(LoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
-        filespace = get_or_create_default_filespace(agent)
-        nodes = (
-            AgentFsNode.objects.alive()
-            .filter(filespace=filespace)
-            .only(
-                "id",
-                "parent_id",
-                "name",
-                "path",
-                "node_type",
-                "size_bytes",
-                "updated_at",
-            )
-            .order_by("parent_id", "node_type", "name")
+        filespace_access = (
+            AgentFileSpaceAccess.objects
+            .filter(agent=agent)
+            .order_by("-is_default", "-granted_at")
+            .first()
         )
+        if filespace_access is None:
+            nodes = []
+            filespace_id = None
+        else:
+            filespace_id = filespace_access.filespace_id
+            nodes = list(
+                AgentFsNode.objects.alive()
+                .filter(filespace_id=filespace_id)
+                .only(
+                    "id",
+                    "parent_id",
+                    "name",
+                    "path",
+                    "node_type",
+                    "size_bytes",
+                    "updated_at",
+                )
+                .order_by("parent_id", "node_type", "name")
+            )
 
         try:
-            node_count = nodes.count()
-            file_count = nodes.filter(node_type=AgentFsNode.NodeType.FILE).count()
+            node_count = len(nodes)
+            file_count = sum(1 for node in nodes if node.node_type == AgentFsNode.NodeType.FILE)
             dir_count = node_count - file_count
             Analytics.track_event(
                 user_id=str(request.user.id),
@@ -4823,7 +4838,7 @@ class AgentFsNodeListAPIView(LoginRequiredMixin, View):
                 properties=Analytics.with_org_properties(
                     {
                         "agent_id": str(agent.id),
-                        "filespace_id": str(filespace.id),
+                        "filespace_id": str(filespace_id) if filespace_id else None,
                         "node_count": node_count,
                         "file_count": file_count,
                         "dir_count": dir_count,

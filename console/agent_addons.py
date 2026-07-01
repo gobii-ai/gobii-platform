@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 from typing import Mapping
 
 from django.conf import settings
-from django.urls import NoReverseMatch
 from django.utils import timezone
 
 from billing.addons import AddonEntitlementService
@@ -409,12 +408,12 @@ def build_agent_addons_payload(
     owner_type = "organization" if agent.organization_id else "user"
 
     if can_open_billing:
-        try:
-            manage_billing_url = settings.STRIPE_CUSTOMER_PORTAL
-            if agent.organization_id:
-                manage_billing_url = append_context_query(f"{IMMERSIVE_APP_BASE_PATH}/billing", str(agent.organization_id))
-        except NoReverseMatch:
-            manage_billing_url = None
+        manage_billing_url = settings.STRIPE_CUSTOMER_PORTAL
+        if agent.organization_id:
+            manage_billing_url = append_context_query(
+                f"{IMMERSIVE_APP_BASE_PATH}/billing",
+                str(agent.organization_id),
+            )
 
     billing_status_payload = _build_billing_status_payload(
         owner,
