@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Building2, Pencil, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
 import {
+  currentOrganizationTemplatesQueryKey,
   createOrganizationTemplate,
   createOrganizationTemplateFromScratch,
   deactivateOrganizationTemplate,
@@ -440,14 +441,17 @@ export function OrganizationScreen() {
     queryKey,
     queryFn: ({ signal }) => fetchCurrentOrganization(signal),
   })
-  const templateQueryKey = useMemo(() => ['current-organization-templates'] as const, [])
+  const templateQueryKey = useMemo(
+    () => currentOrganizationTemplatesQueryKey(data?.organization.id),
+    [data?.organization.id],
+  )
   const {
     data: templateData,
     error: templateQueryError,
     isLoading: templatesLoading,
   } = useQuery({
     queryKey: templateQueryKey,
-    queryFn: ({ signal }) => fetchCurrentOrganizationTemplates(signal),
+    queryFn: ({ signal }) => fetchCurrentOrganizationTemplates(signal, data?.organization.id),
     enabled: Boolean(data),
   })
 
@@ -631,7 +635,7 @@ export function OrganizationScreen() {
       return
     }
     if (action.kind === 'deactivate-template') {
-      const nextData = await deactivateOrganizationTemplate(action.template.id)
+      const nextData = await deactivateOrganizationTemplate(action.template.id, data?.organization.id)
       updateCachedTemplateData(nextData)
       setTemplateMessage(`${action.template.name} deactivated.`)
       return
@@ -650,7 +654,7 @@ export function OrganizationScreen() {
     setTemplateErrors([])
     setTemplateMessage(null)
     try {
-      const nextData = await createOrganizationTemplate(templateSourceAgentId)
+      const nextData = await createOrganizationTemplate(templateSourceAgentId, data?.organization.id)
       updateCachedTemplateData(nextData)
       setCreateTemplateOpen(false)
       setTemplateMessage(nextData.created ? 'Template created.' : 'Template already exists for that agent.')
@@ -737,7 +741,7 @@ export function OrganizationScreen() {
     setTemplateErrors([])
     setTemplateMessage(null)
     try {
-      const payload = await launchOrganizationTemplate(template.id)
+      const payload = await launchOrganizationTemplate(template.id, data?.organization.id)
       if (!navigateWithinApp(payload.redirectUrl)) {
         window.location.assign(payload.redirectUrl)
       }

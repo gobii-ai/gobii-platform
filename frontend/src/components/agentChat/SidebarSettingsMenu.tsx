@@ -130,6 +130,7 @@ export function SidebarSettingsMenu({
   collapsed = false,
 }: SidebarSettingsMenuProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const actionsRef = useRef<HTMLDivElement | null>(null)
   const popoverRef = useRef<HTMLElement | null>(null)
   const [open, setOpen] = useState(false)
   const [creditsOpen, setCreditsOpen] = useState(false)
@@ -149,7 +150,7 @@ export function SidebarSettingsMenu({
       if (!(target instanceof Node)) {
         return
       }
-      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) {
+      if (actionsRef.current?.contains(target) || popoverRef.current?.contains(target)) {
         return
       }
       handleOpenChange(false)
@@ -202,7 +203,7 @@ export function SidebarSettingsMenu({
       data-collapsed={collapsed ? 'true' : 'false'}
       data-has-help={onOpenHelp ? 'true' : 'false'}
     >
-      <div className="sidebar-settings__actions">
+      <div className="sidebar-settings__actions" ref={actionsRef}>
         <Button
           ref={triggerRef}
           className="sidebar-settings__trigger"
@@ -229,7 +230,7 @@ export function SidebarSettingsMenu({
       </div>
       <Popover
         ref={popoverRef}
-        triggerRef={triggerRef}
+        triggerRef={actionsRef}
         isOpen={open}
         onOpenChange={handleOpenChange}
         shouldCloseOnInteractOutside={() => true}

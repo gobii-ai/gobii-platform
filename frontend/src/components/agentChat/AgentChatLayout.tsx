@@ -8,6 +8,7 @@ import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
 import { AgentTimelinePane } from './AgentTimelinePane'
 import { ChatSidebar } from './ChatSidebar'
+import type { TeamTemplateCreateMenu } from './AgentCreateSplitButton'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
@@ -193,6 +194,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
   onBlockedCreateAgent?: (location: 'sidebar') => void
+  teamTemplateMenu?: TeamTemplateCreateMenu | null
   agentRosterSortMode?: AgentRosterSortMode
   onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
@@ -389,6 +391,7 @@ export function AgentChatLayout({
   onCreateAgent,
   createAgentDisabledReason = null,
   onBlockedCreateAgent,
+  teamTemplateMenu = null,
   agentRosterSortMode = 'recent',
   onAgentRosterSortModeChange,
   onInsightsPanelExpandedPreferenceChange,
@@ -1503,6 +1506,7 @@ export function AgentChatLayout({
         onCreateAgent={onCreateAgent}
         createAgentDisabledReason={createAgentDisabledReason}
         onBlockedCreateAgent={onBlockedCreateAgent}
+        teamTemplateMenu={teamTemplateMenu}
         rosterSortMode={agentRosterSortMode}
         onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}

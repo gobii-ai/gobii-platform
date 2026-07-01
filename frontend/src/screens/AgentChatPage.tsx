@@ -18,6 +18,12 @@ import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { createAgent, updateAgent } from '../api/agents'
 import {
+  currentOrganizationTemplatesQueryKey,
+  fetchCurrentOrganizationTemplates,
+  launchOrganizationTemplate,
+  type OrganizationTemplate,
+} from '../api/organization'
+import {
   stopAgentProcessing,
   fulfillRequestedSecrets,
   removeRequestedSecrets,
@@ -102,6 +108,7 @@ import {
   getAgentChatShellSubview,
 } from '../util/agentChatShellRoutes'
 import { storeConsoleContext } from '../util/consoleContextStorage'
+import { navigateWithinApp } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
 
 function deriveFirstName(agentName?: string | null): string {
@@ -122,6 +129,19 @@ const GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = 'google_sheets_native'
 const APOLLO_NATIVE_SYSTEM_SKILL_KEY = 'apollo_native'
 const HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = 'hubspot_native'
 const DISCORD_NATIVE_SYSTEM_SKILL_KEY = 'discord_native'
+
+function withTemplateLaunchNonce(path: string): string {
+  if (typeof window === 'undefined') {
+    return path
+  }
+  try {
+    const url = new URL(path, window.location.origin)
+    url.searchParams.set('template_launch', String(Date.now()))
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return path
+  }
+}
 
 function timelineHasSystemSkillEnablement(events: TimelineEvent[], skillKey: string): boolean {
   for (const event of events) {
@@ -933,6 +953,7 @@ export type AgentChatPageProps = {
   onOpenOrganization?: () => void
   onOpenSecrets?: () => void
   onOpenIntegrations?: () => void
+  appLocationSearch?: string
 }
 
 const STREAMING_STALE_MS = 6000
@@ -973,6 +994,7 @@ export function AgentChatPage({
   onOpenOrganization,
   onOpenSecrets,
   onOpenIntegrations,
+  appLocationSearch,
 }: AgentChatPageProps) {
   const [shellPathname, setShellPathname] = useState(() => (
     typeof window === 'undefined' ? '' : window.location.pathname
@@ -1491,6 +1513,18 @@ export function AgentChatPage({
     contextKey: rosterContextKey,
     forAgentId: rosterQueryAgentId,
     refetchIntervalMs: rosterRefreshIntervalMs,
+  })
+  const effectiveOrganizationId = effectiveContext?.type === 'organization' ? effectiveContext.id : null
+  const currentOrganizationTemplateQueryKey = useMemo(
+    () => currentOrganizationTemplatesQueryKey(effectiveOrganizationId),
+    [effectiveOrganizationId],
+  )
+  const organizationTemplatesQuery = useQuery({
+    queryKey: currentOrganizationTemplateQueryKey,
+    queryFn: ({ signal }) => fetchCurrentOrganizationTemplates(signal, effectiveOrganizationId),
+    enabled: contextReady && Boolean(effectiveOrganizationId),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   })
   const [agentRosterSortMode, setAgentRosterSortMode] = useState<AgentRosterSortMode>('recent')
   const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([])
@@ -2077,6 +2111,8 @@ export function AgentChatPage({
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
   const [createAgentError, setCreateAgentError] = useState<CreateAgentErrorState | null>(null)
   const [createAgentTrialOnboarding, setCreateAgentTrialOnboarding] = useState<TrialOnboardingTarget | null>(null)
+  const [teamTemplateLaunchBusyId, setTeamTemplateLaunchBusyId] = useState<string | null>(null)
+  const [teamTemplateLaunchError, setTeamTemplateLaunchError] = useState<string | null>(null)
   const [sendMessageError, setSendMessageError] = useState<string | null>(null)
   const [stopProcessingBusy, setStopProcessingBusy] = useState(false)
   const [stopProcessingRequested, setStopProcessingRequested] = useState(false)
@@ -2202,6 +2238,11 @@ export function AgentChatPage({
   }, [isNewAgent, activeAgentId])
 
   useEffect(() => {
+    setTeamTemplateLaunchError(null)
+    setTeamTemplateLaunchBusyId(null)
+  }, [effectiveContext?.id, effectiveContext?.type])
+
+  useEffect(() => {
     if (!isNewAgent) {
       return
     }
@@ -2221,14 +2262,15 @@ export function AgentChatPage({
     }
   }, [draftIntelligenceTier, isNewAgent, llmIntelligence?.options, llmIntelligence?.systemDefaultTier])
 
+  const currentLocationSearch = appLocationSearch ?? (typeof window === 'undefined' ? '' : window.location.search)
   const spawnFlow = useMemo(() => {
     if (!isNewAgent || typeof window === 'undefined') {
       return false
     }
-    const params = new URLSearchParams(window.location.search)
+    const params = new URLSearchParams(currentLocationSearch)
     const flag = (params.get('spawn') || '').toLowerCase()
     return flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on'
-  }, [isNewAgent])
+  }, [currentLocationSearch, isNewAgent])
   const onboardingTarget = createAgentTrialOnboarding ?? spawnIntent?.onboarding_target ?? null
   const requiresTrialPlanSelection = Boolean(
     createAgentTrialOnboarding || spawnIntent?.requires_plan_selection,
@@ -2273,7 +2315,7 @@ export function AgentChatPage({
     return () => {
       controller.abort()
     }
-  }, [isNewAgent, spawnFlow])
+  }, [currentLocationSearch, isNewAgent, spawnFlow])
 
   const resolvedIntelligenceTier = useMemo(() => {
     if (isNewAgent) {
@@ -2671,6 +2713,29 @@ export function AgentChatPage({
     // Fall back to full page navigation for console mode
     window.location.assign('/console/agents/create/quick/')
   }, [createAgentDisabledReason, onCreateAgent])
+
+  const handleLaunchTeamTemplate = useCallback(async (template: OrganizationTemplate) => {
+    if (createAgentDisabledReason || teamTemplateLaunchBusyId) {
+      return
+    }
+    if (!effectiveOrganizationId) {
+      setTeamTemplateLaunchError('Switch to an organization context first.')
+      return
+    }
+    setTeamTemplateLaunchBusyId(template.id)
+    setTeamTemplateLaunchError(null)
+    try {
+      const payload = await launchOrganizationTemplate(template.id, effectiveOrganizationId)
+      const redirectUrl = withTemplateLaunchNonce(payload.redirectUrl)
+      if (!navigateWithinApp(redirectUrl)) {
+        window.location.assign(redirectUrl)
+      }
+    } catch (err) {
+      setTeamTemplateLaunchError(safeErrorMessage(err) || 'Unable to use template.')
+    } finally {
+      setTeamTemplateLaunchBusyId(null)
+    }
+  }, [createAgentDisabledReason, effectiveOrganizationId, teamTemplateLaunchBusyId])
 
   const handleJumpToLatest = useCallback(() => {
     const currentAgentId = activeAgentIdRef.current
@@ -3286,6 +3351,37 @@ export function AgentChatPage({
     usageSummary?.period?.resetOn,
   ])
   const immersiveShellOpenHandlers = isImmersiveShellPath ? appShellOpenHandlers : null
+  const handleOpenTeamTemplates = useCallback(() => {
+    appShellOpenHandlers.organization()
+  }, [appShellOpenHandlers])
+  const teamTemplateMenuError = organizationTemplatesQuery.error
+    ? safeErrorMessage(organizationTemplatesQuery.error)
+    : null
+  const teamTemplateMenu = useMemo(() => {
+    if (effectiveContext?.type !== 'organization') {
+      return null
+    }
+    return {
+      templates: organizationTemplatesQuery.data?.templates ?? [],
+      isLoading: organizationTemplatesQuery.isLoading,
+      errorMessage: teamTemplateMenuError,
+      launchErrorMessage: teamTemplateLaunchError,
+      canManageTemplates: Boolean(organizationTemplatesQuery.data?.viewer.canManageTemplates),
+      launchBusyTemplateId: teamTemplateLaunchBusyId,
+      onLaunchTemplate: handleLaunchTeamTemplate,
+      onOpenTemplates: handleOpenTeamTemplates,
+    }
+  }, [
+    effectiveContext?.type,
+    handleLaunchTeamTemplate,
+    handleOpenTeamTemplates,
+    organizationTemplatesQuery.data?.templates,
+    organizationTemplatesQuery.data?.viewer.canManageTemplates,
+    organizationTemplatesQuery.isLoading,
+    teamTemplateLaunchBusyId,
+    teamTemplateLaunchError,
+    teamTemplateMenuError,
+  ])
   const selectionSidebarSettings = useMemo(() => ({
     context: effectiveContext,
     viewerEmail: viewerEmail ?? null,
@@ -3881,6 +3977,7 @@ export function AgentChatPage({
     onCreateAgent: handleCreateAgent,
     createAgentDisabledReason,
     onBlockedCreateAgent: previewCreateAgentBlocked ? handleBlockedCreateAgent : undefined,
+    teamTemplateMenu,
     agentRosterSortMode,
     onAgentRosterSortModeChange: handleAgentRosterSortModeChange,
     onInsightsPanelExpandedPreferenceChange: handleInsightsPanelExpandedPreferenceChange,

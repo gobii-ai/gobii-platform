@@ -1,6 +1,7 @@
 import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
+import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCreateSplitButton'
 import { AgentEmptyState, AgentListSectionHeader } from './ChatSidebarParts'
 import { AgentChatAvatar, AgentChatIconButton, AgentChatPill, joinClassNames } from './uiPrimitives'
 
@@ -18,8 +19,10 @@ type ChatSidebarGalleryProps = {
   onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
+  createAgentDisabled?: boolean
   createAgentButtonDisabled?: boolean
   createAgentDisabledReason?: string | null
+  teamTemplateMenu?: TeamTemplateCreateMenu | null
 }
 
 type GalleryCardProps = {
@@ -175,8 +178,10 @@ export function ChatSidebarGallery({
   onConfigureAgent,
   onToggleAgentFavorite,
   onCreateAgent,
+  createAgentDisabled = false,
   createAgentButtonDisabled = false,
   createAgentDisabledReason = null,
+  teamTemplateMenu = null,
 }: ChatSidebarGalleryProps) {
   const favoriteAgentIdSet = new Set(favoriteAgentIds)
   const favoriteAgents = agents.filter((agent) => favoriteAgentIdSet.has(agent.id))
@@ -187,18 +192,29 @@ export function ChatSidebarGallery({
   return (
     <div className="agent-gallery-scroll" data-variant={variant}>
       {onCreateAgent ? (
-        <button
-          type="button"
-          className="agent-gallery-create"
-          data-variant={variant}
-          onClick={onCreateAgent}
-          disabled={createAgentButtonDisabled}
-          aria-disabled={createAgentButtonDisabled ? 'true' : undefined}
-          title={createAgentDisabledReason ?? undefined}
-        >
-          <Plus className="h-4 w-4" />
-          <span>New Agent</span>
-        </button>
+        teamTemplateMenu ? (
+          <AgentCreateSplitButton
+            variant="gallery"
+            onCreateAgent={onCreateAgent}
+            createAgentDisabled={createAgentDisabled}
+            createAgentButtonDisabled={createAgentButtonDisabled}
+            createAgentDisabledReason={createAgentDisabledReason}
+            menu={teamTemplateMenu}
+          />
+        ) : (
+          <button
+            type="button"
+            className="agent-gallery-create"
+            data-variant={variant}
+            onClick={onCreateAgent}
+            disabled={createAgentButtonDisabled}
+            aria-disabled={createAgentDisabled ? 'true' : undefined}
+            title={createAgentDisabledReason ?? undefined}
+          >
+            <Plus className="h-4 w-4" />
+            <span>New Agent</span>
+          </button>
+        )
       ) : null}
 
       <AgentEmptyState
