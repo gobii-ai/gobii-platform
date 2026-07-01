@@ -525,6 +525,62 @@ class NativeDiscordBotTests(TestCase):
         )
 
     @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_message_reuses_existing_discord_delivery_on_retry(self, schedule_mock):
+        guild = self._guild()
+        second_browser = BrowserUseAgent.objects.create(user=self.user, name="Second Browser")
+        second_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Second Agent",
+            charter="Also handle Discord messages.",
+            browser_use_agent=second_browser,
+        )
+        first_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        second_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=second_agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        message = DiscordGatewayMessage(
+            message_id="500",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="300",
+            author_name="Human",
+            content="hello both agents",
+            attachments=[],
+            embeds=[],
+        )
+
+        first_result = ingest_gateway_message(message)
+        retry_result = ingest_gateway_message(message)
+
+        self.assertFalse(retry_result["ignored"])
+        self.assertEqual(retry_result["subscription_count"], 2)
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(raw_payload__discord_message_id="500").count(),
+            2,
+        )
+        self.assertCountEqual(
+            [delivery["message_id"] for delivery in retry_result["deliveries"]],
+            [delivery["message_id"] for delivery in first_result["deliveries"]],
+        )
+        self.assertCountEqual(
+            [delivery["subscription_id"] for delivery in retry_result["deliveries"]],
+            [str(first_subscription.id), str(second_subscription.id)],
+        )
+        self.assertEqual(schedule_mock.call_count, 4)
+
+    @tag("batch_agent_webhooks")
     @override_settings(GOBII_RELEASE_ENV="local")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
     def test_inbound_gateway_message_skips_agents_from_other_environment(self, schedule_mock):
