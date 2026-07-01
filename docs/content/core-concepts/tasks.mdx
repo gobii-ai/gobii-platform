@@ -47,11 +47,27 @@ Tasks span the full range of agent capabilities:
 
 ## Tasks vs. task credits
 
-Tasks consume **task credits** from your account. The cost varies by task type and complexity:
+Tasks consume **task credits** from your account. Most tasks cost a fraction of a credit — the base cost per task is **0.05 credits**, and most individual tool calls (searches, scrapes, API calls, messages) fall in this range.
 
-- A simple email send might cost ~0.04 credits
-- A web search or page scrape might cost ~2–3 credits
-- A complex browser automation could cost more
+The actual cost of a task is:
+
+
+
+## Intelligence tiers and multipliers
+
+Your agent's intelligence level multiplies the base cost of every task:
+
+| Tier | Multiplier | Cost per task | Best for |
+|---|---|---|---|
+| **Standard** (1×) | 1.00 | 0.05 credits | Routine tasks, simple lookups |
+| **Smarter** (2×) | 2.00 | 0.10 credits | Research, multi-step workflows |
+| **Smartest** (5×) | 5.00 | 0.25 credits | Complex analysis, deep research |
+| **Ultra** (20×) | 20.00 | 1.00 credits | Maximum capability |
+| **Ultra Max** (50×) | 50.00 | 2.50 credits | Peak performance |
+
+Higher tiers give your agent access to more capable models and deeper reasoning, but they consume credits faster. You set the intelligence level per agent in the agent settings.
+
+**Example:** On the Standard tier, sending an email costs ~0.05 credits. On Smartest (5×), the same email costs ~0.25 credits — still fractional, but proportional to the intelligence boost.
 
 Your plan includes a monthly pool of task credits. See [Task Credits](/core-concepts/task-credits) for details on budgets, soft limits, and monitoring usage.
 
@@ -63,7 +79,7 @@ If a task fails (e.g., a page won't load, an API returns an error), the agent ty
 
 ## Agent budgets and limits
 
-Each agent has a **daily soft limit** on task credits. This prevents runaway consumption. The agent will pause when it hits the limit and resume the next day.
+Each agent has a **daily soft limit** on task credits. This prevents runaway consumption — especially important at higher intelligence tiers where each task costs more. The agent will pause when it hits the limit and resume the next day.
 
 You set this limit per agent in the agent settings. See the [agent settings guide](/console-guides/agent-settings) for details.
 
