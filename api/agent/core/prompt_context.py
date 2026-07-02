@@ -1878,6 +1878,7 @@ def build_prompt_context(
     routing_profile: Any = None,
     prefer_low_latency: Optional[bool] = None,
     include_metadata: bool = False,
+    system_directive_block: str = "",
 ) -> tuple[List[dict], int, Optional[UUID]] | tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
@@ -1913,7 +1914,8 @@ def build_prompt_context(
             prefer_low_latency=prefer_low_latency,
         )
     )
-    system_directive_block = _consume_system_prompt_messages(agent)
+    if not system_directive_block:
+        system_directive_block = _consume_system_prompt_messages(agent)
 
     provisional_result = None
     max_render_attempts = 3
@@ -1971,6 +1973,8 @@ def build_prompt_context(
         record_span=True,
     )
     final_metadata["prompt_failover_configs"] = list(prompt_failover_configs or [])
+    if system_directive_block:
+        final_metadata["system_directive_block"] = system_directive_block
 
     result = (final_messages, final_tokens, final_archive_id)
     if include_metadata:

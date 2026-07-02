@@ -5287,6 +5287,71 @@ class OrchestratorHumanInputInterruptTests(TestCase):
     @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
     @patch("api.agent.core.event_processing._completion_with_failover")
     @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_prompt_rebuild_reuses_delivered_system_directive_block(
+        self,
+        mock_build_prompt,
+        mock_completion,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        directive_block = "## Immediate System Directives From Gobii Operations\n\n1. Stay on the urgent deck."
+        directive_blocks: list[str] = []
+
+        def _build_prompt_and_interrupt_once(*_args, **kwargs):
+            directive_blocks.append(kwargs.get("system_directive_block") or "")
+            if len(directive_blocks) == 1:
+                bump_human_inbound_generation(self.agent.id)
+                return (
+                    [{"role": "system", "content": "stale sys"}],
+                    1000,
+                    None,
+                    {"system_directive_block": directive_block},
+                )
+            return (
+                [{"role": "system", "content": kwargs["system_directive_block"]}],
+                1000,
+                None,
+                {},
+            )
+
+        mock_build_prompt.side_effect = _build_prompt_and_interrupt_once
+        response = make_completion_response(content="Done")
+        token_usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "model": "m",
+            "provider": "p",
+        }
+        mock_completion.return_value = (response, token_usage)
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(directive_blocks, ["", directive_block])
+        self.assertIn(directive_block, mock_completion.call_args.kwargs["messages"][0]["content"])
+        self.assertEqual(usage.get("total_tokens"), 15)
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    @patch("api.agent.core.event_processing.build_prompt_context")
     def test_generation_is_not_consumed_when_completion_fails(
         self,
         mock_build_prompt,
