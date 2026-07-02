@@ -81,6 +81,7 @@ import { useRecentAgentSubscriptions } from '../hooks/useRecentAgentSubscription
 import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore, setTimelineQueryClient } from '../stores/agentChatStore'
+import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import {
@@ -939,6 +940,8 @@ export type AgentChatPageProps = {
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
+  scrollToAgentId?: string | null
+  onScrolledToAgent?: (agentId: string) => void
   showContextSwitcher?: boolean
   persistContextSession?: boolean
   onContextSwitch?: (context: ConsoleContext) => void
@@ -980,6 +983,8 @@ export function AgentChatPage({
   onClose,
   onCreateAgent,
   onAgentCreated,
+  scrollToAgentId = null,
+  onScrolledToAgent,
   showContextSwitcher = false,
   persistContextSession = true,
   onContextSwitch,
@@ -1223,6 +1228,7 @@ export function AgentChatPage({
   const realtimeEventCursors = useAgentChatStore((state) => state.realtimeEventCursors)
   const consumeRealtimeEventCursor = useAgentChatStore((state) => state.consumeRealtimeEventCursor)
   const persistPendingEventsToCache = useAgentChatStore((state) => state.persistPendingEventsToCache)
+  const pendingEvents = useAgentChatStore((state) => state.pendingEvents)
   const setInsightsForAgent = useAgentChatStore((state) => state.setInsightsForAgent)
   const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
   const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
@@ -1249,7 +1255,15 @@ export function AgentChatPage({
   const isStoreSynced = storeAgentId === activeAgentId
   const hasMoreOlder = timelineQuery.hasPreviousPage ?? false
   const hasMoreNewer = timelineQuery.hasNextPage ?? false
-  const timelineEvents = !isNewAgent ? flatEvents : []
+  const timelineEvents = useMemo(() => {
+    if (isNewAgent) {
+      return []
+    }
+    if (!isStoreSynced || pendingEvents.length === 0) {
+      return flatEvents
+    }
+    return mergeTimelineEvents(flatEvents, pendingEvents)
+  }, [flatEvents, isNewAgent, isStoreSynced, pendingEvents])
   const timelineHasMoreOlder = !isNewAgent ? hasMoreOlder : false
   const timelineHasMoreNewer = !isNewAgent ? hasMoreNewer : false
   const timelineHasUnseenActivity = !isNewAgent && isStoreSynced ? hasUnseenActivity : false
@@ -4010,6 +4024,8 @@ export function AgentChatPage({
     embeddedSettingsPanel,
     embeddedSettingsTitle,
     onBackFromEmbeddedSettings: handleExitEmbeddedSettings,
+    scrollToAgentId,
+    onScrolledToAgent,
   }
 
   const activeAuditUrl = useMemo(() => {

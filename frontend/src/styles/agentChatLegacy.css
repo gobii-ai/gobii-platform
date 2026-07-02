@@ -3112,6 +3112,51 @@
 .chat-content td a:hover {
     text-decoration: underline;
 }
+.chat-html-content {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+}
+.chat-html-table-scroll {
+    width: 100%;
+    max-width: 100%;
+    margin: 0.75rem 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+.chat-html-content > :first-child {
+    margin-top: 0 !important;
+}
+.chat-html-content > :last-child {
+    margin-bottom: 0 !important;
+}
+.chat-html-content p,
+.chat-html-content ul,
+.chat-html-content ol,
+.chat-html-content blockquote,
+.chat-html-content pre {
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+.chat-html-content table {
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.875rem;
+    table-layout: auto;
+}
+.chat-html-table-scroll table {
+    margin: 0;
+}
+.chat-html-content th,
+.chat-html-content td {
+    overflow-wrap: normal;
+    word-break: normal;
+    white-space: normal;
+}
 .chat-bubble--user .chat-content {
     color: #334155;
 }
@@ -3155,6 +3200,25 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+}
+.chat-author-name {
+    flex: 0 0 auto;
+}
+.chat-email-subject-inline {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    color: #334155;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.chat-email-subject-inline::before {
+    content: "•";
+    margin-right: 0.5rem;
+    color: #94a3b8;
+    font-weight: 700;
 }
 .chat-author--user {
     color: #6366f1;
@@ -7063,6 +7127,11 @@
     -webkit-tap-highlight-color: transparent;
     animation: agent-fab-enter 0.4s ease 0.6s both;
 }
+.agent-chat-button.agent-fab[data-size] {
+    min-height: 0;
+    padding: 0;
+    gap: 0;
+}
 @keyframes agent-fab-enter {
     from {
         opacity: 0;
@@ -7276,10 +7345,52 @@
     --drawer-control-bg: rgba(255, 255, 255, 0.08);
     --drawer-purple-border: rgba(167, 139, 250, 0.25);
 }
+.chat-sidebar-mobile-content {
+    display: contents;
+}
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__trigger, .agent-gallery-create) {
     border-color: var(--drawer-purple-border);
     background: rgba(167, 139, 250, 0.12);
     color: #c4b5fd;
+}
+.agent-mobile-sheet--sidebar .chat-sidebar-create-btn--drawer {
+    width: calc(100% - 1.5rem);
+    margin: 0 0.75rem 0.5rem;
+    border: 1px solid rgba(167, 139, 250, 0.18);
+    border-radius: 0.9rem;
+    background: rgba(255, 255, 255, 0.07);
+    color: #ddd6fe;
+}
+.agent-mobile-sheet--sidebar .chat-sidebar-create-btn--drawer:not(.agent-create-split) {
+    padding: 0.7rem 0.85rem;
+}
+.agent-mobile-sheet--sidebar .chat-sidebar-create-btn--drawer:hover,
+.agent-mobile-sheet--sidebar .agent-create-split.chat-sidebar-create-btn--drawer[data-open='true'] {
+    border-color: rgba(196, 181, 253, 0.3);
+    background: rgba(255, 255, 255, 0.1);
+}
+.agent-mobile-sheet--sidebar .chat-sidebar-create-btn--drawer .chat-sidebar-create-btn-icon {
+    width: 2.3rem;
+    height: 2.3rem;
+    background: rgba(167, 139, 250, 0.12);
+    color: #a78bfa;
+}
+.agent-mobile-sheet--sidebar .agent-create-split[data-create-variant='drawer'] .agent-create-split__main {
+    padding: 0.7rem 0.85rem;
+}
+.agent-mobile-sheet--sidebar .agent-create-split[data-create-variant='drawer'] .agent-create-split__chevron {
+    flex: 0 0 2.25rem;
+    align-self: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    margin-right: 0.55rem;
+    border-left: 0;
+    border-radius: 0.65rem;
+    color: rgba(221, 214, 254, 0.82);
+}
+.agent-mobile-sheet--sidebar .agent-create-split[data-create-variant='drawer'] .agent-create-split__chevron:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
 }
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__trigger:hover, .agent-roster-search__clear:active) {
     background: rgba(167, 139, 250, 0.16);
@@ -7310,10 +7421,11 @@
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__item-role, .agent-roster-item__desc, .agent-roster-empty) {
     color: var(--drawer-soft-text);
 }
-.agent-mobile-sheet--sidebar :is(.agent-roster-search, .agent-roster-sort) {
+.agent-mobile-sheet--sidebar .agent-roster-search {
     border-bottom: 1px solid rgba(167, 139, 250, 0.14);
 }
 .agent-mobile-sheet--sidebar .agent-roster-sort {
+    border-bottom: 0;
     background: linear-gradient(180deg, rgba(167, 139, 250, 0.08), rgba(167, 139, 250, 0.02));
 }
 .agent-mobile-sheet--sidebar :is(.agent-roster-search__icon, .agent-roster-search__clear) {

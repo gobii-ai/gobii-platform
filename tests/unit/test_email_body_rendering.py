@@ -21,6 +21,22 @@ class EmailBodyRenderingTestCase(TestCase):
         self.assertIn("Thanks", plaintext)
 
     @tag("batch_email_body")
+    def test_html_table_followed_by_paragraph_does_not_gain_breaks(self):
+        body = (
+            "<div style='margin-bottom: 25px;'>\n"
+            "  <table><tr><td>One</td></tr></table>\n"
+            "  <p style='margin: 10px 0 0 0;'>Summary</p>\n"
+            "</div>"
+        )
+
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("margin-bottom: 25px", html_snippet)
+        self.assertNotRegex(html_snippet, r"</table>\s*<br\s*/?>")
+        self.assertNotRegex(html_snippet, r"<p[^>]*>\s*<br\s*/?>")
+        self.assertIn("Summary", plaintext)
+
+    @tag("batch_email_body")
     def test_indented_html_lines_do_not_become_code_blocks(self):
         body = (
             "\n"

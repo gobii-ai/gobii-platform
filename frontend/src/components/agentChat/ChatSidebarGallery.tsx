@@ -57,6 +57,7 @@ function GalleryCard({
   return (
     <article
       className="agent-gallery-card"
+      data-agent-roster-item-id={agent.id}
       data-variant={variant}
       data-active={isActive ? 'true' : 'false'}
       data-switching={isSwitching ? 'true' : 'false'}

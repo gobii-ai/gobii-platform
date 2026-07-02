@@ -810,8 +810,15 @@ export function ImmersiveApp({
     navigateTo('/app/agents/new')
   }, [])
 
+  const [scrollToCreatedAgentId, setScrollToCreatedAgentId] = useState<string | null>(null)
+
   const handleAgentCreated = useCallback((agentId: string) => {
+    setScrollToCreatedAgentId(agentId)
     navigateTo(`/app/agents/${agentId}`)
+  }, [])
+
+  const handleScrolledToCreatedAgent = useCallback((agentId: string) => {
+    setScrollToCreatedAgentId((current) => (current === agentId ? null : current))
   }, [])
 
   const handleContextSwitch = useCallback((context: ConsoleContext) => {
@@ -917,6 +924,8 @@ export function ImmersiveApp({
     onClose: embed ? handleEmbeddedClose : handleClose,
     onCreateAgent: handleNavigateToNewAgent,
     onAgentCreated: handleAgentCreated,
+    scrollToAgentId: scrollToCreatedAgentId,
+    onScrolledToAgent: handleScrolledToCreatedAgent,
     showContextSwitcher: true,
     onContextSwitch: handleContextSwitch,
     selectionPage,

@@ -387,9 +387,9 @@ export function getSqliteInternalTableDisplay(
   }
 
   return {
-    label: `${descriptor.labelPrefix} ${summaryKind}`,
+    label: isToolResultsQuery ? 'Analyzing Tool Results' : `${descriptor.labelPrefix} ${summaryKind}`,
     caption: isToolResultsQuery
-      ? purpose
+      ? 'Processing data'
       : kind === 'toolResults'
         ? null
       : kind === 'agentSkills'

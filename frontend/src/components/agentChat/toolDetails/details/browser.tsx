@@ -19,6 +19,16 @@ function parseHostname(value: string): string | null {
   }
 }
 
+function normalizeHttpUrl(value: string | null): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+  } catch {
+    return null
+  }
+}
+
 function buildFaviconUrl(hostname: string | null): string | null {
   if (!hostname) return null
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`
@@ -55,6 +65,40 @@ function normalizeSectionItem(value: unknown): SectionItem | null {
   const snippet = pickString(value['c']) || pickString(value['content']) || pickString(value['excerpt'])
   if (!heading && !snippet) return null
   return { heading: heading ?? 'Section', snippet }
+}
+
+function cleanScrapedMarkdown(value: string, sourceUrl: string | null): string {
+  let source = value
+  const host = sourceUrl ? parseHostname(sourceUrl) : null
+  if (host?.endsWith('wikipedia.org')) {
+    const articleStart = source.indexOf('From Wikipedia, the free encyclopedia')
+    if (articleStart >= 0) source = source.slice(articleStart)
+  }
+
+  return source
+    .replace(/\r\n?/g, '\n')
+    .replace(/\\([[\]()_&])/g, '$1')
+    .replace(/^```\s*\n([^\n`]{1,160})\s*\n```\s*\n+/, '$1\n\n')
+    .replace(/\[\s*([^\][]*?)\s*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, label: string, href: string) => {
+      const cleanLabel = label.replace(/\s+/g, ' ').trim()
+      return cleanLabel ? `[${cleanLabel}](${href})` : ''
+    })
+    .replace(/\)\[/g, ') [')
+    .replace(/\[([^\]\n]+)\]\(#[^)]+\)/g, '$1')
+    .replace(/\[([^\]\n]+)\n\s*\]\(#[^)]+\)/g, (_, label: string) => label.trim())
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed === '[' || trimmed === ']' || /^\(redirected from\b/i.test(trimmed)) return ''
+      if (/^(contents|move to sidebar hide|\(top\)|from wikipedia, the free encyclopedia)$/i.test(trimmed)) return ''
+      if (/^(\[\[edit\]|\]\(#[^)]+\)\s*toggle\b)/i.test(trimmed)) return ''
+      const anchorMatch = trimmed.match(/^\]\(#[^)]+\)\s*(.*)$/)
+      if (anchorMatch) return anchorMatch[1]?.trim() || ''
+      return line
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 export function BrowserTaskDetail({ entry }: ToolDetailProps) {
@@ -127,7 +171,6 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
     pickString(params['markdown']) ||
     (nestedResultString && !looksLikeHtml(nestedResultString) ? nestedResultString : null) ||
     (!parsedResult && rawResultString && !looksLikeHtml(rawResultString) ? rawResultString : null)
-  const readerText = markdownCandidate || pickString(parsedResult?.excerpt) || null
 
   const screenshotUrl =
     pickString(params['screenshot_url']) || pickString(params['screenshot']) || pickString(parsedResult?.screenshot_url)
@@ -137,6 +180,9 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
     pickString(params['start_url']) ||
     pickString(params['target_url']) ||
     pickString(parsedResult?.url)
+  const normalizedTargetUrl = normalizeHttpUrl(targetUrl)
+  const readerText = markdownCandidate ? cleanScrapedMarkdown(markdownCandidate, normalizedTargetUrl) : pickString(parsedResult?.excerpt)
+  const isScrapeAsMarkdown = (entry.toolName || '').toLowerCase().includes('scrape_as_markdown')
 
   const pageTitle =
     pickString(params['title']) ||
@@ -153,6 +199,7 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
 
   const urlLabel = targetUrl || pickString(parsedResult?.url) || 'Web snapshot'
   const hasOutline = sectionItems.length > 0 || linkItems.length > 0
+  const showSnapshotBody = !isScrapeAsMarkdown
 
   return (
     <div className="space-y-3 text-sm text-slate-600">
@@ -193,6 +240,17 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
               {compressionLabel} trimmed
             </span>
           ) : null}
+          {isScrapeAsMarkdown && normalizedTargetUrl ? (
+            <a
+              href={normalizedTargetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-indigo-100 no-underline hover:bg-white/20 hover:text-white"
+            >
+              Open page
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
+          ) : null}
         </div>
         <div className="space-y-3 px-4 py-3">
           <div className="flex items-start justify-between gap-3">
@@ -209,8 +267,38 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
               />
             </div>
           ) : null}
-          {sanitizedHtml ? <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} /> : null}
-          {!sanitizedHtml && readerText ? (
+          {isScrapeAsMarkdown ? (
+            readerText ? (
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3.5 py-2.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-600">
+                  <span>Extracted page text</span>
+                  {normalizedTargetUrl ? (
+                    <a className="shrink-0 text-indigo-600 no-underline hover:text-indigo-700 hover:underline" href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
+                      Source
+                    </a>
+                  ) : null}
+                </div>
+                <div className="max-h-[min(520px,68vh)] overflow-y-auto overflow-x-hidden px-4 py-3 [webkit-overflow-scrolling:touch] max-md:max-h-[min(380px,58vh)]">
+                  <MarkdownViewer content={readerText} className="prose prose-sm max-w-none leading-relaxed text-slate-800 prose-a:font-semibold prose-a:text-indigo-600 prose-headings:tracking-normal prose-headings:text-slate-900" />
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-indigo-50/60 px-3.5 py-3 text-sm text-slate-500">
+                <span>No extracted text returned.</span>
+                {normalizedTargetUrl ? (
+                  <a className="shrink-0 font-extrabold text-indigo-600 no-underline hover:text-indigo-700 hover:underline" href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
+                    Open page
+                  </a>
+                ) : targetUrl ? (
+                  <span className="break-all text-slate-500">{targetUrl}</span>
+                ) : null}
+              </div>
+            )
+          ) : null}
+          {showSnapshotBody && sanitizedHtml ? (
+            <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
+          ) : null}
+          {showSnapshotBody && !sanitizedHtml && readerText ? (
             <MarkdownViewer content={readerText} className="prose prose-sm max-w-none" />
           ) : null}
           {hasOutline ? (
@@ -248,7 +336,7 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
               ) : null}
             </div>
           ) : null}
-          {!sanitizedHtml && !readerText && !hasOutline ? <p className="text-slate-500">No page content returned.</p> : null}
+          {!isScrapeAsMarkdown && !sanitizedHtml && !readerText && !hasOutline ? <p className="text-slate-500">No page content returned.</p> : null}
         </div>
       </div>
     </div>

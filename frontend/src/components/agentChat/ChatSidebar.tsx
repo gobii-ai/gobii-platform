@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react'
+import { memo, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { ArrowLeftRight, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
@@ -53,6 +53,8 @@ type ChatSidebarProps = {
   embeddedSettingsPanel?: ReactNode
   embeddedSettingsTitle?: string
   onBackFromEmbeddedSettings?: () => void
+  scrollToAgentId?: string | null
+  onScrolledToAgent?: (agentId: string) => void
 }
 
 export const ChatSidebar = memo(function ChatSidebar({
@@ -82,7 +84,13 @@ export const ChatSidebar = memo(function ChatSidebar({
   embeddedSettingsPanel = null,
   embeddedSettingsTitle = 'Agent Settings',
   onBackFromEmbeddedSettings,
+  scrollToAgentId = null,
+  onScrolledToAgent,
 }: ChatSidebarProps) {
+  const sidebarRootRef = useRef<HTMLElement | null>(null)
+  const setSidebarRootRef = useCallback((node: HTMLElement | null) => {
+    sidebarRootRef.current = node
+  }, [])
   const [isMobile, setIsMobile] = useState(() => {
     if (typeof window === 'undefined') {
       return false
@@ -124,6 +132,55 @@ export const ChatSidebar = memo(function ChatSidebar({
     () => hasFavoritesInRoster ? [...favoriteFilteredAgents, ...allFilteredAgents] : filteredAgents,
     [allFilteredAgents, favoriteFilteredAgents, filteredAgents, hasFavoritesInRoster],
   )
+
+  useEffect(() => {
+    if (!scrollToAgentId || typeof window === 'undefined') {
+      return
+    }
+    if (!agents.some((agent) => agent.id === scrollToAgentId)) {
+      return
+    }
+    if (isMobile && !drawerOpen) {
+      return
+    }
+    if (searchQuery && !filteredAgents.some((agent) => agent.id === scrollToAgentId)) {
+      setSearchQuery('')
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const root: ParentNode | null = isMobile ? document : sidebarRootRef.current
+      const selectorId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+        ? CSS.escape(scrollToAgentId)
+        : scrollToAgentId.replace(/["\\]/g, '\\$&')
+      const rosterItem = root?.querySelector<HTMLElement>(`[data-agent-roster-item-id="${selectorId}"]`)
+      if (!rosterItem) {
+        return
+      }
+      const prefersReducedMotion = typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      rosterItem.scrollIntoView({
+        block: 'center',
+        inline: 'nearest',
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      })
+      onScrolledToAgent?.(scrollToAgentId)
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    agents,
+    desktopMode,
+    drawerOpen,
+    drawerViewMode,
+    filteredAgents,
+    isMobile,
+    onScrolledToAgent,
+    scrollToAgentId,
+    searchQuery,
+    showCustomGalleryShellPanel,
+    showSettingsView,
+  ])
 
   useEffect(() => {
     if (!drawerOpen) {
@@ -361,7 +418,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         }
       : null
     return (
-      <>
+      <div ref={setSidebarRootRef} className="chat-sidebar-mobile-content">
         <AgentChatButton
           className="agent-fab"
           variant="solid"
@@ -489,12 +546,13 @@ export const ChatSidebar = memo(function ChatSidebar({
           ) : null}
           {!showSettingsView && settings ? <SidebarSettingsMenu {...settings} variant="drawer" /> : null}
         </AgentChatMobileSheet>
-      </>
+      </div>
     )
   }
 
   return (
     <aside
+      ref={setSidebarRootRef}
       className={`chat-sidebar chat-sidebar--${desktopMode}`}
       data-collapsed={collapsed}
       data-sidebar-mode={desktopMode}

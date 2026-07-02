@@ -992,13 +992,14 @@ class EmailContentRenderingTests(TestCase):
         self.assertIn("Total", plaintext)
         self.assertIn("100", plaintext)
 
-    def test_tables_insert_structural_spacing_only_when_content_follows(self):
+    def test_html_tables_do_not_insert_synthetic_spacing(self):
         body_with_followup = (
             "<table><tr><th>Name</th></tr><tr><td>Total</td></tr></table>"
             "<p>Next paragraph</p>"
         )
         html_with_followup, _ = convert_body_to_html_and_plaintext(body_with_followup)
-        self.assertRegex(html_with_followup, r"</table><br />\s*<p>Next paragraph</p>")
+        self.assertRegex(html_with_followup, r"</table>\s*<p>Next paragraph</p>")
+        self.assertNotRegex(html_with_followup, r"</table>\s*<br\s*/?>")
 
         body_without_followup = "<table><tr><th>Name</th></tr><tr><td>Total</td></tr></table>"
         html_without_followup, _ = convert_body_to_html_and_plaintext(body_without_followup)
