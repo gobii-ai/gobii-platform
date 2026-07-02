@@ -56,7 +56,7 @@ const {
     ],
   },
   agentChatStoreState: {
-    agentId: null,
+    agentId: null as string | null,
     agentName: null,
     agentAvatarUrl: null,
     signupPreviewState: 'none',
