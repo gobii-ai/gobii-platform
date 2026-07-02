@@ -18,6 +18,7 @@ import  logging
 import re
 
 from config.settings import EMAIL_STRIP_REPLIES
+from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
 from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)
@@ -387,6 +388,8 @@ class PostmarkEmailAdapter(EmailAdapter):
         span.set_attribute("postmark.body_used", body_used)
 
         normalized_payload = _normalize_inbound_email_raw_payload(payload_dict)
+        if body or html_body:
+            normalized_payload = merge_chat_body_html_cache(normalized_payload, body)
 
         return ParsedMessage(
             sender=payload_dict.get("From", ""),
@@ -531,6 +534,8 @@ class MailgunEmailAdapter(EmailAdapter):
         ).strip()
 
         normalized_payload = _normalize_inbound_email_raw_payload(payload_dict)
+        if body or html_body:
+            normalized_payload = merge_chat_body_html_cache(normalized_payload, body)
 
         return ParsedMessage(
             sender=sender,

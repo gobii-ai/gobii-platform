@@ -18,18 +18,17 @@ from django.utils import timezone
 from django.utils.timesince import timesince
 from django.urls import reverse
 
-from bleach.sanitizer import ALLOWED_ATTRIBUTES as BLEACH_ALLOWED_ATTRIBUTES_BASE
-from bleach.sanitizer import ALLOWED_PROTOCOLS as BLEACH_ALLOWED_PROTOCOLS_BASE
-from bleach.sanitizer import ALLOWED_TAGS as BLEACH_ALLOWED_TAGS_BASE
-from bleach.sanitizer import Cleaner
-from bleach.css_sanitizer import CSSSanitizer
-
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
 from api.agent.core.schedule_parser import ScheduleParser
+from api.agent.comms.chat_email_display_cache import (
+    get_cached_chat_body_html,
+    normalize_explicit_email_html,
+    render_chat_email_body_html,
+    sanitize_chat_email_html,
+)
 from api.agent.comms.human_input_requests import serialize_human_input_tool_result
 from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
-from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.agent.comms.source_metadata import get_message_source_metadata, get_webhook_timeline_metadata
 from api.models import (
     BrowserUseAgentTask,
@@ -54,44 +53,6 @@ MAX_PAGE_SIZE = 100
 COLLAPSE_THRESHOLD = 3
 THINKING_COMPLETION_TYPES = (PersistentAgentCompletion.CompletionType.ORCHESTRATOR,)
 HIDE_IN_CHAT_PAYLOAD_KEY = "hide_in_chat"
-EMAIL_STYLE_TAGS = {
-    "caption",
-    "div",
-    "em",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "li",
-    "ol",
-    "p",
-    "span",
-    "strong",
-    "table",
-    "td",
-    "th",
-    "tr",
-    "ul",
-}
-EMAIL_ALLOWED_CSS_PROPERTIES = [
-    "background",
-    "border-bottom",
-    "border-left",
-    "border-radius",
-    "color",
-    "display",
-    "flex-direction",
-    "font-size",
-    "gap",
-    "line-height",
-    "margin",
-    "margin-bottom",
-    "margin-top",
-    "padding",
-    "padding-bottom",
-]
 
 logger = logging.getLogger(__name__)
 
@@ -106,62 +67,6 @@ def _message_queryset(agent: PersistentAgent):
     return PersistentAgentMessage.objects.filter(owner_agent=agent).filter(
         Q(**{hidden_key: False}) | Q(**{f"{hidden_key}__isnull": True}),
     )
-
-def _build_html_cleaner() -> Cleaner:
-    """Create a Bleach cleaner that preserves common email formatting."""
-
-    allowed_tags = set(BLEACH_ALLOWED_TAGS_BASE).union(
-        {
-            "p",
-            "br",
-            "div",
-            "span",
-            "img",
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-            "ul",
-            "ol",
-            "li",
-            "pre",
-            # Table tags for rich data display
-            "table",
-            "thead",
-            "tbody",
-            "tfoot",
-            "tr",
-            "th",
-            "td",
-            "caption",
-        }
-    )
-
-    allowed_attributes = dict(BLEACH_ALLOWED_ATTRIBUTES_BASE)
-    anchor_attrs = set(allowed_attributes.get("a", ())).union({"href", "title", "target", "rel"})
-    allowed_attributes["a"] = sorted(anchor_attrs)
-    allowed_attributes.setdefault("span", [])
-    allowed_attributes["img"] = ["src", "alt", "width", "height"]
-    # Table cell attributes
-    allowed_attributes["th"] = ["colspan", "rowspan", "scope", "headers"]
-    allowed_attributes["td"] = ["colspan", "rowspan", "headers"]
-    for tag in EMAIL_STYLE_TAGS:
-        allowed_attributes[tag] = sorted(set(allowed_attributes.get(tag, ())).union({"style"}))
-
-    allowed_protocols = set(BLEACH_ALLOWED_PROTOCOLS_BASE).union({"mailto", "tel"})
-
-    return Cleaner(
-        tags=sorted(allowed_tags),
-        attributes=allowed_attributes,
-        protocols=allowed_protocols,
-        css_sanitizer=CSSSanitizer(allowed_css_properties=EMAIL_ALLOWED_CSS_PROPERTIES),
-        strip=True,
-    )
-
-
-HTML_CLEANER = _build_html_cleaner()
 
 TimelineDirection = Literal["initial", "older", "newer"]
 
@@ -242,27 +147,27 @@ def _render_email_body_html(
     body: str,
     attachments: Sequence[dict],
     explicit_html: str | None = None,
+    cached_html: str | None = None,
 ) -> str:
-    html_snippet = explicit_html or ""
+    html_snippet = cached_html
+    if html_snippet is None:
+        html_snippet = render_chat_email_body_html(body or "", explicit_html=explicit_html, allow_cid=True)
     if not html_snippet:
-        try:
-            html_snippet, _ = convert_body_to_html_and_plaintext(body or "", emit_logs=False)
-        except Exception:
-            html_snippet = body or ""
-    if html_snippet:
-        html_snippet = _rewrite_email_cid_image_src(html_snippet, attachments)
-    return HTML_CLEANER.clean(html_snippet) if html_snippet else ""
+        return ""
+    return sanitize_chat_email_html(_rewrite_email_cid_image_src(html_snippet, attachments))
 
 
 def _message_body_html(message: PersistentAgentMessage, channel: str | None, attachments: Sequence[dict]) -> str:
     if not channel or channel.lower() != "email":
         return ""
     payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
-    explicit_html = payload.get(EMAIL_BODY_HTML_PAYLOAD_KEY)
+    explicit_html = normalize_explicit_email_html(payload.get(EMAIL_BODY_HTML_PAYLOAD_KEY))
+    cached_html = get_cached_chat_body_html(payload, message.body or "", explicit_html=explicit_html)
     return _render_email_body_html(
         message.body or "",
         attachments,
-        explicit_html=explicit_html.strip() if isinstance(explicit_html, str) else None,
+        explicit_html=explicit_html,
+        cached_html=cached_html,
     )
 
 

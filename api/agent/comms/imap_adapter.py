@@ -24,6 +24,7 @@ from .adapters import (
     _extract_forward_sections,
 )
 from .attachment_filters import is_signature_image_attachment
+from .chat_email_display_cache import merge_chat_body_html_cache
 from .rejected_attachments import build_rejected_attachment_metadata
 from config.settings import EMAIL_STRIP_REPLIES
 from api.services.system_settings import get_max_file_size
@@ -274,6 +275,12 @@ class ImapEmailAdapter:
         }
         if body_html_preserved:
             raw_payload[EMAIL_BODY_HTML_PAYLOAD_KEY] = body_html_preserved
+        if body_text or body_html_preserved:
+            raw_payload = merge_chat_body_html_cache(
+                raw_payload,
+                body_text,
+                explicit_html=body_html_preserved.strip() if body_html_preserved else None,
+            )
         if ctx is not None:
             if ctx.uid:
                 raw_payload["imap_uid"] = str(ctx.uid)

@@ -22,6 +22,7 @@ from api.agent.files.attachment_helpers import resolve_filespace_attachments
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.comms.imap_adapter import ImapEmailAdapter
 from api.agent.comms.adapters import ParsedMessage
+from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
 from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
 from api.agent.core.prompt_context import build_prompt_context
 from api.agent.tasks.reported_message_judge import run_reported_agent_judge_task
@@ -1491,6 +1492,50 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("<p>Status: Ready</p>", rendered_html)
 
     @tag("batch_agent_chat")
+    def test_timeline_uses_cached_email_html_when_source_hash_matches(self):
+        plain_body = "Status: Ready"
+        html_body = "<p><strong>Cached Ready</strong></p>"
+        raw_payload = merge_chat_body_html_cache(
+            {"body_html": html_body},
+            plain_body,
+            explicit_html=html_body,
+        )
+        email_address = "cached-html@example.com"
+
+        email_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+            is_primary=False,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=email_sender,
+            conversation=email_conversation,
+            body=plain_body,
+            owner_agent=self.agent,
+            raw_payload=raw_payload,
+        )
+
+        with patch("console.agent_chat.timeline.render_chat_email_body_html") as mock_render:
+            response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+
+        self.assertEqual(response.status_code, 200)
+        mock_render.assert_not_called()
+        payload = response.json()
+        html_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == plain_body
+        )
+        self.assertIn("<strong>Cached Ready</strong>", html_event["message"]["bodyHtml"])
+
+    @tag("batch_agent_chat")
     def test_timeline_serializes_email_subject_only_for_email_messages(self):
         email_address = "subject-line@example.com"
 
@@ -1658,6 +1703,58 @@ class AgentChatAPITests(TestCase):
             body=plain_body,
             owner_agent=self.agent,
             raw_payload={"body_html": html_body},
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"image-bytes", name="roadmap-card.png"),
+            content_type="image/png",
+            file_size=11,
+            filename="roadmap-card.png",
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        cid_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == plain_body
+        )
+
+        rendered_html = cid_event["message"]["bodyHtml"]
+        attachment_url = cid_event["message"]["attachments"][0]["url"]
+        self.assertIn(attachment_url, rendered_html)
+        self.assertNotIn("cid:roadmap-card.png", rendered_html)
+
+    @tag("batch_agent_chat")
+    def test_timeline_rewrites_cid_image_src_from_cached_email_html(self):
+        html_body = "<p><img src='cid:roadmap-card.png' alt='Roadmap card' /></p>"
+        plain_body = "See cached roadmap card"
+        email_address = "cached-html-cid@example.com"
+
+        email_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+            is_primary=False,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+        )
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=email_sender,
+            conversation=email_conversation,
+            body=plain_body,
+            owner_agent=self.agent,
+            raw_payload=merge_chat_body_html_cache(
+                {"body_html": html_body},
+                plain_body,
+                explicit_html=html_body,
+            ),
         )
         PersistentAgentMessageAttachment.objects.create(
             message=message,

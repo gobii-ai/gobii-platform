@@ -24,6 +24,7 @@ from api.models import (
     BrowserUseAgent,
     AgentEmailAccount,
 )
+from api.agent.comms.chat_email_display_cache import CHAT_BODY_HTML_CACHE_KEY, CHAT_BODY_HTML_SOURCE_HASH_KEY
 from api.agent.comms.outbound_delivery import deliver_agent_email, deliver_agent_sms, _convert_sms_body_to_plaintext
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from config import settings
@@ -418,6 +419,8 @@ class EmailDeliveryTests(TestCase):
         message.refresh_from_db()
         self.assertEqual(message.raw_payload["message_id"], call_kwargs["headers"]["Message-ID"])
         self.assertEqual(message.raw_payload["references"], call_kwargs["headers"]["References"])
+        self.assertEqual(message.raw_payload[CHAT_BODY_HTML_CACHE_KEY], "<p>Hello</p>")
+        self.assertIn(CHAT_BODY_HTML_SOURCE_HASH_KEY, message.raw_payload)
 
     @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
     @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
