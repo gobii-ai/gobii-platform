@@ -28,6 +28,7 @@ const sidebars = {
       collapsed: false,
       items: [
         'using-gobii/chat-and-timeline',
+        'using-gobii/building-effective-agents',
         'using-gobii/planning-and-deliverables',
         'using-gobii/peer-linking',
         'using-gobii/approvals-and-requests',
