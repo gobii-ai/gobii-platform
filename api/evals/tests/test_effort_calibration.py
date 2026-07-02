@@ -371,7 +371,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             "api.agent.core.prompt_context.CommsAllowlistEntry.objects.filter",
             return_value=NoPeerLinks(),
         ):
-            instructions = _get_system_instruction(agent, system_directive_block="")
+            instructions = _get_system_instruction(agent)
 
         self.assertIn("Use `update_plan` only for substantial multi-step work", instructions)
         self.assertIn("where a visible plan helps", instructions)

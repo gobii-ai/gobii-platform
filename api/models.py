@@ -8117,7 +8117,7 @@ class PersistentAgentSystemMessageBroadcast(models.Model):
 
 class PersistentAgentSystemMessage(models.Model):
     """
-    High-priority system directives injected into an agent's system prompt.
+    High-priority system directives delivered into an agent's unified history.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

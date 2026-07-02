@@ -66,6 +66,7 @@ from api.agent.core.internal_reasoning import (
     build_internal_reasoning_description,
 )
 from api.agent.core.prompt_context import (
+    build_prompt_context_preview,
     get_agent_tools,
     get_prompt_token_budget,
     message_history_limit,
@@ -2932,8 +2933,8 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("Test Sheets", content)
         self.assertIn("search_tools", content)
 
-    def test_admin_system_message_is_injected_once(self):
-        """Admin-authored system directives should appear in the system prompt and be marked delivered."""
+    def test_admin_system_message_is_delivered_once_in_same_run_unified_history(self):
+        """Admin-authored directives should be delivered as same-run unified history steps."""
         directive = PersistentAgentSystemMessage.objects.create(
             agent=self.agent,
             body="Drop everything and update the quarterly results deck today.",
@@ -2946,9 +2947,14 @@ class PromptContextBuilderTests(TestCase):
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
         self.assertIsNotNone(system_message)
-        content = system_message['content']
-        self.assertIn("A note from the Gobii team:", content)
-        self.assertIn("Drop everything and update the quarterly results deck today.", content)
+        self.assertNotIn("A note from the Gobii team:", system_message["content"])
+        self.assertNotIn("Drop everything and update the quarterly results deck today.", system_message["content"])
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        user_content = user_message["content"]
+        self.assertIn("System directive delivered:", user_content)
+        self.assertIn("Drop everything and update the quarterly results deck today.", user_content)
 
         sys_steps = PersistentAgentSystemStep.objects.filter(
             code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
@@ -2967,6 +2973,9 @@ class PromptContextBuilderTests(TestCase):
         second_system = next((m for m in second_context if m['role'] == 'system'), None)
         self.assertIsNotNone(second_system)
         self.assertNotIn("Drop everything and update the quarterly results deck today.", second_system['content'])
+        second_user = next((m for m in second_context if m["role"] == "user"), None)
+        self.assertIsNotNone(second_user)
+        self.assertEqual(second_user["content"].count("Drop everything and update the quarterly results deck today."), 1)
         self.assertEqual(
             PersistentAgentSystemStep.objects.filter(
                 code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
@@ -2975,8 +2984,42 @@ class PromptContextBuilderTests(TestCase):
             1,
         )
 
+    def test_prompt_preview_does_not_consume_system_messages(self):
+        """Preview rendering must not deliver pending directives or expose them in prompts."""
+        directive = PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Preview-only directive should remain pending.",
+            created_by=self.user,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context_preview(self.agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(system_message)
+        self.assertIsNotNone(user_message)
+        self.assertNotIn("Preview-only directive should remain pending.", system_message["content"])
+        self.assertNotIn("Preview-only directive should remain pending.", user_message["content"])
+
+        directive.refresh_from_db()
+        self.assertIsNone(directive.delivered_at)
+        self.assertFalse(
+            PersistentAgentSystemStep.objects.filter(
+                code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
+                step__agent=self.agent,
+            ).exists()
+        )
+
     def test_prompt_archive_saved_to_storage(self):
         """Prompt archives should be written to object storage as compressed JSON."""
+        PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Archive this directive in unified history.",
+            created_by=self.user,
+        )
+
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, prompt_archive_id = build_prompt_context(self.agent)
@@ -2996,6 +3039,9 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(payload["token_budget"], get_prompt_token_budget(self.agent))
         self.assertIn("system_prompt", payload)
         self.assertIn("user_prompt", payload)
+        self.assertNotIn("Archive this directive in unified history.", payload["system_prompt"])
+        self.assertIn("System directive delivered:", payload["user_prompt"])
+        self.assertIn("Archive this directive in unified history.", payload["user_prompt"])
         user_message = next((m for m in context if m["role"] == "user"), None)
         self.assertIsNotNone(user_message)
         self.assertEqual(payload["user_prompt"], user_message["content"])
