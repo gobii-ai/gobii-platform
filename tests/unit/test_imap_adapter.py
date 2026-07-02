@@ -5,6 +5,7 @@ from email.message import EmailMessage
 
 from django.test import TestCase, override_settings, tag
 
+from api.agent.comms.chat_email_display_cache import CHAT_BODY_HTML_CACHE_KEY
 from api.agent.comms.imap_adapter import ImapEmailAdapter, ImapParsedContext
 
 
@@ -92,6 +93,8 @@ class ImapAdapterTests(TestCase):
             parsed.raw_payload.get("body_html"),
             "<table><tr><td><strong>Rich</strong></td></tr></table>\n",
         )
+        self.assertIn(CHAT_BODY_HTML_CACHE_KEY, parsed.raw_payload)
+        self.assertIn("<strong>Rich</strong>", parsed.raw_payload[CHAT_BODY_HTML_CACHE_KEY])
 
     def test_attached_message_html_is_not_preserved_as_top_level_body(self):
         raw = self._build_with_attached_message()

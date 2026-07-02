@@ -20,13 +20,11 @@ type TimelineScrollControllerOptions = {
   contentVersion: string
   eventCount: number
   fetchPreviousPage: () => Promise<unknown>
-  hasMoreOlder: boolean
   hasPreviousPage: boolean
   initialLoading: boolean
   isFetchPreviousPageError: boolean
   isFetchingPreviousPage: boolean
   isNewAgent: boolean
-  loadingOlder: boolean
   pageCount: number
   setAutoScrollPinned: (pinned: boolean) => void
   switchingAgentId: string | null
@@ -53,13 +51,11 @@ export function useTimelineScrollController({
   contentVersion,
   eventCount,
   fetchPreviousPage,
-  hasMoreOlder,
   hasPreviousPage,
   initialLoading,
   isFetchPreviousPageError,
   isFetchingPreviousPage,
   isNewAgent,
-  loadingOlder,
   pageCount,
   setAutoScrollPinned,
   switchingAgentId,
@@ -80,7 +76,6 @@ export function useTimelineScrollController({
   const [contentNode, setContentNode] = useState<HTMLDivElement | null>(null)
   const [composerNode, setComposerNode] = useState<HTMLDivElement | null>(null)
   const [isNearBottom, setIsNearBottom] = useState(true)
-  const [timelineCanScroll, setTimelineCanScroll] = useState(false)
 
   useEffect(() => {
     pinnedRef.current = autoScrollPinned
@@ -100,8 +95,6 @@ export function useTimelineScrollController({
     }
     const nearBottom = bottomDistance(container) <= NEAR_BOTTOM_PX
     setIsNearBottom((current) => (current === nearBottom ? current : nearBottom))
-    const scrollable = canScroll(container)
-    setTimelineCanScroll((current) => (current === scrollable ? current : scrollable))
   }, [])
 
   const scrollToBottomNow = useCallback(() => {
@@ -200,7 +193,7 @@ export function useTimelineScrollController({
     scrollToBottomAcrossFrames(3)
   }, [scrollToBottomAcrossFrames, scrollToBottomNow, setAutoScrollPinned])
 
-  const requestPreviousPage = useCallback(() => {
+  const requestPreviousPage = useCallback((options?: { preservePinned?: boolean }) => {
     if (
       fetchOlderInFlightRef.current
       || !hasPreviousPage
@@ -211,11 +204,17 @@ export function useTimelineScrollController({
     }
 
     cancelPendingBottomScroll()
+    const shouldRestorePinned = Boolean(options?.preservePinned && pinnedRef.current)
     prependAnchorRef.current = capturePrependAnchor()
-    setPinned(false)
+    if (!options?.preservePinned) {
+      setPinned(false)
+    }
     fetchOlderInFlightRef.current = true
     void fetchPreviousPage().finally(() => {
       fetchOlderInFlightRef.current = false
+      if (shouldRestorePinned) {
+        setPinned(true)
+      }
     })
   }, [
     fetchPreviousPage,
@@ -341,6 +340,36 @@ export function useTimelineScrollController({
 
   useEffect(() => {
     const container = timelineNode
+    if (
+      !container
+      || initialLoading
+      || isNewAgent
+      || switchingAgentId
+      || eventCount === 0
+      || !hasPreviousPage
+      || isFetchPreviousPageError
+      || isFetchingPreviousPage
+      || canScroll(container)
+    ) {
+      return
+    }
+
+    requestPreviousPage({ preservePinned: true })
+  }, [
+    contentVersion,
+    eventCount,
+    hasPreviousPage,
+    initialLoading,
+    isFetchPreviousPageError,
+    isFetchingPreviousPage,
+    isNewAgent,
+    requestPreviousPage,
+    switchingAgentId,
+    timelineNode,
+  ])
+
+  useEffect(() => {
+    const container = timelineNode
     if (!container || typeof ResizeObserver === 'undefined') {
       return
     }
@@ -381,24 +410,12 @@ export function useTimelineScrollController({
     }
   }, [pinAndJumpToBottom])
 
-  const showOlderLoadButton = (
-    !initialLoading
-    && !isNewAgent
-    && !switchingAgentId
-    && eventCount > 0
-    && hasMoreOlder
-    && !loadingOlder
-    && !timelineCanScroll
-  )
-
   return {
     autoScrollPinnedRef: pinnedRef,
     isNearBottom,
     pinAndJumpToBottom,
-    requestPreviousPage,
     scrollOnComposerFocus,
     scrollToBottom,
-    showOlderLoadButton,
     timelineContentRef,
     timelineRef,
     composerShellRef,

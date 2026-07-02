@@ -4,7 +4,7 @@ import { Check, Copy, Flag } from 'lucide-react'
 import type { AgentMessage } from './types'
 import { MessageContent } from './MessageContent'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
-import { formatRelativeTimestamp } from '../../util/time'
+import { useRelativeTimestamp } from '../../hooks/useRelativeTimestamp'
 import { sanitizeHtml } from '../../util/sanitize'
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -142,7 +142,8 @@ export const MessageEventCard = memo(function MessageEventCard({
     showChannelTag = true
   }
 
-  const relativeLabel = message.relativeTimestamp || formatRelativeTimestamp(message.timestamp) || ''
+  const liveRelativeLabel = useRelativeTimestamp(message.timestamp)
+  const relativeLabel = liveRelativeLabel || message.relativeTimestamp || ''
   const status = message.status
   const statusLabel = status === 'sending' ? 'Sending...' : status === 'failed' ? 'Failed to send' : null
   const metaLabel = statusLabel || relativeLabel || message.timestamp || ''

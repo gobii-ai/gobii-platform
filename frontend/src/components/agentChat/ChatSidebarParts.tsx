@@ -128,7 +128,9 @@ type AgentListItemProps = {
   isActive: boolean
   isSwitching: boolean
   isFavorite?: boolean
+  isMuted?: boolean
   onSelect: (agent: AgentRosterEntry) => void
+  onOpenContextMenu?: (agent: AgentRosterEntry, position: { x: number; y: number }) => void
   onToggleFavorite?: (agentId: string) => void
   variant: 'drawer' | 'sidebar'
   collapsed?: boolean
@@ -153,7 +155,9 @@ export function AgentListItem({
   isActive,
   isSwitching,
   isFavorite = false,
+  isMuted = false,
   onSelect,
+  onOpenContextMenu,
   onToggleFavorite,
   variant,
   collapsed,
@@ -167,7 +171,7 @@ export function AgentListItem({
   const hoverDescription = longDescription && longDescription !== miniDescription ? longDescription : undefined
   const showFavoriteButton = Boolean(onToggleFavorite) && (variant === 'drawer' || !collapsed) && showFavoriteToggle
   const isWorking = Boolean(agent.processingActive)
-  const hasUnread = Boolean(agent.hasUnreadAgentMessage)
+  const hasUnread = Boolean(agent.hasUnreadAgentMessage) && !isMuted
   const showCollapsedUnreadBadge = variant === 'sidebar' && Boolean(collapsed) && hasUnread
   const showUnreadSlot = variant === 'drawer' || !collapsed
   const collapsedTitle = isWorking ? `${agent.name || 'Agent'} • Working` : agent.name || 'Agent'
@@ -187,6 +191,23 @@ export function AgentListItem({
     onToggleFavorite?.(agent.id)
   }
 
+  const handleContextMenu = (event: MouseEvent<HTMLButtonElement>) => {
+    if (!onOpenContextMenu) {
+      return
+    }
+    event.preventDefault()
+    onOpenContextMenu(agent, { x: event.clientX, y: event.clientY })
+  }
+
+  const handleRowKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (!onOpenContextMenu || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) {
+      return
+    }
+    event.preventDefault()
+    const rect = event.currentTarget.getBoundingClientRect()
+    onOpenContextMenu(agent, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+  }
+
   return (
     <button
       type="button"
@@ -198,11 +219,15 @@ export function AgentListItem({
       data-enabled={agent.isActive ? 'true' : 'false'}
       data-working={isWorking ? 'true' : 'false'}
       data-unread={hasUnread ? 'true' : 'false'}
+      data-muted={isMuted ? 'true' : 'false'}
       data-collapsed={collapsed && variant === 'sidebar' ? 'true' : 'false'}
       onClick={() => onSelect(agent)}
+      onContextMenu={handleContextMenu}
+      onKeyDown={handleRowKeyDown}
       title={variant === 'sidebar' && collapsed ? (hasUnread ? `${collapsedTitle} • Unread` : collapsedTitle) : undefined}
       role="listitem"
       aria-current={isActive ? 'page' : undefined}
+      aria-haspopup={onOpenContextMenu ? 'menu' : undefined}
     >
       <span className="agent-roster-item__leading">
         {showUnreadSlot ? (

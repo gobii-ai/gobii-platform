@@ -2912,6 +2912,10 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
             [],
         )
+        muted_agent_ids = resolved_preferences.get(
+            UserPreference.KEY_AGENT_CHAT_MUTED_AGENT_IDS,
+            [],
+        )
         insights_panel_expanded = resolved_preferences.get(
             UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED
         )
@@ -2982,15 +2986,18 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
             .order_by("name")
         )
-        shared_qs = (
-            shared_agent_queryset_for(request.user)
-            .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
-        )
         agent_ids = list(agents_qs.values_list("id", flat=True))
-        if agent_ids:
-            shared_qs = shared_qs.exclude(id__in=agent_ids)
         agents = list(agents_qs)
-        shared_agents = list(shared_qs.order_by("name"))
+        if context_info.current_context.type == "personal":
+            shared_qs = (
+                shared_agent_queryset_for(request.user)
+                .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
+            )
+            if agent_ids:
+                shared_qs = shared_qs.exclude(id__in=agent_ids)
+            shared_agents = list(shared_qs.order_by("name"))
+        else:
+            shared_agents = []
         collaborators_by_agent_id = {agent.id for agent in shared_agents}
         agents += shared_agents
         enrich_agents_for_card_surface(agents, owner)
@@ -3106,6 +3113,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "requested_agent_status": requested_agent_status,
                 "agent_roster_sort_mode": agent_roster_sort_mode,
                 "favorite_agent_ids": favorite_agent_ids,
+                "muted_agent_ids": muted_agent_ids,
                 "insights_panel_expanded": insights_panel_expanded,
                 "agent_chat_notifications_enabled": agent_chat_notifications_enabled,
                 "billingStatus": billing_status,

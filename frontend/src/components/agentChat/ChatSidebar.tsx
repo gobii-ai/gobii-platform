@@ -1,5 +1,6 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
-import { ArrowLeftRight, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { ArrowLeftRight, Bell, BellOff, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Settings } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -25,10 +26,33 @@ import {
 import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
 
 const SEARCH_THRESHOLD = 6
+const CONTEXT_MENU_WIDTH = 208
+const CONTEXT_MENU_HEIGHT = 104
+const CONTEXT_MENU_MARGIN = 8
+
+type ContextMenuPosition = {
+  x: number
+  y: number
+}
+
+type AgentContextMenuState = ContextMenuPosition & {
+  agent: AgentRosterEntry
+}
+
+function clampContextMenuPosition(x: number, y: number): ContextMenuPosition {
+  if (typeof window === 'undefined') {
+    return { x, y }
+  }
+  return {
+    x: Math.min(Math.max(CONTEXT_MENU_MARGIN, x), Math.max(CONTEXT_MENU_MARGIN, window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_MARGIN)),
+    y: Math.min(Math.max(CONTEXT_MENU_MARGIN, y), Math.max(CONTEXT_MENU_MARGIN, window.innerHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_MARGIN)),
+  }
+}
 
 type ChatSidebarProps = {
   agents?: AgentRosterEntry[]
   favoriteAgentIds?: string[]
+  mutedAgentIds?: string[]
   activeAgentId?: string | null
   switchingAgentId?: string | null
   loading?: boolean
@@ -38,6 +62,7 @@ type ChatSidebarProps = {
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
+  onToggleAgentMute?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
   onBlockedCreateAgent?: (location: 'sidebar') => void
@@ -60,6 +85,7 @@ type ChatSidebarProps = {
 export const ChatSidebar = memo(function ChatSidebar({
   agents = [],
   favoriteAgentIds = [],
+  mutedAgentIds = [],
   activeAgentId,
   switchingAgentId,
   loading = false,
@@ -69,6 +95,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onSelectAgent,
   onConfigureAgent,
   onToggleAgentFavorite,
+  onToggleAgentMute,
   onCreateAgent,
   createAgentDisabledReason = null,
   onBlockedCreateAgent,
@@ -100,6 +127,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [drawerViewMode, setDrawerViewMode] = useState<AgentDrawerViewMode>('list')
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
+  const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null)
 
   const showSettingsView = showEmbeddedSettings && Boolean(embeddedSettingsPanel)
   const showGalleryShellSwitcher = Boolean(onGalleryShellPageChange)
@@ -116,6 +145,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [agents, searchQuery])
 
   const favoriteAgentIdSet = useMemo(() => new Set(favoriteAgentIds), [favoriteAgentIds])
+  const mutedAgentIdSet = useMemo(() => new Set(mutedAgentIds), [mutedAgentIds])
   const hasFavoritesInRoster = useMemo(
     () => agents.some((agent) => favoriteAgentIdSet.has(agent.id)),
     [agents, favoriteAgentIdSet],
@@ -255,6 +285,64 @@ export const ChatSidebar = memo(function ChatSidebar({
     }
   }, [createAgentDisabled, isMobile, onBlockedCreateAgent, onCreateAgent])
 
+  const closeAgentContextMenu = useCallback(() => {
+    setAgentContextMenu(null)
+  }, [])
+
+  const openAgentContextMenu = useCallback((agent: AgentRosterEntry, position: ContextMenuPosition) => {
+    setAgentContextMenu({ agent, ...clampContextMenuPosition(position.x, position.y) })
+  }, [])
+
+  const handleContextMenuMute = useCallback(() => {
+    if (!agentContextMenu) {
+      return
+    }
+    onToggleAgentMute?.(agentContextMenu.agent.id)
+    closeAgentContextMenu()
+  }, [agentContextMenu, closeAgentContextMenu, onToggleAgentMute])
+
+  const handleContextMenuSettings = useCallback(() => {
+    if (!agentContextMenu) {
+      return
+    }
+    onConfigureAgent?.(agentContextMenu.agent)
+    closeAgentContextMenu()
+    if (isMobile) {
+      setDrawerOpen(false)
+    }
+  }, [agentContextMenu, closeAgentContextMenu, isMobile, onConfigureAgent])
+
+  useEffect(() => {
+    if (!agentContextMenu || typeof document === 'undefined') {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (contextMenuRef.current?.contains(event.target as Node)) {
+        return
+      }
+      closeAgentContextMenu()
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeAgentContextMenu()
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    document.addEventListener('keydown', handleKeyDown, true)
+    window.addEventListener('resize', closeAgentContextMenu)
+    window.addEventListener('scroll', closeAgentContextMenu, true)
+    contextMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true)
+      document.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('resize', closeAgentContextMenu)
+      window.removeEventListener('scroll', closeAgentContextMenu, true)
+    }
+  }, [agentContextMenu, closeAgentContextMenu])
+
   const sidebarLogoSrc = '/static/images/gobii_fish.png'
   const sidebarLogoAlt = 'Gobii Fish'
 
@@ -266,10 +354,61 @@ export const ChatSidebar = memo(function ChatSidebar({
   const shellTitle = SELECTION_SHELL_PAGE_LABELS[galleryShellPage] ?? 'Agents'
   const showHeaderPageSwitcher = !collapsed && showGalleryShellSwitcher && galleryMode
   const showOrganizationShellPage = settings?.context ? settings.context.type === 'organization' : true
+  const contextMenuMuted = agentContextMenu ? mutedAgentIdSet.has(agentContextMenu.agent.id) : false
+  const contextMenuRoot = typeof document !== 'undefined' ? document.body : null
+  const agentContextMenuElement = agentContextMenu && contextMenuRoot
+    ? createPortal(
+      <div
+        ref={contextMenuRef}
+        className="agent-roster-context-menu sidebar-settings__menu"
+        role="menu"
+        aria-label={`${agentContextMenu.agent.name || 'Agent'} actions`}
+        style={{ left: agentContextMenu.x, top: agentContextMenu.y }}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          className="sidebar-settings__link agent-roster-context-menu__item"
+          onClick={handleContextMenuMute}
+          disabled={!onToggleAgentMute}
+        >
+          {contextMenuMuted ? <Bell className="sidebar-settings__link-icon" /> : <BellOff className="sidebar-settings__link-icon" />}
+          <span>{contextMenuMuted ? 'Unmute' : 'Mute'}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="sidebar-settings__link agent-roster-context-menu__item"
+          onClick={handleContextMenuSettings}
+          disabled={!onConfigureAgent}
+        >
+          <Settings className="sidebar-settings__link-icon" />
+          <span>Settings</span>
+        </button>
+      </div>,
+      contextMenuRoot,
+    )
+    : null
 
   const renderListContent = useCallback((variant: 'drawer' | 'sidebar', collapsedView: boolean) => {
     const sourceAgents = collapsedView ? collapsedFilteredAgents : filteredAgents
     const emptyCount = collapsedView ? collapsedFilteredAgents.length : filteredAgents.length
+    const renderAgentItem = (agent: AgentRosterEntry, isFavorite: boolean) => (
+      <AgentListItem
+        key={agent.id}
+        variant={variant}
+        agent={agent}
+        isActive={agent.id === activeAgentId}
+        isSwitching={agent.id === switchingAgentId}
+        isFavorite={isFavorite}
+        isMuted={mutedAgentIdSet.has(agent.id)}
+        onSelect={handleAgentSelect}
+        onOpenContextMenu={openAgentContextMenu}
+        onToggleFavorite={onToggleAgentFavorite}
+        collapsed={collapsedView}
+        showFavoriteToggle={!collapsedView}
+      />
+    )
 
     return (
       <>
@@ -314,20 +453,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         />
 
         {collapsedView ? (
-          sourceAgents.map((agent) => (
-            <AgentListItem
-              key={agent.id}
-              variant={variant}
-              agent={agent}
-              isActive={agent.id === activeAgentId}
-              isSwitching={agent.id === switchingAgentId}
-              isFavorite={favoriteAgentIdSet.has(agent.id)}
-              onSelect={handleAgentSelect}
-              onToggleFavorite={onToggleAgentFavorite}
-              collapsed={collapsedView}
-              showFavoriteToggle={false}
-            />
-          ))
+          sourceAgents.map((agent) => renderAgentItem(agent, favoriteAgentIdSet.has(agent.id)))
         ) : hasFavoritesInRoster ? (
           <>
             <AgentListSectionHeader
@@ -335,52 +461,16 @@ export const ChatSidebar = memo(function ChatSidebar({
               label="Favorites"
               count={favoriteFilteredAgents.length}
             />
-            {favoriteFilteredAgents.map((agent) => (
-              <AgentListItem
-                key={agent.id}
-                variant={variant}
-                agent={agent}
-                isActive={agent.id === activeAgentId}
-                isSwitching={agent.id === switchingAgentId}
-                isFavorite={true}
-                onSelect={handleAgentSelect}
-                onToggleFavorite={onToggleAgentFavorite}
-                collapsed={collapsedView}
-              />
-            ))}
+            {favoriteFilteredAgents.map((agent) => renderAgentItem(agent, true))}
             <AgentListSectionHeader
               variant={variant}
               label="All agents"
               count={allFilteredAgents.length}
             />
-            {allFilteredAgents.map((agent) => (
-              <AgentListItem
-                key={agent.id}
-                variant={variant}
-                agent={agent}
-                isActive={agent.id === activeAgentId}
-                isSwitching={agent.id === switchingAgentId}
-                isFavorite={false}
-                onSelect={handleAgentSelect}
-                onToggleFavorite={onToggleAgentFavorite}
-                collapsed={collapsedView}
-              />
-            ))}
+            {allFilteredAgents.map((agent) => renderAgentItem(agent, false))}
           </>
         ) : (
-          sourceAgents.map((agent) => (
-            <AgentListItem
-              key={agent.id}
-              variant={variant}
-              agent={agent}
-              isActive={agent.id === activeAgentId}
-              isSwitching={agent.id === switchingAgentId}
-              isFavorite={false}
-              onSelect={handleAgentSelect}
-              onToggleFavorite={onToggleAgentFavorite}
-              collapsed={collapsedView}
-            />
-          ))
+          sourceAgents.map((agent) => renderAgentItem(agent, false))
         )}
       </>
     )
@@ -400,8 +490,10 @@ export const ChatSidebar = memo(function ChatSidebar({
     hasAgents,
     hasFavoritesInRoster,
     loading,
+    mutedAgentIdSet,
     onCreateAgent,
     onToggleAgentFavorite,
+    openAgentContextMenu,
     searchQuery,
     switchingAgentId,
     teamTemplateMenu,
@@ -418,6 +510,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         }
       : null
     return (
+      <>
       <div ref={setSidebarRootRef} className="chat-sidebar-mobile-content">
         <AgentChatButton
           className="agent-fab"
@@ -547,10 +640,13 @@ export const ChatSidebar = memo(function ChatSidebar({
           {!showSettingsView && settings ? <SidebarSettingsMenu {...settings} variant="drawer" /> : null}
         </AgentChatMobileSheet>
       </div>
+      {agentContextMenuElement}
+      </>
     )
   }
 
   return (
+    <>
     <aside
       ref={setSidebarRootRef}
       className={`chat-sidebar chat-sidebar--${desktopMode}`}
@@ -689,5 +785,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         ) : null}
       </div>
     </aside>
+    {agentContextMenuElement}
+    </>
   )
 })

@@ -183,6 +183,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   connectionDetail?: string | null
   agentRoster?: AgentRosterEntry[]
   favoriteAgentIds?: string[]
+  mutedAgentIds?: string[]
   activeAgentId?: string | null
   insightsPanelExpandedPreference?: boolean | null
   switchingAgentId?: string | null
@@ -191,6 +192,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
+  onToggleAgentMute?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
   onBlockedCreateAgent?: (location: 'sidebar') => void
@@ -266,8 +268,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
   highPriorityBanner?: HighPriorityBannerConfig | null
-  showOlderLoadButton?: boolean
-  onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
   onClose?: () => void
@@ -381,6 +381,7 @@ export function AgentChatLayout({
   connectionDetail,
   agentRoster,
   favoriteAgentIds,
+  mutedAgentIds,
   activeAgentId,
   insightsPanelExpandedPreference = null,
   switchingAgentId,
@@ -391,6 +392,7 @@ export function AgentChatLayout({
   onSelectAgent,
   onConfigureAgent,
   onToggleAgentFavorite,
+  onToggleAgentMute,
   onCreateAgent,
   createAgentDisabledReason = null,
   onBlockedCreateAgent,
@@ -464,8 +466,6 @@ export function AgentChatLayout({
   showTaskCreditsUpgrade = false,
   taskCreditsDismissKey = null,
   highPriorityBanner = null,
-  showOlderLoadButton = false,
-  onLoadOlder,
   hasMoreNewer,
   processingActive,
   awaitingResponse = false,
@@ -1499,6 +1499,7 @@ export function AgentChatLayout({
         onDesktopModeChange={handleSidebarModeChange}
         agents={agentRoster}
         favoriteAgentIds={favoriteAgentIds}
+        mutedAgentIds={mutedAgentIds}
         activeAgentId={activeAgentId}
         switchingAgentId={switchingAgentId}
         loading={rosterLoading}
@@ -1506,6 +1507,7 @@ export function AgentChatLayout({
         onSelectAgent={onSelectAgent}
         onConfigureAgent={onConfigureAgent}
         onToggleAgentFavorite={onToggleAgentFavorite}
+        onToggleAgentMute={onToggleAgentMute}
         onCreateAgent={onCreateAgent}
         createAgentDisabledReason={createAgentDisabledReason}
         onBlockedCreateAgent={onBlockedCreateAgent}
@@ -1639,7 +1641,6 @@ export function AgentChatLayout({
             onHardLimitQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
             onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
             onJumpToLatest={onJumpToLatest}
-            onLoadOlder={onLoadOlder}
             onMessageCopied={handleMessageCopied}
             onMessageLinkClick={handleMessageLinkClick}
             onPurchaseSeats={handlePurchaseSeats}
@@ -1653,7 +1654,6 @@ export function AgentChatLayout({
             showHardLimitCallout={showHardLimitCallout}
             showJumpButton={showJumpButton}
             showNoSeatsCallout={showNoSeatsCallout}
-            showOlderLoadButton={showOlderLoadButton}
             showProcessingIndicator={showProcessingIndicator}
             showScheduledResumeEvent={showScheduledResumeEvent}
             showStarterPrompts={pendingActionRequests.length === 0 && signupPreviewState === 'none' && (starterPromptsLoading || starterPrompts.length > 0)}

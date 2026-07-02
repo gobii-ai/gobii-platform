@@ -43,6 +43,7 @@ const {
   rosterState: {
     agents: [] as unknown[],
     agentChatNotificationsEnabled: true,
+    mutedAgentIds: [] as string[],
   },
   llmIntelligence: {
     systemDefaultTier: 'standard',
@@ -127,6 +128,7 @@ vi.mock('../api/userPreferences', () => ({
   updateUserPreferences: updateUserPreferencesMock,
   parseFavoriteAgentIdsPreference: vi.fn(() => []),
   USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: 'agent_chat_notifications_enabled',
+  USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS: 'agent_chat_muted_agent_ids',
   USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: 'agent_chat_insights_panel_expanded',
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: 'agent_chat_roster_favorite_agent_ids',
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE: 'agent_chat_roster_sort_mode',
@@ -313,6 +315,7 @@ vi.mock('../hooks/useAgentRoster', () => ({
       agents: rosterState.agents,
       agentRosterSortMode: 'recent',
       favoriteAgentIds: [],
+      mutedAgentIds: rosterState.mutedAgentIds,
       insightsPanelExpanded: null,
       agentChatNotificationsEnabled: rosterState.agentChatNotificationsEnabled,
       requestedAgentStatus: null,
@@ -511,6 +514,7 @@ describe('AgentChatPage trial onboarding', () => {
     agentChatStoreState.awaitingResponse = false
     rosterState.agents = []
     rosterState.agentChatNotificationsEnabled = true
+    rosterState.mutedAgentIds = []
     agentChatStoreState.signupPreviewState = 'none'
     agentChatStoreState.processingActive = false
     FakeNotification.permission = 'granted'

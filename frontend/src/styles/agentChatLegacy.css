@@ -5251,7 +5251,7 @@
     opacity: 0.8;
 }
 .chat-sidebar-logo {
-    height: 2rem;
+    height: 1.55rem;
     width: auto;
     opacity: 0.88;
     flex-shrink: 0;
@@ -6692,6 +6692,15 @@
 .sidebar-settings__credits-trigger:focus-visible {
     outline: 2px solid rgba(221, 214, 254, 0.36);
     outline-offset: 1px;
+}
+.agent-roster-context-menu {
+    position: fixed;
+    z-index: 120;
+    width: 13rem;
+}
+.agent-roster-context-menu__item:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
 }
 .sidebar-settings__notification-toggle {
     justify-content: space-between;

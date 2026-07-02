@@ -89,6 +89,7 @@ type HarnessProps = {
   enabled?: boolean
   activeAgentId?: string | null
   availableAgentIds?: string[]
+  mutedAgentIds?: string[]
   currentContext?: { type: 'personal' | 'organization'; id: string; name: string } | null
   onOpenAgent?: (agentId: string) => void
 }
@@ -99,6 +100,7 @@ function HookHarness({
   enabled = true,
   activeAgentId = 'agent-1',
   availableAgentIds = ['agent-1', 'agent-2'],
+  mutedAgentIds = [],
   currentContext = { type: 'personal', id: 'user-1', name: 'Test User' },
   onOpenAgent = () => undefined,
 }: HarnessProps) {
@@ -107,6 +109,7 @@ function HookHarness({
     currentContext,
     activeAgentId,
     availableAgentIds,
+    mutedAgentIds,
     onOpenAgent,
   })
 
@@ -361,6 +364,16 @@ describe('useAgentChatNotifications', () => {
       currentContext: { type: 'personal', id: 'user-1', name: 'Test User' },
       activeAgentId: 'agent-1',
       availableAgentIds: ['agent-1', 'agent-2'],
+    })).toBe(false)
+
+    expect(shouldDispatchAgentChatNotification({
+      event: buildNotificationEvent({
+        agent_id: 'agent-2',
+      }),
+      currentContext: { type: 'personal', id: 'user-1', name: 'Test User' },
+      activeAgentId: 'agent-1',
+      availableAgentIds: ['agent-1', 'agent-2'],
+      mutedAgentIds: ['agent-2'],
     })).toBe(false)
   })
 })

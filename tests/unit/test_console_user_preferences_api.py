@@ -35,6 +35,10 @@ class ConsoleUserPreferencesApiTests(TestCase):
             preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS),
             [],
         )
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_MUTED_AGENT_IDS),
+            [],
+        )
         self.assertIsNone(
             preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED),
         )
@@ -138,6 +142,39 @@ class ConsoleUserPreferencesApiTests(TestCase):
             [favorite_agent_id, second_agent_id],
         )
 
+    def test_patch_updates_muted_agent_ids_and_dedupes(self):
+        muted_agent_id = str(uuid.uuid4())
+        duplicate_agent_id = muted_agent_id.upper()
+        second_agent_id = str(uuid.uuid4())
+
+        patch_response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_MUTED_AGENT_IDS: [
+                            muted_agent_id,
+                            duplicate_agent_id,
+                            second_agent_id,
+                        ],
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        patch_preferences = patch_response.json().get("preferences", {})
+        self.assertEqual(
+            patch_preferences.get(UserPreference.KEY_AGENT_CHAT_MUTED_AGENT_IDS),
+            [muted_agent_id, second_agent_id],
+        )
+
+        stored = UserPreference.objects.get(user=self.user)
+        self.assertEqual(
+            (stored.preferences or {}).get(UserPreference.KEY_AGENT_CHAT_MUTED_AGENT_IDS),
+            [muted_agent_id, second_agent_id],
+        )
+
     def test_patch_updates_insights_panel_expanded_preference(self):
         response = self.client.patch(
             self.url,
@@ -225,6 +262,21 @@ class ConsoleUserPreferencesApiTests(TestCase):
                 {
                     "preferences": {
                         UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: ["not-a-uuid"],
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
+    def test_patch_rejects_invalid_muted_agent_ids(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_MUTED_AGENT_IDS: ["not-a-uuid"],
                     }
                 }
             ),

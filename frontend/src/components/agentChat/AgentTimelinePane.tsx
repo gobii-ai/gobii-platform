@@ -48,7 +48,6 @@ type AgentTimelinePaneProps = {
   onHardLimitQuickIncrease?: () => void
   onIncomingAnimationConsumed?: (cursor: string) => void
   onJumpToLatest?: () => void
-  onLoadOlder?: () => void
   onMessageCopied?: (message: AgentMessage) => void | Promise<void>
   onMessageLinkClick?: (href: string) => boolean | void
   onPurchaseSeats?: () => void
@@ -62,7 +61,6 @@ type AgentTimelinePaneProps = {
   showHardLimitCallout?: boolean
   showJumpButton?: boolean
   showNoSeatsCallout?: boolean
-  showOlderLoadButton?: boolean
   showProcessingIndicator?: boolean
   showScheduledResumeEvent?: boolean
   showStarterPrompts?: boolean
@@ -112,7 +110,6 @@ export function AgentTimelinePane({
   onHardLimitQuickIncrease,
   onIncomingAnimationConsumed,
   onJumpToLatest,
-  onLoadOlder,
   onMessageCopied,
   onMessageLinkClick,
   onPurchaseSeats,
@@ -126,7 +123,6 @@ export function AgentTimelinePane({
   showHardLimitCallout = false,
   showJumpButton = false,
   showNoSeatsCallout = false,
-  showOlderLoadButton = false,
   showProcessingIndicator = false,
   showScheduledResumeEvent = false,
   showStarterPrompts = false,
@@ -172,13 +168,6 @@ export function AgentTimelinePane({
                     <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
                     <span className="timeline-load-label">Loading…</span>
                   </div>
-                </div>
-              ) : showOlderLoadButton && onLoadOlder ? (
-                <div className="timeline-load-control" data-side="older" data-state="ready">
-                  <button type="button" className="agent-chat-button timeline-load-button" onClick={onLoadOlder}>
-                    <span className="timeline-load-indicator" aria-hidden="true" />
-                    <span className="timeline-load-label">Load older activity</span>
-                  </button>
                 </div>
               ) : null}
 
