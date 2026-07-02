@@ -5587,6 +5587,7 @@ def _run_agent_loop(
     inferred_message_continue_streak = 0
     pending_reply_after_progress = False
     continuation_notice: Optional[str] = None
+    stale_prompt_system_directive_block = ""
     empty_response_loop_retries = 0
 
     def _current_human_inbound_generation() -> int:
@@ -5709,6 +5710,7 @@ def _run_agent_loop(
                         routing_profile=routing_profile,
                         prefer_low_latency=prefer_low_latency,
                         include_metadata=True,
+                        system_directive_block=stale_prompt_system_directive_block,
                     )
                 except Exception as exc:
                     log_prompt_construction_error(
@@ -5738,6 +5740,9 @@ def _run_agent_loop(
                 prompt_archive_attached = False
                 latest_human_generation = _current_human_inbound_generation()
                 if latest_human_generation > prompt_human_generation:
+                    stale_prompt_system_directive_block = str(
+                        prompt_metadata.get("system_directive_block") or stale_prompt_system_directive_block or ""
+                    )
                     logger.info(
                         "Agent %s: human input generation changed from %s to %s while building prompt; rebuilding.",
                         agent.id,
@@ -5751,6 +5756,7 @@ def _run_agent_loop(
                     continue
 
                 accepted_human_generation = latest_human_generation
+                stale_prompt_system_directive_block = ""
 
                 # Atomically consume one global step only after accepting the prompt.
                 if budget_ctx is not None:

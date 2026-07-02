@@ -99,7 +99,6 @@ export type AuditSystemMessageEvent = {
   timestamp: string | null
   delivered_at: string | null
   body: string
-  is_active: boolean
   broadcast_id: string | null
   created_by: {
     id: string

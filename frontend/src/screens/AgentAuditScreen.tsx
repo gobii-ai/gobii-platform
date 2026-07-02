@@ -180,7 +180,6 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [messageModalOpen, setMessageModalOpen] = useState(false)
   const [editingMessage, setEditingMessage] = useState<AuditSystemMessageEvent | null>(null)
   const [messageBody, setMessageBody] = useState('')
-  const [messageActive, setMessageActive] = useState(true)
   const [messageSubmitting, setMessageSubmitting] = useState(false)
   const [messageError, setMessageError] = useState<string | null>(null)
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
@@ -334,7 +333,6 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   useEffect(() => {
     if (editingMessage) {
       setMessageBody(editingMessage.body || '')
-      setMessageActive(editingMessage.is_active)
       setMessageModalOpen(true)
     }
   }, [editingMessage])
@@ -412,7 +410,6 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const resetMessageForm = () => {
     setEditingMessage(null)
     setMessageBody('')
-    setMessageActive(true)
     setMessageModalOpen(false)
     setMessageError(null)
   }
@@ -428,8 +425,8 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
     try {
       const payload =
         editingMessage != null
-          ? await updateSystemMessage(agentId, editingMessage.id, { body: messageBody, is_active: messageActive })
-          : await createSystemMessage(agentId, { body: messageBody, is_active: messageActive })
+          ? await updateSystemMessage(agentId, editingMessage.id, { body: messageBody })
+          : await createSystemMessage(agentId, { body: messageBody })
       useAgentAuditStore.getState().receiveRealtimeEvent(payload)
       resetMessageForm()
     } catch (err) {
@@ -759,7 +756,6 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
               onClick={() => {
                 setEditingMessage(null)
                 setMessageBody('')
-                setMessageActive(true)
                 setMessageModalOpen(true)
                 setMessageError(null)
               }}
@@ -991,7 +987,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
       {messageModalOpen ? (
         <Modal
           title={editingMessage ? 'Edit system message' : 'Add system message'}
-          subtitle="System directives are injected ahead of the agent instructions."
+          subtitle="System directives are delivered into the agent's unified history."
           onClose={resetMessageForm}
           icon={Megaphone}
           iconBgClass="bg-amber-100"
@@ -1029,16 +1025,6 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
                 placeholder="Enter the directive to deliver to this agent..."
                 disabled={messageSubmitting}
               />
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-slate-300 text-amber-700 focus:ring-amber-600"
-                checked={messageActive}
-                onChange={(e) => setMessageActive(e.target.checked)}
-                disabled={messageSubmitting}
-              />
-              Keep active for future prompts
             </label>
             {messageError ? <div className="text-sm text-rose-600">{messageError}</div> : null}
           </div>

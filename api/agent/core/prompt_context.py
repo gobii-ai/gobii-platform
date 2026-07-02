@@ -1358,7 +1358,7 @@ def _render_prompt_context_once(
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
     prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = None,
-    system_directive_block: str | None = None,
+    system_directive_block: str = "",
     skip_compaction: bool = False,
     archive_prompt: bool = False,
     record_span: bool = False,
@@ -1878,6 +1878,7 @@ def build_prompt_context(
     routing_profile: Any = None,
     prefer_low_latency: Optional[bool] = None,
     include_metadata: bool = False,
+    system_directive_block: str = "",
 ) -> tuple[List[dict], int, Optional[UUID]] | tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
@@ -1913,7 +1914,8 @@ def build_prompt_context(
             prefer_low_latency=prefer_low_latency,
         )
     )
-    preview_system_directive_block = _preview_system_prompt_messages(agent)
+    if not system_directive_block:
+        system_directive_block = _consume_system_prompt_messages(agent)
 
     provisional_result = None
     max_render_attempts = 3
@@ -1928,7 +1930,7 @@ def build_prompt_context(
             continuation_notice=continuation_notice,
             routing_profile=routing_profile,
             prompt_failover_configs=prompt_failover_configs,
-            system_directive_block=preview_system_directive_block,
+            system_directive_block=system_directive_block,
             skip_compaction=attempt > 0,
             archive_prompt=False,
             record_span=False,
@@ -1965,14 +1967,14 @@ def build_prompt_context(
         continuation_notice=continuation_notice,
         routing_profile=routing_profile,
         prompt_failover_configs=prompt_failover_configs,
-        system_directive_block=preview_system_directive_block,
+        system_directive_block=system_directive_block,
         skip_compaction=True,
         archive_prompt=True,
         record_span=True,
     )
-    if preview_system_directive_block:
-        _consume_system_prompt_messages(agent)
     final_metadata["prompt_failover_configs"] = list(prompt_failover_configs or [])
+    if system_directive_block:
+        final_metadata["system_directive_block"] = system_directive_block
 
     result = (final_messages, final_tokens, final_archive_id)
     if include_metadata:
@@ -2004,7 +2006,6 @@ def build_prompt_context_preview(
             prefer_low_latency=prefer_low_latency,
         )
     )
-    preview_system_directive_block = _preview_system_prompt_messages(agent)
 
     max_render_attempts = 3
     for _attempt in range(max_render_attempts):
@@ -2018,7 +2019,6 @@ def build_prompt_context_preview(
             continuation_notice=continuation_notice,
             routing_profile=routing_profile,
             prompt_failover_configs=prompt_failover_configs,
-            system_directive_block=preview_system_directive_block,
             skip_compaction=True,
             archive_prompt=False,
             record_span=False,
@@ -2054,7 +2054,6 @@ def build_prompt_context_preview(
         continuation_notice=continuation_notice,
         routing_profile=routing_profile,
         prompt_failover_configs=prompt_failover_configs,
-        system_directive_block=preview_system_directive_block,
         skip_compaction=True,
         archive_prompt=False,
         record_span=False,
@@ -3299,105 +3298,76 @@ def _get_recent_sqlite_retry_warning(agent: PersistentAgent) -> str:
     return _build_sqlite_retry_warning(recent_calls)
 
 
-def _get_pending_system_prompt_message_payloads(
-    agent: PersistentAgent,
-) -> list[tuple[PersistentAgentSystemMessage, str]]:
-    """Load pending admin-authored directives for prompt injection."""
-
-    try:
-        pending_messages = list(
-            agent.system_prompt_messages.filter(
-                is_active=True,
-                delivered_at__isnull=True,
-            ).order_by("created_at")
-        )
-    except Exception:
-        logger.exception(
-            "Failed to process system prompt messages for agent %s. These messages will not be injected in this cycle.",
-            agent.id,
-        )
-        return []
-
-    message_payloads: list[tuple[PersistentAgentSystemMessage, str]] = []
-    for message in pending_messages:
-        text = (message.body or "").strip()
-        if not text:
-            text = "(No directive text provided)"
-        message_payloads.append((message, text))
-    return message_payloads
-
-
-def _format_system_prompt_messages_block(
+def _format_system_directive_prompt_block(
     message_payloads: list[tuple[PersistentAgentSystemMessage, str]],
 ) -> str:
-    """Render admin-authored directives into a system-prompt block."""
+    """Render just-delivered directives as a one-completion system prompt block."""
 
     if not message_payloads:
         return ""
 
-    directives = [
+    directive_lines = [
         f"{idx}. {text}"
         for idx, (_message, text) in enumerate(message_payloads, start=1)
     ]
-    header = (
-        "A note from the Gobii team:\n"
-        "Please address these directive(s) before continuing with your regular work:"
-    )
-    footer = "Acknowledge in your reasoning and act on these promptly."
-    return f"{header}\n" + "\n".join(directives) + f"\n{footer}"
-
-
-def _deliver_system_prompt_messages(
-    agent: PersistentAgent,
-    message_payloads: list[tuple[PersistentAgentSystemMessage, str]],
-) -> None:
-    """Mark injected directives delivered and record audit steps."""
-
-    if not message_payloads:
-        return
-
-    with transaction.atomic():
-        now = dj_timezone.now()
-        message_ids = [message.id for message, _ in message_payloads]
-        PersistentAgentSystemMessage.objects.filter(id__in=message_ids).update(delivered_at=now)
-        _record_system_directive_steps(agent, message_payloads)
-
-        # Broadcast updated delivery status to audit subscribers.
-        try:
-            from console.agent_audit.realtime import broadcast_system_message_audit
-
-            for message, _ in message_payloads:
-                message.delivered_at = now
-                broadcast_system_message_audit(message)
-        except Exception:
-            logger.debug(
-                "Failed to broadcast system directive delivery for agent %s",
-                agent.id,
-                exc_info=True,
-            )
-
-
-def _preview_system_prompt_messages(agent: PersistentAgent) -> str:
-    """Return pending directives without mutating delivery state."""
-
-    return _format_system_prompt_messages_block(
-        _get_pending_system_prompt_message_payloads(agent)
+    return (
+        "## Immediate System Directives From Gobii Operations\n\n"
+        "The following directive(s) were just delivered for this completion. "
+        "They are high-priority operational instructions. Act on them immediately before continuing normal work. "
+        "Do not summarize them, defer them, ignore them, or treat them as background history. "
+        "Follow them unless they conflict with higher-priority system, developer, or tool policy.\n\n"
+        + "\n".join(directive_lines)
     )
 
 
 def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
-    """
-    Return a formatted system directive block issued via the admin panel.
+    """Deliver pending directives as system steps before prompt rendering."""
 
-    Pending directives are marked as delivered so they only appear once.
-    """
+    try:
+        with transaction.atomic():
+            pending_messages = list(
+                agent.system_prompt_messages.select_for_update()
+                .filter(
+                    is_active=True,
+                    delivered_at__isnull=True,
+                )
+                .order_by("created_at")
+            )
+            if not pending_messages:
+                return ""
 
-    message_payloads = _get_pending_system_prompt_message_payloads(agent)
-    directive_block = _format_system_prompt_messages_block(message_payloads)
-    if not directive_block:
+            message_payloads: list[tuple[PersistentAgentSystemMessage, str]] = []
+            for message in pending_messages:
+                text = (message.body or "").strip()
+                if not text:
+                    text = "(No directive text provided)"
+                message_payloads.append((message, text))
+
+            now = dj_timezone.now()
+            message_ids = [message.id for message, _ in message_payloads]
+            PersistentAgentSystemMessage.objects.filter(id__in=message_ids).update(delivered_at=now)
+            _record_system_directive_steps(agent, message_payloads)
+    except DatabaseError:
+        logger.exception(
+            "Failed to deliver system directives for agent %s. These directives will remain pending.",
+            agent.id,
+        )
         return ""
-    _deliver_system_prompt_messages(agent, message_payloads)
-    return directive_block
+
+    try:
+        from console.agent_audit.realtime import broadcast_system_message_audit
+
+        for message, _ in message_payloads:
+            message.delivered_at = now
+            broadcast_system_message_audit(message)
+    except Exception:
+        logger.debug(
+            "Failed to broadcast system directive delivery for agent %s",
+            agent.id,
+            exc_info=True,
+        )
+
+    return _format_system_directive_prompt_block(message_payloads)
 
 
 def _record_system_directive_steps(
@@ -3407,7 +3377,13 @@ def _record_system_directive_steps(
     """Create audit steps for directives delivered to an agent."""
 
     for message, directive_text in message_payloads:
-        description = f"System directive delivered:\n{directive_text}"
+        description = (
+            "System directive delivered:\n"
+            "This is a high-priority directive from Gobii Operations. "
+            "Address it before continuing normal work; do not treat it as background history. "
+            "Follow it unless it conflicts with higher-priority system, developer, or tool policy.\n\n"
+            f"Directive:\n{directive_text}"
+        )
         step = PersistentAgentStep.objects.create(
             agent=agent,
             description=description,
@@ -3596,7 +3572,7 @@ def _get_system_instruction(
     proactive_context: dict | None = None,
     implied_send_context: dict | None = None,
     continuation_notice: str | None = None,
-    system_directive_block: str | None = None,
+    system_directive_block: str = "",
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
@@ -3834,11 +3810,8 @@ def _get_system_instruction(
     )
     base_prompt += "\n\n<sqlite_examples>\n" + _get_sqlite_examples() + "\n</sqlite_examples>"
 
-    directive_block = system_directive_block
-    if directive_block is None:
-        directive_block = _consume_system_prompt_messages(agent)
-    if directive_block:
-        base_prompt += "\n\n" + directive_block
+    if system_directive_block:
+        base_prompt += "\n\n" + system_directive_block
 
     if peer_dm_context:
         base_prompt += (

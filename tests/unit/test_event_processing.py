@@ -66,6 +66,7 @@ from api.agent.core.internal_reasoning import (
     build_internal_reasoning_description,
 )
 from api.agent.core.prompt_context import (
+    build_prompt_context_preview,
     get_agent_tools,
     get_prompt_token_budget,
     message_history_limit,
@@ -2932,8 +2933,8 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("Test Sheets", content)
         self.assertIn("search_tools", content)
 
-    def test_admin_system_message_is_injected_once(self):
-        """Admin-authored system directives should appear in the system prompt and be marked delivered."""
+    def test_admin_system_message_is_delivered_once_with_same_run_system_boost(self):
+        """Admin-authored directives should get a one-shot system boost and unified history step."""
         directive = PersistentAgentSystemMessage.objects.create(
             agent=self.agent,
             body="Drop everything and update the quarterly results deck today.",
@@ -2946,9 +2947,14 @@ class PromptContextBuilderTests(TestCase):
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
         self.assertIsNotNone(system_message)
-        content = system_message['content']
-        self.assertIn("A note from the Gobii team:", content)
-        self.assertIn("Drop everything and update the quarterly results deck today.", content)
+        self.assertIn("Immediate System Directives From Gobii Operations", system_message["content"])
+        self.assertIn("Drop everything and update the quarterly results deck today.", system_message["content"])
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        user_content = user_message["content"]
+        self.assertIn("System directive delivered:", user_content)
+        self.assertIn("Drop everything and update the quarterly results deck today.", user_content)
 
         sys_steps = PersistentAgentSystemStep.objects.filter(
             code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
@@ -2966,7 +2972,11 @@ class PromptContextBuilderTests(TestCase):
 
         second_system = next((m for m in second_context if m['role'] == 'system'), None)
         self.assertIsNotNone(second_system)
+        self.assertNotIn("Immediate System Directives From Gobii Operations", second_system['content'])
         self.assertNotIn("Drop everything and update the quarterly results deck today.", second_system['content'])
+        second_user = next((m for m in second_context if m["role"] == "user"), None)
+        self.assertIsNotNone(second_user)
+        self.assertEqual(second_user["content"].count("Drop everything and update the quarterly results deck today."), 1)
         self.assertEqual(
             PersistentAgentSystemStep.objects.filter(
                 code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
@@ -2975,8 +2985,42 @@ class PromptContextBuilderTests(TestCase):
             1,
         )
 
+    def test_prompt_preview_does_not_consume_system_messages(self):
+        """Preview rendering must not deliver pending directives or expose them in prompts."""
+        directive = PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Preview-only directive should remain pending.",
+            created_by=self.user,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context_preview(self.agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(system_message)
+        self.assertIsNotNone(user_message)
+        self.assertNotIn("Preview-only directive should remain pending.", system_message["content"])
+        self.assertNotIn("Preview-only directive should remain pending.", user_message["content"])
+
+        directive.refresh_from_db()
+        self.assertIsNone(directive.delivered_at)
+        self.assertFalse(
+            PersistentAgentSystemStep.objects.filter(
+                code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
+                step__agent=self.agent,
+            ).exists()
+        )
+
     def test_prompt_archive_saved_to_storage(self):
         """Prompt archives should be written to object storage as compressed JSON."""
+        PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Archive this directive in unified history.",
+            created_by=self.user,
+        )
+
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, prompt_archive_id = build_prompt_context(self.agent)
@@ -2996,6 +3040,10 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(payload["token_budget"], get_prompt_token_budget(self.agent))
         self.assertIn("system_prompt", payload)
         self.assertIn("user_prompt", payload)
+        self.assertIn("Immediate System Directives From Gobii Operations", payload["system_prompt"])
+        self.assertIn("Archive this directive in unified history.", payload["system_prompt"])
+        self.assertIn("System directive delivered:", payload["user_prompt"])
+        self.assertIn("Archive this directive in unified history.", payload["user_prompt"])
         user_message = next((m for m in context if m["role"] == "user"), None)
         self.assertIsNotNone(user_message)
         self.assertEqual(payload["user_prompt"], user_message["content"])
@@ -5230,6 +5278,71 @@ class OrchestratorHumanInputInterruptTests(TestCase):
 
         self.assertEqual(usage.get("total_tokens"), 0)
         mock_completion.assert_not_called()
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_prompt_rebuild_reuses_delivered_system_directive_block(
+        self,
+        mock_build_prompt,
+        mock_completion,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        directive_block = "## Immediate System Directives From Gobii Operations\n\n1. Stay on the urgent deck."
+        directive_blocks: list[str] = []
+
+        def _build_prompt_and_interrupt_once(*_args, **kwargs):
+            directive_blocks.append(kwargs.get("system_directive_block") or "")
+            if len(directive_blocks) == 1:
+                bump_human_inbound_generation(self.agent.id)
+                return (
+                    [{"role": "system", "content": "stale sys"}],
+                    1000,
+                    None,
+                    {"system_directive_block": directive_block},
+                )
+            return (
+                [{"role": "system", "content": kwargs["system_directive_block"]}],
+                1000,
+                None,
+                {},
+            )
+
+        mock_build_prompt.side_effect = _build_prompt_and_interrupt_once
+        response = make_completion_response(content="Done")
+        token_usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "model": "m",
+            "provider": "p",
+        }
+        mock_completion.return_value = (response, token_usage)
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(directive_blocks, ["", directive_block])
+        self.assertIn(directive_block, mock_completion.call_args.kwargs["messages"][0]["content"])
+        self.assertEqual(usage.get("total_tokens"), 15)
 
     @patch("api.agent.core.event_processing._schedule_agent_follow_up")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")

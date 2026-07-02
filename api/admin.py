@@ -3557,7 +3557,7 @@ class SystemMessageForm(forms.Form):
         label="System message",
         widget=forms.Textarea(attrs={"rows": 5, "cols": 80}),
         max_length=2000,
-        help_text="This text will be injected into the agent's system prompt as a Gobii system directive.",
+        help_text="This text will be delivered into the agent's unified history as a Gobii system directive.",
         strip=True,
     )
 
@@ -4924,8 +4924,25 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
         return HttpResponseRedirect(reverse('admin:api_persistentagentcommsendpoint_change', args=[object_id]))
 
 
+class PersistentAgentSystemMessageAdminForm(forms.ModelForm):
+    class Meta:
+        model = PersistentAgentSystemMessage
+        fields = "__all__"
+        labels = {
+            "is_active": "Deliver if pending",
+        }
+        help_texts = {
+            "body": "System directive text delivered into the agent's unified history.",
+            "is_active": (
+                "Uncheck to cancel a directive that has not been delivered yet. "
+                "Delivered directives stay in unified history."
+            ),
+        }
+
+
 @admin.register(PersistentAgentSystemMessage)
 class PersistentAgentSystemMessageAdmin(admin.ModelAdmin):
+    form = PersistentAgentSystemMessageAdminForm
     list_display = ("agent", "created_by", "created_at", "delivered_at", "is_active", "broadcast")
     list_filter = ("is_active", "delivered_at")
     search_fields = ("agent__name", "agent__user__email", "body")
@@ -4942,7 +4959,7 @@ class PersistentAgentSystemMessageBroadcastForm(forms.ModelForm):
             "body": forms.Textarea(attrs={"rows": 5, "cols": 80}),
         }
         help_texts = {
-            "body": "This directive will be duplicated for every persistent agent's system prompt.",
+            "body": "This directive will be duplicated for every persistent agent and delivered into unified history.",
         }
 
 
