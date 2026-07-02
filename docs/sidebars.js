@@ -47,6 +47,7 @@ const sidebars = {
         'using-gobii/files-and-workspaces',
         'using-gobii/secrets-and-credentials',
         'using-gobii/usage-credits-and-limits',
+        'using-gobii/optimizing-credit-usage',
       ],
     },
     {
