@@ -1592,13 +1592,6 @@ class ConsoleStatusView(SystemAdminRequiredMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
-class ConsoleDiagnosticsView(ConsoleViewMixin, TemplateView):
-    template_name = "console/diagnostics.html"
-
-    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
-        return HttpResponseNotAllowed(['GET'])
-
-
 class LegacyConsoleStatusRedirectView(View):
     """Preserve the legacy status URL while redirecting to the staff route."""
 
