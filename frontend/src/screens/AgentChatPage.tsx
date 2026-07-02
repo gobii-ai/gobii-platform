@@ -639,6 +639,20 @@ function favoriteAgentIdsPreferenceEquals(
   return areStringArraysEqual(normalizedCurrentValue, nextValue)
 }
 
+function syncStringListPreference(
+  nextValue: string[] | undefined,
+  setValue: Dispatch<SetStateAction<string[]>>,
+): void {
+  const normalized = Array.isArray(nextValue) ? nextValue : []
+  setValue((current) => areStringArraysEqual(current, normalized) ? current : normalized)
+}
+
+function toggleStringListValue(list: string[], value: string): string[] {
+  return list.includes(value)
+    ? list.filter((candidate) => candidate !== value)
+    : [...list, value]
+}
+
 function updateAgentRosterPreferenceInQueryData<K extends AgentRosterPreferenceField>(
   current: AgentRosterQueryData | undefined,
   field: K,
@@ -1563,26 +1577,9 @@ export function AgentChatPage({
   )
 
   useEffect(() => {
-    const serverFavoriteAgentIds = Array.isArray(rosterQuery.data?.favoriteAgentIds)
-      ? rosterQuery.data.favoriteAgentIds
-      : []
-    setFavoriteAgentIds((current) => (
-      areStringArraysEqual(current, serverFavoriteAgentIds)
-        ? current
-        : serverFavoriteAgentIds
-    ))
-  }, [rosterQuery.data?.favoriteAgentIds])
-
-  useEffect(() => {
-    const serverMutedAgentIds = Array.isArray(rosterQuery.data?.mutedAgentIds)
-      ? rosterQuery.data.mutedAgentIds
-      : []
-    setMutedAgentIds((current) => (
-      areStringArraysEqual(current, serverMutedAgentIds)
-        ? current
-        : serverMutedAgentIds
-    ))
-  }, [rosterQuery.data?.mutedAgentIds])
+    syncStringListPreference(rosterQuery.data?.favoriteAgentIds, setFavoriteAgentIds)
+    syncStringListPreference(rosterQuery.data?.mutedAgentIds, setMutedAgentIds)
+  }, [rosterQuery.data?.favoriteAgentIds, rosterQuery.data?.mutedAgentIds])
 
   useHydratedAgentRosterPreference(
     rosterQuery.data?.insightsPanelExpanded,
@@ -1661,40 +1658,52 @@ export function AgentChatPage({
     [agentRosterSortMode, persistAgentRosterPreference],
   )
 
-  const handleToggleAgentFavorite = useCallback(
-    (agentId: string) => {
-      const nextFavoriteAgentIds = favoriteAgentIds.includes(agentId)
-        ? favoriteAgentIds.filter((candidateId) => candidateId !== agentId)
-        : [...favoriteAgentIds, agentId]
-
-      persistAgentRosterPreference(nextFavoriteAgentIds, {
-        field: 'favoriteAgentIds',
-        preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
-        setState: setFavoriteAgentIds,
+  const toggleAgentIdListPreference = useCallback(
+    (
+      agentId: string,
+      currentValue: string[],
+      {
+        field,
+        preferenceKey,
+        setState,
+      }: {
+        field: 'favoriteAgentIds' | 'mutedAgentIds'
+        preferenceKey: string
+        setState: Dispatch<SetStateAction<string[]>>
+      },
+    ) => {
+      persistAgentRosterPreference(toggleStringListValue(currentValue, agentId), {
+        field,
+        preferenceKey,
+        setState,
         parsePersistedValue: parseFavoriteAgentIdsPreference,
-        currentValue: favoriteAgentIds,
+        currentValue,
         areEqual: favoriteAgentIdsPreferenceEquals,
       })
     },
-    [favoriteAgentIds, persistAgentRosterPreference],
+    [persistAgentRosterPreference],
+  )
+
+  const handleToggleAgentFavorite = useCallback(
+    (agentId: string) => {
+      toggleAgentIdListPreference(agentId, favoriteAgentIds, {
+        field: 'favoriteAgentIds',
+        preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
+        setState: setFavoriteAgentIds,
+      })
+    },
+    [favoriteAgentIds, toggleAgentIdListPreference],
   )
 
   const handleToggleAgentMute = useCallback(
     (agentId: string) => {
-      const nextMutedAgentIds = mutedAgentIds.includes(agentId)
-        ? mutedAgentIds.filter((candidateId) => candidateId !== agentId)
-        : [...mutedAgentIds, agentId]
-
-      persistAgentRosterPreference(nextMutedAgentIds, {
+      toggleAgentIdListPreference(agentId, mutedAgentIds, {
         field: 'mutedAgentIds',
         preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS,
         setState: setMutedAgentIds,
-        parsePersistedValue: parseFavoriteAgentIdsPreference,
-        currentValue: mutedAgentIds,
-        areEqual: favoriteAgentIdsPreferenceEquals,
       })
     },
-    [mutedAgentIds, persistAgentRosterPreference],
+    [mutedAgentIds, toggleAgentIdListPreference],
   )
 
   const handleInsightsPanelExpandedPreferenceChange = useCallback(

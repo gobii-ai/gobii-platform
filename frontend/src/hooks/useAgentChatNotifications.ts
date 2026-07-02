@@ -87,7 +87,7 @@ export function shouldDispatchAgentChatNotification({
   if (!currentContext) {
     return false
   }
-  if (new Set(mutedAgentIds ?? []).has(event.agent_id)) {
+  if (mutedAgentIds?.includes(event.agent_id)) {
     return false
   }
   const knownAgentIds = new Set(availableAgentIds ?? [])

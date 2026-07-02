@@ -6695,8 +6695,6 @@
 }
 .agent-roster-context-menu {
     position: fixed;
-    left: var(--agent-roster-context-menu-x);
-    top: var(--agent-roster-context-menu-y);
     z-index: 120;
     width: 13rem;
 }
