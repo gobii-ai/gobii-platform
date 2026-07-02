@@ -10,7 +10,6 @@ import { storeConsoleContextFromUrlSearch } from './util/consoleContextStorage'
 import './index.css'
 import './styles/consoleShell.css'
 
-const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/DiagnosticsScreen')).DiagnosticsScreen }))
 const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
 const SystemStatusScreen = lazy(async () => ({ default: (await import('./screens/SystemStatusScreen')).SystemStatusScreen }))
 const StaffUsersScreen = lazy(async () => ({ default: (await import('./screens/StaffUsersScreen')).StaffUsersScreen }))
@@ -78,9 +77,6 @@ const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
 const nativeIntegrationsUrl = mountNode.dataset.nativeIntegrationsUrl || null
 
 switch (appName) {
-  case 'diagnostics':
-    screen = <DiagnosticsScreen />
-    break
   case 'system-status':
     screen = <SystemStatusScreen />
     break

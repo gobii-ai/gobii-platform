@@ -236,7 +236,6 @@ from console.legacy_redirects import LegacyConsoleRedirectView
 from console.views import (
     ConsoleHome,
     BillingPortalView,
-    ConsoleDiagnosticsView,
     ConsoleStatusView,
     LegacyConsoleStatusRedirectView,
     SystemSettingsView,
@@ -359,7 +358,6 @@ urlpatterns = [
 
     # console
     path("console/", ConsoleHome.as_view(), name="console-home"),
-    path("console/diagnostics/", ConsoleDiagnosticsView.as_view(), name="console_diagnostics"),
     path("staff/status/", ConsoleStatusView.as_view(), name="console-status"),
     path("console/status/", LegacyConsoleStatusRedirectView.as_view(), name="console-status-legacy"),
     path("staff/mcp/", PlatformMCPServerManagementView.as_view(), name="staff-platform-mcp"),
