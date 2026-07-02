@@ -67,6 +67,45 @@ function normalizeSectionItem(value: unknown): SectionItem | null {
   return { heading: heading ?? 'Section', snippet }
 }
 
+function cleanScrapedMarkdown(value: string, sourceUrl: string | null): string {
+  let source = value
+  const host = sourceUrl ? parseHostname(sourceUrl) : null
+  if (host?.endsWith('wikipedia.org')) {
+    const articleStart = source.indexOf('From Wikipedia, the free encyclopedia')
+    if (articleStart >= 0) {
+      source = source.slice(articleStart)
+    }
+  }
+
+  const normalized = source
+    .replace(/\r\n?/g, '\n')
+    .replace(/\\([[\]()_&])/g, '$1')
+    .replace(/\[([^\]\n]+)\]\(#[^)]+\)/g, '$1')
+    .replace(/\[([^\]\n]+)\n\s*\]\(#[^)]+\)/g, (_, label: string) => label.trim())
+
+  return normalized
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return ''
+      if (trimmed === '[' || trimmed === ']') return ''
+      if (/^(contents|move to sidebar hide|\(top\)|from wikipedia, the free encyclopedia)$/i.test(trimmed)) return ''
+      if (/^\(redirected from\b/i.test(trimmed)) return ''
+      if (/^\[\[edit\]/i.test(trimmed)) return ''
+
+      const samePageAnchorMatch = trimmed.match(/^\]\(#[^)]+\)\s*(.*)$/)
+      if (samePageAnchorMatch) {
+        const trailingText = samePageAnchorMatch[1]?.trim() || ''
+        return /^toggle\b/i.test(trailingText) ? '' : trailingText
+      }
+
+      return line
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 export function BrowserTaskDetail({ entry }: ToolDetailProps) {
   const params = entry.parameters || {}
   let prompt = (params.prompt as string) || null
@@ -137,7 +176,6 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
     pickString(params['markdown']) ||
     (nestedResultString && !looksLikeHtml(nestedResultString) ? nestedResultString : null) ||
     (!parsedResult && rawResultString && !looksLikeHtml(rawResultString) ? rawResultString : null)
-  const readerText = markdownCandidate || pickString(parsedResult?.excerpt) || null
 
   const screenshotUrl =
     pickString(params['screenshot_url']) || pickString(params['screenshot']) || pickString(parsedResult?.screenshot_url)
@@ -148,6 +186,7 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
     pickString(params['target_url']) ||
     pickString(parsedResult?.url)
   const normalizedTargetUrl = normalizeHttpUrl(targetUrl)
+  const readerText = markdownCandidate ? cleanScrapedMarkdown(markdownCandidate, normalizedTargetUrl) : pickString(parsedResult?.excerpt)
   const isScrapeAsMarkdown = (entry.toolName || '').toLowerCase().includes('scrape_as_markdown')
 
   const pageTitle =
@@ -206,6 +245,17 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
               {compressionLabel} trimmed
             </span>
           ) : null}
+          {isScrapeAsMarkdown && normalizedTargetUrl ? (
+            <a
+              href={normalizedTargetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="brightdata-reader-open-link"
+            >
+              Open page
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
+          ) : null}
         </div>
         <div className="space-y-3 px-4 py-3">
           <div className="flex items-start justify-between gap-3">
@@ -223,26 +273,28 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
             </div>
           ) : null}
           {isScrapeAsMarkdown ? (
-            normalizedTargetUrl ? (
-              <div className="brightdata-snapshot-iframe-panel">
-                <iframe
-                  src={normalizedTargetUrl}
-                  title={pageTitle ? `Preview of ${pageTitle}` : 'Web page preview'}
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                  className="brightdata-snapshot-iframe"
-                />
-                <div className="brightdata-snapshot-iframe-fallback">
-                  <span>Preview not loading?</span>
-                  <a href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
-                    Open page
-                  </a>
+            readerText ? (
+              <div className="brightdata-reader-panel">
+                <div className="brightdata-reader-panel-header">
+                  <span>Extracted page text</span>
+                  {normalizedTargetUrl ? (
+                    <a href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
+                      Source
+                    </a>
+                  ) : null}
+                </div>
+                <div className="brightdata-reader-scroll">
+                  <MarkdownViewer content={readerText} className="brightdata-reader-content prose prose-sm max-w-none" />
                 </div>
               </div>
             ) : (
-              <div className="brightdata-snapshot-iframe-unavailable">
-                <span>Page preview unavailable.</span>
-                {targetUrl ? (
+              <div className="brightdata-reader-empty">
+                <span>No extracted text returned.</span>
+                {normalizedTargetUrl ? (
+                  <a href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
+                    Open page
+                  </a>
+                ) : targetUrl ? (
                   <span className="break-all text-slate-500">{targetUrl}</span>
                 ) : null}
               </div>
