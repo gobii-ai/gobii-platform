@@ -355,7 +355,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   const showHeaderPageSwitcher = !collapsed && showGalleryShellSwitcher && galleryMode
   const showOrganizationShellPage = settings?.context ? settings.context.type === 'organization' : true
   const contextMenuMuted = agentContextMenu ? mutedAgentIdSet.has(agentContextMenu.agent.id) : false
-  const agentContextMenuElement = agentContextMenu && typeof document !== 'undefined'
+  const contextMenuRoot = typeof document !== 'undefined' ? document.body : null
+  const agentContextMenuElement = agentContextMenu && contextMenuRoot
     ? createPortal(
       <div
         ref={contextMenuRef}
@@ -385,7 +386,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           <span>Settings</span>
         </button>
       </div>,
-      document.body,
+      contextMenuRoot,
     )
     : null
 

@@ -193,7 +193,7 @@ export function useTimelineScrollController({
     scrollToBottomAcrossFrames(3)
   }, [scrollToBottomAcrossFrames, scrollToBottomNow, setAutoScrollPinned])
 
-  const requestPreviousPage = useCallback(() => {
+  const requestPreviousPage = useCallback((options?: { preservePinned?: boolean }) => {
     if (
       fetchOlderInFlightRef.current
       || !hasPreviousPage
@@ -204,11 +204,17 @@ export function useTimelineScrollController({
     }
 
     cancelPendingBottomScroll()
+    const shouldRestorePinned = Boolean(options?.preservePinned && pinnedRef.current)
     prependAnchorRef.current = capturePrependAnchor()
-    setPinned(false)
+    if (!options?.preservePinned) {
+      setPinned(false)
+    }
     fetchOlderInFlightRef.current = true
     void fetchPreviousPage().finally(() => {
       fetchOlderInFlightRef.current = false
+      if (shouldRestorePinned) {
+        setPinned(true)
+      }
     })
   }, [
     fetchPreviousPage,
@@ -348,7 +354,7 @@ export function useTimelineScrollController({
       return
     }
 
-    requestPreviousPage()
+    requestPreviousPage({ preservePinned: true })
   }, [
     contentVersion,
     eventCount,

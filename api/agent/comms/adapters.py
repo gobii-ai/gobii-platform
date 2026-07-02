@@ -389,7 +389,11 @@ class PostmarkEmailAdapter(EmailAdapter):
 
         normalized_payload = _normalize_inbound_email_raw_payload(payload_dict)
         if body or html_body:
-            normalized_payload = merge_chat_body_html_cache(normalized_payload, body)
+            normalized_payload = merge_chat_body_html_cache(
+                normalized_payload,
+                body,
+                explicit_html=html_body,
+            )
 
         return ParsedMessage(
             sender=payload_dict.get("From", ""),
@@ -535,7 +539,11 @@ class MailgunEmailAdapter(EmailAdapter):
 
         normalized_payload = _normalize_inbound_email_raw_payload(payload_dict)
         if body or html_body:
-            normalized_payload = merge_chat_body_html_cache(normalized_payload, body)
+            normalized_payload = merge_chat_body_html_cache(
+                normalized_payload,
+                body,
+                explicit_html=html_body,
+            )
 
         return ParsedMessage(
             sender=sender,

@@ -100,7 +100,7 @@ def render_chat_email_body_html(
     if not html_snippet:
         try:
             html_snippet, _ = convert_body_to_html_and_plaintext(body or "", emit_logs=False)
-        except (RuntimeError, ValueError, OSError):
+        except (RuntimeError, ValueError, OSError, TypeError, AttributeError, LookupError):
             html_snippet = body or ""
     return sanitize_chat_email_html(html_snippet, allow_cid=allow_cid)
 

@@ -12,13 +12,17 @@ function refreshDelayMs(timestampMs: number): number {
 
 export function useRelativeTimestamp(value?: string | null): string | null {
   const timestampMs = value ? Date.parse(value) : NaN
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  const [nowMs, setNowMs] = useState<number | null>(null)
 
   useEffect(() => {
-    if (Number.isNaN(timestampMs)) return
+    setNowMs(Date.now())
+  }, [])
+
+  useEffect(() => {
+    if (Number.isNaN(timestampMs) || nowMs === null) return
     const timeoutId = window.setTimeout(() => setNowMs(Date.now()), refreshDelayMs(timestampMs))
     return () => window.clearTimeout(timeoutId)
   }, [nowMs, timestampMs])
 
-  return Number.isNaN(timestampMs) ? null : formatRelativeTimestamp(value, new Date(nowMs))
+  return Number.isNaN(timestampMs) || nowMs === null ? null : formatRelativeTimestamp(value, new Date(nowMs))
 }
