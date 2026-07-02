@@ -9,10 +9,17 @@ export type SecretDTO = {
   secret_type: 'credential' | 'env_var'
   domain_pattern: string
   description: string
-  requested?: boolean
-  created_at: string | null
-  updated_at: string | null
   source: 'agent' | 'global'
+}
+
+export type RequestedSecretDTO = {
+  id: string
+  name: string
+  key: string
+  secret_type: 'credential' | 'env_var'
+  domain_pattern: string
+  description: string
+  created_at: string | null
 }
 
 export type GlobalSecretListResponse = {
@@ -23,7 +30,7 @@ export type GlobalSecretListResponse = {
 export type AgentSecretListResponse = {
   agent_secrets: SecretDTO[]
   global_secrets: SecretDTO[]
-  requested_secrets: SecretDTO[]
+  requested_secrets: RequestedSecretDTO[]
 }
 
 export type SecretMutationResponse = {

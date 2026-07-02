@@ -27,8 +27,6 @@ export type AgentSuggestionsResponse = {
 
 export type TimelineResponse = {
   events: TimelineEvent[]
-  oldest_cursor: string | null
-  newest_cursor: string | null
   has_more_older: boolean
   has_more_newer: boolean
   processing_active: boolean
@@ -59,11 +57,6 @@ export type AgentMessageReadState = {
 export type AgentWebSessionSnapshot = {
   session_key: string
   ttl_seconds: number
-  expires_at: string
-  last_seen_at: string
-  last_seen_source: string | null
-  is_visible: boolean
-  ended_at?: string
 }
 
 export async function fetchAgentTimeline(
@@ -151,10 +144,6 @@ type RequestedSecretWire = {
   domainPattern?: unknown
   domain_pattern?: unknown
   description?: unknown
-  createdAt?: unknown
-  created_at?: unknown
-  updatedAt?: unknown
-  updated_at?: unknown
 }
 
 type PendingContactRequestWire = {
@@ -168,16 +157,12 @@ type PendingContactRequestWire = {
   allow_inbound?: unknown
   allowOutbound?: unknown
   allow_outbound?: unknown
-  canConfigure?: unknown
-  can_configure?: unknown
   smsContactPurpose?: unknown
   sms_contact_purpose?: unknown
   smsContactPurposeDetails?: unknown
   sms_contact_purpose_details?: unknown
   smsContactPermissionAttested?: unknown
   sms_contact_permission_attested?: unknown
-  smsContactPermissionAttestedAt?: unknown
-  sms_contact_permission_attested_at?: unknown
   requestedAt?: unknown
   requested_at?: unknown
   expiresAt?: unknown
@@ -303,8 +288,6 @@ function normalizeRequestedSecret(raw: unknown): RequestedSecret | null {
     secretType,
     domainPattern,
     description: asNonEmptyString(secret.description),
-    createdAt: asNonEmptyString(secret.createdAt) ?? asNonEmptyString(secret.created_at),
-    updatedAt: asNonEmptyString(secret.updatedAt) ?? asNonEmptyString(secret.updated_at),
   }
 }
 
@@ -328,11 +311,9 @@ function normalizePendingContactRequest(raw: unknown): PendingContactRequest | n
     purpose: asNonEmptyString(request.purpose),
     allowInbound: Boolean(request.allowInbound ?? request.allow_inbound),
     allowOutbound: Boolean(request.allowOutbound ?? request.allow_outbound),
-    canConfigure: Boolean(request.canConfigure ?? request.can_configure),
     smsContactPurpose: asNonEmptyString(request.smsContactPurpose) ?? asNonEmptyString(request.sms_contact_purpose),
     smsContactPurposeDetails: asNonEmptyString(request.smsContactPurposeDetails) ?? asNonEmptyString(request.sms_contact_purpose_details),
     smsContactPermissionAttested: Boolean(request.smsContactPermissionAttested ?? request.sms_contact_permission_attested),
-    smsContactPermissionAttestedAt: asNonEmptyString(request.smsContactPermissionAttestedAt) ?? asNonEmptyString(request.sms_contact_permission_attested_at),
     requestedAt: asNonEmptyString(request.requestedAt) ?? asNonEmptyString(request.requested_at),
     expiresAt: asNonEmptyString(request.expiresAt) ?? asNonEmptyString(request.expires_at),
   }
@@ -604,7 +585,6 @@ export type ContactRequestResolvePayload = {
     decision: 'approve' | 'decline'
     allow_inbound?: boolean
     allow_outbound?: boolean
-    can_configure?: boolean
     sms_contact_purpose?: string | null
     sms_contact_purpose_details?: string | null
     sms_contact_permission_attested?: boolean | null

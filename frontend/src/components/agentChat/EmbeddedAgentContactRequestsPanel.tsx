@@ -16,7 +16,6 @@ type ContactRequestResolution = {
   decision: 'approve' | 'decline'
   allowInbound: boolean
   allowOutbound: boolean
-  canConfigure: boolean
   smsContactPermissionAttested?: boolean
 }
 
@@ -148,7 +147,6 @@ export function EmbeddedAgentContactRequestsPanel({
         decision,
         allowInbound: draft.allowInbound,
         allowOutbound: draft.allowOutbound,
-        canConfigure: request.canConfigure,
         smsContactPermissionAttested: draft.smsContactPermissionAttested,
       }
     })
@@ -164,7 +162,6 @@ export function EmbeddedAgentContactRequestsPanel({
             decision: response.decision,
             allow_inbound: response.allowInbound,
             allow_outbound: response.allowOutbound,
-            can_configure: response.canConfigure,
             sms_contact_permission_attested: response.smsContactPermissionAttested ?? null,
           })),
         })

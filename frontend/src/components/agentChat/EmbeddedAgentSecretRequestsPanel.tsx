@@ -4,7 +4,7 @@ import { AlertTriangle, Check, EyeOff, Globe, Inbox, KeyRound, Loader2, ShieldCh
 
 import { fulfillRequestedSecrets, removeRequestedSecrets } from '../../api/agentChat'
 import { HttpError } from '../../api/http'
-import { fetchAgentSecrets, type AgentSecretListResponse, type SecretDTO } from '../../api/secrets'
+import { fetchAgentSecrets, type AgentSecretListResponse, type RequestedSecretDTO } from '../../api/secrets'
 import { SettingsBanner } from '../agentSettings/SettingsBanner'
 import { InlineStatusBanner } from '../common/InlineStatusBanner'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
@@ -25,9 +25,9 @@ type RequestErrors = {
   fieldErrors: Record<string, string>
 }
 
-const EMPTY_REQUESTS: SecretDTO[] = []
+const EMPTY_REQUESTS: RequestedSecretDTO[] = []
 
-function formatSecretScope(secret: SecretDTO): string {
+function formatSecretScope(secret: RequestedSecretDTO): string {
   if (secret.secret_type === 'env_var' || secret.domain_pattern === '__gobii_env_var__') {
     return 'Environment variable'
   }

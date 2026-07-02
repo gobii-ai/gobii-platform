@@ -448,12 +448,6 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         today_credit_total = sum(today_status_credit_totals.values(), DECIMAL_ZERO) + today_persistent_credit_total
 
         combined_total = task_credit_total + persistent_credit_total
-        completed_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.COMPLETED, DECIMAL_ZERO)
-        combined_completed = completed_credit + persistent_credit_total
-        in_progress_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.IN_PROGRESS, DECIMAL_ZERO)
-        pending_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.PENDING, DECIMAL_ZERO)
-        failed_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.FAILED, DECIMAL_ZERO)
-        cancelled_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.CANCELLED, DECIMAL_ZERO)
         total_credits = combined_total
 
         quota_payload, extra_tasks_enabled, _unlimited_quota, _available_credits = _build_quota_payload(
@@ -476,14 +470,6 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                 "name": resolved.current_context.name,
             },
             "metrics": {
-                "tasks": {
-                    "count": float(combined_total),
-                    "completed": float(combined_completed),
-                    "in_progress": float(in_progress_credit),
-                    "pending": float(pending_credit),
-                    "failed": float(failed_credit),
-                    "cancelled": float(cancelled_credit),
-                },
                 "credits": {
                     "total": float(total_credits),
                     "unit": "credits",
@@ -620,10 +606,6 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
             current_end_dt = timezone.make_aware(
                 datetime.combine(current_end_date + timedelta(days=1), time.min), tz
             )
-
-        current_duration = current_end_dt - current_start_dt
-        previous_end_dt = current_start_dt
-        previous_start_dt = previous_end_dt - current_duration
 
         base_filters = {
             "is_deleted": False,
@@ -767,38 +749,25 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
 
         current_counts = _build_counts(current_start_dt, current_end_dt)
         current_agent_counts = _build_agent_counts(current_start_dt, current_end_dt)
-        previous_counts = _build_counts(previous_start_dt, previous_end_dt)
 
         buckets: list[dict[str, object]] = []
         current_cursor = current_start_dt
-        previous_cursor = previous_start_dt
         while current_cursor < current_end_dt:
             current_key = current_cursor.isoformat()
-            previous_key = previous_cursor.isoformat()
             agent_counts = current_agent_counts.get(current_key, {})
             buckets.append(
                 {
                     "timestamp": current_key,
                     "current": current_counts.get(current_key, 0),
-                    "previous": previous_counts.get(previous_key, 0),
                     "agents": agent_counts,
                 }
             )
             current_cursor += step
-            previous_cursor += step
 
         payload = {
             "mode": mode,
             "resolution": "hour" if step == timedelta(hours=1) else "day",
             "timezone": tz_name,
-            "current_period": {
-                "start": current_start_dt.isoformat(),
-                "end": current_end_dt.isoformat(),
-            },
-            "previous_period": {
-                "start": previous_start_dt.isoformat(),
-                "end": previous_end_dt.isoformat(),
-            },
             "agents": [
                 {
                     "id": str(agent.id),

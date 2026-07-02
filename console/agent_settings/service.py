@@ -435,8 +435,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             {
                 "id": str(invite.id),
                 "email": invite.email,
-                "invitedAtIso": invite.created_at.isoformat() if invite.created_at else None,
-                "expiresAtIso": invite.expires_at.isoformat() if invite.expires_at else None,
             }
             for invite in list(pending_invites)
         ]
@@ -658,12 +656,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
 
-        def _datetime_iso(value):
-            if not value:
-                return None
-            localized = timezone.localtime(value)
-            return localized.isoformat()
-
         def _datetime_display(value, fmt: str):
             if not value:
                 return None
@@ -678,7 +670,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'label': option.get('label'),
                 'inUseElsewhere': bool(option.get('in_use_elsewhere')),
                 'disabled': bool(option.get('disabled')),
-                'assignedNames': option.get('assigned_names', []),
             }
             for option in context.get('dedicated_proxy_options', [])
         ]
@@ -782,7 +773,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         if pending_transfer:
             pending_transfer_payload = {
                 'toEmail': pending_transfer.to_email,
-                'createdAtIso': _datetime_iso(pending_transfer.created_at),
                 'createdAtDisplay': _datetime_display(pending_transfer.created_at, "M j, Y g:i A"),
             }
 
@@ -796,7 +786,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         can_reassign = bool(context.get('can_reassign'))
         reassignment = {
             'enabled': can_reassign,
-            'canReassign': can_reassign,
             'organizations': [
                 {
                     'id': str(org.id),
@@ -828,7 +817,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             for webhook in context.get('agent_webhooks', [])
         ]
         inbound_webhooks = self._build_inbound_webhooks_payload(request, agent)
-
         mcp_manage_url = reverse('console-mcp-servers')
 
         return {
@@ -847,7 +835,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     organization_id=str(agent.organization_id) if agent.organization_id else None,
                 ),
                 'delete': reverse('agent_delete', args=[agent.id]),
-                'mcpServersManage': mcp_manage_url,
             },
             'agent': {
                 'id': str(agent.id),

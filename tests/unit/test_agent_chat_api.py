@@ -29,6 +29,8 @@ from api.agent.peer_comm import PeerMessagingService
 from api.agent.tools.plan import PlanFileDeliverable, PlanMessageDeliverable, PlanSnapshot, PlanStepChange
 from api.models import (
     AgentCollaborator,
+    AgentFileSpaceAccess,
+    AgentFsNode,
     AgentPeerLink,
     AgentSpawnRequest,
     BrowserUseAgent,
@@ -785,7 +787,8 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(message_event["message"]["senderAddress"], self.user_address)
         tool_cluster = next(event for event in events if event["kind"] == "steps")
         self.assertEqual(tool_cluster["entries"][0]["toolName"], "send_email")
-        self.assertTrue(payload.get("newest_cursor"))
+        self.assertNotIn("oldest_cursor", payload)
+        self.assertNotIn("newest_cursor", payload)
         self.assertIsNotNone(payload.get("processing_active"))
         snapshot = payload.get("processing_snapshot")
         self.assertIsInstance(snapshot, dict)
@@ -838,6 +841,49 @@ class AgentChatAPITests(TestCase):
             ["human_input", "spawn_request", "requested_secrets", "contact_requests"],
         )
         self.assertEqual(len(payload.get("pending_human_input_requests", [])), 1)
+        pending_actions = {item.get("kind"): item for item in payload.get("pending_action_requests", [])}
+        requested_secret_payload = pending_actions["requested_secrets"]["secrets"][0]
+        self.assertNotIn("createdAt", requested_secret_payload)
+        self.assertNotIn("updatedAt", requested_secret_payload)
+        contact_request_payload = pending_actions["contact_requests"]["requests"][0]
+        self.assertNotIn("canConfigure", contact_request_payload)
+        self.assertNotIn("smsContactPermissionAttestedAt", contact_request_payload)
+
+    @tag("batch_agent_chat")
+    def test_agent_files_list_returns_minimal_node_shape(self):
+        write_bytes_to_dir(
+            self.agent,
+            b"hello",
+            "/reports/summary.txt",
+            "text/plain",
+        )
+
+        response = self.client.get(reverse("console_agent_fs_list", kwargs={"agent_id": self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertNotIn("filespace", payload)
+        file_payload = next(
+            item
+            for item in payload["nodes"]
+            if item["nodeType"] == AgentFsNode.NodeType.FILE
+        )
+        self.assertEqual(
+            set(file_payload.keys()),
+            {"id", "parentId", "name", "path", "nodeType", "sizeBytes", "updatedAt"},
+        )
+        self.assertNotIn("createdAt", file_payload)
+        self.assertNotIn("mimeType", file_payload)
+
+    @tag("batch_agent_chat")
+    def test_agent_files_list_does_not_create_empty_filespace(self):
+        access_count = AgentFileSpaceAccess.objects.filter(agent=self.agent).count()
+
+        response = self.client.get(reverse("console_agent_fs_list", kwargs={"agent_id": self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"nodes": []})
+        self.assertEqual(AgentFileSpaceAccess.objects.filter(agent=self.agent).count(), access_count)
 
     @tag("batch_agent_chat")
     def test_timeline_filters_manager_only_pending_actions_for_collaborator(self):
@@ -1814,7 +1860,7 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(start_response.status_code, 200)
         start_payload = start_response.json()
         session_key = start_payload["session_key"]
-        self.assertTrue(start_payload["is_visible"])
+        self.assertEqual(set(start_payload.keys()), {"session_key", "ttl_seconds"})
 
         heartbeat_response = self.client.post(
             f"/console/api/agents/{self.agent.id}/web-sessions/heartbeat/",
@@ -1822,7 +1868,9 @@ class AgentChatAPITests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(heartbeat_response.status_code, 200)
-        self.assertFalse(heartbeat_response.json()["is_visible"])
+        heartbeat_payload = heartbeat_response.json()
+        self.assertEqual(set(heartbeat_payload.keys()), {"session_key", "ttl_seconds"})
+        self.assertEqual(heartbeat_payload["session_key"], session_key)
 
         end_response = self.client.post(
             f"/console/api/agents/{self.agent.id}/web-sessions/end/",
@@ -1831,9 +1879,10 @@ class AgentChatAPITests(TestCase):
         )
         self.assertEqual(end_response.status_code, 200)
         end_payload = end_response.json()
-        self.assertIn("ended_at", end_payload)
+        self.assertEqual(set(end_payload.keys()), {"session_key", "ttl_seconds"})
+        self.assertEqual(end_payload["session_key"], session_key)
 
-        # Ending an already-deleted session should still succeed idempotently.
+        # Ending an already-ended session should still succeed idempotently.
         repeat_end = self.client.post(
             f"/console/api/agents/{self.agent.id}/web-sessions/end/",
             data=json.dumps({"session_key": session_key}),
@@ -1841,10 +1890,7 @@ class AgentChatAPITests(TestCase):
         )
         self.assertEqual(repeat_end.status_code, 200)
         repeat_payload = repeat_end.json()
-        self.assertTrue(
-            repeat_payload.get("ended") or repeat_payload.get("ended_at"),
-            repeat_payload,
-        )
+        self.assertEqual(repeat_payload["session_key"], session_key)
 
     @tag("batch_agent_chat")
     def test_web_session_start_creates_distinct_sessions_per_tab(self):
@@ -2447,6 +2493,46 @@ class AgentChatAPITests(TestCase):
         self.assertTrue(allowlist_entry.allow_outbound)
         self.assertTrue(allowlist_entry.can_configure)
         self.assertEqual(response.json().get("pending_action_requests"), [])
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.process_agent_events_task.delay")
+    def test_contact_request_resolve_api_preserves_requested_configure_when_omitted(self, mock_delay):
+        request_obj = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="configure@example.com",
+            reason="Need configuration approval",
+            purpose="Configure the agent",
+            request_configure=True,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/contact-requests/resolve/",
+                data=json.dumps(
+                    {
+                        "responses": [
+                            {
+                                "request_id": str(request_obj.id),
+                                "decision": "approve",
+                                "allow_inbound": True,
+                                "allow_outbound": True,
+                            }
+                        ]
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        request_obj.refresh_from_db()
+        self.assertTrue(request_obj.request_configure)
+        allowlist_entry = self.agent.manual_allowlist.get(
+            channel=CommsChannel.EMAIL,
+            address="configure@example.com",
+        )
+        self.assertTrue(allowlist_entry.can_configure)
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_chat")

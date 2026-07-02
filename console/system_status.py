@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from uuid import UUID
 
 from django.conf import settings
-from django.db.models import CharField, Count, DateTimeField, IntegerField, OuterRef, Subquery
+from django.db.models import CharField, Count, DateTimeField, OuterRef, Subquery
 from django.utils import timezone
 
 from api.agent.core.processing_flags import (
@@ -183,8 +183,6 @@ def _collect_agent_processing_section(*, now):
                 "queuedCount": 0,
                 "pendingCount": 0,
                 "lockedCount": 0,
-                "heartbeatCount": 0,
-                "queuedOrPendingCount": 0,
             },
             "rows": [],
         }
@@ -221,20 +219,19 @@ def _collect_agent_processing_section(*, now):
     )
     rows = rows[:SYSTEM_STATUS_ROW_LIMIT]
 
+    queued_or_pending_count = sum(
+        1 for state in filtered_states if state["queued"] or state["pending"]
+    )
     summary = {
         "activeAgentCount": len(agents),
         "queuedCount": sum(1 for state in filtered_states if state["queued"]),
         "pendingCount": sum(1 for state in filtered_states if state["pending"]),
         "lockedCount": sum(1 for state in filtered_states if state["locked"]),
-        "heartbeatCount": sum(1 for state in filtered_states if state["heartbeat"]),
-        "queuedOrPendingCount": sum(
-            1 for state in filtered_states if state["queued"] or state["pending"]
-        ),
     }
 
-    if summary["queuedOrPendingCount"] >= 20:
+    if queued_or_pending_count >= 20:
         status = STATUS_CRITICAL
-    elif summary["queuedOrPendingCount"] > 0:
+    elif queued_or_pending_count > 0:
         status = STATUS_WARNING
     elif summary["activeAgentCount"] > 0:
         status = STATUS_INFO
@@ -297,19 +294,19 @@ def _collect_compute_section(*, now):
     summary = {
         "runningCount": 0,
         "idleStoppingCount": 0,
-        "stoppedCount": 0,
         "errorCount": 0,
     }
     state_key_map = {
         AgentComputeSession.State.RUNNING: "runningCount",
         AgentComputeSession.State.IDLE_STOPPING: "idleStoppingCount",
-        AgentComputeSession.State.STOPPED: "stoppedCount",
         AgentComputeSession.State.ERROR: "errorCount",
     }
 
     rows = []
     for session in sessions:
-        summary[state_key_map[session.state]] += 1
+        summary_key = state_key_map.get(session.state)
+        if summary_key:
+            summary[summary_key] += 1
         if session.state not in {
             AgentComputeSession.State.RUNNING,
             AgentComputeSession.State.IDLE_STOPPING,
@@ -321,10 +318,7 @@ def _collect_compute_section(*, now):
                 "agentId": str(session.agent_id),
                 "agentName": session.agent.name,
                 "state": session.state,
-                "namespace": session.namespace,
                 "podName": session.pod_name,
-                "proxyName": session.proxy_server.name if session.proxy_server else "",
-                "lastActivityAt": _iso_or_empty(session.last_activity_at),
                 "leaseExpiresAt": _iso_or_empty(session.lease_expires_at),
             }
         )
@@ -358,10 +352,6 @@ def _collect_proxy_section(*, now):
         ProxyServer.objects.annotate(
             latest_status=Subquery(latest_results.values("status")[:1], output_field=CharField()),
             latest_checked_at=Subquery(latest_results.values("checked_at")[:1], output_field=DateTimeField()),
-            latest_response_time_ms=Subquery(
-                latest_results.values("response_time_ms")[:1],
-                output_field=IntegerField(),
-            ),
         ).order_by("name", "host", "port")
     )
 
@@ -370,12 +360,13 @@ def _collect_proxy_section(*, now):
         "healthyCount": 0,
         "degradedCount": 0,
         "staleCount": 0,
-        "inactiveCount": 0,
     }
     rows = []
     for proxy in proxies:
         classification = _classify_proxy(proxy, freshness_cutoff)
-        summary[_proxy_summary_key(classification)] += 1
+        summary_key = _proxy_summary_key(classification)
+        if summary_key:
+            summary[summary_key] += 1
         if classification != "inactive":
             summary["activeCount"] += 1
         rows.append(
@@ -384,12 +375,8 @@ def _collect_proxy_section(*, now):
                 "name": proxy.name,
                 "endpoint": f"{proxy.host}:{proxy.port}",
                 "classification": classification,
-                "isActive": proxy.is_active,
                 "latestStatus": proxy.latest_status or "",
                 "latestCheckedAt": _iso_or_empty(proxy.latest_checked_at),
-                "responseTimeMs": proxy.latest_response_time_ms,
-                "consecutiveHealthFailures": proxy.consecutive_health_failures,
-                "deactivationReason": proxy.deactivation_reason,
             }
         )
 
@@ -600,7 +587,7 @@ def _build_overview_cards(sections):
             section=sections.get("agents"),
             value_key="activeAgentCount",
             subtitle_builder=lambda summary: (
-                f"{summary.get('queuedOrPendingCount', 0)} queued or pending"
+                f"{summary.get('queuedCount', 0) + summary.get('pendingCount', 0)} queued or pending"
                 if summary
                 else ""
             ),
@@ -730,7 +717,7 @@ def _proxy_summary_key(classification):
         "healthy": "healthyCount",
         "degraded": "degradedCount",
         "stale": "staleCount",
-        "inactive": "inactiveCount",
+        "inactive": None,
     }[classification]
 
 

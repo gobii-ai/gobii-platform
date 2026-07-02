@@ -53,8 +53,6 @@ def _serialize_global_secret(secret: GlobalSecret) -> dict:
         "secret_type": secret.secret_type,
         "domain_pattern": secret.domain_pattern,
         "description": secret.description,
-        "created_at": secret.created_at.isoformat() if secret.created_at else None,
-        "updated_at": secret.updated_at.isoformat() if secret.updated_at else None,
         "source": "global",
     }
 
@@ -67,10 +65,19 @@ def _serialize_agent_secret(secret: PersistentAgentSecret) -> dict:
         "secret_type": secret.secret_type,
         "domain_pattern": secret.domain_pattern,
         "description": secret.description,
-        "requested": secret.requested,
-        "created_at": secret.created_at.isoformat() if secret.created_at else None,
-        "updated_at": secret.updated_at.isoformat() if secret.updated_at else None,
         "source": "agent",
+    }
+
+
+def _serialize_requested_agent_secret(secret: PersistentAgentSecret) -> dict:
+    return {
+        "id": str(secret.id),
+        "name": secret.name,
+        "key": secret.key,
+        "secret_type": secret.secret_type,
+        "domain_pattern": secret.domain_pattern,
+        "description": secret.description,
+        "created_at": secret.created_at.isoformat() if secret.created_at else None,
     }
 
 
@@ -249,7 +256,7 @@ class AgentSecretListAPIView(LoginRequiredMixin, View):
         return JsonResponse({
             "agent_secrets": [_serialize_agent_secret(s) for s in agent_secrets],
             "global_secrets": [_serialize_global_secret(s) for s in global_secrets],
-            "requested_secrets": [_serialize_agent_secret(s) for s in requested_secrets],
+            "requested_secrets": [_serialize_requested_agent_secret(s) for s in requested_secrets],
         })
 
     def post(self, request: HttpRequest, agent_id, *args: Any, **kwargs: Any):
