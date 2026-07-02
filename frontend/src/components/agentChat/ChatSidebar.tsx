@@ -140,13 +140,16 @@ export const ChatSidebar = memo(function ChatSidebar({
     if (!agents.some((agent) => agent.id === scrollToAgentId)) {
       return
     }
+    if (isMobile && !drawerOpen) {
+      return
+    }
     if (searchQuery && !filteredAgents.some((agent) => agent.id === scrollToAgentId)) {
       setSearchQuery('')
       return
     }
 
     const frame = window.requestAnimationFrame(() => {
-      const root = sidebarRootRef.current
+      const root: ParentNode | null = isMobile ? document : sidebarRootRef.current
       const selectorId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
         ? CSS.escape(scrollToAgentId)
         : scrollToAgentId.replace(/["\\]/g, '\\$&')
@@ -168,8 +171,10 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [
     agents,
     desktopMode,
+    drawerOpen,
     drawerViewMode,
     filteredAgents,
+    isMobile,
     onScrolledToAgent,
     scrollToAgentId,
     searchQuery,
