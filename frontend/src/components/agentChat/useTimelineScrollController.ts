@@ -20,13 +20,11 @@ type TimelineScrollControllerOptions = {
   contentVersion: string
   eventCount: number
   fetchPreviousPage: () => Promise<unknown>
-  hasMoreOlder: boolean
   hasPreviousPage: boolean
   initialLoading: boolean
   isFetchPreviousPageError: boolean
   isFetchingPreviousPage: boolean
   isNewAgent: boolean
-  loadingOlder: boolean
   pageCount: number
   setAutoScrollPinned: (pinned: boolean) => void
   switchingAgentId: string | null
@@ -53,13 +51,11 @@ export function useTimelineScrollController({
   contentVersion,
   eventCount,
   fetchPreviousPage,
-  hasMoreOlder,
   hasPreviousPage,
   initialLoading,
   isFetchPreviousPageError,
   isFetchingPreviousPage,
   isNewAgent,
-  loadingOlder,
   pageCount,
   setAutoScrollPinned,
   switchingAgentId,
@@ -344,9 +340,9 @@ export function useTimelineScrollController({
       || isNewAgent
       || switchingAgentId
       || eventCount === 0
-      || !hasMoreOlder
-      || loadingOlder
+      || !hasPreviousPage
       || isFetchPreviousPageError
+      || isFetchingPreviousPage
       || canScroll(container)
     ) {
       return
@@ -356,11 +352,11 @@ export function useTimelineScrollController({
   }, [
     contentVersion,
     eventCount,
-    hasMoreOlder,
+    hasPreviousPage,
     initialLoading,
     isFetchPreviousPageError,
+    isFetchingPreviousPage,
     isNewAgent,
-    loadingOlder,
     requestPreviousPage,
     switchingAgentId,
     timelineNode,

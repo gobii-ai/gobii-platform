@@ -16,7 +16,7 @@ from api.models import (
     BrowserUseAgent,
     DeliveryStatus,
 )
-from api.agent.comms.chat_email_display_cache import CHAT_BODY_HTML_CACHE_KEY, CHAT_BODY_HTML_SOURCE_HASH_KEY
+from api.agent.comms.chat_email_display_cache import CHAT_BODY_HTML_CACHE_KEY
 from api.webhooks import email_webhook_postmark, email_webhook_mailgun, sms_status_webhook, open_and_link_webhook
 from config import settings
 
@@ -113,7 +113,6 @@ class PostmarkEmailWebhookTest(TestCase):
         parsed = mock_ingest.call_args[0][1]
         self.assertEqual(parsed.raw_payload.get("message_id"), "<postmark-inbound@example.com>")
         self.assertIn(CHAT_BODY_HTML_CACHE_KEY, parsed.raw_payload)
-        self.assertIn(CHAT_BODY_HTML_SOURCE_HASH_KEY, parsed.raw_payload)
 
     @tag("batch_email")
     def test_postmark_open_marks_matching_outbound_message_read(self):
@@ -362,7 +361,6 @@ class MailgunEmailWebhookTest(TestCase):
         self.assertEqual(parsed.raw_payload.get("message_id"), "<mailgun-inbound@example.com>")
         self.assertEqual(parsed.raw_payload.get("headers", {}).get("Message-Id"), "<mailgun-inbound@example.com>")
         self.assertIn(CHAT_BODY_HTML_CACHE_KEY, parsed.raw_payload)
-        self.assertIn(CHAT_BODY_HTML_SOURCE_HASH_KEY, parsed.raw_payload)
 
     @tag("batch_email")
     @patch("api.webhooks.ingest_inbound_message")

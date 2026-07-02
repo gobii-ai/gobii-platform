@@ -1492,7 +1492,7 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("<p>Status: Ready</p>", rendered_html)
 
     @tag("batch_agent_chat")
-    def test_timeline_uses_cached_email_html_when_source_hash_matches(self):
+    def test_timeline_uses_cached_email_html_when_available(self):
         plain_body = "Status: Ready"
         html_body = "<p><strong>Cached Ready</strong></p>"
         raw_payload = merge_chat_body_html_cache(

@@ -162,7 +162,7 @@ def _message_body_html(message: PersistentAgentMessage, channel: str | None, att
         return ""
     payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
     explicit_html = normalize_explicit_email_html(payload.get(EMAIL_BODY_HTML_PAYLOAD_KEY))
-    cached_html = get_cached_chat_body_html(payload, message.body or "", explicit_html=explicit_html)
+    cached_html = get_cached_chat_body_html(payload)
     return _render_email_body_html(
         message.body or "",
         attachments,
