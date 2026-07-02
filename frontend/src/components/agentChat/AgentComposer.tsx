@@ -1531,9 +1531,10 @@ export const AgentComposer = memo(function AgentComposer({
     }
     const attachmentsSnapshot = attachments.slice()
     if (onSubmit) {
+      const bodySnapshot = body
+      const attachmentErrorSnapshot = attachmentError
       try {
         setIsSending(true)
-        await onSubmit(trimmed, attachmentsSnapshot)
         setBody('')
         clearAgentChatMessageDraft(agentId)
         setAttachments([])
@@ -1542,7 +1543,13 @@ export const AgentComposer = memo(function AgentComposer({
           fileInputRef.current.value = ''
         }
         requestAnimationFrame(() => adjustTextareaHeight(true))
+        await onSubmit(trimmed, attachmentsSnapshot)
       } catch {
+        setBody(bodySnapshot)
+        writeAgentChatMessageDraft(agentId, bodySnapshot)
+        setAttachments(attachmentsSnapshot)
+        setAttachmentError(attachmentErrorSnapshot)
+        requestAnimationFrame(() => adjustTextareaHeight(true))
         return
       } finally {
         setIsSending(false)
@@ -1560,6 +1567,7 @@ export const AgentComposer = memo(function AgentComposer({
   }, [
     adjustTextareaHeight,
     agentId,
+    attachmentError,
     attachments,
     body,
     disabled,
