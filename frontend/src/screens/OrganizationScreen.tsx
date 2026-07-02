@@ -130,10 +130,6 @@ function isNoOrganizationContextError(error: unknown): boolean {
   return Boolean(body && typeof body === 'object' && (body as { error?: unknown }).error === 'Switch to an organization context first.')
 }
 
-function shouldRetryCurrentOrganizationQuery(failureCount: number, error: unknown): boolean {
-  return !isNoOrganizationContextError(error) && failureCount < 3
-}
-
 function buildBillingPathForCurrentAppRoute(): string {
   if (typeof window === 'undefined') {
     return '/app/billing'
@@ -209,16 +205,8 @@ type CreateOrganizationModalProps = { name: string; errors: string[]; busy: bool
 function CreateOrganizationModal({ name, errors, busy, onNameChange, onClose, onSubmit }: CreateOrganizationModalProps) {
   return (
     <ModalForm
-      id="organization-create-team-form"
-      title="Create Team"
-      onClose={onClose}
-      onSubmit={onSubmit}
-      widthClass="sm:max-w-lg"
-      dismissible={!busy}
-      submitLabel="Create Team"
-      submittingLabel="Creating..."
-      submitting={busy}
-      errorMessages={errors}
+      id="organization-create-team-form" title="Create Team" onClose={onClose} onSubmit={onSubmit} widthClass="sm:max-w-lg"
+      dismissible={!busy} submitLabel="Create Team" submittingLabel="Creating..." submitting={busy} errorMessages={errors}
     >
       <label htmlFor="organization-create-team-name" className="block text-sm font-medium text-slate-700">
         Team Name
@@ -500,8 +488,7 @@ function OrganizationEmptyState({
   onCreateOrganization: () => void
 }) {
   const hasOrganizations = organizations.length > 0
-  const isCheckingOrganizations = organizationsLoading && !hasOrganizations
-  const title = hasOrganizations || isCheckingOrganizations ? 'Choose a team workspace' : 'Create your team workspace'
+  const title = hasOrganizations || organizationsLoading ? 'Choose a team workspace' : 'Create your team workspace'
   const description = hasOrganizations
     ? 'You are in your personal workspace. Switch to a team to manage members, templates, setup, and pooled task credits.'
     : 'Shared agents, templates, setup, members, and pooled task credits can live together in one place.'
@@ -509,21 +496,15 @@ function OrganizationEmptyState({
   return (
     <div className="profile-screen profile-screen--embedded organization-screen organization-screen--empty">
       <header className="profile-screen__header organization-screen__empty-hero">
-        <div className="profile-screen__title-icon" aria-hidden="true">
-          <Users className="h-5 w-5" />
-        </div>
+        <div className="profile-screen__title-icon" aria-hidden="true"><Users className="h-5 w-5" /></div>
         <div className="organization-screen__empty-copy">
           <p className="profile-screen__eyebrow">Teams</p>
           <h1>{title}</h1>
           <p className="profile-screen__muted">
-            {isCheckingOrganizations ? 'You are in your personal workspace. Looking for teams you can manage.' : description}
+            {organizationsLoading && !hasOrganizations ? 'You are in your personal workspace. Looking for teams you can manage.' : description}
           </p>
         </div>
-        <button
-          type="button"
-          className="profile-screen__button profile-screen__button--primary organization-screen__empty-action"
-          onClick={onCreateOrganization}
-        >
+        <button type="button" className="profile-screen__button profile-screen__button--primary organization-screen__empty-action" onClick={onCreateOrganization}>
           <Plus className="h-4 w-4" aria-hidden="true" />
           Create Team
         </button>
@@ -533,25 +514,19 @@ function OrganizationEmptyState({
         {organizationsLoading ? (
           <p className="profile-screen__muted">Loading teams...</p>
         ) : hasOrganizations ? (
-          organizations.map((organization) => {
-            const isSwitching = switchingOrganizationId === organization.id
-            return (
-              <div key={organization.id} className="organization-screen__empty-row">
-                <div>
-                  <h2>{organization.name}</h2>
-                  {organization.role ? <p className="profile-screen__muted">{organization.role} access</p> : null}
-                </div>
-                <button
-                  type="button"
-                  className="profile-screen__button profile-screen__button--secondary"
-                  onClick={() => onSwitchOrganization(organization)}
-                  disabled={isSwitching}
-                >
-                  {isSwitching ? 'Opening...' : 'Open Team'}
-                </button>
-              </div>
-            )
-          })
+          organizations.map((organization) => (
+            <div key={organization.id} className="organization-screen__empty-row">
+              <h2>{organization.name}</h2>
+              <button
+                type="button"
+                className="profile-screen__button profile-screen__button--secondary"
+                onClick={() => onSwitchOrganization(organization)}
+                disabled={switchingOrganizationId === organization.id}
+              >
+                {switchingOrganizationId === organization.id ? 'Opening...' : 'Open Team'}
+              </button>
+            </div>
+          ))
         ) : (
           <p className="profile-screen__muted">Create a team to start sharing agents, templates, setup, members, and pooled task credits.</p>
         )}
@@ -564,17 +539,17 @@ function OrganizationEmptyState({
 export function OrganizationScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['current-organization'] as const, [])
-  const { data, error, isFetching, isLoading } = useQuery({
+  const { data, error, isLoading } = useQuery({
     queryKey,
     queryFn: ({ signal }) => fetchCurrentOrganization(signal),
-    retry: shouldRetryCurrentOrganizationQuery,
+    retry: (failureCount, err) => !isNoOrganizationContextError(err) && failureCount < 3,
   })
   const noOrganizationContext = !data && isNoOrganizationContextError(error)
   const templateQueryKey = useMemo(
     () => currentOrganizationTemplatesQueryKey(data?.organization.id),
     [data?.organization.id],
   )
-  const handleTeamContextSwitched = useCallback(() => {
+  const refreshOrganizationQueries = useCallback(() => {
     queryClient.setQueryData(queryKey, undefined)
     queryClient.setQueryData(templateQueryKey, undefined)
     void queryClient.invalidateQueries({ queryKey })
@@ -582,7 +557,7 @@ export function OrganizationScreen() {
   }, [queryClient, queryKey, templateQueryKey])
   const teamContextSwitcher = useConsoleContextSwitcher({
     enabled: noOrganizationContext,
-    onSwitched: handleTeamContextSwitched,
+    onSwitched: refreshOrganizationQueries,
   })
   const {
     data: templateData,
@@ -627,11 +602,11 @@ export function OrganizationScreen() {
   const [createOrganizationErrors, setCreateOrganizationErrors] = useState<string[]>([])
   const [creatingOrganization, setCreatingOrganization] = useState(false)
 
-  const openCreateOrganizationModal = useCallback(() => {
+  const openCreateOrganizationModal = () => {
     setCreateOrganizationName('')
     setCreateOrganizationErrors([])
     setCreateOrganizationOpen(true)
-  }, [])
+  }
 
   useEffect(() => {
     if (data) {
@@ -650,10 +625,7 @@ export function OrganizationScreen() {
         return
       }
       if (detail.type !== 'organization' || detail.id !== data?.organization.id) {
-        queryClient.setQueryData(queryKey, undefined)
-        queryClient.setQueryData(templateQueryKey, undefined)
-        void queryClient.invalidateQueries({ queryKey })
-        void queryClient.invalidateQueries({ queryKey: templateQueryKey })
+        refreshOrganizationQueries()
       }
     }
 
@@ -661,7 +633,7 @@ export function OrganizationScreen() {
     return () => {
       window.removeEventListener('gobii:console-context-updated', handleContextUpdated)
     }
-  }, [data?.organization.id, queryClient, queryKey, templateQueryKey])
+  }, [data?.organization.id, refreshOrganizationQueries])
 
   useEffect(() => {
     if (!inviteRole && data?.roles[0]) {
@@ -890,8 +862,7 @@ export function OrganizationScreen() {
       publishConsoleContext(created.context)
       setCreateOrganizationOpen(false)
       setCreateOrganizationName('')
-      await queryClient.invalidateQueries({ queryKey })
-      await queryClient.invalidateQueries({ queryKey: templateQueryKey })
+      refreshOrganizationQueries()
     } catch (err) {
       setCreateOrganizationErrors(formatErrors(err, 'Unable to create team.'))
     } finally {
@@ -922,7 +893,7 @@ export function OrganizationScreen() {
     }
   }, [billingUrl])
 
-  if (isLoading || (isFetching && !data && !error)) {
+  if (isLoading) {
     return (
       <div className="profile-screen profile-screen--embedded">
         <section className="profile-screen__section">
@@ -1088,115 +1059,6 @@ export function OrganizationScreen() {
         ) : null}
       </section>
 
-      <CustomInstructionsSection
-        value={data.organization.customInstructions}
-        maxChars={data.organization.customInstructionsMaxChars}
-        canEdit={canEditCustomInstructions}
-        placeholder="Follow the organization's tone, policies, and operating preferences."
-        successMessage="Custom instructions updated."
-        onSave={handleCustomInstructionsSave}
-        formatErrorMessages={(err) => formatErrors(err, 'Unable to update custom instructions.')}
-      />
-
-      <section className="profile-screen__section">
-        <div className="profile-screen__section-header organization-screen__section-header">
-          <div className="organization-screen__section-title">
-            <div className="profile-screen__section-icon" aria-hidden="true">
-              <Bot className="h-4 w-4" />
-            </div>
-            <div>
-              <h2>Templates</h2>
-              <p>{templates.length} organization template{templates.length === 1 ? '' : 's'}</p>
-            </div>
-          </div>
-          {canManageTemplates ? (
-            <div className="organization-screen__member-actions">
-              {sourceAgents.length ? (
-                <button
-                  type="button"
-                  className="profile-screen__button profile-screen__button--secondary"
-                  onClick={() => {
-                    setTemplateErrors([])
-                    setTemplateMessage(null)
-                    setTemplateSourceAgentId(sourceAgents[0]?.id ?? '')
-                    setCreateTemplateOpen(true)
-                  }}
-                  disabled={templateBusy}
-                >
-                  <Bot className="h-4 w-4" aria-hidden="true" />
-                  Clone Agent
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="profile-screen__button profile-screen__button--primary"
-                onClick={openNewTemplateEditor}
-                disabled={templateBusy}
-              >
-                <Plus className="h-4 w-4" aria-hidden="true" />
-                New Template
-              </button>
-            </div>
-          ) : null}
-        </div>
-        {templateMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{templateMessage}</p> : null}
-        {templateQueryErrorMessage ? <p className="profile-screen__feedback profile-screen__feedback--error">{templateQueryErrorMessage}</p> : null}
-        {templateErrors.map((message) => (
-          <p key={message} className="profile-screen__feedback profile-screen__feedback--error">{message}</p>
-        ))}
-        {templatesLoading ? (
-          <p className="profile-screen__muted">Loading templates...</p>
-        ) : templates.length > 0 ? (
-          <div className="organization-screen__table-wrap">
-            <table className="organization-screen__table">
-              <thead>
-                <tr>
-                  <th>Template</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {templates.map((template) => (
-                  <tr key={template.id}>
-                    <td>
-                      <p className="organization-screen__primary-text">{template.name}</p>
-                      <p className="profile-screen__muted">{template.tagline}</p>
-                      <p className="profile-screen__muted">Intelligence: {formatTemplateTier(template, templateData?.llmIntelligence ?? null)}</p>
-                    </td>
-                    <td>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <button
-                          type="button"
-                          className="profile-screen__button profile-screen__button--primary"
-                          onClick={() => void handleLaunchTemplate(template)}
-                          disabled={templateLaunchBusyId === template.id}
-                        >
-                          <Play className="h-4 w-4" aria-hidden="true" />
-                          {templateLaunchBusyId === template.id ? 'Opening...' : 'Use Template'}
-                        </button>
-                        {canManageTemplates ? (
-                          <>
-                            <button
-                              type="button"
-                              className="profile-screen__button profile-screen__button--secondary"
-                              onClick={() => handleEditTemplate(template)}
-                            >
-                              <Pencil className="h-4 w-4" aria-hidden="true" />
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="profile-screen__icon-button profile-screen__icon-button--danger"
-                              onClick={() => setConfirmAction({ kind: 'deactivate-template', template })}
-                              aria-label={`Deactivate ${template.name}`}
-                              title="Deactivate"
-                            >
-                              <Trash2 className="h-4 w-4" aria-hidden="true" />
-                            </button>
-                          </>
-        ) : null}
-      </section>
-
       <section className="profile-screen__section">
         <div className="profile-screen__section-header organization-screen__section-header">
           <div className="organization-screen__section-title">
@@ -1351,21 +1213,33 @@ export function OrganizationScreen() {
             </div>
           </div>
           {canManageTemplates ? (
-            <button
-              type="button"
-              className="profile-screen__button profile-screen__button--primary"
-              onClick={() => {
-                setTemplateErrors([])
-                setTemplateMessage(null)
-                setTemplateSourceAgentId(sourceAgents[0]?.id ?? '')
-                setCreateTemplateOpen(true)
-              }}
-              disabled={!sourceAgents.length || templateBusy}
-              title={!sourceAgents.length ? 'Create a team agent first' : undefined}
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              Create Template
-            </button>
+            <div className="organization-screen__member-actions">
+              {sourceAgents.length ? (
+                <button
+                  type="button"
+                  className="profile-screen__button profile-screen__button--secondary"
+                  onClick={() => {
+                    setTemplateErrors([])
+                    setTemplateMessage(null)
+                    setTemplateSourceAgentId(sourceAgents[0]?.id ?? '')
+                    setCreateTemplateOpen(true)
+                  }}
+                  disabled={templateBusy}
+                >
+                  <Bot className="h-4 w-4" aria-hidden="true" />
+                  Clone Agent
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="profile-screen__button profile-screen__button--primary"
+                onClick={openNewTemplateEditor}
+                disabled={templateBusy}
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                New Template
+              </button>
+            </div>
           ) : null}
         </div>
         {templateMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{templateMessage}</p> : null}
@@ -1381,7 +1255,6 @@ export function OrganizationScreen() {
               <thead>
                 <tr>
                   <th>Template</th>
-                  <th>Source</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -1390,14 +1263,8 @@ export function OrganizationScreen() {
                   <tr key={template.id}>
                     <td>
                       <p className="organization-screen__primary-text">{template.name}</p>
-                      <p className="profile-screen__muted">{template.category} - {template.tagline}</p>
-                      {template.scheduleDescription ? (
-                        <p className="profile-screen__muted">{template.scheduleDescription}</p>
-                      ) : null}
-                    </td>
-                    <td>
-                      <p className="organization-screen__primary-text">{template.sourceAgentName ?? '-'}</p>
-                      {template.createdBy ? <p className="profile-screen__muted">Created by {template.createdBy}</p> : null}
+                      <p className="profile-screen__muted">{template.tagline}</p>
+                      <p className="profile-screen__muted">Intelligence: {formatTemplateTier(template, templateData?.llmIntelligence ?? null)}</p>
                     </td>
                     <td>
                       <div className="flex flex-wrap justify-end gap-2">
@@ -1411,14 +1278,25 @@ export function OrganizationScreen() {
                           {templateLaunchBusyId === template.id ? 'Opening...' : 'Use Template'}
                         </button>
                         {canManageTemplates ? (
-                          <button
-                            type="button"
-                            className="profile-screen__button profile-screen__button--danger"
-                            onClick={() => setConfirmAction({ kind: 'deactivate-template', template })}
-                          >
-                            <Trash2 className="h-4 w-4" aria-hidden="true" />
-                            Deactivate
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="profile-screen__button profile-screen__button--secondary"
+                              onClick={() => handleEditTemplate(template)}
+                            >
+                              <Pencil className="h-4 w-4" aria-hidden="true" />
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="profile-screen__icon-button profile-screen__icon-button--danger"
+                              onClick={() => setConfirmAction({ kind: 'deactivate-template', template })}
+                              aria-label={`Deactivate ${template.name}`}
+                              title="Deactivate"
+                            >
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            </button>
+                          </>
                         ) : null}
                       </div>
                     </td>
@@ -1499,7 +1377,6 @@ export function OrganizationScreen() {
           onSubmit={handleTemplateEditorSubmit}
         />
       ) : null}
-      {createOrganizationModal}
     </div>
   )
 }
