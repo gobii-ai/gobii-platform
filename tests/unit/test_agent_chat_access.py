@@ -948,6 +948,46 @@ class AgentChatAccessTests(TestCase):
             "Handles follow-up workflows for shared collaborators.",
         )
 
+    @tag("batch_agent_chat")
+    def test_roster_shows_shared_agents_only_in_personal_context(self):
+        User = get_user_model()
+        owner = User.objects.create_user(
+            username="shared-org-filter-owner@example.com",
+            email="shared-org-filter-owner@example.com",
+            password="pw",
+        )
+        shared_browser_agent = BrowserUseAgent.objects.create(user=owner, name="Shared Filter Browser Agent")
+        shared_agent = PersistentAgent.objects.create(
+            user=owner,
+            name="Shared Filter Agent",
+            charter="Coordinate shared follow-up.",
+            browser_use_agent=shared_browser_agent,
+        )
+        AgentCollaborator.objects.create(
+            agent=shared_agent,
+            user=self.user,
+            invited_by=owner,
+        )
+
+        personal_response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.user.id),
+        )
+        self.assertEqual(personal_response.status_code, 200)
+        personal_roster_ids = {entry["id"] for entry in personal_response.json().get("agents", [])}
+        self.assertIn(str(shared_agent.id), personal_roster_ids)
+
+        org_response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+        self.assertEqual(org_response.status_code, 200)
+        org_roster_ids = {entry["id"] for entry in org_response.json().get("agents", [])}
+        self.assertNotIn(str(shared_agent.id), org_roster_ids)
+        self.assertIn(str(self.org_agent.id), org_roster_ids)
+
     def test_roster_includes_processing_activity_for_mixed_agents(self):
         queued_agent_id = str(self.org_agent.id)
         idle_org_agent = self._create_agent("Org Agent Idle", organization=self.org)
