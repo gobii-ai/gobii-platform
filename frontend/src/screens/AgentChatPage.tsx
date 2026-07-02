@@ -44,6 +44,7 @@ import {
   updateUserPreferences,
   parseFavoriteAgentIdsPreference,
   USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
+  USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS,
   USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
@@ -573,6 +574,7 @@ type AgentRosterQueryData = {
   context: ConsoleContext
   agentRosterSortMode?: AgentRosterSortMode
   favoriteAgentIds?: string[]
+  mutedAgentIds?: string[]
   insightsPanelExpanded?: boolean | null
   agentChatNotificationsEnabled?: boolean
   agents: AgentRosterEntry[]
@@ -582,12 +584,14 @@ type AgentRosterQueryData = {
 type AgentRosterPreferenceField =
   | 'agentRosterSortMode'
   | 'favoriteAgentIds'
+  | 'mutedAgentIds'
   | 'insightsPanelExpanded'
   | 'agentChatNotificationsEnabled'
 
 type AgentRosterPreferenceState = {
   agentRosterSortMode: AgentRosterSortMode
   favoriteAgentIds: string[]
+  mutedAgentIds: string[]
   insightsPanelExpanded: boolean | null
   agentChatNotificationsEnabled: boolean
 }
@@ -626,7 +630,7 @@ function useHydratedAgentRosterPreference<StateValue>(
 }
 
 function favoriteAgentIdsPreferenceEquals(
-  currentValue: AgentRosterQueryData['favoriteAgentIds'] | undefined,
+  currentValue: string[] | undefined,
   nextValue: string[],
 ): boolean {
   const normalizedCurrentValue = Array.isArray(currentValue)
@@ -1539,6 +1543,7 @@ export function AgentChatPage({
   })
   const [agentRosterSortMode, setAgentRosterSortMode] = useState<AgentRosterSortMode>('recent')
   const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([])
+  const [mutedAgentIds, setMutedAgentIds] = useState<string[]>([])
   const [insightsPanelExpandedPreference, setInsightsPanelExpandedPreference] = useState<boolean | null>(null)
   const [agentChatNotificationsEnabled, setAgentChatNotificationsEnabled] = useState<boolean>(() => (
     rosterQuery.data?.agentChatNotificationsEnabled === undefined
@@ -1567,6 +1572,17 @@ export function AgentChatPage({
         : serverFavoriteAgentIds
     ))
   }, [rosterQuery.data?.favoriteAgentIds])
+
+  useEffect(() => {
+    const serverMutedAgentIds = Array.isArray(rosterQuery.data?.mutedAgentIds)
+      ? rosterQuery.data.mutedAgentIds
+      : []
+    setMutedAgentIds((current) => (
+      areStringArraysEqual(current, serverMutedAgentIds)
+        ? current
+        : serverMutedAgentIds
+    ))
+  }, [rosterQuery.data?.mutedAgentIds])
 
   useHydratedAgentRosterPreference(
     rosterQuery.data?.insightsPanelExpanded,
@@ -1661,6 +1677,24 @@ export function AgentChatPage({
       })
     },
     [favoriteAgentIds, persistAgentRosterPreference],
+  )
+
+  const handleToggleAgentMute = useCallback(
+    (agentId: string) => {
+      const nextMutedAgentIds = mutedAgentIds.includes(agentId)
+        ? mutedAgentIds.filter((candidateId) => candidateId !== agentId)
+        : [...mutedAgentIds, agentId]
+
+      persistAgentRosterPreference(nextMutedAgentIds, {
+        field: 'mutedAgentIds',
+        preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS,
+        setState: setMutedAgentIds,
+        parsePersistedValue: parseFavoriteAgentIdsPreference,
+        currentValue: mutedAgentIds,
+        areEqual: favoriteAgentIdsPreferenceEquals,
+      })
+    },
+    [mutedAgentIds, persistAgentRosterPreference],
   )
 
   const handleInsightsPanelExpandedPreferenceChange = useCallback(
@@ -1875,6 +1909,7 @@ export function AgentChatPage({
     currentContext: effectiveContext,
     activeAgentId,
     availableAgentIds: visibleRosterAgentIds,
+    mutedAgentIds,
     onOpenAgent: openAgentChat,
   })
   const handleAgentMessageNotificationEvent = useCallback((event: AgentMessageNotification) => {
@@ -3434,12 +3469,14 @@ export function AgentChatPage({
   const selectionSidebarProps: SelectionSidebarProps = {
     agents: sidebarAgents,
     favoriteAgentIds,
+    mutedAgentIds,
     activeAgentId: null,
     loading: rosterLoading,
     errorMessage: rosterErrorMessage,
     onSelectAgent: handleSelectAgent,
     onConfigureAgent: handleConfigureAgent,
     onToggleAgentFavorite: handleToggleAgentFavorite,
+    onToggleAgentMute: handleToggleAgentMute,
     onCreateAgent: handleCreateAgent,
     createAgentDisabledReason,
     teamTemplateMenu,
@@ -3976,6 +4013,7 @@ export function AgentChatPage({
   const chatLayoutSidebarProps = {
     agentRoster: sidebarAgents,
     favoriteAgentIds,
+    mutedAgentIds,
     activeAgentId,
     insightsPanelExpandedPreference,
     switchingAgentId,
@@ -3984,6 +4022,7 @@ export function AgentChatPage({
     onSelectAgent: handleSelectAgent,
     onConfigureAgent: handleConfigureAgent,
     onToggleAgentFavorite: handleToggleAgentFavorite,
+    onToggleAgentMute: handleToggleAgentMute,
     onCreateAgent: handleCreateAgent,
     createAgentDisabledReason,
     onBlockedCreateAgent: previewCreateAgentBlocked ? handleBlockedCreateAgent : undefined,

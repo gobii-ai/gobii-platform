@@ -183,6 +183,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   connectionDetail?: string | null
   agentRoster?: AgentRosterEntry[]
   favoriteAgentIds?: string[]
+  mutedAgentIds?: string[]
   activeAgentId?: string | null
   insightsPanelExpandedPreference?: boolean | null
   switchingAgentId?: string | null
@@ -191,6 +192,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
+  onToggleAgentMute?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
   onBlockedCreateAgent?: (location: 'sidebar') => void
@@ -379,6 +381,7 @@ export function AgentChatLayout({
   connectionDetail,
   agentRoster,
   favoriteAgentIds,
+  mutedAgentIds,
   activeAgentId,
   insightsPanelExpandedPreference = null,
   switchingAgentId,
@@ -389,6 +392,7 @@ export function AgentChatLayout({
   onSelectAgent,
   onConfigureAgent,
   onToggleAgentFavorite,
+  onToggleAgentMute,
   onCreateAgent,
   createAgentDisabledReason = null,
   onBlockedCreateAgent,
@@ -1495,6 +1499,7 @@ export function AgentChatLayout({
         onDesktopModeChange={handleSidebarModeChange}
         agents={agentRoster}
         favoriteAgentIds={favoriteAgentIds}
+        mutedAgentIds={mutedAgentIds}
         activeAgentId={activeAgentId}
         switchingAgentId={switchingAgentId}
         loading={rosterLoading}
@@ -1502,6 +1507,7 @@ export function AgentChatLayout({
         onSelectAgent={onSelectAgent}
         onConfigureAgent={onConfigureAgent}
         onToggleAgentFavorite={onToggleAgentFavorite}
+        onToggleAgentMute={onToggleAgentMute}
         onCreateAgent={onCreateAgent}
         createAgentDisabledReason={createAgentDisabledReason}
         onBlockedCreateAgent={onBlockedCreateAgent}

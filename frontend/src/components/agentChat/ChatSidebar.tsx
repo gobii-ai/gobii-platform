@@ -29,6 +29,7 @@ const SEARCH_THRESHOLD = 6
 type ChatSidebarProps = {
   agents?: AgentRosterEntry[]
   favoriteAgentIds?: string[]
+  mutedAgentIds?: string[]
   activeAgentId?: string | null
   switchingAgentId?: string | null
   loading?: boolean
@@ -38,6 +39,7 @@ type ChatSidebarProps = {
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
+  onToggleAgentMute?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
   onBlockedCreateAgent?: (location: 'sidebar') => void
@@ -60,6 +62,7 @@ type ChatSidebarProps = {
 export const ChatSidebar = memo(function ChatSidebar({
   agents = [],
   favoriteAgentIds = [],
+  mutedAgentIds = [],
   activeAgentId,
   switchingAgentId,
   loading = false,
@@ -69,6 +72,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onSelectAgent,
   onConfigureAgent,
   onToggleAgentFavorite,
+  onToggleAgentMute,
   onCreateAgent,
   createAgentDisabledReason = null,
   onBlockedCreateAgent,
@@ -116,6 +120,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [agents, searchQuery])
 
   const favoriteAgentIdSet = useMemo(() => new Set(favoriteAgentIds), [favoriteAgentIds])
+  const mutedAgentIdSet = useMemo(() => new Set(mutedAgentIds), [mutedAgentIds])
   const hasFavoritesInRoster = useMemo(
     () => agents.some((agent) => favoriteAgentIdSet.has(agent.id)),
     [agents, favoriteAgentIdSet],
@@ -322,8 +327,11 @@ export const ChatSidebar = memo(function ChatSidebar({
               isActive={agent.id === activeAgentId}
               isSwitching={agent.id === switchingAgentId}
               isFavorite={favoriteAgentIdSet.has(agent.id)}
+              isMuted={mutedAgentIdSet.has(agent.id)}
               onSelect={handleAgentSelect}
+              onConfigure={onConfigureAgent}
               onToggleFavorite={onToggleAgentFavorite}
+              onToggleMute={onToggleAgentMute}
               collapsed={collapsedView}
               showFavoriteToggle={false}
             />
@@ -343,8 +351,11 @@ export const ChatSidebar = memo(function ChatSidebar({
                 isActive={agent.id === activeAgentId}
                 isSwitching={agent.id === switchingAgentId}
                 isFavorite={true}
+                isMuted={mutedAgentIdSet.has(agent.id)}
                 onSelect={handleAgentSelect}
+                onConfigure={onConfigureAgent}
                 onToggleFavorite={onToggleAgentFavorite}
+                onToggleMute={onToggleAgentMute}
                 collapsed={collapsedView}
               />
             ))}
@@ -361,8 +372,11 @@ export const ChatSidebar = memo(function ChatSidebar({
                 isActive={agent.id === activeAgentId}
                 isSwitching={agent.id === switchingAgentId}
                 isFavorite={false}
+                isMuted={mutedAgentIdSet.has(agent.id)}
                 onSelect={handleAgentSelect}
+                onConfigure={onConfigureAgent}
                 onToggleFavorite={onToggleAgentFavorite}
+                onToggleMute={onToggleAgentMute}
                 collapsed={collapsedView}
               />
             ))}
@@ -376,8 +390,11 @@ export const ChatSidebar = memo(function ChatSidebar({
               isActive={agent.id === activeAgentId}
               isSwitching={agent.id === switchingAgentId}
               isFavorite={false}
+              isMuted={mutedAgentIdSet.has(agent.id)}
               onSelect={handleAgentSelect}
+              onConfigure={onConfigureAgent}
               onToggleFavorite={onToggleAgentFavorite}
+              onToggleMute={onToggleAgentMute}
               collapsed={collapsedView}
             />
           ))
@@ -400,8 +417,11 @@ export const ChatSidebar = memo(function ChatSidebar({
     hasAgents,
     hasFavoritesInRoster,
     loading,
+    mutedAgentIdSet,
+    onConfigureAgent,
     onCreateAgent,
     onToggleAgentFavorite,
+    onToggleAgentMute,
     searchQuery,
     switchingAgentId,
     teamTemplateMenu,

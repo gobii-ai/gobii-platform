@@ -746,6 +746,25 @@ class AgentChatAccessTests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("favorite_agent_ids"), [str(self.org_agent.id)])
 
+    def test_roster_includes_muted_agent_ids(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {
+                UserPreference.KEY_AGENT_CHAT_MUTED_AGENT_IDS: [
+                    str(self.org_agent.id),
+                ],
+            },
+        )
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("muted_agent_ids"), [str(self.org_agent.id)])
+
     def test_roster_includes_insights_panel_expanded_preference(self):
         UserPreference.update_known_preferences(
             self.user,

@@ -12,6 +12,7 @@ type AgentChatNotificationOptions = {
   currentContext: ConsoleContext | null
   activeAgentId: string | null
   availableAgentIds?: string[]
+  mutedAgentIds?: string[]
   onOpenAgent: (agentId: string) => void
 }
 
@@ -75,13 +76,18 @@ export function shouldDispatchAgentChatNotification({
   currentContext,
   activeAgentId,
   availableAgentIds,
+  mutedAgentIds,
 }: {
   event: AgentMessageNotification
   currentContext: ConsoleContext | null
   activeAgentId: string | null
   availableAgentIds?: readonly string[]
+  mutedAgentIds?: readonly string[]
 }): boolean {
   if (!currentContext) {
+    return false
+  }
+  if (new Set(mutedAgentIds ?? []).has(event.agent_id)) {
     return false
   }
   const knownAgentIds = new Set(availableAgentIds ?? [])
@@ -107,6 +113,7 @@ export function useAgentChatNotifications({
   currentContext,
   activeAgentId,
   availableAgentIds = [],
+  mutedAgentIds = [],
   onOpenAgent,
 }: AgentChatNotificationOptions) {
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionState>(() =>
@@ -233,6 +240,7 @@ export function useAgentChatNotifications({
       currentContext,
       activeAgentId,
       availableAgentIds,
+      mutedAgentIds,
     })) {
       return
     }
@@ -272,6 +280,7 @@ export function useAgentChatNotifications({
     availableAgentIds,
     currentContext,
     enabled,
+    mutedAgentIds,
     playNotificationSound,
     refreshNotificationPermission,
   ])

@@ -861,6 +861,7 @@ class UserPreference(models.Model):
 
     KEY_AGENT_CHAT_ROSTER_SORT_MODE = "agent.chat.roster.sort_mode"
     KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = "agent.chat.roster.favorite_agent_ids"
+    KEY_AGENT_CHAT_MUTED_AGENT_IDS = "agent.chat.muted_agent_ids"
     KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED = "agent.chat.insights_panel.expanded"
     KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED = "agent.chat.notifications.enabled"
     KEY_USER_TIMEZONE = "user.timezone"
@@ -871,6 +872,10 @@ class UserPreference(models.Model):
             "allowed_values": frozenset(AgentRosterSortMode.values),
         },
         KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: {
+            "default": [],
+            "type": "uuid_list",
+        },
+        KEY_AGENT_CHAT_MUTED_AGENT_IDS: {
             "default": [],
             "type": "uuid_list",
         },
