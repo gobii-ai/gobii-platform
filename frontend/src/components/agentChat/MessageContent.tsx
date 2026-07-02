@@ -79,24 +79,17 @@ function shouldInterceptLinkClick(event: ReactMouseEvent<HTMLElement>): boolean 
 }
 
 function wrapTablesForHorizontalScroll(value: string): string {
-  if (!value || typeof DOMParser === 'undefined') {
-    return value
-  }
+  if (!value || typeof DOMParser === 'undefined') return value
 
-  const parser = new DOMParser()
-  const document = parser.parseFromString(value, 'text/html')
-
+  const document = new DOMParser().parseFromString(value, 'text/html')
   document.body.querySelectorAll('table').forEach((table) => {
-    if (table.parentElement?.classList.contains('chat-html-table-scroll')) {
-      return
-    }
+    if (table.parentElement?.classList.contains('chat-html-table-scroll')) return
 
     const wrapper = document.createElement('div')
     wrapper.className = 'chat-html-table-scroll'
-    table.parentNode?.insertBefore(wrapper, table)
+    table.before(wrapper)
     wrapper.appendChild(table)
   })
-
   return document.body.innerHTML
 }
 

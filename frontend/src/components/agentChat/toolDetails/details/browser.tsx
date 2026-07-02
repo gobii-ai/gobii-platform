@@ -72,33 +72,22 @@ function cleanScrapedMarkdown(value: string, sourceUrl: string | null): string {
   const host = sourceUrl ? parseHostname(sourceUrl) : null
   if (host?.endsWith('wikipedia.org')) {
     const articleStart = source.indexOf('From Wikipedia, the free encyclopedia')
-    if (articleStart >= 0) {
-      source = source.slice(articleStart)
-    }
+    if (articleStart >= 0) source = source.slice(articleStart)
   }
 
-  const normalized = source
+  return source
     .replace(/\r\n?/g, '\n')
     .replace(/\\([[\]()_&])/g, '$1')
     .replace(/\[([^\]\n]+)\]\(#[^)]+\)/g, '$1')
     .replace(/\[([^\]\n]+)\n\s*\]\(#[^)]+\)/g, (_, label: string) => label.trim())
-
-  return normalized
     .split('\n')
     .map((line) => {
       const trimmed = line.trim()
-      if (!trimmed) return ''
-      if (trimmed === '[' || trimmed === ']') return ''
+      if (!trimmed || trimmed === '[' || trimmed === ']' || /^\(redirected from\b/i.test(trimmed)) return ''
       if (/^(contents|move to sidebar hide|\(top\)|from wikipedia, the free encyclopedia)$/i.test(trimmed)) return ''
-      if (/^\(redirected from\b/i.test(trimmed)) return ''
-      if (/^\[\[edit\]/i.test(trimmed)) return ''
-
-      const samePageAnchorMatch = trimmed.match(/^\]\(#[^)]+\)\s*(.*)$/)
-      if (samePageAnchorMatch) {
-        const trailingText = samePageAnchorMatch[1]?.trim() || ''
-        return /^toggle\b/i.test(trailingText) ? '' : trailingText
-      }
-
+      if (/^(\[\[edit\]|\]\(#[^)]+\)\s*toggle\b)/i.test(trimmed)) return ''
+      const anchorMatch = trimmed.match(/^\]\(#[^)]+\)\s*(.*)$/)
+      if (anchorMatch) return anchorMatch[1]?.trim() || ''
       return line
     })
     .join('\n')
@@ -250,7 +239,7 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
               href={normalizedTargetUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="brightdata-reader-open-link"
+              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-indigo-100 no-underline hover:bg-white/20 hover:text-white"
             >
               Open page
               <ExternalLink className="h-3 w-3" aria-hidden="true" />
@@ -274,24 +263,24 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
           ) : null}
           {isScrapeAsMarkdown ? (
             readerText ? (
-              <div className="brightdata-reader-panel">
-                <div className="brightdata-reader-panel-header">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3.5 py-2.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-600">
                   <span>Extracted page text</span>
                   {normalizedTargetUrl ? (
-                    <a href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
+                    <a className="shrink-0 text-indigo-600 no-underline hover:text-indigo-700 hover:underline" href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
                       Source
                     </a>
                   ) : null}
                 </div>
-                <div className="brightdata-reader-scroll">
-                  <MarkdownViewer content={readerText} className="brightdata-reader-content prose prose-sm max-w-none" />
+                <div className="max-h-[min(520px,68vh)] overflow-y-auto overflow-x-hidden px-4 py-3 [webkit-overflow-scrolling:touch] max-md:max-h-[min(380px,58vh)]">
+                  <MarkdownViewer content={readerText} className="prose prose-sm max-w-none leading-relaxed text-slate-800 prose-a:font-semibold prose-a:text-indigo-600 prose-headings:tracking-normal prose-headings:text-slate-900" />
                 </div>
               </div>
             ) : (
-              <div className="brightdata-reader-empty">
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-indigo-50/60 px-3.5 py-3 text-sm text-slate-500">
                 <span>No extracted text returned.</span>
                 {normalizedTargetUrl ? (
-                  <a href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
+                  <a className="shrink-0 font-extrabold text-indigo-600 no-underline hover:text-indigo-700 hover:underline" href={normalizedTargetUrl} target="_blank" rel="noopener noreferrer">
                     Open page
                   </a>
                 ) : targetUrl ? (
