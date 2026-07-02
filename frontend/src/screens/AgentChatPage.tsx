@@ -1315,10 +1315,8 @@ export function AgentChatPage({
     autoScrollPinnedRef,
     isNearBottom,
     pinAndJumpToBottom,
-    requestPreviousPage,
     scrollOnComposerFocus,
     scrollToBottom,
-    showOlderLoadButton,
     timelineContentRef,
     timelineRef: captureTimelineRef,
     composerShellRef,
@@ -4239,7 +4237,6 @@ export function AgentChatPage({
         onRealtimeEventAnimationConsumed={consumeRealtimeEventCursor}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
-        showOlderLoadButton={showOlderLoadButton}
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
         newestCursor={timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : null}
         processingActive={timelineProcessingActive}
@@ -4248,7 +4245,6 @@ export function AgentChatPage({
         processingWebTasks={timelineProcessingWebTasks}
         nextScheduledAt={timelineNextScheduledAt}
         streaming={timelineStreaming}
-        onLoadOlder={requestPreviousPage}
         onSendMessage={handleSend}
         onRespondHumanInputRequest={handleRespondHumanInputRequest}
         onDismissHumanInputRequest={handleDismissHumanInputRequest}

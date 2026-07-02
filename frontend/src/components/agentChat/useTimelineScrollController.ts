@@ -80,7 +80,6 @@ export function useTimelineScrollController({
   const [contentNode, setContentNode] = useState<HTMLDivElement | null>(null)
   const [composerNode, setComposerNode] = useState<HTMLDivElement | null>(null)
   const [isNearBottom, setIsNearBottom] = useState(true)
-  const [timelineCanScroll, setTimelineCanScroll] = useState(false)
 
   useEffect(() => {
     pinnedRef.current = autoScrollPinned
@@ -100,8 +99,6 @@ export function useTimelineScrollController({
     }
     const nearBottom = bottomDistance(container) <= NEAR_BOTTOM_PX
     setIsNearBottom((current) => (current === nearBottom ? current : nearBottom))
-    const scrollable = canScroll(container)
-    setTimelineCanScroll((current) => (current === scrollable ? current : scrollable))
   }, [])
 
   const scrollToBottomNow = useCallback(() => {
@@ -341,6 +338,36 @@ export function useTimelineScrollController({
 
   useEffect(() => {
     const container = timelineNode
+    if (
+      !container
+      || initialLoading
+      || isNewAgent
+      || switchingAgentId
+      || eventCount === 0
+      || !hasMoreOlder
+      || loadingOlder
+      || isFetchPreviousPageError
+      || canScroll(container)
+    ) {
+      return
+    }
+
+    requestPreviousPage()
+  }, [
+    contentVersion,
+    eventCount,
+    hasMoreOlder,
+    initialLoading,
+    isFetchPreviousPageError,
+    isNewAgent,
+    loadingOlder,
+    requestPreviousPage,
+    switchingAgentId,
+    timelineNode,
+  ])
+
+  useEffect(() => {
+    const container = timelineNode
     if (!container || typeof ResizeObserver === 'undefined') {
       return
     }
@@ -381,24 +408,12 @@ export function useTimelineScrollController({
     }
   }, [pinAndJumpToBottom])
 
-  const showOlderLoadButton = (
-    !initialLoading
-    && !isNewAgent
-    && !switchingAgentId
-    && eventCount > 0
-    && hasMoreOlder
-    && !loadingOlder
-    && !timelineCanScroll
-  )
-
   return {
     autoScrollPinnedRef: pinnedRef,
     isNearBottom,
     pinAndJumpToBottom,
-    requestPreviousPage,
     scrollOnComposerFocus,
     scrollToBottom,
-    showOlderLoadButton,
     timelineContentRef,
     timelineRef,
     composerShellRef,

@@ -266,8 +266,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
   highPriorityBanner?: HighPriorityBannerConfig | null
-  showOlderLoadButton?: boolean
-  onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
   onClose?: () => void
@@ -464,8 +462,6 @@ export function AgentChatLayout({
   showTaskCreditsUpgrade = false,
   taskCreditsDismissKey = null,
   highPriorityBanner = null,
-  showOlderLoadButton = false,
-  onLoadOlder,
   hasMoreNewer,
   processingActive,
   awaitingResponse = false,
@@ -1639,7 +1635,6 @@ export function AgentChatLayout({
             onHardLimitQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
             onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
             onJumpToLatest={onJumpToLatest}
-            onLoadOlder={onLoadOlder}
             onMessageCopied={handleMessageCopied}
             onMessageLinkClick={handleMessageLinkClick}
             onPurchaseSeats={handlePurchaseSeats}
@@ -1653,7 +1648,6 @@ export function AgentChatLayout({
             showHardLimitCallout={showHardLimitCallout}
             showJumpButton={showJumpButton}
             showNoSeatsCallout={showNoSeatsCallout}
-            showOlderLoadButton={showOlderLoadButton}
             showProcessingIndicator={showProcessingIndicator}
             showScheduledResumeEvent={showScheduledResumeEvent}
             showStarterPrompts={pendingActionRequests.length === 0 && signupPreviewState === 'none' && (starterPromptsLoading || starterPrompts.length > 0)}
