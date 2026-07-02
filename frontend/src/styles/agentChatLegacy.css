@@ -7353,6 +7353,45 @@
     background: rgba(167, 139, 250, 0.12);
     color: #c4b5fd;
 }
+.agent-mobile-sheet--sidebar .chat-sidebar-create-btn--drawer {
+    width: calc(100% - 1.5rem);
+    margin: 0 0.75rem 0.5rem;
+    border: 1px solid rgba(167, 139, 250, 0.18);
+    border-radius: 0.9rem;
+    background: rgba(255, 255, 255, 0.07);
+    color: #ddd6fe;
+}
+.agent-mobile-sheet--sidebar .chat-sidebar-create-btn--drawer:not(.agent-create-split) {
+    padding: 0.7rem 0.85rem;
+}
+.agent-mobile-sheet--sidebar .chat-sidebar-create-btn--drawer:hover,
+.agent-mobile-sheet--sidebar .agent-create-split.chat-sidebar-create-btn--drawer[data-open='true'] {
+    border-color: rgba(196, 181, 253, 0.3);
+    background: rgba(255, 255, 255, 0.1);
+}
+.agent-mobile-sheet--sidebar .chat-sidebar-create-btn--drawer .chat-sidebar-create-btn-icon {
+    width: 2.3rem;
+    height: 2.3rem;
+    background: rgba(167, 139, 250, 0.12);
+    color: #a78bfa;
+}
+.agent-mobile-sheet--sidebar .agent-create-split[data-create-variant='drawer'] .agent-create-split__main {
+    padding: 0.7rem 0.85rem;
+}
+.agent-mobile-sheet--sidebar .agent-create-split[data-create-variant='drawer'] .agent-create-split__chevron {
+    flex: 0 0 2.25rem;
+    align-self: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    margin-right: 0.55rem;
+    border-left: 0;
+    border-radius: 0.65rem;
+    color: rgba(221, 214, 254, 0.82);
+}
+.agent-mobile-sheet--sidebar .agent-create-split[data-create-variant='drawer'] .agent-create-split__chevron:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__trigger:hover, .agent-roster-search__clear:active) {
     background: rgba(167, 139, 250, 0.16);
     color: #ddd6fe;
@@ -7382,10 +7421,11 @@
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__item-role, .agent-roster-item__desc, .agent-roster-empty) {
     color: var(--drawer-soft-text);
 }
-.agent-mobile-sheet--sidebar :is(.agent-roster-search, .agent-roster-sort) {
+.agent-mobile-sheet--sidebar .agent-roster-search {
     border-bottom: 1px solid rgba(167, 139, 250, 0.14);
 }
 .agent-mobile-sheet--sidebar .agent-roster-sort {
+    border-bottom: 0;
     background: linear-gradient(180deg, rgba(167, 139, 250, 0.08), rgba(167, 139, 250, 0.02));
 }
 .agent-mobile-sheet--sidebar :is(.agent-roster-search__icon, .agent-roster-search__clear) {
