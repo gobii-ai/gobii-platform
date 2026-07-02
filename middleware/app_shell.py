@@ -18,12 +18,27 @@ APP_PROTECTED_PATH_PREFIX = f"{APP_PATH_PREFIX}/agents"
 APP_BILLING_PATH_PREFIX = f"{APP_PATH_PREFIX}/billing"
 APP_API_KEYS_PATH_PREFIX = f"{APP_PATH_PREFIX}/api-keys"
 APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX = f"{APP_PATH_PREFIX}/agent-collaborator-invites"
+APP_TEAM_PATH_PREFIX = f"{APP_PATH_PREFIX}/team"
 APP_ORGANIZATION_PATH_PREFIX = f"{APP_PATH_PREFIX}/organization"
 APP_ORGANIZATION_INVITES_PATH_PREFIX = f"{APP_PATH_PREFIX}/organizations/invites"
 APP_PROFILE_PATH_PREFIX = f"{APP_PATH_PREFIX}/profile"
 APP_SECRETS_PATH_PREFIX = f"{APP_PATH_PREFIX}/secrets"
 APP_USAGE_PATH_PREFIX = f"{APP_PATH_PREFIX}/usage"
 APP_INTEGRATIONS_PATH_PREFIX = f"{APP_PATH_PREFIX}/integrations"
+APP_LOGIN_REQUIRED_PATH_PREFIXES = (
+    APP_PROTECTED_PATH_PREFIX,
+    APP_BILLING_PATH_PREFIX,
+    APP_API_KEYS_PATH_PREFIX,
+    APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX,
+    APP_TEAM_PATH_PREFIX,
+    APP_ORGANIZATION_PATH_PREFIX,
+    APP_ORGANIZATION_INVITES_PATH_PREFIX,
+    APP_PROFILE_PATH_PREFIX,
+    APP_SECRETS_PATH_PREFIX,
+    APP_USAGE_PATH_PREFIX,
+    APP_INTEGRATIONS_PATH_PREFIX,
+)
+APP_LOGIN_REQUIRED_SUBPATH_PREFIXES = tuple(f"{prefix}/" for prefix in APP_LOGIN_REQUIRED_PATH_PREFIXES)
 APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 APP_ROBOTS_HEADER_VALUE = "noindex, follow"
 
@@ -272,6 +287,10 @@ class AppShellMiddleware:
                 redirect_to_login(request.get_full_path(), login_url=reverse("account_login"))
             )
 
+        canonical_redirect = self._canonical_redirect_path(request)
+        if canonical_redirect is not None:
+            return self._with_robots_header(HttpResponseRedirect(canonical_redirect))
+
         if request.user.is_authenticated:
             self._apply_context_query(request)
 
@@ -308,6 +327,15 @@ class AppShellMiddleware:
         return response
 
     @staticmethod
+    def _canonical_redirect_path(request) -> str | None:
+        if request.path != APP_ORGANIZATION_PATH_PREFIX and not request.path.startswith(f"{APP_ORGANIZATION_PATH_PREFIX}/"):
+            return None
+
+        target_path = request.path.replace(APP_ORGANIZATION_PATH_PREFIX, APP_TEAM_PATH_PREFIX, 1)
+        query_string = request.META.get("QUERY_STRING")
+        return f"{target_path}?{query_string}" if query_string else target_path
+
+    @staticmethod
     def _legacy_console_redirect(request) -> str | None:
         if not settings.LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED:
             return None
@@ -319,28 +347,7 @@ class AppShellMiddleware:
 
     @staticmethod
     def _requires_login(path: str) -> bool:
-        return (
-            path == APP_PROTECTED_PATH_PREFIX
-            or path.startswith(f"{APP_PROTECTED_PATH_PREFIX}/")
-            or path == APP_BILLING_PATH_PREFIX
-            or path.startswith(f"{APP_BILLING_PATH_PREFIX}/")
-            or path == APP_API_KEYS_PATH_PREFIX
-            or path.startswith(f"{APP_API_KEYS_PATH_PREFIX}/")
-            or path == APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX
-            or path.startswith(f"{APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX}/")
-            or path == APP_ORGANIZATION_PATH_PREFIX
-            or path.startswith(f"{APP_ORGANIZATION_PATH_PREFIX}/")
-            or path == APP_ORGANIZATION_INVITES_PATH_PREFIX
-            or path.startswith(f"{APP_ORGANIZATION_INVITES_PATH_PREFIX}/")
-            or path == APP_PROFILE_PATH_PREFIX
-            or path.startswith(f"{APP_PROFILE_PATH_PREFIX}/")
-            or path == APP_SECRETS_PATH_PREFIX
-            or path.startswith(f"{APP_SECRETS_PATH_PREFIX}/")
-            or path == APP_USAGE_PATH_PREFIX
-            or path.startswith(f"{APP_USAGE_PATH_PREFIX}/")
-            or path == APP_INTEGRATIONS_PATH_PREFIX
-            or path.startswith(f"{APP_INTEGRATIONS_PATH_PREFIX}/")
-        )
+        return path in APP_LOGIN_REQUIRED_PATH_PREFIXES or path.startswith(APP_LOGIN_REQUIRED_SUBPATH_PREFIXES)
 
     @staticmethod
     def _apply_context_query(request) -> None:

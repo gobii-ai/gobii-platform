@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEv
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Building2, Pencil, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
+import { createOrganization, type ConsoleContext, type ConsoleContextOption } from '../api/context'
 import {
   currentOrganizationTemplatesQueryKey,
   createOrganizationTemplate,
@@ -32,7 +33,9 @@ import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceS
 import { ModalForm } from '../components/common/ModalForm'
 import { CustomInstructionsSection } from '../components/settings/CustomInstructionsSection'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
+import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { navigateWithinApp } from '../util/appNavigation'
+import { storeConsoleContext } from '../util/consoleContextStorage'
 
 type ConfirmAction = {
   kind: 'remove-member'
@@ -55,14 +58,9 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 })
 
 function formatDate(value: string | null): string {
-  if (!value) {
-    return '-'
-  }
+  if (!value) return '-'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return dateFormatter.format(date)
+  return Number.isNaN(date.getTime()) ? value : dateFormatter.format(date)
 }
 
 function formatErrors(error: unknown, fallback: string): string[] {
@@ -86,19 +84,13 @@ function formatErrors(error: unknown, fallback: string): string[] {
 function resolveTemplateDefaultTier(config?: LlmIntelligenceConfig | null): IntelligenceTierKey {
   const options = config?.options ?? []
   const systemDefault = config?.systemDefaultTier
-  if (systemDefault && options.some((option) => option.key === systemDefault)) {
-    return systemDefault
-  }
-  return options[0]?.key ?? FALLBACK_INTELLIGENCE_TIER
+  return systemDefault && options.some((option) => option.key === systemDefault)
+    ? systemDefault
+    : options[0]?.key ?? FALLBACK_INTELLIGENCE_TIER
 }
 
 function buildBlankTemplateDraft(config?: LlmIntelligenceConfig | null): OrganizationTemplateEditorPayload {
-  return {
-    name: '',
-    tagline: '',
-    charter: '',
-    preferredLlmTier: resolveTemplateDefaultTier(config),
-  }
+  return { name: '', tagline: '', charter: '', preferredLlmTier: resolveTemplateDefaultTier(config) }
 }
 
 function formatTemplateTier(template: OrganizationTemplate, config?: LlmIntelligenceConfig | null): string {
@@ -107,16 +99,18 @@ function formatTemplateTier(template: OrganizationTemplate, config?: LlmIntellig
 }
 
 function publishOrganizationContext(data: CurrentOrganizationPayload) {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.dispatchEvent(new CustomEvent('gobii:console-context-updated', {
-    detail: {
-      type: 'organization',
-      id: data.organization.id,
-      name: data.organization.name,
-    },
-  }))
+  publishConsoleContext({ type: 'organization', id: data.organization.id, name: data.organization.name })
+}
+
+function publishConsoleContext(context: ConsoleContext) {
+  if (typeof window === 'undefined') return
+  storeConsoleContext(context)
+  window.dispatchEvent(new CustomEvent('gobii:console-context-updated', { detail: context }))
+}
+
+function isNoOrganizationContextError(error: unknown): boolean {
+  const body = error instanceof HttpError && error.status === 404 ? error.body : null
+  return Boolean(body && typeof body === 'object' && (body as { error?: unknown }).error === 'Switch to an organization context first.')
 }
 
 function buildBillingPathForCurrentAppRoute(): string {
@@ -139,15 +133,9 @@ function buildBillingPathForCurrentAppRoute(): string {
   return `/app/agents/${match[1]}?${params.toString()}`
 }
 
-function ConfirmOrganizationActionModal({
-  action,
-  onClose,
-  onConfirm,
-}: {
-  action: ConfirmAction
-  onClose: () => void
-  onConfirm: (action: ConfirmAction) => Promise<void>
-}) {
+type ConfirmOrganizationActionModalProps = { action: ConfirmAction; onClose: () => void; onConfirm: (action: ConfirmAction) => Promise<void> }
+
+function ConfirmOrganizationActionModal({ action, onClose, onConfirm }: ConfirmOrganizationActionModalProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isRemove = action.kind === 'remove-member'
@@ -155,9 +143,9 @@ function ConfirmOrganizationActionModal({
   const title = isTemplateDeactivate ? 'Deactivate Template' : isRemove ? 'Remove Member' : 'Revoke Invite'
   const subject = isRemove ? action.member.email : isTemplateDeactivate ? action.template.name : action.invite.email
   const subtitle = isTemplateDeactivate
-    ? `${subject} will no longer appear for this organization.`
+    ? `${subject} will no longer appear for this team.`
     : isRemove
-      ? `${subject} will lose access to this organization.`
+      ? `${subject} will lose access to this team.`
       : `${subject} will no longer be able to accept this invitation.`
 
   const handleConfirm = async () => {
@@ -167,7 +155,7 @@ function ConfirmOrganizationActionModal({
       await onConfirm(action)
       onClose()
     } catch (err) {
-      setError(formatErrors(err, 'Unable to update organization membership.')[0] ?? 'Unable to update organization membership.')
+      setError(formatErrors(err, 'Unable to update team membership.')[0] ?? 'Unable to update team membership.')
     } finally {
       setBusy(false)
     }
@@ -189,29 +177,35 @@ function ConfirmOrganizationActionModal({
   )
 }
 
-function AddMemberModal({
-  roles,
-  email,
-  role,
-  seatsAvailable,
-  errors,
-  busy,
-  onEmailChange,
-  onRoleChange,
-  onClose,
-  onSubmit,
-}: {
-  roles: CurrentOrganizationPayload['roles']
-  email: string
-  role: string
-  seatsAvailable: number | null
-  errors: string[]
-  busy: boolean
-  onEmailChange: (email: string) => void
-  onRoleChange: (role: string) => void
-  onClose: () => void
-  onSubmit: (event: FormEvent) => void
-}) {
+type CreateOrganizationModalProps = { name: string; errors: string[]; busy: boolean; onNameChange: (name: string) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }
+
+function CreateOrganizationModal({ name, errors, busy, onNameChange, onClose, onSubmit }: CreateOrganizationModalProps) {
+  return (
+    <ModalForm
+      id="organization-create-team-form" title="Create Team" onClose={onClose} onSubmit={onSubmit} widthClass="sm:max-w-lg"
+      dismissible={!busy} submitLabel="Create Team" submittingLabel="Creating..." submitting={busy} errorMessages={errors}
+    >
+      <label htmlFor="organization-create-team-name" className="block text-sm font-medium text-slate-700">
+        Team Name
+        <input
+          id="organization-create-team-name"
+          type="text"
+          required
+          value={name}
+          onChange={(event) => onNameChange(event.target.value)}
+          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          placeholder="Acme Operations"
+          autoFocus
+          disabled={busy}
+        />
+      </label>
+    </ModalForm>
+  )
+}
+
+type AddMemberModalProps = { roles: CurrentOrganizationPayload['roles']; email: string; role: string; seatsAvailable: number | null; errors: string[]; busy: boolean; onEmailChange: (email: string) => void; onRoleChange: (role: string) => void; onClose: () => void; onSubmit: (event: FormEvent) => void }
+
+function AddMemberModal({ roles, email, role, seatsAvailable, errors, busy, onEmailChange, onRoleChange, onClose, onSubmit }: AddMemberModalProps) {
   const noSeatsAvailable = seatsAvailable !== null && seatsAvailable <= 0
   const selectedRoleRequiresSeat = role !== SOLUTIONS_PARTNER_ROLE
   const submitDisabled = !role || (noSeatsAvailable && selectedRoleRequiresSeat)
@@ -220,7 +214,7 @@ function AddMemberModal({
     <ModalForm
       id="organization-add-member-form"
       title="Add Member"
-      subtitle="Send an invitation to join this organization."
+      subtitle="Send an invitation to join this team."
       onClose={onClose}
       onSubmit={onSubmit}
       widthClass="sm:max-w-lg"
@@ -273,30 +267,16 @@ function AddMemberModal({
   )
 }
 
-function CreateTemplateModal({
-  sourceAgents,
-  sourceAgentId,
-  errors,
-  busy,
-  onSourceAgentChange,
-  onClose,
-  onSubmit,
-}: {
-  sourceAgents: CurrentOrganizationTemplatesPayload['sourceAgents']
-  sourceAgentId: string
-  errors: string[]
-  busy: boolean
-  onSourceAgentChange: (agentId: string) => void
-  onClose: () => void
-  onSubmit: (event: FormEvent) => void
-}) {
+type CreateTemplateModalProps = { sourceAgents: CurrentOrganizationTemplatesPayload['sourceAgents']; sourceAgentId: string; errors: string[]; busy: boolean; onSourceAgentChange: (agentId: string) => void; onClose: () => void; onSubmit: (event: FormEvent) => void }
+
+function CreateTemplateModal({ sourceAgents, sourceAgentId, errors, busy, onSourceAgentChange, onClose, onSubmit }: CreateTemplateModalProps) {
   const hasSourceAgents = sourceAgents.length > 0
 
   return (
     <ModalForm
       id="organization-create-template-form"
       title="Create Template"
-      subtitle="Clone one of this organization's agents into a private template."
+      subtitle="Clone one of this team's agents into a private template."
       onClose={onClose}
       onSubmit={onSubmit}
       widthClass="sm:max-w-lg"
@@ -331,31 +311,15 @@ function CreateTemplateModal({
           </span>
         </label>
       ) : (
-        <p className="text-sm text-slate-600">Create an organization-owned agent before turning it into a template.</p>
+        <p className="text-sm text-slate-600">Create a team-owned agent before turning it into a template.</p>
       )}
     </ModalForm>
   )
 }
 
-function TemplateEditorModal({
-  mode,
-  draft,
-  intelligenceConfig,
-  errors,
-  busy,
-  onDraftChange,
-  onClose,
-  onSubmit,
-}: {
-  mode: 'create' | 'edit'
-  draft: OrganizationTemplateEditorPayload
-  intelligenceConfig: LlmIntelligenceConfig | null
-  errors: string[]
-  busy: boolean
-  onDraftChange: (draft: OrganizationTemplateEditorPayload) => void
-  onClose: () => void
-  onSubmit: (event: FormEvent) => void
-}) {
+type TemplateEditorModalProps = { mode: 'create' | 'edit'; draft: OrganizationTemplateEditorPayload; intelligenceConfig: LlmIntelligenceConfig | null; errors: string[]; busy: boolean; onDraftChange: (draft: OrganizationTemplateEditorPayload) => void; onClose: () => void; onSubmit: (event: FormEvent) => void }
+
+function TemplateEditorModal({ mode, draft, intelligenceConfig, errors, busy, onDraftChange, onClose, onSubmit }: TemplateEditorModalProps) {
   const updateDraft = <K extends keyof OrganizationTemplateEditorPayload>(
     key: K,
     value: OrganizationTemplateEditorPayload[K],
@@ -435,17 +399,81 @@ function TemplateEditorModal({
   )
 }
 
+type OrganizationEmptyStateProps = { organizations: ConsoleContextOption[]; organizationsLoading: boolean; switchingOrganizationId: string | null; switchError: string | null; onSwitchOrganization: (organization: ConsoleContextOption) => void; onCreateOrganization: () => void }
+
+function OrganizationEmptyState({ organizations, organizationsLoading, switchingOrganizationId, switchError, onSwitchOrganization, onCreateOrganization }: OrganizationEmptyStateProps) {
+  const hasOrganizations = organizations.length > 0
+  const title = hasOrganizations || organizationsLoading ? 'Choose a team workspace' : 'Create your team workspace'
+  const description = hasOrganizations
+    ? 'You are in your personal workspace. Switch to a team to manage members, templates, setup, and pooled task credits.'
+    : 'Shared agents, templates, setup, members, and pooled task credits can live together in one place.'
+
+  return (
+    <div className="profile-screen profile-screen--embedded organization-screen organization-screen--empty">
+      <header className="profile-screen__header organization-screen__empty-hero">
+        <div className="profile-screen__title-icon" aria-hidden="true"><Users className="h-5 w-5" /></div>
+        <div className="organization-screen__empty-copy">
+          <p className="profile-screen__eyebrow">Teams</p>
+          <h1>{title}</h1>
+          <p className="profile-screen__muted">
+            {organizationsLoading && !hasOrganizations ? 'You are in your personal workspace. Looking for teams you can manage.' : description}
+          </p>
+        </div>
+        <button type="button" className="profile-screen__button profile-screen__button--primary organization-screen__empty-action" onClick={onCreateOrganization}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Create Team
+        </button>
+      </header>
+
+      <section className="profile-screen__section organization-screen__empty-section">
+        {organizationsLoading ? (
+          <p className="profile-screen__muted">Loading teams...</p>
+        ) : hasOrganizations ? (
+          organizations.map((organization) => (
+            <div key={organization.id} className="organization-screen__empty-row">
+              <h2>{organization.name}</h2>
+              <button
+                type="button"
+                className="profile-screen__button profile-screen__button--secondary"
+                onClick={() => onSwitchOrganization(organization)}
+                disabled={switchingOrganizationId === organization.id}
+              >
+                {switchingOrganizationId === organization.id ? 'Opening...' : 'Open Team'}
+              </button>
+            </div>
+          ))
+        ) : (
+          <p className="profile-screen__muted">Create a team to start sharing agents, templates, setup, members, and pooled task credits.</p>
+        )}
+        {switchError ? <p className="profile-screen__feedback profile-screen__feedback--error">{switchError}</p> : null}
+      </section>
+    </div>
+  )
+}
+
 export function OrganizationScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['current-organization'] as const, [])
   const { data, error, isLoading } = useQuery({
     queryKey,
     queryFn: ({ signal }) => fetchCurrentOrganization(signal),
+    retry: (failureCount, err) => !isNoOrganizationContextError(err) && failureCount < 3,
   })
+  const noOrganizationContext = !data && isNoOrganizationContextError(error)
   const templateQueryKey = useMemo(
     () => currentOrganizationTemplatesQueryKey(data?.organization.id),
     [data?.organization.id],
   )
+  const refreshOrganizationQueries = useCallback(() => {
+    queryClient.setQueryData(queryKey, undefined)
+    queryClient.setQueryData(templateQueryKey, undefined)
+    void queryClient.invalidateQueries({ queryKey })
+    void queryClient.invalidateQueries({ queryKey: templateQueryKey })
+  }, [queryClient, queryKey, templateQueryKey])
+  const teamContextSwitcher = useConsoleContextSwitcher({
+    enabled: noOrganizationContext,
+    onSwitched: refreshOrganizationQueries,
+  })
   const {
     data: templateData,
     error: templateQueryError,
@@ -484,6 +512,16 @@ export function OrganizationScreen() {
   const [templateMessage, setTemplateMessage] = useState<string | null>(null)
   const [templateBusy, setTemplateBusy] = useState(false)
   const [templateLaunchBusyId, setTemplateLaunchBusyId] = useState<string | null>(null)
+  const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
+  const [createOrganizationName, setCreateOrganizationName] = useState('')
+  const [createOrganizationErrors, setCreateOrganizationErrors] = useState<string[]>([])
+  const [creatingOrganization, setCreatingOrganization] = useState(false)
+
+  const openCreateOrganizationModal = () => {
+    setCreateOrganizationName('')
+    setCreateOrganizationErrors([])
+    setCreateOrganizationOpen(true)
+  }
 
   useEffect(() => {
     if (data) {
@@ -502,10 +540,7 @@ export function OrganizationScreen() {
         return
       }
       if (detail.type !== 'organization' || detail.id !== data?.organization.id) {
-        queryClient.setQueryData(queryKey, undefined)
-        queryClient.setQueryData(templateQueryKey, undefined)
-        void queryClient.invalidateQueries({ queryKey })
-        void queryClient.invalidateQueries({ queryKey: templateQueryKey })
+        refreshOrganizationQueries()
       }
     }
 
@@ -513,7 +548,7 @@ export function OrganizationScreen() {
     return () => {
       window.removeEventListener('gobii:console-context-updated', handleContextUpdated)
     }
-  }, [data?.organization.id, queryClient, queryKey, templateQueryKey])
+  }, [data?.organization.id, refreshOrganizationQueries])
 
   useEffect(() => {
     if (!inviteRole && data?.roles[0]) {
@@ -545,7 +580,7 @@ export function OrganizationScreen() {
     }
     const nextName = nameDraft.trim()
     if (!nextName) {
-      setNameErrors(['Organization name is required.'])
+      setNameErrors(['Team name is required.'])
       return
     }
     setSavingName(true)
@@ -554,9 +589,9 @@ export function OrganizationScreen() {
     try {
       const nextData = await updateCurrentOrganizationName(nextName)
       updateCachedData(nextData)
-      setNameMessage('Organization updated.')
+      setNameMessage('Team updated.')
     } catch (err) {
-      setNameErrors(formatErrors(err, 'Unable to update organization.'))
+      setNameErrors(formatErrors(err, 'Unable to update team.'))
     } finally {
       setSavingName(false)
     }
@@ -728,6 +763,28 @@ export function OrganizationScreen() {
     }
   }
 
+  const handleCreateOrganizationSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const nextName = createOrganizationName.trim()
+    if (!nextName) {
+      setCreateOrganizationErrors(['Team name is required.'])
+      return
+    }
+    setCreatingOrganization(true)
+    setCreateOrganizationErrors([])
+    try {
+      const created = await createOrganization(nextName)
+      publishConsoleContext(created.context)
+      setCreateOrganizationOpen(false)
+      setCreateOrganizationName('')
+      refreshOrganizationQueries()
+    } catch (err) {
+      setCreateOrganizationErrors(formatErrors(err, 'Unable to create team.'))
+    } finally {
+      setCreatingOrganization(false)
+    }
+  }
+
   const handleLaunchTemplate = async (template: OrganizationTemplate) => {
     setTemplateLaunchBusyId(template.id)
     setTemplateErrors([])
@@ -755,9 +812,49 @@ export function OrganizationScreen() {
     return (
       <div className="profile-screen profile-screen--embedded">
         <section className="profile-screen__section">
-          <p className="profile-screen__muted">Loading organization...</p>
+          <p className="profile-screen__muted">Loading team...</p>
         </section>
       </div>
+    )
+  }
+
+  const createOrganizationModal = createOrganizationOpen ? (
+    <CreateOrganizationModal
+      name={createOrganizationName}
+      errors={createOrganizationErrors}
+      busy={creatingOrganization}
+      onNameChange={setCreateOrganizationName}
+      onClose={() => {
+        if (!creatingOrganization) {
+          setCreateOrganizationOpen(false)
+        }
+      }}
+      onSubmit={handleCreateOrganizationSubmit}
+    />
+  ) : null
+
+  if (!data && (!error || noOrganizationContext)) {
+    return (
+      <>
+        <OrganizationEmptyState
+          organizations={teamContextSwitcher.data?.organizations ?? []}
+          organizationsLoading={
+            teamContextSwitcher.isLoading
+            || (noOrganizationContext && !teamContextSwitcher.data && !teamContextSwitcher.error)
+          }
+          switchingOrganizationId={
+            teamContextSwitcher.isSwitching && teamContextSwitcher.data?.context.type === 'organization'
+              ? teamContextSwitcher.data.context.id
+              : null
+          }
+          switchError={teamContextSwitcher.error}
+          onSwitchOrganization={(organization) => {
+            void teamContextSwitcher.switchContext(organization)
+          }}
+          onCreateOrganization={openCreateOrganizationModal}
+        />
+        {createOrganizationModal}
+      </>
     )
   }
 
@@ -765,8 +862,8 @@ export function OrganizationScreen() {
     return (
       <SettingsBanner
         variant="embedded"
-        title="Organization Context Required"
-        subtitle={formatErrors(error, 'Switch to an organization context to manage organization settings.')[0]}
+        title="Team Unavailable"
+        subtitle={formatErrors(error, 'Switch to a team context to manage team settings.')[0]}
       />
     )
   }
@@ -784,7 +881,7 @@ export function OrganizationScreen() {
   const sourceAgents = templateData?.sourceAgents ?? []
   const canManageTemplates = Boolean(templateData?.viewer.canManageTemplates)
   const templateQueryErrorMessage = templateQueryError
-    ? formatErrors(templateQueryError, 'Unable to load organization templates.')[0]
+    ? formatErrors(templateQueryError, 'Unable to load team templates.')[0]
     : null
 
   return (
@@ -794,7 +891,7 @@ export function OrganizationScreen() {
           <Building2 className="h-5 w-5" />
         </div>
         <div>
-          <p className="profile-screen__eyebrow">Organization</p>
+          <p className="profile-screen__eyebrow">Team</p>
           <h1>{data.organization.name}</h1>
         </div>
       </header>
@@ -803,7 +900,7 @@ export function OrganizationScreen() {
         <SettingsBanner
           variant="embedded"
           title="Read-Only Access"
-          subtitle={`Your ${data.viewer.roleLabel} role can view this organization, but cannot edit settings or membership.`}
+          subtitle={`Your ${data.viewer.roleLabel} role can view this team, but cannot edit settings or membership.`}
         />
       ) : null}
 
@@ -813,7 +910,7 @@ export function OrganizationScreen() {
             <Building2 className="h-4 w-4" />
           </div>
           <div>
-            <h2>Organization Details</h2>
+            <h2>Team Details</h2>
             <p>Current role: {data.viewer.roleLabel}</p>
           </div>
         </div>
@@ -852,7 +949,7 @@ export function OrganizationScreen() {
               <label className="organization-screen__setting-row">
                 <span className="organization-screen__setting-copy">
                   <span className="organization-screen__setting-title">Member Agent Creation</span>
-                  <span className="organization-screen__setting-description">Members may create organization agents</span>
+                  <span className="organization-screen__setting-description">Members may create team agents</span>
                 </span>
                 <span className="organization-screen__setting-toggle">
                   <input
@@ -875,125 +972,6 @@ export function OrganizationScreen() {
             </div>
           </>
         ) : null}
-      </section>
-
-      <CustomInstructionsSection
-        value={data.organization.customInstructions}
-        maxChars={data.organization.customInstructionsMaxChars}
-        canEdit={canEditCustomInstructions}
-        placeholder="Follow the organization's tone, policies, and operating preferences."
-        successMessage="Custom instructions updated."
-        onSave={handleCustomInstructionsSave}
-        formatErrorMessages={(err) => formatErrors(err, 'Unable to update custom instructions.')}
-      />
-
-      <section className="profile-screen__section">
-        <div className="profile-screen__section-header organization-screen__section-header">
-          <div className="organization-screen__section-title">
-            <div className="profile-screen__section-icon" aria-hidden="true">
-              <Bot className="h-4 w-4" />
-            </div>
-            <div>
-              <h2>Templates</h2>
-              <p>{templates.length} organization template{templates.length === 1 ? '' : 's'}</p>
-            </div>
-          </div>
-          {canManageTemplates ? (
-            <div className="organization-screen__member-actions">
-              {sourceAgents.length ? (
-                <button
-                  type="button"
-                  className="profile-screen__button profile-screen__button--secondary"
-                  onClick={() => {
-                    setTemplateErrors([])
-                    setTemplateMessage(null)
-                    setTemplateSourceAgentId(sourceAgents[0]?.id ?? '')
-                    setCreateTemplateOpen(true)
-                  }}
-                  disabled={templateBusy}
-                >
-                  <Bot className="h-4 w-4" aria-hidden="true" />
-                  Clone Agent
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="profile-screen__button profile-screen__button--primary"
-                onClick={openNewTemplateEditor}
-                disabled={templateBusy}
-              >
-                <Plus className="h-4 w-4" aria-hidden="true" />
-                New Template
-              </button>
-            </div>
-          ) : null}
-        </div>
-        {templateMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{templateMessage}</p> : null}
-        {templateQueryErrorMessage ? <p className="profile-screen__feedback profile-screen__feedback--error">{templateQueryErrorMessage}</p> : null}
-        {templateErrors.map((message) => (
-          <p key={message} className="profile-screen__feedback profile-screen__feedback--error">{message}</p>
-        ))}
-        {templatesLoading ? (
-          <p className="profile-screen__muted">Loading templates...</p>
-        ) : templates.length > 0 ? (
-          <div className="organization-screen__table-wrap">
-            <table className="organization-screen__table">
-              <thead>
-                <tr>
-                  <th>Template</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {templates.map((template) => (
-                  <tr key={template.id}>
-                    <td>
-                      <p className="organization-screen__primary-text">{template.name}</p>
-                      <p className="profile-screen__muted">{template.tagline}</p>
-                      <p className="profile-screen__muted">Intelligence: {formatTemplateTier(template, templateData?.llmIntelligence ?? null)}</p>
-                    </td>
-                    <td>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <button
-                          type="button"
-                          className="profile-screen__button profile-screen__button--primary"
-                          onClick={() => void handleLaunchTemplate(template)}
-                          disabled={templateLaunchBusyId === template.id}
-                        >
-                          <Play className="h-4 w-4" aria-hidden="true" />
-                          {templateLaunchBusyId === template.id ? 'Opening...' : 'Use Template'}
-                        </button>
-                        {canManageTemplates ? (
-                          <>
-                            <button
-                              type="button"
-                              className="profile-screen__button profile-screen__button--secondary"
-                              onClick={() => handleEditTemplate(template)}
-                            >
-                              <Pencil className="h-4 w-4" aria-hidden="true" />
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="profile-screen__icon-button profile-screen__icon-button--danger"
-                              onClick={() => setConfirmAction({ kind: 'deactivate-template', template })}
-                              aria-label={`Deactivate ${template.name}`}
-                              title="Deactivate"
-                            >
-                              <Trash2 className="h-4 w-4" aria-hidden="true" />
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="profile-screen__muted">No organization templates yet.</p>
-        )}
       </section>
 
       <section className="profile-screen__section">
@@ -1094,49 +1072,168 @@ export function OrganizationScreen() {
           </table>
         </div>
 
-      {data.pendingInvites.length > 0 ? (
-        <div className="organization-screen__pending">
-          <div className="organization-screen__pending-header">
-            <ShieldAlert className="h-4 w-4" aria-hidden="true" />
-            <span>{data.pendingInvites.length} pending invite{data.pendingInvites.length === 1 ? '' : 's'}</span>
-          </div>
-          <div className="organization-screen__invite-list">
-            {data.pendingInvites.map((invite) => (
-              <div key={invite.token} className="organization-screen__invite-row">
-                <div>
-                  <p className="organization-screen__primary-text">{invite.email}</p>
-                  <p className="profile-screen__muted">
-                    {invite.roleLabel} - invited by {invite.invitedBy} - expires {formatDate(invite.expiresAt)}
-                  </p>
-                </div>
-                {canManageMembers ? (
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <button
-                      type="button"
-                      className="profile-screen__button profile-screen__button--secondary"
-                      onClick={() => void handleResendInvite(invite)}
-                      disabled={inviteBusyToken === invite.token}
-                    >
-                      <Send className="h-4 w-4" aria-hidden="true" />
-                      {inviteBusyToken === invite.token ? 'Sending...' : 'Resend'}
-                    </button>
-                    <button
-                      type="button"
-                      className="profile-screen__button profile-screen__button--danger"
-                      onClick={() => setConfirmAction({ kind: 'revoke-invite', invite })}
-                      disabled={inviteBusyToken === invite.token}
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden="true" />
-                      Revoke
-                    </button>
+        {data.pendingInvites.length > 0 ? (
+          <div className="organization-screen__pending">
+            <div className="organization-screen__pending-header">
+              <ShieldAlert className="h-4 w-4" aria-hidden="true" />
+              <span>{data.pendingInvites.length} pending invite{data.pendingInvites.length === 1 ? '' : 's'}</span>
+            </div>
+            <div className="organization-screen__invite-list">
+              {data.pendingInvites.map((invite) => (
+                <div key={invite.token} className="organization-screen__invite-row">
+                  <div>
+                    <p className="organization-screen__primary-text">{invite.email}</p>
+                    <p className="profile-screen__muted">
+                      {invite.roleLabel} - invited by {invite.invitedBy} - expires {formatDate(invite.expiresAt)}
+                    </p>
                   </div>
-                ) : null}
-              </div>
-            ))}
+                  {canManageMembers ? (
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        className="profile-screen__button profile-screen__button--secondary"
+                        onClick={() => void handleResendInvite(invite)}
+                        disabled={inviteBusyToken === invite.token}
+                      >
+                        <Send className="h-4 w-4" aria-hidden="true" />
+                        {inviteBusyToken === invite.token ? 'Sending...' : 'Resend'}
+                      </button>
+                      <button
+                        type="button"
+                        className="profile-screen__button profile-screen__button--danger"
+                        onClick={() => setConfirmAction({ kind: 'revoke-invite', invite })}
+                        disabled={inviteBusyToken === invite.token}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                        Revoke
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
       </section>
+
+      <section className="profile-screen__section">
+        <div className="profile-screen__section-header organization-screen__section-header">
+          <div className="organization-screen__section-title">
+            <div className="profile-screen__section-icon" aria-hidden="true">
+              <Bot className="h-4 w-4" />
+            </div>
+            <div>
+              <h2>Templates</h2>
+              <p>{templates.length} team template{templates.length === 1 ? '' : 's'}</p>
+            </div>
+          </div>
+          {canManageTemplates ? (
+            <div className="organization-screen__member-actions">
+              {sourceAgents.length ? (
+                <button
+                  type="button"
+                  className="profile-screen__button profile-screen__button--secondary"
+                  onClick={() => {
+                    setTemplateErrors([])
+                    setTemplateMessage(null)
+                    setTemplateSourceAgentId(sourceAgents[0]?.id ?? '')
+                    setCreateTemplateOpen(true)
+                  }}
+                  disabled={templateBusy}
+                >
+                  <Bot className="h-4 w-4" aria-hidden="true" />
+                  Clone Agent
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="profile-screen__button profile-screen__button--primary"
+                onClick={openNewTemplateEditor}
+                disabled={templateBusy}
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                New Template
+              </button>
+            </div>
+          ) : null}
+        </div>
+        {templateMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{templateMessage}</p> : null}
+        {templateQueryErrorMessage ? <p className="profile-screen__feedback profile-screen__feedback--error">{templateQueryErrorMessage}</p> : null}
+        {templateErrors.map((message) => (
+          <p key={message} className="profile-screen__feedback profile-screen__feedback--error">{message}</p>
+        ))}
+        {templatesLoading ? (
+          <p className="profile-screen__muted">Loading templates...</p>
+        ) : templates.length > 0 ? (
+          <div className="organization-screen__table-wrap">
+            <table className="organization-screen__table">
+              <thead>
+                <tr>
+                  <th>Template</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {templates.map((template) => (
+                  <tr key={template.id}>
+                    <td>
+                      <p className="organization-screen__primary-text">{template.name}</p>
+                      <p className="profile-screen__muted">{template.tagline}</p>
+                      <p className="profile-screen__muted">Intelligence: {formatTemplateTier(template, templateData?.llmIntelligence ?? null)}</p>
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          className="profile-screen__button profile-screen__button--primary"
+                          onClick={() => void handleLaunchTemplate(template)}
+                          disabled={templateLaunchBusyId === template.id}
+                        >
+                          <Play className="h-4 w-4" aria-hidden="true" />
+                          {templateLaunchBusyId === template.id ? 'Opening...' : 'Use Template'}
+                        </button>
+                        {canManageTemplates ? (
+                          <>
+                            <button
+                              type="button"
+                              className="profile-screen__button profile-screen__button--secondary"
+                              onClick={() => handleEditTemplate(template)}
+                            >
+                              <Pencil className="h-4 w-4" aria-hidden="true" />
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="profile-screen__icon-button profile-screen__icon-button--danger"
+                              onClick={() => setConfirmAction({ kind: 'deactivate-template', template })}
+                              aria-label={`Deactivate ${template.name}`}
+                              title="Deactivate"
+                            >
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="profile-screen__muted">No team templates yet.</p>
+        )}
+      </section>
+
+      <CustomInstructionsSection
+        value={data.organization.customInstructions}
+        maxChars={data.organization.customInstructionsMaxChars}
+        canEdit={canEditCustomInstructions}
+        placeholder="Follow the team's tone, policies, and operating preferences."
+        successMessage="Custom instructions updated."
+        onSave={handleCustomInstructionsSave}
+        formatErrorMessages={(err) => formatErrors(err, 'Unable to update custom instructions.')}
+      />
 
       {confirmAction ? (
         <ConfirmOrganizationActionModal

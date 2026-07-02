@@ -1,4 +1,9 @@
+from importlib import import_module
+from types import SimpleNamespace
+
+from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase, tag
 
 from api.models import (
@@ -121,6 +126,41 @@ class PlanVersionResolverTests(TestCase):
         plan_context = get_active_public_plan_context(PlanNames.STARTUP)
 
         self.assertEqual(plan_context.get("monthly_task_credits"), 500)
+
+    def test_org_team_credits_migration_updates_active_slug_match_without_legacy_code(self):
+        org_plan = Plan.objects.create(slug="org_team", is_org=True, is_active=True)
+        org_version = PlanVersion.objects.create(
+            plan=org_plan,
+            version_code="team-no-legacy",
+            legacy_plan_code=None,
+            is_active_for_new_subs=True,
+            display_name="Team",
+            description="Organization tier",
+            marketing_features=[],
+        )
+        entitlement, _ = EntitlementDefinition.objects.get_or_create(
+            key="credits_per_seat",
+            defaults={
+                "display_name": "Credits per seat",
+                "description": "Included monthly task credits granted per organization seat.",
+                "value_type": "int",
+                "unit": "credits",
+            },
+        )
+        PlanVersionEntitlement.objects.create(
+            plan_version=org_version,
+            entitlement=entitlement,
+            value_int=500,
+        )
+
+        migration = import_module("api.migrations.0406_update_org_team_credits_per_seat")
+        migration.update_org_team_credits_per_seat(
+            apps,
+            SimpleNamespace(connection=connection),
+        )
+
+        plan_context = get_active_public_plan_context(PlanNames.ORG_TEAM, is_org=True)
+        self.assertEqual(plan_context.get("credits_per_seat"), 1000)
 
     def test_resolves_shared_price_id_with_context(self):
         org_plan = Plan.objects.create(slug="org_team", is_org=True, is_active=True)

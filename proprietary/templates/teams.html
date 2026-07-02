@@ -1,0 +1,381 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Shared AI Agent Workspaces for Growing Teams | Gobii{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="Gobii for Teams gives growing teams shared AI agents, pooled task credits, private templates, shared credentials, and one simple team bill.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Shared AI Agent Workspaces for Growing Teams | Gobii">
+<meta property="og:description" content="Gobii for Teams gives growing teams shared AI agents, pooled task credits, private templates, shared credentials, and one simple team bill.">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="Gobii">
+<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/teams-og-1200x630.jpg' %}">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Gobii for Teams shared AI agent workspace">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Shared AI Agent Workspaces for Growing Teams | Gobii">
+<meta name="twitter:description" content="Gobii for Teams gives growing teams shared AI agents, pooled task credits, private templates, shared credentials, and one simple team bill.">
+<meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/teams-og-1200x630.jpg' %}">
+<meta name="twitter:image:alt" content="Gobii for Teams shared AI agent workspace">
+<style>
+  .teams-panel {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    background: #fff;
+  }
+
+  .teams-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, #fff 0%, #fff 40%, rgba(255,255,255,0.82) 56%, rgba(255,255,255,0.22) 100%),
+      linear-gradient(180deg, rgba(255,255,255,0.88) 0%, rgba(255,255,255,0.32) 34%, rgba(255,255,255,0.64) 100%);
+  }
+
+  .teams-panel::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 4;
+    height: 8rem;
+    pointer-events: none;
+    background: linear-gradient(to top, #fff 0%, rgba(255,255,255,0.56) 44%, rgba(255,255,255,0) 100%);
+  }
+
+  .teams-hero-image {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .teams-hero-image img {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 78%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 72% 50%;
+    opacity: 1;
+    -webkit-mask-image:
+      linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.14) 16%, rgba(0,0,0,0.6) 38%, black 62%),
+      linear-gradient(180deg, rgba(0,0,0,0.55) 0%, black 15%, black 84%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.14) 16%, rgba(0,0,0,0.6) 38%, black 62%),
+      linear-gradient(180deg, rgba(0,0,0,0.55) 0%, black 15%, black 84%, transparent 100%);
+    mask-composite: intersect;
+  }
+
+  @media (max-width: 1023px) {
+    .teams-panel::before {
+      background:
+        linear-gradient(90deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.9) 62%, rgba(255,255,255,0.68) 100%),
+        linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.86) 38%, #fff 100%);
+    }
+
+    .teams-hero-image img {
+      right: -14%;
+      width: 120%;
+      object-position: 78% 50%;
+      opacity: 0.35;
+      -webkit-mask-image:
+        linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.25) 30%, black 72%),
+        linear-gradient(180deg, rgba(0,0,0,0.2) 0%, black 20%, black 70%, transparent 100%);
+      mask-image:
+        linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.25) 30%, black 72%),
+        linear-gradient(180deg, rgba(0,0,0,0.2) 0%, black 20%, black 70%, transparent 100%);
+    }
+  }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://gobii.ai/teams/#webpage",
+      "url": "https://gobii.ai/teams/",
+      "name": "Gobii for Teams",
+      "description": "Shared AI agent workspaces for teams with pooled task credits, private templates, shared credentials, roles, invites, and billing.",
+      "mainEntity": { "@id": "https://gobii.ai/teams/#software" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://gobii.ai/teams/#breadcrumbs",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://gobii.ai/" },
+        { "@type": "ListItem", "position": 2, "name": "Teams", "item": "https://gobii.ai/teams/" }
+      ]
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://gobii.ai/teams/#software",
+      "name": "Gobii for Teams",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "brand": { "@type": "Brand", "name": "Gobii" },
+      "offers": {
+        "@type": "Offer",
+        "price": "{{ team_offer.price_per_seat }}",
+        "priceCurrency": "USD",
+        "url": "https://gobii.ai/teams/",
+        "availability": "https://schema.org/InStock"
+      },
+      "featureList": [
+        "Shared AI agents",
+        "Pooled task credits",
+        "Private templates",
+        "Shared credentials and integrations",
+        "Roles, invites, seats, and team billing"
+      ]
+    }
+  ]
+}
+</script>
+{% endblock %}
+
+{% block content %}
+{% url 'account_signup' as teams_signup_url %}
+{% url 'account_signup_modal' as teams_signup_modal_url %}
+
+<section class="teams-panel min-h-[560px] text-slate-950 lg:min-h-[640px]">
+  <picture class="teams-hero-image" aria-hidden="true">
+    <source
+      srcset="{% static 'images/solutions/sales-hero-960.jpg' %} 960w,
+              {% static 'images/solutions/sales-hero-1280.jpg' %} 1280w,
+              {% static 'images/solutions/sales-hero-1920.jpg' %} 1920w"
+      sizes="(max-width: 1023px) 120vw, 78vw"
+    >
+    <img
+      src="{% static 'images/solutions/sales-hero-1920.jpg' %}"
+      alt=""
+      class="h-full w-full object-cover"
+      width="1920"
+      height="1280"
+      loading="eager"
+      fetchpriority="high"
+      decoding="async"
+    >
+  </picture>
+  <div class="relative z-10 mx-auto max-w-7xl px-6 pb-14 pt-10 sm:px-8 sm:pb-16 sm:pt-12 lg:px-12 lg:pb-20 lg:pt-16">
+    <div class="max-w-2xl">
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Gobii for Teams</p>
+      <h1 class="mt-5 text-4xl font-light leading-[1.08] tracking-normal text-slate-950 sm:text-5xl lg:text-6xl">
+        One shared workspace for your AI agent team
+      </h1>
+      <p class="mt-6 max-w-xl text-lg leading-8 text-slate-700">
+        Give teammates shared agents, shared setup, pooled task credits, and one place to manage the AI work moving across your business.
+      </p>
+      <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+        <a
+          href="{% if user.is_authenticated %}{{ team_offer.start_url }}{% else %}{{ teams_signup_url }}?next=%2Fapp%2Forganization{% endif %}"
+          {% if not user.is_authenticated %}data-auth-modal-link data-auth-modal-url="{{ teams_signup_modal_url }}?next=%2Fapp%2Forganization"{% endif %}
+          data-analytics-cta-id="teams_hero_start"
+          data-analytics-placement="teams_hero"
+          data-analytics-intent="start_team"
+          data-analytics-label="Start a Team"
+          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-indigo-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-white"
+        >
+          Start a Team
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </a>
+        <a
+          href="{% url 'proprietary:pricing' %}#pricing"
+          data-analytics-cta-id="teams_hero_pricing"
+          data-analytics-placement="teams_hero"
+          data-analytics-intent="view_pricing"
+          data-analytics-label="See Pricing"
+          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white/80 px-6 py-3 text-sm font-semibold text-slate-900 backdrop-blur-sm transition hover:border-indigo-300 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-white"
+        >
+          See Pricing
+        </a>
+      </div>
+      <div class="mt-8 max-w-2xl rounded-lg border border-slate-200 bg-white/95 p-4 shadow-[0_18px_40px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:mt-10">
+        <dl class="grid grid-cols-3 gap-3 sm:gap-6">
+          <div>
+            <dt class="text-2xl font-light text-slate-950 sm:text-3xl">{{ team_offer.price_per_seat_display }}</dt>
+            <dd class="mt-1 text-xs leading-5 text-slate-700 sm:text-sm">seat / month</dd>
+          </div>
+          <div>
+            <dt class="text-2xl font-light text-slate-950 sm:text-3xl">{{ team_offer.credits_per_seat_display }}</dt>
+            <dd class="mt-1 text-xs leading-5 text-slate-700 sm:text-sm">credits / seat</dd>
+          </div>
+          <div>
+            <dt class="text-2xl font-light text-slate-950 sm:text-3xl">{{ team_offer.api_rate_limit_display }}</dt>
+            <dd class="mt-1 text-xs leading-5 text-slate-700 sm:text-sm">API / minute</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16 text-slate-950">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="max-w-3xl">
+      <p class="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Why teams use it</p>
+      <h2 class="mt-4 text-3xl font-light tracking-normal sm:text-4xl">Stop rebuilding the same agent setup for every person</h2>
+      <p class="mt-4 text-base leading-7 text-slate-700">
+        Team workspaces make Gobii easier to share: the agents, templates, credentials, integrations, billing, and usage live together instead of being scattered across individual accounts.
+      </p>
+    </div>
+
+    <div class="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+      <article class="rounded-lg border border-emerald-100 bg-white p-5">
+        <i data-lucide="wallet-cards" class="h-5 w-5 text-emerald-700"></i>
+        <h3 class="mt-4 text-lg font-semibold text-slate-950">Pooled credits</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Each paid seat adds {{ team_offer.credits_per_seat_display }} task credits to one shared team pool.</p>
+      </article>
+      <article class="rounded-lg border border-cyan-100 bg-white p-5">
+        <i data-lucide="bot" class="h-5 w-5 text-cyan-700"></i>
+        <h3 class="mt-4 text-lg font-semibold text-slate-950">Shared agents</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Create agents the team can manage, chat with, reuse, and turn into private templates.</p>
+      </article>
+      <article class="rounded-lg border border-indigo-100 bg-white p-5">
+        <i data-lucide="key-round" class="h-5 w-5 text-indigo-700"></i>
+        <h3 class="mt-4 text-lg font-semibold text-slate-950">Shared setup</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Keep credentials, integrations, API keys, secrets, MCP servers, and skill profiles available to the right team agents.</p>
+      </article>
+      <article class="rounded-lg border border-amber-100 bg-white p-5">
+        <i data-lucide="users-round" class="h-5 w-5 text-amber-700"></i>
+        <h3 class="mt-4 text-lg font-semibold text-slate-950">Roles and seats</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Invite teammates, assign roles, manage seats, and keep one bill for the shared workspace.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="bg-cyan-50 py-16 text-slate-950">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.16em] text-cyan-800">What becomes shared</p>
+      <h2 class="mt-4 text-3xl font-light tracking-normal sm:text-4xl">A team layer for the agents already doing the work</h2>
+      <p class="mt-4 text-base leading-7 text-slate-700">
+        Start self-serve with seats and pooled credits, then grow into a more governed deployment when your team needs a larger rollout.
+      </p>
+    </div>
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div class="rounded-lg border border-cyan-200 bg-white p-5">
+        <h3 class="text-base font-semibold text-slate-950">Agents and templates</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Build shared agents, launch private templates, and move useful personal agents into the team workspace.</p>
+      </div>
+      <div class="rounded-lg border border-cyan-200 bg-white p-5">
+        <h3 class="text-base font-semibold text-slate-950">Instructions and standards</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Set team-level operating instructions so agents can follow the same tone, policies, and preferences.</p>
+      </div>
+      <div class="rounded-lg border border-cyan-200 bg-white p-5">
+        <h3 class="text-base font-semibold text-slate-950">Credentials and integrations</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Use shared secrets, API keys, MCP servers, and native integrations without copying setup between teammates.</p>
+      </div>
+      <div class="rounded-lg border border-cyan-200 bg-white p-5">
+        <h3 class="text-base font-semibold text-slate-950">Billing and usage</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Buy seats, track pooled credits, and manage task overage from the same billing surface.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16 text-slate-950">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.16em] text-indigo-700">How it works</p>
+        <h2 class="mt-4 text-3xl font-light tracking-normal sm:text-4xl">Self-serve first, enterprise-ready later</h2>
+        <p class="mt-4 text-base leading-7 text-slate-700">
+          The Team plan is built for small and medium teams that want to start without procurement, while still leaving a clear path for bigger deployments.
+        </p>
+      </div>
+      <div class="grid gap-4">
+        <div class="rounded-lg border border-indigo-100 bg-white p-5">
+          <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-700 text-sm font-semibold text-white">1</span>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Create the team workspace</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Start from the Gobii app and give the workspace a name. Owners and admins can manage settings and invites.</p>
+        </div>
+        <div class="rounded-lg border border-indigo-100 bg-white p-5">
+          <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-700 text-sm font-semibold text-white">2</span>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Add seats</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">{{ team_offer.price_per_seat_display }} per seat per month. Ten seats create a {{ team_offer.example_ten_seat_credits_display }} shared credit pool.</p>
+        </div>
+        <div class="rounded-lg border border-indigo-100 bg-white p-5">
+          <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-700 text-sm font-semibold text-white">3</span>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Invite teammates and share agents</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Bring teammates in, create shared agents, connect the tools they need, and manage the work from one team surface.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-indigo-950 py-16 text-white">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[1fr_0.9fr] lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.16em] text-cyan-200">Team plan</p>
+      <h2 class="mt-4 text-3xl font-light tracking-normal sm:text-4xl">Transparent pricing for the team layer</h2>
+      <p class="mt-4 max-w-2xl text-base leading-7 text-indigo-100">
+        Start with the public Team plan when you want a shared Gobii workspace. For larger teams, the same path can lead into a custom enterprise deployment with dedicated infrastructure, SLAs, and governance support.
+      </p>
+      <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+        <a
+          href="{% if user.is_authenticated %}{{ team_offer.start_url }}{% else %}{{ teams_signup_url }}?next=%2Fapp%2Forganization{% endif %}"
+          {% if not user.is_authenticated %}data-auth-modal-link data-auth-modal-url="{{ teams_signup_modal_url }}?next=%2Fapp%2Forganization"{% endif %}
+          data-analytics-cta-id="teams_pricing_start"
+          data-analytics-placement="teams_pricing"
+          data-analytics-intent="start_team"
+          data-analytics-label="Start a Team"
+          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-cyan-300 px-6 py-3 text-sm font-semibold text-indigo-950 transition hover:bg-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-200 focus:ring-offset-2 focus:ring-offset-indigo-950"
+        >
+          Start a Team
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </a>
+        <a
+          href="{% url 'proprietary:prequalify' %}"
+          data-analytics-cta-id="teams_enterprise"
+          data-analytics-placement="teams_pricing"
+          data-analytics-intent="request_enterprise"
+          data-analytics-label="Talk to sales"
+          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/40 bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white/60 focus:ring-offset-2 focus:ring-offset-indigo-950"
+        >
+          Talk to sales
+        </a>
+      </div>
+    </div>
+    <div class="rounded-lg border border-white/20 bg-white/10 p-6">
+      <div class="flex items-end gap-2">
+        <span class="text-5xl font-light tracking-normal text-white">{{ team_offer.price_per_seat_display }}</span>
+        <span class="pb-2 text-sm font-medium text-indigo-100">/ seat / month</span>
+      </div>
+      <ul class="mt-6 space-y-3 text-sm leading-6 text-indigo-50">
+        <li class="flex gap-3">
+          <i data-lucide="circle-check" class="mt-1 h-4 w-4 shrink-0 text-cyan-200"></i>
+          <span>{{ team_offer.credits_per_seat_display }} pooled task credits per seat</span>
+        </li>
+        <li class="flex gap-3">
+          <i data-lucide="circle-check" class="mt-1 h-4 w-4 shrink-0 text-cyan-200"></i>
+          <span>Shared agents, private templates, credentials, and integrations</span>
+        </li>
+        <li class="flex gap-3">
+          <i data-lucide="circle-check" class="mt-1 h-4 w-4 shrink-0 text-cyan-200"></i>
+          <span>Roles, invites, team settings, and shared billing</span>
+        </li>
+        <li class="flex gap-3">
+          <i data-lucide="circle-check" class="mt-1 h-4 w-4 shrink-0 text-cyan-200"></i>
+          <span>{{ team_offer.max_contacts_per_agent_display }} contacts per agent</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+</section>
+{% endblock %}

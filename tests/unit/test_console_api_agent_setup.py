@@ -265,7 +265,7 @@ class AgentSetupApiTests(TestCase):
         usage = next(insight for insight in response.json()["insights"] if insight["insightType"] == "burn_rate")
         month_usage = usage["metadata"]["monthUsage"]
         self.assertEqual(month_usage["used"], 0.0)
-        self.assertEqual(month_usage["limit"], 1500.0)
+        self.assertEqual(month_usage["limit"], 3000.0)
         self.assertEqual(month_usage["percentUsed"], 0.0)
         self.assertFalse(month_usage["unlimited"])
 

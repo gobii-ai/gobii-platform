@@ -422,8 +422,8 @@ class TaskCreditServiceGetTasksEntitledTests(TestCase):
 
         result = TaskCreditService.get_tasks_entitled_for_owner(org)
 
-        # Team plan grants 500 per seat => 1500 total
-        self.assertEqual(result, 1500)
+        # Team plan grants 1000 per seat => 3000 total
+        self.assertEqual(result, 3000)
 
     def test_get_tasks_entitled_for_organization_with_unlimited_extra(self):
         owner = User.objects.create(username="org_owner2")
@@ -528,13 +528,13 @@ class TaskCreditServiceGrantOrgSubscriptionCreditsTests(TestCase):
             replace_current=True,
         )
 
-        self.assertEqual(returned, 1000)
+        self.assertEqual(returned, 2000)
         # Should update existing block instead of creating a new one
         credits = TaskCredit.objects.filter(organization=self.org)
         self.assertEqual(credits.count(), 1)
         refreshed = TaskCredit.objects.get(pk=existing.pk)
         self.assertEqual(refreshed.stripe_invoice_id, "inv-org-renew")
-        self.assertEqual(refreshed.credits, Decimal("1000"))
+        self.assertEqual(refreshed.credits, Decimal("2000"))
         self.assertEqual(refreshed.credits_used, Decimal("0"))
 
 @tag("batch_task_credits")

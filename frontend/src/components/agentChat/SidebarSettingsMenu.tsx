@@ -163,7 +163,7 @@ export function SidebarSettingsMenu({
   }, [handleOpenChange, open])
   const identityLabel = useMemo(() => {
     if (context?.type === 'organization') {
-      return context.name || 'Organization'
+      return context.name || 'Team'
     }
     return viewerEmail?.trim() || context?.name || 'Personal workspace'
   }, [context, viewerEmail])
@@ -303,12 +303,12 @@ export function SidebarSettingsMenu({
                   }}
                 >
                   <Building2 className="sidebar-settings__link-icon" aria-hidden="true" />
-                  <span>Organization</span>
+                  <span>Team</span>
                 </button>
               ) : (
                 <a className="sidebar-settings__link" href={organizationUrl ?? undefined} target="_blank" rel="noreferrer">
                   <Building2 className="sidebar-settings__link-icon" aria-hidden="true" />
-                  <span>Organization</span>
+                  <span>Team</span>
                 </a>
               )
             ) : null}

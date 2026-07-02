@@ -45,10 +45,10 @@ export function GlobalSecretsScreen({ listUrl, ownerScope }: GlobalSecretsScreen
   const resolvedOwnerScope = ownerScope ?? data?.owner_scope
   const isOrganizationScope = resolvedOwnerScope === 'organization'
   const description = isOrganizationScope
-    ? 'Manage encrypted secrets for this organization.'
+    ? 'Manage encrypted secrets for this team.'
     : 'Manage encrypted secrets for your account.'
   const subtitle = isOrganizationScope
-    ? 'Shared across all agents in this organization'
+    ? 'Shared across all agents in this team'
     : 'Shared across all agents in your account'
 
   return (

@@ -138,6 +138,7 @@ class AppShellAuthenticationTests(TestCase):
             "/app/agents/new",
             "/app/billing",
             "/app/api-keys",
+            "/app/team",
             "/app/organization",
             "/app/profile",
             "/app/secrets",
@@ -168,6 +169,28 @@ class AppShellAuthenticationTests(TestCase):
         self.assertEqual(
             parse_qs(parsed.query),
             {"next": [f"/app/agents/{agent_id}/?return_to=%2Fconsole%2Fagents%2F"]},
+        )
+        self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
+
+    def test_authenticated_legacy_organization_path_redirects_to_team(self):
+        user = get_user_model().objects.create_user(username="team-route-user")
+        self.client.force_login(user)
+        context_id = str(uuid.uuid4())
+
+        response = self.client.get(
+            "/app/organization",
+            {"context_type": "organization", "context_id": context_id},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/team")
+        self.assertEqual(
+            parse_qs(parsed.query),
+            {
+                "context_type": ["organization"],
+                "context_id": [context_id],
+            },
         )
         self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
 
@@ -331,7 +354,7 @@ class LegacyConsolePageRedirectTests(TestCase):
         self.assertEqual(login_redirect.path, reverse("account_login"))
         next_url = parse_qs(login_redirect.query).get("next", [""])[0]
         app_redirect = urlparse(next_url)
-        self.assertEqual(app_redirect.path, "/app/organization")
+        self.assertEqual(app_redirect.path, "/app/team")
         self.assertEqual(parse_qs(app_redirect.query), {
             "context_type": ["organization"],
             "context_id": [str(organization.id)],
@@ -368,8 +391,8 @@ class LegacyConsolePageRedirectTests(TestCase):
             "/console/api-keys/": "/app/api-keys",
             "/console/secrets/": "/app/secrets",
             "/console/advanced/mcp-servers/": "/app/integrations",
-            "/console/organizations/": "/app/organization",
-            "/console/organizations/add/": "/app/organization",
+            "/console/organizations/": "/app/team",
+            "/console/organizations/add/": "/app/team",
         }
         for source, target in cases.items():
             with self.subTest(source=source):

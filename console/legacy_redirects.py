@@ -64,8 +64,8 @@ _CONSOLE_PAGE_REDIRECTS = {
     "/console/api-keys/": "/app/api-keys",
     "/console/secrets/": "/app/secrets",
     "/console/advanced/mcp-servers/": "/app/integrations",
-    "/console/organizations/": "/app/organization",
-    "/console/organizations/add/": "/app/organization",
+    "/console/organizations/": "/app/team",
+    "/console/organizations/add/": "/app/team",
 }
 
 
@@ -129,7 +129,7 @@ def get_legacy_console_redirect_path(request) -> str | None:
             return _with_original_query(request, f"/app/organizations/invites/{parts[1]}/accept")
         if not remainder or "/" in remainder:
             return None
-        target_path = _organization_context_target_path(request, "/app/organization", remainder)
+        target_path = _organization_context_target_path(request, "/app/team", remainder)
         return _with_original_query(request, target_path)
 
     return None

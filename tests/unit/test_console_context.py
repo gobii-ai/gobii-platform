@@ -1069,7 +1069,7 @@ class ConsoleContextTests(TestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 302)
         redirect = urlsplit(resp.url)
-        self.assertEqual(redirect.path, "/app/organization")
+        self.assertEqual(redirect.path, "/app/team")
         query = parse_qs(redirect.query)
         self.assertEqual(query.get("context_type"), ["organization"])
         self.assertEqual(query.get("context_id"), [str(self.org.id)])

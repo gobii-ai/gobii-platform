@@ -2197,7 +2197,7 @@ export function AgentChatPage({
     event.preventDefault()
     const name = createOrganizationName.trim()
     if (!name) {
-      setCreateOrganizationErrors(['Organization name is required.'])
+      setCreateOrganizationErrors(['Team name is required.'])
       return
     }
     setCreateOrganizationBusy(true)
@@ -2220,7 +2220,7 @@ export function AgentChatPage({
           setCreateOrganizationErrors([error.statusText])
         }
       } else {
-        setCreateOrganizationErrors([safeErrorMessage(error) || 'Unable to create organization.'])
+        setCreateOrganizationErrors([safeErrorMessage(error) || 'Unable to create team.'])
       }
     } finally {
       setCreateOrganizationBusy(false)
@@ -2559,7 +2559,7 @@ export function AgentChatPage({
     && !currentContextAccountPause?.paused
     && personalSignupPreviewAvailable
   const createAgentDisabledReason = !currentContextCanCreateAgents
-    ? 'You do not have permission to create agents in this organization.'
+    ? 'You do not have permission to create agents in this team.'
     : currentContextAccountPause?.paused
       ? resolveCreateAgentPausedMessage(currentContextAccountPause.resumeAt)
       : currentContextBillingStatus?.delinquent
@@ -3277,7 +3277,7 @@ export function AgentChatPage({
   const apiKeysUrl = '/app/api-keys'
   const profileUrl = '/app/profile'
   const organizationUrl = effectiveContext?.type === 'organization'
-    ? '/app/organization'
+    ? '/app/team'
     : null
   const secretsUrl = '/app/secrets'
   const integrationsUrl = '/app/integrations'
@@ -3463,7 +3463,7 @@ export function AgentChatPage({
   const createOrganizationModal = createOrganizationOpen ? (
     <ModalForm
       id="create-organization-form"
-      title="Add Organization"
+      title="Add Team"
       onClose={() => {
         if (!createOrganizationBusy) {
           setCreateOrganizationOpen(false)
@@ -3475,14 +3475,14 @@ export function AgentChatPage({
       iconColorClass="text-blue-600"
       dismissible={!createOrganizationBusy}
       onSubmit={handleCreateOrganizationSubmit}
-      submitLabel="Create Organization"
+      submitLabel="Create Team"
       submittingLabel="Creating..."
       submitting={createOrganizationBusy}
       errorMessages={createOrganizationErrors}
     >
       <div>
         <label htmlFor="organization-name" className="block text-sm font-medium text-slate-700">
-          Organization Name
+          Team Name
         </label>
         <input
           id="organization-name"

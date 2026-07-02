@@ -215,7 +215,7 @@ def _agent_settings_app_path(agent: PersistentAgent) -> str:
 
 
 def _organization_app_path(org_id: Any | None = None) -> str:
-    path = f"{IMMERSIVE_APP_BASE_PATH}/organization"
+    path = f"{IMMERSIVE_APP_BASE_PATH}/team"
     if org_id:
         return append_context_query(path, str(org_id))
     return path

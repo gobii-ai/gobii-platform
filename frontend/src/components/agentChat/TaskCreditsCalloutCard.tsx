@@ -57,7 +57,7 @@ export function TaskCreditsCalloutCard({
           </p>
           <p className="hard-limit-callout-subtitle">
             {isNoOrgSeats
-              ? 'You do not have an active organization membership. Purchase seats and add team members.'
+              ? 'You do not have an active team membership. Purchase seats and add team members.'
               : isOutOfCredits
               ? 'Your account is out of task credits.'
               : 'Your account is almost out of task credits.'}

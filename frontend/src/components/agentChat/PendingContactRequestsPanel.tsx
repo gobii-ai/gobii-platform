@@ -57,7 +57,7 @@ export function PendingContactRequestsPanel({
             </span>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-slate-900">Reviewing this request</p>
-              <p className="text-sm text-slate-600">You're allowing this contact to message your organization.</p>
+              <p className="text-sm text-slate-600">You're allowing this contact to message your team.</p>
             </div>
           </div>
         ) : null}

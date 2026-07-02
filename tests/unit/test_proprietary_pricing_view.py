@@ -1,6 +1,10 @@
+import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -142,6 +146,85 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertContains(response, "Choose the plan that fits your team.")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_teams_page_renders_self_serve_team_offer(self):
+        response = self.client.get(reverse("proprietary:teams"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Gobii for Teams")
+        self.assertContains(response, "Shared AI Agent Workspaces for Growing Teams | Gobii")
+        self.assertContains(
+            response,
+            '<meta name="description" content="Gobii for Teams gives growing teams shared AI agents, pooled task credits, private templates, shared credentials, and one simple team bill.">',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<meta property="og:image" content="http://testserver/static/images/teams-og-1200x630.jpg">',
+            html=True,
+        )
+        self.assertContains(response, '<meta property="og:image:width" content="1200">', html=True)
+        self.assertContains(response, '<meta property="og:image:height" content="630">', html=True)
+        self.assertContains(
+            response,
+            '<meta name="twitter:image" content="http://testserver/static/images/teams-og-1200x630.jpg">',
+            html=True,
+        )
+        self.assertContains(response, "One shared workspace for your AI agent team")
+        self.assertContains(response, "$50")
+        self.assertContains(response, "1,000 pooled task credits per seat")
+        self.assertContains(response, "Ten seats create a 10,000 shared credit pool.")
+        self.assertContains(response, 'href="/accounts/signup/?next=%2Fapp%2Forganization"')
+        self.assertContains(response, 'data-auth-modal-url="/accounts/modal/signup/?next=%2Fapp%2Forganization"')
+        self.assertContains(response, 'data-analytics-cta-id="teams_hero_start"')
+        self.assertContains(response, 'data-analytics-cta-tracking-enabled="true"')
+        self.assertContains(response, 'let pageCategory = "Marketing";')
+        self.assertContains(response, 'let pageName = "Teams";')
+
+        share_image = Path(settings.BASE_DIR) / "static" / "images" / "teams-og-1200x630.jpg"
+        self.assertLess(share_image.stat().st_size, 300_000)
+
+        content = response.content.decode()
+        schema_match = re.search(
+            r'<script type="application/ld\+json">\s*(.*?)\s*</script>',
+            content,
+            re.S,
+        )
+        self.assertIsNotNone(schema_match)
+        schema = json.loads(schema_match.group(1))
+        self.assertEqual(schema["@context"], "https://schema.org")
+        graph = {entry["@type"]: entry for entry in schema["@graph"]}
+        self.assertEqual(graph["WebPage"]["@id"], "https://gobii.ai/teams/#webpage")
+        self.assertEqual(graph["WebPage"]["mainEntity"], {"@id": "https://gobii.ai/teams/#software"})
+        self.assertEqual(graph["BreadcrumbList"]["itemListElement"][1]["name"], "Teams")
+        software = graph["SoftwareApplication"]
+        self.assertEqual(software["@id"], "https://gobii.ai/teams/#software")
+        self.assertEqual(software["offers"]["price"], "50")
+        self.assertEqual(software["offers"]["availability"], "https://schema.org/InStock")
+        self.assertIn("Pooled task credits", software["featureList"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_active_public_plan_context", return_value=None)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_team_offer_uses_static_defaults_when_public_plan_context_is_missing(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_active_public_plan_context,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        teams_response = self.client.get(reverse("proprietary:teams"))
+        pricing_response = self.client.get(reverse("proprietary:pricing"))
+
+        for response in (teams_response, pricing_response):
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, "$50")
+            self.assertContains(response, "1,000")
+            self.assertContains(response, "2,000")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
     def test_pricing_page_renders_free_oss_plan(
         self,
@@ -158,7 +241,7 @@ class PricingPageCtaCopyTests(TestCase):
         plans = response.context["pricing_plans"]
         self.assertEqual(
             [plan["code"] for plan in plans],
-            ["free_oss", PlanNames.STARTUP, PlanNames.SCALE],
+            ["free_oss", PlanNames.STARTUP, PlanNames.SCALE, PlanNames.ORG_TEAM],
         )
         self.assertTrue(response.context["pricing_grid_has_free_oss_plan"])
 
@@ -182,6 +265,7 @@ class PricingPageCtaCopyTests(TestCase):
 
         self.assertEqual(plans[1]["cta_url"], reverse("proprietary:startup_checkout"))
         self.assertEqual(plans[2]["cta_url"], reverse("proprietary:scale_checkout"))
+        self.assertEqual(plans[3]["cta_url"], "/app/team")
 
         content = response.content.decode()
         analytics_pos = content.index('data-analytics-cta-id="pricing_free_oss_plan"')

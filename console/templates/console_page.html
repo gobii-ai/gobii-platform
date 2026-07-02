@@ -92,7 +92,7 @@
             Advanced
           </a>
           {% if current_context.type == 'organization' and current_context.id %}
-            <a href="/app/organization?context_type=organization&context_id={{ current_context.id }}"
+            <a href="/app/team?context_type=organization&context_id={{ current_context.id }}"
                class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'organization_detail' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
               <i aria-hidden="true" data-lucide="building-2" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'organization_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
               Organization

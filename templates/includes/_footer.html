@@ -6,6 +6,7 @@
       <ul class="space-y-2">
         <li><a href="{% url 'pages:home' %}" class="text-slate-700 hover:text-blue-600">Gobii</a></li>
         {% if settings.GOBII_PROPRIETARY_MODE %}
+          <li><a href="{% url 'proprietary:teams' %}" class="text-slate-700 hover:text-blue-600">Teams</a></li>
           <li><a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a></li>
         {% endif %}
         <li><a href="{% url 'agents' %}" class="text-slate-700 hover:text-blue-600">My Agents</a></li>
