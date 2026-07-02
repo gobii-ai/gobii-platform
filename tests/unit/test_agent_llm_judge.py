@@ -7,7 +7,6 @@ from django.contrib.auth import get_user_model
 from django.db import DatabaseError
 from django.test import TestCase, tag
 from django.utils import timezone
-from waffle.models import Flag
 
 from api.agent.core.agent_judge import (
     JUDGE_DAILY_RUN_LIMIT,
@@ -47,7 +46,6 @@ from api.models import (
     UserQuota,
 )
 from console.agent_chat.pending_actions import list_pending_action_requests
-from constants.feature_flags import PERSISTENT_AGENT_LLM_JUDGE
 from util.analytics import AnalyticsEvent
 
 
@@ -84,17 +82,6 @@ class AgentJudgeTests(TestCase):
         quota, _ = UserQuota.objects.get_or_create(user=cls.user)
         quota.agent_limit = 50
         quota.save()
-        Flag.objects.update_or_create(
-            name=PERSISTENT_AGENT_LLM_JUDGE,
-            defaults={
-                "everyone": True,
-                "percent": 0,
-                "superusers": False,
-                "staff": False,
-                "authenticated": False,
-            },
-        )
-
     def setUp(self):
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -161,39 +148,7 @@ class AgentJudgeTests(TestCase):
 
         self.assertIsNone(trigger)
 
-    def test_disabled_waffle_flag_blocks_judge(self):
-        Flag.objects.update_or_create(
-            name=PERSISTENT_AGENT_LLM_JUDGE,
-            defaults={
-                "everyone": False,
-                "percent": 0,
-                "superusers": False,
-                "staff": False,
-                "authenticated": False,
-            },
-        )
-        self._add_steps(40)
-
-        self.assertFalse(is_agent_judge_enabled_for_agent(self.agent))
-        self.assertIsNone(build_judge_trigger(self.agent, tools=[]))
-
-        with patch("api.agent.core.agent_judge.get_agent_judge_llm_config") as config_mock:
-            maybe_run_agent_judge(self.agent, tools=[])
-
-        config_mock.assert_not_called()
-
-    def test_user_specific_waffle_flag_enables_judge(self):
-        flag, _ = Flag.objects.update_or_create(
-            name=PERSISTENT_AGENT_LLM_JUDGE,
-            defaults={
-                "everyone": None,
-                "percent": 0,
-                "superusers": False,
-                "staff": False,
-                "authenticated": False,
-            },
-        )
-        flag.users.add(self.user)
+    def test_agent_with_user_is_judge_enabled(self):
         self._add_failed_tool_trigger()
 
         self.assertTrue(is_agent_judge_enabled_for_agent(self.agent))

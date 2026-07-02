@@ -7,7 +7,6 @@ from django.urls import reverse
 from waffle.testutils import override_flag
 
 from api.models import EntitlementDefinition, Plan, PlanVersion, PlanVersionEntitlement
-from constants.feature_flags import PRICING_FREE_OSS_PLAN
 from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
 from pages.models import CallToAction
 
@@ -144,7 +143,7 @@ class PricingPageCtaCopyTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
-    def test_pricing_page_omits_free_oss_plan_when_flag_disabled(
+    def test_pricing_page_renders_free_oss_plan(
         self,
         mock_get_stripe_settings,
     ):
@@ -153,32 +152,7 @@ class PricingPageCtaCopyTests(TestCase):
             scale_trial_days=14,
         )
 
-        with override_flag(PRICING_FREE_OSS_PLAN, active=False):
-            response = self.client.get(reverse("proprietary:pricing"))
-
-        self.assertEqual(response.status_code, 200)
-        plan_codes = [
-            plan["code"]
-            for plan in response.context["pricing_plans"]
-        ]
-        self.assertEqual(plan_codes, [PlanNames.STARTUP, PlanNames.SCALE])
-        self.assertFalse(response.context["pricing_grid_has_free_oss_plan"])
-        self.assertNotContains(response, "View on GitHub")
-        self.assertNotContains(response, 'data-analytics-cta-id="pricing_free_oss_plan"')
-
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @patch("proprietary.views.get_stripe_settings")
-    def test_pricing_page_renders_free_oss_plan_when_flag_enabled(
-        self,
-        mock_get_stripe_settings,
-    ):
-        mock_get_stripe_settings.return_value = SimpleNamespace(
-            startup_trial_days=7,
-            scale_trial_days=14,
-        )
-
-        with override_flag(PRICING_FREE_OSS_PLAN, active=True):
-            response = self.client.get(reverse("proprietary:pricing"))
+        response = self.client.get(reverse("proprietary:pricing"))
 
         self.assertEqual(response.status_code, 200)
         plans = response.context["pricing_plans"]

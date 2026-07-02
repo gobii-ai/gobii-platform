@@ -425,20 +425,8 @@ class HomePageTests(TestCase):
         self.assertContains(response, "turnstile/v0/api.js?render=explicit")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_page_uses_legacy_hero_illustration_when_fish_homepage_is_off(self):
-        with override_flag("fish_homepage", active=False):
-            response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        legacy_hero_image = soup.find("img", {"src": "/static/images/undraw/texting.svg"})
-        self.assertIsNotNone(legacy_hero_image)
-        self.assertIsNone(soup.select_one("[data-gobii-fish-cursor]"))
-
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_page_uses_fish_hero_animation_when_fish_homepage_is_on(self):
-        with override_flag("fish_homepage", active=True):
-            response = self.client.get("/")
+    def test_home_page_uses_fish_hero_animation(self):
+        response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
@@ -1542,7 +1530,11 @@ class RecruitingContactPageTests(TestCase):
         self.assertEqual(response.status_code, 301)
         self.assertEqual(response["Location"], "/")
 
-    @override_settings(PUBLIC_CONTACT_EMAIL="hello@gobii.test", SUPPORT_EMAIL="support@gobii.test")
+    @override_settings(
+        PUBLIC_CONTACT_EMAIL="hello@gobii.test",
+        SUPPORT_EMAIL="support@gobii.test",
+        TURNSTILE_ENABLED=False,
+    )
     @patch("pages.views._track_web_event_for_request")
     @patch("pages.views.send_mail")
     def test_recruiting_contact_request_sends_distinct_lead_email(self, mock_send_mail, mock_track_event):
@@ -1893,6 +1885,7 @@ class RobotsTxtTests(TestCase):
 
 @tag("batch_pages")
 class LlmsTxtTests(TestCase):
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_llms_txt_is_served_from_root_in_community_mode(self):
         response = self.client.get("/llms.txt")
 
@@ -1923,6 +1916,7 @@ class LlmsTxtTests(TestCase):
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_llms_full_txt_is_served_from_root_in_community_mode(self):
         response = self.client.get("/llms-full.txt")
 
@@ -3165,7 +3159,6 @@ class AgentSpawnIntentApiTests(TestCase):
         self.client.force_login(user)
 
         with (
-            override_flag("personal_agent_signup_starter_charter", active=True),
             override_flag("personal_agent_signup_preview_processing_limit", active=True),
             patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
         ):
@@ -4469,6 +4462,10 @@ class ProprietaryPricingTrialCopyTests(TestCase):
         view.setup(request)
         return view.get_context_data()
 
+    @staticmethod
+    def _plan_by_id(plans, plan_id):
+        return next(plan for plan in plans if plan["code"] == plan_id)
+
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="no_trial"))
     @patch("proprietary.views.get_stripe_settings")
@@ -4491,8 +4488,8 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 
         context = self._get_pricing_context_for_user(user)
         plans = context["pricing_plans"]
-        self.assertEqual(plans[0]["cta"], "Subscribe to Pro")
-        self.assertEqual(plans[1]["cta"], "Subscribe to Scale")
+        self.assertEqual(self._plan_by_id(plans, PlanNames.STARTUP)["cta"], "Subscribe to Pro")
+        self.assertEqual(self._plan_by_id(plans, PlanNames.SCALE)["cta"], "Subscribe to Scale")
 
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="eligible"))
@@ -4516,8 +4513,8 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 
         context = self._get_pricing_context_for_user(user)
         plans = context["pricing_plans"]
-        self.assertEqual(plans[0]["cta"], "Start 7-day Free Trial")
-        self.assertEqual(plans[1]["cta"], "Start 14-day Free Trial")
+        self.assertEqual(self._plan_by_id(plans, PlanNames.STARTUP)["cta"], "Start 7-day Free Trial")
+        self.assertEqual(self._plan_by_id(plans, PlanNames.SCALE)["cta"], "Start 14-day Free Trial")
 
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="eligible"))
@@ -4543,8 +4540,8 @@ class ProprietaryPricingTrialCopyTests(TestCase):
             context = self._get_pricing_context_for_user(user)
 
         plans = context["pricing_plans"]
-        self.assertEqual(plans[0]["cta"], "Start Free Trial")
-        self.assertEqual(plans[1]["cta"], "Start Free Trial")
+        self.assertEqual(self._plan_by_id(plans, PlanNames.STARTUP)["cta"], "Start Free Trial")
+        self.assertEqual(self._plan_by_id(plans, PlanNames.SCALE)["cta"], "Start Free Trial")
 
 
 @tag("batch_pages")

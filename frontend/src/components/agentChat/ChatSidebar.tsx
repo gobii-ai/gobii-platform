@@ -198,15 +198,8 @@ export const ChatSidebar = memo(function ChatSidebar({
     }
   }, [createAgentDisabled, isMobile, onBlockedCreateAgent, onCreateAgent])
 
-  const fishCollateralEnabled = useMemo(() => {
-    if (typeof document === 'undefined') {
-      return true
-    }
-    const mountNode = document.getElementById('gobii-frontend-root')
-    return mountNode?.dataset.fishCollateralEnabled !== 'false'
-  }, [])
-  const sidebarLogoSrc = fishCollateralEnabled ? '/static/images/gobii_fish.png' : '/static/images/noBgWhite.png'
-  const sidebarLogoAlt = fishCollateralEnabled ? 'Gobii Fish' : 'Gobii'
+  const sidebarLogoSrc = '/static/images/gobii_fish.png'
+  const sidebarLogoAlt = 'Gobii Fish'
 
   const activeAgent = useMemo(
     () => agents.find((agent) => agent.id === activeAgentId) ?? null,

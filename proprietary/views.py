@@ -12,6 +12,7 @@ from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils.html import strip_tags, escape
+from django.utils.translation import gettext_lazy as _
 from django.views.generic import TemplateView
 from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
@@ -25,13 +26,11 @@ from api.services.trial_abuse import (
     evaluate_user_trial_eligibility,
     user_has_prior_individual_history,
 )
-from util.fish_collateral import is_fish_collateral_enabled
 from constants.feature_flags import (
     CTA_NO_CHARGE_DURING_TRIAL,
     CTA_PRICING_CANCEL_TEXT_UNDER_BTN,
     CTA_START_FREE_TRIAL,
     CTA_UNLOCK_AGENT_COPY,
-    PRICING_FREE_OSS_PLAN,
     SUPPORT_INTERCOM,
 )
 from util.trial_eligibility import (
@@ -239,12 +238,6 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             self.request,
             default=False,
         )
-        show_free_oss_plan = is_waffle_flag_active(
-            PRICING_FREE_OSS_PLAN,
-            self.request,
-            default=False,
-        )
-
         def _trial_cta(days: int, label: str) -> str:
             if days > 0 and trial_eligible:
                 if cta_unlock_agent_copy:
@@ -426,44 +419,43 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             },
         ]
 
-        if show_free_oss_plan:
-            pricing_plans.insert(
-                0,
-                {
-                    "code": "free_oss",
-                    "name": "Free",
-                    "price": 0,
-                    "price_label": "$0",
-                    "price_prefix": "$",
-                    "price_amount": 0,
-                    "desc": "Self-Hosted Agents",
-                    "tasks": None,
-                    "pricing_model": "Self-hosted, open source",
-                    "highlight": False,
-                    "badge": "Open source",
-                    "disabled": False,
-                    "cta_disabled": False,
-                    "current_plan": False,
-                    "trial_cancel_text": None,
-                    "features": [
-                        "Run on your own computer or server",
-                        "Bring your own AI models",
-                        "Always-on agents with browser automation",
-                        "Open source and MIT licensed",
-                    ],
-                    "cta": "View on GitHub",
-                    "cta_url": "https://github.com/gobii-ai/gobii-platform",
-                    "cta_icon": "github",
-                    "cta_variant": "outline",
-                    "external": True,
-                    "signup_modal": False,
-                    "analytics_cta_id": "pricing_free_oss_plan",
-                    "analytics_intent": "view_open_source",
-                },
-            )
+        pricing_plans.insert(
+            0,
+            {
+                "code": "free_oss",
+                "name": _("Free"),
+                "price": 0,
+                "price_label": "$0",
+                "price_prefix": "$",
+                "price_amount": 0,
+                "desc": _("Self-Hosted Agents"),
+                "tasks": None,
+                "pricing_model": _("Self-hosted, open source"),
+                "highlight": False,
+                "badge": _("Open source"),
+                "disabled": False,
+                "cta_disabled": False,
+                "current_plan": False,
+                "trial_cancel_text": None,
+                "features": [
+                    _("Run on your own computer or server"),
+                    _("Bring your own AI models"),
+                    _("Always-on agents with browser automation"),
+                    _("Open source and MIT licensed"),
+                ],
+                "cta": _("View on GitHub"),
+                "cta_url": "https://github.com/gobii-ai/gobii-platform",
+                "cta_icon": "github",
+                "cta_variant": "outline",
+                "external": True,
+                "signup_modal": False,
+                "analytics_cta_id": "pricing_free_oss_plan",
+                "analytics_intent": "view_open_source",
+            },
+        )
 
         context["pricing_plans"] = pricing_plans
-        context["pricing_grid_has_free_oss_plan"] = show_free_oss_plan
+        context["pricing_grid_has_free_oss_plan"] = True
 
         # Plan limits pulled from plan configuration to keep the table in sync
         max_contacts_per_agent = [
@@ -859,12 +851,8 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
         )
 
         canonical_url = self.request.build_absolute_uri(self.request.path)
-        if is_fish_collateral_enabled():
-            brand_logo_path = "images/gobii_fish.png"
-            default_image_path = "images/gobii_fish_social_1280x640.png"
-        else:
-            brand_logo_path = "images/noBgBlue.png"
-            default_image_path = "images/noBgBlue.png"
+        brand_logo_path = "images/gobii_fish.png"
+        default_image_path = "images/gobii_fish_social_1280x640.png"
         brand_logo_url = self.request.build_absolute_uri(static(brand_logo_path))
         default_image_url = self.request.build_absolute_uri(static(default_image_path))
 
@@ -953,12 +941,8 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
 
         context = super().get_context_data(**kwargs)
         canonical_url = self.request.build_absolute_uri(self.request.path)
-        if is_fish_collateral_enabled():
-            brand_logo_path = "images/gobii_fish.png"
-            default_image_path = "images/gobii_fish_social_1280x640.png"
-        else:
-            brand_logo_path = "images/noBgBlue.png"
-            default_image_path = "images/noBgBlue.png"
+        brand_logo_path = "images/gobii_fish.png"
+        default_image_path = "images/gobii_fish_social_1280x640.png"
         default_image_alt = "Gobii logo"
         brand_logo_url = self.request.build_absolute_uri(static(brand_logo_path))
         default_image_url = self.request.build_absolute_uri(static(default_image_path))
