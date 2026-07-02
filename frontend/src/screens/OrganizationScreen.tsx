@@ -58,14 +58,9 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 })
 
 function formatDate(value: string | null): string {
-  if (!value) {
-    return '-'
-  }
+  if (!value) return '-'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return dateFormatter.format(date)
+  return Number.isNaN(date.getTime()) ? value : dateFormatter.format(date)
 }
 
 function formatErrors(error: unknown, fallback: string): string[] {
@@ -89,19 +84,13 @@ function formatErrors(error: unknown, fallback: string): string[] {
 function resolveTemplateDefaultTier(config?: LlmIntelligenceConfig | null): IntelligenceTierKey {
   const options = config?.options ?? []
   const systemDefault = config?.systemDefaultTier
-  if (systemDefault && options.some((option) => option.key === systemDefault)) {
-    return systemDefault
-  }
-  return options[0]?.key ?? FALLBACK_INTELLIGENCE_TIER
+  return systemDefault && options.some((option) => option.key === systemDefault)
+    ? systemDefault
+    : options[0]?.key ?? FALLBACK_INTELLIGENCE_TIER
 }
 
 function buildBlankTemplateDraft(config?: LlmIntelligenceConfig | null): OrganizationTemplateEditorPayload {
-  return {
-    name: '',
-    tagline: '',
-    charter: '',
-    preferredLlmTier: resolveTemplateDefaultTier(config),
-  }
+  return { name: '', tagline: '', charter: '', preferredLlmTier: resolveTemplateDefaultTier(config) }
 }
 
 function formatTemplateTier(template: OrganizationTemplate, config?: LlmIntelligenceConfig | null): string {
@@ -110,17 +99,11 @@ function formatTemplateTier(template: OrganizationTemplate, config?: LlmIntellig
 }
 
 function publishOrganizationContext(data: CurrentOrganizationPayload) {
-  publishConsoleContext({
-    type: 'organization',
-    id: data.organization.id,
-    name: data.organization.name,
-  })
+  publishConsoleContext({ type: 'organization', id: data.organization.id, name: data.organization.name })
 }
 
 function publishConsoleContext(context: ConsoleContext) {
-  if (typeof window === 'undefined') {
-    return
-  }
+  if (typeof window === 'undefined') return
   storeConsoleContext(context)
   window.dispatchEvent(new CustomEvent('gobii:console-context-updated', { detail: context }))
 }
@@ -150,15 +133,9 @@ function buildBillingPathForCurrentAppRoute(): string {
   return `/app/agents/${match[1]}?${params.toString()}`
 }
 
-function ConfirmOrganizationActionModal({
-  action,
-  onClose,
-  onConfirm,
-}: {
-  action: ConfirmAction
-  onClose: () => void
-  onConfirm: (action: ConfirmAction) => Promise<void>
-}) {
+type ConfirmOrganizationActionModalProps = { action: ConfirmAction; onClose: () => void; onConfirm: (action: ConfirmAction) => Promise<void> }
+
+function ConfirmOrganizationActionModal({ action, onClose, onConfirm }: ConfirmOrganizationActionModalProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isRemove = action.kind === 'remove-member'
@@ -226,29 +203,9 @@ function CreateOrganizationModal({ name, errors, busy, onNameChange, onClose, on
   )
 }
 
-function AddMemberModal({
-  roles,
-  email,
-  role,
-  seatsAvailable,
-  errors,
-  busy,
-  onEmailChange,
-  onRoleChange,
-  onClose,
-  onSubmit,
-}: {
-  roles: CurrentOrganizationPayload['roles']
-  email: string
-  role: string
-  seatsAvailable: number | null
-  errors: string[]
-  busy: boolean
-  onEmailChange: (email: string) => void
-  onRoleChange: (role: string) => void
-  onClose: () => void
-  onSubmit: (event: FormEvent) => void
-}) {
+type AddMemberModalProps = { roles: CurrentOrganizationPayload['roles']; email: string; role: string; seatsAvailable: number | null; errors: string[]; busy: boolean; onEmailChange: (email: string) => void; onRoleChange: (role: string) => void; onClose: () => void; onSubmit: (event: FormEvent) => void }
+
+function AddMemberModal({ roles, email, role, seatsAvailable, errors, busy, onEmailChange, onRoleChange, onClose, onSubmit }: AddMemberModalProps) {
   const noSeatsAvailable = seatsAvailable !== null && seatsAvailable <= 0
   const selectedRoleRequiresSeat = role !== SOLUTIONS_PARTNER_ROLE
   const submitDisabled = !role || (noSeatsAvailable && selectedRoleRequiresSeat)
@@ -310,23 +267,9 @@ function AddMemberModal({
   )
 }
 
-function CreateTemplateModal({
-  sourceAgents,
-  sourceAgentId,
-  errors,
-  busy,
-  onSourceAgentChange,
-  onClose,
-  onSubmit,
-}: {
-  sourceAgents: CurrentOrganizationTemplatesPayload['sourceAgents']
-  sourceAgentId: string
-  errors: string[]
-  busy: boolean
-  onSourceAgentChange: (agentId: string) => void
-  onClose: () => void
-  onSubmit: (event: FormEvent) => void
-}) {
+type CreateTemplateModalProps = { sourceAgents: CurrentOrganizationTemplatesPayload['sourceAgents']; sourceAgentId: string; errors: string[]; busy: boolean; onSourceAgentChange: (agentId: string) => void; onClose: () => void; onSubmit: (event: FormEvent) => void }
+
+function CreateTemplateModal({ sourceAgents, sourceAgentId, errors, busy, onSourceAgentChange, onClose, onSubmit }: CreateTemplateModalProps) {
   const hasSourceAgents = sourceAgents.length > 0
 
   return (
@@ -374,25 +317,9 @@ function CreateTemplateModal({
   )
 }
 
-function TemplateEditorModal({
-  mode,
-  draft,
-  intelligenceConfig,
-  errors,
-  busy,
-  onDraftChange,
-  onClose,
-  onSubmit,
-}: {
-  mode: 'create' | 'edit'
-  draft: OrganizationTemplateEditorPayload
-  intelligenceConfig: LlmIntelligenceConfig | null
-  errors: string[]
-  busy: boolean
-  onDraftChange: (draft: OrganizationTemplateEditorPayload) => void
-  onClose: () => void
-  onSubmit: (event: FormEvent) => void
-}) {
+type TemplateEditorModalProps = { mode: 'create' | 'edit'; draft: OrganizationTemplateEditorPayload; intelligenceConfig: LlmIntelligenceConfig | null; errors: string[]; busy: boolean; onDraftChange: (draft: OrganizationTemplateEditorPayload) => void; onClose: () => void; onSubmit: (event: FormEvent) => void }
+
+function TemplateEditorModal({ mode, draft, intelligenceConfig, errors, busy, onDraftChange, onClose, onSubmit }: TemplateEditorModalProps) {
   const updateDraft = <K extends keyof OrganizationTemplateEditorPayload>(
     key: K,
     value: OrganizationTemplateEditorPayload[K],
@@ -472,21 +399,9 @@ function TemplateEditorModal({
   )
 }
 
-function OrganizationEmptyState({
-  organizations,
-  organizationsLoading,
-  switchingOrganizationId,
-  switchError,
-  onSwitchOrganization,
-  onCreateOrganization,
-}: {
-  organizations: ConsoleContextOption[]
-  organizationsLoading: boolean
-  switchingOrganizationId: string | null
-  switchError: string | null
-  onSwitchOrganization: (organization: ConsoleContextOption) => void
-  onCreateOrganization: () => void
-}) {
+type OrganizationEmptyStateProps = { organizations: ConsoleContextOption[]; organizationsLoading: boolean; switchingOrganizationId: string | null; switchError: string | null; onSwitchOrganization: (organization: ConsoleContextOption) => void; onCreateOrganization: () => void }
+
+function OrganizationEmptyState({ organizations, organizationsLoading, switchingOrganizationId, switchError, onSwitchOrganization, onCreateOrganization }: OrganizationEmptyStateProps) {
   const hasOrganizations = organizations.length > 0
   const title = hasOrganizations || organizationsLoading ? 'Choose a team workspace' : 'Create your team workspace'
   const description = hasOrganizations
