@@ -264,7 +264,7 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_create_system_message(self):
-        payload = {"body": "Priority directive", "is_active": True}
+        payload = {"body": "Priority directive"}
         response = self.client.post(
             f"/console/api/staff/agents/{self.agent.id}/system-messages/",
             data=json.dumps(payload),
@@ -274,6 +274,7 @@ class StaffAgentAuditAPITests(TestCase):
         data = response.json()
         self.assertEqual(data.get("kind"), "system_message")
         self.assertEqual(data.get("body"), "Priority directive")
+        self.assertNotIn("is_active", data)
 
     def test_log_agent_error_helper_persists_and_logs(self):
         from api.services.agent_error_logging import log_agent_error

@@ -193,7 +193,6 @@ def serialize_system_message(message: PersistentAgentSystemMessage) -> dict:
         "timestamp": timestamp,
         "delivered_at": delivered_at,
         "body": message.body or "",
-        "is_active": bool(message.is_active),
         "broadcast_id": str(message.broadcast_id) if message.broadcast_id else None,
         "created_by": {
             "id": str(created_by.id),

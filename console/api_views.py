@@ -2765,11 +2765,9 @@ class StaffAgentJudgeSuggestionDecisionAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("decision must be approve or reject")
 
         suggestion.refresh_from_db()
-        system_message = suggestion.system_message
         return JsonResponse(
             {
                 "status": suggestion.status,
-                "system_message_active": bool(system_message and system_message.is_active),
             },
             status=200,
         )
@@ -2791,11 +2789,9 @@ class StaffAgentSystemMessageAPIView(SystemAdminAPIView):
         if not body:
             return HttpResponseBadRequest("body is required")
 
-        is_active = payload.get("is_active", True)
         message = PersistentAgentSystemMessage.objects.create(
             agent=agent,
             body=body,
-            is_active=bool(is_active),
             created_by=request.user if request.user.is_authenticated else None,
         )
 
@@ -2825,12 +2821,6 @@ class StaffAgentSystemMessageDetailAPIView(SystemAdminAPIView):
             if message.body != body:
                 message.body = body
                 updates.append("body")
-
-        if "is_active" in payload:
-            is_active = bool(payload.get("is_active"))
-            if message.is_active != is_active:
-                message.is_active = is_active
-                updates.append("is_active")
 
         if updates:
             message.save(update_fields=updates)

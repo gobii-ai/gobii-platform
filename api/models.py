@@ -8127,7 +8127,7 @@ class PersistentAgentSystemMessage(models.Model):
         related_name="system_prompt_messages",
         help_text="Agent that should receive this system directive.",
     )
-    body = models.TextField(help_text="System directive text injected ahead of the agent's instructions.")
+    body = models.TextField(help_text="System directive text delivered into the agent's unified history.")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -8148,11 +8148,11 @@ class PersistentAgentSystemMessage(models.Model):
     delivered_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="Timestamp when this directive was injected into the system prompt.",
+        help_text="Timestamp when this directive was delivered into the agent's unified history.",
     )
     is_active = models.BooleanField(
         default=True,
-        help_text="Disable to keep the record but skip injecting it into future prompts.",
+        help_text="Disable to keep the record but skip delivery into unified history.",
     )
 
     class Meta:

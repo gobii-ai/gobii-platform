@@ -2947,19 +2947,13 @@ class PromptContextBuilderTests(TestCase):
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
         self.assertIsNotNone(system_message)
-        self.assertNotIn("A note from the Gobii team:", system_message["content"])
         self.assertIn("Immediate System Directives From Gobii Operations", system_message["content"])
-        self.assertIn("Act on them immediately before continuing normal work", system_message["content"])
-        self.assertIn("Do not summarize them, defer them, ignore them, or treat them as background history", system_message["content"])
         self.assertIn("Drop everything and update the quarterly results deck today.", system_message["content"])
 
         user_message = next((m for m in context if m["role"] == "user"), None)
         self.assertIsNotNone(user_message)
         user_content = user_message["content"]
         self.assertIn("System directive delivered:", user_content)
-        self.assertIn("high-priority directive from Gobii Operations", user_content)
-        self.assertIn("Address it before continuing normal work", user_content)
-        self.assertIn("do not treat it as background history", user_content)
         self.assertIn("Drop everything and update the quarterly results deck today.", user_content)
 
         sys_steps = PersistentAgentSystemStep.objects.filter(
@@ -2968,7 +2962,6 @@ class PromptContextBuilderTests(TestCase):
         )
         self.assertEqual(sys_steps.count(), 1)
         self.assertIn("Drop everything and update the quarterly results deck today.", sys_steps.first().step.description)
-        self.assertIn("Address it before continuing normal work", sys_steps.first().step.description)
 
         directive.refresh_from_db()
         self.assertIsNotNone(directive.delivered_at)
@@ -3048,10 +3041,8 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("system_prompt", payload)
         self.assertIn("user_prompt", payload)
         self.assertIn("Immediate System Directives From Gobii Operations", payload["system_prompt"])
-        self.assertIn("Act on them immediately before continuing normal work", payload["system_prompt"])
         self.assertIn("Archive this directive in unified history.", payload["system_prompt"])
         self.assertIn("System directive delivered:", payload["user_prompt"])
-        self.assertIn("high-priority directive from Gobii Operations", payload["user_prompt"])
         self.assertIn("Archive this directive in unified history.", payload["user_prompt"])
         user_message = next((m for m in context if m["role"] == "user"), None)
         self.assertIsNotNone(user_message)

@@ -4925,20 +4925,18 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
 
 
 class PersistentAgentSystemMessageAdminForm(forms.ModelForm):
-    is_active = forms.BooleanField(
-        label="Deliver if pending",
-        required=False,
-        help_text=(
-            "Uncheck to cancel a directive that has not been delivered yet. "
-            "Delivered directives stay in unified history."
-        ),
-    )
-
     class Meta:
         model = PersistentAgentSystemMessage
         fields = "__all__"
+        labels = {
+            "is_active": "Deliver if pending",
+        }
         help_texts = {
             "body": "System directive text delivered into the agent's unified history.",
+            "is_active": (
+                "Uncheck to cancel a directive that has not been delivered yet. "
+                "Delivered directives stay in unified history."
+            ),
         }
 
 

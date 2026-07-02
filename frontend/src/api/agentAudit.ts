@@ -98,14 +98,13 @@ export async function runAgentJudge(agentId: string): Promise<ManualJudgeRespons
 
 export async function decideAgentJudgeSuggestion(decisionApiUrl: string, decision: 'approve' | 'reject'): Promise<{
   status: string
-  system_message_active?: boolean
 }> {
   return jsonRequest(decisionApiUrl, { method: 'POST', includeCsrf: true, json: { decision } })
 }
 
 export async function createSystemMessage(
   agentId: string,
-  payload: { body: string; is_active?: boolean },
+  payload: { body: string },
 ): Promise<AuditEvent> {
   const url = `/console/api/staff/agents/${agentId}/system-messages/`
   return jsonRequest(url, { method: 'POST', includeCsrf: true, json: payload })
@@ -114,7 +113,7 @@ export async function createSystemMessage(
 export async function updateSystemMessage(
   agentId: string,
   messageId: string,
-  payload: { body?: string; is_active?: boolean },
+  payload: { body?: string },
 ): Promise<AuditEvent> {
   const url = `/console/api/staff/agents/${agentId}/system-messages/${messageId}/`
   return jsonRequest(url, { method: 'PATCH', includeCsrf: true, json: payload })
