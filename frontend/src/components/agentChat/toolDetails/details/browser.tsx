@@ -78,6 +78,12 @@ function cleanScrapedMarkdown(value: string, sourceUrl: string | null): string {
   return source
     .replace(/\r\n?/g, '\n')
     .replace(/\\([[\]()_&])/g, '$1')
+    .replace(/^```\s*\n([^\n`]{1,160})\s*\n```\s*\n+/, '$1\n\n')
+    .replace(/\[\s*([^\][]*?)\s*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, label: string, href: string) => {
+      const cleanLabel = label.replace(/\s+/g, ' ').trim()
+      return cleanLabel ? `[${cleanLabel}](${href})` : ''
+    })
+    .replace(/\)\[/g, ') [')
     .replace(/\[([^\]\n]+)\]\(#[^)]+\)/g, '$1')
     .replace(/\[([^\]\n]+)\n\s*\]\(#[^)]+\)/g, (_, label: string) => label.trim())
     .split('\n')
