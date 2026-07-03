@@ -1,36 +1,8 @@
+{% extends "console/oauth_callback_shell.html" %}
 {% load static %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="csrf-cookie-name" content="{{ settings.CSRF_COOKIE_NAME|default:'csrftoken' }}">
-  <title>Finishing Connection - Gobii</title>
-  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
-  <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
-  <script defer src="https://unpkg.com/lucide@0.546.0"></script>
-</head>
-<body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
-  <main class="flex min-h-screen items-center justify-center px-4 py-8">
-    <section class="w-full max-w-sm space-y-4 text-center">
-      <div class="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-sky-300/25 bg-sky-950/45 text-sky-100">
-        <i data-lucide="plug" class="h-5 w-5"></i>
-      </div>
-      <div class="space-y-1">
-        <h1 class="text-base font-semibold">Finishing connection</h1>
-        <p id="native-oauth-status" class="text-sm text-slate-300">Completing authorization...</p>
-      </div>
-      <pre id="native-oauth-error" class="hidden rounded-lg border border-rose-300/25 bg-rose-950/30 px-3 py-2 text-left text-xs text-rose-100 whitespace-pre-wrap"></pre>
-      <p class="text-xs text-slate-500">This tab will close automatically if your browser allows it.</p>
-    </section>
-  </main>
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      if (window.lucide) {
-        window.lucide.createIcons({ nameAttr: 'data-lucide' });
-      }
-    });
-  </script>
+
+{% block oauth_callback_status_id %}native-oauth-status{% endblock %}
+{% block oauth_callback_error_id %}native-oauth-error{% endblock %}
+{% block oauth_callback_script %}
   <script type="module" src="{% static 'js/native_integration_oauth_callback.js' %}"></script>
-</body>
-</html>
+{% endblock %}

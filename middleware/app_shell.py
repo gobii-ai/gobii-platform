@@ -14,6 +14,9 @@ from config.vite import ViteManifestError, get_vite_asset
 from util.integrations import pipedream_status
 
 APP_PATH_PREFIX = "/app"
+APP_SHELL_BYPASS_PATHS = (
+    f"{APP_PATH_PREFIX}/email/oauth/callback/",
+)
 APP_PROTECTED_PATH_PREFIX = f"{APP_PATH_PREFIX}/agents"
 APP_BILLING_PATH_PREFIX = f"{APP_PATH_PREFIX}/billing"
 APP_API_KEYS_PATH_PREFIX = f"{APP_PATH_PREFIX}/api-keys"
@@ -319,6 +322,8 @@ class AppShellMiddleware:
 
     @staticmethod
     def _should_handle(path: str) -> bool:
+        if path in APP_SHELL_BYPASS_PATHS:
+            return False
         return path == APP_PATH_PREFIX or path.startswith(f"{APP_PATH_PREFIX}/")
 
     @staticmethod

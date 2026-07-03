@@ -1102,6 +1102,17 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(agent_response.json()["agent_secrets"], [])
         self.assertEqual(agent_response.json()["global_secrets"], [])
 
+    def test_native_integration_oauth_callback_page_uses_standalone_shell(self):
+        response = self.client.get(
+            reverse("console-native-integration-oauth-callback-view"),
+            {"code": "abc", "state": "xyz"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "js/native_integration_oauth_callback.js")
+        self.assertContains(response, "native-oauth-status")
+        self.assertNotContains(response, "console-submenu")
+
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
     def test_http_request_injects_native_provider_auth(self, mock_request, mock_proxy):

@@ -575,7 +575,7 @@ def _serialize_agent_email_settings(
         "provider": credential.provider if credential else "",
         "scope": credential.scope if credential else "",
         "expiresAt": credential.expires_at.isoformat() if credential and credential.expires_at else None,
-        "callbackPath": reverse("console-email-oauth-callback-view"),
+        "callbackPath": reverse("app-email-oauth-callback-view"),
         "startUrl": reverse("console-email-oauth-start"),
         "statusUrl": reverse("console-email-oauth-status", args=[account.pk]) if account else None,
         "revokeUrl": reverse("console-email-oauth-revoke", args=[account.pk]) if account else None,

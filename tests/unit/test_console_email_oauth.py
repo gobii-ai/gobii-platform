@@ -308,10 +308,17 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertFalse(AgentEmailOAuthCredential.objects.filter(id=credential.id).exists())
 
     def test_callback_page_includes_completion_script(self):
-        url = reverse("console-email-oauth-callback-view")
+        url = reverse("app-email-oauth-callback-view")
         response = self.client.get(url, {"code": "abc", "state": "xyz"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "js/agent_email_oauth_callback.js")
+        self.assertNotContains(response, "console-submenu")
+
+    def test_legacy_callback_page_redirects_to_app_callback_with_query(self):
+        url = reverse("console-email-oauth-callback-view")
+        response = self.client.get(url, {"code": "abc", "state": "xyz"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"{reverse('app-email-oauth-callback-view')}?code=abc&state=xyz")
 
     @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_settings_page_mounts_react_email_app(self):
@@ -364,6 +371,7 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertIn("exists", payload["defaultEndpoint"])
         self.assertIn("address", payload["defaultEndpoint"])
         self.assertIn("isInboundAliasActive", payload["defaultEndpoint"])
+        self.assertEqual(payload["oauth"]["callbackPath"], reverse("app-email-oauth-callback-view"))
         self.assertIn("gmail", payload["providerDefaults"])
         self.assertIn("microsoft", payload["providerDefaults"])
         self.assertIn("outlook", payload["providerDefaults"])
