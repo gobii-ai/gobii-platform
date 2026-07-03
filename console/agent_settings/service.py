@@ -1547,7 +1547,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     message=transfer_message,
                 )
                 try:
-                    dashboard_url = request.build_absolute_uri(reverse('console-home'))
+                    dashboard_url = request.build_absolute_uri(IMMERSIVE_APP_BASE_PATH)
                     initiator_name = request.user.get_full_name() or request.user.email or "A Gobii user"
                     context = {
                         'agent': agent,

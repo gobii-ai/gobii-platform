@@ -1109,12 +1109,12 @@ class PipedreamConnectRedirectView(View):
             agent = PersistentAgent.objects.get(id=agent_id)
         except PersistentAgent.DoesNotExist:
             logger.warning("PD JIT Connect: agent not found agent=%s", agent_id)
-            return HttpResponseRedirect('/console/')
+            return HttpResponseRedirect('/app')
 
         # Redirect to console if agent is expired
         if agent.life_state == PersistentAgent.LifeState.EXPIRED:
             logger.info("PD JIT Connect: agent expired agent=%s", agent_id)
-            return HttpResponseRedirect('/console/')
+            return HttpResponseRedirect('/app')
 
         # Check user has access to this agent (owns it or is in the org)
         has_access = (agent.user_id == request.user.id) or (
@@ -1130,8 +1130,7 @@ class PipedreamConnectRedirectView(View):
                 "PD JIT Connect: access denied user=%s agent=%s",
                 request.user.id, agent_id
             )
-            # Redirect to console rather than 404 for better UX
-            return HttpResponseRedirect('/console/')
+            return HttpResponseRedirect('/app')
 
         # Always create a fresh connect link (Pipedream links are single-use)
         session, connect_url = create_connect_session(agent, app_slug)

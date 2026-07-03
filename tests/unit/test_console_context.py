@@ -1099,21 +1099,6 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
 
-    def test_header_menu_reflects_context(self):
-        # Organization context should show Organization link and hide Profile
-        self._set_org_context()
-        resp = self.client.get(reverse("console-home"))
-        self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode()
-        self.assertIn(str(self.org.id), html)
-        self.assertIn("Organization", html)
-        # Switch to personal context
-        self._set_personal_context()
-        resp2 = self.client.get(reverse("console-home"))
-        self.assertEqual(resp2.status_code, 200)
-        html2 = resp2.content.decode()
-        self.assertIn("Profile", html2)
-
     @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_sidebar_nav_reflects_context(self):
         self._set_org_context()

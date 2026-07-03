@@ -229,7 +229,6 @@ from console.usage_views import (
 from console.insight_views import AgentInsightsAPIView
 from console.legacy_redirects import LegacyConsoleRedirectView
 from console.views import (
-    ConsoleHome,
     BillingPortalView,
     ConsoleStatusView,
     LegacyConsoleStatusRedirectView,
@@ -350,7 +349,6 @@ urlpatterns = [
     path("system-settings/", SystemSettingsView.as_view(), name="system-settings"),
 
     # console
-    path("console/", ConsoleHome.as_view(), name="console-home"),
     path("staff/status/", ConsoleStatusView.as_view(), name="console-status"),
     path("console/status/", LegacyConsoleStatusRedirectView.as_view(), name="console-status-legacy"),
     path("staff/mcp/", PlatformMCPServerManagementView.as_view(), name="staff-platform-mcp"),
