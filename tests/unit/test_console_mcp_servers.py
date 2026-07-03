@@ -431,18 +431,11 @@ class MCPServerManagementPageTests(TestCase):
         )
         self.client.force_login(self.user)
 
-    @override_settings(
-        PIPEDREAM_CLIENT_ID="",
-        PIPEDREAM_CLIENT_SECRET="",
-        PIPEDREAM_PROJECT_ID="",
-    )
-    def test_management_page_hides_pipedream_data_attributes_when_unconfigured(self):
-        response = self.client.get(reverse("console-mcp-servers"))
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
+    def test_legacy_management_page_is_removed(self):
+        response = self.client.get("/console/advanced/mcp-servers/")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-app="mcp-servers"')
-        self.assertNotContains(response, 'data-pipedream-apps-url=')
-        self.assertNotContains(response, 'data-pipedream-app-search-url=')
+        self.assertEqual(response.status_code, 404)
 
     def test_platform_management_page_requires_staff(self):
         response = self.client.get(reverse("staff-platform-mcp"))

@@ -132,7 +132,6 @@ from billing.addons import AddonEntitlementService
 from util.payments_helper import PaymentsHelper
 from util.integrations import (
     IntegrationDisabledError,
-    pipedream_status,
     stripe_status,
 )
 from util.onboarding import (
@@ -177,8 +176,6 @@ from console.agent_chat.access import (
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG
-from waffle import flag_is_active
-from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
 
 def _format_validation_error(error: ValidationError) -> str:
     if hasattr(error, "message_dict") and error.message_dict:
@@ -1659,67 +1656,6 @@ class StaffAgentAuditView(SystemAdminRequiredMixin, TemplateView):
         agent = get_object_or_404(PersistentAgent, pk=agent_id)
         context["agent"] = agent
         context["admin_agent_url"] = reverse("admin:api_persistentagent_change", args=[agent.id])
-        return context
-
-
-class ConsoleOwnerScopeMixin:
-    """Shared owner resolution logic for owner-scoped console management views."""
-
-    owner_scope: str | None = None
-    owner_user = None
-    owner_org = None
-
-    def dispatch(self, request, *args, **kwargs):
-        self.owner_scope, self.owner_user, self.owner_org = self._resolve_owner()
-        return super().dispatch(request, *args, **kwargs)
-
-    def _resolve_owner(self):
-        context = build_console_context(self.request)
-        if context.current_context.type == 'organization':
-            membership = context.current_membership
-            if membership is None or not context.can_manage_org_agents:
-                raise PermissionDenied("You do not have permission to manage organization resources.")
-            return ('organization', None, membership.org)
-        return ('user', self.request.user, None)
-
-    def get_mcp_servers_queryset(self):
-        if self.owner_scope == 'organization':
-            return MCPServerConfig.objects.filter(
-                scope=MCPServerConfig.Scope.ORGANIZATION,
-                organization=self.owner_org,
-            ).order_by('display_name')
-        return MCPServerConfig.objects.filter(
-            scope=MCPServerConfig.Scope.USER,
-            user=self.owner_user,
-        ).order_by('display_name')
-
-    def get_owner_label(self):
-        if self.owner_scope == 'organization' and self.owner_org:
-            return self.owner_org.name
-        return self.request.user.get_full_name() or self.request.user.username
-
-
-class MCPServerManagementView(ConsoleOwnerScopeMixin, ConsoleViewMixin, TemplateView):
-    template_name = "console/mcp_servers.html"
-
-    def dispatch(self, request, *args, **kwargs):
-        return super().dispatch(request, *args, **kwargs)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        placeholder_id = "00000000-0000-0000-0000-000000000000"
-        context.update(
-            {
-                'owner_scope': self.owner_scope,
-                'owner_label': self.get_owner_label(),
-                'allow_mcp_commands': flag_is_active(self.request, SANDBOX_COMPUTE_WAFFLE_FLAG),
-                'pipedream_integrations_enabled': pipedream_status().enabled,
-                'mcp_server_list_url': reverse('console-mcp-server-list'),
-                'mcp_server_detail_url_template': reverse('console-mcp-server-detail', args=[placeholder_id]),
-                'mcp_server_assign_url_template': reverse('console-mcp-server-assignments', args=[placeholder_id]),
-                'mcp_server_test_url_template': reverse('console-mcp-server-test', args=[placeholder_id]),
-            }
-        )
         return context
 
 

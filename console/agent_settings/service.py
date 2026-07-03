@@ -534,7 +534,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             'personal': personal_servers,
             'showPersonalForm': agent.organization_id is None and bool(personal_servers),
             'canManage': can_manage,
-            'manageUrl': reverse('console-mcp-servers'),
+            'manageUrl': '/app/integrations',
         }
 
     def _build_webhooks_payload(self, agent: PersistentAgent) -> list[dict[str, str]]:
@@ -817,7 +817,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             for webhook in context.get('agent_webhooks', [])
         ]
         inbound_webhooks = self._build_inbound_webhooks_payload(request, agent)
-        mcp_manage_url = reverse('console-mcp-servers')
+        mcp_manage_url = '/app/integrations'
 
         return {
             'csrfToken': get_token(request),
