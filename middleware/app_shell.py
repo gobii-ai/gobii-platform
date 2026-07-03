@@ -322,7 +322,8 @@ class AppShellMiddleware:
 
     @staticmethod
     def _should_handle(path: str) -> bool:
-        if path in APP_SHELL_BYPASS_PATHS:
+        normalized_path = path if path.endswith("/") else f"{path}/"
+        if normalized_path in APP_SHELL_BYPASS_PATHS:
             return False
         return path == APP_PATH_PREFIX or path.startswith(f"{APP_PATH_PREFIX}/")
 

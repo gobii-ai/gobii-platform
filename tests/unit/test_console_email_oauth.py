@@ -314,6 +314,11 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertContains(response, "js/agent_email_oauth_callback.js")
         self.assertNotContains(response, "console-submenu")
 
+    def test_callback_page_without_trailing_slash_redirects_to_callback(self):
+        response = self.client.get("/app/email/oauth/callback", {"code": "abc", "state": "xyz"})
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, f"{reverse('app-email-oauth-callback-view')}?code=abc&state=xyz")
+
     def test_legacy_callback_page_redirects_to_app_callback_with_query(self):
         url = reverse("console-email-oauth-callback-view")
         response = self.client.get(url, {"code": "abc", "state": "xyz"})
