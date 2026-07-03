@@ -90,6 +90,12 @@ const NATIVE_PROVIDER_ICONS: Record<string, { className: string; framedClassName
     src: '/static/images/integrations/native/discord.svg',
     tileClassName: 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700',
   },
+  meta_ads: {
+    className: 'h-5 w-5 object-contain',
+    framedClassName: 'h-6 w-6 object-contain',
+    src: '/static/images/integrations/native/meta_ads.svg',
+    tileClassName: 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700',
+  },
 }
 
 export function useNativeIntegrationRefreshEffects({
@@ -214,6 +220,10 @@ export function openNativeOAuthPopup(provider: NativeIntegrationProvider): Windo
 
 export function supportsNativeIntegrationPicker(provider: NativeIntegrationProvider): boolean {
   return provider.providerKey === 'google_drive' && Boolean(provider.pickerTokenUrl)
+}
+
+export function usesManualNativeIntegrationCredentials(provider: NativeIntegrationProvider): boolean {
+  return provider.authType === 'manual' && provider.credentialFields.length > 0
 }
 
 export function confirmNativeIntegrationDisconnect(provider: Pick<NativeIntegrationProvider, 'displayName'>): boolean {

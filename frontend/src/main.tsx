@@ -18,7 +18,6 @@ const SystemSettingsScreen = lazy(async () => ({ default: (await import('./scree
 const EvalsScreen = lazy(async () => ({ default: (await import('./screens/EvalsScreen')).EvalsScreen }))
 const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/EvalsDetailScreen')).EvalsDetailScreen }))
 const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
-const SystemSkillProfilesScreen = lazy(async () => ({ default: (await import('./screens/SystemSkillProfilesScreen')).SystemSkillProfilesScreen }))
 const ImmersiveApp = lazy(async () => ({ default: (await import('./screens/ImmersiveApp')).ImmersiveApp }))
 
 const LoadingFallback = () => (
@@ -179,20 +178,6 @@ switch (appName) {
       />
     )
     break
-  case 'system-skill-profiles': {
-    const listUrl = mountNode.dataset.listUrl
-    if (!listUrl) {
-      throw new Error('System skill profile list URL is required')
-    }
-    screen = (
-      <SystemSkillProfilesScreen
-        listUrl={listUrl}
-        ownerScope={mountNode.dataset.ownerScope}
-        skillKey={mountNode.dataset.skillKey}
-      />
-    )
-    break
-  }
   case 'immersive-app':
     screen = (
       <ImmersiveApp

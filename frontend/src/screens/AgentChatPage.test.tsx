@@ -185,6 +185,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       apolloNativeTabEnabled,
       hubspotNativeTabEnabled,
       discordNativeTabEnabled,
+      metaAdsTabEnabled,
       events,
     }: {
       spawnIntentLoading?: boolean
@@ -202,6 +203,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       apolloNativeTabEnabled?: boolean
       hubspotNativeTabEnabled?: boolean
       discordNativeTabEnabled?: boolean
+      metaAdsTabEnabled?: boolean
       events?: Array<{
         kind: string
         message?: {
@@ -228,6 +230,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="apollo-native-tab-enabled">{String(Boolean(apolloNativeTabEnabled))}</div>
           <div data-testid="hubspot-native-tab-enabled">{String(Boolean(hubspotNativeTabEnabled))}</div>
           <div data-testid="discord-native-tab-enabled">{String(Boolean(discordNativeTabEnabled))}</div>
+          <div data-testid="meta-ads-tab-enabled">{String(Boolean(metaAdsTabEnabled))}</div>
           <div data-testid="timeline-event-count">{events?.length ?? 0}</div>
           {events?.map((event, index) => (
             event.kind === 'message' ? (
@@ -922,10 +925,11 @@ describe('AgentChatPage trial onboarding', () => {
     expect(screen.getByTestId('apollo-native-tab-enabled')).toHaveTextContent('false')
     expect(screen.getByTestId('hubspot-native-tab-enabled')).toHaveTextContent('false')
     expect(screen.getByTestId('discord-native-tab-enabled')).toHaveTextContent('false')
+    expect(screen.getByTestId('meta-ads-tab-enabled')).toHaveTextContent('false')
   })
 
   it('passes native tab enablement from roster system skills', async () => {
-    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One', ['apollo_native', 'hubspot_native', 'discord_native'])]
+    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One', ['apollo_native', 'hubspot_native', 'discord_native', 'meta_ads_platform'])]
     window.history.pushState({}, '', '/app/agents/agent-1')
 
     renderAgentChatPage({ agentId: 'agent-1' })
@@ -935,6 +939,7 @@ describe('AgentChatPage trial onboarding', () => {
     })
     expect(screen.getByTestId('hubspot-native-tab-enabled')).toHaveTextContent('true')
     expect(screen.getByTestId('discord-native-tab-enabled')).toHaveTextContent('true')
+    expect(screen.getByTestId('meta-ads-tab-enabled')).toHaveTextContent('true')
   })
 
   it('passes native tab enablement from live tool search results', async () => {
@@ -958,7 +963,7 @@ describe('AgentChatPage trial onboarding', () => {
             result: {
               status: 'success',
               system_skills: {
-                enabled: ['apollo_native', 'hubspot_native', 'discord_native'],
+                enabled: ['apollo_native', 'hubspot_native', 'discord_native', 'meta_ads_platform'],
               },
             },
             status: 'complete',
@@ -975,6 +980,7 @@ describe('AgentChatPage trial onboarding', () => {
     })
     expect(screen.getByTestId('hubspot-native-tab-enabled')).toHaveTextContent('true')
     expect(screen.getByTestId('discord-native-tab-enabled')).toHaveTextContent('true')
+    expect(screen.getByTestId('meta-ads-tab-enabled')).toHaveTextContent('true')
   })
 
   it('opens embedded settings from the direct console shell settings route', async () => {

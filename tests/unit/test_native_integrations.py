@@ -38,10 +38,12 @@ from api.services.native_integrations import (
     APOLLO_PROVIDER,
     GOOGLE_DRIVE_PROVIDER,
     HUBSPOT_PROVIDER,
+    META_ADS_PROVIDER,
     apply_native_integration_auth,
     build_native_integration_permission_summary,
     get_native_integration_provider,
     list_native_integration_capabilities,
+    load_native_integration_credentials,
     native_integration_is_connected,
     parse_native_integration_scopes,
     preflight_native_integration_capability,
@@ -561,6 +563,90 @@ class NativeIntegrationTests(TestCase):
                     reverse("console-native-integration-revoke", args=[provider_key]),
                 )
 
+    def test_list_reports_meta_ads_manual_provider_form_state(self):
+        response = self.client.get(reverse("console-native-integration-list"))
+
+        self.assertEqual(response.status_code, 200)
+        providers = {provider["provider_key"]: provider for provider in response.json()["providers"]}
+        provider = providers["meta_ads"]
+        self.assertEqual(provider["display_name"], "Meta Ads")
+        self.assertEqual(provider["auth_type"], "manual")
+        self.assertFalse(provider["connected"])
+        self.assertTrue(provider["setup_url"].endswith("/app/integrations?provider=meta_ads&connect=1"))
+        self.assertIn("META_APP_ID", [field["key"] for field in provider["credential_fields"]])
+        self.assertIn("META_APP_ID", provider["missing_credential_fields"])
+        self.assertEqual(provider["present_credential_fields"], [])
+
+    def test_meta_ads_manual_connect_saves_hidden_integration_secret(self):
+        response = self.client.post(
+            reverse("console-native-integration-connect", args=["meta_ads"]),
+            data=json.dumps(
+                {
+                    "credentials": {
+                        "META_APP_ID": "app-123",
+                        "META_APP_SECRET": "secret-123",
+                        "META_SYSTEM_USER_TOKEN": "token-123",
+                        "META_AD_ACCOUNT_ID": "act_123",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertTrue(payload["connected"])
+        self.assertEqual(payload["provider_key"], "meta_ads")
+        self.assertEqual(payload["missing_credential_fields"], [])
+        secret = GlobalSecret.objects.get(user=self.user, key="native_meta_ads")
+        self.assertEqual(secret.secret_type, GlobalSecret.SecretType.INTEGRATION)
+        self.assertEqual(secret.domain_pattern, GlobalSecret.INTEGRATION_DOMAIN_SENTINEL)
+        stored = load_native_integration_credentials(secret)
+        self.assertEqual(stored["META_APP_ID"], "app-123")
+        self.assertEqual(stored["META_API_VERSION"], "v25.0")
+        self.assertEqual(stored["auth_type"], "manual")
+
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    def test_meta_ads_manual_connect_wakes_enabled_agents_when_complete(self, mock_delay):
+        self._enable_pipedream_tool(self.agent, "meta_ads")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("console-native-integration-connect", args=["meta_ads"]),
+                data=json.dumps(
+                    {
+                        "credentials": {
+                            "META_APP_ID": "app-123",
+                            "META_APP_SECRET": "secret-123",
+                            "META_SYSTEM_USER_TOKEN": "token-123",
+                            "META_AD_ACCOUNT_ID": "act_123",
+                        }
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    def test_meta_ads_manual_connect_can_remain_incomplete(self):
+        response = self.client.post(
+            reverse("console-native-integration-connect", args=["meta_ads"]),
+            data=json.dumps({"credentials": {"META_APP_ID": "app-123"}}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertFalse(payload["connected"])
+        self.assertEqual(payload["present_credential_fields"], ["META_API_VERSION", "META_APP_ID"])
+        self.assertIn("META_APP_SECRET", payload["missing_credential_fields"])
+
+        list_response = self.client.get(reverse("console-native-integration-list"))
+        providers = {provider["provider_key"]: provider for provider in list_response.json()["providers"]}
+        self.assertFalse(providers["meta_ads"]["connected"])
+        self.assertIn("META_APP_SECRET", providers["meta_ads"]["missing_credential_fields"])
+
     def test_list_treats_legacy_google_sheets_secret_as_connected(self):
         self._create_integration_secret(owner_user=self.user)
         GlobalSecret.objects.update(key="native_google_sheets")
@@ -953,6 +1039,27 @@ class NativeIntegrationTests(TestCase):
 
     def test_revoke_deletes_only_provider_integration_secret(self):
         self._create_integration_secret(owner_user=self.user)
+        meta_secret = GlobalSecret(
+            user=self.user,
+            name=META_ADS_PROVIDER.display_name,
+            description=META_ADS_PROVIDER.description,
+            secret_type=GlobalSecret.SecretType.INTEGRATION,
+            domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
+            key=META_ADS_PROVIDER.secret_key,
+        )
+        meta_secret.set_value(
+            json.dumps(
+                {
+                    "provider_key": META_ADS_PROVIDER.key,
+                    "auth_type": META_ADS_PROVIDER.auth_type,
+                    "META_APP_ID": "app-123",
+                    "META_APP_SECRET": "secret-123",
+                    "META_SYSTEM_USER_TOKEN": "token-123",
+                    "META_AD_ACCOUNT_ID": "act_123",
+                }
+            )
+        )
+        meta_secret.save()
         credential = GlobalSecret(
             user=self.user,
             name="Visible Credential",
@@ -967,11 +1074,22 @@ class NativeIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["revoked"])
-        self.assertFalse(GlobalSecret.objects.filter(secret_type=GlobalSecret.SecretType.INTEGRATION).exists())
+        self.assertFalse(GlobalSecret.objects.filter(key="native_google_drive").exists())
+        self.assertTrue(GlobalSecret.objects.filter(key="native_meta_ads").exists())
         self.assertTrue(GlobalSecret.objects.filter(id=credential.id).exists())
 
     def test_secret_apis_exclude_integration_secrets(self):
         self._create_integration_secret(owner_user=self.user)
+        meta_secret = GlobalSecret(
+            user=self.user,
+            name=META_ADS_PROVIDER.display_name,
+            description=META_ADS_PROVIDER.description,
+            secret_type=GlobalSecret.SecretType.INTEGRATION,
+            domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
+            key=META_ADS_PROVIDER.secret_key,
+        )
+        meta_secret.set_value(json.dumps({"provider_key": "meta_ads", "META_APP_ID": "app-123"}))
+        meta_secret.save()
 
         global_response = self.client.get(reverse("console-global-secret-list"))
         agent_response = self.client.get(reverse("console-agent-secret-list", args=[self.agent.id]))

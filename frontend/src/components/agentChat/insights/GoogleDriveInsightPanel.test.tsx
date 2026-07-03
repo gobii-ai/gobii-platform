@@ -21,6 +21,7 @@ vi.mock('../../../api/nativeIntegrations', () => ({
   fetchNativeIntegrationPickerToken: vi.fn(),
   recordNativeIntegrationAgentEvent: vi.fn(),
   startNativeIntegrationConnect: vi.fn(),
+  saveNativeIntegrationCredentials: vi.fn(),
 }))
 
 vi.mock('../../mcp/NativeIntegrationShared', () => ({
@@ -32,6 +33,7 @@ vi.mock('../../mcp/NativeIntegrationShared', () => ({
   supportsNativeIntegrationPicker: (provider: { providerKey: string; pickerTokenUrl: string }) => (
     provider.providerKey === 'google_drive' && Boolean(provider.pickerTokenUrl)
   ),
+  usesManualNativeIntegrationCredentials: () => false,
   useNativeIntegrationRefreshEffects: vi.fn(),
 }))
 
@@ -51,6 +53,9 @@ const googleDriveProvider = {
   pickerTokenUrl: '/console/api/native-integrations/google_drive/picker-token/',
   agentEventUrl: '/console/api/native-integrations/google_drive/agent-events/',
   revokeUrl: '/console/api/native-integrations/google_drive/revoke/',
+  credentialFields: [],
+  presentCredentialFields: [],
+  missingCredentialFields: [],
 }
 
 function renderPanel({ agentId = null }: { agentId?: string | null } = {}) {

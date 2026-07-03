@@ -35,6 +35,9 @@ const DISCORD_PROVIDER: NativeIntegrationProvider = {
   pickerTokenUrl: '',
   agentEventUrl: '',
   revokeUrl: '',
+  credentialFields: [],
+  presentCredentialFields: [],
+  missingCredentialFields: [],
 }
 
 export function DiscordInsightPanel({ agentId = null, onOpenApps }: DiscordInsightPanelProps) {

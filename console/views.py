@@ -1754,24 +1754,6 @@ class PlatformMCPServerManagementView(SystemAdminRequiredMixin, TemplateView):
         return context
 
 
-class SystemSkillProfilesView(ConsoleOwnerScopeMixin, ConsoleViewMixin, TemplateView):
-    """React-based system skill profile management page."""
-
-    template_name = "console/system_skill_profiles.html"
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        skill_key = kwargs.get("skill_key")
-        context.update(
-            {
-                "owner_scope": self.owner_scope,
-                "skill_key": skill_key,
-                "list_url": reverse("console-system-skill-profile-list", args=[skill_key]),
-            }
-        )
-        return context
-
-
 class MCPOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
     """Landing page shown after external OAuth redirects back to Gobii."""
 

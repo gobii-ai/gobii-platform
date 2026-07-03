@@ -50,7 +50,7 @@ from api.agent.tools.tool_manager import (
     get_available_tool_ids,
     get_enabled_tool_definitions,
 )
-from api.services.system_skill_profiles import set_default_system_skill_profile, upsert_system_skill_profile_values
+from api.services.native_integrations import META_ADS_PROVIDER, upsert_manual_native_integration_credentials
 from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
 from api.services.sandbox_kubernetes import KubernetesSandboxBackend
 from api.services.sandbox_compute import SandboxComputeService, SandboxSessionUpdate, LocalSandboxBackend
@@ -68,7 +68,6 @@ from api.models import (
     PersistentAgentSystemStep,
     PersistentAgentSystemSkillState,
     PersistentAgentToolCall,
-    SystemSkillProfile,
     TaskCredit,
     UserQuota,
 )
@@ -109,16 +108,11 @@ class CustomToolsTests(TestCase):
         secret.save()
         return secret
 
-    def _create_meta_ads_profile(self, *, profile_key: str = "default", is_default: bool = True) -> SystemSkillProfile:
-        profile = SystemSkillProfile.objects.create(
-            user=self.user,
-            skill_key="meta_ads_platform",
-            profile_key=profile_key,
-            label="Meta Ads Profile",
-            is_default=False,
-        )
-        upsert_system_skill_profile_values(
-            profile,
+    def _create_meta_ads_integration(self):
+        return upsert_manual_native_integration_credentials(
+            META_ADS_PROVIDER,
+            self.user,
+            None,
             {
                 "META_APP_ID": "app-123",
                 "META_APP_SECRET": "secret-123",
@@ -127,9 +121,6 @@ class CustomToolsTests(TestCase):
                 "META_API_VERSION": "v25.0",
             },
         )
-        if is_default:
-            set_default_system_skill_profile(profile)
-        return profile
 
     @staticmethod
     def _build_runnable_tool_source(run_body: str, *, imports: str = "") -> str:
@@ -2476,7 +2467,7 @@ def run(params, ctx):
         mock_ensure_credit,
         mock_meta_get,
     ):
-        self._create_meta_ads_profile()
+        self._create_meta_ads_integration()
         custom_tool = PersistentAgentCustomTool.objects.create(
             agent=self.agent,
             name="Wrapper",
@@ -2529,7 +2520,7 @@ def run(params, ctx):
                 ).fetchone()
             finally:
                 conn.close()
-            self.assertEqual(row, ("accounts", "default", "account", "act_123", "Main Account"))
+            self.assertEqual(row, ("accounts", "meta_ads", "account", "act_123", "Main Account"))
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     def test_prompt_summary_reports_saved_and_enabled_custom_tools(self, _mock_sandbox):

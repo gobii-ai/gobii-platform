@@ -8,18 +8,18 @@ import json
 import logging
 import sqlite3
 from typing import Any, Optional
-from urllib.parse import urlencode
 import uuid
 
 import requests
-from django.urls import reverse
 from requests import Response
 from requests.exceptions import RequestException
 
-from api.agent.system_skills.registry import get_system_skill_definition
 from api.models import PersistentAgent
-from api.services.system_skill_profiles import resolve_system_skill_profile_for_agent
-from config import settings
+from api.services.native_integrations import (
+    META_ADS_PROVIDER,
+    list_native_integration_credential_fields,
+    resolve_meta_ads_credentials_for_agent,
+)
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from .sqlite_state import get_sqlite_db_path
 
@@ -119,8 +119,8 @@ def get_meta_ads_tool() -> dict[str, Any]:
         "function": {
             "name": "meta_ads",
             "description": (
-                "Read Meta Ads account, campaign, and insights data for a configured Meta Ads profile. "
-                "Use profile_key when you need a non-default credential profile. Data operations sync full datasets "
+                "Read Meta Ads account, campaign, and insights data for the connected Meta Ads native integration. "
+                "Data operations sync full datasets "
                 "directly into the shared agent SQLite DB so the agent can analyze them with sqlite_batch without "
                 "shuttling rows through context. If setup is incomplete, help the user finish onboarding before retrying."
             ),
@@ -139,10 +139,6 @@ def get_meta_ads_tool() -> dict[str, Any]:
                             "conversion_quality",
                         ],
                         "description": "Meta Ads action to perform.",
-                    },
-                    "profile_key": {
-                        "type": "string",
-                        "description": "Optional named Meta Ads profile to use.",
                     },
                     "account_id": {
                         "type": "string",
@@ -662,7 +658,7 @@ def _base_sync_response(
         "status": "success",
         "result": result,
         "operation": operation,
-        "profile_key": profile_key,
+        "provider_key": profile_key,
         "destination_table": destination_table,
         "sync_run_id": sync_run_id,
         "query_signature": query_signature,
@@ -1230,43 +1226,9 @@ def _sync_conversion_quality_rows(
                 logger.debug("Failed to close SQLite connection after Meta conversion-quality sync", exc_info=True)
 
 
-def _build_setup_path(
-    skill_key: str,
-    *,
-    open_setup: bool = False,
-    profile_key: Optional[str] = None,
-) -> str:
-    path = reverse("console-system-skill-profiles", args=[skill_key])
-    query: dict[str, str] = {}
-    if open_setup:
-        query["setup"] = "1"
-    if profile_key:
-        query["profile_key"] = str(profile_key).strip()
-    if not query:
-        return path
-    return f"{path}?{urlencode(query)}"
-
-
-def _build_setup_url(
-    skill_key: str,
-    *,
-    open_setup: bool = False,
-    profile_key: Optional[str] = None,
-) -> str:
-    relative_url = _build_setup_path(skill_key, open_setup=open_setup, profile_key=profile_key)
-    base_url = str(settings.PUBLIC_SITE_URL or "").strip().rstrip("/")
-    if not base_url:
-        return relative_url
-    return f"{base_url}{relative_url}"
-
-
 def _serialize_field_guidance() -> list[dict[str, Any]]:
-    definition = get_system_skill_definition(SYSTEM_SKILL_KEY)
-    if definition is None:
-        return []
-
     guidance: list[dict[str, Any]] = []
-    for field in definition.profile_fields():
+    for field in list_native_integration_credential_fields(META_ADS_PROVIDER.key):
         guidance.append(
             {
                 "key": field.key,
@@ -1289,24 +1251,40 @@ def _serialize_field_guidance() -> list[dict[str, Any]]:
 
 
 def _base_onboarding_payload(*, setup_note: Optional[str] = None) -> dict[str, Any]:
-    definition = get_system_skill_definition(SYSTEM_SKILL_KEY)
-    if definition is None:
-        return {}
-
+    fields = list_native_integration_credential_fields(META_ADS_PROVIDER.key)
     return {
-        "required_fields": [field.key for field in definition.required_profile_fields],
+        "required_fields": [field.key for field in fields if field.required],
         "field_guidance": _serialize_field_guidance(),
-        "setup_instructions": definition.setup_instructions,
-        "setup_steps": list(definition.setup_steps),
+        "setup_instructions": (
+            "Register as a Meta developer, create a Business app with the Marketing API product, create a system user, "
+            "assign the app and ad account, generate a system user token with ads_read access, and then connect Meta Ads "
+            "from the integrations page."
+        ),
+        "setup_steps": [
+            "Register the real Facebook admin account as a Meta developer before trying to create the app.",
+            "Create a Business app and make sure the Marketing API product is actually added to that app.",
+            "Capture the App ID and App Secret from App Settings -> Basic.",
+            "Create a system user in Business Settings and assign the app plus the ad account to it.",
+            "Generate a system user token with ads_read access.",
+            "Open the Meta Ads integration form and enter the App ID, App Secret, system user token, and default ad account ID.",
+            "Optional but recommended: add the Pixel or dataset ID so the agent can monitor conversion quality and event health.",
+        ],
         "setup_docs": [
             {
                 "title": doc.title,
                 "url": doc.url,
                 "description": doc.description,
             }
-            for doc in definition.setup_docs
+            for field in fields
+            for doc in field.docs
         ],
-        "troubleshooting_tips": list(definition.troubleshooting_tips),
+        "troubleshooting_tips": [
+            "If developers.facebook.com/apps keeps bouncing to a marketing or public landing page, complete developer registration first.",
+            "Do not use the Meta app flow that says 'Create & manage app ads with Meta Ads Manager' because it does not include Marketing API.",
+            "If token generation says approval was requested, another business admin must approve it in Business Settings -> Requests.",
+            "If the token works but no ad accounts are returned, double-check that the system user was assigned both the app and the ad account.",
+            "If conversion-quality monitoring fails, make sure the system user or token also has access to the Pixel or dataset in Business Manager.",
+        ],
         "agent_guidance": (
             setup_note
             or (
@@ -1318,119 +1296,45 @@ def _base_onboarding_payload(*, setup_note: Optional[str] = None) -> dict[str, A
     }
 
 
-def _default_setup_note_for_resolution(
+def _native_action_required(
     resolution: dict[str, object],
     *,
-    profile_key: Optional[str],
-) -> str:
-    status = str(resolution.get("status") or "").strip()
-    if status == "multiple_profiles":
-        available_profiles = list(resolution.get("available_profile_keys") or [])
-        if available_profiles:
-            joined = ", ".join(available_profiles)
-            return (
-                f"Ask the user which Meta Ads profile to use from: {joined}. If none of those are right, "
-                "offer to create a new profile. Do not guess."
-            )
-        return "Ask the user whether they want to create a new Meta Ads profile before retrying. Do not guess."
-    if status == "profile_not_found":
-        requested = profile_key or "that profile"
-        available_profiles = list(resolution.get("available_profile_keys") or [])
-        if available_profiles:
-            joined = ", ".join(available_profiles)
-            return (
-                f"Tell the user Meta Ads profile '{requested}' does not exist. Ask whether to use one of: {joined}, "
-                "or create a new profile."
-            )
-        return (
-            f"Tell the user Meta Ads profile '{requested}' does not exist yet. Help them create the first profile, "
-            "starting with developer registration if needed."
-        )
-
-    selected_profile = resolution.get("profile")
-    selected_profile_key = getattr(selected_profile, "profile_key", profile_key or "default")
-    was_bootstrapped = bool(resolution.get("was_bootstrapped"))
-    if was_bootstrapped:
-        return (
-            f"Keep the first response brief. Tell the user a default Meta Ads profile '{selected_profile_key}' is ready, "
-            "send them to the credential form, and offer to walk them through developer registration, app creation, "
-            "system-user setup, and token generation if they want help."
-        )
-    return (
-        f"Keep the first response brief. Send the user to the credential form for Meta Ads profile '{selected_profile_key}', "
-        "offer help getting the values, and use the full checklist or docs only if they ask or the setup still fails."
-    )
-
-
-def _profile_action_required(
-    resolution: dict[str, object],
-    *,
-    profile_key: Optional[str] = None,
     setup_note: Optional[str] = None,
+    result: Optional[str] = None,
 ) -> dict[str, Any]:
-    available_profiles = list(resolution.get("available_profile_keys") or [])
-    status = resolution.get("status")
-    selected_profile_key = getattr(resolution.get("profile"), "profile_key", None)
-    open_setup = status == "incomplete_profile"
-    setup_path = _build_setup_path(
-        SYSTEM_SKILL_KEY,
-        open_setup=open_setup,
-        profile_key=selected_profile_key if open_setup else None,
-    )
-    setup_url = setup_path
-    setup_url_absolute = _build_setup_url(
-        SYSTEM_SKILL_KEY,
-        open_setup=open_setup,
-        profile_key=selected_profile_key if open_setup else None,
-    )
-    if status == "profile_not_found":
-        result = (
-            f"Meta Ads profile '{profile_key}' was not found. "
-            f"Available profiles: {', '.join(available_profiles) if available_profiles else 'none'}. "
-            f"Manage profiles here: {setup_path}"
-        )
-    elif status == "multiple_profiles":
-        result = (
-            "Multiple Meta Ads profiles are configured and no default profile is set. "
-            f"Choose one of: {', '.join(available_profiles)}. "
-            f"You can set a default profile here: {setup_path}"
-        )
-    elif status == "incomplete_profile":
-        selected_profile = resolution.get("profile")
-        selected_profile_key = getattr(selected_profile, "profile_key", profile_key or "default")
-        missing_required_keys = list(resolution.get("missing_required_keys") or [])
-        was_bootstrapped = bool(resolution.get("was_bootstrapped"))
-        if was_bootstrapped:
+    missing_required_keys = list(resolution.get("missing_required_fields") or [])
+    setup_url = str(resolution.get("setup_url") or "/app/integrations?provider=meta_ads&connect=1")
+    if result is None:
+        if missing_required_keys:
             result = (
-                f"I created a default Meta Ads profile '{selected_profile_key}' for you. "
-                f"Open the credential form here: {setup_path}. "
-                f"Add these values: {', '.join(missing_required_keys)}. If you want help getting them, ask me."
+                "Meta Ads is missing required credentials: "
+                f"{', '.join(missing_required_keys)}. Open the Meta Ads integration form here: {setup_url}. "
+                "If you want help getting them, ask me."
             )
         else:
             result = (
-                f"Meta Ads profile '{selected_profile_key}' is missing required values: {', '.join(missing_required_keys)}. "
-                f"Open the credential form here: {setup_path}. If you want help getting them, ask me."
+                "Meta Ads setup is required before this tool can run. "
+                f"Connect Meta Ads here: {setup_url}"
             )
-    else:
-        result = (
-            "Meta Ads setup is required before this tool can run. "
-            f"Add a Meta Ads profile here: {setup_path}"
-        )
 
     payload = {
         "status": "action_required",
         "result": result,
-        "setup_path": setup_path,
+        "setup_path": setup_url,
         "setup_url": setup_url,
-        "setup_url_absolute": setup_url_absolute,
+        "setup_url_absolute": setup_url,
         "skill_key": SYSTEM_SKILL_KEY,
-        "available_profiles": available_profiles,
-        "selection_required": status == "multiple_profiles",
-        "selected_profile_key": selected_profile_key,
+        "provider_key": META_ADS_PROVIDER.key,
+        "missing_required_fields": missing_required_keys,
     }
     payload.update(
         _base_onboarding_payload(
-            setup_note=setup_note or _default_setup_note_for_resolution(resolution, profile_key=profile_key)
+            setup_note=setup_note
+            or (
+                "Keep the first response brief. Direct the user to the Meta Ads integration form, tell them you can "
+                "walk them through Meta developer setup if they want help, and only expand into detailed setup steps "
+                "or docs if they ask or setup still fails."
+            )
         )
     )
     return payload
@@ -1481,27 +1385,23 @@ def _looks_like_onboarding_error(message: str) -> bool:
 def _credentials_action_required(
     resolution: dict[str, object],
     *,
-    profile_key: Optional[str],
     error_message: str,
 ) -> dict[str, Any]:
-    selected_profile = resolution.get("profile")
-    selected_profile_key = getattr(selected_profile, "profile_key", profile_key or "default")
-    payload = _profile_action_required(
+    setup_url = str(resolution.get("setup_url") or "/app/integrations?provider=meta_ads&connect=1")
+    payload = _native_action_required(
         resolution,
-        profile_key=profile_key,
         setup_note=(
-            "Keep the first response short. Direct the user to the credential form, explain that the saved Meta credentials or permissions "
+            "Keep the first response short. Direct the user to the Meta Ads integration form, explain that the saved Meta credentials or permissions "
             "failed a live check, and offer to help troubleshoot developer registration, app setup, system-user assignment, or token generation. "
             "Use the detailed steps and docs only if they ask or the next attempt still fails."
-        ),
+        )
     )
     payload["result"] = (
-        f"Meta Ads profile '{selected_profile_key}' needs attention before monitoring can start. "
+        "Meta Ads needs attention before monitoring can start. "
         f"Live check failed with: {error_message} "
-        f"Open the credential form here: {payload['setup_path']}. If you want help fixing it, ask me and I will walk you through it."
+        f"Open the integration form here: {setup_url}. If you want help fixing it, ask me and I will walk you through it."
     )
     payload["auth_error"] = error_message
-    payload["selected_profile_key"] = selected_profile_key
     return payload
 
 
@@ -1566,7 +1466,7 @@ def _paginate_graph_get(
     return rows, last_headers
 
 
-def _doctor_result(profile_key: str, profile_values: dict[str, str]) -> dict[str, Any]:
+def _doctor_result(provider_key: str, profile_values: dict[str, str]) -> dict[str, Any]:
     api_version = _normalize_api_version(profile_values.get("META_API_VERSION"))
     default_account_id = _normalize_account_id(profile_values.get("META_AD_ACCOUNT_ID") or "")
     business_id = str(profile_values.get("META_BUSINESS_ID") or "").strip() or None
@@ -1605,7 +1505,7 @@ def _doctor_result(profile_key: str, profile_values: dict[str, str]) -> dict[str
             dataset_quality_event_count = len(dataset_quality_payload["web"])
 
     result = (
-        f"Meta Ads profile '{profile_key}' is connected. "
+        "Meta Ads is connected. "
         f"Default account: {default_account_id or 'not set'}. "
         f"API version: {api_version}. "
         f"Accessible ad account sample count: {len(rows)}."
@@ -1620,7 +1520,7 @@ def _doctor_result(profile_key: str, profile_values: dict[str, str]) -> dict[str
     return {
         "status": "success",
         "result": result,
-        "profile_key": profile_key,
+        "provider_key": provider_key,
         "api_version": api_version,
         "default_account_id": default_account_id or None,
         "business_id": business_id,
@@ -1838,19 +1738,25 @@ def execute_meta_ads(agent: PersistentAgent, params: dict[str, Any]) -> dict[str
             ),
         }
 
-    profile_key = str(params.get("profile_key") or "").strip() or None
-    resolution = resolve_system_skill_profile_for_agent(
-        agent,
-        SYSTEM_SKILL_KEY,
-        profile_key=profile_key,
-        auto_bootstrap=profile_key is None,
-    )
-    if resolution.get("status") != "ok":
-        return _profile_action_required(resolution, profile_key=profile_key)
+    if "profile_key" in params:
+        setup_url = "/app/integrations?provider=meta_ads&connect=1"
+        return {
+            "status": "error",
+            "message": (
+                "Meta Ads profiles were replaced by the Meta Ads native integration. "
+                f"Remove profile_key and connect Meta Ads here: {setup_url}"
+            ),
+            "code": "meta_ads_profiles_removed",
+            "provider_key": META_ADS_PROVIDER.key,
+            "setup_url": setup_url,
+        }
 
-    profile = resolution["profile"]
+    resolution = resolve_meta_ads_credentials_for_agent(agent)
+    if resolution.get("status") != "ok":
+        return _native_action_required(resolution)
+
     profile_values = resolution["values"]
-    selected_profile_key = profile.profile_key
+    selected_profile_key = META_ADS_PROVIDER.key
 
     try:
         if operation == "doctor":
@@ -1961,26 +1867,20 @@ def execute_meta_ads(agent: PersistentAgent, params: dict[str, Any]) -> dict[str
             response["rows"] = rows
         return response
     except RequestException as exc:
-        logger.warning("Meta Ads tool request failed for agent %s profile %s: %s", agent.id, selected_profile_key, exc)
+        logger.warning("Meta Ads tool request failed for agent %s provider %s: %s", agent.id, selected_profile_key, exc)
         return {"status": "error", "message": str(exc)}
     except sqlite3.Error as exc:
-        logger.warning("Meta Ads SQLite sync failed for agent %s profile %s: %s", agent.id, selected_profile_key, exc)
+        logger.warning("Meta Ads SQLite sync failed for agent %s provider %s: %s", agent.id, selected_profile_key, exc)
         return {"status": "error", "message": f"Meta Ads SQLite sync failed: {exc}"}
     except ValueError as exc:
-        logger.warning("Meta Ads tool failed for agent %s profile %s: %s", agent.id, selected_profile_key, exc)
+        logger.warning("Meta Ads tool failed for agent %s provider %s: %s", agent.id, selected_profile_key, exc)
         if (
             _looks_like_onboarding_error(str(exc))
             or "Missing Meta ad account ID" in str(exc)
             or "Missing Meta dataset or pixel ID" in str(exc)
         ):
             return _credentials_action_required(
-                {
-                    "status": "incomplete_profile",
-                    "profile": profile,
-                    "available_profile_keys": resolution.get("available_profile_keys", []),
-                    "missing_required_keys": [],
-                },
-                profile_key=selected_profile_key,
+                resolution,
                 error_message=str(exc),
             )
         return {"status": "error", "message": str(exc)}

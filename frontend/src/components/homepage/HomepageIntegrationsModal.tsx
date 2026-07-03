@@ -10,6 +10,7 @@ import {
   fetchNativeIntegrations,
   mapNativeIntegrationProvider,
   revokeNativeIntegration,
+  saveNativeIntegrationCredentials,
   startNativeIntegrationConnect,
   type NativeIntegrationProvider,
   type NativeIntegrationProviderDTO,
@@ -27,8 +28,10 @@ import {
   openNativeOAuthPopup,
   storePendingNativeOAuth,
   supportsNativeIntegrationPicker,
+  usesManualNativeIntegrationCredentials,
   useNativeIntegrationRefreshEffects,
 } from '../mcp/NativeIntegrationShared'
+import { NativeIntegrationCredentialFormModal } from '../mcp/NativeIntegrationCredentialFormModal'
 import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from '../mcp/PipedreamAppsShared'
 
 type HomepageIntegrationsModalAppDTO = {
@@ -107,6 +110,7 @@ export function HomepageIntegrationsModal({
     providerKey: string
     kind: 'connect' | 'disconnect' | 'picker'
   } | null>(null)
+  const [credentialProvider, setCredentialProvider] = useState<NativeIntegrationProvider | null>(null)
   const [nativeErrorMessage, setNativeErrorMessage] = useState<string | null>(null)
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
@@ -219,6 +223,25 @@ export function HomepageIntegrationsModal({
       setNativeErrorMessage(null)
     },
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: nativeQueryKey })
+    },
+    onError: (error) => {
+      setNativeErrorMessage(safeErrorMessage(error))
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
+
+  const nativeCredentialMutation = useMutation({
+    mutationFn: async ({ provider, credentials }: { provider: NativeIntegrationProvider; credentials: Record<string, string | null> }) => {
+      const csrfToken = await ensureHomepageCsrf()
+      return saveNativeIntegrationCredentials(provider.connectUrl, credentials, csrfToken)
+    },
+    onMutate: ({ provider }) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
+      setNativeErrorMessage(null)
+    },
+    onSuccess: (payload) => {
+      setNativeErrorMessage(payload.connected ? null : 'Saved credentials. Add the remaining required fields to finish setup.')
       void queryClient.invalidateQueries({ queryKey: nativeQueryKey })
     },
     onError: (error) => {
@@ -349,10 +372,14 @@ export function HomepageIntegrationsModal({
                 key={provider.providerKey}
                 provider={provider}
                 pendingAction={pendingNativeAction}
-                disabled={nativeConnectMutation.isPending || nativeDisconnectMutation.isPending || nativePickerMutation.isPending}
+                disabled={nativeConnectMutation.isPending || nativeCredentialMutation.isPending || nativeDisconnectMutation.isPending || nativePickerMutation.isPending}
                 onConnect={() => {
                   if (!isAuthenticated) {
                     scheduleLoginRedirect(buildHomepageNativeIntegrationLoginReturnUrl(provider))
+                    return
+                  }
+                  if (usesManualNativeIntegrationCredentials(provider)) {
+                    setCredentialProvider(provider)
                     return
                   }
                   nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
@@ -561,6 +588,13 @@ export function HomepageIntegrationsModal({
       >
         {body}
       </ImmersiveDialog>
+      {credentialProvider ? (
+        <NativeIntegrationCredentialFormModal
+          provider={credentialProvider}
+          onClose={() => setCredentialProvider(null)}
+          onSubmit={(credentials) => nativeCredentialMutation.mutateAsync({ provider: credentialProvider, credentials })}
+        />
+      ) : null}
     </>
   )
 }

@@ -18,6 +18,9 @@ export const DISCORD_NATIVE_DISPLAY_PROVIDER: NativeIntegrationProvider = {
   pickerTokenUrl: '',
   agentEventUrl: '',
   revokeUrl: '',
+  credentialFields: [],
+  presentCredentialFields: [],
+  missingCredentialFields: [],
 }
 
 export function withDiscordNativeProvider(providers: NativeIntegrationProvider[]): NativeIntegrationProvider[] {

@@ -627,7 +627,7 @@ META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
     setup_instructions=(
         "Register as a Meta developer, create a Business app with the Marketing API product, create a system user, "
         "assign the app and ad account, generate a system user token with ads_read access, and then fill in the "
-        "profile fields below."
+        "Meta Ads native integration form."
     ),
     setup_steps=(
         "Register the real Facebook admin account as a Meta developer before trying to create the app.",
@@ -635,7 +635,7 @@ META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
         "Capture the App ID and App Secret from App Settings -> Basic.",
         "Create a system user in Business Settings and assign the app plus the ad account to it.",
         "Generate a system user token with ads_read access. If Meta sends it for approval, another business admin must approve it in Business Settings -> Requests.",
-        "Fill in the profile with the App ID, App Secret, system user token, and default ad account ID.",
+        "Fill in the Meta Ads native integration form with the App ID, App Secret, system user token, and default ad account ID.",
         "Optional but recommended for serious performance monitoring: add the Pixel or dataset ID so the agent can monitor conversion quality and event health.",
     ),
     setup_docs=(
@@ -674,8 +674,6 @@ META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
         "If the token works but no ad accounts are returned, double-check that the system user was assigned both the app and the ad account.",
         "If conversion-quality monitoring fails, make sure the system user or token also has access to the Pixel or dataset in Business Manager.",
     ),
-    bootstrap_profile_key="default",
-    bootstrap_profile_label="Primary Meta Ads Profile",
 )
 
 
