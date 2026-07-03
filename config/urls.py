@@ -363,7 +363,12 @@ urlpatterns = [
     path("console/secrets/", LegacyConsoleRedirectView.as_view(), name="console-secrets"),
     path("console/advanced/mcp-servers/", MCPServerManagementView.as_view(), name="console-mcp-servers"),
     path("console/mcp/oauth/callback/", MCPOAuthCallbackPageView.as_view(), name="console-mcp-oauth-callback-view"),
-    path("console/email/oauth/callback/", AgentEmailOAuthCallbackPageView.as_view(), name="console-email-oauth-callback-view"),
+    path(
+        "console/email/oauth/callback/",
+        RedirectView.as_view(pattern_name="app-email-oauth-callback-view", permanent=False, query_string=True),
+        name="console-email-oauth-callback-view",
+    ),
+    path("app/email/oauth/callback/", AgentEmailOAuthCallbackPageView.as_view(), name="app-email-oauth-callback-view"),
     path(
         "integrations/oauth/callback/",
         NativeIntegrationOAuthCallbackPageView.as_view(),

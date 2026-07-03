@@ -8094,7 +8094,7 @@ class AgentEmailOAuthStartView(LoginRequiredMixin, View):
         state = str(body.get("state") or secrets.token_urlsafe(32))
 
         callback_url = body.get("redirect_uri") or request.build_absolute_uri(
-            reverse("console-email-oauth-callback-view")
+            reverse("app-email-oauth-callback-view")
         )
 
         manual_client_id = str(body.get("client_id") or "")
@@ -8261,7 +8261,7 @@ class AgentEmailOAuthCallbackView(LoginRequiredMixin, View):
         client_id = body.get("client_id") or session.client_id or ""
         client_secret = body.get("client_secret") or session.client_secret or ""
         redirect_uri = body.get("redirect_uri") or session.redirect_uri or request.build_absolute_uri(
-            reverse("console-email-oauth-callback-view")
+            reverse("app-email-oauth-callback-view")
         )
         headers = body.get("headers") or {}
         if headers and not isinstance(headers, dict):
