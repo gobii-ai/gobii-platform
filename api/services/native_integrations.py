@@ -1556,6 +1556,9 @@ def apply_native_integration_auth(
     if provider is None:
         return headers
 
+    if provider.auth_type != "oauth2":
+        return headers
+
     if any(key.lower() == "authorization" for key in headers):
         return headers
 

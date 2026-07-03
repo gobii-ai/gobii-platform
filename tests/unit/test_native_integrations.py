@@ -1,7 +1,9 @@
 import json
+import importlib
 import os
 from datetime import timedelta
 from io import BytesIO
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -1198,6 +1200,115 @@ class NativeIntegrationTests(TestCase):
                 for term in expected_terms:
                     self.assertIn(term, result["message"])
         mock_request.assert_not_called()
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_http_request_allows_manual_native_provider_without_auth_injection(self, mock_request, mock_proxy):
+        mock_proxy.return_value = None
+        mock_request.return_value = _mock_response(b'{"ok": true}')
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://graph.facebook.com/v25.0/act_123/campaigns?access_token=explicit-token",
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertNotIn("Authorization", mock_request.call_args.kwargs["headers"])
+
+    def test_meta_ads_migration_keeps_scanning_after_empty_default_profile(self):
+        migration = importlib.import_module("api.migrations.0410_migrate_meta_ads_profiles_to_native_integration")
+        profiles = [
+            SimpleNamespace(
+                id=1,
+                user_id=self.user.id,
+                organization_id=None,
+                profile_key="default",
+                label="Default",
+                is_default=True,
+            ),
+            SimpleNamespace(
+                id=2,
+                user_id=self.user.id,
+                organization_id=None,
+                profile_key="complete",
+                label="Complete",
+                is_default=False,
+            ),
+        ]
+        secrets_by_profile = {
+            2: [
+                SimpleNamespace(key="META_APP_ID", encrypted_value="app-123"),
+                SimpleNamespace(key="META_SYSTEM_USER_TOKEN", encrypted_value="token-123"),
+            ]
+        }
+        created_secrets = []
+
+        class FakeQuerySet:
+            def __init__(self, items):
+                self.items = list(items)
+
+            def order_by(self, *fields):
+                return self
+
+            def iterator(self):
+                return iter(self.items)
+
+            def first(self):
+                return self.items[0] if self.items else None
+
+        class FakeProfileObjects:
+            def filter(self, **kwargs):
+                return FakeQuerySet(profiles)
+
+        class FakeSecretObjects:
+            def filter(self, **kwargs):
+                return FakeQuerySet(secrets_by_profile.get(kwargs["profile_id"], []))
+
+        class FakeGlobalSecretObjects:
+            def filter(self, **kwargs):
+                return FakeQuerySet([])
+
+            def create(self, **defaults):
+                created_secrets.append(defaults)
+                return SimpleNamespace(**defaults)
+
+        class FakeSystemSkillProfile:
+            objects = FakeProfileObjects()
+
+        class FakeSystemSkillProfileSecret:
+            objects = FakeSecretObjects()
+
+        class FakeGlobalSecret:
+            objects = FakeGlobalSecretObjects()
+
+        class Apps:
+            @staticmethod
+            def get_model(app_label, model_name):
+                models = {
+                    "SystemSkillProfile": FakeSystemSkillProfile,
+                    "SystemSkillProfileSecret": FakeSystemSkillProfileSecret,
+                    "GlobalSecret": FakeGlobalSecret,
+                }
+                return models[model_name]
+
+        with patch("api.encryption.SecretsEncryption.decrypt_value", side_effect=lambda value: value):
+            with patch("api.encryption.SecretsEncryption.encrypt_value", return_value=b"encrypted") as encrypt_mock:
+                migration.migrate_default_meta_ads_profiles(Apps(), None)
+
+        self.assertEqual(len(created_secrets), 1)
+        self.assertEqual(created_secrets[0]["key"], "native_meta_ads")
+        payload = json.loads(encrypt_mock.call_args.args[0])
+        self.assertEqual(payload["META_APP_ID"], "app-123")
+        self.assertEqual(payload["META_SYSTEM_USER_TOKEN"], "token-123")
+        self.assertEqual(payload["META_API_VERSION"], "v25.0")
+        self.assertEqual(
+            payload["metadata"]["migrated_from_system_skill_profile"]["profile_key"],
+            "complete",
+        )
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")

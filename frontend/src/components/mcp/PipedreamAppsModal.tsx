@@ -22,7 +22,6 @@ import {
   fetchNativeIntegrationPickerToken,
   fetchNativeIntegrations,
   revokeNativeIntegration,
-  saveNativeIntegrationCredentials,
   startNativeIntegrationConnect,
   type NativeIntegrationProvider,
 } from '../../api/nativeIntegrations'
@@ -63,7 +62,7 @@ import {
   usesManualNativeIntegrationCredentials,
   useNativeIntegrationRefreshEffects,
 } from './NativeIntegrationShared'
-import { NativeIntegrationCredentialFormModal } from './NativeIntegrationCredentialFormModal'
+import { useManualNativeIntegrationConnect } from './useManualNativeIntegrationConnect'
 import {
   agentHasDiscordNative,
   DiscordAgentConnectionsScreen,
@@ -77,6 +76,8 @@ type PipedreamAppsModalProps = {
   settingsUrl: string | null
   searchUrl: string | null
   nativeIntegrationsUrl?: string | null
+  initialNativeProviderKey?: string | null
+  initialNativeConnect?: boolean
   initialSettings: PipedreamAppSettings
   onClose: () => void
   onError: (message: string) => void
@@ -110,6 +111,8 @@ export function PipedreamAppsModal({
   settingsUrl,
   searchUrl,
   nativeIntegrationsUrl = null,
+  initialNativeProviderKey = null,
+  initialNativeConnect = false,
   initialSettings,
   onClose,
   onError,
@@ -126,8 +129,7 @@ export function PipedreamAppsModal({
   const [pendingAppAction, setPendingAppAction] = useState<PendingAppAction>(null)
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction>(null)
-  const [credentialProvider, setCredentialProvider] = useState<NativeIntegrationProvider | null>(null)
-  const [nativeDeepLinkHandled, setNativeDeepLinkHandled] = useState(false)
+  const [initialNativeConnectHandled, setInitialNativeConnectHandled] = useState(false)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
@@ -363,24 +365,25 @@ export function PipedreamAppsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
-  const nativeCredentialMutation = useMutation({
-    mutationFn: ({ provider, credentials }: { provider: NativeIntegrationProvider; credentials: Record<string, string | null> }) =>
-      saveNativeIntegrationCredentials(provider.connectUrl, credentials),
-    onMutate: ({ provider }) => {
+  const {
+    credentialModal,
+    isPending: manualNativeConnectPending,
+    openCredentialModal,
+  } = useManualNativeIntegrationConnect({
+    nativeQueryKey,
+    extraInvalidateQueryKeys: [['agent-roster']],
+    onMutate: (provider) => {
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
       setStatusMessage(null)
     },
-    onSuccess: (payload, { provider }) => {
+    onSuccess: (payload, provider) => {
       setStatusMessage({
         text: payload.connected
           ? `${provider.displayName} is connected.`
           : `Saved ${provider.displayName}. Add the remaining required credentials to finish setup.`,
       })
-      void queryClient.invalidateQueries({ queryKey: nativeQueryKey })
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
     },
-    onError: (error) => {
-      const message = safeErrorMessage(error)
+    onError: (message) => {
       setStatusMessage({ text: message, tone: 'error' })
       onError(message)
     },
@@ -444,7 +447,7 @@ export function PipedreamAppsModal({
     || connectMutation.isPending
     || disconnectMutation.isPending
     || nativeConnectMutation.isPending
-    || nativeCredentialMutation.isPending
+    || manualNativeConnectPending
     || nativeRevokeMutation.isPending
     || nativePickerMutation.isPending
     || discordDisconnectMutation.isPending
@@ -562,7 +565,7 @@ export function PipedreamAppsModal({
       onRemove={(app) => removeMutation.mutate(app)}
       onNativeConnect={(provider) => {
         if (usesManualNativeIntegrationCredentials(provider)) {
-          setCredentialProvider(provider)
+          openCredentialModal(provider)
           return
         }
         nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
@@ -582,26 +585,26 @@ export function PipedreamAppsModal({
   )
 
   useEffect(() => {
-    if (nativeDeepLinkHandled || nativeIntegrationsQuery.isLoading || activeApp || discordConnectionsOpen || activeDiscordAgentId) {
-      return
-    }
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('connect') !== '1') {
-      return
-    }
-    const providerKey = params.get('provider')
-    if (!providerKey) {
+    if (
+      initialNativeConnectHandled
+      || !initialNativeConnect
+      || !initialNativeProviderKey
+      || nativeIntegrationsQuery.isLoading
+      || activeApp
+      || discordConnectionsOpen
+      || activeDiscordAgentId
+    ) {
       return
     }
     const provider = (nativeIntegrationsQuery.data?.providers ?? []).find(
-      (candidate) => candidate.providerKey === providerKey,
+      (candidate) => candidate.providerKey === initialNativeProviderKey,
     )
     if (!provider) {
       return
     }
-    setNativeDeepLinkHandled(true)
+    setInitialNativeConnectHandled(true)
     if (usesManualNativeIntegrationCredentials(provider)) {
-      setCredentialProvider(provider)
+      openCredentialModal(provider)
     } else {
       nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
     }
@@ -609,10 +612,13 @@ export function PipedreamAppsModal({
     activeApp,
     activeDiscordAgentId,
     discordConnectionsOpen,
+    initialNativeConnect,
+    initialNativeConnectHandled,
+    initialNativeProviderKey,
     nativeConnectMutation,
-    nativeDeepLinkHandled,
     nativeIntegrationsQuery.data?.providers,
     nativeIntegrationsQuery.isLoading,
+    openCredentialModal,
   ])
 
   return (
@@ -632,13 +638,7 @@ export function PipedreamAppsModal({
       >
         {body}
       </PipedreamModalShell>
-      {credentialProvider ? (
-        <NativeIntegrationCredentialFormModal
-          provider={credentialProvider}
-          onClose={() => setCredentialProvider(null)}
-          onSubmit={(credentials) => nativeCredentialMutation.mutateAsync({ provider: credentialProvider, credentials })}
-        />
-      ) : null}
+      {credentialModal}
     </>
   )
 }

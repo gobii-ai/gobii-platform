@@ -5,6 +5,11 @@ from django.conf import settings
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
+from api.meta_ads_setup import (
+    META_ADS_SETUP_INSTRUCTIONS,
+    META_ADS_SETUP_STEPS,
+    META_ADS_TROUBLESHOOTING_TIPS,
+)
 
 from .native_api_cookbooks import render_native_api_cookbook
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
@@ -624,20 +629,8 @@ META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
         ),
     ),
     default_values={"META_API_VERSION": "v25.0"},
-    setup_instructions=(
-        "Register as a Meta developer, create a Business app with the Marketing API product, create a system user, "
-        "assign the app and ad account, generate a system user token with ads_read access, and then fill in the "
-        "Meta Ads native integration form."
-    ),
-    setup_steps=(
-        "Register the real Facebook admin account as a Meta developer before trying to create the app.",
-        "Create a Business app and make sure the Marketing API product is actually added to that app.",
-        "Capture the App ID and App Secret from App Settings -> Basic.",
-        "Create a system user in Business Settings and assign the app plus the ad account to it.",
-        "Generate a system user token with ads_read access. If Meta sends it for approval, another business admin must approve it in Business Settings -> Requests.",
-        "Fill in the Meta Ads native integration form with the App ID, App Secret, system user token, and default ad account ID.",
-        "Optional but recommended for serious performance monitoring: add the Pixel or dataset ID so the agent can monitor conversion quality and event health.",
-    ),
+    setup_instructions=META_ADS_SETUP_INSTRUCTIONS,
+    setup_steps=META_ADS_SETUP_STEPS,
     setup_docs=(
         SystemSkillDocLink(
             title="Developer registration",
@@ -667,13 +660,7 @@ META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
             description="Use this when you want production-grade monitoring of event match quality, deduplication, freshness, and diagnostics.",
         ),
     ),
-    troubleshooting_tips=(
-        "If developers.facebook.com/apps keeps bouncing to a marketing or public landing page, complete developer registration first.",
-        "Do not use the Meta app flow that says 'Create & manage app ads with Meta Ads Manager' because it does not include Marketing API.",
-        "If token generation says approval was requested, the setup is not broken. Another business admin must approve it in Business Settings -> Requests.",
-        "If the token works but no ad accounts are returned, double-check that the system user was assigned both the app and the ad account.",
-        "If conversion-quality monitoring fails, make sure the system user or token also has access to the Pixel or dataset in Business Manager.",
-    ),
+    troubleshooting_tips=META_ADS_TROUBLESHOOTING_TIPS,
 )
 
 

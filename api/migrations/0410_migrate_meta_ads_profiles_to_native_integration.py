@@ -38,7 +38,6 @@ def migrate_default_meta_ads_profiles(apps, schema_editor):
         owner_key = (profile.user_id, profile.organization_id)
         if owner_key in selected_owner_keys:
             continue
-        selected_owner_keys.add(owner_key)
 
         values = {}
         secrets = SystemSkillProfileSecret.objects.filter(profile_id=profile.id).order_by("key")
@@ -51,6 +50,7 @@ def migrate_default_meta_ads_profiles(apps, schema_editor):
         if not values:
             continue
 
+        selected_owner_keys.add(owner_key)
         values.setdefault("META_API_VERSION", "v25.0")
         credentials = {
             "provider_key": META_ADS_PROVIDER_KEY,

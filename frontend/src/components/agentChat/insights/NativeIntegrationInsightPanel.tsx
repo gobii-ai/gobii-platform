@@ -1,11 +1,10 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { CheckCircle2, Loader2, Plug } from 'lucide-react'
 
 import {
   fetchNativeIntegrations,
-  saveNativeIntegrationCredentials,
   startNativeIntegrationConnect,
   type NativeIntegrationProvider,
 } from '../../../api/nativeIntegrations'
@@ -18,7 +17,7 @@ import {
   usesManualNativeIntegrationCredentials,
   useNativeIntegrationRefreshEffects,
 } from '../../mcp/NativeIntegrationShared'
-import { NativeIntegrationCredentialFormModal } from '../../mcp/NativeIntegrationCredentialFormModal'
+import { useManualNativeIntegrationConnect } from '../../mcp/useManualNativeIntegrationConnect'
 
 export type NativeIntegrationPendingAction = string | null
 
@@ -48,8 +47,6 @@ export function useNativeIntegrationPanelState({
 }): NativeIntegrationPanelState {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<NativeIntegrationPendingAction>(null)
-  const [credentialProvider, setCredentialProvider] = useState<NativeIntegrationProvider | null>(null)
-  const queryClient = useQueryClient()
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
     [nativeIntegrationsUrl],
@@ -99,34 +96,22 @@ export function useNativeIntegrationPanelState({
     onSettled: () => setPendingAction(null),
   })
 
-  const credentialMutation = useMutation({
-    mutationFn: ({ provider, credentials }: { provider: NativeIntegrationProvider; credentials: Record<string, string | null> }) =>
-      saveNativeIntegrationCredentials(provider.connectUrl, credentials),
+  const manualNativeConnect = useManualNativeIntegrationConnect({
+    nativeQueryKey,
     onMutate: () => {
       setPendingAction('connect')
       setStatusMessage(null)
     },
-    onSuccess: (payload, { provider }) => {
+    onSuccess: (payload, provider) => {
       setStatusMessage(
         payload.connected
           ? `${provider.displayName} is connected.`
           : `Saved ${provider.displayName}. Add the remaining required credentials to finish setup.`,
       )
-      void queryClient.invalidateQueries({ queryKey: nativeQueryKey })
     },
-    onError: (error) => {
-      setStatusMessage(safeErrorMessage(error))
-    },
+    onError: setStatusMessage,
     onSettled: () => setPendingAction(null),
   })
-
-  const credentialModal = credentialProvider ? (
-    <NativeIntegrationCredentialFormModal
-      provider={credentialProvider}
-      onClose={() => setCredentialProvider(null)}
-      onSubmit={(credentials) => credentialMutation.mutateAsync({ provider: credentialProvider, credentials })}
-    />
-  ) : null
 
   return {
     provider,
@@ -136,13 +121,13 @@ export function useNativeIntegrationPanelState({
       : null,
     statusMessage,
     pendingAction,
-    connectPending: connectMutation.isPending || credentialMutation.isPending,
-    credentialModal,
+    connectPending: connectMutation.isPending || manualNativeConnect.isPending,
+    credentialModal: manualNativeConnect.credentialModal,
     setStatusMessage,
     setPendingAction,
     startConnect: (provider) => {
       if (usesManualNativeIntegrationCredentials(provider)) {
-        setCredentialProvider(provider)
+        manualNativeConnect.openCredentialModal(provider)
         return
       }
       connectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
