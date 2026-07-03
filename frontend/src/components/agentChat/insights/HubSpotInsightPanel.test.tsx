@@ -17,6 +17,7 @@ vi.mock('../../../api/nativeIntegrations', () => ({
   fetchNativeIntegrations: vi.fn(),
   fetchNativeIntegrationPickerToken: vi.fn(),
   startNativeIntegrationConnect: vi.fn(),
+  saveNativeIntegrationCredentials: vi.fn(),
 }))
 
 vi.mock('../../mcp/NativeIntegrationShared', () => ({
@@ -25,6 +26,7 @@ vi.mock('../../mcp/NativeIntegrationShared', () => ({
   openGoogleDrivePicker: vi.fn(),
   openNativeOAuthPopup: vi.fn(),
   storePendingNativeOAuth: vi.fn(),
+  usesManualNativeIntegrationCredentials: () => false,
   useNativeIntegrationRefreshEffects: vi.fn(),
 }))
 
@@ -44,6 +46,9 @@ const hubspotProvider = {
   pickerTokenUrl: '',
   agentEventUrl: '/console/api/native-integrations/hubspot/agent-events/',
   revokeUrl: '/console/api/native-integrations/hubspot/revoke/',
+  credentialFields: [],
+  presentCredentialFields: [],
+  missingCredentialFields: [],
 }
 
 function renderPanel(nativeIntegrationsUrl: string | null = '/console/api/native-integrations/') {

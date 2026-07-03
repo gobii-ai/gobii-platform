@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, Loader2, Plus, Sparkles } from 'lucide-react'
 
@@ -30,6 +30,7 @@ export function PipedreamAppsPanel({
   embedded = false,
 }: PipedreamAppsPanelProps) {
   const [modal, showModal] = useModal()
+  const [deepLinkHandled, setDeepLinkHandled] = useState(false)
   const queryKey = useMemo(() => ['pipedream-app-settings', settingsUrl] as const, [settingsUrl])
   const settingsQuery = useQuery({
     queryKey,
@@ -69,7 +70,19 @@ export function PipedreamAppsPanel({
   const hasPipedreamApps = Boolean(settingsUrl && searchUrl)
   const canOpenModal = hasPipedreamApps ? Boolean(settingsQuery.data) : Boolean(nativeIntegrationsUrl)
 
-  const openModal = useCallback(() => {
+  const deepLinkRequest = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return null
+    }
+    const params = new URLSearchParams(window.location.search)
+    const providerKey = params.get('provider')?.trim() || null
+    return {
+      providerKey,
+      connect: params.get('connect') === '1',
+    }
+  }, [])
+
+  const openModal = useCallback((options: { providerKey?: string | null; connect?: boolean } = {}) => {
     if (!hasPipedreamApps && !nativeIntegrationsUrl) {
       return
     }
@@ -81,6 +94,8 @@ export function PipedreamAppsPanel({
         settingsUrl={settingsUrl ?? null}
         searchUrl={searchUrl ?? null}
         nativeIntegrationsUrl={nativeIntegrationsUrl}
+        initialNativeProviderKey={options.providerKey ?? null}
+        initialNativeConnect={Boolean(options.connect)}
         initialSettings={effectiveSettings}
         onClose={onClose}
         onError={onError}
@@ -95,6 +110,25 @@ export function PipedreamAppsPanel({
     settingsQuery.data,
     settingsUrl,
     showModal,
+  ])
+
+  useEffect(() => {
+    if (deepLinkHandled || !deepLinkRequest?.providerKey || !deepLinkRequest.connect || !canOpenModal) {
+      return
+    }
+    if (settingsQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading) {
+      return
+    }
+    setDeepLinkHandled(true)
+    openModal({ providerKey: deepLinkRequest.providerKey, connect: true })
+  }, [
+    agentRosterQuery.isLoading,
+    canOpenModal,
+    deepLinkHandled,
+    deepLinkRequest,
+    nativeIntegrationsQuery.isLoading,
+    openModal,
+    settingsQuery.isLoading,
   ])
 
   const sectionClassName = embedded
@@ -130,7 +164,7 @@ export function PipedreamAppsPanel({
           <button
             type="button"
             className={buttonClassName}
-            onClick={openModal}
+            onClick={() => openModal()}
             disabled={!canOpenModal || settingsQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading}
           >
             <Plus className="h-4 w-4" aria-hidden="true" />

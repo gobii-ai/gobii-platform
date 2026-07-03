@@ -205,11 +205,6 @@ from console.native_integrations_api import (
     NativeIntegrationPickerTokenAPIView,
     NativeIntegrationRevokeAPIView,
 )
-from console.system_skill_profiles_api_views import (
-    SystemSkillProfileListAPIView,
-    SystemSkillProfileDetailAPIView,
-    SystemSkillProfileSetDefaultAPIView,
-)
 from console.email_settings.views import (
     AgentEmailSettingsAPIView,
     AgentEmailSettingsEnsureAccountAPIView,
@@ -242,7 +237,6 @@ from console.views import (
     ConsoleLLMConfigView,
     MCPServerManagementView,
     PlatformMCPServerManagementView,
-    SystemSkillProfilesView,
     MCPOAuthCallbackPageView,
     AgentEmailOAuthCallbackPageView,
     NativeIntegrationOAuthCallbackPageView,
@@ -367,11 +361,6 @@ urlpatterns = [
     path("console/usage/", LegacyConsoleRedirectView.as_view(), name="usage"),
     path("console/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditView.as_view(), name="console-agent-audit"),
     path("console/secrets/", LegacyConsoleRedirectView.as_view(), name="console-secrets"),
-    path(
-        "console/system-skills/<slug:skill_key>/profiles/",
-        SystemSkillProfilesView.as_view(),
-        name="console-system-skill-profiles",
-    ),
     path("console/advanced/mcp-servers/", MCPServerManagementView.as_view(), name="console-mcp-servers"),
     path("console/mcp/oauth/callback/", MCPOAuthCallbackPageView.as_view(), name="console-mcp-oauth-callback-view"),
     path("console/email/oauth/callback/", AgentEmailOAuthCallbackPageView.as_view(), name="console-email-oauth-callback-view"),
@@ -680,21 +669,6 @@ urlpatterns = [
     path("console/api/organization/invites/<str:token>/", CurrentOrganizationInviteDetailAPIView.as_view(), name="console-current-organization-invite-detail"),
     path("console/api/organization/invites/<str:token>/resend/", CurrentOrganizationInviteResendAPIView.as_view(), name="console-current-organization-invite-resend"),
     path("console/api/organization/members/<int:user_id>/", CurrentOrganizationMemberAPIView.as_view(), name="console-current-organization-member-detail"),
-    path(
-        "console/api/system-skills/<slug:skill_key>/profiles/",
-        SystemSkillProfileListAPIView.as_view(),
-        name="console-system-skill-profile-list",
-    ),
-    path(
-        "console/api/system-skills/<slug:skill_key>/profiles/<uuid:profile_id>/",
-        SystemSkillProfileDetailAPIView.as_view(),
-        name="console-system-skill-profile-detail",
-    ),
-    path(
-        "console/api/system-skills/<slug:skill_key>/profiles/<uuid:profile_id>/default/",
-        SystemSkillProfileSetDefaultAPIView.as_view(),
-        name="console-system-skill-profile-set-default",
-    ),
     path("console/api/agents/<uuid:agent_id>/secrets/", AgentSecretListAPIView.as_view(), name="console-agent-secret-list"),
     path("console/api/agents/<uuid:agent_id>/secrets/<uuid:secret_id>/", AgentSecretDetailAPIView.as_view(), name="console-agent-secret-detail"),
     path("console/api/agents/<uuid:agent_id>/secrets/<uuid:secret_id>/promote/", AgentSecretPromoteAPIView.as_view(), name="console-agent-secret-promote"),

@@ -16,6 +16,25 @@ export type NativeIntegrationProviderDTO = {
   picker_token_url: string
   agent_event_url: string
   revoke_url: string
+  credential_fields?: NativeIntegrationCredentialFieldDTO[]
+  present_credential_fields?: string[]
+  missing_credential_fields?: string[]
+}
+
+export type NativeIntegrationDocLinkDTO = {
+  title: string
+  url: string
+  description?: string
+}
+
+export type NativeIntegrationCredentialFieldDTO = {
+  key: string
+  name: string
+  description?: string
+  required?: boolean
+  default?: string | null
+  how_to_get?: string
+  docs?: NativeIntegrationDocLinkDTO[]
 }
 
 type NativeIntegrationListResponseDTO = {
@@ -29,6 +48,14 @@ type NativeIntegrationConnectResponseDTO = {
   authorization_url: string
   state: string
   expires_at: string
+}
+
+type NativeIntegrationManualConnectResponseDTO = {
+  provider_key: string
+  connected: boolean
+  secret_id: string
+  present_credential_fields: string[]
+  missing_credential_fields: string[]
 }
 
 type NativeIntegrationPickerTokenResponseDTO = {
@@ -67,6 +94,25 @@ export type NativeIntegrationProvider = {
   pickerTokenUrl: string
   agentEventUrl: string
   revokeUrl: string
+  credentialFields: NativeIntegrationCredentialField[]
+  presentCredentialFields: string[]
+  missingCredentialFields: string[]
+}
+
+export type NativeIntegrationDocLink = {
+  title: string
+  url: string
+  description: string
+}
+
+export type NativeIntegrationCredentialField = {
+  key: string
+  name: string
+  description: string
+  required: boolean
+  default: string | null
+  howToGet: string
+  docs: NativeIntegrationDocLink[]
 }
 
 export type NativeIntegrationListResponse = {
@@ -80,6 +126,14 @@ export type NativeIntegrationConnectResponse = {
   authorizationUrl: string
   state: string
   expiresAt: string
+}
+
+export type NativeIntegrationManualConnectResponse = {
+  providerKey: string
+  connected: boolean
+  secretId: string
+  presentCredentialFields: string[]
+  missingCredentialFields: string[]
 }
 
 export type NativeIntegrationPickerTokenResponse = {
@@ -118,6 +172,21 @@ export const mapNativeIntegrationProvider = (provider: NativeIntegrationProvider
   pickerTokenUrl: provider.picker_token_url,
   agentEventUrl: provider.agent_event_url,
   revokeUrl: provider.revoke_url,
+  credentialFields: (provider.credential_fields ?? []).map((field) => ({
+    key: field.key,
+    name: field.name,
+    description: field.description ?? '',
+    required: field.required !== false,
+    default: field.default ?? null,
+    howToGet: field.how_to_get ?? '',
+    docs: (field.docs ?? []).map((doc) => ({
+      title: doc.title,
+      url: doc.url,
+      description: doc.description ?? '',
+    })),
+  })),
+  presentCredentialFields: (provider.present_credential_fields ?? []).map(String),
+  missingCredentialFields: (provider.missing_credential_fields ?? []).map(String),
 })
 
 const mapNativeIntegrationFile = (file: NativeIntegrationAccessibleFileDTO): NativeIntegrationAccessibleFile => ({
@@ -151,6 +220,26 @@ export async function startNativeIntegrationConnect(
     authorizationUrl: payload.authorization_url,
     state: payload.state,
     expiresAt: payload.expires_at,
+  }
+}
+
+export async function saveNativeIntegrationCredentials(
+  connectUrl: string,
+  credentials: Record<string, string | null>,
+  csrfToken?: string,
+): Promise<NativeIntegrationManualConnectResponse> {
+  const payload = await jsonRequest<NativeIntegrationManualConnectResponseDTO>(connectUrl, {
+    method: 'POST',
+    includeCsrf: true,
+    csrfToken,
+    json: { credentials },
+  })
+  return {
+    providerKey: payload.provider_key,
+    connected: Boolean(payload.connected),
+    secretId: payload.secret_id,
+    presentCredentialFields: (payload.present_credential_fields ?? []).map(String),
+    missingCredentialFields: (payload.missing_credential_fields ?? []).map(String),
   }
 }
 

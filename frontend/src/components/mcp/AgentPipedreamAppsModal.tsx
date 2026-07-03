@@ -49,8 +49,10 @@ import {
   openNativeOAuthPopup,
   storePendingNativeOAuth,
   supportsNativeIntegrationPicker,
+  usesManualNativeIntegrationCredentials,
   useNativeIntegrationRefreshEffects,
 } from './NativeIntegrationShared'
+import { useManualNativeIntegrationConnect } from './useManualNativeIntegrationConnect'
 import {
   DiscordConfigurationScreen,
   DiscordSummaryCell,
@@ -207,6 +209,27 @@ export function AgentPipedreamAppsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
+  const {
+    credentialModal,
+    isPending: manualNativeConnectPending,
+    openCredentialModal,
+  } = useManualNativeIntegrationConnect({
+    nativeQueryKey,
+    onMutate: (provider) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
+      setStatusMessage(null)
+    },
+    onSuccess: (payload, provider) => {
+      setStatusMessage({
+        text: payload.connected
+          ? `${provider.displayName} is connected.`
+          : `Saved ${provider.displayName}. Add the remaining required credentials to finish setup.`,
+      })
+    },
+    onError: (message) => setStatusMessage({ text: message, tone: 'error' }),
+    onSettled: () => setPendingNativeAction(null),
+  })
+
   const nativeDisconnectMutation = useMutation({
     mutationFn: (provider: NativeIntegrationProvider) => revokeNativeIntegration(provider.revokeUrl).then(() => provider),
     onMutate: (provider) => {
@@ -266,6 +289,7 @@ export function AgentPipedreamAppsModal({
     || disconnectMutation.isPending
     || removeMutation.isPending
     || nativeConnectMutation.isPending
+    || manualNativeConnectPending
     || nativeDisconnectMutation.isPending
     || nativePickerMutation.isPending
     || isDiscordAgentActionPending
@@ -309,7 +333,13 @@ export function AgentPipedreamAppsModal({
                 provider={app}
                 pendingNativeAction={pendingNativeAction}
                 disabled={isBusy}
-                onConnect={() => nativeConnectMutation.mutate({ provider: app, popup: openNativeOAuthPopup(app) })}
+                onConnect={() => {
+                  if (usesManualNativeIntegrationCredentials(app)) {
+                    openCredentialModal(app)
+                    return
+                  }
+                  nativeConnectMutation.mutate({ provider: app, popup: openNativeOAuthPopup(app) })
+                }}
                 onDisconnect={() => {
                   if (confirmNativeIntegrationDisconnect(app)) {
                     nativeDisconnectMutation.mutate(app)
@@ -346,14 +376,17 @@ export function AgentPipedreamAppsModal({
   )
 
   return (
-    <PipedreamModalShell
-      title={activeDiscordApp ? 'Configure Discord' : 'Apps'}
-      subtitle={activeDiscordApp ? 'Choose the Discord server channels this agent should watch.' : 'Search, connect, and disconnect apps for this agent.'}
-      ariaLabel="Manage agent apps"
-      onClose={onClose}
-    >
-      {body}
-    </PipedreamModalShell>
+    <>
+      <PipedreamModalShell
+        title={activeDiscordApp ? 'Configure Discord' : 'Apps'}
+        subtitle={activeDiscordApp ? 'Choose the Discord server channels this agent should watch.' : 'Search, connect, and disconnect apps for this agent.'}
+        ariaLabel="Manage agent apps"
+        onClose={onClose}
+      >
+        {body}
+      </PipedreamModalShell>
+      {credentialModal}
+    </>
   )
 }
 

@@ -59,8 +59,10 @@ import {
   openNativeOAuthPopup,
   storePendingNativeOAuth,
   supportsNativeIntegrationPicker,
+  usesManualNativeIntegrationCredentials,
   useNativeIntegrationRefreshEffects,
 } from './NativeIntegrationShared'
+import { useManualNativeIntegrationConnect } from './useManualNativeIntegrationConnect'
 import {
   agentHasDiscordNative,
   DiscordAgentConnectionsScreen,
@@ -74,6 +76,8 @@ type PipedreamAppsModalProps = {
   settingsUrl: string | null
   searchUrl: string | null
   nativeIntegrationsUrl?: string | null
+  initialNativeProviderKey?: string | null
+  initialNativeConnect?: boolean
   initialSettings: PipedreamAppSettings
   onClose: () => void
   onError: (message: string) => void
@@ -107,6 +111,8 @@ export function PipedreamAppsModal({
   settingsUrl,
   searchUrl,
   nativeIntegrationsUrl = null,
+  initialNativeProviderKey = null,
+  initialNativeConnect = false,
   initialSettings,
   onClose,
   onError,
@@ -123,6 +129,7 @@ export function PipedreamAppsModal({
   const [pendingAppAction, setPendingAppAction] = useState<PendingAppAction>(null)
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction>(null)
+  const [initialNativeConnectHandled, setInitialNativeConnectHandled] = useState(false)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
@@ -358,6 +365,31 @@ export function PipedreamAppsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
+  const {
+    credentialModal,
+    isPending: manualNativeConnectPending,
+    openCredentialModal,
+  } = useManualNativeIntegrationConnect({
+    nativeQueryKey,
+    extraInvalidateQueryKeys: [['agent-roster']],
+    onMutate: (provider) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
+      setStatusMessage(null)
+    },
+    onSuccess: (payload, provider) => {
+      setStatusMessage({
+        text: payload.connected
+          ? `${provider.displayName} is connected.`
+          : `Saved ${provider.displayName}. Add the remaining required credentials to finish setup.`,
+      })
+    },
+    onError: (message) => {
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
+
   const nativeRevokeMutation = useMutation({
     mutationFn: (provider: NativeIntegrationProvider) => revokeNativeIntegration(provider.revokeUrl).then(() => provider),
     onMutate: (provider) => {
@@ -415,6 +447,7 @@ export function PipedreamAppsModal({
     || connectMutation.isPending
     || disconnectMutation.isPending
     || nativeConnectMutation.isPending
+    || manualNativeConnectPending
     || nativeRevokeMutation.isPending
     || nativePickerMutation.isPending
     || discordDisconnectMutation.isPending
@@ -530,7 +563,13 @@ export function PipedreamAppsModal({
         setStatusMessage(null)
       }}
       onRemove={(app) => removeMutation.mutate(app)}
-      onNativeConnect={(provider) => nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })}
+      onNativeConnect={(provider) => {
+        if (usesManualNativeIntegrationCredentials(provider)) {
+          openCredentialModal(provider)
+          return
+        }
+        nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
+      }}
       onNativeDisconnect={(provider) => {
         if (confirmNativeIntegrationDisconnect(provider)) {
           nativeRevokeMutation.mutate(provider)
@@ -545,22 +584,62 @@ export function PipedreamAppsModal({
     />
   )
 
+  useEffect(() => {
+    if (
+      initialNativeConnectHandled
+      || !initialNativeConnect
+      || !initialNativeProviderKey
+      || nativeIntegrationsQuery.isLoading
+      || activeApp
+      || discordConnectionsOpen
+      || activeDiscordAgentId
+    ) {
+      return
+    }
+    const provider = (nativeIntegrationsQuery.data?.providers ?? []).find(
+      (candidate) => candidate.providerKey === initialNativeProviderKey,
+    )
+    if (!provider) {
+      return
+    }
+    setInitialNativeConnectHandled(true)
+    if (usesManualNativeIntegrationCredentials(provider)) {
+      openCredentialModal(provider)
+    } else {
+      nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
+    }
+  }, [
+    activeApp,
+    activeDiscordAgentId,
+    discordConnectionsOpen,
+    initialNativeConnect,
+    initialNativeConnectHandled,
+    initialNativeProviderKey,
+    nativeConnectMutation,
+    nativeIntegrationsQuery.data?.providers,
+    nativeIntegrationsQuery.isLoading,
+    openCredentialModal,
+  ])
+
   return (
-    <PipedreamModalShell
-      title={activeDiscordAgentId ? 'Configure Discord' : discordConnectionsOpen || activeApp ? 'Manage connections' : 'Manage integrations'}
-      subtitle={
-        activeDiscordAgentId
-          ? `Choose Discord channels for ${activeDiscordAgent?.name ?? 'this agent'}.`
-          : discordConnectionsOpen
-            ? 'Configure Discord for each agent.'
-            : activeApp
-              ? `${activeApp.name} connections across agents.`
-              : 'Search apps and manage agent connections.'
-      }
-      onClose={onClose}
-    >
-      {body}
-    </PipedreamModalShell>
+    <>
+      <PipedreamModalShell
+        title={activeDiscordAgentId ? 'Configure Discord' : discordConnectionsOpen || activeApp ? 'Manage connections' : 'Manage integrations'}
+        subtitle={
+          activeDiscordAgentId
+            ? `Choose Discord channels for ${activeDiscordAgent?.name ?? 'this agent'}.`
+            : discordConnectionsOpen
+              ? 'Configure Discord for each agent.'
+              : activeApp
+                ? `${activeApp.name} connections across agents.`
+                : 'Search apps and manage agent connections.'
+        }
+        onClose={onClose}
+      >
+        {body}
+      </PipedreamModalShell>
+      {credentialModal}
+    </>
   )
 }
 

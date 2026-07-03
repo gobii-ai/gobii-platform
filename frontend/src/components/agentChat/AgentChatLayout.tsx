@@ -329,6 +329,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   apolloNativeTabEnabled?: boolean
   hubspotNativeTabEnabled?: boolean
   discordNativeTabEnabled?: boolean
+  metaAdsTabEnabled?: boolean
   pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInputRequest?: (
     response:
@@ -524,6 +525,7 @@ export function AgentChatLayout({
   apolloNativeTabEnabled = false,
   hubspotNativeTabEnabled = false,
   discordNativeTabEnabled = false,
+  metaAdsTabEnabled = false,
   pendingActionRequests = [],
   onRespondHumanInputRequest,
   onDismissHumanInputRequest,
@@ -1782,6 +1784,7 @@ export function AgentChatLayout({
               apolloNativeTabEnabled={apolloNativeTabEnabled}
               hubspotNativeTabEnabled={hubspotNativeTabEnabled}
               discordNativeTabEnabled={discordNativeTabEnabled}
+              metaAdsTabEnabled={metaAdsTabEnabled}
               compact={sidebarMode === 'gallery'}
             />
           )}

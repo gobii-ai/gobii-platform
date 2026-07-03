@@ -14,8 +14,10 @@ import {
   nativeOAuthContextPayload,
   openNativeOAuthPopup,
   storePendingNativeOAuth,
+  usesManualNativeIntegrationCredentials,
   useNativeIntegrationRefreshEffects,
 } from '../../mcp/NativeIntegrationShared'
+import { useManualNativeIntegrationConnect } from '../../mcp/useManualNativeIntegrationConnect'
 
 export type NativeIntegrationPendingAction = string | null
 
@@ -26,6 +28,7 @@ type NativeIntegrationPanelState = {
   statusMessage: string | null
   pendingAction: NativeIntegrationPendingAction
   connectPending: boolean
+  credentialModal: ReactNode
   setStatusMessage: Dispatch<SetStateAction<string | null>>
   setPendingAction: Dispatch<SetStateAction<NativeIntegrationPendingAction>>
   startConnect: (provider: NativeIntegrationProvider) => void
@@ -93,6 +96,23 @@ export function useNativeIntegrationPanelState({
     onSettled: () => setPendingAction(null),
   })
 
+  const manualNativeConnect = useManualNativeIntegrationConnect({
+    nativeQueryKey,
+    onMutate: () => {
+      setPendingAction('connect')
+      setStatusMessage(null)
+    },
+    onSuccess: (payload, provider) => {
+      setStatusMessage(
+        payload.connected
+          ? `${provider.displayName} is connected.`
+          : `Saved ${provider.displayName}. Add the remaining required credentials to finish setup.`,
+      )
+    },
+    onError: setStatusMessage,
+    onSettled: () => setPendingAction(null),
+  })
+
   return {
     provider,
     isLoading: nativeIntegrationsQuery.isLoading,
@@ -101,10 +121,17 @@ export function useNativeIntegrationPanelState({
       : null,
     statusMessage,
     pendingAction,
-    connectPending: connectMutation.isPending,
+    connectPending: connectMutation.isPending || manualNativeConnect.isPending,
+    credentialModal: manualNativeConnect.credentialModal,
     setStatusMessage,
     setPendingAction,
-    startConnect: (provider) => connectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) }),
+    startConnect: (provider) => {
+      if (usesManualNativeIntegrationCredentials(provider)) {
+        manualNativeConnect.openCredentialModal(provider)
+        return
+      }
+      connectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
+    },
   }
 }
 

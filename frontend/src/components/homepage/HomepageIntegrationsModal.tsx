@@ -27,8 +27,10 @@ import {
   openNativeOAuthPopup,
   storePendingNativeOAuth,
   supportsNativeIntegrationPicker,
+  usesManualNativeIntegrationCredentials,
   useNativeIntegrationRefreshEffects,
 } from '../mcp/NativeIntegrationShared'
+import { useManualNativeIntegrationConnect } from '../mcp/useManualNativeIntegrationConnect'
 import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from '../mcp/PipedreamAppsShared'
 
 type HomepageIntegrationsModalAppDTO = {
@@ -227,6 +229,24 @@ export function HomepageIntegrationsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
+  const {
+    credentialModal,
+    isPending: manualNativeConnectPending,
+    openCredentialModal,
+  } = useManualNativeIntegrationConnect({
+    nativeQueryKey,
+    getCsrfToken: ensureHomepageCsrf,
+    onMutate: (provider) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
+      setNativeErrorMessage(null)
+    },
+    onSuccess: (payload) => {
+      setNativeErrorMessage(payload.connected ? null : 'Saved credentials. Add the remaining required fields to finish setup.')
+    },
+    onError: setNativeErrorMessage,
+    onSettled: () => setPendingNativeAction(null),
+  })
+
   const nativePickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
       const previousScrollX = window.scrollX
@@ -349,10 +369,14 @@ export function HomepageIntegrationsModal({
                 key={provider.providerKey}
                 provider={provider}
                 pendingAction={pendingNativeAction}
-                disabled={nativeConnectMutation.isPending || nativeDisconnectMutation.isPending || nativePickerMutation.isPending}
+                disabled={nativeConnectMutation.isPending || manualNativeConnectPending || nativeDisconnectMutation.isPending || nativePickerMutation.isPending}
                 onConnect={() => {
                   if (!isAuthenticated) {
                     scheduleLoginRedirect(buildHomepageNativeIntegrationLoginReturnUrl(provider))
+                    return
+                  }
+                  if (usesManualNativeIntegrationCredentials(provider)) {
+                    openCredentialModal(provider)
                     return
                   }
                   nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
@@ -561,6 +585,7 @@ export function HomepageIntegrationsModal({
       >
         {body}
       </ImmersiveDialog>
+      {credentialModal}
     </>
   )
 }

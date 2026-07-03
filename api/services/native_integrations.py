@@ -4,15 +4,16 @@ import secrets
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import httpx
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from api.models import GlobalSecret, MCPServerConfig, PersistentAgent
+from api.models import GlobalSecret, MCPServerConfig, PersistentAgent, PersistentAgentEnabledTool
 from api.services.pipedream_apps import disable_pipedream_apps_for_owner
 from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
 
@@ -130,6 +131,42 @@ class NativeIntegrationProvider:
 
 
 @dataclass(frozen=True)
+class NativeIntegrationDocLink:
+    title: str
+    url: str
+    description: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "title": self.title,
+            "url": self.url,
+            "description": self.description,
+        }
+
+
+@dataclass(frozen=True)
+class NativeIntegrationCredentialField:
+    key: str
+    name: str
+    description: str = ""
+    required: bool = True
+    default: str | None = None
+    how_to_get: str = ""
+    docs: tuple[NativeIntegrationDocLink, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "name": self.name,
+            "description": self.description,
+            "required": self.required,
+            "default": self.default,
+            "how_to_get": self.how_to_get,
+            "docs": [doc.to_dict() for doc in self.docs],
+        }
+
+
+@dataclass(frozen=True)
 class NativeIntegrationCapability:
     key: str
     provider_key: str
@@ -220,14 +257,142 @@ HUBSPOT_PROVIDER = NativeIntegrationProvider(
     authorization_params={},
 )
 
+META_ADS_PROVIDER = NativeIntegrationProvider(
+    key="meta_ads",
+    display_name="Meta Ads",
+    description="Connect Meta Ads for account health checks, campaign reporting, and conversion quality monitoring.",
+    auth_type="manual",
+    authorization_endpoint="",
+    token_endpoint="",
+    scopes=(),
+    api_hosts=("graph.facebook.com",),
+    api_url_prefixes=("https://graph.facebook.com/",),
+    icon="meta_ads",
+    authorization_params={},
+)
+
 GOOGLE_SHEETS_PROVIDER = GOOGLE_DRIVE_PROVIDER
 GOOGLE_DRIVE_PROVIDER_ALIASES = ("google_sheets",)
 GOOGLE_DRIVE_LEGACY_SECRET_KEYS = ("native_google_sheets",)
+
+META_ADS_CREDENTIAL_FIELDS: tuple[NativeIntegrationCredentialField, ...] = (
+    NativeIntegrationCredentialField(
+        key="META_APP_ID",
+        name="App ID",
+        description="Meta app identifier.",
+        how_to_get=(
+            "Register as a Meta developer first, then create a Business app with the Marketing API product. "
+            "Copy the App ID from App Settings -> Basic."
+        ),
+        docs=(
+            NativeIntegrationDocLink(
+                title="Register as a Meta developer",
+                url="https://developers.facebook.com/docs/development/register/",
+            ),
+            NativeIntegrationDocLink(
+                title="Create a Meta app",
+                url="https://developers.facebook.com/docs/development/create-an-app/",
+            ),
+        ),
+    ),
+    NativeIntegrationCredentialField(
+        key="META_APP_SECRET",
+        name="App Secret",
+        description="Meta app secret.",
+        how_to_get=(
+            "Use the same Business app as META_APP_ID. Copy the App Secret from App Settings -> Basic and "
+            "rotate it immediately if it is ever exposed."
+        ),
+        docs=(
+            NativeIntegrationDocLink(
+                title="Meta app settings",
+                url="https://developers.facebook.com/apps/",
+            ),
+        ),
+    ),
+    NativeIntegrationCredentialField(
+        key="META_SYSTEM_USER_TOKEN",
+        name="System User Token",
+        description="System user token with ads_read access.",
+        how_to_get=(
+            "In Business Settings, create a system user, assign the app and ad account to that system user, "
+            "then generate a token with ads_read access."
+        ),
+        docs=(
+            NativeIntegrationDocLink(
+                title="System users overview",
+                url="https://developers.facebook.com/docs/business-management-apis/system-users/",
+            ),
+            NativeIntegrationDocLink(
+                title="Generate system user tokens",
+                url="https://developers.facebook.com/docs/business-management-apis/system-users/install-apps-and-generate-tokens/",
+            ),
+        ),
+    ),
+    NativeIntegrationCredentialField(
+        key="META_AD_ACCOUNT_ID",
+        name="Ad Account ID",
+        description="Default ad account ID, usually starting with act_.",
+        how_to_get=(
+            "Copy the ad account ID that the system user can access. If you know only the numeric ID, this setup "
+            "screen accepts it and the tool will normalize it to the act_ form."
+        ),
+        docs=(
+            NativeIntegrationDocLink(
+                title="Marketing API authorization",
+                url="https://developers.facebook.com/docs/marketing-api/get-started/authorization/",
+            ),
+        ),
+    ),
+    NativeIntegrationCredentialField(
+        key="META_API_VERSION",
+        name="API Version",
+        description="Marketing API version override.",
+        required=False,
+        default="v25.0",
+        how_to_get="Optional. Leave blank to use the supported default version.",
+    ),
+    NativeIntegrationCredentialField(
+        key="META_BUSINESS_ID",
+        name="Business ID",
+        description="Optional business ID for listing owned ad accounts.",
+        required=False,
+        how_to_get=(
+            "Optional. Add this when Meta does not return ad accounts through the default me/adaccounts path "
+            "and you want the tool to list owned accounts via the business."
+        ),
+    ),
+    NativeIntegrationCredentialField(
+        key="META_DATASET_ID",
+        name="Pixel / Dataset ID",
+        description="Optional Meta Pixel or dataset ID for conversion-quality monitoring.",
+        required=False,
+        how_to_get=(
+            "Find the Pixel ID in Events Manager. The Meta conversion-quality API uses this as the dataset_id "
+            "for monitoring event match quality, deduplication, freshness, and diagnostics."
+        ),
+        docs=(
+            NativeIntegrationDocLink(
+                title="Conversions API get started",
+                url="https://developers.facebook.com/docs/marketing-api/conversions-api/get-started/",
+            ),
+            NativeIntegrationDocLink(
+                title="Dataset Quality API",
+                url="https://developers.facebook.com/docs/marketing-api/conversions-api/dataset-quality-api/",
+            ),
+        ),
+    ),
+)
+
+NATIVE_INTEGRATION_CREDENTIAL_FIELDS: dict[str, tuple[NativeIntegrationCredentialField, ...]] = {
+    META_ADS_PROVIDER.key: META_ADS_CREDENTIAL_FIELDS,
+}
 
 NATIVE_INTEGRATION_PROVIDERS = {
     GOOGLE_DRIVE_PROVIDER.key: GOOGLE_DRIVE_PROVIDER,
     APOLLO_PROVIDER.key: APOLLO_PROVIDER,
     HUBSPOT_PROVIDER.key: HUBSPOT_PROVIDER,
+    META_ADS_PROVIDER.key: META_ADS_PROVIDER,
 }
 
 NATIVE_INTEGRATION_CAPABILITIES: dict[str, tuple[NativeIntegrationCapability, ...]] = {
@@ -453,6 +618,10 @@ NATIVE_INTEGRATION_PIPEDREAM_APP_SLUGS = {
     HUBSPOT_PROVIDER.key: ("hubspot",),
 }
 
+NATIVE_INTEGRATION_AGENT_WAKE_TOOL_NAMES = {
+    META_ADS_PROVIDER.key: ("meta_ads",),
+}
+
 
 def list_native_integration_providers() -> list[NativeIntegrationProvider]:
     return list(NATIVE_INTEGRATION_PROVIDERS.values())
@@ -461,6 +630,11 @@ def list_native_integration_providers() -> list[NativeIntegrationProvider]:
 def list_native_integration_capabilities(provider_key: str) -> list[NativeIntegrationCapability]:
     provider = get_native_integration_provider(provider_key)
     return list(NATIVE_INTEGRATION_CAPABILITIES.get(provider.key, ()))
+
+
+def list_native_integration_credential_fields(provider_key: str) -> list[NativeIntegrationCredentialField]:
+    provider = get_native_integration_provider(provider_key)
+    return list(NATIVE_INTEGRATION_CREDENTIAL_FIELDS.get(provider.key, ()))
 
 
 def get_native_integration_capability(provider_key: str, capability_key: str) -> NativeIntegrationCapability:
@@ -489,6 +663,19 @@ def native_integration_client_credentials(provider: NativeIntegrationProvider) -
     if provider.key == HUBSPOT_PROVIDER.key:
         return settings.HUBSPOT_CLIENT_ID, settings.HUBSPOT_CLIENT_SECRET
     return "", ""
+
+
+def native_integration_deep_link(provider_key: str = "", *, connect: bool = False) -> str:
+    base_url = native_integration_setup_url()
+    query: dict[str, str] = {}
+    if provider_key:
+        query["provider"] = provider_key
+    if connect:
+        query["connect"] = "1"
+    if not query:
+        return base_url
+    separator = "&" if "?" in base_url else "?"
+    return f"{base_url}{separator}{urlencode(query)}"
 
 
 def native_integration_secret_queryset(owner_user, owner_org):
@@ -529,6 +716,36 @@ def disable_overlapping_pipedream_tools_for_native_integration(
     return result["disabled_tools"]
 
 
+def trigger_agents_for_native_integration_change(provider_key: str, owner_user, owner_org) -> int:
+    provider = get_native_integration_provider(provider_key)
+    tool_names = NATIVE_INTEGRATION_AGENT_WAKE_TOOL_NAMES.get(provider.key, ())
+    if not tool_names:
+        return 0
+
+    enabled_qs = PersistentAgentEnabledTool.objects.filter(tool_full_name__in=tool_names)
+    if owner_org is not None:
+        enabled_qs = enabled_qs.filter(agent__organization=owner_org)
+    else:
+        enabled_qs = enabled_qs.filter(agent__user=owner_user, agent__organization__isnull=True)
+
+    agent_ids = list(
+        enabled_qs.filter(agent__is_deleted=False, agent__is_active=True)
+        .values_list("agent_id", flat=True)
+        .distinct()
+    )
+    if not agent_ids:
+        return 0
+
+    from api.agent.tasks.process_events import process_agent_events_task
+
+    def _enqueue() -> None:
+        for agent_id in agent_ids:
+            process_agent_events_task.delay(str(agent_id))
+
+    transaction.on_commit(_enqueue)
+    return len(agent_ids)
+
+
 def _native_integration_secret_keys(provider: NativeIntegrationProvider) -> list[str]:
     keys = [provider.secret_key]
     if provider.key == GOOGLE_DRIVE_PROVIDER.key:
@@ -537,7 +754,10 @@ def _native_integration_secret_keys(provider: NativeIntegrationProvider) -> list
 
 
 def _native_integration_not_connected_guidance(provider: NativeIntegrationProvider) -> str:
-    setup_url = native_integration_setup_url()
+    setup_url = native_integration_deep_link(
+        provider.key,
+        connect=provider.auth_type == "manual",
+    )
     if provider.key == GOOGLE_DRIVE_PROVIDER.key:
         return (
             f"Ask the user to open {setup_url}, connect Google Drive, "
@@ -582,6 +802,111 @@ def _credentials_granted_scopes(credentials: dict[str, Any] | None, provider: Na
     return granted_scopes or provider.scopes
 
 
+def _manual_credential_field_keys(provider: NativeIntegrationProvider) -> set[str]:
+    return {field.key for field in list_native_integration_credential_fields(provider.key)}
+
+
+def _manual_credential_values(provider: NativeIntegrationProvider, credentials: dict[str, Any] | None) -> dict[str, str]:
+    if not credentials:
+        return {}
+    allowed_keys = _manual_credential_field_keys(provider)
+    values: dict[str, str] = {}
+    for key in allowed_keys:
+        value = credentials.get(key)
+        if value is None or str(value) == "":
+            continue
+        values[key] = str(value)
+    return values
+
+
+def manual_native_integration_credential_status(
+    provider: NativeIntegrationProvider,
+    credentials: dict[str, Any] | None,
+) -> dict[str, Any]:
+    values = _manual_credential_values(provider, credentials)
+    fields = list_native_integration_credential_fields(provider.key)
+    missing_required = [
+        field.key
+        for field in fields
+        if field.required and field.key not in values and field.default is None
+    ]
+    return {
+        "complete": not missing_required,
+        "present_fields": sorted(values.keys()),
+        "missing_required_fields": missing_required,
+        "values": values,
+    }
+
+
+def upsert_manual_native_integration_credentials(
+    provider: NativeIntegrationProvider,
+    owner_user,
+    owner_org,
+    values: dict[str, Any],
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> GlobalSecret:
+    if provider.auth_type != "manual":
+        raise ValidationError({"provider": "This provider does not accept manual credentials."})
+    if not isinstance(values, dict):
+        raise ValidationError({"credentials": "credentials must be an object."})
+
+    fields = list_native_integration_credential_fields(provider.key)
+    allowed_keys = {field.key for field in fields}
+    normalized_values = {
+        str(key or "").strip().upper(): value
+        for key, value in values.items()
+        if str(key or "").strip()
+    }
+    invalid_keys = sorted(key for key in normalized_values.keys() if key not in allowed_keys)
+    if invalid_keys:
+        raise ValidationError({"credentials": [f"Unknown field(s): {', '.join(invalid_keys)}"]})
+
+    existing_secret = get_native_integration_secret(provider.key, owner_user, owner_org)
+    existing_credentials: dict[str, Any] = {}
+    if existing_secret is not None:
+        try:
+            existing_credentials = load_native_integration_credentials(existing_secret)
+        except NativeIntegrationAuthError:
+            existing_credentials = {}
+
+    next_credentials = {
+        key: value
+        for key, value in existing_credentials.items()
+        if key not in allowed_keys
+    }
+    for key, value in _manual_credential_values(provider, existing_credentials).items():
+        next_credentials[key] = value
+
+    for field in fields:
+        if field.default is not None and field.key not in next_credentials:
+            next_credentials[field.key] = field.default
+
+    for key, value in normalized_values.items():
+        if value is None or str(value) == "":
+            next_credentials.pop(key, None)
+            continue
+        next_credentials[key] = str(value)
+
+    if not _manual_credential_values(provider, next_credentials):
+        raise ValidationError({"credentials": "At least one credential value is required."})
+
+    next_credentials.update(
+        {
+            "provider_key": provider.key,
+            "auth_type": provider.auth_type,
+            "metadata": {
+                **(existing_credentials.get("metadata") if isinstance(existing_credentials.get("metadata"), dict) else {}),
+                **(metadata or {}),
+                "api_hosts": list(provider.api_hosts),
+                "api_url_prefixes": list(provider.api_url_prefixes),
+                "credential_fields": [field.key for field in fields],
+            },
+        }
+    )
+    return save_native_integration_credentials(provider, owner_user, owner_org, next_credentials)
+
+
 def _capability_status(capability: NativeIntegrationCapability, connected: bool, granted_scopes: tuple[str, ...]) -> dict[str, Any]:
     granted_set = set(granted_scopes)
     missing_scopes = [
@@ -603,7 +928,12 @@ def build_native_integration_permission_summary(
     *,
     connected: bool | None = None,
 ) -> dict[str, Any]:
-    is_connected = bool(credentials) if connected is None else bool(connected)
+    if provider.auth_type == "manual":
+        credential_status = manual_native_integration_credential_status(provider, credentials)
+        is_connected = bool(credential_status["complete"]) if connected is None else bool(connected and credential_status["complete"])
+    else:
+        credential_status = {"present_fields": [], "missing_required_fields": [], "complete": bool(credentials)}
+        is_connected = bool(credentials) if connected is None else bool(connected)
     granted_scopes = _credentials_granted_scopes(credentials, provider) if is_connected else ()
     requested_scopes = parse_native_integration_scopes(provider.scopes)
     capability_statuses = [
@@ -621,10 +951,17 @@ def build_native_integration_permission_summary(
     )
 
     if not is_connected:
-        status_text = (
-            f"{provider.display_name} is not connected. "
-            f"{_native_integration_not_connected_guidance(provider)}"
-        )
+        if provider.auth_type == "manual" and credential_status["missing_required_fields"]:
+            status_text = (
+                f"{provider.display_name} is missing required credentials: "
+                f"{', '.join(credential_status['missing_required_fields'])}. "
+                f"{_native_integration_not_connected_guidance(provider)}"
+            )
+        else:
+            status_text = (
+                f"{provider.display_name} is not connected. "
+                f"{_native_integration_not_connected_guidance(provider)}"
+            )
     elif missing_scopes:
         status_text = (
             f"{provider.display_name} is connected, but some capabilities need additional scopes: "
@@ -632,19 +969,27 @@ def build_native_integration_permission_summary(
         )
     else:
         labels = [str(capability["label"]) for capability in available]
-        status_text = f"{provider.display_name} is connected with access for: {', '.join(labels)}."
+        if labels:
+            status_text = f"{provider.display_name} is connected with access for: {', '.join(labels)}."
+        else:
+            status_text = f"{provider.display_name} is connected."
 
     return {
         "provider_key": provider.key,
         "provider_name": provider.display_name,
         "connected": is_connected,
-        "setup_url": native_integration_setup_url(),
+        "setup_url": native_integration_deep_link(
+            provider.key,
+            connect=provider.auth_type == "manual",
+        ),
         "requested_scopes": list(requested_scopes),
         "granted_scopes": list(granted_scopes),
         "granted_scope_string": " ".join(granted_scopes),
         "available_capabilities": available,
         "missing_capabilities": missing,
         "missing_scopes": missing_scopes,
+        "present_credential_fields": list(credential_status["present_fields"]),
+        "missing_credential_fields": list(credential_status["missing_required_fields"]),
         "status_text": status_text,
     }
 
@@ -703,7 +1048,15 @@ def native_integration_is_connected(
 ) -> bool:
     provider = get_native_integration_provider(provider_key)
     secret = get_native_integration_secret(provider.key, owner_user, owner_org)
-    return secret is not None
+    if secret is None:
+        return False
+    if provider.auth_type != "manual":
+        return True
+    try:
+        credentials = load_native_integration_credentials(secret)
+    except NativeIntegrationAuthError:
+        return False
+    return bool(manual_native_integration_credential_status(provider, credentials)["complete"])
 
 
 def preflight_native_integration_capability(
@@ -751,6 +1104,49 @@ def preflight_native_integration_capability(
         "missing_scopes": capability_summary["missing_scopes"],
         "setup_url": summary["setup_url"],
         "recommended_next_action": next_action,
+    }
+
+
+def resolve_meta_ads_credentials_for_agent(agent: PersistentAgent) -> dict[str, Any]:
+    provider = META_ADS_PROVIDER
+    owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
+    secret = get_native_integration_secret(provider.key, owner_user, owner_org)
+    credentials: dict[str, Any] | None = None
+    if secret is not None:
+        try:
+            credentials = load_native_integration_credentials(secret)
+        except NativeIntegrationAuthError:
+            credentials = None
+
+    status = manual_native_integration_credential_status(provider, credentials)
+    available_fields = [field.key for field in list_native_integration_credential_fields(provider.key)]
+    if secret is None:
+        return {
+            "status": "missing_connection",
+            "provider": provider,
+            "available_fields": available_fields,
+            "missing_required_fields": [field.key for field in list_native_integration_credential_fields(provider.key) if field.required],
+            "setup_url": native_integration_deep_link(provider.key, connect=True),
+        }
+    if not status["complete"]:
+        return {
+            "status": "incomplete_connection",
+            "provider": provider,
+            "available_fields": available_fields,
+            "present_fields": list(status["present_fields"]),
+            "missing_required_fields": list(status["missing_required_fields"]),
+            "setup_url": native_integration_deep_link(provider.key, connect=True),
+        }
+
+    values = dict(status["values"])
+    for field in list_native_integration_credential_fields(provider.key):
+        if field.default is not None and field.key not in values:
+            values[field.key] = field.default
+    return {
+        "status": "ok",
+        "provider": provider,
+        "values": values,
+        "setup_url": native_integration_deep_link(provider.key, connect=True),
     }
 
 
@@ -1158,6 +1554,9 @@ def apply_native_integration_auth(
 ) -> dict[str, str]:
     provider = find_provider_for_url(url)
     if provider is None:
+        return headers
+
+    if provider.auth_type != "oauth2":
         return headers
 
     if any(key.lower() == "authorization" for key in headers):

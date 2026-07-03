@@ -131,6 +131,7 @@ const GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = 'google_sheets_native'
 const APOLLO_NATIVE_SYSTEM_SKILL_KEY = 'apollo_native'
 const HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = 'hubspot_native'
 const DISCORD_NATIVE_SYSTEM_SKILL_KEY = 'discord_native'
+const META_ADS_SYSTEM_SKILL_KEY = 'meta_ads_platform'
 
 function withTemplateLaunchNonce(path: string): string {
   if (typeof window === 'undefined') {
@@ -1846,6 +1847,9 @@ export function AgentChatPage({
   const rosterDiscordNativeTabEnabled = Boolean(
     activeRosterMeta?.enabledSystemSkills?.includes(DISCORD_NATIVE_SYSTEM_SKILL_KEY),
   )
+  const rosterMetaAdsTabEnabled = Boolean(
+    activeRosterMeta?.enabledSystemSkills?.includes(META_ADS_SYSTEM_SKILL_KEY),
+  )
   const liveGoogleSheetsDriveTabEnabled = useMemo(
     () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY)),
     [activeAgentId, timelineEvents],
@@ -1862,12 +1866,17 @@ export function AgentChatPage({
     () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, DISCORD_NATIVE_SYSTEM_SKILL_KEY)),
     [activeAgentId, timelineEvents],
   )
+  const liveMetaAdsTabEnabled = useMemo(
+    () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, META_ADS_SYSTEM_SKILL_KEY)),
+    [activeAgentId, timelineEvents],
+  )
   const googleSheetsDriveTabEnabled = rosterGoogleSheetsDriveTabEnabled || liveGoogleSheetsDriveTabEnabled
   const apolloNativeTabEnabled = rosterApolloNativeTabEnabled || liveApolloNativeTabEnabled
   const hubspotNativeTabEnabled = rosterHubSpotNativeTabEnabled || liveHubSpotNativeTabEnabled
   const discordNativeTabEnabled = rosterDiscordNativeTabEnabled || liveDiscordNativeTabEnabled
+  const metaAdsTabEnabled = rosterMetaAdsTabEnabled || liveMetaAdsTabEnabled
   useEffect(() => {
-    if (!activeAgentId || (!liveGoogleSheetsDriveTabEnabled && !liveApolloNativeTabEnabled && !liveHubSpotNativeTabEnabled && !liveDiscordNativeTabEnabled)) {
+    if (!activeAgentId || (!liveGoogleSheetsDriveTabEnabled && !liveApolloNativeTabEnabled && !liveHubSpotNativeTabEnabled && !liveDiscordNativeTabEnabled && !liveMetaAdsTabEnabled)) {
       return
     }
     const refreshKey = [
@@ -1876,13 +1885,14 @@ export function AgentChatPage({
       liveApolloNativeTabEnabled ? APOLLO_NATIVE_SYSTEM_SKILL_KEY : '',
       liveHubSpotNativeTabEnabled ? HUBSPOT_NATIVE_SYSTEM_SKILL_KEY : '',
       liveDiscordNativeTabEnabled ? DISCORD_NATIVE_SYSTEM_SKILL_KEY : '',
+      liveMetaAdsTabEnabled ? META_ADS_SYSTEM_SKILL_KEY : '',
     ].join(':')
     if (googleSheetsRosterRefreshAgentsRef.current.has(refreshKey)) {
       return
     }
     googleSheetsRosterRefreshAgentsRef.current.add(refreshKey)
     void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
-  }, [activeAgentId, liveApolloNativeTabEnabled, liveDiscordNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, liveHubSpotNativeTabEnabled, queryClient])
+  }, [activeAgentId, liveApolloNativeTabEnabled, liveDiscordNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, liveHubSpotNativeTabEnabled, liveMetaAdsTabEnabled, queryClient])
   const visibleRosterAgentIds = useMemo(
     () => rosterAgents.map((agent) => agent.id),
     [rosterAgents],
@@ -4275,6 +4285,7 @@ export function AgentChatPage({
         apolloNativeTabEnabled={apolloNativeTabEnabled}
         hubspotNativeTabEnabled={hubspotNativeTabEnabled}
         discordNativeTabEnabled={discordNativeTabEnabled}
+        metaAdsTabEnabled={metaAdsTabEnabled}
         pendingActionRequests={pendingActionRequests}
         events={timelineEvents}
         displayEvents={displayEvents}

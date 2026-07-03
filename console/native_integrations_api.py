@@ -25,6 +25,7 @@ from api.services.native_integrations import (
     disable_overlapping_pipedream_tools_for_native_integration,
     get_native_integration_provider,
     get_native_integration_secret,
+    list_native_integration_credential_fields,
     list_native_integration_providers,
     load_native_integration_credentials,
     list_google_drive_accessible_files,
@@ -33,6 +34,8 @@ from api.services.native_integrations import (
     refresh_oauth_credentials_if_needed,
     request_oauth_token,
     save_native_integration_credentials,
+    trigger_agents_for_native_integration_change,
+    upsert_manual_native_integration_credentials,
 )
 from api.services.native_integration_events import (
     normalize_native_integration_event_files,
@@ -94,13 +97,19 @@ def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
         "icon": provider.icon,
         "api_hosts": list(provider.api_hosts),
         "scopes": list(provider.scopes),
-        "connected": secret is not None,
+        "connected": bool(permission_summary["connected"]),
         "scope": credentials.get("scope") or "",
         "granted_scopes": permission_summary["granted_scopes"],
         "requested_scopes": permission_summary["requested_scopes"],
         "available_capabilities": permission_summary["available_capabilities"],
         "missing_capabilities": permission_summary["missing_capabilities"],
         "missing_scopes": permission_summary["missing_scopes"],
+        "credential_fields": [
+            field.to_dict()
+            for field in list_native_integration_credential_fields(provider.key)
+        ],
+        "present_credential_fields": permission_summary["present_credential_fields"],
+        "missing_credential_fields": permission_summary["missing_credential_fields"],
         "capability_summary": permission_summary["status_text"],
         "setup_url": permission_summary["setup_url"],
         "expires_at": credentials.get("expires_at"),
@@ -185,6 +194,53 @@ class NativeIntegrationConnectAPIView(LoginRequiredMixin, View):
             provider = get_native_integration_provider(provider_key)
         except KeyError:
             return JsonResponse({"error": "Unknown native integration provider."}, status=404)
+
+        if provider.auth_type == "manual":
+            try:
+                body = request.body.decode("utf-8")
+            except UnicodeDecodeError:
+                return HttpResponseBadRequest("Invalid request body")
+
+            try:
+                payload = json.loads(body or "{}")
+            except json.JSONDecodeError:
+                return HttpResponseBadRequest("Invalid JSON body")
+            if not isinstance(payload, dict):
+                return HttpResponseBadRequest("Invalid JSON payload: expected an object")
+
+            credentials = payload.get("credentials") or {}
+            try:
+                _, owner_user, owner_org = _resolve_native_integration_owner(request)
+                secret = upsert_manual_native_integration_credentials(
+                    provider,
+                    owner_user,
+                    owner_org,
+                    credentials,
+                )
+                stored = load_native_integration_credentials(secret)
+                permission_summary = build_native_integration_permission_summary(provider, stored)
+            except ValidationError as exc:
+                return _validation_error_response(exc)
+            except PermissionDenied as exc:
+                return _permission_denied_response(exc)
+            except NativeIntegrationAuthError as exc:
+                return JsonResponse({"error": str(exc)}, status=400)
+
+            with transaction.atomic():
+                disable_overlapping_pipedream_tools_for_native_integration(provider.key, owner_user, owner_org)
+                if permission_summary["connected"]:
+                    trigger_agents_for_native_integration_change(provider.key, owner_user, owner_org)
+
+            return JsonResponse(
+                {
+                    "connected": bool(permission_summary["connected"]),
+                    "provider_key": provider.key,
+                    "secret_id": str(secret.id),
+                    "present_credential_fields": permission_summary["present_credential_fields"],
+                    "missing_credential_fields": permission_summary["missing_credential_fields"],
+                },
+                status=201,
+            )
 
         if provider.auth_type != "oauth2":
             return HttpResponseBadRequest("This provider does not use OAuth 2.0.")

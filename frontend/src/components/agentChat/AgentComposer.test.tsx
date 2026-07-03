@@ -55,6 +55,12 @@ vi.mock('./insights/DiscordInsightPanel', () => ({
   ),
 }))
 
+vi.mock('./insights/MetaAdsInsightPanel', () => ({
+  MetaAdsInsightPanel: () => (
+    <div data-testid="meta-ads-panel">Meta Ads panel</div>
+  ),
+}))
+
 vi.mock('./AgentIntelligenceSelector', () => ({
   AgentIntelligenceSelector: () => null,
 }))
@@ -596,6 +602,13 @@ describe('AgentComposer pending action insights panel', () => {
       panelTestId: 'discord-panel',
       enabledProps: { discordNativeTabEnabled: true },
       disabledProps: { discordNativeTabEnabled: false },
+    },
+    {
+      name: 'Meta Ads',
+      ariaLabel: 'View Meta Ads connection',
+      panelTestId: 'meta-ads-panel',
+      enabledProps: { metaAdsTabEnabled: true },
+      disabledProps: { metaAdsTabEnabled: false },
     },
   ] as const
 
