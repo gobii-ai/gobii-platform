@@ -4,10 +4,10 @@ from django.urls import reverse
 
 from api.models import Organization, UserBilling
 from api.services.dedicated_proxy_service import DedicatedProxyService, is_multi_assign_enabled
-from api.services.owner_execution_pause import get_owner_account_pause_state
 from billing.addons import AddonEntitlementService
 from billing.churnkey import build_churnkey_cancel_flow_config
 from config.plans import PLAN_CONFIG, get_plan_config
+from console.agent_addons import build_account_pause_payload
 from console.context_helpers import build_console_context
 from console.extra_tasks_settings import derive_extra_tasks_settings
 from console.org_billing_helpers import build_org_billing_overview
@@ -52,22 +52,6 @@ def _serialize_addon_context(addon_context: dict) -> dict[str, object]:
             "currency": totals.get("currency") or "",
             "amountDisplay": totals.get("amount_display") or "",
         },
-    }
-
-
-def _serialize_account_pause(owner, *, manage_billing_url: str | None = None) -> dict[str, object]:
-    state = get_owner_account_pause_state(owner)
-    customer_paused = bool(state.get("customer_paused"))
-    scheduled = bool(state.get("scheduled"))
-    resume_at = state.get("resume_at") if customer_paused else state.get("scheduled_resume_at")
-    effective_at = state.get("scheduled_effective_at") if scheduled else None
-    return {
-        "paused": customer_paused,
-        "scheduled": scheduled,
-        "reason": state.get("reason") if customer_paused else ("customer_account_pause" if scheduled else None),
-        "resumeAt": resume_at.isoformat() if resume_at else None,
-        "effectiveAt": effective_at.isoformat() if effective_at else None,
-        "manageBillingUrl": manage_billing_url if (customer_paused or scheduled) else None,
     }
 
 
@@ -302,7 +286,7 @@ def build_billing_initial_data(request) -> dict[str, object]:
         "periodEndDate": period_end_date,
         "cancelAt": cancel_at,
         "cancelAtPeriodEnd": cancel_at_period_end,
-        "accountPause": _serialize_account_pause(request.user),
+        "accountPause": build_account_pause_payload(request.user),
         "churnKey": churnkey_config,
         "addons": _serialize_addon_context(addon_context),
         "addonsDisabled": not paid_subscriber,

@@ -283,6 +283,31 @@ def _require_current_org_role(request, roles, message: str):
     return org, membership, None
 
 
+def _require_current_org_response(request):
+    try:
+        return _require_current_org(request)
+    except PermissionDenied as exc:
+        return None, None, _json_error(str(exc), status=404)
+
+
+def _require_template_manager(request):
+    org, membership, error = _require_current_org_response(request)
+    if error:
+        return org, membership, error
+    if membership.role not in MEMBER_MANAGE_ROLES:
+        return org, membership, _json_error("You do not have permission to manage templates.", status=403)
+    return org, membership, None
+
+
+def _require_member_manager(request):
+    org, membership, error = _require_current_org_response(request)
+    if error:
+        return org, membership, error
+    if membership.role not in MEMBER_MANAGE_ROLES:
+        return org, membership, _json_error("You do not have permission to manage members.", status=403)
+    return org, membership, None
+
+
 def _lock_organization(org: Organization) -> Organization:
     return Organization.objects.select_for_update().get(pk=org.pk)
 
@@ -392,20 +417,14 @@ class CurrentOrganizationAPIView(LoginRequiredMixin, View):
     http_method_names = ["get", "patch"]
 
     def get(self, request):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_response(request)
         if error:
             return error
         return JsonResponse(_serialize_organization(org, membership))
 
     @transaction.atomic
     def patch(self, request):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_response(request)
         if error:
             return error
 
@@ -479,10 +498,7 @@ class CurrentOrganizationTemplateAPIView(LoginRequiredMixin, View):
     http_method_names = ["get", "post"]
 
     def get(self, request):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_response(request)
         if error:
             return error
         return JsonResponse(_serialize_organization_templates(org, membership))
@@ -604,6 +620,8 @@ class CurrentOrganizationTemplateDetailAPIView(LoginRequiredMixin, View):
         org, membership, error = _require_current_org_role(request, MEMBER_MANAGE_ROLES, "You do not have permission to manage templates.")
         if error:
             return error
+        if membership.role not in MEMBER_MANAGE_ROLES:
+            return _json_error("You do not have permission to manage templates.", status=403)
 
         template = get_object_or_404(
             PersistentAgentTemplate.objects.select_related("preferred_llm_tier"),
@@ -621,10 +639,7 @@ class CurrentOrganizationTemplateLaunchAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, template_id):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_response(request)
         if error:
             return error
         if not user_role_can_create_org_agents(membership.role, org):
