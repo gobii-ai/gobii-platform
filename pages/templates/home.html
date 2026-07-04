@@ -46,6 +46,7 @@
       "sameAs": [
         "{{ settings.PUBLIC_GITHUB_URL|default:'https://github.com/gobii-ai' }}",
         {% if settings.PUBLIC_LINKEDIN_URL %}"{{ settings.PUBLIC_LINKEDIN_URL }}",{% endif %}
+        {% if settings.PUBLIC_HUGGINGFACE_URL %}"{{ settings.PUBLIC_HUGGINGFACE_URL }}",{% endif %}
         "{{ settings.PUBLIC_X_URL|default:'https://x.com/gobii_ai' }}"
       ]
     }
