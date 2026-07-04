@@ -1,38 +1,30 @@
-import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Bot, Building2, ChevronDown, Loader2, Plus, Sparkles } from 'lucide-react'
+import { useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { Bot, Building2, ChevronDown, Loader2, Plus } from 'lucide-react'
 import { Button, Dialog, Popover } from 'react-aria-components'
 
 import type { OrganizationTemplate } from '../../api/organization'
 import { joinClassNames } from './uiPrimitives'
 
-export type TeamTemplateCreateMenu = {
-  templates: OrganizationTemplate[]
-  isLoading: boolean
-  errorMessage?: string | null
-  launchErrorMessage?: string | null
-  canManageTemplates: boolean
-  launchBusyTemplateId?: string | null
-  onLaunchTemplate: (template: OrganizationTemplate) => void
-  onOpenTemplates: () => void
-}
+export type TeamTemplateCreateMenu = { templates: OrganizationTemplate[]; isLoading: boolean; errorMessage?: string | null; launchErrorMessage?: string | null; canManageTemplates: boolean; launchBusyTemplateId?: string | null; onLaunchTemplate: (template: OrganizationTemplate) => void; onOpenTemplates: () => void }
 
-type AgentCreateSplitButtonProps = {
-  variant: 'sidebar' | 'drawer' | 'gallery'
-  onCreateAgent: () => void
-  createAgentDisabled: boolean
-  createAgentButtonDisabled: boolean
-  createAgentDisabledReason?: string | null
-  menu: TeamTemplateCreateMenu
-  className?: string
-}
+type AgentCreateSplitButtonProps = { variant: 'sidebar' | 'drawer' | 'gallery'; onCreateAgent: () => void; createAgentDisabled: boolean; createAgentButtonDisabled: boolean; createAgentDisabledReason?: string | null; menu: TeamTemplateCreateMenu; className?: string }
 
 function templateDescription(template: OrganizationTemplate): string {
-  const tagline = template.tagline?.trim()
-  if (tagline) {
-    return tagline
-  }
-  const category = template.category?.trim()
-  return category || 'Team template'
+  return template.tagline?.trim() || template.category?.trim() || 'Team template'
+}
+
+type CreateMenuItemProps = ButtonHTMLAttributes<HTMLButtonElement> & { icon: ReactNode; label: ReactNode; description?: ReactNode }
+
+function CreateMenuItem({ icon, label, description, ...buttonProps }: CreateMenuItemProps) {
+  return (
+    <button type="button" className="sidebar-settings__link" {...buttonProps}>
+      {icon}
+      <span className="sidebar-settings__notification-copy">
+        <span className="sidebar-settings__notification-title">{label}</span>
+        {description ? <span className="sidebar-settings__notification-status">{description}</span> : null}
+      </span>
+    </button>
+  )
 }
 
 export function AgentCreateSplitButton({
@@ -52,26 +44,18 @@ export function AgentCreateSplitButton({
   const buttonClassName = variant === 'gallery'
     ? 'agent-gallery-create'
     : joinClassNames('chat-sidebar-create-btn', variant === 'drawer' && 'chat-sidebar-create-btn--drawer')
+  const disabledMenuItemProps: ButtonHTMLAttributes<HTMLButtonElement> = { disabled: menuCreateDisabled, 'aria-disabled': createAgentDisabled ? true : undefined, title: createAgentDisabledReason ?? undefined }
 
-  const closeMenu = useCallback(() => setOpen(false), [])
-
-  const handleBlankAgent = useCallback(() => {
-    if (menuCreateDisabled) {
-      return
+  const closeMenu = () => setOpen(false)
+  const handleBlankAgent = () => {
+    if (!menuCreateDisabled) {
+      closeMenu()
+      onCreateAgent()
     }
-    closeMenu()
-    onCreateAgent()
-  }, [closeMenu, menuCreateDisabled, onCreateAgent])
-
-  const handleOpenTemplates = useCallback(() => {
-    closeMenu()
-    menu.onOpenTemplates()
-  }, [closeMenu, menu])
-
-  const handleTemplateLaunch = useCallback((template: OrganizationTemplate) => {
-    if (menuCreateDisabled) {
-      return
-    }
+  }
+  const handleOpenTemplates = () => { closeMenu(); menu.onOpenTemplates() }
+  const handleTemplateLaunch = (template: OrganizationTemplate) => {
+    if (menuCreateDisabled) return
     if (createAgentDisabled) {
       closeMenu()
       onCreateAgent()
@@ -79,16 +63,7 @@ export function AgentCreateSplitButton({
     }
     closeMenu()
     menu.onLaunchTemplate(template)
-  }, [closeMenu, createAgentDisabled, menu, menuCreateDisabled, onCreateAgent])
-
-  const handleChevronPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!open) {
-      return
-    }
-    event.preventDefault()
-    event.stopPropagation()
-    setOpen(false)
-  }, [open])
+  }
 
   return (
     <div
@@ -107,10 +82,10 @@ export function AgentCreateSplitButton({
         aria-disabled={createAgentDisabled ? 'true' : undefined}
         title={createAgentDisabledReason ?? undefined}
       >
-        <span className={variant === 'gallery' ? 'agent-create-split__gallery-icon' : 'chat-sidebar-create-btn-icon'}>
+        <span className={variant === 'gallery' ? undefined : 'chat-sidebar-create-btn-icon'}>
           <Plus className="h-4 w-4" aria-hidden="true" />
         </span>
-        <span className={joinClassNames('agent-create-split__label', variant !== 'gallery' && 'chat-sidebar-create-btn-label')}>
+        <span className={variant !== 'gallery' ? 'chat-sidebar-create-btn-label' : undefined}>
           New Agent
         </span>
       </button>
@@ -118,7 +93,13 @@ export function AgentCreateSplitButton({
         className="agent-create-split__chevron"
         aria-label="Choose a team template"
         aria-expanded={open}
-        onPointerDownCapture={handleChevronPointerDownCapture}
+        onPointerDownCapture={(event) => {
+          if (open) {
+            event.preventDefault()
+            event.stopPropagation()
+            setOpen(false)
+          }
+        }}
         onPress={() => setOpen((current) => !current)}
       >
         <ChevronDown className="h-4 w-4" aria-hidden="true" />
@@ -131,30 +112,22 @@ export function AgentCreateSplitButton({
         placement="bottom"
         containerPadding={0}
         isNonModal
-        className="agent-create-menu-popover"
-        data-create-variant={variant}
-        data-variant={variant}
+        className="sidebar-settings__popover"
+        data-variant={variant === 'sidebar' ? 'sidebar' : 'drawer'}
+        data-collapsed="false"
       >
         <Dialog className="agent-create-menu sidebar-settings__menu" aria-label="Create agent menu">
-          <button
-            type="button"
-            className="agent-create-menu__item sidebar-settings__link"
+          <CreateMenuItem
+            icon={<Plus className="sidebar-settings__link-icon" aria-hidden="true" />}
+            label="Blank agent"
+            description="Start from a fresh charter."
             onClick={handleBlankAgent}
-            disabled={menuCreateDisabled}
-            aria-disabled={createAgentDisabled ? 'true' : undefined}
-            title={createAgentDisabledReason ?? undefined}
-          >
-            <Plus className="agent-create-menu__item-icon sidebar-settings__link-icon" aria-hidden="true" />
-            <span className="agent-create-menu__item-copy">
-              <span className="agent-create-menu__item-title">Blank agent</span>
-              <span className="agent-create-menu__item-description">Start from a fresh charter.</span>
-            </span>
-          </button>
+            {...disabledMenuItemProps}
+          />
           <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
 
-          <div className="agent-create-menu__section-label">
-            <Sparkles className="agent-create-menu__section-icon" aria-hidden="true" />
-            <span>Team templates</span>
+          <div className="sidebar-settings__identity">
+            <span className="sidebar-settings__identity-label">Team templates</span>
           </div>
 
           {menu.launchErrorMessage ? (
@@ -165,7 +138,7 @@ export function AgentCreateSplitButton({
 
           {menu.isLoading ? (
             <div className="agent-create-menu__state">
-              <Loader2 className="agent-create-menu__state-icon animate-spin" aria-hidden="true" />
+              <Loader2 className="sidebar-settings__link-icon animate-spin" aria-hidden="true" />
               <span>Loading templates...</span>
             </div>
           ) : menu.errorMessage ? (
@@ -173,48 +146,35 @@ export function AgentCreateSplitButton({
               {menu.errorMessage}
             </div>
           ) : menu.templates.length > 0 ? (
-            <div className="agent-create-menu__templates">
+            <div className="agent-create-menu__templates sidebar-settings__links">
               {menu.templates.map((template) => {
                 const launching = menu.launchBusyTemplateId === template.id
-                const disabled = menuCreateDisabled || launchBusy
                 return (
-                  <button
+                  <CreateMenuItem
                     key={template.id}
-                    type="button"
-                    className="agent-create-menu__item agent-create-menu__template sidebar-settings__link"
+                    icon={launching
+                      ? <Loader2 className="sidebar-settings__link-icon animate-spin" aria-hidden="true" />
+                      : <Bot className="sidebar-settings__link-icon" aria-hidden="true" />}
+                    label={template.name}
+                    description={templateDescription(template)}
                     onClick={() => handleTemplateLaunch(template)}
-                    disabled={disabled}
-                    aria-disabled={createAgentDisabled ? 'true' : undefined}
-                    title={createAgentDisabledReason ?? undefined}
-                  >
-                    {launching ? (
-                      <Loader2 className="agent-create-menu__item-icon sidebar-settings__link-icon animate-spin" aria-hidden="true" />
-                    ) : (
-                      <Bot className="agent-create-menu__item-icon sidebar-settings__link-icon" aria-hidden="true" />
-                    )}
-                    <span className="agent-create-menu__item-copy">
-                      <span className="agent-create-menu__item-title">{template.name}</span>
-                      <span className="agent-create-menu__item-description">{templateDescription(template)}</span>
-                    </span>
-                  </button>
+                    {...disabledMenuItemProps}
+                  />
                 )
               })}
             </div>
           ) : (
             <div className="agent-create-menu__empty">
-              <span className="agent-create-menu__empty-title">No team templates yet</span>
-              <span className="agent-create-menu__empty-copy">Create reusable starting points for this organization.</span>
+              <span className="sidebar-settings__notification-title">No team templates yet</span>
+              <span className="sidebar-settings__notification-status">Create reusable starting points for this organization.</span>
             </div>
           )}
 
-          <button
-            type="button"
-            className="agent-create-menu__footer sidebar-settings__link"
+          <CreateMenuItem
+            icon={<Building2 className="sidebar-settings__link-icon" aria-hidden="true" />}
+            label={footerLabel}
             onClick={handleOpenTemplates}
-          >
-            <Building2 className="agent-create-menu__footer-icon sidebar-settings__link-icon" aria-hidden="true" />
-            <span>{footerLabel}</span>
-          </button>
+          />
         </Dialog>
       </Popover>
     </div>

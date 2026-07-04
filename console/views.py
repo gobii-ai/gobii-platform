@@ -1307,9 +1307,11 @@ def _validate_churnkey_pause_duration(value: Any) -> int | None:
         duration = int(value)
     except (TypeError, ValueError):
         return None
-    if duration < 1 or duration > 3:
-        return None
-    return duration
+    return duration if 1 <= duration <= 3 else None
+
+
+def _billing_json_error(message: str, *, status: int = 400):
+    return JsonResponse({'success': False, 'error': message}, status=status)
 
 
 @login_required
@@ -1317,13 +1319,7 @@ def _validate_churnkey_pause_duration(value: Any) -> int | None:
 @tracer.start_as_current_span("BILLING Churnkey Pause Subscription")
 def churnkey_pause_subscription(request):
     if not stripe_status().enabled:
-        return JsonResponse(
-            {
-                'success': False,
-                'error': 'Stripe billing is not available in this deployment.',
-            },
-            status=404,
-        )
+        return _billing_json_error('Stripe billing is not available in this deployment.', status=404)
 
     try:
         payload = json.loads(request.body or "{}")
@@ -1331,67 +1327,43 @@ def churnkey_pause_subscription(request):
         payload = {}
 
     if not isinstance(payload, dict):
-        return JsonResponse(
-            {'success': False, 'error': 'subscriptionId and pauseDuration are required.'},
-            status=400,
-        )
+        return _billing_json_error('subscriptionId and pauseDuration are required.')
 
     subscription_id = str((payload.get("subscriptionId") or "")).strip()
     pause_duration = _validate_churnkey_pause_duration(payload.get("pauseDuration"))
     pause_interval = str(payload.get("pauseInterval") or "month").strip().lower()
     if not subscription_id:
-        return JsonResponse({'success': False, 'error': 'subscriptionId is required.'}, status=400)
+        return _billing_json_error('subscriptionId is required.')
     if pause_duration is None:
-        return JsonResponse({'success': False, 'error': 'pauseDuration must be between 1 and 3 months.'}, status=400)
+        return _billing_json_error('pauseDuration must be between 1 and 3 months.')
     if pause_interval != "month":
-        return JsonResponse({'success': False, 'error': 'Only month-based pauses are supported.'}, status=400)
+        return _billing_json_error('Only month-based pauses are supported.')
 
     customer = get_stripe_customer(request.user)
     if not customer or not getattr(customer, "id", None):
-        return JsonResponse(
-            {
-                'success': False,
-                'error': 'No Stripe customer is associated with this account.',
-            },
-            status=400,
-        )
+        return _billing_json_error('No Stripe customer is associated with this account.')
 
     try:
         _assign_stripe_api_key()
         subscription_payload = stripe.Subscription.retrieve(subscription_id)
     except stripe.error.StripeError:
-        return JsonResponse({'success': False, 'error': 'Error retrieving subscription.'}, status=500)
+        return _billing_json_error('Error retrieving subscription.', status=500)
 
     if _stripe_subscription_customer_id(subscription_payload) != str(customer.id):
-        return JsonResponse(
-            {'success': False, 'error': 'Subscription does not belong to the current account.'},
-            status=403,
-        )
+        return _billing_json_error('Subscription does not belong to the current account.', status=403)
 
     active_subscription = get_active_subscription(request.user, sync_with_stripe=True)
     active_subscription_id = getattr(active_subscription, "id", None)
     if not active_subscription_id or str(active_subscription_id) != subscription_id:
-        return JsonResponse(
-            {
-                'success': False,
-                'error': 'Subscription is not the current active billing subscription for this account.',
-            },
-            status=403,
-        )
+        return _billing_json_error('Subscription is not the current active billing subscription for this account.', status=403)
 
     subscription_status = str(_stripe_object_field(subscription_payload, "status") or "").strip().lower()
     if subscription_status not in {"active", "trialing"}:
-        return JsonResponse(
-            {'success': False, 'error': 'Only active subscriptions can be paused.'},
-            status=400,
-        )
+        return _billing_json_error('Only active subscriptions can be paused.')
 
     effective_at = _stripe_object_datetime(_stripe_object_field(subscription_payload, "current_period_end"))
     if effective_at is None:
-        return JsonResponse(
-            {'success': False, 'error': 'Unable to determine the current paid-through date.'},
-            status=400,
-        )
+        return _billing_json_error('Unable to determine the current paid-through date.')
     resume_at = effective_at + relativedelta(months=+pause_duration)
 
     try:
@@ -1403,7 +1375,7 @@ def churnkey_pause_subscription(request):
             },
         )
     except stripe.error.StripeError:
-        return JsonResponse({'success': False, 'error': 'Error scheduling subscription pause.'}, status=500)
+        return _billing_json_error('Error scheduling subscription pause.', status=500)
 
     _sync_subscription_after_direct_update(updated_subscription)
     schedule_customer_account_pause(
@@ -3556,8 +3528,7 @@ def _update_addon_quantity(
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
-    scheduled_pause_redirect = _scheduled_customer_pause_mutation_redirect(request, owner, owner_type)
-    if scheduled_pause_redirect is not None:
+    if scheduled_pause_redirect := _scheduled_customer_pause_mutation_redirect(request, owner, owner_type):
         return scheduled_pause_redirect
 
     form = AddonQuantityForm(request.POST, label=form_label)
@@ -3730,8 +3701,7 @@ def update_addons(request, owner, owner_type):
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
-    scheduled_pause_redirect = _scheduled_customer_pause_mutation_redirect(request, owner, owner_type)
-    if scheduled_pause_redirect is not None:
+    if scheduled_pause_redirect := _scheduled_customer_pause_mutation_redirect(request, owner, owner_type):
         return scheduled_pause_redirect
 
     desired_quantities: dict[str, int] = {}
@@ -3795,8 +3765,7 @@ def add_dedicated_ip_quantity(request, owner, owner_type):
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect(f'{IMMERSIVE_APP_BASE_PATH}/billing')
 
-    scheduled_pause_redirect = _scheduled_customer_pause_mutation_redirect(request, owner, owner_type)
-    if scheduled_pause_redirect is not None:
+    if scheduled_pause_redirect := _scheduled_customer_pause_mutation_redirect(request, owner, owner_type):
         return scheduled_pause_redirect
 
     owner_plan_id = None
@@ -3857,8 +3826,7 @@ def remove_dedicated_ip(request, owner, owner_type):
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect(f'{IMMERSIVE_APP_BASE_PATH}/billing')
 
-    scheduled_pause_redirect = _scheduled_customer_pause_mutation_redirect(request, owner, owner_type)
-    if scheduled_pause_redirect is not None:
+    if scheduled_pause_redirect := _scheduled_customer_pause_mutation_redirect(request, owner, owner_type):
         return scheduled_pause_redirect
 
     proxy_id = request.POST.get("proxy_id")
@@ -3902,8 +3870,7 @@ def remove_all_dedicated_ip(request, owner, owner_type):
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect(f'{IMMERSIVE_APP_BASE_PATH}/billing')
 
-    scheduled_pause_redirect = _scheduled_customer_pause_mutation_redirect(request, owner, owner_type)
-    if scheduled_pause_redirect is not None:
+    if scheduled_pause_redirect := _scheduled_customer_pause_mutation_redirect(request, owner, owner_type):
         return scheduled_pause_redirect
 
     from console.billing_update_service import (
