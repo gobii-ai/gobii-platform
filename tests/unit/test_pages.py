@@ -195,8 +195,14 @@ class HomePageTests(TestCase):
 
     def test_home_page_organization_schema_uses_configured_linkedin_url(self):
         linkedin_url = "https://www.linkedin.com/company/example-ai"
+        g2_url = "https://www.g2.com/products/gobii/reviews"
+        saashub_url = "https://www.saashub.com/gobii"
 
-        with override_settings(PUBLIC_LINKEDIN_URL=linkedin_url):
+        with override_settings(
+            PUBLIC_LINKEDIN_URL=linkedin_url,
+            PUBLIC_G2_URL=g2_url,
+            PUBLIC_SAASHUB_URL=saashub_url,
+        ):
             response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
@@ -212,11 +218,18 @@ class HomePageTests(TestCase):
         self.assertIn(linkedin_url, organization_schema["sameAs"])
         self.assertNotIn("https://www.linkedin.com/company/gobii-ai", organization_schema["sameAs"])
         self.assertIn("https://huggingface.co/gobii-ai", organization_schema["sameAs"])
-        self.assertIn("https://www.g2.com/products/gobii/reviews", organization_schema["sameAs"])
-        self.assertIn("https://www.saashub.com/gobii", organization_schema["sameAs"])
+        self.assertIn(g2_url, organization_schema["sameAs"])
+        self.assertIn(saashub_url, organization_schema["sameAs"])
 
     def test_home_page_organization_schema_omits_empty_linkedin_url(self):
-        with override_settings(PUBLIC_LINKEDIN_URL=""):
+        g2_url = "https://www.g2.com/products/gobii/reviews"
+        saashub_url = "https://www.saashub.com/gobii"
+
+        with override_settings(
+            PUBLIC_LINKEDIN_URL="",
+            PUBLIC_G2_URL=g2_url,
+            PUBLIC_SAASHUB_URL=saashub_url,
+        ):
             response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
@@ -231,8 +244,8 @@ class HomePageTests(TestCase):
 
         self.assertNotIn("https://www.linkedin.com/company/gobii-ai", organization_schema["sameAs"])
         self.assertIn("https://huggingface.co/gobii-ai", organization_schema["sameAs"])
-        self.assertIn("https://www.g2.com/products/gobii/reviews", organization_schema["sameAs"])
-        self.assertIn("https://www.saashub.com/gobii", organization_schema["sameAs"])
+        self.assertIn(g2_url, organization_schema["sameAs"])
+        self.assertIn(saashub_url, organization_schema["sameAs"])
 
     def test_home_page_organization_schema_omits_empty_huggingface_url(self):
         with override_settings(PUBLIC_HUGGINGFACE_URL=""):
