@@ -218,6 +218,7 @@ _COMMUNITY_DEFAULTS = {
         "PUBLIC_DISCORD_URL": "https://discord.gg/yyDB8GwxtE",
         "PUBLIC_X_URL": "https://x.com/gobii_ai",
         "PUBLIC_GITHUB_URL": "https://github.com/gobii-ai",
+        "PUBLIC_HUGGINGFACE_URL": "https://huggingface.co/gobii-ai",
     }
 }
 
@@ -338,6 +339,22 @@ PUBLIC_GITHUB_URL = env(
         "PUBLIC_GITHUB_URL",
         fallback=_community_default("brand", "PUBLIC_GITHUB_URL"),
     ),
+)
+PUBLIC_HUGGINGFACE_URL = env(
+    "PUBLIC_HUGGINGFACE_URL",
+    default=_proprietary_default(
+        "brand",
+        "PUBLIC_HUGGINGFACE_URL",
+        fallback=_community_default("brand", "PUBLIC_HUGGINGFACE_URL"),
+    ),
+)
+PUBLIC_G2_URL = env(
+    "PUBLIC_G2_URL",
+    default=_proprietary_default("brand", "PUBLIC_G2_URL"),
+)
+PUBLIC_SAASHUB_URL = env(
+    "PUBLIC_SAASHUB_URL",
+    default=_proprietary_default("brand", "PUBLIC_SAASHUB_URL"),
 )
 PUBLIC_DISCORD_URL = env(
     "PUBLIC_DISCORD_URL",
