@@ -58,11 +58,23 @@ class ProprietaryDefaultHelperTests(SimpleTestCase):
                 "PUBLIC_HUGGINGFACE_URL",
                 fallback="",
             )
+            g2 = settings_module._community_default(
+                "brand",
+                "PUBLIC_G2_URL",
+                fallback="",
+            )
+            saashub = settings_module._community_default(
+                "brand",
+                "PUBLIC_SAASHUB_URL",
+                fallback="",
+            )
 
         self.assertEqual(discord, "https://discord.gg/yyDB8GwxtE")
         self.assertEqual(x_url, "https://x.com/gobii_ai")
         self.assertEqual(github, "https://github.com/gobii-ai")
         self.assertEqual(huggingface, "https://huggingface.co/gobii-ai")
+        self.assertEqual(g2, "")
+        self.assertEqual(saashub, "")
 
     def test_returns_fallback_when_key_missing(self) -> None:
         defaults_map = {"brand": {}}

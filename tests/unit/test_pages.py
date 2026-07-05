@@ -212,6 +212,8 @@ class HomePageTests(TestCase):
         self.assertIn(linkedin_url, organization_schema["sameAs"])
         self.assertNotIn("https://www.linkedin.com/company/gobii-ai", organization_schema["sameAs"])
         self.assertIn("https://huggingface.co/gobii-ai", organization_schema["sameAs"])
+        self.assertIn("https://www.g2.com/products/gobii/reviews", organization_schema["sameAs"])
+        self.assertIn("https://www.saashub.com/gobii", organization_schema["sameAs"])
 
     def test_home_page_organization_schema_omits_empty_linkedin_url(self):
         with override_settings(PUBLIC_LINKEDIN_URL=""):
@@ -229,6 +231,8 @@ class HomePageTests(TestCase):
 
         self.assertNotIn("https://www.linkedin.com/company/gobii-ai", organization_schema["sameAs"])
         self.assertIn("https://huggingface.co/gobii-ai", organization_schema["sameAs"])
+        self.assertIn("https://www.g2.com/products/gobii/reviews", organization_schema["sameAs"])
+        self.assertIn("https://www.saashub.com/gobii", organization_schema["sameAs"])
 
     def test_home_page_organization_schema_omits_empty_huggingface_url(self):
         with override_settings(PUBLIC_HUGGINGFACE_URL=""):
@@ -245,6 +249,38 @@ class HomePageTests(TestCase):
         )
 
         self.assertNotIn("https://huggingface.co/gobii-ai", organization_schema["sameAs"])
+
+    def test_home_page_organization_schema_omits_empty_g2_url(self):
+        with override_settings(PUBLIC_G2_URL=""):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        schemas = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        organization_schema = next(
+            schema for schema in schemas if schema.get("@id", "").endswith("/#organization")
+        )
+
+        self.assertNotIn("https://www.g2.com/products/gobii/reviews", organization_schema["sameAs"])
+
+    def test_home_page_organization_schema_omits_empty_saashub_url(self):
+        with override_settings(PUBLIC_SAASHUB_URL=""):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        schemas = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        organization_schema = next(
+            schema for schema in schemas if schema.get("@id", "").endswith("/#organization")
+        )
+
+        self.assertNotIn("https://www.saashub.com/gobii", organization_schema["sameAs"])
 
     def test_home_page_charter_textarea_has_hidden_accessible_label(self):
         response = self.client.get("/")

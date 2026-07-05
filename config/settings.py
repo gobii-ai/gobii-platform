@@ -348,6 +348,14 @@ PUBLIC_HUGGINGFACE_URL = env(
         fallback=_community_default("brand", "PUBLIC_HUGGINGFACE_URL"),
     ),
 )
+PUBLIC_G2_URL = env(
+    "PUBLIC_G2_URL",
+    default=_proprietary_default("brand", "PUBLIC_G2_URL"),
+)
+PUBLIC_SAASHUB_URL = env(
+    "PUBLIC_SAASHUB_URL",
+    default=_proprietary_default("brand", "PUBLIC_SAASHUB_URL"),
+)
 PUBLIC_DISCORD_URL = env(
     "PUBLIC_DISCORD_URL",
     default=_proprietary_default(
