@@ -170,6 +170,7 @@ from console.agent_chat.access import (
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG
+from waffle import flag_is_active
 
 def _format_validation_error(error: ValidationError) -> str:
     if hasattr(error, "message_dict") and error.message_dict:
