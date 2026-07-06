@@ -1366,6 +1366,67 @@ class PublicTemplateRouteTests(TestCase):
         self.assertEqual(response["Location"], "/library/finance/canonical-finance-template/")
 
     @tag("batch_public_templates")
+    def test_legacy_template_detail_redirects_to_canonical_library_path(self):
+        user = get_user_model().objects.create_user(
+            username="legacy-template-owner",
+            email="legacy-template-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle="bright-glade")
+        PersistentAgentTemplate.objects.create(
+            code="automated-lead-prospector-code",
+            public_profile=public_profile,
+            slug="automated-lead-prospector",
+            display_name="Automated Lead Prospector",
+            tagline="Find qualified leads.",
+            description="Find qualified leads.",
+            charter="Find qualified leads.",
+            category="Sales",
+            is_active=True,
+        )
+
+        response = self.client.get("/bright-glade/automated-lead-prospector/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/library/sales/automated-lead-prospector/")
+
+    @tag("batch_public_templates")
+    def test_legacy_template_detail_redirects_using_historical_handle_alias(self):
+        user = get_user_model().objects.create_user(
+            username="renamed-template-owner",
+            email="renamed-template-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle="lucid-voyage")
+        template = PersistentAgentTemplate.objects.create(
+            code="renewable-energy-market-analyst-code",
+            public_profile=public_profile,
+            slug="renewable-energy-market-analyst",
+            display_name="Renewable Energy Market Analyst",
+            tagline="Track renewable energy markets.",
+            description="Track renewable energy markets.",
+            charter="Track renewable energy markets.",
+            category="Research",
+            is_active=True,
+        )
+        PersistentAgentTemplateUrlAlias.objects.create(
+            template=template,
+            handle="gentle-isle",
+            slug="renewable-energy-market-analyst",
+        )
+
+        response = self.client.get("/gentle-isle/renewable-energy-market-analyst/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/library/research/renewable-energy-market-analyst/")
+
+    @tag("batch_public_templates")
+    def test_unknown_legacy_template_path_still_returns_404(self):
+        response = self.client.get("/bright-glade/not-a-template/")
+
+        self.assertEqual(response.status_code, 404)
+
+    @tag("batch_public_templates")
     def test_organization_template_requires_matching_organization(self):
         owner = get_user_model().objects.create_user(username="org-template-owner", email="org-template-owner@example.com", password="pw")
         org = Organization.objects.create(name="Template Org", slug="template-org", created_by=owner)
