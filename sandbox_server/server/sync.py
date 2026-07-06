@@ -25,6 +25,7 @@ from sandbox_server.workspace import (
     _resolve_local_checksum,
     _safe_url_for_log,
     _trace_context,
+    _workspace_root_git_worktree_prefixes,
     _workspace_size_bytes,
 )
 
@@ -205,7 +206,12 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             uploaded_bytes += len(content)
 
         deleted = manifest.get("deleted", {})
-        tracked = {rel for rel in manifest.get("files", {}).keys() if not is_filespace_sync_ignored_path(rel)}
+        ignored_prefixes = _workspace_root_git_worktree_prefixes(agent_root)
+        tracked = {
+            rel for rel in manifest.get("files", {}).keys()
+            if not is_filespace_sync_ignored_path(rel)
+            and not any(rel == prefix or rel.startswith(f"{prefix}/") for prefix in ignored_prefixes)
+        }
         for rel in sorted(tracked - seen_paths):
             deleted_at = time.time()
             if since is not None and deleted_at <= since:

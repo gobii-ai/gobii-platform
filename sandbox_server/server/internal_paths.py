@@ -27,10 +27,7 @@ FILESYSTEM_SYNC_IGNORED_NAMES = {
     ".turbo",
     ".venv",
     "__pycache__",
-    "build",
-    "dist",
     "node_modules",
-    "target",
     "venv",
 }
 

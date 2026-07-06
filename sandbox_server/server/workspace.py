@@ -163,6 +163,9 @@ def _iter_workspace_files(agent_root: Path) -> Iterable[Path]:
         root_path = Path(root)
         if ".gobii" in root_path.parts:
             continue
+        if root_path != agent_root and root_path.joinpath(".git").exists():
+            dirs[:] = []
+            continue
         dirs[:] = [
             name
             for name in dirs
@@ -179,6 +182,23 @@ def _iter_workspace_files(agent_root: Path) -> Iterable[Path]:
             ):
                 continue
             yield path
+
+
+def _workspace_root_git_worktree_prefixes(agent_root: Path) -> set[str]:
+    try:
+        children = list(agent_root.iterdir())
+    except OSError:
+        return set()
+
+    prefixes: set[str] = set()
+    for child in children:
+        try:
+            is_git_worktree = child.is_dir() and child.joinpath(".git").exists()
+        except OSError:
+            continue
+        if is_git_worktree:
+            prefixes.add(f"/{child.name}")
+    return prefixes
 
 
 def _decode_content(change: Dict[str, Any]) -> Optional[bytes]:

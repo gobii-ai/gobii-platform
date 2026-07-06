@@ -36,6 +36,9 @@ class SandboxRepoWorkdirTests(TestCase):
             "/.scratch/tmp/notes.txt",
             "/plain-repo/.git/HEAD",
             "/node_modules/pkg/index.js",
+            "/dist/index.html",
+            "/reports/build/summary.txt",
+            "/target/out.txt",
             "/reports/out.txt",
         ):
             result = write_bytes_to_dir(
@@ -51,7 +54,15 @@ class SandboxRepoWorkdirTests(TestCase):
         manifest = build_filespace_pull_manifest(self.agent)
 
         self.assertEqual(manifest["status"], "ok")
-        self.assertEqual([entry["path"] for entry in manifest["files"]], ["/reports/out.txt"])
+        self.assertEqual(
+            sorted(entry["path"] for entry in manifest["files"]),
+            [
+                "/dist/index.html",
+                "/reports/build/summary.txt",
+                "/reports/out.txt",
+                "/target/out.txt",
+            ],
+        )
 
     def test_apply_filespace_push_ignores_repo_workdir_and_heavy_dirs(self):
         result = apply_filespace_push(
@@ -61,17 +72,23 @@ class SandboxRepoWorkdirTests(TestCase):
                 {"path": "/.scratch/tmp/notes.txt", "content": "scratch", "mime_type": "text/plain"},
                 {"path": "/plain-repo/.git/HEAD", "content": "ref: refs/heads/main\n", "mime_type": "text/plain"},
                 {"path": "/node_modules/pkg/index.js", "content": "pkg", "mime_type": "text/plain"},
+                {"path": "/dist/index.html", "content": "dist", "mime_type": "text/html"},
+                {"path": "/reports/build/summary.txt", "content": "build", "mime_type": "text/plain"},
+                {"path": "/target/out.txt", "content": "target", "mime_type": "text/plain"},
                 {"path": "/reports/out.txt", "content": "ok", "mime_type": "text/plain"},
             ],
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["created"], 4)
         self.assertEqual(result["skipped"], 4)
         self.assertFalse(AgentFsNode.objects.filter(path="/.scratch/repos/repo/file.py").exists())
         self.assertFalse(AgentFsNode.objects.filter(path="/.scratch/tmp/notes.txt").exists())
         self.assertFalse(AgentFsNode.objects.filter(path="/plain-repo/.git/HEAD").exists())
         self.assertFalse(AgentFsNode.objects.filter(path="/node_modules/pkg/index.js").exists())
+        self.assertTrue(AgentFsNode.objects.filter(path="/dist/index.html").exists())
+        self.assertTrue(AgentFsNode.objects.filter(path="/reports/build/summary.txt").exists())
+        self.assertTrue(AgentFsNode.objects.filter(path="/target/out.txt").exists())
         self.assertTrue(AgentFsNode.objects.filter(path="/reports/out.txt").exists())
 
     def test_run_command_tool_description_mentions_repo_workdir(self):
