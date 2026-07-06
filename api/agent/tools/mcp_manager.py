@@ -954,8 +954,8 @@ class MCPToolManager:
                 prefer_cache=False,
                 sandbox_context=sandbox_context,
             )
-        except (ValueError, RuntimeError):
-            logger.exception("Failed to discover MCP tools for %s", config_id)
+        except (ValueError, RuntimeError, OSError, TimeoutError, httpx.HTTPError, ToolError) as exc:
+            logger.warning("MCP discovery failed for %s: %s", config_id, exc)
             return False
         return True
 

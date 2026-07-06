@@ -5,6 +5,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -221,6 +222,48 @@ class MCPServerCrudAPITests(TestCase):
         self.assertFalse(props["has_command"])
         self.assertTrue(props["is_active"])
         self.assertIsNone(track_kwargs.get("organization"))
+
+    @patch("api.services.mcp_tool_discovery.SandboxComputeService")
+    @patch("api.services.mcp_tool_discovery.sandbox_compute_enabled", return_value=True)
+    @patch("console.api_views._track_org_event_for_console")
+    @patch("console.api_views.get_mcp_manager")
+    def test_create_server_succeeds_when_inline_discovery_is_unauthorized(
+        self,
+        mock_get_mcp_manager,
+        mock_track_event,
+        _mock_schedule_enabled,
+        mock_sandbox_service,
+    ):
+        request = httpx.Request("GET", "https://api.example.com/mcp")
+        response = httpx.Response(401, request=request)
+        mock_sandbox_service.return_value.discover_mcp_tools.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=request,
+            response=response,
+        )
+
+        response = self.client.post(
+            reverse("console-mcp-server-list"),
+            data=json.dumps({
+                "display_name": "HTTP Server",
+                "url": "https://api.example.com/mcp",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
+                "is_active": True,
+                "headers": {},
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        server = MCPServerConfig.objects.get()
+        self.assertEqual(server.display_name, "HTTP Server")
+        mock_sandbox_service.return_value.discover_mcp_tools.assert_called_once_with(
+            str(server.id),
+            reason="config_changed",
+            agent=None,
+        )
+        mock_get_mcp_manager.return_value.refresh_server.assert_called_once_with(str(server.id))
+        mock_track_event.assert_called_once()
 
     @patch("console.api_views._track_org_event_for_console")
     @patch("console.api_views.get_mcp_manager")

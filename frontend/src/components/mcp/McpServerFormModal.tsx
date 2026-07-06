@@ -11,6 +11,7 @@ import {
   type McpServerPayload,
 } from '../../api/mcp'
 import { HttpError } from '../../api/http'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { useMcpOAuth } from '../../hooks/useMcpOAuth'
 import { Modal } from '../common/Modal'
 import { ModalForm } from '../common/ModalForm'
@@ -1014,18 +1015,7 @@ function isErrorBody(payload: unknown): payload is { errors?: FormErrors; messag
 }
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof HttpError) {
-    if (typeof error.body === 'string' && error.body) {
-      return error.body
-    }
-    if (typeof error.statusText === 'string' && error.statusText) {
-      return error.statusText
-    }
-  }
-  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
-    return (error as { message: string }).message
-  }
-  return fallback
+  return safeErrorMessage(error, fallback)
 }
 
 function extractBearerToken(value: string): string | null {
