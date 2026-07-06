@@ -29,6 +29,10 @@ from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+    GOBII_REPO_WORKDIR_ENV,
+    GOBII_SCRATCH_DIR_ENV,
+    REPO_WORKDIR_WORKSPACE_PATH,
+    SCRATCH_DIR_WORKSPACE_PATH,
     sandbox_workspace_root_for_agent,
 )
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
@@ -159,7 +163,11 @@ def _no_proxy_value() -> str:
 def _allowed_env_keys() -> set[str]:
     keys = getattr(settings, "SANDBOX_COMPUTE_ALLOWED_ENV_KEYS", None)
     if isinstance(keys, (list, tuple, set)):
-        return {str(key) for key in keys if str(key)}
+        return {
+            str(key)
+            for key in (*keys, GOBII_SCRATCH_DIR_ENV, GOBII_REPO_WORKDIR_ENV)
+            if str(key)
+        }
     return {
         "PATH",
         "HOME",
@@ -176,7 +184,22 @@ def _allowed_env_keys() -> set[str]:
         "SSL_CERT_DIR",
         "PYTHONUNBUFFERED",
         "PYTHONIOENCODING",
+        GOBII_SCRATCH_DIR_ENV,
+        GOBII_REPO_WORKDIR_ENV,
     }
+
+
+def _ensure_writable_dir(path: str, fallback: str) -> str:
+    for candidate in (path, fallback):
+        if not candidate:
+            continue
+        try:
+            os.makedirs(candidate, exist_ok=True)
+        except OSError:
+            continue
+        if os.access(candidate, os.W_OK | os.X_OK):
+            return candidate
+    return fallback
 
 
 def _sanitize_env(
@@ -192,6 +215,15 @@ def _sanitize_env(
             key_str = str(key)
             if key_str in allowed or key_str.startswith("SANDBOX_") or key_str in trusted:
                 env[str(key)] = str(value)
+    scratch_dir = _ensure_writable_dir(
+        env.get(GOBII_SCRATCH_DIR_ENV, SCRATCH_DIR_WORKSPACE_PATH),
+        os.path.join(tempfile.gettempdir(), "gobii", "scratch"),
+    )
+    env[GOBII_SCRATCH_DIR_ENV] = scratch_dir
+    env[GOBII_REPO_WORKDIR_ENV] = _ensure_writable_dir(
+        env.get(GOBII_REPO_WORKDIR_ENV, os.path.join(scratch_dir, "repos")),
+        os.path.join(scratch_dir, "repos"),
+    )
     return env
 
 

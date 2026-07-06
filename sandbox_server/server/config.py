@@ -4,6 +4,12 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 
+from sandbox_server.server.internal_paths import (
+    GOBII_REPO_WORKDIR_ENV,
+    GOBII_SCRATCH_DIR_ENV,
+    SCRATCH_DIR_NAME,
+)
+
 _DEFAULT_ALLOWED_ENV_KEYS = {
     "PATH",
     "HOME",
@@ -26,6 +32,8 @@ _DEFAULT_ALLOWED_ENV_KEYS = {
     "NPM_CONFIG_CACHE",
     "npm_config_cache",
     "PIP_CACHE_DIR",
+    GOBII_SCRATCH_DIR_ENV,
+    GOBII_REPO_WORKDIR_ENV,
 }
 
 _PROXY_ENV_KEYS = {
@@ -118,6 +126,16 @@ def _sandbox_env(
 
     if _should_replace_runtime_path(env.get("PIP_CACHE_DIR", ""), generic_defaults=("/tmp/.cache/pip",)):
         env["PIP_CACHE_DIR"] = str(runtime_paths["pip"])
+    if isinstance(agent_root, Path):
+        scratch_dir = agent_root / SCRATCH_DIR_NAME
+        repo_workdir = scratch_dir / "repos"
+        try:
+            scratch_dir.mkdir(parents=True, exist_ok=True)
+            repo_workdir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        env[GOBII_SCRATCH_DIR_ENV] = str(scratch_dir)
+        env[GOBII_REPO_WORKDIR_ENV] = str(repo_workdir)
     if extra_env:
         for key, value in extra_env.items():
             if key in allowed or key.startswith("SANDBOX_") or key in trusted:

@@ -9,7 +9,7 @@ import requests
 
 from sandbox_server.config import _agent_workspace, _workspace_max_bytes
 from sandbox_server.manifest import _load_manifest, _proxy_env_from_manifest, _save_manifest, _store_proxy_env
-from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
+from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH, is_filespace_sync_ignored_path
 from sandbox_server.workspace import (
     _checksum_bytes,
     _decode_content,
@@ -25,6 +25,7 @@ from sandbox_server.workspace import (
     _resolve_local_checksum,
     _safe_url_for_log,
     _trace_context,
+    _workspace_root_git_worktree_prefixes,
     _workspace_size_bytes,
 )
 
@@ -205,7 +206,12 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             uploaded_bytes += len(content)
 
         deleted = manifest.get("deleted", {})
-        tracked = set(manifest.get("files", {}).keys())
+        ignored_prefixes = _workspace_root_git_worktree_prefixes(agent_root)
+        tracked = {
+            rel for rel in manifest.get("files", {}).keys()
+            if not is_filespace_sync_ignored_path(rel)
+            and not any(rel == prefix or rel.startswith(f"{prefix}/") for prefix in ignored_prefixes)
+        }
         for rel in sorted(tracked - seen_paths):
             deleted_at = time.time()
             if since is not None and deleted_at <= since:
@@ -262,6 +268,9 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             path = entry.get("path")
             full_path, normalized = _normalize_workspace_path(agent_root, path)
             if full_path is None or not normalized:
+                continue
+            if is_filespace_sync_ignored_path(normalized):
+                skipped += 1
                 continue
             is_custom_tool_sqlite = normalized == CUSTOM_TOOL_SQLITE_FILESPACE_PATH
             entry_updated_at = _parse_entry_updated_at(entry)

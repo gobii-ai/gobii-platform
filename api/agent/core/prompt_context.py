@@ -2761,6 +2761,9 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         "or MCP/API fan-out work; use `search_tools` only if create_custom_tool is missing. "
         "Gobii tool arguments use filespace paths like `/tools/foo.py`; shell commands use workspace paths like "
         "`tools/foo.py` or `/workspace/tools/foo.py`. "
+        "Use `$GOBII_SCRATCH_DIR` for temporary working files that should not sync into agent filespace and may disappear when sandbox state resets. "
+        "For repository work, clone repos under `$GOBII_REPO_WORKDIR` (for example "
+        "`git clone <url> $GOBII_REPO_WORKDIR/repo-name`). "
         "Only env-var secrets reach sandboxed code via `os.environ`; request them with "
         "`secure_credentials_request(secret_type='env_var')`."
     )

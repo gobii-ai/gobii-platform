@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 from urllib.parse import urlsplit
 
 from sandbox_server.config import _TRACEPARENT_HEADER, _TRACEPARENT_PARTS, _TRACE_ID_HEX_LEN, _workspace_max_bytes
+from sandbox_server.server.internal_paths import FILESYSTEM_SYNC_IGNORED_NAMES, SCRATCH_DIR_NAME
 
 
 def _parse_since(value: Any) -> Optional[float]:
@@ -162,11 +163,42 @@ def _iter_workspace_files(agent_root: Path) -> Iterable[Path]:
         root_path = Path(root)
         if ".gobii" in root_path.parts:
             continue
+        if root_path != agent_root and root_path.joinpath(".git").exists():
+            dirs[:] = []
+            continue
+        dirs[:] = [
+            name
+            for name in dirs
+            if name not in FILESYSTEM_SYNC_IGNORED_NAMES
+            and not (root_path == agent_root and name == SCRATCH_DIR_NAME)
+        ]
         for name in files:
             path = root_path / name
-            if ".gobii" in path.parts:
+            relative_parts = path.relative_to(agent_root).parts
+            if (
+                ".gobii" in path.parts
+                or (relative_parts and relative_parts[0] == SCRATCH_DIR_NAME)
+                or any(part in FILESYSTEM_SYNC_IGNORED_NAMES for part in relative_parts)
+            ):
                 continue
             yield path
+
+
+def _workspace_root_git_worktree_prefixes(agent_root: Path) -> set[str]:
+    try:
+        children = list(agent_root.iterdir())
+    except OSError:
+        return set()
+
+    prefixes: set[str] = set()
+    for child in children:
+        try:
+            is_git_worktree = child.is_dir() and child.joinpath(".git").exists()
+        except OSError:
+            continue
+        if is_git_worktree:
+            prefixes.add(f"/{child.name}")
+    return prefixes
 
 
 def _decode_content(change: Dict[str, Any]) -> Optional[bytes]:

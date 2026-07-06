@@ -478,6 +478,10 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("apply_patch", definition.tool_names)
         self.assertIn("run_command", definition.tool_names)
         self.assertIn("git status --short", definition.prompt_instructions)
+        self.assertIn("$GOBII_SCRATCH_DIR", definition.prompt_instructions)
+        self.assertIn("Scratch files do not sync into agent filespace", definition.prompt_instructions)
+        self.assertIn("$GOBII_REPO_WORKDIR", definition.prompt_instructions)
+        self.assertIn("Do not clone repos directly under `/workspace`", definition.prompt_instructions)
         self.assertNotIn("search_tools", definition.prompt_instructions)
 
     @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True)

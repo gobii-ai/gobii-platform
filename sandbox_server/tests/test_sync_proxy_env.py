@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
 from sandbox_server.sync import _download_file, _handle_sync_filespace
+from sandbox_server.workspace import _workspace_size_bytes
 
 
 class SyncProxyEnvTests(unittest.TestCase):
@@ -214,6 +215,156 @@ class SyncProxyEnvTests(unittest.TestCase):
         self.assertEqual(change["content_b64"], "c3FsaXRlIGJ5dGVz")
         self.assertEqual(change["mime_type"], "application/vnd.sqlite3")
         self.assertEqual(change["checksum_sha256"], sha256(b"sqlite bytes").hexdigest())
+
+    def test_handle_sync_filespace_push_skips_ignored_paths(self):
+        payload = {
+            "agent_id": "agent-1",
+            "direction": "push",
+        }
+
+        with TemporaryDirectory() as tmp_dir:
+            agent_root = Path(tmp_dir).resolve()
+            agent_root.joinpath(".scratch", "repos", "repo").mkdir(parents=True)
+            agent_root.joinpath(".scratch", "repos", "repo", "tracked.py").write_text("repo", encoding="utf-8")
+            agent_root.joinpath(".scratch", "tmp").mkdir(parents=True)
+            agent_root.joinpath(".scratch", "tmp", "notes.txt").write_text("scratch", encoding="utf-8")
+            agent_root.joinpath("plain-repo", ".git").mkdir(parents=True)
+            agent_root.joinpath("plain-repo", ".git", "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+            agent_root.joinpath("plain-repo", "README.md").write_text("repo", encoding="utf-8")
+            agent_root.joinpath("node_modules", "pkg").mkdir(parents=True)
+            agent_root.joinpath("node_modules", "pkg", "index.js").write_text("pkg", encoding="utf-8")
+            agent_root.joinpath("dist").mkdir()
+            agent_root.joinpath("dist", "index.html").write_text("dist", encoding="utf-8")
+            agent_root.joinpath("reports").mkdir()
+            agent_root.joinpath("reports", "build").mkdir(parents=True)
+            agent_root.joinpath("reports", "build", "summary.txt").write_text("build", encoding="utf-8")
+            agent_root.joinpath("target").mkdir()
+            agent_root.joinpath("target", "out.txt").write_text("target", encoding="utf-8")
+            agent_root.joinpath("reports", "out.txt").write_text("ok", encoding="utf-8")
+
+            with patch("sandbox_server.sync._agent_workspace", return_value=agent_root), patch(
+                "sandbox_server.sync._store_proxy_env",
+                return_value=False,
+            ), patch(
+                "sandbox_server.sync._proxy_env_from_manifest",
+                return_value=None,
+            ), patch(
+                "sandbox_server.sync._load_manifest",
+                return_value={"files": {}, "deleted": {}},
+            ), patch(
+                "sandbox_server.sync._save_manifest"
+            ):
+                result = _handle_sync_filespace(payload)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(
+            sorted(change["path"] for change in result["changes"]),
+            [
+                "/dist/index.html",
+                "/reports/build/summary.txt",
+                "/reports/out.txt",
+                "/target/out.txt",
+            ],
+        )
+
+    def test_handle_sync_filespace_push_does_not_delete_ignored_manifest_paths(self):
+        payload = {
+            "agent_id": "agent-1",
+            "direction": "push",
+        }
+
+        with TemporaryDirectory() as tmp_dir:
+            agent_root = Path(tmp_dir).resolve()
+            agent_root.joinpath("plain-repo", ".git").mkdir(parents=True)
+            agent_root.joinpath("plain-repo", "README.md").write_text("repo", encoding="utf-8")
+            manifest = {
+                "files": {
+                    "/.scratch/repos/repo/file.py": {"mtime": 1, "size": 1},
+                    "/.scratch/tmp/notes.txt": {"mtime": 1, "size": 1},
+                    "/plain-repo/.git/HEAD": {"mtime": 1, "size": 1},
+                    "/plain-repo/README.md": {"mtime": 1, "size": 1},
+                    "/node_modules/pkg/index.js": {"mtime": 1, "size": 1},
+                    "/old.txt": {"mtime": 1, "size": 1},
+                },
+                "deleted": {},
+            }
+            with patch("sandbox_server.sync._agent_workspace", return_value=agent_root), patch(
+                "sandbox_server.sync._store_proxy_env",
+                return_value=False,
+            ), patch(
+                "sandbox_server.sync._proxy_env_from_manifest",
+                return_value=None,
+            ), patch(
+                "sandbox_server.sync._load_manifest",
+                return_value=manifest,
+            ), patch(
+                "sandbox_server.sync._save_manifest"
+            ):
+                result = _handle_sync_filespace(payload)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["changes"], [{"path": "/old.txt", "is_deleted": True}])
+
+    def test_handle_sync_filespace_pull_skips_ignored_paths(self):
+        payload = {
+            "agent_id": "agent-1",
+            "direction": "pull",
+            "files": [
+                {"path": "/.scratch/repos/repo/file.py", "content": "repo"},
+                {"path": "/.scratch/tmp/notes.txt", "content": "scratch"},
+                {"path": "/plain-repo/.git/HEAD", "content": "ref: refs/heads/main\n"},
+                {"path": "/node_modules/pkg/index.js", "content": "pkg"},
+                {"path": "/reports/out.txt", "content": "ok"},
+            ],
+        }
+
+        with TemporaryDirectory() as tmp_dir:
+            agent_root = Path(tmp_dir).resolve()
+            with patch("sandbox_server.sync._agent_workspace", return_value=agent_root), patch(
+                "sandbox_server.sync._store_proxy_env",
+                return_value=False,
+            ), patch(
+                "sandbox_server.sync._proxy_env_from_manifest",
+                return_value=None,
+            ), patch(
+                "sandbox_server.sync._load_manifest",
+                return_value={"files": {}, "deleted": {}},
+            ), patch(
+                "sandbox_server.sync._save_manifest"
+            ):
+                result = _handle_sync_filespace(payload)
+                repo_file_exists = agent_root.joinpath(".scratch", "repos", "repo", "file.py").exists()
+                scratch_file_exists = agent_root.joinpath(".scratch", "tmp", "notes.txt").exists()
+                git_file_exists = agent_root.joinpath("plain-repo", ".git", "HEAD").exists()
+                package_file_exists = agent_root.joinpath("node_modules", "pkg", "index.js").exists()
+                report_file_exists = agent_root.joinpath("reports", "out.txt").exists()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(repo_file_exists)
+        self.assertFalse(scratch_file_exists)
+        self.assertFalse(git_file_exists)
+        self.assertFalse(package_file_exists)
+        self.assertTrue(report_file_exists)
+
+    def test_workspace_size_ignores_repo_workdir_and_heavy_dirs(self):
+        with TemporaryDirectory() as tmp_dir:
+            agent_root = Path(tmp_dir).resolve()
+            agent_root.joinpath(".scratch", "repos", "repo").mkdir(parents=True)
+            agent_root.joinpath(".scratch", "repos", "repo", "big.bin").write_bytes(b"x" * 20)
+            agent_root.joinpath(".scratch", "tmp").mkdir(parents=True)
+            agent_root.joinpath(".scratch", "tmp", "notes.txt").write_bytes(b"x" * 12)
+            agent_root.joinpath("plain-repo", ".git").mkdir(parents=True)
+            agent_root.joinpath("plain-repo", ".git", "HEAD").write_bytes(b"x" * 15)
+            agent_root.joinpath("plain-repo", "README.md").write_bytes(b"x" * 30)
+            agent_root.joinpath("node_modules").mkdir()
+            agent_root.joinpath("node_modules", "pkg.js").write_bytes(b"x" * 10)
+            agent_root.joinpath("dist").mkdir()
+            agent_root.joinpath("dist", "index.html").write_bytes(b"x" * 4)
+            agent_root.joinpath("keep.txt").write_bytes(b"ok")
+
+            size = _workspace_size_bytes(agent_root)
+
+        self.assertEqual(size, 6)
 
     def test_handle_sync_filespace_push_requested_internal_paths_bypass_since_filter(self):
         payload = {

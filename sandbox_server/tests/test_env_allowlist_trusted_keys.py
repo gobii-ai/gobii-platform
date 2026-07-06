@@ -33,6 +33,8 @@ class EnvAllowlistTrustedKeysTests(unittest.TestCase):
 
         self.assertEqual(env.get("POSTGRES_CONNECTION_STRING"), "postgres://example")
         self.assertEqual(env.get("UV_PROJECT_ENVIRONMENT"), "/tmp/workspace/.gobii/uv-project-env")
+        self.assertEqual(env.get("GOBII_SCRATCH_DIR"), "/tmp/workspace/.scratch")
+        self.assertEqual(env.get("GOBII_REPO_WORKDIR"), "/tmp/workspace/.scratch/repos")
 
     def test_run_command_forwards_trusted_env_keys(self):
         payload = {
