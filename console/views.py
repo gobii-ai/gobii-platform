@@ -101,10 +101,8 @@ from console.daily_credit import (
     parse_daily_credit_limit,
     serialize_daily_credit_payload,
 )
-from console.home_metrics import get_console_home_metrics
 from console.role_constants import BILLING_MANAGE_ROLES
 from api.models import (
-    ApiKey,
     UserBilling,
     BrowserUseAgent,
     ProxyServer,
@@ -127,12 +125,10 @@ from console.mixins import AgentOwnerContextOverrideMixin, ConsoleViewMixin, Str
 from pages.account_info_cache import invalidate_account_info_cache
 
 from .context_helpers import build_console_context
-from tasks.services import TaskCreditService
 from billing.addons import AddonEntitlementService
 from util.payments_helper import PaymentsHelper
 from util.integrations import (
     IntegrationDisabledError,
-    pipedream_status,
     stripe_status,
 )
 from util.onboarding import (
@@ -146,9 +142,6 @@ from util.personal_signup_preview import (
 from util.subscription_helper import (
     reconcile_user_plan_from_stripe,
     get_active_subscription,
-    allow_user_extra_tasks,
-    calculate_extra_tasks_used_during_subscription_period,
-    get_user_extra_task_limit,
     get_stripe_customer,
     get_organization_plan,
     get_user_max_contacts_per_agent,
@@ -178,7 +171,6 @@ from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG
 from waffle import flag_is_active
-from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
 
 def _format_validation_error(error: ValidationError) -> str:
     if hasattr(error, "message_dict") and error.message_dict:
@@ -762,96 +754,6 @@ def _apply_subscribe_success_context(request, context: dict, plan_id: str | None
     context["subscribe_event_id"] = ""
     context["subscribe_plan"] = ""
 
-
-class ConsoleHome(ConsoleViewMixin, TemplateView):
-    """Dashboard homepage for the console."""
-    template_name = "index.html"
-
-    @tracer.start_as_current_span("CONSOLE Home")
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-
-        current_ctx = context.get('current_context', {}) or {}
-
-        if current_ctx.get('type') != 'organization':
-            # Get the oldest non-revoked API key that has a raw key value
-            default_key = ApiKey.objects.filter(
-                user=self.request.user,
-                revoked_at__isnull=True,
-                raw_key__isnull=False
-            ).exclude(
-                raw_key=""
-            ).order_by('created_at').first()
-
-            if default_key and default_key.raw_key:
-                context['default_api_key'] = default_key.raw_key
-                context['has_api_key'] = True
-            else:
-                context['has_api_key'] = False
-        else:
-            context['has_api_key'] = False
-
-        pending_transfers_qs = AgentTransferInvite.objects.filter(
-            status=AgentTransferInvite.Status.PENDING,
-        ).filter(
-            Q(to_user=self.request.user) | Q(to_user__isnull=True, to_email__iexact=self.request.user.email)
-        ).select_related('agent', 'agent__user')
-
-        pending_transfers: list[AgentTransferInvite] = list(pending_transfers_qs)
-        if pending_transfers:
-            unsassigned_ids = [invite.id for invite in pending_transfers if invite.to_user_id is None]
-            if unsassigned_ids:
-                AgentTransferInvite.objects.filter(id__in=unsassigned_ids).update(to_user=self.request.user)
-                for invite in pending_transfers:
-                    if invite.id in unsassigned_ids:
-                        invite.to_user = self.request.user
-            context['pending_agent_transfer_invites'] = pending_transfers
-
-        context.update(
-            get_console_home_metrics(
-                self.request,
-                current_ctx,
-                context.get("current_membership"),
-            )
-        )
-
-        # Get the user's subscription plan (defaults to 'free' if not set)
-        context['subscription_plan'] = reconcile_user_plan_from_stripe(self.request.user)
-
-        # Get number of available tasks
-        context['available_tasks'] = TaskCreditService.calculate_available_tasks(self.request.user)
-
-        context['addl_tasks_enabled'] = allow_user_extra_tasks(self.request.user)
-        context['addl_tasks_used'] = calculate_extra_tasks_used_during_subscription_period(self.request.user)
-        context['addl_tasks_max'] = get_user_extra_task_limit(self.request.user)
-        context['addl_tasks_unlimited'] = context['addl_tasks_max'] == -1  # -1 indicates unlimited tasks
-        context['addl_tasks_remaining'] = context['addl_tasks_max'] - context['addl_tasks_used']
-
-        # If enabled but not unlimited calculate percent. else 0
-        if context['addl_tasks_enabled'] and not context['addl_tasks_unlimited']:
-            context['addl_tasks_percent'] = min(max((context['addl_tasks_used'] / context['addl_tasks_max'] * 100), 0), 100)
-        else:
-            context['addl_tasks_percent'] = 0
-
-        _apply_subscribe_success_context(self.request, context)
-
-
-        # Get the user's active subscription
-        sub = get_active_subscription(self.request.user)
-        context['subscription'] = sub
-        context['paid_subscriber'] = sub is not None
-
-        if sub:
-            start = sub.stripe_data['current_period_start']
-            end = sub.stripe_data['current_period_end']
-
-            dt_start = datetime.fromtimestamp(int(start), tz=dt_timezone.utc)
-            dt_end = datetime.fromtimestamp(int(end), tz=dt_timezone.utc)
-
-            context['period_start_date'] = dt_start.strftime("%B %d, %Y")
-            context['period_end_date'] = dt_end.strftime("%B %d, %Y")
-
-        return context
 
 class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):
     """Open the Stripe billing portal for personal subscriptions."""
@@ -1659,67 +1561,6 @@ class StaffAgentAuditView(SystemAdminRequiredMixin, TemplateView):
         agent = get_object_or_404(PersistentAgent, pk=agent_id)
         context["agent"] = agent
         context["admin_agent_url"] = reverse("admin:api_persistentagent_change", args=[agent.id])
-        return context
-
-
-class ConsoleOwnerScopeMixin:
-    """Shared owner resolution logic for owner-scoped console management views."""
-
-    owner_scope: str | None = None
-    owner_user = None
-    owner_org = None
-
-    def dispatch(self, request, *args, **kwargs):
-        self.owner_scope, self.owner_user, self.owner_org = self._resolve_owner()
-        return super().dispatch(request, *args, **kwargs)
-
-    def _resolve_owner(self):
-        context = build_console_context(self.request)
-        if context.current_context.type == 'organization':
-            membership = context.current_membership
-            if membership is None or not context.can_manage_org_agents:
-                raise PermissionDenied("You do not have permission to manage organization resources.")
-            return ('organization', None, membership.org)
-        return ('user', self.request.user, None)
-
-    def get_mcp_servers_queryset(self):
-        if self.owner_scope == 'organization':
-            return MCPServerConfig.objects.filter(
-                scope=MCPServerConfig.Scope.ORGANIZATION,
-                organization=self.owner_org,
-            ).order_by('display_name')
-        return MCPServerConfig.objects.filter(
-            scope=MCPServerConfig.Scope.USER,
-            user=self.owner_user,
-        ).order_by('display_name')
-
-    def get_owner_label(self):
-        if self.owner_scope == 'organization' and self.owner_org:
-            return self.owner_org.name
-        return self.request.user.get_full_name() or self.request.user.username
-
-
-class MCPServerManagementView(ConsoleOwnerScopeMixin, ConsoleViewMixin, TemplateView):
-    template_name = "console/mcp_servers.html"
-
-    def dispatch(self, request, *args, **kwargs):
-        return super().dispatch(request, *args, **kwargs)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        placeholder_id = "00000000-0000-0000-0000-000000000000"
-        context.update(
-            {
-                'owner_scope': self.owner_scope,
-                'owner_label': self.get_owner_label(),
-                'allow_mcp_commands': flag_is_active(self.request, SANDBOX_COMPUTE_WAFFLE_FLAG),
-                'pipedream_integrations_enabled': pipedream_status().enabled,
-                'mcp_server_list_url': reverse('console-mcp-server-list'),
-                'mcp_server_detail_url_template': reverse('console-mcp-server-detail', args=[placeholder_id]),
-                'mcp_server_assign_url_template': reverse('console-mcp-server-assignments', args=[placeholder_id]),
-                'mcp_server_test_url_template': reverse('console-mcp-server-test', args=[placeholder_id]),
-            }
-        )
         return context
 
 
@@ -2860,12 +2701,12 @@ class AgentTransferInviteRespondView(LoginRequiredMixin, View):
 
         if invite.status != AgentTransferInvite.Status.PENDING:
             messages.info(request, "This transfer invite has already been handled.")
-            return redirect('console-home')
+            return redirect(IMMERSIVE_APP_BASE_PATH)
 
         user_email = (request.user.email or "").lower()
         if not user_email or invite.to_email.lower() != user_email:
             messages.error(request, "This transfer invite is not addressed to your account.")
-            return redirect('console-home')
+            return redirect(IMMERSIVE_APP_BASE_PATH)
 
         original_owner = invite.initiated_by
         original_owner_email = getattr(original_owner, "email", "") or ""
@@ -2947,7 +2788,7 @@ class AgentTransferInviteRespondView(LoginRequiredMixin, View):
         except AgentTransferError as exc:
             messages.error(request, f"Could not process the transfer invite: {exc}")
 
-        return redirect('console-home')
+        return redirect(IMMERSIVE_APP_BASE_PATH)
 
 
 class AgentAllowlistInviteAcceptView(TemplateView):

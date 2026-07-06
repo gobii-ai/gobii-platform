@@ -13,7 +13,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from django.conf import settings
 from django.db.models import F
-from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from opentelemetry import trace
 
@@ -66,19 +65,7 @@ def _has_active_pipedream_runtime() -> bool:
     ).exists()
 
 
-def _build_console_url(route_name: str) -> str:
-    app_route_paths = {
-        "console-mcp-servers": "/app/integrations",
-    }
-    if route_name in app_route_paths:
-        path = app_route_paths[route_name]
-    else:
-        try:
-            path = reverse(route_name)
-        except NoReverseMatch:
-            logger.debug("search_tools: failed to reverse route %s", route_name, exc_info=True)
-            return ""
-
+def _build_app_url(path: str) -> str:
     base_url = (getattr(settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
     if base_url:
         return f"{base_url}{path}"
@@ -865,7 +852,7 @@ def _search_with_llm(
     global_skill_lines = _build_global_skill_lines(global_skills)
     system_skill_lines = _build_system_skill_lines(system_skills)
     app_lines = _build_app_lines(app_catalog, enabled_app_slugs=enabled_app_slugs)
-    enable_apps_manually_url = _build_console_url("console-mcp-servers")
+    enable_apps_manually_url = _build_app_url("/app/integrations")
     manual_app_guidance = (
         f'If a needed Pipedream app is not enabled yet and you require it, tell the user to go to "Add Apps" here: '
         f"{enable_apps_manually_url} and search for the exact app slug.\n"

@@ -229,13 +229,11 @@ from console.usage_views import (
 from console.insight_views import AgentInsightsAPIView
 from console.legacy_redirects import LegacyConsoleRedirectView
 from console.views import (
-    ConsoleHome,
     BillingPortalView,
     ConsoleStatusView,
     LegacyConsoleStatusRedirectView,
     SystemSettingsView,
     ConsoleLLMConfigView,
-    MCPServerManagementView,
     PlatformMCPServerManagementView,
     MCPOAuthCallbackPageView,
     AgentEmailOAuthCallbackPageView,
@@ -351,7 +349,6 @@ urlpatterns = [
     path("system-settings/", SystemSettingsView.as_view(), name="system-settings"),
 
     # console
-    path("console/", ConsoleHome.as_view(), name="console-home"),
     path("staff/status/", ConsoleStatusView.as_view(), name="console-status"),
     path("console/status/", LegacyConsoleStatusRedirectView.as_view(), name="console-status-legacy"),
     path("staff/mcp/", PlatformMCPServerManagementView.as_view(), name="staff-platform-mcp"),
@@ -361,7 +358,6 @@ urlpatterns = [
     path("console/usage/", LegacyConsoleRedirectView.as_view(), name="usage"),
     path("console/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditView.as_view(), name="console-agent-audit"),
     path("console/secrets/", LegacyConsoleRedirectView.as_view(), name="console-secrets"),
-    path("console/advanced/mcp-servers/", MCPServerManagementView.as_view(), name="console-mcp-servers"),
     path("console/mcp/oauth/callback/", MCPOAuthCallbackPageView.as_view(), name="console-mcp-oauth-callback-view"),
     path(
         "console/email/oauth/callback/",

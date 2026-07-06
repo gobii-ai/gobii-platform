@@ -55,25 +55,25 @@ class PipedreamJitConnectRedirectTests(TestCase):
         self.assertIn('/accounts/login/', response.url)
         self.assertIn(f'next={url}', response.url)
 
-    def test_nonexistent_agent_redirects_to_console(self):
-        """Request for a non-existent agent should redirect to console."""
+    def test_nonexistent_agent_redirects_to_app(self):
+        """Request for a non-existent agent should redirect to the app."""
         self.client.login(username="jit@example.com", password="testpass123")
         fake_agent_id = uuid_module.uuid4()
         url = self._get_url(fake_agent_id, "google_sheets")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/console/')
+        self.assertEqual(response.url, '/app')
 
-    def test_agent_not_owned_by_user_redirects_to_console(self):
-        """User without access should be redirected to console."""
+    def test_agent_not_owned_by_user_redirects_to_app(self):
+        """User without access should be redirected to the app."""
         self.client.login(username="other@example.com", password="testpass123")
         url = self._get_url(self.agent.id, "google_sheets")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/console/')
+        self.assertEqual(response.url, '/app')
 
-    def test_expired_agent_redirects_to_console(self):
-        """Expired agents should redirect to console."""
+    def test_expired_agent_redirects_to_app(self):
+        """Expired agents should redirect to the app."""
         self.client.login(username="jit@example.com", password="testpass123")
         # Mark agent as expired
         self.agent.life_state = PersistentAgent.LifeState.EXPIRED
@@ -82,7 +82,7 @@ class PipedreamJitConnectRedirectTests(TestCase):
         url = self._get_url(self.agent.id, "google_sheets")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/console/')
+        self.assertEqual(response.url, '/app')
 
     @override_settings(PIPEDREAM_CLIENT_ID='', PIPEDREAM_CLIENT_SECRET='', PIPEDREAM_PROJECT_ID='')
     def test_pipedream_not_configured_shows_info_page(self):
@@ -198,7 +198,7 @@ class PipedreamJitConnectRedirectTests(TestCase):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/console/')
+        self.assertEqual(response.url, '/app')
 
     @patch("api.integrations.pipedream_connect.create_connect_session")
     def test_different_app_slugs(self, mock_create_session):

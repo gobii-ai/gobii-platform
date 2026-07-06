@@ -362,8 +362,10 @@ class LegacyConsolePageRedirectTests(TestCase):
 
     @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=False)
     def test_legacy_console_redirect_view_honors_disabled_setting(self):
+        root_response = self.client.get("/console/")
         response = self.client.get("/console/billing/")
 
+        self.assertEqual(root_response.status_code, 404)
         self.assertEqual(response.status_code, 404)
 
     def test_authenticated_console_pages_redirect_to_app_equivalents(self):
@@ -390,7 +392,6 @@ class LegacyConsolePageRedirectTests(TestCase):
             "/console/usage/": "/app/usage",
             "/console/api-keys/": "/app/api-keys",
             "/console/secrets/": "/app/secrets",
-            "/console/advanced/mcp-servers/": "/app/integrations",
             "/console/organizations/": "/app/team",
             "/console/organizations/add/": "/app/team",
         }

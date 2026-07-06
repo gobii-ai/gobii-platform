@@ -63,7 +63,6 @@ _CONSOLE_PAGE_REDIRECTS = {
     "/console/usage/": "/app/usage",
     "/console/api-keys/": "/app/api-keys",
     "/console/secrets/": "/app/secrets",
-    "/console/advanced/mcp-servers/": "/app/integrations",
     "/console/organizations/": "/app/team",
     "/console/organizations/add/": "/app/team",
 }

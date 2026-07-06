@@ -6,7 +6,7 @@ register = template.Library()
 def nav_active(context, *url_names):
     """
     Return Tailwind classes if the current view’s url_name matches any supplied.
-    Usage:  class="{{ nav_active 'console-home' 'marketing-home' }}"
+    Usage:  class="{{ nav_active 'marketing-home' 'pricing' }}"
     """
     current = context.request.resolver_match.url_name
     return (
