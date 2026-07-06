@@ -1,0 +1,118 @@
+---
+title: "Building Effective Agents (and Teams of Agents)"
+sidebar_label: "Building Effective Agents"
+description: "Learn how to design, scope, and connect Gobii agents — from single-agent best practices to multi-agent teams that collaborate through peer linking."
+---
+
+Building a great Gobii agent starts with a clear goal and a well-defined scope. Whether you're creating a single research assistant or a team of specialized agents that pass work between each other, the same principles apply: give agents focused instructions, the right tools, and clear boundaries.
+
+## Designing a Single Agent
+
+### Start with a Clear Purpose
+
+Every agent should have one primary job. Instead of creating a single agent that tries to "handle everything," create focused agents:
+
+| ❌ Too Broad | ✅ Focused |
+|---|---|
+| "Monitor competitors and send reports and also manage billing" | "Monitor competitor pricing changes and alert when prices drop" |
+| "Research topics and reply to customer emails and track shipments" | "Research industry trends and compile weekly briefings" |
+
+When an agent has too broad of a scope, it uses more credits on context switching, makes more mistakes, and is harder to debug.
+
+### Write Great Instructions
+
+Your agent's instructions (its system prompt) are the most important factor in its performance.
+
+**Do:**
+- Use clear, direct language: "Send a daily summary of trending topics to the team Slack channel."
+- Include specific output formats: "Format results as a Markdown table with columns: Topic, Source, Relevance."
+- Set boundaries: "Only research topics related to artificial intelligence and machine learning."
+- Describe edge cases: "If no new results are found, skip today's report — don't send an empty message."
+
+**Don't:**
+- Use vague language: "Keep me updated on stuff."
+- Give multiple unrelated responsibilities.
+- Forget to specify what _not_ to do.
+
+### Set the Right Intelligence Level
+
+Gobii offers five intelligence tiers that directly affect credit consumption:
+
+| Tier | Multiplier | Per-Task Cost (0.15 base) | Best For |
+|---|---|---|---|
+| Standard | 1× | 0.15 credits | Simple lookups, monitoring, routine data collection |
+| Premium | 2× | 0.30 credits | Research synthesis, multi-step analysis |
+| Max | 3× | 0.45 credits | Complex reasoning, code review, detailed reports |
+| Ultra | 8× | 1.20 credits | Deep analysis, large-context tasks |
+| Ultra Max | 15× | 2.25 credits | Maximum reasoning, complex multi-step agent coordination |
+
+Use the Standard tier for scheduled monitoring tasks and simple data gathering. Reserve Ultra and Ultra Max for complex, one-off analysis where deep reasoning matters.
+
+### Set a Daily Credit Budget
+
+Every agent has a configurable daily soft limit. Gobii aims to stay within this budget and only slightly exceeds it when the agent is near completion of a task. A hard limit (derived from your soft limit — 2× by default) stops the agent entirely for the day.
+
+- **Start low** — give new agents a conservative budget (e.g., 10–20 credits/day)
+- **Monitor usage** — check the Usage dashboard to see actual consumption
+- **Adjust up** — increase the budget only when you see the agent hitting its limit productively
+
+## Building Teams of Agents
+
+When your workflow involves multiple steps or domains, consider splitting work across several specialized agents connected via [peer linking](./peer-linking.mdx).
+
+### When to Use Multiple Agents
+
+| Use a Single Agent When... | Use Multiple Agents When... |
+|---|---|
+| The task is straightforward and linear | Work spans distinct domains (e.g., research → drafting → review) |
+| A single instruction set covers everything | Each step needs different tools or permissions |
+| You want the simplest possible setup | You need parallel work streams |
+| Latency isn't critical | Each subtask is deep enough to justify its own agent |
+
+### The Research → Draft → Review Pattern
+
+A common multi-agent setup follows a pipeline:
+
+```
+┌────────────┐     ┌────────────┐     ┌────────────┐
+│  Research  │ ──▶ │   Writer   │ ──▶ │  Reviewer  │
+│  Agent     │     │  Agent     │     │  Agent     │
+│            │     │            │     │            │
+│ Gathers    │     │ Synthesizes│     │ Fact-      │
+│ sources &  │     │ findings   │     │ checks &   │
+│ data       │     │ into draft │     │ edits      │
+└────────────┘     └────────────┘     └────────────┘
+```
+
+Each agent has:
+- A focused instruction set
+- Different tools (research uses web search; writer uses email/docs)
+- A peer link to pass results to the next agent in the chain
+
+### Design Your Agent Team
+
+1. **Map the workflow** — List the distinct steps from start to finish
+2. **Assign one agent per step** — Each agent owns one responsibility
+3. **Define handoffs** — What does each agent pass to the next? (e.g., "After researching, send a summary to the Writer agent")
+4. **Set the trigger** — Usually the first agent runs on a schedule; downstream agents run when they receive input from the previous agent
+5. **Test the chain** — Start with a manual trigger and verify each link before enabling the full schedule
+
+### Avoid Common Pitfalls
+
+- **Circular workflows** — Don't create a loop where Agent A passes work to Agent B, which passes work back to Agent A. This burns credits without progress.
+- **Overlapping schedules** — If two agents independently monitor the same source, they'll duplicate work. Assign clear boundaries.
+- **Competing for contacts** — When multiple agents share a contact (e.g., all sending to the same Slack channel), use templates to ensure consistent formatting and avoid conflicting messages.
+
+## Using Templates for Consistency
+
+Gobii's [template library](./template-library.mdx) lets you create reusable agent configurations. Templates are especially useful for teams:
+
+- **Standardize agent patterns** — Create a "Research Agent" template that anyone in your org can instantiate
+- **Share across workspaces** — Publish templates so teams maintain consistent agent designs
+- **Iterate on proven setups** — When you find a great agent configuration, save it as a template
+
+## Next Steps
+
+- Explore [Peer Linking](./peer-linking.mdx) to connect your agents into teams
+- Learn about [Planning and Deliverables](./planning-and-deliverables.mdx) to understand how agents show their work
+- Check [Usage, Credits, and Limits](/using-gobii/usage-credits-and-limits) for broader guidance on platform budgets, caps, and operational limits
