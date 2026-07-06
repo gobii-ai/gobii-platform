@@ -133,7 +133,7 @@ export function FileTable({
             }}
             onChange={table.getToggleAllRowsSelectedHandler()}
             className={selectionInputClassName}
-            aria-label="Select all files"
+            aria-label="Select all items"
           />
         ),
         cell: ({ row }) => (
@@ -204,24 +204,36 @@ export function FileTable({
           const node = row.original
           if (node.nodeType === 'dir') {
             return (
-              <label
-                htmlFor={uploadInputId}
-                role="button"
-                tabIndex={isBusy ? -1 : 0}
-                aria-disabled={isBusy}
-                className={folderUploadButtonClassName}
-                onPointerDown={(event) => {
-                  if (isBusy) {
-                    event.preventDefault()
-                    return
-                  }
-                  onRequestUpload(node.id)
-                }}
-                onKeyDown={(event) => handleUploadKeyDown(node.id, event)}
-              >
-                <UploadCloud className="h-3.5 w-3.5" />
-                Upload here
-              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <label
+                  htmlFor={uploadInputId}
+                  role="button"
+                  tabIndex={isBusy ? -1 : 0}
+                  aria-disabled={isBusy}
+                  className={folderUploadButtonClassName}
+                  onPointerDown={(event) => {
+                    if (isBusy) {
+                      event.preventDefault()
+                      return
+                    }
+                    onRequestUpload(node.id)
+                  }}
+                  onKeyDown={(event) => handleUploadKeyDown(node.id, event)}
+                >
+                  <UploadCloud className="h-3.5 w-3.5" />
+                  Upload here
+                </label>
+                {canManage && (
+                  <button
+                    type="button"
+                    className={deleteButtonClassName}
+                    onClick={() => onDeleteNode(node)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </button>
+                )}
+              </div>
             )
           }
 
@@ -260,7 +272,7 @@ export function FileTable({
     onRowSelectionChange,
     getCoreRowModel: getCoreRowModel(),
     getRowId: (row) => row.id,
-    enableRowSelection: canManage ? (row) => row.original.nodeType === 'file' : false,
+    enableRowSelection: canManage,
   })
 
   return (

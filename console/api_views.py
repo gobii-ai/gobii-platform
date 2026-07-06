@@ -4990,18 +4990,23 @@ class AgentFsNodeBulkDeleteAPIView(LoginRequiredMixin, View):
             return HttpResponseBadRequest("node_ids must be a non-empty list")
 
         filespace = get_or_create_default_filespace(agent)
-        nodes = (
+        nodes = list(
             AgentFsNode.objects.alive()
             .filter(
                 filespace=filespace,
                 id__in=node_ids,
-                node_type=AgentFsNode.NodeType.FILE,
             )
+            .order_by("path")
         )
 
         deleted = 0
-        for node in nodes:
+        deleted_prefixes: list[str] = []
+        for node in sorted(nodes, key=lambda item: item.path.count("/")):
+            if any(node.path == prefix or node.path.startswith(f"{prefix}/") for prefix in deleted_prefixes):
+                continue
             deleted += node.trash_subtree()
+            if node.node_type == AgentFsNode.NodeType.DIR:
+                deleted_prefixes.append(node.path.rstrip("/"))
 
         try:
             Analytics.track_event(

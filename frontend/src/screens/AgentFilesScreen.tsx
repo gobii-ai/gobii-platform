@@ -243,6 +243,11 @@ export function AgentFilesScreen({
     return Object.keys(rowSelection).filter((key) => rowSelection[key])
   }, [rowSelection])
   const selectedRows = selectedNodes.length
+  const selectedNodeRecords = useMemo(() => {
+    return selectedNodes
+      .map((nodeId) => nodeMap.get(nodeId))
+      .filter((node): node is AgentFsNode => Boolean(node))
+  }, [nodeMap, selectedNodes])
 
   const handleBulkDelete = useCallback(async () => {
     if (!canManage) {
@@ -251,7 +256,12 @@ export function AgentFilesScreen({
     if (!selectedNodes.length) {
       return
     }
-    const confirmed = window.confirm(`Delete ${selectedNodes.length} file${selectedNodes.length === 1 ? '' : 's'}?`)
+    const hasFolder = selectedNodeRecords.some((node) => node.nodeType === 'dir')
+    const confirmed = window.confirm(
+      hasFolder
+        ? `Delete ${selectedNodes.length} selected item${selectedNodes.length === 1 ? '' : 's'}? Folders and their contents will also be deleted.`
+        : `Delete ${selectedNodes.length} file${selectedNodes.length === 1 ? '' : 's'}?`,
+    )
     if (!confirmed) {
       return
     }
@@ -260,13 +270,17 @@ export function AgentFilesScreen({
     } catch {
       // Errors are surfaced via mutation callbacks.
     }
-  }, [canManage, deleteMutation, selectedNodes])
+  }, [canManage, deleteMutation, selectedNodeRecords, selectedNodes])
 
   const handleSingleDelete = useCallback(async (node: AgentFsNode) => {
     if (!canManage) {
       return
     }
-    const confirmed = window.confirm(`Delete ${node.name}?`)
+    const confirmed = window.confirm(
+      node.nodeType === 'dir'
+        ? `Delete folder "${node.name}" and all contents?`
+        : `Delete "${node.name}"?`,
+    )
     if (!confirmed) {
       return
     }
