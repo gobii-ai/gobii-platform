@@ -31,6 +31,12 @@ from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
     sandbox_workspace_root_for_agent,
 )
+from api.services.sandbox_sync_policy import (
+    GOBII_REPO_WORKDIR_ENV,
+    GOBII_SCRATCH_DIR_ENV,
+    REPO_WORKDIR_WORKSPACE_PATH,
+    SCRATCH_DIR_WORKSPACE_PATH,
+)
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from config.redis_client import get_redis_client
@@ -176,6 +182,8 @@ def _allowed_env_keys() -> set[str]:
         "SSL_CERT_DIR",
         "PYTHONUNBUFFERED",
         "PYTHONIOENCODING",
+        GOBII_SCRATCH_DIR_ENV,
+        GOBII_REPO_WORKDIR_ENV,
     }
 
 
@@ -187,6 +195,8 @@ def _sanitize_env(
     trusted = {str(key) for key in (trusted_env_keys or []) if isinstance(key, str) and key.strip()}
     env = {key: value for key, value in os.environ.items() if key in allowed}
     env.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+    env.setdefault(GOBII_SCRATCH_DIR_ENV, SCRATCH_DIR_WORKSPACE_PATH)
+    env.setdefault(GOBII_REPO_WORKDIR_ENV, REPO_WORKDIR_WORKSPACE_PATH)
     if extra_env:
         for key, value in extra_env.items():
             key_str = str(key)

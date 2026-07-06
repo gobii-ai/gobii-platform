@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 from urllib.parse import urlsplit
 
 from sandbox_server.config import _TRACEPARENT_HEADER, _TRACEPARENT_PARTS, _TRACE_ID_HEX_LEN, _workspace_max_bytes
+from sandbox_server.server.sync_policy import is_ignored_workspace_path, should_prune_workspace_dir
 
 
 def _parse_since(value: Any) -> Optional[float]:
@@ -162,9 +163,12 @@ def _iter_workspace_files(agent_root: Path) -> Iterable[Path]:
         root_path = Path(root)
         if ".gobii" in root_path.parts:
             continue
+        dirs[:] = [name for name in dirs if not should_prune_workspace_dir(agent_root, root_path / name)]
         for name in files:
             path = root_path / name
             if ".gobii" in path.parts:
+                continue
+            if is_ignored_workspace_path(agent_root, path):
                 continue
             yield path
 
