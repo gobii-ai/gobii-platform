@@ -19,7 +19,7 @@ from django.utils import timezone
 from waffle.testutils import override_flag, override_switch
 
 from api.agent.files.attachment_helpers import resolve_filespace_attachments
-from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.agent.comms.imap_adapter import ImapEmailAdapter
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
@@ -885,6 +885,132 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"nodes": []})
         self.assertEqual(AgentFileSpaceAccess.objects.filter(agent=self.agent).count(), access_count)
+
+    @tag("batch_agent_chat")
+    def test_agent_files_delete_file_still_soft_deletes_file(self):
+        write_bytes_to_dir(
+            self.agent,
+            b"hello",
+            "/reports/summary.txt",
+            "text/plain",
+        )
+        node = AgentFsNode.objects.get(path="/reports/summary.txt")
+
+        response = self.client.post(
+            reverse("console_agent_fs_delete", kwargs={"agent_id": self.agent.id}),
+            data=json.dumps({"nodeIds": [str(node.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"deleted": 1})
+        node.refresh_from_db()
+        self.assertTrue(node.is_deleted)
+
+    @tag("batch_agent_chat")
+    def test_agent_files_delete_empty_folder_soft_deletes_folder(self):
+        filespace = get_or_create_default_filespace(self.agent)
+        folder = AgentFsNode.objects.create(
+            filespace=filespace,
+            parent=None,
+            node_type=AgentFsNode.NodeType.DIR,
+            name="empty",
+        )
+
+        response = self.client.post(
+            reverse("console_agent_fs_delete", kwargs={"agent_id": self.agent.id}),
+            data=json.dumps({"nodeIds": [str(folder.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"deleted": 1})
+        folder.refresh_from_db()
+        self.assertTrue(folder.is_deleted)
+
+    @tag("batch_agent_chat")
+    def test_agent_files_delete_folder_soft_deletes_subtree(self):
+        write_bytes_to_dir(
+            self.agent,
+            b"notes",
+            "/docs/notes.txt",
+            "text/plain",
+        )
+        write_bytes_to_dir(
+            self.agent,
+            b"report",
+            "/docs/sub/report.txt",
+            "text/plain",
+        )
+        folder = AgentFsNode.objects.get(path="/docs")
+
+        response = self.client.post(
+            reverse("console_agent_fs_delete", kwargs={"agent_id": self.agent.id}),
+            data=json.dumps({"nodeIds": [str(folder.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"deleted": 4})
+        self.assertFalse(AgentFsNode.objects.alive().filter(path__startswith="/docs").exists())
+
+    @tag("batch_agent_chat")
+    def test_agent_files_delete_folder_and_child_does_not_double_count(self):
+        write_bytes_to_dir(
+            self.agent,
+            b"notes",
+            "/docs/notes.txt",
+            "text/plain",
+        )
+        write_bytes_to_dir(
+            self.agent,
+            b"report",
+            "/docs/sub/report.txt",
+            "text/plain",
+        )
+        folder = AgentFsNode.objects.get(path="/docs")
+        child = AgentFsNode.objects.get(path="/docs/sub/report.txt")
+
+        response = self.client.post(
+            reverse("console_agent_fs_delete", kwargs={"agent_id": self.agent.id}),
+            data=json.dumps({"nodeIds": [str(folder.id), str(child.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"deleted": 4})
+        self.assertFalse(AgentFsNode.objects.alive().filter(path__startswith="/docs").exists())
+
+    @tag("batch_agent_chat")
+    def test_agent_files_delete_folder_forbidden_for_collaborator(self):
+        write_bytes_to_dir(
+            self.agent,
+            b"notes",
+            "/docs/notes.txt",
+            "text/plain",
+        )
+        folder = AgentFsNode.objects.get(path="/docs")
+        collaborator = get_user_model().objects.create_user(
+            username="files-delete-collaborator",
+            email="files-delete-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(
+            agent=self.agent,
+            user=collaborator,
+            invited_by=self.user,
+        )
+        self.client.force_login(collaborator)
+
+        response = self.client.post(
+            reverse("console_agent_fs_delete", kwargs={"agent_id": self.agent.id}),
+            data=json.dumps({"nodeIds": [str(folder.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        folder.refresh_from_db()
+        self.assertFalse(folder.is_deleted)
 
     @tag("batch_agent_chat")
     def test_timeline_filters_manager_only_pending_actions_for_collaborator(self):
