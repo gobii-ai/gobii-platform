@@ -593,6 +593,48 @@ class PublicTemplateRouteTests(TestCase):
             link.full_clean()
 
     @tag("batch_public_templates")
+    def test_related_template_link_rejects_organization_scoped_source_template(self):
+        owner = get_user_model().objects.create_user(
+            username="private-source-owner",
+            email="private-source-owner@example.com",
+            password="pw",
+        )
+        organization = Organization.objects.create(
+            name="Private Source Org",
+            slug="private-source-org",
+            created_by=owner,
+        )
+        private_source_template = PersistentAgentTemplate.objects.create(
+            code="private-related-source",
+            organization=organization,
+            display_name="Private Related Source",
+            tagline="Private source",
+            description="Private source.",
+            charter="Private source.",
+            category="Research",
+            is_active=True,
+        )
+        public_related_template = PersistentAgentTemplate.objects.create(
+            code="public-related-target",
+            public_profile=None,
+            slug="",
+            display_name="Public Related Target",
+            tagline="Public target",
+            description="Public target.",
+            charter="Public target.",
+            category="Research",
+            is_active=True,
+        )
+        link = PersistentAgentTemplateRelatedTemplate(
+            source_template=private_source_template,
+            related_template=public_related_template,
+            position=1,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "organization-scoped"):
+            link.full_clean()
+
+    @tag("batch_public_templates")
     def test_public_template_detail_uses_automatic_related_templates_without_specified_links(self):
         self.create_public_template(
             code="automatic-related-source",

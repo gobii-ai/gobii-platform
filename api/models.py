@@ -6509,6 +6509,10 @@ class PersistentAgentTemplateRelatedTemplate(models.Model):
 
     def clean(self):
         super().clean()
+        if self.source_template_id:
+            source_template = self.source_template
+            if source_template.organization_id is not None:
+                raise ValidationError({"source_template": "Cannot add public related templates to an organization-scoped template."})
         if self.source_template_id and self.source_template_id == self.related_template_id:
             raise ValidationError({"related_template": "A template cannot be related to itself."})
         if self.related_template_id:
