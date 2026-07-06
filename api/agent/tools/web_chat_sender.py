@@ -226,17 +226,23 @@ def _resolve_default_web_chat_address(agent: PersistentAgent) -> str:
 
     for session in get_deliverable_web_sessions(agent):
         if session.user_id is not None:
-            return build_web_user_address(session.user_id, agent.id)
+            session_address = build_web_user_address(session.user_id, agent.id)
+            if agent.is_recipient_whitelisted(CommsChannel.WEB, session_address):
+                return session_address
 
     web_conversations = agent.owned_conversations.filter(channel=CommsChannel.WEB)
-    latest_conversation = (
+    messaged_conversations = (
         web_conversations.filter(messages__isnull=False)
         .annotate(latest_message_at=Max("messages__timestamp"))
         .order_by("-latest_message_at", "-id")
-        .first()
     )
-    if latest_conversation:
-        return latest_conversation.address
+    for conversation in messaged_conversations:
+        if agent.is_recipient_whitelisted(CommsChannel.WEB, conversation.address):
+            return conversation.address
+
+    for conversation in web_conversations.order_by("-id"):
+        if agent.is_recipient_whitelisted(CommsChannel.WEB, conversation.address):
+            return conversation.address
 
     owner_user = getattr(agent, "user", None)
     if owner_user and not web_conversations.exists() and not has_other_contact_channel(agent, owner_user):
