@@ -3091,6 +3091,252 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(message.to_endpoint.address, self.user_address)
 
     @tag("batch_agent_chat")
+    def test_send_chat_tool_without_to_address_prefers_deliverable_web_session_over_uuid_order(self):
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Default Recipient Session Tester",
+            charter="Test web chat default routing",
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=self.user,
+                name="Default Recipient Session Browser",
+            ),
+        )
+        stale_user = get_user_model().objects.create_user(
+            username="stale-web-user",
+            email="stale-web-user@example.com",
+            password="password123",
+        )
+        active_user = get_user_model().objects.create_user(
+            username="active-web-user",
+            email="active-web-user@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=agent, user=stale_user)
+        AgentCollaborator.objects.create(agent=agent, user=active_user)
+
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address="default-recipient-session@example.com",
+            is_primary=True,
+        )
+        EmailAddress.objects.create(
+            user=stale_user,
+            email=stale_user.email,
+            verified=True,
+            primary=True,
+        )
+        EmailAddress.objects.create(
+            user=active_user,
+            email=active_user.email,
+            verified=True,
+            primary=True,
+        )
+
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(agent.id),
+            is_primary=True,
+        )
+        stale_address = build_web_user_address(stale_user.id, agent.id)
+        active_address = build_web_user_address(active_user.id, agent.id)
+        stale_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=stale_address,
+        )
+        active_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=active_address,
+        )
+        stale_conversation = PersistentAgentConversation.objects.create(
+            id="ffffffff-ffff-ffff-ffff-ffffffffffff",
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=stale_address,
+        )
+        active_conversation = PersistentAgentConversation.objects.create(
+            id="00000000-0000-0000-0000-000000000001",
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=active_address,
+        )
+        stale_message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=stale_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=stale_conversation,
+            body="Older chat",
+            owner_agent=agent,
+        )
+        active_message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=active_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=active_conversation,
+            body="Recent chat",
+            owner_agent=agent,
+        )
+        PersistentAgentMessage.objects.filter(pk=stale_message.pk).update(
+            timestamp=timezone.now() - timedelta(days=1)
+        )
+        PersistentAgentMessage.objects.filter(pk=active_message.pk).update(timestamp=timezone.now())
+        start_web_session(agent, active_user)
+
+        uuid_selected = agent.owned_conversations.filter(channel=CommsChannel.WEB).order_by("-id").first()
+        self.assertEqual(uuid_selected.address, stale_address)
+
+        result = execute_send_chat_message(agent, {"body": "Ping"})
+
+        self.assertEqual(result["status"], "ok")
+        message = PersistentAgentMessage.objects.get(owner_agent=agent, is_outbound=True, body="Ping")
+        self.assertEqual(message.to_endpoint.address, active_address)
+
+    @tag("batch_agent_chat")
+    def test_send_chat_tool_without_to_address_falls_back_to_latest_web_conversation_by_message_time(self):
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Default Recipient Conversation Tester",
+            charter="Test web chat conversation recency routing",
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=self.user,
+                name="Default Recipient Conversation Browser",
+            ),
+        )
+        older_user = get_user_model().objects.create_user(
+            username="older-web-user",
+            email="older-web-user@example.com",
+            password="password123",
+        )
+        recent_user = get_user_model().objects.create_user(
+            username="recent-web-user",
+            email="recent-web-user@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=agent, user=older_user)
+        AgentCollaborator.objects.create(agent=agent, user=recent_user)
+
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(agent.id),
+            is_primary=True,
+        )
+        older_address = build_web_user_address(older_user.id, agent.id)
+        recent_address = build_web_user_address(recent_user.id, agent.id)
+        older_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=older_address,
+        )
+        recent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=recent_address,
+        )
+        older_conversation = PersistentAgentConversation.objects.create(
+            id="ffffffff-ffff-ffff-ffff-fffffffffffe",
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=older_address,
+        )
+        recent_conversation = PersistentAgentConversation.objects.create(
+            id="00000000-0000-0000-0000-000000000002",
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=recent_address,
+        )
+        older_message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=older_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=older_conversation,
+            body="Older chat",
+            owner_agent=agent,
+        )
+        recent_message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=recent_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=recent_conversation,
+            body="Recent chat",
+            owner_agent=agent,
+        )
+        PersistentAgentMessage.objects.filter(pk=older_message.pk).update(
+            timestamp=timezone.now() - timedelta(days=1)
+        )
+        PersistentAgentMessage.objects.filter(pk=recent_message.pk).update(timestamp=timezone.now())
+
+        uuid_selected = agent.owned_conversations.filter(channel=CommsChannel.WEB).order_by("-id").first()
+        self.assertEqual(uuid_selected.address, older_address)
+
+        result = execute_send_chat_message(agent, {"body": "Ping"})
+
+        self.assertEqual(result["status"], "ok")
+        message = PersistentAgentMessage.objects.get(owner_agent=agent, is_outbound=True, body="Ping")
+        self.assertEqual(message.to_endpoint.address, recent_address)
+
+    @tag("batch_agent_chat")
+    def test_send_chat_tool_without_to_address_skips_unauthorized_deliverable_web_session(self):
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Default Recipient Authorization Tester",
+            charter="Test web chat authorization routing",
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=self.user,
+                name="Default Recipient Authorization Browser",
+            ),
+        )
+        removed_user = get_user_model().objects.create_user(
+            username="removed-web-user",
+            email="removed-web-user@example.com",
+            password="password123",
+        )
+        active_user = get_user_model().objects.create_user(
+            username="authorized-web-user",
+            email="authorized-web-user@example.com",
+            password="password123",
+        )
+        removed_collaborator = AgentCollaborator.objects.create(agent=agent, user=removed_user)
+        AgentCollaborator.objects.create(agent=agent, user=active_user)
+
+        start_web_session(agent, active_user)
+        start_web_session(agent, removed_user)
+        removed_collaborator.delete()
+
+        result = execute_send_chat_message(agent, {"body": "Ping"})
+
+        self.assertEqual(result["status"], "ok")
+        message = PersistentAgentMessage.objects.get(owner_agent=agent, is_outbound=True, body="Ping")
+        self.assertEqual(message.to_endpoint.address, build_web_user_address(active_user.id, agent.id))
+
+    @tag("batch_agent_chat")
+    def test_send_chat_tool_without_to_address_falls_back_to_web_conversation_without_messages(self):
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Default Recipient Empty Conversation Tester",
+            charter="Test empty web conversation routing",
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=self.user,
+                name="Default Recipient Empty Conversation Browser",
+            ),
+        )
+        owner_address = build_web_user_address(self.user.id, agent.id)
+        PersistentAgentConversation.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=owner_address,
+        )
+
+        result = execute_send_chat_message(agent, {"body": "Ping"})
+
+        self.assertEqual(result["status"], "ok")
+        message = PersistentAgentMessage.objects.get(owner_agent=agent, is_outbound=True, body="Ping")
+        self.assertEqual(message.to_endpoint.address, owner_address)
+
+    @tag("batch_agent_chat")
     @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     def test_message_post_creates_console_message(self, mock_enqueue):
         body = "Run weekly summary"
