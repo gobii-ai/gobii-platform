@@ -1888,9 +1888,15 @@ PUBLIC_TEMPLATE_DETAIL_SECTIONS = (
 )
 
 
-def _build_public_template_detail_sections(template: PersistentAgentTemplate) -> list[dict[str, str]]:
+def _build_public_template_detail_sections(
+    template: PersistentAgentTemplate,
+    *,
+    include_tools: bool = True,
+) -> list[dict[str, str]]:
     sections = []
     for field_name, title in PUBLIC_TEMPLATE_DETAIL_SECTIONS:
+        if field_name == "expected_tools_summary" and not include_tools:
+            continue
         raw_content = getattr(template, field_name, "") or ""
         if not raw_content.strip():
             continue
@@ -1904,11 +1910,76 @@ def _build_public_template_detail_sections(template: PersistentAgentTemplate) ->
     return sections
 
 
+def _build_public_template_card(template: PersistentAgentTemplate) -> dict[str, object]:
+    return {
+        "name": template.display_name,
+        "tagline": template.tagline,
+        "category": public_template_category_label(template),
+        "url": public_template_detail_path(template),
+        "is_official": template.is_official,
+    }
+
+
+def _is_public_related_template_candidate(
+    template: PersistentAgentTemplate,
+    *,
+    source_template_id,
+) -> bool:
+    if not template or template.id == source_template_id:
+        return False
+    if template.organization_id is not None or not template.is_active:
+        return False
+    return bool(public_template_route_slug(template))
+
+
+def _build_specified_related_public_template_cards(
+    template: PersistentAgentTemplate,
+    *,
+    limit: int,
+) -> tuple[list[dict[str, object]], bool]:
+    links = list(
+        template.specified_related_template_links.select_related(
+            "related_template",
+            "related_template__public_profile",
+        ).order_by(
+            "position",
+            "related_template__priority",
+            Lower("related_template__display_name"),
+            "related_template__id",
+        )
+    )
+    if not links:
+        return [], False
+
+    cards = []
+    for link in links:
+        related_template = link.related_template
+        if not _is_public_related_template_candidate(
+            related_template,
+            source_template_id=template.id,
+        ):
+            continue
+        cards.append(_build_public_template_card(related_template))
+        if len(cards) >= limit:
+            break
+    return cards, True
+
+
 def _build_related_public_template_cards(
     template: PersistentAgentTemplate,
     *,
     limit: int = 6,
 ) -> list[dict[str, object]]:
+    if template.hide_related_templates:
+        return []
+
+    specified_cards, has_specified_templates = _build_specified_related_public_template_cards(
+        template,
+        limit=limit,
+    )
+    if has_specified_templates:
+        return specified_cards
+
     current_category = (template.category or "").strip()
     same_category_rank = (
         Case(
@@ -1950,16 +2021,7 @@ def _build_related_public_template_cards(
             "id",
         )[:limit]
     )
-    return [
-        {
-            "name": related_template.display_name,
-            "tagline": related_template.tagline,
-            "category": public_template_category_label(related_template),
-            "url": public_template_detail_path(related_template),
-            "is_official": related_template.is_official,
-        }
-        for related_template in related_templates
-    ]
+    return [_build_public_template_card(related_template) for related_template in related_templates]
 
 
 def _get_active_public_template_by_slug(template_slug: str | None):
@@ -2315,7 +2377,11 @@ class PublicTemplateDetailView(TemplateView):
         context["template_seo_title"] = f"{social_title} | Gobii"
         context["template_seo_description"] = seo_description
         context["template_description_html"] = template_description_html
-        context["template_detail_sections"] = _build_public_template_detail_sections(self.template)
+        show_public_tools = not self.template.hide_tools
+        context["template_detail_sections"] = _build_public_template_detail_sections(
+            self.template,
+            include_tools=show_public_tools,
+        )
         context["related_templates"] = _build_related_public_template_cards(self.template)
         context["template_social_image_url"] = social_image_url
         context["template_structured_data_json"] = html_safe_json_dumps(structured_data)
@@ -2327,12 +2393,15 @@ class PublicTemplateDetailView(TemplateView):
         context["schedule_jitter_minutes"] = self.template.schedule_jitter_minutes
         context["base_schedule"] = self.template.base_schedule
         context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.template.base_schedule)
-        display_map = PretrainedWorkerTemplateService.get_tool_display_map(self.template.default_tools or [])
         context["event_triggers"] = self.template.event_triggers or []
-        context["default_tools"] = PretrainedWorkerTemplateService.get_tool_display_list(
-            self.template.default_tools or [],
-            display_map=display_map,
-        )
+        if show_public_tools:
+            display_map = PretrainedWorkerTemplateService.get_tool_display_map(self.template.default_tools or [])
+            context["default_tools"] = PretrainedWorkerTemplateService.get_tool_display_list(
+                self.template.default_tools or [],
+                display_map=display_map,
+            )
+        else:
+            context["default_tools"] = []
         context["contact_method_label"] = PretrainedWorkerTemplateService.describe_contact_channel(
             self.template.recommended_contact_channel
         )
