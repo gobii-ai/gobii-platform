@@ -147,9 +147,13 @@ def _resolve_category_from_slug(category_slug: str | None) -> str:
 
 
 def _get_legacy_library_handle_template(template_slug: str | None):
+    normalized_template_slug = str(template_slug or "").strip()
+    if not normalized_template_slug:
+        return None
+
     template = _library_queryset().filter(
         public_profile__handle="library",
-        slug=template_slug,
+        slug=normalized_template_slug,
     ).first()
     if template:
         return template
@@ -157,10 +161,9 @@ def _get_legacy_library_handle_template(template_slug: str | None):
     alias = (
         PersistentAgentTemplateUrlAlias.objects.select_related("template", "template__public_profile")
         .filter(
-            public_profile__handle="library",
-            slug=template_slug,
+            Q(handle="library") | Q(handle="", public_profile__handle="library"),
+            slug=normalized_template_slug,
             template__is_active=True,
-            template__public_profile__isnull=False,
             template__organization__isnull=True,
         )
         .first()

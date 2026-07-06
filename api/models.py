@@ -23,7 +23,7 @@ from django.db.models.functions import Lower
 from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.utils.text import get_valid_filename
+from django.utils.text import get_valid_filename, slugify
 from django.db.utils import InternalError, OperationalError, ProgrammingError
 
 from django.contrib.auth import get_user_model
@@ -6094,7 +6094,14 @@ class PersistentAgentTemplateUrlAlias(models.Model):
     public_profile = models.ForeignKey(
         PublicProfile,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="template_url_aliases",
+    )
+    handle = models.SlugField(
+        max_length=32,
+        blank=True,
+        help_text="Legacy public profile handle used in the old template URL.",
     )
     slug = models.SlugField(
         max_length=80,
@@ -6103,16 +6110,29 @@ class PersistentAgentTemplateUrlAlias(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["public_profile", "slug"]
+        ordering = ["handle", "slug"]
         constraints = [
             UniqueConstraint(
                 fields=["public_profile", "slug"],
                 name="unique_public_template_url_alias",
             ),
+            UniqueConstraint(
+                fields=["handle", "slug"],
+                condition=~Q(handle=""),
+                name="unique_public_template_url_alias_handle",
+            ),
         ]
 
+    def save(self, *args, **kwargs):
+        if not self.handle and self.public_profile_id:
+            self.handle = self.public_profile.handle
+        if self.handle:
+            self.handle = slugify(self.handle)
+        return super().save(*args, **kwargs)
+
     def __str__(self) -> str:  # pragma: no cover - simple repr
-        return f"PersistentAgentTemplateUrlAlias<{self.public_profile.handle}/{self.slug}>"
+        handle = self.handle or (self.public_profile.handle if self.public_profile_id else "")
+        return f"PersistentAgentTemplateUrlAlias<{handle}/{self.slug}>"
 
 
 class PersistentAgentTemplateLike(models.Model):
