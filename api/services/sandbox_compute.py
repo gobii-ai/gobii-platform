@@ -163,7 +163,11 @@ def _no_proxy_value() -> str:
 def _allowed_env_keys() -> set[str]:
     keys = getattr(settings, "SANDBOX_COMPUTE_ALLOWED_ENV_KEYS", None)
     if isinstance(keys, (list, tuple, set)):
-        return {str(key) for key in keys if str(key)}
+        return {
+            str(key)
+            for key in (*keys, GOBII_SCRATCH_DIR_ENV, GOBII_REPO_WORKDIR_ENV)
+            if str(key)
+        }
     return {
         "PATH",
         "HOME",
@@ -185,6 +189,19 @@ def _allowed_env_keys() -> set[str]:
     }
 
 
+def _ensure_writable_dir(path: str, fallback: str) -> str:
+    for candidate in (path, fallback):
+        if not candidate:
+            continue
+        try:
+            os.makedirs(candidate, exist_ok=True)
+        except OSError:
+            continue
+        if os.access(candidate, os.W_OK | os.X_OK):
+            return candidate
+    return fallback
+
+
 def _sanitize_env(
     extra_env: Optional[Dict[str, str]] = None,
     trusted_env_keys: Optional[Sequence[str]] = None,
@@ -193,13 +210,20 @@ def _sanitize_env(
     trusted = {str(key) for key in (trusted_env_keys or []) if isinstance(key, str) and key.strip()}
     env = {key: value for key, value in os.environ.items() if key in allowed}
     env.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-    env.setdefault(GOBII_SCRATCH_DIR_ENV, SCRATCH_DIR_WORKSPACE_PATH)
-    env.setdefault(GOBII_REPO_WORKDIR_ENV, REPO_WORKDIR_WORKSPACE_PATH)
     if extra_env:
         for key, value in extra_env.items():
             key_str = str(key)
             if key_str in allowed or key_str.startswith("SANDBOX_") or key_str in trusted:
                 env[str(key)] = str(value)
+    scratch_dir = _ensure_writable_dir(
+        env.get(GOBII_SCRATCH_DIR_ENV, SCRATCH_DIR_WORKSPACE_PATH),
+        os.path.join(tempfile.gettempdir(), "gobii", "scratch"),
+    )
+    env[GOBII_SCRATCH_DIR_ENV] = scratch_dir
+    env[GOBII_REPO_WORKDIR_ENV] = _ensure_writable_dir(
+        env.get(GOBII_REPO_WORKDIR_ENV, os.path.join(scratch_dir, "repos")),
+        os.path.join(scratch_dir, "repos"),
+    )
     return env
 
 

@@ -174,7 +174,7 @@ def _iter_workspace_files(agent_root: Path) -> Iterable[Path]:
             relative_parts = path.relative_to(agent_root).parts
             if (
                 ".gobii" in path.parts
-                or relative_parts[0] == SCRATCH_DIR_NAME
+                or (relative_parts and relative_parts[0] == SCRATCH_DIR_NAME)
                 or any(part in FILESYSTEM_SYNC_IGNORED_NAMES for part in relative_parts)
             ):
                 continue
