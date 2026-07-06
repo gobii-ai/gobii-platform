@@ -207,7 +207,7 @@ export function McpServerFormModal({
         }
       } else {
         const fallback = mode === 'create' ? 'Unable to save MCP server.' : 'Unable to update MCP server.'
-        const message = resolveErrorMessage(error, fallback)
+        const message = safeErrorMessage(error, fallback)
         setStatusMessage(message)
         onError(message)
       }
@@ -247,7 +247,7 @@ export function McpServerFormModal({
   }
 
   if (mode === 'edit' && detailQuery.error) {
-    const message = resolveErrorMessage(detailQuery.error, 'Failed to load MCP server details.')
+    const message = safeErrorMessage(detailQuery.error, 'Failed to load MCP server details.')
     return (
       <Modal
         title={formTitle}
@@ -1012,10 +1012,6 @@ function isErrorBody(payload: unknown): payload is { errors?: FormErrors; messag
   }
   const record = payload as Record<string, unknown>
   return 'errors' in record || 'message' in record
-}
-
-function resolveErrorMessage(error: unknown, fallback: string): string {
-  return safeErrorMessage(error, fallback)
 }
 
 function extractBearerToken(value: string): string | null {

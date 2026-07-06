@@ -11,7 +11,7 @@ import {
   type McpServerTestResponse,
   type McpServerTestTool,
 } from '../../api/mcp'
-import { HttpError } from '../../api/http'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { Modal } from '../common/Modal'
 
 type McpServerTestModalProps = {
@@ -51,7 +51,7 @@ export function McpServerTestModal({
       }
     },
     onError: (error) => {
-      const message = resolveErrorMessage(error, 'Unable to test MCP server.')
+      const message = safeErrorMessage(error, 'Unable to test MCP server.')
       setStatusMessage(message)
       onError(message)
     },
@@ -111,7 +111,7 @@ export function McpServerTestModal({
               </div>
             ) : assignmentsQuery.isError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {resolveErrorMessage(assignmentsQuery.error, 'Failed to load eligible agents.')}
+                {safeErrorMessage(assignmentsQuery.error, 'Failed to load eligible agents.')}
               </div>
             ) : (
               <>
@@ -290,19 +290,4 @@ function useFilteredTools(tools: McpServerTestTool[] | undefined, searchTerm: st
       return name.includes(query) || description.includes(query)
     })
   }, [tools, searchTerm])
-}
-
-function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof HttpError) {
-    if (typeof error.body === 'string' && error.body) {
-      return error.body
-    }
-    if (typeof error.statusText === 'string' && error.statusText) {
-      return error.statusText
-    }
-  }
-  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
-    return (error as { message: string }).message
-  }
-  return fallback
 }

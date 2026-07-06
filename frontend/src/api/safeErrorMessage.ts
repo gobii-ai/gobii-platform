@@ -6,13 +6,11 @@ export function safeErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MESSAG
   if (error instanceof HttpError) {
     const body = error.body
     if (body && typeof body === 'object') {
-      const maybeDetail = (body as { detail?: unknown }).detail
-      const maybeError = (body as { error?: unknown }).error
-      if (typeof maybeDetail === 'string' && maybeDetail.trim()) {
-        return maybeDetail
-      }
-      if (typeof maybeError === 'string' && maybeError.trim()) {
-        return maybeError
+      for (const key of ['message', 'detail', 'error']) {
+        const value = (body as Record<string, unknown>)[key]
+        if (typeof value === 'string' && value.trim()) {
+          return value
+        }
       }
     }
     if (typeof body === 'string' && body.trim()) {
