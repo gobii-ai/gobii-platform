@@ -14,6 +14,7 @@ from api.models import (
     Organization,
     PersistentAgentTemplate,
     PersistentAgentTemplateLike,
+    PersistentAgentTemplateRelatedTemplate,
     PersistentAgentTemplateUrlAlias,
     PublicProfile,
 )
@@ -141,6 +142,36 @@ class PublicTemplateUrlHelperTests(TestCase):
 
 
 class PublicTemplateRouteTests(TestCase):
+    def create_public_template(
+        self,
+        *,
+        code: str,
+        display_name: str,
+        handle: str,
+        slug: str | None = None,
+        category: str = "Finance",
+        **overrides,
+    ) -> PersistentAgentTemplate:
+        user = get_user_model().objects.create_user(
+            username=f"{code}-owner",
+            email=f"{code}-owner@example.com",
+            password="pw",
+        )
+        public_profile = PublicProfile.objects.create(user=user, handle=handle)
+        values = {
+            "code": code,
+            "public_profile": public_profile,
+            "slug": slug if slug is not None else code,
+            "display_name": display_name,
+            "tagline": f"{display_name} tagline.",
+            "description": f"{display_name} description.",
+            "charter": f"{display_name} charter.",
+            "category": category,
+            "is_active": True,
+        }
+        values.update(overrides)
+        return PersistentAgentTemplate.objects.create(**values)
+
     @tag("batch_public_templates")
     def test_code_only_curated_template_detail_renders_from_library_category_path(self):
         PersistentAgentTemplate.objects.update_or_create(
@@ -404,6 +435,254 @@ class PublicTemplateRouteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Stripe Fraud Dispute Monitor")
         self.assertContains(response, "Monitor Stripe disputes and flag risky activity.")
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_hides_related_templates_even_when_specified(self):
+        template = self.create_public_template(
+            code="hidden-related-source",
+            display_name="Hidden Related Source",
+            handle="hidden-related-source",
+            hide_related_templates=True,
+        )
+        related_template = self.create_public_template(
+            code="hidden-related-target",
+            display_name="Hidden Related Target",
+            handle="hidden-related-target",
+        )
+        PersistentAgentTemplateRelatedTemplate.objects.create(
+            source_template=template,
+            related_template=related_template,
+            position=1,
+        )
+
+        response = self.client.get("/library/finance/hidden-related-source/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["related_templates"], [])
+        self.assertNotContains(response, "Related templates")
+        self.assertNotContains(response, "Hidden Related Target")
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_uses_specified_related_templates_in_position_order(self):
+        template = self.create_public_template(
+            code="manual-related-source",
+            display_name="Manual Related Source",
+            handle="manual-related-source",
+        )
+        beta_template = self.create_public_template(
+            code="manual-related-beta",
+            display_name="Beta Related",
+            handle="manual-related-beta",
+            category="Operations",
+        )
+        alpha_template = self.create_public_template(
+            code="manual-related-alpha",
+            display_name="Alpha Related",
+            handle="manual-related-alpha",
+            category="Research",
+        )
+        self.create_public_template(
+            code="automatic-finance-match",
+            display_name="Automatic Finance Match",
+            handle="automatic-finance-match",
+        )
+        PersistentAgentTemplateRelatedTemplate.objects.create(
+            source_template=template,
+            related_template=beta_template,
+            position=20,
+        )
+        PersistentAgentTemplateRelatedTemplate.objects.create(
+            source_template=template,
+            related_template=alpha_template,
+            position=10,
+        )
+
+        response = self.client.get("/library/finance/manual-related-source/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [card["name"] for card in response.context["related_templates"]],
+            ["Alpha Related", "Beta Related"],
+        )
+        self.assertContains(response, "Alpha Related")
+        self.assertContains(response, "Beta Related")
+        self.assertNotContains(response, "Automatic Finance Match")
+        content = response.content.decode("utf-8")
+        self.assertLess(content.index("Alpha Related"), content.index("Beta Related"))
+
+    @tag("batch_public_templates")
+    def test_curated_template_detail_uses_specified_related_templates(self):
+        template = PersistentAgentTemplate.objects.create(
+            code="real-estate-research-analyst",
+            public_profile=None,
+            slug="",
+            display_name="Real Estate Research Analyst",
+            tagline="Finds properties, pulls comps, and tracks market trends",
+            description="Researches comparable properties and market data.",
+            charter="Research real estate opportunities.",
+            category="Research",
+            is_active=True,
+        )
+        related_template = PersistentAgentTemplate.objects.create(
+            code="curated-related-market-monitor",
+            public_profile=None,
+            slug="",
+            display_name="Curated Related Market Monitor",
+            tagline="Tracks market signals for related research.",
+            description="Tracks market signals.",
+            charter="Track market signals.",
+            category="Research",
+            is_active=True,
+        )
+        PersistentAgentTemplateRelatedTemplate.objects.create(
+            source_template=template,
+            related_template=related_template,
+            position=1,
+        )
+
+        response = self.client.get("/library/research/real-estate-research-analyst/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [card["name"] for card in response.context["related_templates"]],
+            ["Curated Related Market Monitor"],
+        )
+        self.assertContains(response, "Related templates")
+        self.assertContains(response, "Curated Related Market Monitor")
+
+    @tag("batch_public_templates")
+    def test_related_template_link_rejects_organization_scoped_template(self):
+        source_template = PersistentAgentTemplate.objects.create(
+            code="public-related-source",
+            public_profile=None,
+            slug="",
+            display_name="Public Related Source",
+            tagline="Public source",
+            description="Public source.",
+            charter="Public source.",
+            category="Research",
+            is_active=True,
+        )
+        owner = get_user_model().objects.create_user(
+            username="private-related-owner",
+            email="private-related-owner@example.com",
+            password="pw",
+        )
+        organization = Organization.objects.create(
+            name="Private Related Org",
+            slug="private-related-org",
+            created_by=owner,
+        )
+        private_template = PersistentAgentTemplate.objects.create(
+            code="private-related-target",
+            organization=organization,
+            display_name="Private Related Target",
+            tagline="Private target",
+            description="Private target.",
+            charter="Private target.",
+            category="Research",
+            is_active=True,
+        )
+        link = PersistentAgentTemplateRelatedTemplate(
+            source_template=source_template,
+            related_template=private_template,
+            position=1,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "public-facing"):
+            link.full_clean()
+
+    @tag("batch_public_templates")
+    def test_related_template_link_rejects_organization_scoped_source_template(self):
+        owner = get_user_model().objects.create_user(
+            username="private-source-owner",
+            email="private-source-owner@example.com",
+            password="pw",
+        )
+        organization = Organization.objects.create(
+            name="Private Source Org",
+            slug="private-source-org",
+            created_by=owner,
+        )
+        private_source_template = PersistentAgentTemplate.objects.create(
+            code="private-related-source",
+            organization=organization,
+            display_name="Private Related Source",
+            tagline="Private source",
+            description="Private source.",
+            charter="Private source.",
+            category="Research",
+            is_active=True,
+        )
+        public_related_template = PersistentAgentTemplate.objects.create(
+            code="public-related-target",
+            public_profile=None,
+            slug="",
+            display_name="Public Related Target",
+            tagline="Public target",
+            description="Public target.",
+            charter="Public target.",
+            category="Research",
+            is_active=True,
+        )
+        link = PersistentAgentTemplateRelatedTemplate(
+            source_template=private_source_template,
+            related_template=public_related_template,
+            position=1,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "organization-scoped"):
+            link.full_clean()
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_uses_automatic_related_templates_without_specified_links(self):
+        self.create_public_template(
+            code="automatic-related-source",
+            display_name="Automatic Related Source",
+            handle="automatic-related-source",
+        )
+        self.create_public_template(
+            code="automatic-related-target",
+            display_name="Automatic Related Target",
+            handle="automatic-related-target",
+        )
+
+        response = self.client.get("/library/finance/automatic-related-source/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "Automatic Related Target",
+            [card["name"] for card in response.context["related_templates"]],
+        )
+        self.assertContains(response, "Automatic Related Target")
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_hide_tools_suppresses_public_tool_surfaces(self):
+        template = self.create_public_template(
+            code="hidden-tools-template",
+            display_name="Hidden Tools Template",
+            handle="hidden-tools-template",
+            default_tools=["google_sheets-add-row"],
+            expected_tools_summary="Use Sheets to log disputes.",
+            hide_tools=True,
+        )
+
+        response = self.client.get("/library/finance/hidden-tools-template/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["default_tools"], [])
+        self.assertEqual(response.context["template"].default_tools, template.default_tools)
+        self.assertFalse(
+            any(
+                section["key"] == "expected_tools_summary"
+                for section in response.context["template_detail_sections"]
+            )
+        )
+        self.assertNotContains(response, "tools enabled")
+        self.assertNotContains(response, "Enabled tools")
+        self.assertNotContains(response, "Tools it uses")
+        self.assertNotContains(response, "Use Sheets to log disputes.")
+        self.assertNotContains(response, "Google Sheets Add Row")
 
     @tag("batch_public_templates")
     def test_public_template_detail_omits_missing_social_image(self):

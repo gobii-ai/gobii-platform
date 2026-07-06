@@ -59,7 +59,7 @@ from .admin_forms import (
 from .models import (
     ApiKey, UserQuota, UserFlags, UserReferral, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
-    PersistentAgent, PersistentAgentTemplate, PublicProfile, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
+    PersistentAgent, PersistentAgentTemplate, PersistentAgentTemplateRelatedTemplate, PublicProfile, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSkill, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     GlobalAgentSkill, GlobalAgentSkillCustomTool,
@@ -6185,6 +6185,15 @@ class PublicProfileAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at")
 
 
+class PersistentAgentTemplateRelatedTemplateInline(admin.TabularInline):
+    model = PersistentAgentTemplateRelatedTemplate
+    fk_name = "source_template"
+    fields = ("related_template", "position")
+    extra = 0
+    autocomplete_fields = ("related_template",)
+    ordering = ("position", "related_template__display_name")
+
+
 @admin.register(PersistentAgentTemplate)
 class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     list_display = (
@@ -6207,12 +6216,16 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
     autocomplete_fields = ('organization', 'public_profile', 'source_agent', 'created_by')
     prepopulated_fields = {"code": ("display_name",)}
+    inlines = (PersistentAgentTemplateRelatedTemplateInline,)
     fieldsets = (
         ('Identity', {
             'fields': ('code', 'display_name', 'tagline', 'category', 'priority', 'is_active')
         }),
         ('Public Template', {
             'fields': ('public_profile', 'slug', 'is_official', 'source_agent', 'created_by')
+        }),
+        ('Public Detail Display', {
+            'fields': ('hide_related_templates', 'hide_tools')
         }),
         ('Organization Template', {
             'fields': ('organization',)

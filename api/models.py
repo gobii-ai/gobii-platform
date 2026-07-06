@@ -6303,6 +6303,23 @@ class PersistentAgentTemplate(models.Model):
         default=False,
         help_text="Whether this template is an official Gobii template.",
     )
+    hide_related_templates = models.BooleanField(
+        default=False,
+        help_text="Hide the related templates section on the public detail page.",
+    )
+    hide_tools = models.BooleanField(
+        default=False,
+        help_text="Hide tool-related badges, lists, and detail sections on the public detail page.",
+    )
+    specified_related_templates = models.ManyToManyField(
+        "self",
+        through="PersistentAgentTemplateRelatedTemplate",
+        through_fields=("source_template", "related_template"),
+        symmetrical=False,
+        blank=True,
+        related_name="specified_by_templates",
+        help_text="Manually ordered related templates for the public detail page.",
+    )
     source_agent = models.ForeignKey(
         "PersistentAgent",
         on_delete=models.SET_NULL,
@@ -6450,6 +6467,67 @@ class PersistentAgentTemplate(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - simple repr
         return f"PretrainedWorkerTemplate<{self.display_name}>"
+
+
+class PersistentAgentTemplateRelatedTemplate(models.Model):
+    """Ordered related-template link for public template detail pages."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_template = models.ForeignKey(
+        PersistentAgentTemplate,
+        on_delete=models.CASCADE,
+        related_name="specified_related_template_links",
+    )
+    related_template = models.ForeignKey(
+        PersistentAgentTemplate,
+        on_delete=models.CASCADE,
+        related_name="specified_as_related_template_links",
+    )
+    position = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Lower numbers appear first on the public detail page.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["source_template", "position", "related_template"]
+        constraints = [
+            UniqueConstraint(
+                fields=["source_template", "related_template"],
+                name="uniq_pat_rel_pair",
+            ),
+            models.CheckConstraint(
+                condition=~Q(source_template_id=models.F("related_template_id")),
+                name="pat_rel_not_self",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["source_template", "position"], name="pat_rel_src_pos_idx"),
+            models.Index(fields=["related_template"], name="pat_rel_target_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.source_template_id:
+            source_template = self.source_template
+            if source_template.organization_id is not None:
+                raise ValidationError({"source_template": "Cannot add public related templates to an organization-scoped template."})
+        if self.source_template_id and self.source_template_id == self.related_template_id:
+            raise ValidationError({"related_template": "A template cannot be related to itself."})
+        if self.related_template_id:
+            related_template = self.related_template
+            if related_template.organization_id is not None:
+                raise ValidationError({"related_template": "Related templates must be public-facing, not organization-scoped."})
+            if not related_template.is_active:
+                raise ValidationError({"related_template": "Related templates must be active."})
+            if not (related_template.slug or related_template.code):
+                raise ValidationError({"related_template": "Related templates must have a public route slug or code."})
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        source = getattr(self.source_template, "display_name", "template")
+        related = getattr(self.related_template, "display_name", "related template")
+        return f"{source} -> {related}"
 
 
 class PersistentAgentTemplateUrlAlias(models.Model):
