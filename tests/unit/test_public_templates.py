@@ -511,6 +511,88 @@ class PublicTemplateRouteTests(TestCase):
         self.assertLess(content.index("Alpha Related"), content.index("Beta Related"))
 
     @tag("batch_public_templates")
+    def test_curated_template_detail_uses_specified_related_templates(self):
+        template = PersistentAgentTemplate.objects.create(
+            code="real-estate-research-analyst",
+            public_profile=None,
+            slug="",
+            display_name="Real Estate Research Analyst",
+            tagline="Finds properties, pulls comps, and tracks market trends",
+            description="Researches comparable properties and market data.",
+            charter="Research real estate opportunities.",
+            category="Research",
+            is_active=True,
+        )
+        related_template = PersistentAgentTemplate.objects.create(
+            code="curated-related-market-monitor",
+            public_profile=None,
+            slug="",
+            display_name="Curated Related Market Monitor",
+            tagline="Tracks market signals for related research.",
+            description="Tracks market signals.",
+            charter="Track market signals.",
+            category="Research",
+            is_active=True,
+        )
+        PersistentAgentTemplateRelatedTemplate.objects.create(
+            source_template=template,
+            related_template=related_template,
+            position=1,
+        )
+
+        response = self.client.get("/library/research/real-estate-research-analyst/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [card["name"] for card in response.context["related_templates"]],
+            ["Curated Related Market Monitor"],
+        )
+        self.assertContains(response, "Related templates")
+        self.assertContains(response, "Curated Related Market Monitor")
+
+    @tag("batch_public_templates")
+    def test_related_template_link_rejects_organization_scoped_template(self):
+        source_template = PersistentAgentTemplate.objects.create(
+            code="public-related-source",
+            public_profile=None,
+            slug="",
+            display_name="Public Related Source",
+            tagline="Public source",
+            description="Public source.",
+            charter="Public source.",
+            category="Research",
+            is_active=True,
+        )
+        owner = get_user_model().objects.create_user(
+            username="private-related-owner",
+            email="private-related-owner@example.com",
+            password="pw",
+        )
+        organization = Organization.objects.create(
+            name="Private Related Org",
+            slug="private-related-org",
+            created_by=owner,
+        )
+        private_template = PersistentAgentTemplate.objects.create(
+            code="private-related-target",
+            organization=organization,
+            display_name="Private Related Target",
+            tagline="Private target",
+            description="Private target.",
+            charter="Private target.",
+            category="Research",
+            is_active=True,
+        )
+        link = PersistentAgentTemplateRelatedTemplate(
+            source_template=source_template,
+            related_template=private_template,
+            position=1,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "public-facing"):
+            link.full_clean()
+
+    @tag("batch_public_templates")
     def test_public_template_detail_uses_automatic_related_templates_without_specified_links(self):
         self.create_public_template(
             code="automatic-related-source",
