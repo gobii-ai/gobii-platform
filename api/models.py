@@ -6511,6 +6511,14 @@ class PersistentAgentTemplateRelatedTemplate(models.Model):
         super().clean()
         if self.source_template_id and self.source_template_id == self.related_template_id:
             raise ValidationError({"related_template": "A template cannot be related to itself."})
+        if self.related_template_id:
+            related_template = self.related_template
+            if related_template.organization_id is not None:
+                raise ValidationError({"related_template": "Related templates must be public-facing, not organization-scoped."})
+            if not related_template.is_active:
+                raise ValidationError({"related_template": "Related templates must be active."})
+            if not (related_template.slug or related_template.code):
+                raise ValidationError({"related_template": "Related templates must have a public route slug or code."})
 
     def __str__(self) -> str:  # pragma: no cover - display helper
         source = getattr(self.source_template, "display_name", "template")
