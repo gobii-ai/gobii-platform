@@ -19,13 +19,19 @@ export function safeErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MESSAG
       }
       return body
     }
+    if (typeof error.statusText === 'string' && error.statusText.trim()) {
+      return error.statusText
+    }
     return fallback
   }
-  if (error instanceof Error && error.message) {
-    if (isHtmlResponse(error.message)) {
-      return fallback
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message: unknown }).message
+    if (typeof message === 'string' && message.trim()) {
+      if (isHtmlResponse(message)) {
+        return fallback
+      }
+      return message
     }
-    return error.message
   }
   return fallback
 }

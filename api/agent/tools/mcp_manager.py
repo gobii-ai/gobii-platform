@@ -954,7 +954,15 @@ class MCPToolManager:
                 prefer_cache=False,
                 sandbox_context=sandbox_context,
             )
-        except (ValueError, RuntimeError, OSError, TimeoutError, httpx.HTTPError, ToolError) as exc:
+        except (
+            ValueError,
+            RuntimeError,
+            OSError,
+            TimeoutError,
+            asyncio.TimeoutError,
+            httpx.HTTPError,
+            ToolError,
+        ) as exc:
             logger.warning("MCP discovery failed for %s: %s", config_id, exc)
             return False
         return True
@@ -1007,7 +1015,15 @@ class MCPToolManager:
                 prefer_cache=False,
                 sandbox_context=sandbox_context,
             )
-        except (ValueError, RuntimeError, OSError, TimeoutError, httpx.HTTPError, ToolError) as exc:
+        except (
+            ValueError,
+            RuntimeError,
+            OSError,
+            TimeoutError,
+            asyncio.TimeoutError,
+            httpx.HTTPError,
+            ToolError,
+        ) as exc:
             logger.warning("MCP test discovery failed for %s: %s", config_id, exc)
             return False, [], {
                 "phase": "discover_tools",

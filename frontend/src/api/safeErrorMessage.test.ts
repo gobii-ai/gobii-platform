@@ -19,4 +19,16 @@ describe('safeErrorMessage', () => {
 
     expect(safeErrorMessage(error, 'Unable to save MCP server.')).toBe('Unable to save MCP server.')
   })
+
+  it('falls back to statusText when body is empty or not useful', () => {
+    const error = new HttpError(401, 'Unauthorized', null)
+
+    expect(safeErrorMessage(error, 'Fallback message.')).toBe('Unauthorized')
+  })
+
+  it('handles plain objects with a message property', () => {
+    const error = { message: 'Custom plain error message' }
+
+    expect(safeErrorMessage(error, 'Fallback message.')).toBe('Custom plain error message')
+  })
 })
