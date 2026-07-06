@@ -9,8 +9,7 @@ import requests
 
 from sandbox_server.config import _agent_workspace, _workspace_max_bytes
 from sandbox_server.manifest import _load_manifest, _proxy_env_from_manifest, _save_manifest, _store_proxy_env
-from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
-from sandbox_server.server.sync_policy import is_ignored_filespace_path
+from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH, is_filespace_sync_ignored_path
 from sandbox_server.workspace import (
     _checksum_bytes,
     _decode_content,
@@ -206,7 +205,7 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             uploaded_bytes += len(content)
 
         deleted = manifest.get("deleted", {})
-        tracked = {rel for rel in manifest.get("files", {}).keys() if not is_ignored_filespace_path(rel)}
+        tracked = {rel for rel in manifest.get("files", {}).keys() if not is_filespace_sync_ignored_path(rel)}
         for rel in sorted(tracked - seen_paths):
             deleted_at = time.time()
             if since is not None and deleted_at <= since:
@@ -264,7 +263,7 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             full_path, normalized = _normalize_workspace_path(agent_root, path)
             if full_path is None or not normalized:
                 continue
-            if is_ignored_filespace_path(normalized):
+            if is_filespace_sync_ignored_path(normalized):
                 skipped += 1
                 continue
             is_custom_tool_sqlite = normalized == CUSTOM_TOOL_SQLITE_FILESPACE_PATH

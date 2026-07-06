@@ -9,8 +9,7 @@ from django.db import DatabaseError
 from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.models import AgentFsNode, PersistentAgent
-from api.services.sandbox_internal_paths import is_sandbox_internal_path
-from api.services.sandbox_sync_policy import is_ignored_filespace_path
+from api.services.sandbox_internal_paths import is_filespace_sync_ignored_path, is_sandbox_internal_path
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +91,7 @@ def apply_filespace_push(
         if not isinstance(path, str) or not path.strip():
             skipped += 1
             continue
-        if is_ignored_filespace_path(path):
+        if is_filespace_sync_ignored_path(path):
             skipped += 1
             continue
         if is_sandbox_internal_path(path):
@@ -184,7 +183,7 @@ def build_filespace_pull_manifest(
     for node in queryset.iterator():
         if node.node_type != AgentFsNode.NodeType.FILE:
             continue
-        if is_ignored_filespace_path(node.path):
+        if is_filespace_sync_ignored_path(node.path):
             continue
         if is_sandbox_internal_path(node.path):
             continue

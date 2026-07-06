@@ -4,11 +4,10 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 
-from sandbox_server.server.sync_policy import (
+from sandbox_server.server.internal_paths import (
     GOBII_REPO_WORKDIR_ENV,
     GOBII_SCRATCH_DIR_ENV,
-    repo_workdir_for_agent_root,
-    scratch_dir_for_agent_root,
+    SCRATCH_DIR_NAME,
 )
 
 _DEFAULT_ALLOWED_ENV_KEYS = {
@@ -128,8 +127,8 @@ def _sandbox_env(
     if _should_replace_runtime_path(env.get("PIP_CACHE_DIR", ""), generic_defaults=("/tmp/.cache/pip",)):
         env["PIP_CACHE_DIR"] = str(runtime_paths["pip"])
     if isinstance(agent_root, Path):
-        scratch_dir = scratch_dir_for_agent_root(agent_root)
-        repo_workdir = repo_workdir_for_agent_root(agent_root)
+        scratch_dir = agent_root / SCRATCH_DIR_NAME
+        repo_workdir = scratch_dir / "repos"
         try:
             scratch_dir.mkdir(parents=True, exist_ok=True)
             repo_workdir.mkdir(parents=True, exist_ok=True)

@@ -29,13 +29,11 @@ from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
-    sandbox_workspace_root_for_agent,
-)
-from api.services.sandbox_sync_policy import (
     GOBII_REPO_WORKDIR_ENV,
     GOBII_SCRATCH_DIR_ENV,
     REPO_WORKDIR_WORKSPACE_PATH,
     SCRATCH_DIR_WORKSPACE_PATH,
+    sandbox_workspace_root_for_agent,
 )
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
