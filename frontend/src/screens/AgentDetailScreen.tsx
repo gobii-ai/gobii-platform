@@ -45,6 +45,8 @@ import type {
   PendingCollaboratorAction,
 } from '../components/agentSettings/contactTypes'
 import { useModal } from '../hooks/useModal'
+import { HttpError } from '../api/http'
+import { safeErrorMessage } from '../api/safeErrorMessage'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import type {
@@ -1661,12 +1663,12 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         credentials: 'same-origin',
       })
       if (!response.ok) {
-        const message = (await response.text())?.trim()
-        throw new Error(message || 'Failed to delete agent. Please try again.')
+        const body = await response.text().catch(() => null)
+        throw new HttpError(response.status, response.statusText, body)
       }
       onDeleted?.()
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to delete agent. Please try again.'
+      const message = safeErrorMessage(error, 'Failed to delete agent. Please try again.')
       setDeleteError(message)
       throw error
     }

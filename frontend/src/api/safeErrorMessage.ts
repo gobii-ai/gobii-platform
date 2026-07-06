@@ -1,26 +1,42 @@
 import { HttpError } from './http'
 
-export function safeErrorMessage(error: unknown): string {
+const DEFAULT_ERROR_MESSAGE = 'Request failed. Please try again.'
+
+export function safeErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MESSAGE): string {
   if (error instanceof HttpError) {
     const body = error.body
     if (body && typeof body === 'object') {
-      const maybeDetail = (body as { detail?: unknown }).detail
-      const maybeError = (body as { error?: unknown }).error
-      if (typeof maybeDetail === 'string' && maybeDetail.trim()) {
-        return maybeDetail
-      }
-      if (typeof maybeError === 'string' && maybeError.trim()) {
-        return maybeError
+      for (const key of ['message', 'detail', 'error']) {
+        const value = (body as Record<string, unknown>)[key]
+        if (typeof value === 'string' && value.trim()) {
+          return value
+        }
       }
     }
     if (typeof body === 'string' && body.trim()) {
+      if (isHtmlResponse(body)) {
+        return fallback
+      }
       return body
     }
-    return 'Request failed. Please try again.'
+    if (typeof error.statusText === 'string' && error.statusText.trim()) {
+      return error.statusText
+    }
+    return fallback
   }
-  if (error instanceof Error && error.message) {
-    return error.message
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message: unknown }).message
+    if (typeof message === 'string' && message.trim()) {
+      if (isHtmlResponse(message)) {
+        return fallback
+      }
+      return message
+    }
   }
-  return 'Request failed. Please try again.'
+  return fallback
 }
 
+function isHtmlResponse(value: string): boolean {
+  const normalized = value.slice(0, 200).toLowerCase()
+  return normalized.includes('<!doctype') || normalized.includes('<html') || normalized.includes('<body')
+}

@@ -4,6 +4,7 @@ import type { RowSelectionState } from '@tanstack/react-table'
 import { RefreshCw } from 'lucide-react'
 
 import { HttpError, getCsrfToken, jsonFetch, jsonRequest } from '../api/http'
+import { safeErrorMessage } from '../api/safeErrorMessage'
 import { CreateFolderForm } from '../components/agentFiles/CreateFolderForm'
 import { FileManagerBreadcrumbs } from '../components/agentFiles/FileManagerBreadcrumbs'
 import { FileManagerHeader } from '../components/agentFiles/FileManagerHeader'
@@ -35,21 +36,6 @@ type CreateFolderPayload = {
 type MovePayload = {
   nodeId: string
   parentId: string | null
-}
-
-function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof HttpError) {
-    if (typeof error.body === 'string' && error.body) {
-      return error.body
-    }
-    if (typeof error.statusText === 'string' && error.statusText) {
-      return error.statusText
-    }
-  }
-  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
-    return (error as { message: string }).message
-  }
-  return fallback
 }
 
 async function uploadFiles(url: string, payload: UploadPayload): Promise<AgentFsNode[]> {
@@ -176,7 +162,7 @@ export function AgentFilesScreen({
       await queryClient.invalidateQueries({ queryKey: ['agent-files', initialData.agent.id] })
     },
     onError: (error) => {
-      setActionError(resolveErrorMessage(error, 'Failed to upload files.'))
+      setActionError(safeErrorMessage(error, 'Failed to upload files.'))
     },
     onSettled: () => {
       setUploadInfo(null)
@@ -196,7 +182,7 @@ export function AgentFilesScreen({
       await queryClient.invalidateQueries({ queryKey: ['agent-files', initialData.agent.id] })
     },
     onError: (error) => {
-      setActionError(resolveErrorMessage(error, 'Failed to delete files.'))
+      setActionError(safeErrorMessage(error, 'Failed to delete files.'))
     },
   })
 
@@ -209,7 +195,7 @@ export function AgentFilesScreen({
       await queryClient.invalidateQueries({ queryKey: ['agent-files', initialData.agent.id] })
     },
     onError: (error) => {
-      setActionError(resolveErrorMessage(error, 'Failed to create folder.'))
+      setActionError(safeErrorMessage(error, 'Failed to create folder.'))
     },
   })
 
@@ -221,7 +207,7 @@ export function AgentFilesScreen({
       await queryClient.invalidateQueries({ queryKey: ['agent-files', initialData.agent.id] })
     },
     onError: (error) => {
-      setActionError(resolveErrorMessage(error, 'Failed to move item.'))
+      setActionError(safeErrorMessage(error, 'Failed to move item.'))
     },
   })
 
@@ -406,7 +392,7 @@ export function AgentFilesScreen({
 
   const isBusy = uploadMutation.isPending || deleteMutation.isPending || createFolderMutation.isPending || moveMutation.isPending
   const errorMessage = filesQuery.isError
-    ? resolveErrorMessage(filesQuery.error, 'Unable to load agent files right now.')
+    ? safeErrorMessage(filesQuery.error, 'Unable to load agent files right now.')
     : null
 
   const handleRefresh = useCallback(() => {

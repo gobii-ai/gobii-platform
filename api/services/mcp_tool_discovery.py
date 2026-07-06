@@ -1,6 +1,9 @@
 import logging
 from typing import Optional
 
+import httpx
+from fastmcp.exceptions import ToolError
+
 from api.models import PersistentAgent
 from api.services.sandbox_compute import (
     SandboxComputeService,
@@ -23,5 +26,13 @@ def schedule_mcp_tool_discovery(
     try:
         service = SandboxComputeService()
         service.discover_mcp_tools(config_id, reason=reason, agent=agent)
-    except (SandboxComputeUnavailable, ValueError, RuntimeError) as exc:
+    except (
+        SandboxComputeUnavailable,
+        ValueError,
+        RuntimeError,
+        OSError,
+        TimeoutError,
+        httpx.HTTPError,
+        ToolError,
+    ) as exc:
         logger.warning("Inline MCP tool discovery failed for %s: %s", config_id, exc)

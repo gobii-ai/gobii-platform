@@ -11,6 +11,7 @@ import {
   type McpServerPayload,
 } from '../../api/mcp'
 import { HttpError } from '../../api/http'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { useMcpOAuth } from '../../hooks/useMcpOAuth'
 import { Modal } from '../common/Modal'
 import { ModalForm } from '../common/ModalForm'
@@ -206,7 +207,7 @@ export function McpServerFormModal({
         }
       } else {
         const fallback = mode === 'create' ? 'Unable to save MCP server.' : 'Unable to update MCP server.'
-        const message = resolveErrorMessage(error, fallback)
+        const message = safeErrorMessage(error, fallback)
         setStatusMessage(message)
         onError(message)
       }
@@ -246,7 +247,7 @@ export function McpServerFormModal({
   }
 
   if (mode === 'edit' && detailQuery.error) {
-    const message = resolveErrorMessage(detailQuery.error, 'Failed to load MCP server details.')
+    const message = safeErrorMessage(detailQuery.error, 'Failed to load MCP server details.')
     return (
       <Modal
         title={formTitle}
@@ -1011,21 +1012,6 @@ function isErrorBody(payload: unknown): payload is { errors?: FormErrors; messag
   }
   const record = payload as Record<string, unknown>
   return 'errors' in record || 'message' in record
-}
-
-function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof HttpError) {
-    if (typeof error.body === 'string' && error.body) {
-      return error.body
-    }
-    if (typeof error.statusText === 'string' && error.statusText) {
-      return error.statusText
-    }
-  }
-  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
-    return (error as { message: string }).message
-  }
-  return fallback
 }
 
 function extractBearerToken(value: string): string | null {

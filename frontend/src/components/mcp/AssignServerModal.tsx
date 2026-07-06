@@ -10,7 +10,7 @@ import {
   type McpServerAssignmentResponse,
 } from '../../api/mcp'
 import { ModalForm } from '../common/ModalForm'
-import { HttpError } from '../../api/http'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
 
 type AssignServerModalProps = {
   server: McpServer
@@ -56,7 +56,7 @@ export function AssignServerModal({
       onClose()
     },
     onError: (error) => {
-      const message = resolveErrorMessage(error, 'Unable to update assignments.')
+      const message = safeErrorMessage(error, 'Unable to update assignments.')
       setStatusMessage(message)
       onError(message)
     },
@@ -122,7 +122,7 @@ export function AssignServerModal({
           </div>
         ) : isError ? (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {resolveErrorMessage(error, 'Failed to load agents for this server.')}
+            {safeErrorMessage(error, 'Failed to load agents for this server.')}
           </div>
         ) : (
           <div className="space-y-5">
@@ -225,21 +225,6 @@ function useFilteredAgents(data: McpServerAssignmentResponse | undefined, search
       return name.includes(query) || description.includes(query)
     })
   }, [data, searchTerm])
-}
-
-function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof HttpError) {
-    if (typeof error.body === 'string' && error.body) {
-      return error.body
-    }
-    if (typeof error.statusText === 'string' && error.statusText) {
-      return error.statusText
-    }
-  }
-  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
-    return (error as { message: string }).message
-  }
-  return fallback
 }
 
 function formatTimestamp(iso: string): string {

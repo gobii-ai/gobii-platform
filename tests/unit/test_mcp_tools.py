@@ -11,6 +11,8 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
+
+import httpx
 from django.test import TestCase, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -1248,6 +1250,14 @@ class MCPToolManagerTests(TestCase):
         self.assertTrue(ok)
         self.assertEqual(tools, [])
         self.assertEqual(details, {})
+
+    def test_discover_tools_for_server_handles_http_discovery_failure(self):
+        request = httpx.Request("GET", "https://example.com/mcp")
+        response = httpx.Response(401, request=request)
+        error = httpx.HTTPStatusError("Unauthorized", request=request, response=response)
+
+        with patch.object(self.manager, "_register_server", side_effect=error):
+            self.assertFalse(self.manager.discover_tools_for_server(self.config_id))
         
     def test_get_tools_for_agent_registers_accessible_servers_only(self):
         """Ensure discovery runs only for servers the agent can access."""
