@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db.models import Max
 from django.utils import timezone
 
 from ..comms.message_service import _get_or_create_conversation, _ensure_participant
@@ -29,7 +30,7 @@ from ...models import (
     parse_web_user_address,
 )
 from ...services.email_verification import has_verified_email
-from ...services.web_sessions import get_deliverable_web_session
+from ...services.web_sessions import get_deliverable_web_session, get_deliverable_web_sessions
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 
 _PROGRESS_PREFIX_RE = re.compile(
@@ -219,6 +220,31 @@ def has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
     return False
 
 
+def _resolve_default_web_chat_address(agent: PersistentAgent) -> str:
+    if agent.preferred_contact_endpoint and agent.preferred_contact_endpoint.channel == CommsChannel.WEB:
+        return agent.preferred_contact_endpoint.address
+
+    for session in get_deliverable_web_sessions(agent):
+        if session.user_id is not None:
+            return build_web_user_address(session.user_id, agent.id)
+
+    web_conversations = agent.owned_conversations.filter(channel=CommsChannel.WEB)
+    latest_conversation = (
+        web_conversations.filter(messages__isnull=False)
+        .annotate(latest_message_at=Max("messages__timestamp"))
+        .order_by("-latest_message_at", "-id")
+        .first()
+    )
+    if latest_conversation:
+        return latest_conversation.address
+
+    owner_user = getattr(agent, "user", None)
+    if owner_user and not web_conversations.exists() and not has_other_contact_channel(agent, owner_user):
+        return build_web_user_address(owner_user.id, agent.id)
+
+    return ""
+
+
 def get_send_chat_tool() -> Dict[str, Any]:
     """Definition for the send_chat_message tool exposed to the agent."""
 
@@ -326,18 +352,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     to_address = (params.get("to_address") or "").strip()
 
     if not to_address:
-        # Prefer explicit preferred endpoint configured for web chat
-        if agent.preferred_contact_endpoint and agent.preferred_contact_endpoint.channel == CommsChannel.WEB:
-            to_address = agent.preferred_contact_endpoint.address
-        else:
-            latest_conversation = agent.owned_conversations.filter(channel=CommsChannel.WEB).order_by("-id").first()
-            if latest_conversation:
-                to_address = latest_conversation.address
-            else:
-                owner_user = getattr(agent, "user", None)
-                if owner_user and not has_other_contact_channel(agent, owner_user):
-                    # When web chat is the only channel, default to the owner's web address.
-                    to_address = build_web_user_address(owner_user.id, agent.id)
+        to_address = _resolve_default_web_chat_address(agent)
 
     if not to_address:
         return {
