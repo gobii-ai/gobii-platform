@@ -191,6 +191,7 @@ from util.personal_signup_preview import (
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     TrialRequiredValidationError,
+    can_user_send_personal_agent_chat_message,
 )
 from util.subscription_helper import get_user_max_contacts_per_agent
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
@@ -4447,6 +4448,12 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
             allow_shared=True,
             allow_delinquent_personal_chat=True,
         )
+        if (
+            agent.organization_id is None
+            and agent.user_id is not None
+            and not can_user_send_personal_agent_chat_message(agent.user)
+        ):
+            return JsonResponse({"error": "Choose a plan to send more messages."}, status=403)
         owner = agent.organization or agent.user
         if owner is not None and bool(get_owner_account_pause_state(owner).get("customer_paused")):
             return JsonResponse({"error": _customer_account_pause_block_message(owner)}, status=403)

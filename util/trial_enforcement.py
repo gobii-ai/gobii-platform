@@ -29,7 +29,8 @@ PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH = "personal_free_trial_enforcement
 # can get back into chat long enough to resolve billing, without reopening broader
 # personal-agent creation or API-key access. Canceled users can still inspect their
 # existing agents; creating new work remains gated by normal active-plan checks.
-PERSONAL_CHAT_ALLOWED_INACTIVE_STATUSES = {"past_due", "unpaid", "incomplete", "canceled"}
+PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES = {"past_due", "unpaid", "incomplete"}
+PERSONAL_CHAT_ALLOWED_INACTIVE_STATUSES = PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES | {"canceled"}
 
 
 def is_personal_trial_enforcement_enabled() -> bool:
@@ -75,10 +76,10 @@ def _normalize_subscription_status(value: object) -> str | None:
     return normalized or None
 
 
-def _has_inactive_personal_subscription_for_chat(user) -> bool:
+def _get_personal_subscription_status_for_chat(user) -> str | None:
     customer = get_stripe_customer(user)
     if customer is None:
-        return False
+        return None
 
     try:
         subscriptions = list(customer.subscriptions.all())
@@ -87,11 +88,11 @@ def _has_inactive_personal_subscription_for_chat(user) -> bool:
             "Failed to inspect personal subscriptions for delinquent chat access user=%s",
             getattr(user, "id", None),
         )
-        return False
+        return None
 
     candidate_subscription = get_customer_subscription_candidate(user, subscriptions)
     if candidate_subscription is None:
-        return False
+        return None
 
     stripe_data = getattr(candidate_subscription, "stripe_data", None)
     status = None
@@ -99,7 +100,7 @@ def _has_inactive_personal_subscription_for_chat(user) -> bool:
         status = _normalize_subscription_status(stripe_data.get("status"))
     if status is None:
         status = _normalize_subscription_status(getattr(candidate_subscription, "status", None))
-    return status in PERSONAL_CHAT_ALLOWED_INACTIVE_STATUSES
+    return status
 
 
 def can_user_use_personal_agents_and_api(user) -> bool:
@@ -152,6 +153,23 @@ def can_user_access_personal_agent_chat(user) -> bool:
     if cached is not None:
         return bool(cached)
 
-    allowed = _has_inactive_personal_subscription_for_chat(user)
+    allowed = _get_personal_subscription_status_for_chat(user) in PERSONAL_CHAT_ALLOWED_INACTIVE_STATUSES
+    setattr(user, cache_attr, bool(allowed))
+    return bool(allowed)
+
+
+def can_user_send_personal_agent_chat_message(user) -> bool:
+    if can_user_use_personal_agents_and_api(user):
+        return True
+
+    if not user or not getattr(user, "pk", None):
+        return False
+
+    cache_attr = "_personal_agent_chat_send_allowed"
+    cached = getattr(user, cache_attr, None)
+    if cached is not None:
+        return bool(cached)
+
+    allowed = _get_personal_subscription_status_for_chat(user) in PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES
     setattr(user, cache_attr, bool(allowed))
     return bool(allowed)

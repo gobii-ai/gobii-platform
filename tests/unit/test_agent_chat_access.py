@@ -34,7 +34,10 @@ from api.services.signup_preview import (
 )
 from console.agent_chat.access import resolve_agent
 from util.analytics import AnalyticsEvent
-from util.trial_enforcement import can_user_access_personal_agent_chat
+from util.trial_enforcement import (
+    can_user_access_personal_agent_chat,
+    can_user_send_personal_agent_chat_message,
+)
 
 
 @tag("batch_console_agents_management")
@@ -628,6 +631,13 @@ class AgentChatAccessTests(TestCase):
             self.assertTrue(can_user_access_personal_agent_chat(self.user))
 
     @patch("util.trial_enforcement.can_user_use_personal_agents_and_api", return_value=False)
+    def test_chat_send_denies_current_canceled_subscription(self, _mock_normal_access):
+        customer = self._fake_customer_with_subscription_status("canceled")
+
+        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
+            self.assertFalse(can_user_send_personal_agent_chat_message(self.user))
+
+    @patch("util.trial_enforcement.can_user_use_personal_agents_and_api", return_value=False)
     def test_chat_access_allows_current_past_due_subscription(self, _mock_normal_access):
         customer = self._fake_customer_with_subscriptions([
             self._fake_subscription("canceled", current_period_end=100, created=100),
@@ -636,6 +646,13 @@ class AgentChatAccessTests(TestCase):
 
         with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
             self.assertTrue(can_user_access_personal_agent_chat(self.user))
+
+    @patch("util.trial_enforcement.can_user_use_personal_agents_and_api", return_value=False)
+    def test_chat_send_allows_current_past_due_subscription(self, _mock_normal_access):
+        customer = self._fake_customer_with_subscription_status("past_due")
+
+        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
+            self.assertTrue(can_user_send_personal_agent_chat_message(self.user))
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     @patch("util.trial_enforcement.get_active_subscription", return_value=None)

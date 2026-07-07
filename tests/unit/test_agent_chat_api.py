@@ -3364,6 +3364,29 @@ class AgentChatAPITests(TestCase):
         self.assertIsNotNone(stored)
         self.assertEqual(stored.from_endpoint.address, self.user_address)
 
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.access.can_user_use_personal_agents_and_api", return_value=False)
+    @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
+    @patch("console.api_views.can_user_send_personal_agent_chat_message", return_value=False)
+    def test_message_post_rejects_canceled_personal_subscription(
+        self,
+        _mock_can_send_personal_chat,
+        _mock_can_access_personal_chat,
+        _mock_can_use_personal_agents,
+    ):
+        before_count = PersistentAgentMessage.objects.filter(owner_agent=self.agent).count()
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/",
+            data={"body": "Run after cancel"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("error"), "Choose a plan to send more messages.")
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), before_count)
+
     @tag("batch_agent_chat")
     def test_message_post_rejects_customer_account_pause(self):
         billing = self.user.billing

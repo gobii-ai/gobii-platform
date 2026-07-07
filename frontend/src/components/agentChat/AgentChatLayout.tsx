@@ -1725,19 +1725,6 @@ export function AgentChatLayout({
                 currentPlan={subscriptionPlan}
                 onUpgrade={onUpgrade}
               />
-              {showComposerUnavailableSkipPlanning ? (
-                <div className="agent-chat-skip-planning-fallback">
-                  <button
-                    type="button"
-                    className="composer-skip-planning-button"
-                    onClick={() => void onSkipPlanning?.()}
-                    disabled={skipPlanningDisabled}
-                    title={canManageAgent ? 'Skip Planning' : 'Only managers can skip planning'}
-                  >
-                    {skipPlanningBusy ? 'Skipping...' : 'Skip Planning'}
-                  </button>
-                </div>
-              ) : null}
             </div>
           ) : effectiveShowSubscriptionExpiredPanel ? (
             <div ref={composerShellRef}>
@@ -1748,19 +1735,6 @@ export function AgentChatLayout({
                 onUpgrade={onUpgrade}
                 source="subscription_expired_panel"
               />
-              {showComposerUnavailableSkipPlanning ? (
-                <div className="agent-chat-skip-planning-fallback">
-                  <button
-                    type="button"
-                    className="composer-skip-planning-button"
-                    onClick={() => void onSkipPlanning?.()}
-                    disabled={skipPlanningDisabled}
-                    title={canManageAgent ? 'Skip Planning' : 'Only managers can skip planning'}
-                  >
-                    {skipPlanningBusy ? 'Skipping...' : 'Skip Planning'}
-                  </button>
-                </div>
-              ) : null}
             </div>
           ) : (
             <AgentComposer

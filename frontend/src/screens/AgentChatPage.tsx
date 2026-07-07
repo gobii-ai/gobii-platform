@@ -312,7 +312,11 @@ function resolveSendMessageDisabledMessage(reason?: string | null): string {
 function resolveEffectiveBillingStatus(
   selectedAgentBillingStatus: BillingStatusInfo | null,
   currentContextBillingStatus: BillingStatusInfo | null,
+  preferSelectedAgentBilling = false,
 ): BillingStatusInfo | null {
+  if (preferSelectedAgentBilling) {
+    return selectedAgentBillingStatus
+  }
   if (currentContextBillingStatus?.delinquent) {
     return currentContextBillingStatus
   }
@@ -2613,9 +2617,12 @@ export function AgentChatPage({
   const selectedAgentAccountPause = addonsPayload?.status?.accountPause ?? null
   const currentContextBillingStatus = rosterQuery.data?.billingStatus ?? null
   const currentContextAccountPause = rosterQuery.data?.accountPause ?? null
+  const preferSelectedAgentBilling = effectiveContext?.type !== 'organization'
+    && (resolvedIsOrgOwned || activeIsCollaborator)
   const effectiveBillingStatus = resolveEffectiveBillingStatus(
     selectedAgentBillingStatus,
     currentContextBillingStatus,
+    preferSelectedAgentBilling,
   )
   const currentContextCanCreateAgents = (
     rosterQuery.data?.context.canCreateAgents
