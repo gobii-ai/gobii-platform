@@ -2,10 +2,11 @@ from django.conf import settings
 from django.templatetags.static import static
 
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
-HOMEPAGE_SOFTWARE_DESCRIPTION = (
-    "Gobii is an AI agent platform that gives businesses always-on virtual coworkers "
+HOMEPAGE_SOFTWARE_DESCRIPTION_TEMPLATE = (
+    "{brand_name} is an AI agent platform that gives businesses always-on virtual coworkers "
     "capable of browser automation, web research, data collection, and workflow execution."
 )
+HOMEPAGE_SOFTWARE_DESCRIPTION = HOMEPAGE_SOFTWARE_DESCRIPTION_TEMPLATE.format(brand_name="Gobii")
 HOMEPAGE_SOFTWARE_FEATURES = [
     "Virtual coworkers, not chatbots",
     "Every agent has its own computer",
@@ -45,9 +46,11 @@ def _optional_urls(values) -> list[str]:
 
 def build_homepage_structured_data(
     *,
+    brand_name: str,
     page_title: str,
     page_description: str,
 ) -> dict:
+    brand_name = str(brand_name or "").strip() or "Gobii"
     site_url = _get_site_url()
     home_url = f"{site_url}/"
     organization_id = f"{site_url}/#organization"
@@ -58,7 +61,7 @@ def build_homepage_structured_data(
     organization = {
         "@type": "Organization",
         "@id": organization_id,
-        "name": "Gobii",
+        "name": brand_name,
         "url": home_url,
         "logo": _schema_absolute_url(static("images/gobii_fish_icon_512.png")),
     }
@@ -101,7 +104,7 @@ def build_homepage_structured_data(
     website = {
         "@type": "WebSite",
         "@id": website_id,
-        "name": "Gobii",
+        "name": brand_name,
         "url": home_url,
         "publisher": {"@id": organization_id},
     }
@@ -127,11 +130,11 @@ def build_homepage_structured_data(
     software = {
         "@type": "SoftwareApplication",
         "@id": software_id,
-        "name": "Gobii",
+        "name": brand_name,
         "url": home_url,
         "applicationCategory": "BusinessApplication",
         "operatingSystem": "Web",
-        "description": HOMEPAGE_SOFTWARE_DESCRIPTION,
+        "description": HOMEPAGE_SOFTWARE_DESCRIPTION_TEMPLATE.format(brand_name=brand_name),
         "image": _schema_absolute_url(static(HOMEPAGE_SOCIAL_IMAGE_PATH)),
         "featureList": HOMEPAGE_SOFTWARE_FEATURES,
     }

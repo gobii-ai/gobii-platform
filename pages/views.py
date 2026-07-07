@@ -1341,6 +1341,7 @@ class HomePage(TemplateView):
         ):
             context["home_structured_data_json"] = html_safe_json_dumps(
                 build_homepage_structured_data(
+                    brand_name=context["home_brand_name"],
                     page_title=context["home_meta_title"],
                     page_description=context["home_meta_description"],
                 )
