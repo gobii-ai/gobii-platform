@@ -349,6 +349,23 @@ class HomePageTests(TestCase):
             f"{expected_site_url}/static/images/gobii_og_image_1200x630.png",
         )
 
+    def test_home_page_schema_uses_configured_brand_name(self):
+        _, _, nodes = self._get_homepage_schema_nodes(PUBLIC_BRAND_NAME="Acme")
+
+        organization_schema = nodes["https://gobii.ai/#organization"]
+        website_schema = nodes["https://gobii.ai/#website"]
+        webpage_schema = nodes["https://gobii.ai/#homepage"]
+        software_schema = nodes["https://gobii.ai/#software"]
+
+        self.assertEqual(organization_schema["name"], "Acme")
+        self.assertEqual(website_schema["name"], "Acme")
+        self.assertEqual(webpage_schema["name"], "Acme - AI Coworkers for Teams With Real Work to Do")
+        self.assertEqual(software_schema["name"], "Acme")
+        self.assertEqual(
+            software_schema["description"],
+            homepage_schema.HOMEPAGE_SOFTWARE_DESCRIPTION_TEMPLATE.format(brand_name="Acme"),
+        )
+
     def test_home_page_organization_schema_uses_configured_linkedin_url(self):
         linkedin_url = "https://www.linkedin.com/company/example-ai"
         g2_url = "https://www.g2.com/products/gobii/reviews"

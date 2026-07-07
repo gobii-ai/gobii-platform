@@ -1341,6 +1341,7 @@ class HomePage(TemplateView):
         ):
             context["home_structured_data_json"] = html_safe_json_dumps(
                 build_homepage_structured_data(
+                    brand_name=home_brand_name,
                     page_title=context["home_meta_title"],
                     page_description=context["home_meta_description"],
                 )
@@ -2223,6 +2224,21 @@ def _optional_static_public_url(path: str) -> str:
         return ""
 
 
+def _public_template_social_image_url(template: PersistentAgentTemplate) -> str:
+    if template.social_image:
+        try:
+            return _public_site_absolute_url(template.social_image.url)
+        except ValueError:
+            return ""
+
+    social_image_path = (
+        template.hero_image_path.strip()
+        if template.hero_image_path
+        else "images/gobii_fish_social_1280x640.png"
+    )
+    return _optional_static_public_url(social_image_path)
+
+
 class PublicTemplateLegacyDetailRedirectView(View):
     def get(self, request, *args, **kwargs):
         template = _get_active_public_template_by_legacy_path(
@@ -2263,12 +2279,7 @@ class PublicTemplateDetailView(TemplateView):
         canonical_category_url = _public_site_absolute_url(category_path)
         library_url = _public_site_absolute_url(reverse("pages:library"))
         home_url = _public_site_absolute_url(reverse("pages:home"))
-        social_image_path = (
-            self.template.hero_image_path.strip()
-            if self.template.hero_image_path
-            else "images/gobii_fish_social_1280x640.png"
-        )
-        social_image_url = _optional_static_public_url(social_image_path)
+        social_image_url = _public_template_social_image_url(self.template)
         seo_description = (self.template.seo_meta_description or "").strip() or Truncator(
             (self.template.description or self.template.tagline or "").strip()
         ).chars(160)
@@ -2277,7 +2288,9 @@ class PublicTemplateDetailView(TemplateView):
         else:
             template_description_html = linebreaksbr(self.template.description or "")
         category_label = public_template_category_label(self.template)
-        social_title = f"{self.template.display_name} AI Agent Template"
+        social_title = self.template.display_name
+        if not self.template.omit_ai_agent_template_title_suffix:
+            social_title = f"{social_title} AI Agent Template"
         template_schema_id = f"{canonical_detail_url}#template"
         webpage_schema_id = f"{canonical_detail_url}#webpage"
         breadcrumb_schema_id = f"{canonical_detail_url}#breadcrumb"

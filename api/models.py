@@ -6344,6 +6344,13 @@ class PersistentAgentTemplate(models.Model):
         default="",
         help_text="Optional complete meta description for the public template detail page.",
     )
+    omit_ai_agent_template_title_suffix = models.BooleanField(
+        default=False,
+        help_text=(
+            "Use the display name alone for the public detail page SEO and social title "
+            "instead of appending 'AI Agent Template'."
+        ),
+    )
     description = models.TextField()
     description_markdown = models.TextField(
         blank=True,
@@ -6421,6 +6428,16 @@ class PersistentAgentTemplate(models.Model):
         max_length=255,
         blank=True,
         help_text="Optional static asset path used for UI illustration.",
+    )
+    social_image = models.ImageField(
+        upload_to="public_template_social_images/%Y/%m/%d/",
+        blank=True,
+        null=True,
+        max_length=512,
+        help_text=(
+            "Optional uploaded Open Graph/Twitter preview image for the public template "
+            "detail page. Prefer 1200x630."
+        ),
     )
     priority = models.PositiveIntegerField(
         default=100,

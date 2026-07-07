@@ -1,12 +1,15 @@
+import base64
 import json
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
@@ -23,6 +26,23 @@ from api.services.template_clone import TemplateCloneService
 from pages.library_views import LIBRARY_CACHE_KEY, LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY, LIBRARY_OFFICIAL_CACHE_KEY
 from pages.public_template_urls import public_template_route_slug
 from tests.utils.llm_seed import get_intelligence_tier
+
+
+TEST_SOCIAL_IMAGE_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+
+
+def _test_media_storages(media_root: str) -> dict:
+    return {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {"location": media_root, "base_url": "/media/"},
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
 
 
 class PublicProfileHandleTests(TestCase):
@@ -408,7 +428,7 @@ class PublicTemplateRouteTests(TestCase):
             password="pw",
         )
         public_profile = PublicProfile.objects.create(user=user, handle="finance-team")
-        PersistentAgentTemplate.objects.create(
+        template = PersistentAgentTemplate.objects.create(
             code="stripe-fraud-dispute-monitor",
             public_profile=public_profile,
             slug="stripe-fraud-dispute-monitor",
@@ -435,6 +455,26 @@ class PublicTemplateRouteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Stripe Fraud Dispute Monitor")
         self.assertContains(response, "Monitor Stripe disputes and flag risky activity.")
+        self.assertEqual(response.context["template_seo_title"], f"{template.display_name} AI Agent Template | Gobii")
+        self.assertEqual(response.context["template_social_title"], f"{template.display_name} AI Agent Template")
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_can_omit_ai_agent_template_from_title(self):
+        template = self.create_public_template(
+            code="clean-seo-title-template",
+            display_name="Clean SEO Title",
+            handle="clean-seo-title-template",
+            omit_ai_agent_template_title_suffix=True,
+        )
+
+        response = self.client.get("/library/finance/clean-seo-title-template/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["template_seo_title"], f"{template.display_name} | Gobii")
+        self.assertEqual(response.context["template_social_title"], template.display_name)
+        self.assertContains(response, f"<title>{template.display_name} | Gobii</title>", html=True)
+        self.assertContains(response, f'<meta property="og:title" content="{template.display_name}">')
+        self.assertNotContains(response, f"{template.display_name} AI Agent Template | Gobii")
 
     @tag("batch_public_templates")
     def test_public_template_detail_hides_related_templates_even_when_specified(self):
@@ -752,6 +792,37 @@ class PublicTemplateRouteTests(TestCase):
 
         self.assertContains(response, f'<meta property="og:image" content="{image_url}">')
         self.assertContains(response, f'<meta name="twitter:image" content="{image_url}">')
+        self.assertEqual(structured_data["image"], image_url)
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_uses_uploaded_social_image(self):
+        template = self.create_public_template(
+            code="uploaded-social-image-template",
+            display_name="Uploaded Social Image Template",
+            handle="uploaded-image-team",
+            hero_image_path="https://cdn.example.com/templates/fallback-social-image.png",
+        )
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(
+                MEDIA_ROOT=media_root,
+                PUBLIC_SITE_URL="https://gobii.test",
+                STORAGES=_test_media_storages(media_root),
+            ):
+                template.social_image.save("custom-og.png", ContentFile(TEST_SOCIAL_IMAGE_BYTES), save=True)
+                try:
+                    response = self.client.get("/library/finance/uploaded-social-image-template/")
+                finally:
+                    template.social_image.delete(save=False)
+
+        self.assertEqual(response.status_code, 200)
+        structured_data = json.loads(response.context["template_structured_data_json"])
+        image_url = response.context["template_social_image_url"]
+
+        self.assertTrue(image_url.startswith("https://gobii.test/media/public_template_social_images/"))
+        self.assertContains(response, f'<meta property="og:image" content="{image_url}">')
+        self.assertContains(response, f'<meta name="twitter:image" content="{image_url}">')
+        self.assertNotContains(response, "https://cdn.example.com/templates/fallback-social-image.png")
         self.assertEqual(structured_data["image"], image_url)
 
     @tag("batch_public_templates")
