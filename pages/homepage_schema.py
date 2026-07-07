@@ -2,7 +2,6 @@ from django.conf import settings
 from django.templatetags.static import static
 
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
-HOMEPAGE_SCHEMA_SITE_URL = "https://gobii.ai"
 HOMEPAGE_SOFTWARE_DESCRIPTION = (
     "Gobii is an AI agent platform that gives businesses always-on virtual coworkers "
     "capable of browser automation, web research, data collection, and workflow execution."
@@ -18,12 +17,16 @@ HOMEPAGE_SOFTWARE_FEATURES = [
 ]
 
 
+def _get_site_url() -> str:
+    return settings.PUBLIC_SITE_URL.rstrip("/")
+
+
 def _schema_absolute_url(path_or_url: str) -> str:
     value = str(path_or_url or "").strip()
     if value.startswith(("http://", "https://")):
         return value
     path = value if value.startswith("/") else f"/{value}"
-    return f"{HOMEPAGE_SCHEMA_SITE_URL.rstrip('/')}{path}"
+    return f"{_get_site_url()}{path}"
 
 
 def _optional_urls(values) -> list[str]:
@@ -45,7 +48,7 @@ def build_homepage_structured_data(
     page_title: str,
     page_description: str,
 ) -> dict:
-    site_url = HOMEPAGE_SCHEMA_SITE_URL.rstrip("/")
+    site_url = _get_site_url()
     home_url = f"{site_url}/"
     organization_id = f"{site_url}/#organization"
     website_id = f"{site_url}/#website"

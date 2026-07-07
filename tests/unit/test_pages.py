@@ -305,6 +305,50 @@ class HomePageTests(TestCase):
         self.assertEqual(software_schema["featureList"], homepage_schema.HOMEPAGE_SOFTWARE_FEATURES)
         self.assertNotIn("offers", software_schema)
 
+    def test_home_page_schema_uses_configured_public_site_url(self):
+        configured_site_url = "https://preview.gobii.test/"
+        expected_site_url = configured_site_url.rstrip("/")
+
+        _, _, nodes = self._get_homepage_schema_nodes(PUBLIC_SITE_URL=configured_site_url)
+
+        self.assertEqual(
+            set(nodes),
+            {
+                f"{expected_site_url}/#organization",
+                f"{expected_site_url}/#website",
+                f"{expected_site_url}/#homepage",
+                f"{expected_site_url}/#software",
+            },
+        )
+        organization_schema = nodes[f"{expected_site_url}/#organization"]
+        self.assertEqual(organization_schema["url"], f"{expected_site_url}/")
+        self.assertEqual(
+            organization_schema["logo"],
+            f"{expected_site_url}/static/images/gobii_fish_icon_512.png",
+        )
+
+        webpage_schema = nodes[f"{expected_site_url}/#homepage"]
+        self.assertEqual(webpage_schema["url"], f"{expected_site_url}/")
+        self.assertEqual(webpage_schema["isPartOf"], {"@id": f"{expected_site_url}/#website"})
+        self.assertEqual(webpage_schema["mainEntity"], {"@id": f"{expected_site_url}/#software"})
+        self.assertEqual(
+            webpage_schema["significantLink"],
+            [
+                f"{expected_site_url}/teams/",
+                f"{expected_site_url}/solutions/",
+                f"{expected_site_url}/pricing/",
+                f"{expected_site_url}/library/",
+                f"{expected_site_url}/comparisons/",
+            ],
+        )
+
+        software_schema = nodes[f"{expected_site_url}/#software"]
+        self.assertEqual(software_schema["url"], f"{expected_site_url}/")
+        self.assertEqual(
+            software_schema["image"],
+            f"{expected_site_url}/static/images/gobii_og_image_1200x630.png",
+        )
+
     def test_home_page_organization_schema_uses_configured_linkedin_url(self):
         linkedin_url = "https://www.linkedin.com/company/example-ai"
         g2_url = "https://www.g2.com/products/gobii/reviews"
