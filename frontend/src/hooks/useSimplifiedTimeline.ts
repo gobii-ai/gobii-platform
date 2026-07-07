@@ -319,6 +319,12 @@ export function collapseDetailedStatusRuns(
       continue
     }
 
+    if (event.kind === 'credit_forecast') {
+      flush()
+      result.push(event)
+      continue
+    }
+
     if (eventHasLatestStatus(event, targets)) {
       if (event.kind === 'steps') {
         const { statusEntries, siblingEntries } = splitLatestStatusDisplayEntries(event, targets)

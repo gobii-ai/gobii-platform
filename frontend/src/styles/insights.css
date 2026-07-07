@@ -72,11 +72,31 @@
   padding: 0.45rem 0.65rem;
 }
 
+.usage-gauge-card--forecast-warning {
+  align-items: stretch;
+  justify-content: stretch;
+  border-color: rgba(217, 119, 6, 0.26);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 247, 237, 0.62) 100%);
+}
+
+.usage-gauge-card--today.usage-gauge-card--forecast-warning {
+  border-color: rgba(124, 76, 160, 0.24);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.7) 0%, rgba(250, 245, 255, 0.68) 100%);
+}
+
 .usage-gauge-card__chart {
   position: relative;
   width: 84px;
   height: 84px;
   flex: 0 0 84px;
+}
+
+.usage-gauge-card--forecast-warning .usage-gauge-card__chart {
+  width: 74px;
+  height: 74px;
+  flex-basis: 74px;
 }
 
 .usage-gauge-card__chart .insight-gauge {
@@ -125,6 +145,17 @@
   align-items: center;
   gap: 0.15rem 0.35rem;
   min-width: 0;
+}
+
+.usage-gauge-card--forecast-warning .usage-gauge-card__copy {
+  width: 100%;
+}
+
+.usage-gauge-card__copy--forecast {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: center;
+  align-items: center;
+  gap: 0.12rem 0.4rem;
 }
 
 .usage-gauge-card__icon {
@@ -189,6 +220,12 @@
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
+.usage-gauge-card--forecast-warning > .usage-gauge-card__copy > .usage-gauge-card__action {
+  grid-column: auto;
+  margin-top: 0;
+  justify-self: start;
+}
+
 .usage-gauge-card__action:hover,
 .usage-gauge-card__action:focus-visible {
   color: #3d2551;
@@ -204,6 +241,87 @@
 .usage-gauge-card__action--details:hover,
 .usage-gauge-card__action--details:focus-visible {
   color: #3d2551;
+}
+
+.usage-forecast-summary {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.18rem 0.44rem;
+  min-width: 0;
+  border-top: 1px solid rgba(217, 119, 6, 0.18);
+  margin-top: 0.08rem;
+  padding-top: 0.28rem;
+  color: #7c2d12;
+}
+
+.usage-forecast-summary[data-scope='daily'] {
+  border-top-color: rgba(124, 76, 160, 0.2);
+  color: #5b3378;
+}
+
+.usage-forecast-summary__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+}
+
+.usage-forecast-summary__copy {
+  display: grid;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.usage-forecast-summary__label {
+  min-width: 0;
+  color: currentColor;
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usage-forecast-summary__body {
+  min-width: 0;
+  color: rgba(124, 45, 18, 0.82);
+  font-size: 0.64rem;
+  font-weight: 650;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usage-forecast-summary[data-scope='daily'] .usage-forecast-summary__body {
+  color: rgba(91, 51, 120, 0.86);
+}
+
+.usage-forecast-summary__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: currentColor;
+  font-size: 0.56rem;
+  font-weight: 850;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.usage-forecast-summary__action:hover,
+.usage-forecast-summary__action:focus-visible {
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* ==========================================================================
@@ -1054,6 +1172,12 @@
     padding: 0.35rem;
   }
 
+  .usage-gauge-card--forecast-warning {
+    display: flex;
+    align-items: stretch;
+    padding: 0.42rem 0.55rem;
+  }
+
   .usage-gauge-card__chart,
   .usage-gauge-card__unlimited-stat {
     width: 76px;
@@ -1068,6 +1192,15 @@
     justify-content: center;
     gap: 0.25rem;
     width: 100%;
+  }
+
+  .usage-gauge-card--forecast-warning .usage-gauge-card__copy {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    justify-content: stretch;
+    gap: 0.2rem 0.36rem;
+    min-width: 0;
   }
 
   .usage-gauge-card__title {
@@ -1087,10 +1220,37 @@
     display: none;
   }
 
+  .usage-gauge-card--forecast-warning .usage-gauge-card__label {
+    display: block;
+    font-size: 0.58rem;
+    white-space: nowrap;
+  }
+
   .usage-gauge-card__action {
     flex: 0 0 auto;
     margin-top: 0;
     font-size: 0.58rem;
+  }
+
+  .usage-forecast-summary {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.14rem 0.32rem;
+    margin-top: 0.04rem;
+    padding-top: 0.22rem;
+  }
+
+  .usage-forecast-summary__label {
+    font-size: 0.58rem;
+  }
+
+  .usage-forecast-summary__body,
+  .usage-forecast-summary__action {
+    font-size: 0.54rem;
+  }
+
+  .usage-forecast-summary__action {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 
@@ -1106,6 +1266,10 @@
 
   .usage-gauge-card {
     padding: 0.4rem 0.35rem;
+  }
+
+  .usage-gauge-card--forecast-warning {
+    padding: 0.38rem 0.46rem;
   }
 
   .usage-gauge-card__chart {
@@ -1127,6 +1291,38 @@
 
   .usage-gauge-card__unit {
     font-size: 0.54rem;
+  }
+
+  .usage-gauge-card--forecast-warning .usage-gauge-card__icon {
+    display: none;
+  }
+
+  .usage-gauge-card--forecast-warning .usage-gauge-card__title {
+    grid-column: 1 / -1;
+    font-size: 0.62rem;
+  }
+
+  .usage-gauge-card--forecast-warning .usage-gauge-card__label {
+    white-space: normal;
+  }
+
+  .usage-forecast-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.08rem;
+    padding-top: 0.18rem;
+  }
+
+  .usage-forecast-summary__icon {
+    display: none;
+  }
+
+  .usage-forecast-summary__label,
+  .usage-forecast-summary__body {
+    white-space: normal;
+  }
+
+  .usage-forecast-summary__action {
+    grid-column: 1;
   }
 
 }

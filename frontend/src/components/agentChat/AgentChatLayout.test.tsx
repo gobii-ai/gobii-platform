@@ -15,7 +15,11 @@ vi.mock('./TypingIndicator', () => ({
 }))
 
 vi.mock('./AgentComposer', () => ({
-  AgentComposer: () => <div data-testid="agent-composer" />,
+  AgentComposer: ({
+    forecastCapacityWarning,
+  }: {
+    forecastCapacityWarning?: { scope: 'daily' | 'monthly' } | null
+  }) => <div data-testid="agent-composer" data-forecast-warning={forecastCapacityWarning?.scope ?? ''} />,
 }))
 
 vi.mock('./TimelineEventItem', () => ({
@@ -27,6 +31,7 @@ vi.mock('./TimelineEventItem', () => ({
       kind?: string
       messageLinkHref?: string | null
       forecast?: {
+        perRunCredits?: number | null
         dailyCredits?: number | null
         monthlyCredits?: number | null
       }
@@ -37,8 +42,24 @@ vi.mock('./TimelineEventItem', () => ({
       return (
         <div data-testid="credit-forecast-timeline-event">
           <span>Estimated cost</span>
-          {typeof event.forecast.dailyCredits === 'number' ? <span>{event.forecast.dailyCredits} credits</span> : null}
-          {typeof event.forecast.monthlyCredits === 'number' ? <span>{event.forecast.monthlyCredits} credits</span> : null}
+          {typeof event.forecast.perRunCredits === 'number' && event.forecast.perRunCredits > 0 ? (
+            <>
+              <span>Per run</span>
+              <span>{event.forecast.perRunCredits === 1 ? '1 credit' : `${event.forecast.perRunCredits} credits`}</span>
+            </>
+          ) : null}
+          {typeof event.forecast.dailyCredits === 'number' && event.forecast.dailyCredits > 0 ? (
+            <>
+              <span>Daily</span>
+              <span>{event.forecast.dailyCredits} credits</span>
+            </>
+          ) : null}
+          {typeof event.forecast.monthlyCredits === 'number' && event.forecast.monthlyCredits > 0 ? (
+            <>
+              <span>Monthly</span>
+              <span>{event.forecast.monthlyCredits} credits</span>
+            </>
+          ) : null}
         </div>
       )
     }
@@ -365,10 +386,77 @@ describe('AgentChatLayout upgrade modal gating', () => {
     })
 
     expect(screen.getByText('Estimated cost')).toBeInTheDocument()
-    expect(screen.getByText('8 credits')).toBeInTheDocument()
+    expect(screen.getByText('Per run')).toBeInTheDocument()
+    expect(screen.getByText('Daily')).toBeInTheDocument()
+    expect(screen.getAllByText('8 credits')).toHaveLength(2)
     expect(screen.getByText('240 credits')).toBeInTheDocument()
     expect(screen.queryByText('Usage watch')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Dismiss credit forecast' })).not.toBeInTheDocument()
+  })
+
+  it('renders per-run credit forecasts for one-time agents without daily or monthly estimates', () => {
+    renderAgentChatLayout({
+      agentId: 'agent-one-time-forecast',
+      planningState: 'completed',
+      events: [{
+        kind: 'credit_forecast',
+        cursor: 'forecast-one-time',
+        timestamp: '2026-06-30T12:00:00Z',
+        forecast: {
+          perRunCredits: 1,
+          dailyCredits: 0,
+          monthlyCredits: 0,
+          warningLevel: 'none',
+          estimatedAt: '2026-06-30T12:00:00Z',
+        },
+      }],
+    })
+
+    expect(screen.getByText('Estimated cost')).toBeInTheDocument()
+    expect(screen.getByText('Per run')).toBeInTheDocument()
+    expect(screen.getByText('1 credit')).toBeInTheDocument()
+    expect(screen.queryByText('Daily')).not.toBeInTheDocument()
+    expect(screen.queryByText('Monthly')).not.toBeInTheDocument()
+  })
+
+  it('passes a monthly forecast capacity warning into the working panel', () => {
+    renderAgentChatLayout({
+      creditForecast: {
+        perRunCredits: 4,
+        dailyCredits: 8,
+        monthlyCredits: 360,
+        warningLevel: 'high',
+        estimatedAt: '2026-06-30T12:00:00Z',
+      },
+      dailyCredits: {
+        limit: 100,
+        hardLimit: 100,
+        usage: 10,
+        remaining: 90,
+        softRemaining: 90,
+        unlimited: false,
+        percentUsed: 10,
+        softPercentUsed: 10,
+        nextResetIso: null,
+        nextResetLabel: null,
+        low: false,
+        sliderMin: 0,
+        sliderMax: 100,
+        sliderLimitMax: 100,
+        sliderStep: 1,
+        sliderValue: 100,
+        sliderEmptyValue: 100,
+        standardSliderLimit: 100,
+      },
+      taskQuota: {
+        available: 3,
+        total: 1000,
+        used: 997,
+        used_pct: 99.7,
+      },
+    })
+
+    expect(screen.getByTestId('agent-composer')).toHaveAttribute('data-forecast-warning', 'monthly')
   })
 
   it('renders the signup preview panel instead of the composer when requested', () => {

@@ -96,7 +96,7 @@ import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BillingStatusInfo } from '../types/agentAddons'
-import type { AgentMessageNotification,  PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
+import type { AgentMessageNotification, CreditForecast, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
@@ -1307,6 +1307,15 @@ export function AgentChatPage({
     }
     return mergeTimelineEvents(flatEvents, pendingEvents)
   }, [flatEvents, isNewAgent, isStoreSynced, pendingEvents])
+  const currentCreditForecast = useMemo<CreditForecast | null>(() => {
+    for (let index = timelineEvents.length - 1; index >= 0; index -= 1) {
+      const event = timelineEvents[index]
+      if (event.kind === 'credit_forecast') {
+        return event.forecast
+      }
+    }
+    return initialPageResponse?.credit_forecast ?? null
+  }, [initialPageResponse?.credit_forecast, timelineEvents])
   const timelineHasMoreOlder = !isNewAgent ? hasMoreOlder : false
   const timelineHasMoreNewer = !isNewAgent ? hasMoreNewer : false
   const timelineHasUnseenActivity = !isNewAgent && isStoreSynced ? hasUnseenActivity : false
@@ -4289,6 +4298,7 @@ export function AgentChatPage({
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}
         dailyCreditsStatus={dailyCreditsStatus}
+        creditForecast={currentCreditForecast}
         dailyCreditsLoading={canManageDailyCredits ? quickSettingsLoading : false}
         dailyCreditsError={canManageDailyCredits ? dailyCreditsErrorMessage : null}
         onRefreshDailyCredits={canManageDailyCredits ? refetchQuickSettings : undefined}

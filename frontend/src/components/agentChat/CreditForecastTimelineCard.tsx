@@ -21,6 +21,10 @@ function formatCredits(value: number | null | undefined): string {
   return value.toFixed(2).replace(/\.?0+$/, '')
 }
 
+function formatCreditMetric(value: number): string {
+  return `${formatCredits(value)} ${value === 1 ? 'credit' : 'credits'}`
+}
+
 function isPositiveForecastValue(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
 }
@@ -28,14 +32,14 @@ function isPositiveForecastValue(value: number | null | undefined): value is num
 function buildForecastMetrics(forecast: CreditForecast): ForecastMetric[] {
   const metrics: ForecastMetric[] = []
 
+  if (isPositiveForecastValue(forecast.perRunCredits)) {
+    metrics.push({ label: 'Per run', value: formatCreditMetric(forecast.perRunCredits) })
+  }
   if (isPositiveForecastValue(forecast.dailyCredits)) {
-    metrics.push({ label: 'Daily', value: `${formatCredits(forecast.dailyCredits)} credits` })
+    metrics.push({ label: 'Daily', value: formatCreditMetric(forecast.dailyCredits) })
   }
   if (isPositiveForecastValue(forecast.monthlyCredits)) {
-    metrics.push({ label: 'Monthly', value: `${formatCredits(forecast.monthlyCredits)} credits` })
-  }
-  if (metrics.length === 0 && isPositiveForecastValue(forecast.perRunCredits)) {
-    metrics.push({ label: 'Per run', value: `${formatCredits(forecast.perRunCredits)} credits` })
+    metrics.push({ label: 'Monthly', value: formatCreditMetric(forecast.monthlyCredits) })
   }
 
   return metrics
