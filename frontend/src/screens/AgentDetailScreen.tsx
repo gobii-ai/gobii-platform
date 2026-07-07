@@ -109,8 +109,6 @@ type ConfirmActionConfig = {
   onConfirm?: () => Promise<void> | void
 }
 
-type AgentSettingsWorkspaceVariant = 'standalone' | 'embedded'
-
 export type AgentSettingsWorkspaceSavePayload = {
   agentId: string
   agentName: string
@@ -2045,7 +2043,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 <CircleHelp className="ms-1 inline-block size-3 text-gray-400" aria-hidden="true" />
               </div>
               <div className="sm:col-span-9 space-y-4">
-                <DailyCreditSummary dailyCredits={initialData.dailyCredits} embedded formatNumber={formatNumber} />
+                <DailyCreditSummary dailyCredits={initialData.dailyCredits} formatNumber={formatNumber} />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-3">
                     <label htmlFor="daily-credit-limit-slider" className="inline-block text-sm font-medium text-gray-700">
@@ -2116,7 +2114,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               <div className="sm:col-span-9">
                 <DedicatedIpSummary
                   dedicatedIps={initialData.dedicatedIps}
-                  embedded
                   organizationName={initialData.agent.organization?.name ?? null}
                   selectedValue={formState.dedicatedProxyId}
                   onChange={(value) => setFormState((prev) => ({ ...prev, dedicatedProxyId: value }))}
@@ -2147,13 +2144,11 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
             primaryEmail={initialData.primaryEmail}
             primarySms={initialData.primarySms}
             emailSettingsUrl={initialData.urls.emailSettings}
-            embedded
             onOpenEmailSettings={onOpenEmailSettings}
           />
 
           {initialData.allowlist.show && (
             <AllowlistManager
-              embedded
               state={savedAllowlistState}
               rows={allowlistRows}
               projectedSlotsUsed={projectedContactSlots}
@@ -2166,7 +2161,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
           )}
 
           <CollaboratorManager
-            embedded
             state={savedCollaboratorState}
             rows={collaboratorRows}
             projectedTotalCount={projectedCollaboratorTotalCount}
@@ -2180,7 +2174,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       </details>
 
       <IntegrationsSection
-        variant="embedded"
         mcpServers={initialData.mcpServers}
         isOrgAgent={Boolean(initialData.agent.organization)}
         selectedOrgServers={selectedOrgServers}
@@ -2208,7 +2201,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       <ActionsSection
         csrfToken={initialData.csrfToken}
         urls={initialData.urls}
-        variant="embedded"
         agent={initialData.agent}
         features={initialData.features}
         reassignment={initialData.reassignment}
@@ -2240,18 +2232,17 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
 
 type DailyCreditSummaryProps = {
   dailyCredits: DailyCreditsInfo
-  embedded?: boolean
   formatNumber: (value: number | null, fractionDigits?: number) => string | null
 }
 
-function DailyCreditSummary({ dailyCredits, embedded = false, formatNumber }: DailyCreditSummaryProps) {
+function DailyCreditSummary({ dailyCredits, formatNumber }: DailyCreditSummaryProps) {
   const usageDisplay = formatNumber(dailyCredits.usage, 2)
   const limitDisplay = dailyCredits.limit === null ? 'Unlimited' : formatNumber(dailyCredits.limit, 0)
   const softRemaining = formatNumber(dailyCredits.softRemaining, 2)
   const hardRemaining = formatNumber(dailyCredits.remaining, 2)
 
   return (
-    <div className={embedded ? 'space-y-4 rounded-lg border border-slate-200/70 bg-transparent p-4' : 'p-4 border border-gray-200 rounded-lg bg-white/70 space-y-4'}>
+    <div className="space-y-4 rounded-lg border border-slate-200/70 bg-transparent p-4">
       {dailyCredits.unlimited ? (
         <div>
           <p className="text-sm text-gray-700">Soft target is currently Unlimited, so this agent will keep running until your overall credits run out.</p>
@@ -2282,18 +2273,17 @@ function DailyCreditSummary({ dailyCredits, embedded = false, formatNumber }: Da
 
 type DedicatedIpSummaryProps = {
   dedicatedIps: DedicatedIpInfo
-  embedded?: boolean
   organizationName: string | null
   selectedValue: string
   onChange: (value: string) => void
 }
 
-function DedicatedIpSummary({ dedicatedIps, embedded = false, organizationName, selectedValue, onChange }: DedicatedIpSummaryProps) {
+function DedicatedIpSummary({ dedicatedIps, organizationName, selectedValue, onChange }: DedicatedIpSummaryProps) {
   return (
     <div className="text-sm text-gray-600 space-y-4" data-dedicated-ip-total={dedicatedIps.total}>
       <p className="text-sm text-gray-500">Monitor and assign dedicated IP addresses reserved for this account.</p>
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className={embedded ? 'rounded-lg border border-slate-200/70 bg-transparent p-4' : 'border border-gray-200 rounded-lg bg-gray-50 p-4'}>
+        <div className="rounded-lg border border-slate-200/70 bg-transparent p-4">
           <p className="text-xs uppercase tracking-wide text-gray-500">Total Reserved</p>
           <p className="text-2xl font-semibold text-gray-800 mt-1">{dedicatedIps.total}</p>
           <p className="text-xs text-gray-500 mt-3">
@@ -2304,7 +2294,7 @@ function DedicatedIpSummary({ dedicatedIps, embedded = false, organizationName, 
           {!dedicatedIps.multiAssign && <p className="text-xs text-amber-600 mt-1">Each dedicated IP can be assigned to only one agent at a time.</p>}
           {dedicatedIps.total === 0 && <p className="text-xs text-gray-500 mt-1">Purchase dedicated IPs in Billing to make them available here.</p>}
         </div>
-        <div className={embedded ? 'rounded-lg border border-slate-200/70 bg-transparent p-4' : 'border border-gray-200 rounded-lg bg-gray-50 p-4'}>
+        <div className="rounded-lg border border-slate-200/70 bg-transparent p-4">
           <p className="text-xs uppercase tracking-wide text-gray-500">Available to Assign</p>
           <p className="text-2xl font-semibold text-gray-800 mt-1">{dedicatedIps.available}</p>
           {dedicatedIps.options.length > 0 ? (
@@ -2345,7 +2335,6 @@ type PrimaryContactsProps = {
   primaryEmail: PrimaryEndpoint | null
   primarySms: PrimaryEndpoint | null
   emailSettingsUrl: string
-  embedded?: boolean
   onOpenEmailSettings?: () => void
 }
 
@@ -2353,7 +2342,6 @@ function PrimaryContacts({
   primaryEmail,
   primarySms,
   emailSettingsUrl,
-  embedded = false,
   onOpenEmailSettings,
 }: PrimaryContactsProps) {
   const manageEmailSettingsLink = onOpenEmailSettings ? (
@@ -2388,7 +2376,7 @@ function PrimaryContacts({
               type="text"
               value={primaryEmail.address}
               readOnly
-              className={embedded ? 'block w-full rounded-lg border border-slate-200/70 bg-transparent px-3 py-2 text-sm shadow-none' : 'py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm'}
+              className="block w-full rounded-lg border border-slate-200/70 bg-transparent px-3 py-2 text-sm shadow-none"
             />
             <p className="mt-2 text-xs text-gray-500">The agent's primary email address for communication.</p>
             <div className="mt-2 space-y-1">
@@ -2396,7 +2384,7 @@ function PrimaryContacts({
             </div>
           </>
         ) : (
-          <div className={embedded ? 'rounded border border-dashed border-slate-300 px-3 py-2 text-sm text-gray-600 bg-transparent' : 'py-2 px-3 text-sm text-gray-600 bg-gray-50 border border-dashed border-gray-300 rounded'}>
+          <div className="rounded border border-dashed border-slate-300 px-3 py-2 text-sm text-gray-600 bg-transparent">
             Not configured. {setupEmailLink}
           </div>
         )}
@@ -2413,7 +2401,7 @@ function PrimaryContacts({
               type="text"
               value={primarySms.address}
               readOnly
-              className={embedded ? 'block w-full rounded-lg border border-slate-200/70 bg-transparent px-3 py-2 text-sm shadow-none' : 'py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm'}
+              className="block w-full rounded-lg border border-slate-200/70 bg-transparent px-3 py-2 text-sm shadow-none"
             />
             <p className="mt-2 text-xs text-gray-500">The agent's primary SMS address for communication. This cannot be changed.</p>
           </div>
@@ -2432,10 +2420,9 @@ type AllowlistManagerProps = {
   onRemoveRows: (rows: AllowlistTableRow[]) => void
   contactRequestsUrl: string
   onOpenContactRequests?: () => void
-  embedded?: boolean
 }
 
-function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl, onOpenContactRequests, embedded = false }: AllowlistManagerProps) {
+function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl, onOpenContactRequests }: AllowlistManagerProps) {
   const contactCapReached = typeof state.maxContacts === 'number' && state.maxContacts > 0 && projectedSlotsUsed >= state.maxContacts
   const embeddedInfoBannerClassName = 'flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3'
   const embeddedInfoCardClassName = 'rounded-xl border border-slate-200/20 bg-slate-950/35 px-4 py-4'
@@ -2453,9 +2440,9 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
       </div>
 
       {!state.emailVerified && (
-        <div className={embedded ? embeddedInfoBannerClassName : 'flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3'}>
+        <div className={embeddedInfoBannerClassName}>
           <Mail className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
-          <div className={embedded ? 'text-sm text-amber-100' : 'text-sm text-amber-800'}>
+          <div className="text-sm text-amber-100">
             <span className="font-medium">Email verification required.</span>{' '}
             External contacts won't be able to reach your agent until you{' '}
             <a href="/accounts/email/" className="underline hover:text-amber-900">verify your email address</a>.
@@ -2464,15 +2451,15 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
       )}
 
       {state.pendingContactRequests > 0 && (
-        <div className={embedded ? 'rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3' : 'rounded-lg border border-amber-200 bg-amber-50 px-4 py-3'}>
+        <div className="rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-amber-600" aria-hidden="true" />
-              <span className={embedded ? 'text-sm font-medium text-amber-100' : 'text-sm font-medium text-amber-800'}>
+              <span className="text-sm font-medium text-amber-100">
                 {state.pendingContactRequests} Contact Request{state.pendingContactRequests === 1 ? '' : 's'} Pending
               </span>
             </div>
-            {embedded && onOpenContactRequests ? (
+            {onOpenContactRequests ? (
               <button
                 type="button"
                 onClick={onOpenContactRequests}
@@ -2490,12 +2477,12 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
       )}
 
       {(state.ownerEmail || state.ownerPhone) && (
-        <div className={embedded ? embeddedInfoCardClassName : 'rounded-xl border border-slate-200 bg-white px-4 py-4'}>
+        <div className={embeddedInfoCardClassName}>
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner Endpoints</div>
           <p className="mt-1 text-xs text-slate-600">Owner endpoints are always allowed in default mode.</p>
           {state.ownerEmail && (
             <div className="mt-3 flex items-center gap-2 text-sm text-slate-700">
-              <span className={embedded ? embeddedInfoIconClassName : 'flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600'}>
+              <span className={embeddedInfoIconClassName}>
                 <Mail className="w-4 h-4" aria-hidden="true" />
               </span>
               <span className="font-medium">{state.ownerEmail}</span>
@@ -2503,7 +2490,7 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
           )}
           {state.ownerPhone && (
             <div className="mt-3 flex items-center gap-2 text-sm text-slate-700">
-              <span className={embedded ? embeddedInfoIconClassName : 'flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600'}>
+              <span className={embeddedInfoIconClassName}>
                 <Phone className="w-4 h-4" aria-hidden="true" />
               </span>
               <span className="font-medium">{state.ownerPhone}</span>
@@ -2531,7 +2518,7 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
               type="button"
               onClick={onAddContact}
               disabled={saving || contactCapReached}
-              className={embedded ? embeddedPrimaryActionClassName : 'inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50'}
+              className={embeddedPrimaryActionClassName}
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
               Add Contact
@@ -2559,10 +2546,9 @@ type CollaboratorManagerProps = {
   onAdd: () => void
   onRemove: (row: CollaboratorTableRow) => void
   onConfirmAction: (config: ConfirmActionConfig) => void
-  embedded?: boolean
 }
 
-function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, onAdd, onRemove, onConfirmAction, embedded = false }: CollaboratorManagerProps) {
+function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, onAdd, onRemove, onConfirmAction }: CollaboratorManagerProps) {
   const canManage = state.canManage
   const totalLimit = state.maxContacts ?? 'Unlimited'
   const embeddedPrimaryActionClassName = 'rounded-lg border border-emerald-300/25 bg-emerald-900/50 px-4 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-200/40 hover:bg-emerald-900/70 disabled:opacity-50'
@@ -2591,7 +2577,7 @@ function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, on
               type="button"
               onClick={onAdd}
               disabled={busy || !canManage}
-              className={embedded ? embeddedPrimaryActionClassName : 'rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50'}
+              className={embeddedPrimaryActionClassName}
             >
               <span className="inline-flex items-center gap-2">
                 <UserPlus className="h-4 w-4" aria-hidden="true" />
@@ -2623,7 +2609,6 @@ function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, on
 }
 
 type IntegrationsSectionProps = {
-  variant?: AgentSettingsWorkspaceVariant
   mcpServers: McpServersInfo
   isOrgAgent: boolean
   selectedOrgServers: Set<string>
@@ -2653,7 +2638,6 @@ type IntegrationsSectionProps = {
 }
 
 function IntegrationsSection({
-  variant = 'standalone',
   mcpServers,
   isOrgAgent,
   selectedOrgServers,
@@ -2677,47 +2661,22 @@ function IntegrationsSection({
   onInboundWebhookCopy,
   onConfirmAction,
 }: IntegrationsSectionProps) {
-  const embedded = variant === 'embedded'
-  const sectionClassName = embedded
-    ? getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
-    : 'gobii-card-base group'
-  const summaryClassName = embedded
-    ? 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
-    : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
-  const wrapperClassName = embedded ? 'divide-y divide-slate-200/15 border-t border-slate-200/15' : 'divide-y divide-gray-200/70'
-  const sectionBodyClassName = embedded ? 'space-y-6 px-5 py-5' : 'p-6 sm:p-8 space-y-6'
-  const cardClassName = embedded
-    ? getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'p-4 space-y-4' })
-    : 'border border-gray-200 rounded-xl bg-white p-4 space-y-4'
-  const tableWrapperClassName = embedded
-    ? getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none' })
-    : 'overflow-hidden border border-gray-200 rounded-xl'
-  const tableHeadClassName = embedded ? 'bg-slate-950/45' : 'bg-gray-50'
-  const tableBodyClassName = embedded ? 'bg-transparent divide-y divide-slate-200/15' : 'bg-white divide-y divide-gray-200'
-  const primaryActionButtonClassName = embedded
-    ? 'inline-flex items-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-4 py-2 text-sm font-medium text-sky-50 transition-colors hover:border-sky-200/40 hover:bg-sky-900/75 disabled:opacity-50'
-    : 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-50'
-  const neutralButtonClassName = embedded
-    ? 'inline-flex items-center gap-2 rounded-md border border-slate-200/25 bg-slate-900/35 px-3 py-1.5 text-xs font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 disabled:opacity-50'
-    : 'inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50'
-  const destructiveButtonClassName = embedded
-    ? 'inline-flex items-center gap-1.5 rounded-md border border-rose-300/25 bg-rose-950/35 px-3 py-1.5 text-xs font-medium text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50'
-    : 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50'
-  const warningButtonClassName = embedded
-    ? 'inline-flex items-center gap-1.5 rounded-md border border-amber-300/25 bg-amber-950/30 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:border-amber-200/40 hover:bg-amber-900/45 disabled:opacity-50'
-    : 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-50'
-  const pendingBadgeClassName = embedded
-    ? 'inline-flex rounded-full border border-amber-300/20 bg-amber-950/35 px-2 py-0.5 text-[11px] font-medium text-amber-200'
-    : 'text-xs text-amber-600'
-  const activeStatusClassName = embedded
-    ? 'inline-flex rounded-full border border-emerald-300/20 bg-emerald-950/35 px-2 py-0.5 text-[11px] font-medium text-emerald-200'
-    : 'text-green-600'
-  const inactiveStatusClassName = embedded
-    ? 'inline-flex rounded-full border border-slate-300/20 bg-slate-900/35 px-2 py-0.5 text-[11px] font-medium text-slate-300'
-    : 'text-gray-500'
-  const emptyStateClassName = embedded
-    ? 'rounded-xl border border-dashed border-slate-200/25 bg-slate-950/20 px-4 py-4 text-sm text-slate-300'
-    : 'p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600'
+  const sectionClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
+  const summaryClassName = 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
+  const wrapperClassName = 'divide-y divide-slate-200/15 border-t border-slate-200/15'
+  const sectionBodyClassName = 'space-y-6 px-5 py-5'
+  const cardClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'p-4 space-y-4' })
+  const tableWrapperClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none' })
+  const tableHeadClassName = 'bg-slate-950/45'
+  const tableBodyClassName = 'bg-transparent divide-y divide-slate-200/15'
+  const primaryActionButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-4 py-2 text-sm font-medium text-sky-50 transition-colors hover:border-sky-200/40 hover:bg-sky-900/75 disabled:opacity-50'
+  const neutralButtonClassName = 'inline-flex items-center gap-2 rounded-md border border-slate-200/25 bg-slate-900/35 px-3 py-1.5 text-xs font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 disabled:opacity-50'
+  const destructiveButtonClassName = 'inline-flex items-center gap-1.5 rounded-md border border-rose-300/25 bg-rose-950/35 px-3 py-1.5 text-xs font-medium text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50'
+  const warningButtonClassName = 'inline-flex items-center gap-1.5 rounded-md border border-amber-300/25 bg-amber-950/30 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:border-amber-200/40 hover:bg-amber-900/45 disabled:opacity-50'
+  const pendingBadgeClassName = 'inline-flex rounded-full border border-amber-300/20 bg-amber-950/35 px-2 py-0.5 text-[11px] font-medium text-amber-200'
+  const activeStatusClassName = 'inline-flex rounded-full border border-emerald-300/20 bg-emerald-950/35 px-2 py-0.5 text-[11px] font-medium text-emerald-200'
+  const inactiveStatusClassName = 'inline-flex rounded-full border border-slate-300/20 bg-slate-900/35 px-2 py-0.5 text-[11px] font-medium text-slate-300'
+  const emptyStateClassName = 'rounded-xl border border-dashed border-slate-200/25 bg-slate-950/20 px-4 py-4 text-sm text-slate-300'
 
   return (
     <details className={sectionClassName} id="agent-integrations">
@@ -2743,7 +2702,7 @@ function IntegrationsSection({
             <h4 className="text-sm font-semibold text-gray-700">Inherited Servers</h4>
               <ul className="space-y-2">
                 {mcpServers.inherited.map((server) => (
-                  <li key={server.id} className={embedded ? 'flex items-start justify-between gap-3 rounded-lg border border-slate-200/20 bg-slate-950/25 px-4 py-3' : 'flex items-start justify-between gap-3 border border-gray-200 bg-gray-50 rounded-lg px-4 py-3'}>
+                  <li key={server.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-200/20 bg-slate-950/25 px-4 py-3">
                     <div>
                       <p className="text-sm font-medium text-gray-800">{server.displayName}</p>
                       {server.description && <p className="text-sm text-gray-600">{server.description}</p>}
@@ -2763,7 +2722,7 @@ function IntegrationsSection({
                   {mcpServers.organization.map((server) => {
                     const checked = selectedOrgServers.has(server.id)
                     return (
-                      <label key={server.id} className={embedded ? 'flex items-start gap-3 rounded-lg border border-slate-200/20 bg-slate-950/25 px-3 py-3' : 'flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3'}>
+                      <label key={server.id} className="flex items-start gap-3 rounded-lg border border-slate-200/20 bg-slate-950/25 px-3 py-3">
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded"
@@ -2791,7 +2750,7 @@ function IntegrationsSection({
                   {mcpServers.personal.map((server) => {
                     const checked = selectedPersonalServers.has(server.id)
                     return (
-                      <label key={server.id} className={embedded ? 'flex items-start gap-3 rounded-lg border border-slate-200/20 bg-slate-950/25 px-3 py-3' : 'flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3'}>
+                      <label key={server.id} className="flex items-start gap-3 rounded-lg border border-slate-200/20 bg-slate-950/25 px-3 py-3">
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded"
@@ -2810,7 +2769,7 @@ function IntegrationsSection({
                   <div className="flex justify-end">
                     <a
                       href={mcpServers.manageUrl}
-                      className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white' : 'inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50'}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white"
                     >
                       <ServerCog className="h-4 w-4" aria-hidden="true" />
                       Manage All Servers
@@ -3068,7 +3027,7 @@ function IntegrationsSection({
                           </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
-                          <div className={embedded ? 'flex min-w-0 items-stretch overflow-hidden rounded-lg border border-slate-200/20 bg-slate-950/25' : 'flex min-w-0 items-stretch overflow-hidden rounded-lg border border-gray-200'}>
+                          <div className="flex min-w-0 items-stretch overflow-hidden rounded-lg border border-slate-200/20 bg-slate-950/25">
                             <input
                               type="text"
                               value={webhook.url ?? ''}
@@ -3076,13 +3035,13 @@ function IntegrationsSection({
                               placeholder="URL available after save"
                               aria-label={`Webhook URL for ${webhook.name}`}
                               onFocus={(event) => event.currentTarget.select()}
-                              className={embedded ? 'min-w-0 flex-1 border-0 bg-transparent px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:ring-0' : 'min-w-0 flex-1 border-0 bg-gray-50 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:ring-0'}
+                              className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:ring-0"
                             />
                             <button
                               type="button"
                               onClick={() => onInboundWebhookCopy(webhook)}
                               disabled={!webhook.url}
-                              className={embedded ? 'inline-flex shrink-0 items-center gap-1.5 border-l border-slate-200/20 bg-slate-950/10 px-3 py-2 text-xs font-medium text-slate-100 transition hover:bg-slate-900/45 disabled:cursor-not-allowed disabled:text-slate-500' : 'inline-flex shrink-0 items-center gap-1.5 border-l border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400'}
+                              className="inline-flex shrink-0 items-center gap-1.5 border-l border-slate-200/20 bg-slate-950/10 px-3 py-2 text-xs font-medium text-slate-100 transition hover:bg-slate-900/45 disabled:cursor-not-allowed disabled:text-slate-500"
                             >
                               {copiedInboundWebhookId === webhook.id ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
                               {copyLabel}
@@ -3378,7 +3337,6 @@ function InboundWebhookModal({ mode, webhook, onSubmit, onClose }: InboundWebhoo
 type ActionsSectionProps = {
   csrfToken: string
   urls: AgentSettingsData['urls']
-  variant?: AgentSettingsWorkspaceVariant
   agent: AgentSummary
   features: AgentSettingsData['features']
   reassignment: ReassignmentInfo
@@ -3395,7 +3353,6 @@ type ActionsSectionProps = {
 function ActionsSection({
   csrfToken,
   urls,
-  variant = 'standalone',
   agent,
   features,
   reassignment,
@@ -3408,15 +3365,10 @@ function ActionsSection({
   onDeleteAgent,
   deleteError,
 }: ActionsSectionProps) {
-  const embedded = variant === 'embedded'
-  const sectionClassName = embedded
-    ? getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
-    : 'gobii-card-base group'
-  const summaryClassName = embedded
-    ? 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
-    : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
-  const wrapperClassName = embedded ? 'divide-y divide-slate-200/15 border-t border-slate-200/15' : 'divide-y divide-gray-200/70'
-  const sectionBodyClassName = embedded ? 'space-y-4 px-5 py-5' : 'p-6 sm:p-8 space-y-4'
+  const sectionClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
+  const summaryClassName = 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
+  const wrapperClassName = 'divide-y divide-slate-200/15 border-t border-slate-200/15'
+  const sectionBodyClassName = 'space-y-4 px-5 py-5'
 
   return (
     <details className={sectionClassName} id="agent-ownership">
@@ -3436,7 +3388,7 @@ function ActionsSection({
             </div>
             {agent.organization ? (
               <div className="space-y-3">
-                <div className={embedded ? 'flex flex-col gap-3 rounded-lg border border-slate-200/70 bg-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between' : 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3'}>
+                <div className="flex flex-col gap-3 rounded-lg border border-slate-200/70 bg-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <span className="text-sm text-gray-700">
                     Currently assigned to <strong>{agent.organization.name}</strong>
                   </span>
@@ -3499,7 +3451,7 @@ function ActionsSection({
               <form method="post" action={urls.detail} className="flex" onSubmit={onSubmitTransferForm}>
                 <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
                 <input type="hidden" name="action" value="cancel_transfer_invite" />
-                <button type="submit" className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-4 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55' : 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50'}>
+                <button type="submit" className="inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-4 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55">
                   Cancel Invitation
                 </button>
               </form>
@@ -3542,10 +3494,10 @@ function ActionsSection({
           )}
         </section>
 
-        <section className={embedded ? 'px-4 py-5 sm:px-5' : 'p-6 sm:p-8'}>
+        <section className="px-4 py-5 sm:px-5">
           <div className="flex gap-x-4">
             <div className="flex-shrink-0">
-              <div className={embedded ? 'flex h-12 w-12 items-center justify-center rounded-full border border-rose-300/25 bg-rose-950/35 text-rose-200' : 'flex items-center justify-center w-12 h-12 rounded-full bg-red-100 border-4 border-red-50'}>
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-rose-300/25 bg-rose-950/35 text-rose-200">
                 <ShieldAlert className="w-6 h-6 text-red-600" aria-hidden="true" />
               </div>
             </div>
@@ -3557,7 +3509,7 @@ function ActionsSection({
               <button
                 type="button"
                 onClick={onDeleteAgent}
-                className={embedded ? 'inline-flex items-center gap-x-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-4 py-2 text-sm font-medium text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 focus:outline-none focus:ring-2 focus:ring-rose-400/60 focus:ring-offset-0' : 'py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2'}
+                className="inline-flex items-center gap-x-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-4 py-2 text-sm font-medium text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 focus:outline-none focus:ring-2 focus:ring-rose-400/60 focus:ring-offset-0"
               >
                 <Trash2 className="w-4 h-4" aria-hidden="true" />
                 Delete Agent

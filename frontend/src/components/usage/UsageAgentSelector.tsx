@@ -20,7 +20,6 @@ type UsageAgentSelectorProps = {
   selectedAgentIds: Set<string>
   onSelectionChange: (ids: Set<string>) => void
   variant?: 'default' | 'condensed'
-  embedded?: boolean
 }
 
 export function UsageAgentSelector({
@@ -30,7 +29,6 @@ export function UsageAgentSelector({
   selectedAgentIds,
   onSelectionChange,
   variant = 'default',
-  embedded = false,
 }: UsageAgentSelectorProps) {
   const isLoading = status === 'loading'
   const isErrored = status === 'error'
@@ -39,22 +37,11 @@ export function UsageAgentSelector({
   const labelId = useId()
 
   const containerClasses = 'flex flex-col gap-1'
-  const buttonClassName = `${embedded
-    ? 'flex w-full items-center justify-between gap-2 rounded-md border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-200 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white disabled:cursor-not-allowed disabled:opacity-60'
-    : 'flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60'
-  } ${variant === 'condensed' ? 'sm:w-auto' : ''}`.trim()
-  const labelClassName = embedded
-    ? 'text-xs font-semibold uppercase tracking-wide text-slate-400'
-    : 'text-xs font-semibold uppercase tracking-wide text-slate-500'
-  const popoverClassName = embedded
-    ? 'z-50 mt-2 min-w-56 rounded-xl border border-slate-200/20 bg-slate-950 shadow-none'
-    : 'z-50 mt-2 min-w-56 rounded-xl border border-slate-200 bg-white shadow-xl'
-  const listClassName = embedded
-    ? 'max-h-64 overflow-y-auto p-1 text-sm text-slate-200'
-    : 'max-h-64 overflow-y-auto p-1 text-sm text-slate-700'
-  const itemClassName = embedded
-    ? 'cursor-pointer rounded-md px-3 py-2 data-[focused]:bg-sky-900/55 data-[focused]:text-sky-100 data-[selected]:bg-sky-500 data-[selected]:text-white'
-    : 'cursor-pointer rounded-md px-3 py-2 data-[focused]:bg-blue-50 data-[focused]:text-blue-700 data-[selected]:bg-blue-600 data-[selected]:text-white'
+  const buttonClassName = `flex w-full items-center justify-between gap-2 rounded-md border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-200 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white disabled:cursor-not-allowed disabled:opacity-60 ${variant === 'condensed' ? 'sm:w-auto' : ''}`.trim()
+  const labelClassName = 'text-xs font-semibold uppercase tracking-wide text-slate-400'
+  const popoverClassName = 'z-50 mt-2 min-w-56 rounded-xl border border-slate-200/20 bg-slate-950 shadow-none'
+  const listClassName = 'max-h-64 overflow-y-auto p-1 text-sm text-slate-200'
+  const itemClassName = 'cursor-pointer rounded-md px-3 py-2 data-[focused]:bg-sky-900/55 data-[focused]:text-sky-100 data-[selected]:bg-sky-500 data-[selected]:text-white'
 
   const selectionLabel = useMemo(() => {
     if (selectedAgentIds.size === 0) {
@@ -124,7 +111,7 @@ export function UsageAgentSelector({
         <span className="text-xs text-slate-400">Loading agents and API…</span>
       ) : null}
       {isErrored && errorMessage ? (
-        <span className={embedded ? 'text-xs text-rose-300' : 'text-xs text-red-600'}>{errorMessage}</span>
+        <span className="text-xs text-rose-300">{errorMessage}</span>
       ) : null}
     </div>
   )

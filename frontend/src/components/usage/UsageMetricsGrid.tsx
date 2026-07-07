@@ -25,10 +25,9 @@ type MetricCard = {
 type UsageMetricsGridProps = {
   queryInput: UsageSummaryQueryInput
   agentIds: string[]
-  embedded?: boolean
 }
 
-export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: UsageMetricsGridProps) {
+export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps) {
   const setSummaryLoading = useUsageStore((state) => state.setSummaryLoading)
   const setSummaryData = useUsageStore((state) => state.setSummaryData)
   const setSummaryError = useUsageStore((state) => state.setSummaryError)
@@ -102,7 +101,7 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
   }, [queryInput.from, queryInput.to, resolvedSummary])
 
   const cards = useMemo<MetricCard[]>(() => {
-    const defaultValueClasses = embedded ? 'text-slate-50' : 'text-slate-900'
+    const defaultValueClasses = 'text-slate-50'
     const loadingValueClasses = 'text-slate-400 animate-pulse'
     const errorValueClasses = 'text-slate-500'
 
@@ -192,19 +191,15 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
     }
 
     return cards
-  }, [activeAgentCount, agentsErrorMessage, agentsStatus, creditFormatter, embedded, isError, isPending, periodDayCount, resolvedSummary])
+  }, [activeAgentCount, agentsErrorMessage, agentsStatus, creditFormatter, isError, isPending, periodDayCount, resolvedSummary])
 
-  const cardClassName = embedded
-    ? getSettingsSurfaceClassName({
-      variant: 'embedded',
-      roundedClassName: 'rounded-xl',
-      className: 'flex h-full flex-col justify-between gap-3 p-5',
-    })
-    : 'gobii-card-base flex h-full flex-col justify-between gap-3 p-5'
-  const labelClassName = embedded
-    ? 'text-xs font-semibold uppercase tracking-wide text-slate-400'
-    : 'text-xs font-semibold uppercase tracking-wide text-slate-500'
-  const captionClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-500'
+  const cardClassName = getSettingsSurfaceClassName({
+    variant: 'embedded',
+    roundedClassName: 'rounded-xl',
+    className: 'flex h-full flex-col justify-between gap-3 p-5',
+  })
+  const labelClassName = 'text-xs font-semibold uppercase tracking-wide text-slate-400'
+  const captionClassName = 'text-sm text-slate-400'
 
   return (
     <section className="grid gap-4 md:grid-cols-3">
@@ -233,13 +228,13 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
                     radius="94%"
                     showGlow={false}
                     animate={false}
-                    trackColor={embedded ? 'rgba(170, 116, 206, 0.18)' : 'rgba(170, 116, 206, 0.16)'}
+                    trackColor="rgba(170, 116, 206, 0.18)"
                   />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className={`text-lg font-semibold ${embedded ? 'text-slate-50' : 'text-slate-900'}`}>
+                    <span className="text-lg font-semibold text-slate-50">
                       {Math.round(card.gaugePct)}
                     </span>
-                    <span className={`mt-1 text-[10px] font-semibold ${embedded ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <span className="mt-1 text-[10px] font-semibold text-slate-400">
                       %
                     </span>
                   </div>
