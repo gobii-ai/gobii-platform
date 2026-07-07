@@ -8,7 +8,7 @@ import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0405_update_brightdata_mcp_version"),
+        ("api", "0411_persistent_agent_template_public_options"),
     ]
 
     operations = [
