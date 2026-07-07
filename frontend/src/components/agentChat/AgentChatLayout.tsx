@@ -34,7 +34,7 @@ import type {
   PlanSnapshot,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
-import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite } from '../../types/agentRoster'
 import type { PlanningState, SignupPreviewState } from '../../types/agentRoster'
 import type { ConsoleContext } from '../../api/context'
 import {
@@ -182,6 +182,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   connectionLabel?: string
   connectionDetail?: string | null
   agentRoster?: AgentRosterEntry[]
+  transferInvites?: AgentTransferInvite[]
   favoriteAgentIds?: string[]
   mutedAgentIds?: string[]
   activeAgentId?: string | null
@@ -190,6 +191,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   rosterLoading?: boolean
   rosterError?: string | null
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onRespondTransferInvite?: (invite: AgentTransferInvite, action: 'accept' | 'decline') => Promise<void>
   onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onToggleAgentMute?: (agentId: string) => void
@@ -381,6 +383,7 @@ export function AgentChatLayout({
   connectionLabel,
   connectionDetail,
   agentRoster,
+  transferInvites,
   favoriteAgentIds,
   mutedAgentIds,
   activeAgentId,
@@ -391,6 +394,7 @@ export function AgentChatLayout({
   rosterLoading,
   rosterError,
   onSelectAgent,
+  onRespondTransferInvite,
   onConfigureAgent,
   onToggleAgentFavorite,
   onToggleAgentMute,
@@ -1500,6 +1504,7 @@ export function AgentChatLayout({
         desktopMode={sidebarMode}
         onDesktopModeChange={handleSidebarModeChange}
         agents={agentRoster}
+        transferInvites={transferInvites}
         favoriteAgentIds={favoriteAgentIds}
         mutedAgentIds={mutedAgentIds}
         activeAgentId={activeAgentId}
@@ -1507,6 +1512,7 @@ export function AgentChatLayout({
         loading={rosterLoading}
         errorMessage={rosterError}
         onSelectAgent={onSelectAgent}
+        onRespondTransferInvite={onRespondTransferInvite}
         onConfigureAgent={onConfigureAgent}
         onToggleAgentFavorite={onToggleAgentFavorite}
         onToggleAgentMute={onToggleAgentMute}

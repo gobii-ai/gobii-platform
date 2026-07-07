@@ -43,3 +43,17 @@ export type AgentRosterEntry = {
   latestAgentMessageReadAt?: string | null
   enabledSystemSkills?: string[]
 }
+
+export type AgentTransferInvite = {
+  id: string
+  agent_id: string
+  agent_name: string
+  agent_avatar_url: string | null
+  initiated_by_name: string
+  initiated_by_email: string
+  recipient_email: string
+  message: string
+  created_at: string | null
+  accept_url: string
+  decline_url: string
+}

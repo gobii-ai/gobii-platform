@@ -70,33 +70,31 @@ export function Modal({
           className={`relative z-50 w-full transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 ${widthClass} ${panelClassName}`}
         >
           <div className="px-6 py-5 sm:px-8">
-            <div className="sm:flex sm:items-start sm:gap-4">
-              {Icon && (
-                <div className={`mx-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${iconBgClass} sm:mx-0 sm:h-10 sm:w-10`}>
-                  <Icon aria-hidden="true" className={`h-5 w-5 ${iconColorClass}`} strokeWidth={2} />
-                </div>
-              )}
-              <div className="mt-3 min-w-0 w-full text-center sm:mt-0 sm:text-left">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <h2 className="text-lg font-semibold text-slate-900" id="modal-title">
-                      {title}
-                    </h2>
-                    {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+            <div>
+              <div className="flex items-center gap-4">
+                {Icon && (
+                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${iconBgClass} sm:h-10 sm:w-10`}>
+                    <Icon aria-hidden="true" className={`h-5 w-5 ${iconColorClass}`} strokeWidth={2} />
                   </div>
-                  {dismissible ? (
-                    <button
-                      type="button"
-                      className="text-slate-400 hover:text-slate-500"
-                      onClick={onClose}
-                      aria-label="Close dialog"
-                    >
-                      <X className="h-5 w-5" strokeWidth={2} />
-                    </button>
-                  ) : null}
+                )}
+                <div className="min-w-0 flex-1 text-left">
+                  <h2 className="text-lg font-semibold text-slate-900" id="modal-title">
+                    {title}
+                  </h2>
+                  {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
                 </div>
-                <div className={`mt-4 max-h-[70vh] overflow-y-auto px-1 py-1 text-left ${bodyClassName}`}>{children}</div>
+                {dismissible ? (
+                  <button
+                    type="button"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-500"
+                    onClick={onClose}
+                    aria-label="Close dialog"
+                  >
+                    <X className="h-5 w-5" strokeWidth={2} />
+                  </button>
+                ) : null}
               </div>
+              <div className={`mt-4 max-h-[70vh] overflow-y-auto px-1 py-1 text-left ${Icon ? 'sm:ml-14' : ''} ${bodyClassName}`}>{children}</div>
             </div>
           </div>
           {footer && (

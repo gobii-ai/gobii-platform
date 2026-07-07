@@ -5690,8 +5690,8 @@
     --roster-active-color: rgba(255, 255, 255, 0.96);
     --roster-active-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
     --roster-avatar-ring-surface: var(--sidebar-bg, #1e1145);
-    --roster-leading-gap: 0.35rem;
-    --roster-unread-slot-size: 0.56rem;
+    --roster-leading-gap: 0.42rem;
+    --roster-unread-slot-size: 0.38rem;
     --roster-unread-dot-size: 0.52rem;
     --roster-unread-dot-border: 0;
     --roster-avatar-size: 2.25rem;
@@ -5745,8 +5745,8 @@
     --roster-active-bg: rgba(99, 102, 241, 0.08);
     --roster-active-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.12);
     --roster-avatar-ring-surface: #ffffff;
-    --roster-leading-gap: 0.4rem;
-    --roster-unread-slot-size: 0.72rem;
+    --roster-leading-gap: 0.48rem;
+    --roster-unread-slot-size: 0.44rem;
     --roster-unread-dot-size: 0.72rem;
     --roster-unread-dot-border: 2px solid #ffffff;
     --roster-avatar-size: 2.75rem;
@@ -5818,14 +5818,16 @@
 .agent-roster-item__unread-slot {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     width: var(--roster-unread-slot-size);
-    flex: 0 0 var(--roster-unread-slot-size);
+    flex: 0 0 auto;
+    margin-left: -0.18rem;
 }
 .agent-roster-item__unread-dot {
     display: block;
     width: var(--roster-unread-dot-size);
     height: var(--roster-unread-dot-size);
+    flex: 0 0 var(--roster-unread-dot-size);
     border: var(--roster-unread-dot-border);
     border-radius: 999px;
     background: #2df6f5;
@@ -5884,6 +5886,7 @@
     justify-content: center;
     gap: 0.45rem;
     margin-left: 0.45rem;
+    align-self: center;
 }
 :is(.agent-roster-item__favorite, .agent-roster-search__clear) {
     display: inline-flex;
@@ -5969,6 +5972,60 @@
     height: 1.25rem;
     color: #6366f1;
     flex-shrink: 0;
+}
+.agent-transfer-invite {
+    --transfer-invite-bg: rgba(125, 211, 252, 0.08);
+    --transfer-invite-border: rgba(125, 211, 252, 0.2);
+    --roster-hover-bg: var(--transfer-invite-bg);
+    border: 1px solid var(--transfer-invite-border);
+    background: var(--transfer-invite-bg);
+    cursor: default;
+}
+.agent-transfer-invite[data-variant='drawer'] {
+    --transfer-invite-bg: #ffffff;
+    --transfer-invite-border: rgba(99, 102, 241, 0.18);
+}
+.agent-transfer-invite[data-variant='sidebar']:hover .agent-roster-item__avatar {
+    transform: none;
+}
+.agent-transfer-invite__actions {
+    align-items: center;
+    gap: 0.35rem;
+}
+.agent-transfer-invite__action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.65rem;
+    height: 1.65rem;
+    border: 0;
+    border-radius: 0.45rem;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.agent-transfer-invite__action:hover {
+    transform: translateY(-1px);
+}
+.agent-transfer-invite__action:disabled {
+    cursor: default;
+    opacity: 0.55;
+    transform: none;
+}
+.agent-transfer-invite__action--accept {
+    background: rgba(52, 211, 153, 0.18);
+    color: #a7f3d0;
+}
+.agent-transfer-invite__action--decline {
+    background: rgba(251, 113, 133, 0.16);
+    color: #fecdd3;
+}
+.agent-transfer-invite[data-variant='drawer'] .agent-transfer-invite__action--accept {
+    background: rgba(16, 185, 129, 0.14);
+    color: #047857;
+}
+.agent-transfer-invite[data-variant='drawer'] .agent-transfer-invite__action--decline {
+    background: rgba(244, 63, 94, 0.12);
+    color: #be123c;
 }
 .agent-roster-empty {
     font-weight: 500;
@@ -7420,7 +7477,7 @@
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__heading, .agent-roster-section-header) {
     color: rgba(226, 232, 240, 0.56);
 }
-.agent-mobile-sheet--sidebar :is(.chat-context-switcher__item, .agent-roster-item) {
+.agent-mobile-sheet--sidebar :is(.chat-context-switcher__item, .agent-roster-item, .agent-transfer-invite) {
     color: rgba(255, 255, 255, 0.88);
 }
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__item:hover, .chat-context-switcher__item[data-selected='true'], .chat-context-switcher__item[data-focused='true'], .agent-roster-item:active) {
@@ -7480,6 +7537,18 @@
 }
 .agent-mobile-sheet--sidebar .agent-roster-item__check {
     color: #c4b5fd;
+}
+.agent-mobile-sheet--sidebar .agent-transfer-invite {
+    --transfer-invite-bg: rgba(125, 211, 252, 0.08);
+    --transfer-invite-border: rgba(125, 211, 252, 0.2);
+}
+.agent-mobile-sheet--sidebar .agent-transfer-invite__action--accept {
+    background: rgba(52, 211, 153, 0.18);
+    color: #a7f3d0;
+}
+.agent-mobile-sheet--sidebar .agent-transfer-invite__action--decline {
+    background: rgba(251, 113, 133, 0.16);
+    color: #fecdd3;
 }
 .agent-mobile-sheet--sidebar .sidebar-settings[data-variant='drawer'] {
     border-top: 1px solid rgba(167, 139, 250, 0.12);

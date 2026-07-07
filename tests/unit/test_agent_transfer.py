@@ -238,54 +238,112 @@ class AgentTransferServiceTests(TestCase):
         self.process_events_mock.delay.assert_not_called()
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
 
-    def test_accept_transfer_notifies_initiator(self):
-        invite = self._send_transfer_invite_via_console(email=self.recipient.email)
-        mail.outbox.clear()
-        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
+    def test_roster_includes_pending_transfer_invites_for_recipient(self):
+        invite = self._initiate(self.recipient.email)
 
-        self.client.logout()
+        self.client.login(username="recipient", password="pw")
+        response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        transfer_invites = payload.get("transfer_invites", [])
+        self.assertEqual(len(transfer_invites), 1)
+        invite_payload = transfer_invites[0]
+        self.assertEqual(invite_payload["id"], str(invite.id))
+        self.assertEqual(invite_payload["agent_id"], str(self.agent.id))
+        self.assertEqual(invite_payload["agent_name"], self.agent.name)
+        self.assertEqual(invite_payload["initiated_by_email"], self.owner.email)
+        self.assertEqual(invite_payload["recipient_email"], self.recipient.email)
+        self.assertEqual(
+            invite_payload["accept_url"],
+            reverse("console-agent-transfer-invite-accept-api", args=[invite.id]),
+        )
+        self.assertEqual(
+            invite_payload["decline_url"],
+            reverse("console-agent-transfer-invite-decline-api", args=[invite.id]),
+        )
+
+    def test_roster_excludes_other_and_handled_transfer_invites(self):
+        self._initiate("somebody-else@example.com")
+        handled = AgentTransferInvite.objects.create(
+            agent=self.peer_agent,
+            initiated_by=self.owner,
+            to_email=self.recipient.email,
+            status=AgentTransferInvite.Status.DECLINED,
+            responded_at=timezone.now(),
+        )
+
+        self.client.login(username="recipient", password="pw")
+        response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("transfer_invites"), [])
+        handled.refresh_from_db()
+        self.assertEqual(handled.status, AgentTransferInvite.Status.DECLINED)
+
+    def test_api_accept_transfer_returns_agent_payload_and_removes_invite_from_roster(self):
+        invite = self._initiate(self.recipient.email)
+        mail.outbox.clear()
+
         self.client.login(username="recipient", password="pw")
         response = self.client.post(
-            reverse('console-agent-transfer-invite', args=[invite.id, 'accept'])
+            reverse("console-agent-transfer-invite-accept-api", args=[invite.id])
         )
-        self.assertEqual(response.status_code, 302)
 
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["action"], "accept")
+        self.assertEqual(payload["agent"]["id"], str(self.agent.id))
+        self.assertIn(f"/app/agents/{self.agent.id}", payload["agent"]["chatUrl"])
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.user, self.recipient)
         invite.refresh_from_db()
         self.assertEqual(invite.status, AgentTransferInvite.Status.ACCEPTED)
-
         self.assertEqual(len(mail.outbox), 1)
         msg = mail.outbox[0]
         self.assertEqual(msg.to, [self.owner.email])
-        self.assertIn('accepted', msg.subject.lower())
+        self.assertIn("accepted", msg.subject.lower())
         self.assertIn(self.agent.name, msg.subject)
         messages = PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False)
         self.assertEqual(messages.count(), 1)
-        body = messages.first().body.lower()
-        self.assertIn('taking over as your owner', body)
-        self.process_events_mock.delay.assert_called_once_with(str(invite.agent.id))
+        self.assertIn("taking over as your owner", messages.first().body.lower())
+
+        roster_response = self.client.get(reverse("console_agent_roster"))
+        self.assertEqual(roster_response.status_code, 200)
+        self.assertEqual(roster_response.json().get("transfer_invites"), [])
+        self.process_events_mock.delay.assert_called_once_with(str(self.agent.id))
         self.process_events_mock.delay.reset_mock()
 
-    def test_decline_transfer_notifies_initiator(self):
-        invite = self._send_transfer_invite_via_console(email=self.recipient.email)
+    def test_api_decline_transfer_returns_payload_and_removes_invite_from_roster(self):
+        invite = self._initiate(self.recipient.email)
         mail.outbox.clear()
 
-        self.client.logout()
         self.client.login(username="recipient", password="pw")
         response = self.client.post(
-            reverse('console-agent-transfer-invite', args=[invite.id, 'decline'])
+            reverse("console-agent-transfer-invite-decline-api", args=[invite.id])
         )
-        self.assertEqual(response.status_code, 302)
 
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["action"], "decline")
+        self.assertIsNone(payload["agent"])
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.user, self.owner)
         invite.refresh_from_db()
         self.assertEqual(invite.status, AgentTransferInvite.Status.DECLINED)
-
         self.assertEqual(len(mail.outbox), 1)
         msg = mail.outbox[0]
         self.assertEqual(msg.to, [self.owner.email])
-        self.assertIn('declined', msg.subject.lower())
+        self.assertIn("declined", msg.subject.lower())
         self.assertIn(self.agent.name, msg.subject)
-        self.process_events_mock.delay.assert_not_called()
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
+
+        roster_response = self.client.get(reverse("console_agent_roster"))
+        self.assertEqual(roster_response.status_code, 200)
+        self.assertEqual(roster_response.json().get("transfer_invites"), [])
+        self.process_events_mock.delay.assert_not_called()
 
     def tearDown(self) -> None:
         self.analytics_patcher.stop()

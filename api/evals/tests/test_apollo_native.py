@@ -1,10 +1,12 @@
 import os
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.agent.system_skills.defaults import _apollo_native_prompt_instructions
 from api.agent.system_skills.native_api_cookbooks import render_native_api_cookbook
 from api.evals.scenarios.apollo_native import (
     APOLLO_NATIVE_CASES,
@@ -91,6 +93,20 @@ class ApolloNativeScenarioTests(SimpleTestCase):
         self.assertIn("`/auth/credit_usage_stats`", cookbook)
         self.assertIn("at most 10 person objects", cookbook)
         self.assertIn("do not retry the same malformed batch", cookbook)
+        self.assertIn("pass the returned person `id`", cookbook)
+        self.assertIn("do not invent legacy keys such as `personId`", cookbook)
+        self.assertIn("400 or 422", cookbook)
+        self.assertIn("row-level misses", cookbook)
+
+    @patch("api.agent.system_skills.defaults._native_integration_connected", return_value=True)
+    def test_apollo_prompt_classifies_auth_plan_and_validation_errors(self, _mock_connected):
+        instructions = _apollo_native_prompt_instructions(SimpleNamespace())
+
+        self.assertIn("For 401, ask the user to reconnect Apollo", instructions)
+        self.assertIn("for 403, stop retrying", instructions)
+        self.assertIn("master API key", instructions)
+        self.assertIn("For 422, repair the request shape", instructions)
+        self.assertIn("row-level miss", instructions)
 
     def test_eval_stop_policy_allows_sqlite_batch_for_result_shaping(self):
         scenario = ScenarioRegistry.get(APOLLO_NATIVE_SCENARIO_SLUGS[0])

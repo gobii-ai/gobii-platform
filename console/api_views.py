@@ -102,6 +102,7 @@ from api.models import (
     AgentEmailAccount,
     AgentEmailOAuthCredential,
     AgentEmailOAuthSession,
+    AgentTransferInvite,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentHumanInputRequest,
@@ -2878,6 +2879,48 @@ def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = 
     return Analytics.with_org_properties(payload, organization=getattr(agent, "organization", None))
 
 
+def _serialize_roster_transfer_invite(invite: AgentTransferInvite) -> dict[str, Any]:
+    agent = invite.agent
+    initiator = invite.initiated_by
+    created_at = invite.created_at
+
+    initiator_email = getattr(initiator, "email", "") or ""
+    initiator_name = ""
+    if initiator:
+        initiator_name = initiator.get_full_name() or initiator_email or getattr(initiator, "username", "")
+
+    return {
+        "id": str(invite.id),
+        "agent_id": str(agent.id),
+        "agent_name": agent.name or "Agent",
+        "agent_avatar_url": agent.get_avatar_thumbnail_url(),
+        "initiated_by_name": initiator_name or "Gobii user",
+        "initiated_by_email": initiator_email,
+        "recipient_email": invite.to_email or "",
+        "message": invite.message or "",
+        "created_at": created_at.isoformat() if created_at else None,
+        "accept_url": reverse("console-agent-transfer-invite-accept-api", args=[invite.id]),
+        "decline_url": reverse("console-agent-transfer-invite-decline-api", args=[invite.id]),
+    }
+
+
+def _pending_roster_transfer_invites_for_user(request: HttpRequest) -> list[dict[str, Any]]:
+    user_email = (request.user.email or "").strip()
+    if not user_email:
+        return []
+
+    invites = (
+        AgentTransferInvite.objects
+        .select_related("agent", "initiated_by")
+        .filter(
+            to_email__iexact=user_email,
+            status=AgentTransferInvite.Status.PENDING,
+        )
+        .order_by("-created_at", "-id")
+    )
+    return [_serialize_roster_transfer_invite(invite) for invite in invites]
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
@@ -3119,6 +3162,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "billingStatus": billing_status,
                 "accountPause": account_pause,
                 "agents": payload,
+                "transfer_invites": _pending_roster_transfer_invites_for_user(request),
                 "llmIntelligence": llm_intelligence,
             }
         )

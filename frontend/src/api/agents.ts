@@ -1,6 +1,6 @@
-import { jsonFetch, jsonRequest } from './http'
+import { HttpError, jsonFetch, jsonRequest } from './http'
 import type { ConsoleContext } from './context'
-import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 
@@ -34,6 +34,7 @@ type AgentRosterPayload = {
   billingStatus?: BillingStatusInfo | null
   accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
+  transfer_invites?: AgentTransferInvite[]
   agents: {
     id: string
     name: string
@@ -74,6 +75,7 @@ export async function fetchAgentRoster(
 ): Promise<{
   context: ConsoleContext
   agents: AgentRosterEntry[]
+  transferInvites: AgentTransferInvite[]
   agentRosterSortMode: AgentRosterSortMode
   favoriteAgentIds: string[]
   mutedAgentIds: string[]
@@ -124,6 +126,7 @@ export async function fetchAgentRoster(
   return {
     context: payload.context,
     agents,
+    transferInvites: payload.transfer_invites ?? [],
     agentRosterSortMode: payload.agent_roster_sort_mode ?? 'recent',
     favoriteAgentIds: Array.isArray(payload.favorite_agent_ids)
       ? payload.favorite_agent_ids.filter((value): value is string => typeof value === 'string')
@@ -137,6 +140,45 @@ export async function fetchAgentRoster(
     billingStatus: payload.billingStatus ?? null,
     accountPause: payload.accountPause ?? null,
     llmIntelligence: payload.llmIntelligence,
+  }
+}
+
+export type AgentTransferInviteActionResponse = {
+  ok: boolean
+  action: 'accept' | 'decline'
+  message?: string
+  agent?: {
+    id: string
+    name: string
+    isActive: boolean
+    detailUrl: string
+    chatUrl: string
+  } | null
+}
+
+function extractApiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof HttpError && error.body && typeof error.body === 'object') {
+    const apiError = (error.body as { error?: unknown }).error
+    if (typeof apiError === 'string' && apiError.trim()) {
+      return apiError
+    }
+  }
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
+}
+
+export async function respondToAgentTransferInvite(
+  url: string,
+): Promise<AgentTransferInviteActionResponse> {
+  try {
+    return await jsonRequest<AgentTransferInviteActionResponse>(url, {
+      method: 'POST',
+      includeCsrf: true,
+    })
+  } catch (error) {
+    throw new Error(extractApiErrorMessage(error, 'Could not respond to the transfer invite.'))
   }
 }
 

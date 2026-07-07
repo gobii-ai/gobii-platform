@@ -1,10 +1,11 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeftRight, Bell, BellOff, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Settings } from 'lucide-react'
+import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Settings, X } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
-import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
+import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
 import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCreateSplitButton'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
@@ -16,6 +17,12 @@ import {
 } from './SelectionShellPageSwitcher'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
+import {
+  TransferInviteDetails,
+  TransferInviteSidebarItem,
+  type TransferInviteAction,
+  type TransferInviteDialogState,
+} from './TransferInviteSidebarItem'
 import {
   getNextAgentChatSidebarMode,
   getPreviousAgentChatSidebarMode,
@@ -51,6 +58,7 @@ function clampContextMenuPosition(x: number, y: number): ContextMenuPosition {
 
 type ChatSidebarProps = {
   agents?: AgentRosterEntry[]
+  transferInvites?: AgentTransferInvite[]
   favoriteAgentIds?: string[]
   mutedAgentIds?: string[]
   activeAgentId?: string | null
@@ -60,6 +68,7 @@ type ChatSidebarProps = {
   desktopMode?: AgentChatSidebarMode
   onDesktopModeChange?: (mode: AgentChatSidebarMode) => void
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onRespondTransferInvite?: (invite: AgentTransferInvite, action: TransferInviteAction) => Promise<void>
   onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onToggleAgentMute?: (agentId: string) => void
@@ -84,6 +93,7 @@ type ChatSidebarProps = {
 
 export const ChatSidebar = memo(function ChatSidebar({
   agents = [],
+  transferInvites = [],
   favoriteAgentIds = [],
   mutedAgentIds = [],
   activeAgentId,
@@ -93,6 +103,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   desktopMode = 'list',
   onDesktopModeChange,
   onSelectAgent,
+  onRespondTransferInvite,
   onConfigureAgent,
   onToggleAgentFavorite,
   onToggleAgentMute,
@@ -129,6 +140,9 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [drawerViewMode, setDrawerViewMode] = useState<AgentDrawerViewMode>('list')
   const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null)
+  const [transferInviteDialog, setTransferInviteDialog] = useState<TransferInviteDialogState | null>(null)
+  const [transferInviteBusy, setTransferInviteBusy] = useState(false)
+  const [transferInviteError, setTransferInviteError] = useState<string | null>(null)
 
   const showSettingsView = showEmbeddedSettings && Boolean(embeddedSettingsPanel)
   const showGalleryShellSwitcher = Boolean(onGalleryShellPageChange)
@@ -285,6 +299,38 @@ export const ChatSidebar = memo(function ChatSidebar({
     }
   }, [createAgentDisabled, isMobile, onBlockedCreateAgent, onCreateAgent])
 
+  const openTransferInviteDialog = useCallback((invite: AgentTransferInvite, action: TransferInviteAction) => {
+    setTransferInviteError(null)
+    setTransferInviteDialog({ invite, action })
+  }, [])
+
+  const closeTransferInviteDialog = useCallback(() => {
+    if (transferInviteBusy) {
+      return
+    }
+    setTransferInviteDialog(null)
+    setTransferInviteError(null)
+  }, [transferInviteBusy])
+
+  const handleConfirmTransferInvite = useCallback(async () => {
+    if (!transferInviteDialog || !onRespondTransferInvite) {
+      return
+    }
+    setTransferInviteBusy(true)
+    setTransferInviteError(null)
+    try {
+      await onRespondTransferInvite(transferInviteDialog.invite, transferInviteDialog.action)
+      setTransferInviteDialog(null)
+      if (isMobile && transferInviteDialog.action === 'accept') {
+        setDrawerOpen(false)
+      }
+    } catch (error) {
+      setTransferInviteError(error instanceof Error ? error.message : 'Could not respond to the transfer invite.')
+    } finally {
+      setTransferInviteBusy(false)
+    }
+  }, [isMobile, onRespondTransferInvite, transferInviteDialog])
+
   const closeAgentContextMenu = useCallback(() => {
     setAgentContextMenu(null)
   }, [])
@@ -389,10 +435,32 @@ export const ChatSidebar = memo(function ChatSidebar({
       contextMenuRoot,
     )
     : null
+  const transferInviteDialogElement = transferInviteDialog ? (
+    <ActionConfirmDialog
+      open={true}
+      title={`${transferInviteDialog.action === 'accept' ? 'Accept' : 'Decline'} transfer for ${transferInviteDialog.invite.agent_name || 'this agent'}?`}
+      description={
+        transferInviteDialog.action === 'accept'
+          ? 'Ownership will move to your personal workspace. The original owner will be notified, and the agent may be paused if you are at your agent limit.'
+          : 'The original owner will be notified, and ownership will not change.'
+      }
+      confirmLabel={transferInviteDialog.action === 'accept' ? 'Accept transfer' : 'Decline invite'}
+      busy={transferInviteBusy}
+      danger={transferInviteDialog.action === 'decline'}
+      icon={transferInviteDialog.action === 'accept' ? Check : X}
+      onConfirm={handleConfirmTransferInvite}
+      onClose={closeTransferInviteDialog}
+      localError={transferInviteError}
+    >
+      <TransferInviteDetails invite={transferInviteDialog.invite} />
+    </ActionConfirmDialog>
+  ) : null
 
   const renderListContent = useCallback((variant: 'drawer' | 'sidebar', collapsedView: boolean) => {
     const sourceAgents = collapsedView ? collapsedFilteredAgents : filteredAgents
     const emptyCount = collapsedView ? collapsedFilteredAgents.length : filteredAgents.length
+    const showTransferInvites = !collapsedView && transferInvites.length > 0
+    const hasListRows = hasAgents || showTransferInvites
     const renderAgentItem = (agent: AgentRosterEntry, isFavorite: boolean) => (
       <AgentListItem
         key={agent.id}
@@ -445,32 +513,61 @@ export const ChatSidebar = memo(function ChatSidebar({
 
         <AgentEmptyState
           variant={variant}
-          hasAgents={hasAgents}
+          hasAgents={hasListRows}
           loading={loading}
           errorMessage={errorMessage}
-          filteredCount={emptyCount}
+          filteredCount={emptyCount + (showTransferInvites ? transferInvites.length : 0)}
           searchQuery={searchQuery}
         />
 
         {collapsedView ? (
           sourceAgents.map((agent) => renderAgentItem(agent, favoriteAgentIdSet.has(agent.id)))
-        ) : hasFavoritesInRoster ? (
-          <>
-            <AgentListSectionHeader
-              variant={variant}
-              label="Favorites"
-              count={favoriteFilteredAgents.length}
-            />
-            {favoriteFilteredAgents.map((agent) => renderAgentItem(agent, true))}
-            <AgentListSectionHeader
-              variant={variant}
-              label="All agents"
-              count={allFilteredAgents.length}
-            />
-            {allFilteredAgents.map((agent) => renderAgentItem(agent, false))}
-          </>
         ) : (
-          sourceAgents.map((agent) => renderAgentItem(agent, false))
+          <>
+            {showTransferInvites ? (
+              <>
+                <AgentListSectionHeader
+                  variant={variant}
+                  label="Invites"
+                  count={transferInvites.length}
+                />
+                {transferInvites.map((invite) => (
+                  <TransferInviteSidebarItem
+                    key={invite.id}
+                    variant={variant}
+                    invite={invite}
+                    disabled={!onRespondTransferInvite || transferInviteBusy}
+                    onRespond={openTransferInviteDialog}
+                  />
+                ))}
+              </>
+            ) : null}
+            {hasFavoritesInRoster ? (
+              <>
+                <AgentListSectionHeader
+                  variant={variant}
+                  label="Favorites"
+                  count={favoriteFilteredAgents.length}
+                />
+                {favoriteFilteredAgents.map((agent) => renderAgentItem(agent, true))}
+                <AgentListSectionHeader
+                  variant={variant}
+                  label="All agents"
+                  count={allFilteredAgents.length}
+                />
+                {allFilteredAgents.map((agent) => renderAgentItem(agent, false))}
+              </>
+            ) : (
+              <>
+                <AgentListSectionHeader
+                  variant={variant}
+                  label="All agents"
+                  count={sourceAgents.length}
+                />
+                {sourceAgents.map((agent) => renderAgentItem(agent, false))}
+              </>
+            )}
+          </>
         )}
       </>
     )
@@ -492,11 +589,15 @@ export const ChatSidebar = memo(function ChatSidebar({
     loading,
     mutedAgentIdSet,
     onCreateAgent,
+    onRespondTransferInvite,
     onToggleAgentFavorite,
     openAgentContextMenu,
+    openTransferInviteDialog,
     searchQuery,
     switchingAgentId,
     teamTemplateMenu,
+    transferInviteBusy,
+    transferInvites,
   ])
 
   if (isMobile) {
@@ -641,6 +742,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         </AgentChatMobileSheet>
       </div>
       {agentContextMenuElement}
+      {transferInviteDialogElement}
       </>
     )
   }
@@ -786,6 +888,7 @@ export const ChatSidebar = memo(function ChatSidebar({
       </div>
     </aside>
     {agentContextMenuElement}
+    {transferInviteDialogElement}
     </>
   )
 })

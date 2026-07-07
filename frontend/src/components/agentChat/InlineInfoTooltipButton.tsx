@@ -8,12 +8,25 @@ type InlineInfoTooltipButtonProps = {
   label: string
   description: string
   disabled?: boolean
+  className?: string
+  buttonClassName?: string
+  iconClassName?: string
+  tooltipClassName?: string
 }
 
-export function InlineInfoTooltipButton({
+const defaultWrapperClassName = 'relative shrink-0'
+const defaultButtonClassName = 'inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-white hover:text-slate-600 focus:bg-white focus:text-slate-600'
+const defaultIconClassName = 'h-3.5 w-3.5'
+const defaultTooltipClassName = 'pointer-events-none fixed z-[80] w-72 max-w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-700 shadow-xl'
+
+export function HoverInfoButton({
   label,
   description,
   disabled = false,
+  className = defaultWrapperClassName,
+  buttonClassName = defaultButtonClassName,
+  iconClassName = defaultIconClassName,
+  tooltipClassName = defaultTooltipClassName,
 }: InlineInfoTooltipButtonProps) {
   const [isPinnedOpen, setIsPinnedOpen] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
@@ -56,7 +69,7 @@ export function InlineInfoTooltipButton({
 
   return (
     <div
-      className="relative shrink-0"
+      className={className}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {
         setIsHovered(false)
@@ -68,7 +81,7 @@ export function InlineInfoTooltipButton({
         aria-label={label}
         aria-describedby={isOpen ? tooltipId : undefined}
         aria-expanded={isPinnedOpen}
-        className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-white hover:text-slate-600 focus:bg-white focus:text-slate-600"
+        className={buttonClassName}
         isDisabled={disabled}
         onPress={() => setIsPinnedOpen((isOpen) => !isOpen)}
         onFocus={() => setIsFocused(true)}
@@ -77,14 +90,14 @@ export function InlineInfoTooltipButton({
           setIsPinnedOpen(false)
         }}
       >
-        <Info className="h-3.5 w-3.5" aria-hidden="true" />
+        <Info className={iconClassName} aria-hidden="true" />
       </Button>
       {isOpen && tooltipPosition && typeof document !== 'undefined'
         ? createPortal(
             <div
               id={tooltipId}
               role="tooltip"
-              className="pointer-events-none fixed z-[80] w-72 max-w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-700 shadow-xl"
+              className={tooltipClassName}
               style={{
                 top: `${tooltipPosition.top}px`,
                 left: `${tooltipPosition.left}px`,
@@ -98,3 +111,5 @@ export function InlineInfoTooltipButton({
     </div>
   )
 }
+
+export const InlineInfoTooltipButton = HoverInfoButton
