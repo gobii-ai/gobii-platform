@@ -2698,7 +2698,7 @@ def _send_agent_transfer_owner_notification(request, action: str, original_owner
     if not original_owner_email:
         return
 
-    recipient_name = request.user.get_full_name() or request.user.email
+    recipient_name = request.user.get_full_name() or request.user.email or request.user.get_username() or "A user"
     context = {
         "owner_name": original_owner.get_full_name() or original_owner_email,
         "recipient_name": recipient_name,
@@ -2723,7 +2723,7 @@ def _send_agent_transfer_owner_notification(request, action: str, original_owner
             from_email=None,
             recipient_list=[original_owner_email],
             html_message=render_to_string(html_template, context),
-            fail_silently=True,
+            fail_silently=False,
         )
     except (BadHeaderError, OSError, SMTPException) as email_exc:  # pragma: no cover - best effort
         logger.warning(

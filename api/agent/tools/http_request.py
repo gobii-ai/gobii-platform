@@ -65,7 +65,8 @@ def _apollo_http_error_guidance(status_code: int, content: Any) -> str:
         return (
             "Native Apollo auth was applied, but Apollo denied access. Stop retrying the same request; explain "
             "that the connected Apollo account may lack the required plan, master API key access, or scopes for "
-            "this endpoint."
+            "this endpoint; before asking for credentials, make sure people search uses POST "
+            "https://api.apollo.io/api/v1/mixed_people/api_search with `q_organization_domains_list`."
         )
     if status_code == 422:
         if "people/match" in content_lower or "bulk_match" in content_lower:
