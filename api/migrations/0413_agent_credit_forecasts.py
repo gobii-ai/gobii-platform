@@ -8,7 +8,7 @@ import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0411_persistent_agent_template_public_options"),
+        ("api", "0412_alter_persistentagentsystemmessage_body_and_more"),
     ]
 
     operations = [
