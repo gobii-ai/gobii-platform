@@ -5606,9 +5606,8 @@
     color: rgba(241, 245, 249, 0.8);
     font-size: 0.8rem;
     line-height: 1.45;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    white-space: nowrap;
+    text-overflow: ellipsis;
     overflow: hidden;
 }
 .product-announcement-panel[data-variant='mobile'] .product-announcement-panel__preview {
