@@ -35,36 +35,9 @@
   <meta name="twitter:image:alt" content="{{ home_social_image_alt }}">
   {% endif %}
   {% endif %}
-  <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "Organization",
-      "@id": "{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}/#organization",
-      "name": "{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }}",
-      "url": "{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}",
-      "logo": "{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}/static/images/gobii_fish_icon_512.png",
-      "sameAs": [
-        "{{ settings.PUBLIC_GITHUB_URL|default:'https://github.com/gobii-ai' }}",
-        {% if settings.PUBLIC_LINKEDIN_URL %}"{{ settings.PUBLIC_LINKEDIN_URL }}",{% endif %}
-        {% if settings.PUBLIC_HUGGINGFACE_URL %}"{{ settings.PUBLIC_HUGGINGFACE_URL }}",{% endif %}
-        {% if settings.PUBLIC_G2_URL %}"{{ settings.PUBLIC_G2_URL }}",{% endif %}
-        {% if settings.PUBLIC_SAASHUB_URL %}"{{ settings.PUBLIC_SAASHUB_URL }}",{% endif %}
-        "{{ settings.PUBLIC_X_URL|default:'https://x.com/gobii_ai' }}"
-      ]
-    }
-  </script>
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    "@id": "{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}/#website",
-    "name": "{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }}",
-    "url": "{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}",
-    "publisher": {
-      "@id": "{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}/#organization"
-    }
-  }
-  </script>
+  {% if home_structured_data_json %}
+  <script type="application/ld+json">{{ home_structured_data_json }}</script>
+  {% endif %}
   {% if immersive_app_assets %}
     {% for href in immersive_app_assets.styles %}
       <link rel="preload" as="style" href="{{ href }}">
