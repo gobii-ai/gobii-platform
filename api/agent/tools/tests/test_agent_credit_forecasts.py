@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase, override_settings, tag
 
+from api.agent.tools.plan import execute_update_plan
 from api.agent.tools.planning import execute_end_planning
 from api.agent.tools.schedule_updater import execute_update_schedule
 from api.models import (
@@ -147,7 +148,6 @@ class AgentCreditForecastIntegrationTests(TestCase):
 
     @patch("console.agent_chat.signals.emit_agent_usage_update")
     @patch("console.agent_chat.signals.emit_agent_planning_state_update")
-    @patch("console.agent_chat.signals.emit_agent_credit_forecast_timeline_event")
     @patch("api.services.agent_credit_forecasts.TaskCreditService.calculate_available_tasks_for_owner")
     @patch("api.services.agent_credit_forecasts.find_similar_agent_samples")
     @patch("api.services.agent_credit_forecasts.generate_embedding")
@@ -156,7 +156,6 @@ class AgentCreditForecastIntegrationTests(TestCase):
         mock_embedding,
         mock_find,
         mock_available,
-        _mock_forecast_emit,
         _mock_planning_emit,
         _mock_usage_emit,
     ):
@@ -186,6 +185,55 @@ class AgentCreditForecastIntegrationTests(TestCase):
         self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.COMPLETED)
         self.assertEqual(self.agent.schedule, "@daily")
         self.assertEqual(serialize_agent_credit_forecast(self.agent)["perRunCredits"], 3)
+
+    @patch("console.agent_chat.signals.emit_agent_usage_update")
+    @patch("console.agent_chat.signals.emit_agent_profile_update")
+    @patch("console.agent_chat.signals.broadcast_plan_changes")
+    @patch("api.services.agent_credit_forecasts.TaskCreditService.calculate_available_tasks_for_owner")
+    @patch("api.services.agent_credit_forecasts.find_similar_agent_samples")
+    @patch("api.services.agent_credit_forecasts.generate_embedding")
+    def test_update_plan_refreshes_forecast_from_visible_plan(
+        self,
+        mock_embedding,
+        mock_find,
+        mock_available,
+        _mock_plan_broadcast,
+        mock_profile_emit,
+        mock_usage_emit,
+    ):
+        sample = HistoricalAgentCostSample.objects.create(
+            source_sample_id="update-plan-sample",
+            source_agent_id=self.agent.id,
+            tier_credit_multiplier=Decimal("1.00"),
+            normalized_first_run_credits=Decimal("5"),
+            normalized_daily_credits=Decimal("5"),
+            normalized_monthly_credits=Decimal("150"),
+            embedding_dimension=2,
+            embedding_text="historical active plan agent",
+        )
+        mock_embedding.return_value = EmbeddingResult(vectors=[[0.2, 0.4]], model="test-embedding")
+        mock_find.return_value = [SimilarAgentSample(sample, distance=0.01)]
+        mock_available.return_value = Decimal("1000")
+
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Review vendor outages", "status": "doing"},
+                    {"step": "Send incident summary", "status": "todo"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["credit_forecast"]["perRunCredits"], 5)
+        embedding_text = mock_embedding.call_args.args[0]
+        self.assertIn("Current plan: doing: Review vendor outages; todo: Send incident summary", embedding_text)
+        self.agent.refresh_from_db()
+        self.assertEqual(serialize_agent_credit_forecast(self.agent)["perRunCredits"], 5)
+        mock_profile_emit.assert_called_once_with(self.agent)
+        mock_usage_emit.assert_called_once_with(self.agent)
 
     @patch("api.services.agent_credit_forecasts.persist_agent_credit_forecast")
     def test_schedule_updates_after_planning_do_not_recompute_forecast(self, mock_persist):

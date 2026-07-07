@@ -59,7 +59,6 @@ export function isScheduleEntry(entry: ToolCallEntry): boolean {
 
 function isRenderableCollapsedEvent(event: TimelineEvent): boolean {
   if (event.kind === 'plan' || event.kind === 'kanban') return false
-  if (event.kind === 'credit_forecast') return false
   if (event.kind !== 'steps') return true
   return isClusterRenderable(transformToolCluster(event))
 }
@@ -225,12 +224,6 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
       continue
     }
 
-    if (event.kind === 'credit_forecast') {
-      flush()
-      result.push(event)
-      continue
-    }
-
     // Steps cluster that contains latest charter and/or schedule
     if (event.kind === 'steps') {
       const hasSchedule = event.cursor === latest.scheduleClusterCursor
@@ -316,12 +309,6 @@ export function collapseDetailedStatusRuns(
     }
 
     if (event.kind === 'plan' || event.kind === 'kanban') {
-      continue
-    }
-
-    if (event.kind === 'credit_forecast') {
-      flush()
-      result.push(event)
       continue
     }
 

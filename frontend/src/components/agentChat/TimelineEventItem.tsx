@@ -3,7 +3,6 @@ import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { InlineScheduleCard } from './InlineStatusCard'
-import { CreditForecastTimelineCard } from './CreditForecastTimelineCard'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import type { AgentMessage } from '../../types/agentChat'
 import { buildThinkingCluster, flattenTimelineEventsToEntries } from './activityEntryUtils'
@@ -52,9 +51,6 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   }
   if (event.kind === 'inline-schedule') {
     return <InlineScheduleCard entry={event.entry} />
-  }
-  if (event.kind === 'credit_forecast') {
-    return <CreditForecastTimelineCard forecast={event.forecast} />
   }
   if (event.kind === 'message') {
     return (

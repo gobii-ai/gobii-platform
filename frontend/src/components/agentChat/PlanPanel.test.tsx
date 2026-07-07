@@ -36,4 +36,29 @@ describe('PlanPanel', () => {
     expect(screen.queryByText(/Est\./i)).not.toBeInTheDocument()
     expect(screen.queryByText(/credits/i)).not.toBeInTheDocument()
   })
+
+  it('shows task credit estimates when a forecast is available', () => {
+    render(
+      <PlanPanel
+        plan={plan}
+        isAgentWorking
+        creditForecast={{
+          perRunCredits: 5,
+          dailyCredits: 12.5,
+          monthlyCredits: 250,
+          warningLevel: 'medium',
+          estimatedAt: '2026-07-07T18:00:00Z',
+        }}
+      />,
+    )
+
+    expect(screen.getByLabelText('Estimated task credits')).toBeInTheDocument()
+    expect(screen.getByText('Estimated Usage')).toBeInTheDocument()
+    expect(screen.getByText('5 credits')).toBeInTheDocument()
+    expect(screen.getByText('/ current plan')).toBeInTheDocument()
+    expect(screen.getByText('12.5 credits')).toBeInTheDocument()
+    expect(screen.getByText('/ day')).toBeInTheDocument()
+    expect(screen.getByText('250 credits')).toBeInTheDocument()
+    expect(screen.getByText('/ month')).toBeInTheDocument()
+  })
 })

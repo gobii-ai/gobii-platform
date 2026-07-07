@@ -93,12 +93,6 @@
   flex: 0 0 84px;
 }
 
-.usage-gauge-card--forecast-warning .usage-gauge-card__chart {
-  width: 74px;
-  height: 74px;
-  flex-basis: 74px;
-}
-
 .usage-gauge-card__chart .insight-gauge {
   width: 100% !important;
   height: 100% !important;
@@ -218,12 +212,6 @@
   text-decoration: none;
   cursor: pointer;
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-
-.usage-gauge-card--forecast-warning > .usage-gauge-card__copy > .usage-gauge-card__action {
-  grid-column: auto;
-  margin-top: 0;
-  justify-self: start;
 }
 
 .usage-gauge-card__action:hover,

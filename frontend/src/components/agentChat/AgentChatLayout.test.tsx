@@ -30,39 +30,9 @@ vi.mock('./TimelineEventItem', () => ({
     event?: {
       kind?: string
       messageLinkHref?: string | null
-      forecast?: {
-        perRunCredits?: number | null
-        dailyCredits?: number | null
-        monthlyCredits?: number | null
-      }
     }
     onMessageLinkClick?: (href: string) => boolean | void
   }) => {
-    if (event?.kind === 'credit_forecast' && event.forecast) {
-      return (
-        <div data-testid="credit-forecast-timeline-event">
-          <span>Estimated cost</span>
-          {typeof event.forecast.perRunCredits === 'number' && event.forecast.perRunCredits > 0 ? (
-            <>
-              <span>Per run</span>
-              <span>{event.forecast.perRunCredits === 1 ? '1 credit' : `${event.forecast.perRunCredits} credits`}</span>
-            </>
-          ) : null}
-          {typeof event.forecast.dailyCredits === 'number' && event.forecast.dailyCredits > 0 ? (
-            <>
-              <span>Daily</span>
-              <span>{event.forecast.dailyCredits} credits</span>
-            </>
-          ) : null}
-          {typeof event.forecast.monthlyCredits === 'number' && event.forecast.monthlyCredits > 0 ? (
-            <>
-              <span>Monthly</span>
-              <span>{event.forecast.monthlyCredits} credits</span>
-            </>
-          ) : null}
-        </div>
-      )
-    }
     const href = event?.messageLinkHref
     if (!href) {
       return null
@@ -365,58 +335,6 @@ describe('AgentChatLayout upgrade modal gating', () => {
     await waitFor(() => {
       expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(false)
     })
-  })
-
-  it('renders the post-planning credit forecast as a persistent timeline event', () => {
-    renderAgentChatLayout({
-      agentId: 'agent-forecast',
-      planningState: 'completed',
-      events: [{
-        kind: 'credit_forecast',
-        cursor: 'forecast',
-        timestamp: '2026-06-30T12:00:00Z',
-        forecast: {
-          perRunCredits: 8,
-          dailyCredits: 8,
-          monthlyCredits: 240,
-          warningLevel: 'medium',
-          estimatedAt: '2026-06-30T12:00:00Z',
-        },
-      }],
-    })
-
-    expect(screen.getByText('Estimated cost')).toBeInTheDocument()
-    expect(screen.getByText('Per run')).toBeInTheDocument()
-    expect(screen.getByText('Daily')).toBeInTheDocument()
-    expect(screen.getAllByText('8 credits')).toHaveLength(2)
-    expect(screen.getByText('240 credits')).toBeInTheDocument()
-    expect(screen.queryByText('Usage watch')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Dismiss credit forecast' })).not.toBeInTheDocument()
-  })
-
-  it('renders per-run credit forecasts for one-time agents without daily or monthly estimates', () => {
-    renderAgentChatLayout({
-      agentId: 'agent-one-time-forecast',
-      planningState: 'completed',
-      events: [{
-        kind: 'credit_forecast',
-        cursor: 'forecast-one-time',
-        timestamp: '2026-06-30T12:00:00Z',
-        forecast: {
-          perRunCredits: 1,
-          dailyCredits: 0,
-          monthlyCredits: 0,
-          warningLevel: 'none',
-          estimatedAt: '2026-06-30T12:00:00Z',
-        },
-      }],
-    })
-
-    expect(screen.getByText('Estimated cost')).toBeInTheDocument()
-    expect(screen.getByText('Per run')).toBeInTheDocument()
-    expect(screen.getByText('1 credit')).toBeInTheDocument()
-    expect(screen.queryByText('Daily')).not.toBeInTheDocument()
-    expect(screen.queryByText('Monthly')).not.toBeInTheDocument()
   })
 
   it('passes a monthly forecast capacity warning into the working panel', () => {
@@ -877,6 +795,71 @@ describe('AgentChatLayout upgrade modal gating', () => {
     expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
     expect(screen.getByText('Deliver report')).toBeInTheDocument()
     expect(screen.getByText('Research sources')).toBeInTheDocument()
+  })
+
+  it('opens the desktop plan panel when planning completes', () => {
+    const { rerender } = renderAgentChatLayout({
+      agentId: 'agent-1',
+      planningState: 'planning',
+      planSnapshot: initialPlan,
+      creditForecast: {
+        perRunCredits: 5,
+        dailyCredits: 0,
+        monthlyCredits: 0,
+        warningLevel: 'none',
+        estimatedAt: '2026-07-07T18:00:00Z',
+      },
+    })
+
+    fireEvent.click(screen.getByTestId('banner-plan-button'))
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'hidden')
+
+    rerender(
+      <AgentChatLayout
+        agentId="agent-1"
+        agentFirstName="Agent"
+        agentName="Agent"
+        events={[]}
+        planningState="completed"
+        planSnapshot={initialPlan}
+        creditForecast={{
+          perRunCredits: 5,
+          dailyCredits: 0,
+          monthlyCredits: 0,
+          warningLevel: 'none',
+          estimatedAt: '2026-07-07T18:00:00Z',
+        }}
+      />,
+    )
+
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
+    expect(screen.getByLabelText('Estimated task credits')).toBeInTheDocument()
+    expect(screen.getByText('5 credits')).toBeInTheDocument()
+    expect(screen.getByText('/ current plan')).toBeInTheDocument()
+  })
+
+  it('opens the mobile plan sheet when planning completes', () => {
+    window.innerWidth = 500
+    const { rerender } = renderAgentChatLayout({
+      agentId: 'agent-1',
+      planningState: 'planning',
+      planSnapshot: initialPlan,
+    })
+
+    expect(screen.queryByTestId('mobile-sheet-Plan')).not.toBeInTheDocument()
+
+    rerender(
+      <AgentChatLayout
+        agentId="agent-1"
+        agentFirstName="Agent"
+        agentName="Agent"
+        events={[]}
+        planningState="completed"
+        planSnapshot={initialPlan}
+      />,
+    )
+
+    expect(screen.getByTestId('mobile-sheet-Plan')).toBeInTheDocument()
   })
 
   it('clears the hidden plan preview when switching agents', () => {

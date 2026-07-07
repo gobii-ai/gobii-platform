@@ -14,6 +14,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCreditForecast,
     PersistentAgentEnabledTool,
+    PersistentAgentKanbanCard,
 )
 from api.services.daily_credit_limits import get_agent_credit_multiplier
 from api.services.embeddings import EmbeddingResult, generate_embeddings
@@ -73,6 +74,7 @@ def persist_agent_credit_forecast(agent: PersistentAgent) -> PersistentAgentCred
             "estimated_at": timezone.now(),
         },
     )
+    agent._state.fields_cache["credit_forecast"] = forecast
     return forecast
 
 
@@ -139,10 +141,22 @@ def build_agent_forecast_text(agent: PersistentAgent) -> str:
         f"Schedule: {_schedule_summary(agent.schedule)}",
         f"Channels: {', '.join(channel_hints) if channel_hints else 'web'}",
         f"Enabled tools: {', '.join(enabled_tools) if enabled_tools else 'none'}",
+        f"Current plan: {_current_plan_summary(agent)}",
         f"Planning plan: {agent.planning_plan or ''}",
         f"Charter: {agent.charter or ''}",
     ]
     return "\n".join(parts).strip()
+
+
+def _current_plan_summary(agent: PersistentAgent) -> str:
+    cards = list(
+        PersistentAgentKanbanCard.objects.filter(assigned_agent=agent)
+        .order_by("-priority", "created_at")
+        .values_list("status", "title")[:12]
+    )
+    if not cards:
+        return "none"
+    return "; ".join(f"{status}: {title}" for status, title in cards)
 
 
 def build_historical_sample_embedding_text(

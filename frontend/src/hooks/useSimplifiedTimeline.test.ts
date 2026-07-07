@@ -181,32 +181,4 @@ describe('collapseDetailedStatusRuns', () => {
     expect(result).toEqual([])
   })
 
-  it('keeps credit forecast events visible between activity runs', () => {
-    const forecast: TimelineEvent = {
-      kind: 'credit_forecast',
-      cursor: '3:credit_forecast:agent',
-      timestamp: '2026-06-30T12:00:00Z',
-      forecast: {
-        perRunCredits: 1,
-        dailyCredits: 0,
-        monthlyCredits: 0,
-        warningLevel: 'none',
-        estimatedAt: '2026-06-30T12:00:00Z',
-      },
-    }
-    const result = collapseDetailedStatusRuns(
-      [
-        stepCluster('1:step:first', ['search_web']),
-        forecast,
-        stepCluster('4:step:second', ['sqlite_batch']),
-      ],
-      {
-        latestPlanCursor: null,
-        latestScheduleEntryId: null,
-      },
-    )
-
-    expect(result.map((event) => event.kind)).toEqual(['steps', 'credit_forecast', 'steps'])
-    expect(result[1]).toBe(forecast)
-  })
 })

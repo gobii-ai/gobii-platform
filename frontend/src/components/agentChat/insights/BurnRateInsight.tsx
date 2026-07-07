@@ -63,70 +63,6 @@ function buildDailyLimitSummary(usage: UsageGaugeMetadata): CapacitySummary | nu
   }
 }
 
-function renderForecastCapacityAction(
-  summary: CapacitySummary,
-  {
-    onOpenUsage,
-    onOpenQuickSettings,
-    onOpenTaskPacks,
-    detailsUrl,
-  }: {
-    onOpenUsage?: () => void
-    onOpenQuickSettings?: () => void
-    onOpenTaskPacks?: () => void
-    detailsUrl?: string
-  },
-) {
-  if (summary.scope === 'daily') {
-    return onOpenQuickSettings
-      ? <button type="button" className="usage-forecast-summary__action" onClick={onOpenQuickSettings}>Adjust limit</button>
-      : null
-  }
-  if (onOpenTaskPacks) {
-    return <button type="button" className="usage-forecast-summary__action" onClick={onOpenTaskPacks}>Add credits</button>
-  }
-  if (onOpenUsage) {
-    return <button type="button" className="usage-forecast-summary__action" onClick={onOpenUsage}>Details</button>
-  }
-  return detailsUrl
-    ? <a className="usage-forecast-summary__action" href={detailsUrl}>Details</a>
-    : null
-}
-
-function ForecastCapacitySummary({
-  summary,
-  onOpenUsage,
-  onOpenQuickSettings,
-  onOpenTaskPacks,
-  detailsUrl,
-}: {
-  summary: CapacitySummary
-  onOpenUsage?: () => void
-  onOpenQuickSettings?: () => void
-  onOpenTaskPacks?: () => void
-  detailsUrl?: string
-}) {
-  const action = renderForecastCapacityAction(summary, {
-    onOpenUsage,
-    onOpenQuickSettings,
-    onOpenTaskPacks,
-    detailsUrl,
-  })
-
-  return (
-    <div className="usage-forecast-summary" data-scope={summary.scope}>
-      <span className="usage-forecast-summary__icon" aria-hidden="true">
-        <AlertTriangle size={14} strokeWidth={2.2} />
-      </span>
-      <div className="usage-forecast-summary__copy">
-        <span className="usage-forecast-summary__label">{summary.title}</span>
-        <span className="usage-forecast-summary__body">{summary.body}</span>
-      </div>
-      {action}
-    </div>
-  )
-}
-
 function UsageGauge({
   title,
   usage,
@@ -175,13 +111,24 @@ function UsageGauge({
     capacitySummary ? 'usage-gauge-card--forecast-warning' : null,
   ].filter(Boolean).join(' ')
   const forecastNotice = capacitySummary ? (
-    <ForecastCapacitySummary
-      summary={capacitySummary}
-      onOpenUsage={onDetails}
-      onOpenQuickSettings={onAdjust}
-      onOpenTaskPacks={onOpenTaskPacks}
-      detailsUrl={detailsUrl}
-    />
+    <div className="usage-forecast-summary" data-scope={capacitySummary.scope}>
+      <span className="usage-forecast-summary__icon" aria-hidden="true">
+        <AlertTriangle size={14} strokeWidth={2.2} />
+      </span>
+      <div className="usage-forecast-summary__copy">
+        <span className="usage-forecast-summary__label">{capacitySummary.title}</span>
+        <span className="usage-forecast-summary__body">{capacitySummary.body}</span>
+      </div>
+      {capacitySummary.scope === 'daily' && onAdjust ? (
+        <button type="button" className="usage-forecast-summary__action" onClick={onAdjust}>Adjust limit</button>
+      ) : onOpenTaskPacks ? (
+        <button type="button" className="usage-forecast-summary__action" onClick={onOpenTaskPacks}>Add credits</button>
+      ) : onDetails ? (
+        <button type="button" className="usage-forecast-summary__action" onClick={onDetails}>Details</button>
+      ) : detailsUrl ? (
+        <a className="usage-forecast-summary__action" href={detailsUrl}>Details</a>
+      ) : null}
+    </div>
   ) : null
 
   if (capacitySummary) {

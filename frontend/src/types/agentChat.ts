@@ -291,20 +291,12 @@ export type HistoricalPlanCompatEvent = Omit<PlanEvent, 'kind'> & {
   changes: Array<Omit<PlanStepChange, 'stepId'> & { cardId: string; stepId?: string }>
 }
 
-export type CreditForecastEvent = {
-  kind: 'credit_forecast'
-  cursor: string
-  timestamp?: string | null
-  forecast: CreditForecast
-}
-
 export type TimelineEvent =
   | MessageEvent
   | ToolClusterEvent
   | ThinkingEvent
   | PlanEvent
   | HistoricalPlanCompatEvent
-  | CreditForecastEvent
 
 export type AgentTimelineSnapshot = {
   events: TimelineEvent[]
