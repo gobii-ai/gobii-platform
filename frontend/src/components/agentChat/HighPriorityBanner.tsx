@@ -1,4 +1,4 @@
-import { AlertTriangle, ExternalLink, X } from 'lucide-react'
+import { AlertTriangle, CreditCard, ExternalLink, X } from 'lucide-react'
 
 export type HighPriorityBannerTone = 'warning' | 'critical'
 
@@ -8,6 +8,7 @@ export type HighPriorityBannerConfig = {
   message: string
   actionLabel?: string
   actionHref?: string
+  onAction?: () => void
   dismissible?: boolean
   tone?: HighPriorityBannerTone
 }
@@ -17,6 +18,7 @@ type HighPriorityBannerProps = {
   message: string
   actionLabel?: string
   actionHref?: string
+  onAction?: () => void
   dismissible?: boolean
   tone?: HighPriorityBannerTone
   onDismiss?: () => void
@@ -27,6 +29,7 @@ export function HighPriorityBanner({
   message,
   actionLabel,
   actionHref,
+  onAction,
   dismissible = true,
   tone = 'warning',
   onDismiss,
@@ -43,7 +46,12 @@ export function HighPriorityBanner({
         </div>
       </div>
       <div className="high-priority-banner-actions">
-        {actionHref && actionLabel ? (
+        {onAction && actionLabel ? (
+          <button type="button" className="high-priority-banner-link" onClick={onAction}>
+            <span>{actionLabel}</span>
+            <CreditCard size={13} />
+          </button>
+        ) : actionHref && actionLabel ? (
           <a href={actionHref} target="_top" className="high-priority-banner-link" rel="noreferrer">
             <span>{actionLabel}</span>
             <ExternalLink size={13} />

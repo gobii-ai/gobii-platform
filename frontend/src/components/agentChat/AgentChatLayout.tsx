@@ -1581,6 +1581,7 @@ export function AgentChatLayout({
               message={highPriorityBanner.message}
               actionLabel={highPriorityBanner.actionLabel}
               actionHref={highPriorityBanner.actionHref}
+              onAction={highPriorityBanner.onAction}
               dismissible={highPriorityBannerDismissible}
               tone={highPriorityBanner.tone}
               onDismiss={highPriorityBannerDismissible ? handleHighPriorityDismiss : undefined}

@@ -3419,6 +3419,7 @@ export function AgentChatPage({
         message: resolveCreateAgentPausedMessage(bannerAccountPause.resumeAt),
         actionLabel: 'Open billing',
         actionHref: billingManageUrl,
+        onAction: appShellOpenHandlers.billing,
         dismissible: false,
         tone: 'warning' as const,
       }
@@ -3434,6 +3435,7 @@ export function AgentChatPage({
         : `${resolveBillingAlertMessage(bannerBillingStatus.reason)} Visit billing to fix this and avoid disruption.`,
       actionLabel: bannerBillingStatus.reason === 'canceled' ? 'Upgrade' : 'Open billing',
       actionHref: billingManageUrl,
+      onAction: appShellOpenHandlers.billing,
       dismissible: false,
       tone: 'critical' as const,
     }
@@ -3444,6 +3446,7 @@ export function AgentChatPage({
     bannerBillingStatus?.delinquent,
     bannerBillingStatus?.reason,
     billingManageUrl,
+    appShellOpenHandlers.billing,
   ])
   const selectionMainClassName = 'agent-chat-main'
   const sidebarTaskCredits = useMemo(() => (
@@ -4183,6 +4186,7 @@ export function AgentChatPage({
             message={highPriorityBanner.message}
             actionLabel={highPriorityBanner.actionLabel}
             actionHref={highPriorityBanner.actionHref}
+            onAction={highPriorityBanner.onAction}
             dismissible={highPriorityBanner.dismissible}
             tone={highPriorityBanner.tone}
           />
