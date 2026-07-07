@@ -281,13 +281,16 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
 
   return (
     <DialogTrigger>
-      <Button className="chat-sidebar-toggle product-announcement-bell__trigger" aria-label={label}>
+      <Button
+        className="sidebar-settings__trigger product-announcement-bell__trigger product-announcement-bell__trigger--settings"
+        aria-label={label}
+      >
         <Bell className="h-4 w-4" aria-hidden="true" />
         {hasUnread ? <span className="product-announcement-bell__dot" aria-hidden="true" /> : null}
       </Button>
       <Popover
         className="product-announcement-bell__popover sidebar-settings__popover"
-        placement="bottom end"
+        placement="top end"
         offset={10}
         isNonModal
       >

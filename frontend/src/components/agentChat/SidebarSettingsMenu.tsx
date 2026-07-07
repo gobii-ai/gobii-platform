@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import {
   BarChart3,
   Bell,
@@ -55,6 +55,7 @@ export type SidebarSettingsInfo = {
 type SidebarSettingsMenuProps = SidebarSettingsInfo & {
   variant?: 'sidebar' | 'drawer'
   collapsed?: boolean
+  bottomAccessory?: ReactNode
 }
 
 const creditFormatter = new Intl.NumberFormat('en-US', {
@@ -128,6 +129,7 @@ export function SidebarSettingsMenu({
   onOpenHelp = null,
   variant = 'sidebar',
   collapsed = false,
+  bottomAccessory = null,
 }: SidebarSettingsMenuProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const actionsRef = useRef<HTMLDivElement | null>(null)
@@ -203,30 +205,33 @@ export function SidebarSettingsMenu({
       data-collapsed={collapsed ? 'true' : 'false'}
       data-has-help={onOpenHelp ? 'true' : 'false'}
     >
-      <div className="sidebar-settings__actions" ref={actionsRef}>
-        <Button
-          ref={triggerRef}
-          className="sidebar-settings__trigger"
-          aria-label="Open settings"
-          aria-expanded={open}
-          onPointerDownCapture={handleTriggerPointerDownCapture}
-          onPress={() => handleOpenChange(!open)}
-          data-open={open ? 'true' : 'false'}
-        >
-          <Settings className="sidebar-settings__trigger-icon" aria-hidden="true" />
-          {!collapsed ? <span className="sidebar-settings__trigger-label">Settings</span> : null}
-        </Button>
-        {onOpenHelp ? (
-          <button
-            type="button"
-            className="sidebar-settings__trigger sidebar-settings__trigger--help"
-            aria-label="Contact support"
-            title="Contact support"
-            onClick={onOpenHelp}
+      <div className="sidebar-settings__row">
+        <div className="sidebar-settings__actions" ref={actionsRef}>
+          <Button
+            ref={triggerRef}
+            className="sidebar-settings__trigger"
+            aria-label="Open settings"
+            aria-expanded={open}
+            onPointerDownCapture={handleTriggerPointerDownCapture}
+            onPress={() => handleOpenChange(!open)}
+            data-open={open ? 'true' : 'false'}
           >
-            <CircleHelp className="sidebar-settings__trigger-icon" aria-hidden="true" />
-          </button>
-        ) : null}
+            <Settings className="sidebar-settings__trigger-icon" aria-hidden="true" />
+            {!collapsed ? <span className="sidebar-settings__trigger-label">Settings</span> : null}
+          </Button>
+          {onOpenHelp ? (
+            <button
+              type="button"
+              className="sidebar-settings__trigger sidebar-settings__trigger--help"
+              aria-label="Contact support"
+              title="Contact support"
+              onClick={onOpenHelp}
+            >
+              <CircleHelp className="sidebar-settings__trigger-icon" aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
+        {bottomAccessory ? <div className="sidebar-settings__accessory">{bottomAccessory}</div> : null}
       </div>
       <Popover
         ref={popoverRef}

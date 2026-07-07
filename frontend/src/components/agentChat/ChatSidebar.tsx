@@ -782,7 +782,6 @@ export const ChatSidebar = memo(function ChatSidebar({
             {contextSwitcher ? (
               <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
             ) : null}
-            <ProductAnnouncementBell variant="sidebar" />
             {!collapsed ? (
               <button
                 type="button"
@@ -885,6 +884,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             {...settings}
             variant="sidebar"
             collapsed={collapsed}
+            bottomAccessory={<ProductAnnouncementBell variant="sidebar" />}
           />
         ) : null}
       </div>
