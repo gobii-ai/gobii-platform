@@ -2748,62 +2748,51 @@ def _agent_transfer_response_agent_payload(request, agent: PersistentAgent) -> d
     }
 
 
-def _process_agent_transfer_invite_response(request, invite: AgentTransferInvite, action: str) -> dict[str, Any]:
-    original_owner = invite.initiated_by
-    agent_before = invite.agent
-
-    if action == "accept":
-        invite = AgentTransferService.accept_invite(invite, request.user)
-        agent = PersistentAgent.objects.get(pk=invite.agent_id)
-        _send_agent_transfer_owner_notification(request, action, original_owner, agent)
-        if not agent.is_active:
-            message = f"You now own {agent.name}, but it has been paused because you are at your agent limit."
-        else:
-            message = f"You now own {agent.name}."
-        return {
-            "ok": True,
-            "action": action,
-            "message": message,
-            "agent": _agent_transfer_response_agent_payload(request, agent),
-        }
-
-    invite = AgentTransferService.decline_invite(invite, request.user)
-    _send_agent_transfer_owner_notification(request, action, original_owner, agent_before)
-    return {
-        "ok": True,
-        "action": action,
-        "message": "Transfer invitation declined.",
-        "agent": None,
-    }
-
-
-def _resolve_agent_transfer_invite_response_error(request, invite: AgentTransferInvite | None, action: str) -> tuple[str, int] | None:
-    if action not in {"accept", "decline"}:
-        return "Unsupported invite action.", 400
-    if invite is None:
-        return "Transfer invite not found.", 404
-    if invite.status != AgentTransferInvite.Status.PENDING:
-        return "This transfer invite has already been handled.", 409
-    user_email = (request.user.email or "").strip().lower()
-    if not user_email or (invite.to_email or "").strip().lower() != user_email:
-        return "This transfer invite is not addressed to your account.", 403
-    return None
-
-
 class AgentTransferInviteRespondAPIView(LoginRequiredMixin, View):
     """JSON accept/decline endpoint for app sidebar transfer invites."""
 
     http_method_names = ["post"]
 
     def post(self, request, invite_id: uuid.UUID, action: str):
+        if action not in {"accept", "decline"}:
+            return JsonResponse({"ok": False, "error": "Unsupported invite action."}, status=400)
+
         invite = _agent_transfer_invite_queryset().filter(pk=invite_id).first()
-        error = _resolve_agent_transfer_invite_response_error(request, invite, action)
-        if error:
-            message, status_code = error
-            return JsonResponse({"ok": False, "error": message}, status=status_code)
+        if invite is None:
+            return JsonResponse({"ok": False, "error": "Transfer invite not found."}, status=404)
+        if invite.status != AgentTransferInvite.Status.PENDING:
+            return JsonResponse({"ok": False, "error": "This transfer invite has already been handled."}, status=409)
+
+        user_email = (request.user.email or "").strip().lower()
+        if not user_email or (invite.to_email or "").strip().lower() != user_email:
+            return JsonResponse({"ok": False, "error": "This transfer invite is not addressed to your account."}, status=403)
 
         try:
-            payload = _process_agent_transfer_invite_response(request, invite, action)
+            original_owner = invite.initiated_by
+            if action == "accept":
+                accepted_invite = AgentTransferService.accept_invite(invite, request.user)
+                agent = PersistentAgent.objects.get(pk=accepted_invite.agent_id)
+                _send_agent_transfer_owner_notification(request, action, original_owner, agent)
+                if not agent.is_active:
+                    message = f"You now own {agent.name}, but it has been paused because you are at your agent limit."
+                else:
+                    message = f"You now own {agent.name}."
+                payload = {
+                    "ok": True,
+                    "action": action,
+                    "message": message,
+                    "agent": _agent_transfer_response_agent_payload(request, agent),
+                }
+            else:
+                agent = invite.agent
+                AgentTransferService.decline_invite(invite, request.user)
+                _send_agent_transfer_owner_notification(request, action, original_owner, agent)
+                payload = {
+                    "ok": True,
+                    "action": action,
+                    "message": "Transfer invitation declined.",
+                    "agent": None,
+                }
         except AgentTransferDenied as exc:
             return JsonResponse({"ok": False, "error": str(exc)}, status=403)
         except AgentTransferError as exc:
@@ -2812,38 +2801,6 @@ class AgentTransferInviteRespondAPIView(LoginRequiredMixin, View):
                 status=400,
             )
         return JsonResponse(payload)
-
-
-class AgentTransferInviteRespondView(LoginRequiredMixin, View):
-    """Handle legacy browser accept/decline actions for agent transfer invites."""
-
-    http_method_names = ["post"]
-
-    def post(self, request, invite_id: uuid.UUID, action: str):
-        invite = get_object_or_404(_agent_transfer_invite_queryset(), pk=invite_id)
-        error = _resolve_agent_transfer_invite_response_error(request, invite, action)
-        if error:
-            message, _status_code = error
-            if invite.status != AgentTransferInvite.Status.PENDING:
-                messages.info(request, message)
-            else:
-                messages.error(request, message)
-            return redirect(IMMERSIVE_APP_BASE_PATH)
-
-        try:
-            payload = _process_agent_transfer_invite_response(request, invite, action)
-            if action == "accept" and payload.get("agent") and not payload["agent"]["isActive"]:
-                messages.warning(request, payload["message"])
-            elif action == "decline":
-                messages.info(request, payload["message"])
-            else:
-                messages.success(request, payload["message"])
-        except AgentTransferDenied as exc:
-            messages.error(request, str(exc))
-        except AgentTransferError as exc:
-            messages.error(request, f"Could not process the transfer invite: {exc}")
-
-        return redirect(IMMERSIVE_APP_BASE_PATH)
 
 
 class AgentAllowlistInviteAcceptView(TemplateView):

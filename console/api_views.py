@@ -34,7 +34,6 @@ from django.template.defaultfilters import filesizeformat
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.utils.formats import date_format
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.urls import NoReverseMatch, reverse
@@ -2880,13 +2879,10 @@ def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = 
     return Analytics.with_org_properties(payload, organization=getattr(agent, "organization", None))
 
 
-def _serialize_roster_transfer_invite(request: HttpRequest, invite: AgentTransferInvite) -> dict[str, Any]:
+def _serialize_roster_transfer_invite(invite: AgentTransferInvite) -> dict[str, Any]:
     agent = invite.agent
     initiator = invite.initiated_by
     created_at = invite.created_at
-    created_at_display = ""
-    if created_at:
-        created_at_display = date_format(timezone.localtime(created_at), "M j, Y g:i A")
 
     initiator_email = getattr(initiator, "email", "") or ""
     initiator_name = ""
@@ -2903,7 +2899,6 @@ def _serialize_roster_transfer_invite(request: HttpRequest, invite: AgentTransfe
         "recipient_email": invite.to_email or "",
         "message": invite.message or "",
         "created_at": created_at.isoformat() if created_at else None,
-        "created_at_display": created_at_display,
         "accept_url": reverse("console-agent-transfer-invite-accept-api", args=[invite.id]),
         "decline_url": reverse("console-agent-transfer-invite-decline-api", args=[invite.id]),
     }
@@ -2923,7 +2918,7 @@ def _pending_roster_transfer_invites_for_user(request: HttpRequest) -> list[dict
         )
         .order_by("-created_at", "-id")
     )
-    return [_serialize_roster_transfer_invite(request, invite) for invite in invites]
+    return [_serialize_roster_transfer_invite(invite) for invite in invites]
 
 
 @method_decorator(csrf_exempt, name="dispatch")

@@ -5976,89 +5976,30 @@
 .agent-transfer-invite {
     --transfer-invite-bg: rgba(125, 211, 252, 0.08);
     --transfer-invite-border: rgba(125, 211, 252, 0.2);
-    --transfer-invite-action-bg: rgba(255, 255, 255, 0.08);
-    --transfer-invite-action-color: rgba(255, 255, 255, 0.78);
-    --transfer-invite-accept-bg: rgba(52, 211, 153, 0.18);
-    --transfer-invite-accept-color: #a7f3d0;
-    --transfer-invite-decline-bg: rgba(251, 113, 133, 0.16);
-    --transfer-invite-decline-color: #fecdd3;
-    --roster-avatar-size: 2.25rem;
-    --roster-avatar-text-color: #ffffff;
-    --roster-avatar-text-size: 0.75rem;
-    --roster-avatar-letter-spacing: 0.02em;
-    --roster-leading-gap: 0.42rem;
-    --roster-unread-slot-size: 0.38rem;
-    --roster-meta-gap: 0.1875rem;
-    --roster-name-color: rgba(255, 255, 255, 0.9);
-    --roster-name-size: 0.8125rem;
-    --roster-name-weight: 500;
-    --roster-desc-color: rgba(255, 255, 255, 0.5);
-    --roster-desc-size: 0.6875rem;
-    display: flex;
-    align-items: flex-start;
-    gap: var(--roster-item-gap, 0.75rem);
-    width: 100%;
-    padding: var(--roster-item-padding, 0.625rem 0.5rem);
+    --roster-hover-bg: var(--transfer-invite-bg);
     border: 1px solid var(--transfer-invite-border);
-    border-radius: var(--roster-item-radius, 0.5rem);
     background: var(--transfer-invite-bg);
-    color: rgba(255, 255, 255, 0.78);
+    cursor: default;
 }
 .agent-transfer-invite[data-variant='drawer'] {
     --transfer-invite-bg: #ffffff;
     --transfer-invite-border: rgba(99, 102, 241, 0.18);
-    --transfer-invite-action-bg: rgba(99, 102, 241, 0.1);
-    --transfer-invite-action-color: #475569;
-    --transfer-invite-accept-bg: rgba(16, 185, 129, 0.14);
-    --transfer-invite-accept-color: #047857;
-    --transfer-invite-decline-bg: rgba(244, 63, 94, 0.12);
-    --transfer-invite-decline-color: #be123c;
-    --roster-avatar-size: 2.75rem;
-    --roster-avatar-text-color: #f8fafc;
-    --roster-avatar-text-size: 0.8rem;
-    --roster-avatar-letter-spacing: 0.06em;
-    --roster-leading-gap: 0.48rem;
-    --roster-unread-slot-size: 0.44rem;
-    --roster-name-color: #1e293b;
-    --roster-name-size: 0.9375rem;
-    --roster-name-weight: 600;
-    --roster-desc-color: #64748b;
-    --roster-desc-size: 0.8125rem;
-    padding: 0.875rem 1rem;
-    border-radius: 0.875rem;
-    color: #334155;
+}
+.agent-transfer-invite[data-variant='sidebar']:hover .agent-roster-item__avatar {
+    transform: none;
 }
 .agent-transfer-invite__actions {
-    display: inline-flex;
     align-items: center;
-    align-self: center;
     gap: 0.35rem;
-    margin-left: 0.35rem;
 }
-.agent-transfer-invite__info,
 .agent-transfer-invite__action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 1.65rem;
     height: 1.65rem;
+    border: 0;
     border-radius: 0.45rem;
-}
-.agent-transfer-invite__info {
-    border: 0;
-    background: transparent;
-    color: var(--transfer-invite-action-color);
-    cursor: help;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-.agent-transfer-invite__info:hover,
-.agent-transfer-invite__info:focus-visible {
-    background: var(--transfer-invite-action-bg);
-}
-.agent-transfer-invite__action {
-    border: 0;
-    background: var(--transfer-invite-action-bg);
-    color: var(--transfer-invite-action-color);
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
@@ -6071,48 +6012,20 @@
     transform: none;
 }
 .agent-transfer-invite__action--accept {
-    background: var(--transfer-invite-accept-bg);
-    color: var(--transfer-invite-accept-color);
+    background: rgba(52, 211, 153, 0.18);
+    color: #a7f3d0;
 }
 .agent-transfer-invite__action--decline {
-    background: var(--transfer-invite-decline-bg);
-    color: var(--transfer-invite-decline-color);
+    background: rgba(251, 113, 133, 0.16);
+    color: #fecdd3;
 }
-.agent-transfer-invite__tooltip {
-    pointer-events: none;
-    position: fixed;
-    z-index: 80;
-    width: 18rem;
-    max-width: min(22rem, calc(100vw - 2rem));
-    border: 1px solid rgba(226, 232, 240, 0.22);
-    border-radius: 0.5rem;
-    background: rgba(15, 23, 42, 0.96);
-    padding: 0.5rem 0.625rem;
-    color: #e2e8f0;
-    font-size: 0.75rem;
-    line-height: 1.45;
-    box-shadow: 0 16px 32px rgba(15, 23, 42, 0.22);
+.agent-transfer-invite[data-variant='drawer'] .agent-transfer-invite__action--accept {
+    background: rgba(16, 185, 129, 0.14);
+    color: #047857;
 }
-.agent-transfer-invite-details {
-    display: grid;
-    gap: 0.75rem;
-    color: #334155;
-    font-size: 0.875rem;
-}
-.agent-transfer-invite-details div {
-    display: grid;
-    gap: 0.2rem;
-}
-.agent-transfer-invite-details dt {
-    color: #64748b;
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-}
-.agent-transfer-invite-details dd {
-    margin: 0;
-    overflow-wrap: anywhere;
+.agent-transfer-invite[data-variant='drawer'] .agent-transfer-invite__action--decline {
+    background: rgba(244, 63, 94, 0.12);
+    color: #be123c;
 }
 .agent-roster-empty {
     font-weight: 500;
@@ -7628,12 +7541,14 @@
 .agent-mobile-sheet--sidebar .agent-transfer-invite {
     --transfer-invite-bg: rgba(125, 211, 252, 0.08);
     --transfer-invite-border: rgba(125, 211, 252, 0.2);
-    --transfer-invite-action-bg: rgba(255, 255, 255, 0.08);
-    --transfer-invite-action-color: rgba(226, 232, 240, 0.78);
-    --transfer-invite-accept-bg: rgba(52, 211, 153, 0.18);
-    --transfer-invite-accept-color: #a7f3d0;
-    --transfer-invite-decline-bg: rgba(251, 113, 133, 0.16);
-    --transfer-invite-decline-color: #fecdd3;
+}
+.agent-mobile-sheet--sidebar .agent-transfer-invite__action--accept {
+    background: rgba(52, 211, 153, 0.18);
+    color: #a7f3d0;
+}
+.agent-mobile-sheet--sidebar .agent-transfer-invite__action--decline {
+    background: rgba(251, 113, 133, 0.16);
+    color: #fecdd3;
 }
 .agent-mobile-sheet--sidebar .sidebar-settings[data-variant='drawer'] {
     border-top: 1px solid rgba(167, 139, 250, 0.12);

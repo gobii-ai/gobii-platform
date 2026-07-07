@@ -10,7 +10,6 @@ import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCrea
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { ChatSidebarGallery } from './ChatSidebarGallery'
-import { HoverInfoButton } from './InlineInfoTooltipButton'
 import {
   SelectionShellPageSwitcher,
   SELECTION_SHELL_PAGE_LABELS,
@@ -18,6 +17,12 @@ import {
 } from './SelectionShellPageSwitcher'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
+import {
+  TransferInviteDetails,
+  TransferInviteSidebarItem,
+  type TransferInviteAction,
+  type TransferInviteDialogState,
+} from './TransferInviteSidebarItem'
 import {
   getNextAgentChatSidebarMode,
   getPreviousAgentChatSidebarMode,
@@ -41,13 +46,6 @@ type AgentContextMenuState = ContextMenuPosition & {
   agent: AgentRosterEntry
 }
 
-type TransferInviteAction = 'accept' | 'decline'
-
-type TransferInviteDialogState = {
-  invite: AgentTransferInvite
-  action: TransferInviteAction
-}
-
 function clampContextMenuPosition(x: number, y: number): ContextMenuPosition {
   if (typeof window === 'undefined') {
     return { x, y }
@@ -56,115 +54,6 @@ function clampContextMenuPosition(x: number, y: number): ContextMenuPosition {
     x: Math.min(Math.max(CONTEXT_MENU_MARGIN, x), Math.max(CONTEXT_MENU_MARGIN, window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_MARGIN)),
     y: Math.min(Math.max(CONTEXT_MENU_MARGIN, y), Math.max(CONTEXT_MENU_MARGIN, window.innerHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_MARGIN)),
   }
-}
-
-function inviteSenderLabel(invite: AgentTransferInvite): string {
-  return invite.initiatedByName || invite.initiatedByEmail || 'Someone'
-}
-
-function inviteHoverTitle(invite: AgentTransferInvite): string {
-  const parts = [
-    `${inviteSenderLabel(invite)} invited ${invite.recipientEmail || 'you'} to own ${invite.agentName || 'this agent'}.`,
-  ]
-  if (invite.createdAtDisplay) {
-    parts.push(`Sent ${invite.createdAtDisplay}.`)
-  }
-  if (invite.message.trim()) {
-    parts.push(invite.message.trim())
-  }
-  return parts.join(' ')
-}
-
-function TransferInviteDetails({ invite }: { invite: AgentTransferInvite }) {
-  return (
-    <dl className="agent-transfer-invite-details">
-      <div>
-        <dt>From</dt>
-        <dd>{inviteSenderLabel(invite)}{invite.initiatedByEmail ? ` <${invite.initiatedByEmail}>` : ''}</dd>
-      </div>
-      <div>
-        <dt>To</dt>
-        <dd>{invite.recipientEmail || 'Your account'}</dd>
-      </div>
-      {invite.createdAtDisplay ? (
-        <div>
-          <dt>Sent</dt>
-          <dd>{invite.createdAtDisplay}</dd>
-        </div>
-      ) : null}
-      {invite.message.trim() ? (
-        <div>
-          <dt>Message</dt>
-          <dd>{invite.message.trim()}</dd>
-        </div>
-      ) : null}
-    </dl>
-  )
-}
-
-function TransferInviteListItem({
-  invite,
-  variant,
-  disabled,
-  onRespond,
-}: {
-  invite: AgentTransferInvite
-  variant: 'drawer' | 'sidebar'
-  disabled: boolean
-  onRespond: (invite: AgentTransferInvite, action: TransferInviteAction) => void
-}) {
-  const title = inviteHoverTitle(invite)
-
-  return (
-    <div className="agent-transfer-invite" data-variant={variant} role="listitem">
-      <span className="agent-roster-item__leading">
-        <span className="agent-roster-item__unread-slot" />
-        <span className="agent-roster-item__avatar-wrap">
-          <AgentChatAvatar
-            name={invite.agentName || 'Agent'}
-            avatarUrl={invite.agentAvatarUrl}
-            className="agent-roster-item__avatar"
-            imageClassName="agent-roster-item__avatar-image"
-            textClassName="agent-roster-item__avatar-text"
-          />
-        </span>
-      </span>
-      <span className="agent-roster-item__meta">
-        <span className="agent-roster-item__name">{invite.agentName || 'Agent'}</span>
-        <span className="agent-roster-item__desc">Invitation</span>
-      </span>
-      <span className="agent-transfer-invite__actions">
-        <HoverInfoButton
-          label="Transfer invite details"
-          description={title}
-          disabled={disabled}
-          buttonClassName="agent-transfer-invite__info"
-          iconClassName="h-3.5 w-3.5"
-          tooltipClassName="agent-transfer-invite__tooltip"
-        />
-        <button
-          type="button"
-          className="agent-transfer-invite__action agent-transfer-invite__action--decline"
-          onClick={() => onRespond(invite, 'decline')}
-          disabled={disabled}
-          aria-label={`Decline transfer invite for ${invite.agentName || 'agent'}`}
-          title="Decline"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          className="agent-transfer-invite__action agent-transfer-invite__action--accept"
-          onClick={() => onRespond(invite, 'accept')}
-          disabled={disabled}
-          aria-label={`Accept transfer invite for ${invite.agentName || 'agent'}`}
-          title="Accept"
-        >
-          <Check className="h-3.5 w-3.5" />
-        </button>
-      </span>
-    </div>
-  )
 }
 
 type ChatSidebarProps = {
@@ -549,7 +438,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   const transferInviteDialogElement = transferInviteDialog ? (
     <ActionConfirmDialog
       open={true}
-      title={`${transferInviteDialog.action === 'accept' ? 'Accept' : 'Decline'} transfer for ${transferInviteDialog.invite.agentName || 'this agent'}?`}
+      title={`${transferInviteDialog.action === 'accept' ? 'Accept' : 'Decline'} transfer for ${transferInviteDialog.invite.agent_name || 'this agent'}?`}
       description={
         transferInviteDialog.action === 'accept'
           ? 'Ownership will move to your personal workspace. The original owner will be notified, and the agent may be paused if you are at your agent limit.'
@@ -643,7 +532,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                   count={transferInvites.length}
                 />
                 {transferInvites.map((invite) => (
-                  <TransferInviteListItem
+                  <TransferInviteSidebarItem
                     key={invite.id}
                     variant={variant}
                     invite={invite}

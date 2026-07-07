@@ -34,20 +34,7 @@ type AgentRosterPayload = {
   billingStatus?: BillingStatusInfo | null
   accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
-  transfer_invites?: {
-    id: string
-    agent_id: string
-    agent_name: string
-    agent_avatar_url: string | null
-    initiated_by_name: string
-    initiated_by_email: string
-    recipient_email: string
-    message: string
-    created_at: string | null
-    created_at_display: string
-    accept_url: string
-    decline_url: string
-  }[]
+  transfer_invites?: AgentTransferInvite[]
   agents: {
     id: string
     name: string
@@ -136,24 +123,10 @@ export async function fetchAgentRoster(
       ? agent.enabled_system_skills.filter((value): value is string => typeof value === 'string')
       : [],
   }))
-  const transferInvites = (payload.transfer_invites ?? []).map((invite) => ({
-    id: invite.id,
-    agentId: invite.agent_id,
-    agentName: invite.agent_name,
-    agentAvatarUrl: invite.agent_avatar_url,
-    initiatedByName: invite.initiated_by_name,
-    initiatedByEmail: invite.initiated_by_email,
-    recipientEmail: invite.recipient_email,
-    message: invite.message,
-    createdAt: invite.created_at,
-    createdAtDisplay: invite.created_at_display,
-    acceptUrl: invite.accept_url,
-    declineUrl: invite.decline_url,
-  }))
   return {
     context: payload.context,
     agents,
-    transferInvites,
+    transferInvites: payload.transfer_invites ?? [],
     agentRosterSortMode: payload.agent_roster_sort_mode ?? 'recent',
     favoriteAgentIds: Array.isArray(payload.favorite_agent_ids)
       ? payload.favorite_agent_ids.filter((value): value is string => typeof value === 'string')

@@ -238,55 +238,6 @@ class AgentTransferServiceTests(TestCase):
         self.process_events_mock.delay.assert_not_called()
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
 
-    def test_accept_transfer_notifies_initiator(self):
-        invite = self._send_transfer_invite_via_console(email=self.recipient.email)
-        mail.outbox.clear()
-        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
-
-        self.client.logout()
-        self.client.login(username="recipient", password="pw")
-        response = self.client.post(
-            reverse('console-agent-transfer-invite', args=[invite.id, 'accept'])
-        )
-        self.assertEqual(response.status_code, 302)
-
-        invite.refresh_from_db()
-        self.assertEqual(invite.status, AgentTransferInvite.Status.ACCEPTED)
-
-        self.assertEqual(len(mail.outbox), 1)
-        msg = mail.outbox[0]
-        self.assertEqual(msg.to, [self.owner.email])
-        self.assertIn('accepted', msg.subject.lower())
-        self.assertIn(self.agent.name, msg.subject)
-        messages = PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False)
-        self.assertEqual(messages.count(), 1)
-        body = messages.first().body.lower()
-        self.assertIn('taking over as your owner', body)
-        self.process_events_mock.delay.assert_called_once_with(str(invite.agent.id))
-        self.process_events_mock.delay.reset_mock()
-
-    def test_decline_transfer_notifies_initiator(self):
-        invite = self._send_transfer_invite_via_console(email=self.recipient.email)
-        mail.outbox.clear()
-
-        self.client.logout()
-        self.client.login(username="recipient", password="pw")
-        response = self.client.post(
-            reverse('console-agent-transfer-invite', args=[invite.id, 'decline'])
-        )
-        self.assertEqual(response.status_code, 302)
-
-        invite.refresh_from_db()
-        self.assertEqual(invite.status, AgentTransferInvite.Status.DECLINED)
-
-        self.assertEqual(len(mail.outbox), 1)
-        msg = mail.outbox[0]
-        self.assertEqual(msg.to, [self.owner.email])
-        self.assertIn('declined', msg.subject.lower())
-        self.assertIn(self.agent.name, msg.subject)
-        self.process_events_mock.delay.assert_not_called()
-        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
-
     def test_roster_includes_pending_transfer_invites_for_recipient(self):
         invite = self._initiate(self.recipient.email)
 
@@ -350,7 +301,13 @@ class AgentTransferServiceTests(TestCase):
         invite.refresh_from_db()
         self.assertEqual(invite.status, AgentTransferInvite.Status.ACCEPTED)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(mail.outbox[0].to, [self.owner.email])
+        msg = mail.outbox[0]
+        self.assertEqual(msg.to, [self.owner.email])
+        self.assertIn("accepted", msg.subject.lower())
+        self.assertIn(self.agent.name, msg.subject)
+        messages = PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False)
+        self.assertEqual(messages.count(), 1)
+        self.assertIn("taking over as your owner", messages.first().body.lower())
 
         roster_response = self.client.get(reverse("console_agent_roster"))
         self.assertEqual(roster_response.status_code, 200)
@@ -377,7 +334,11 @@ class AgentTransferServiceTests(TestCase):
         invite.refresh_from_db()
         self.assertEqual(invite.status, AgentTransferInvite.Status.DECLINED)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(mail.outbox[0].to, [self.owner.email])
+        msg = mail.outbox[0]
+        self.assertEqual(msg.to, [self.owner.email])
+        self.assertIn("declined", msg.subject.lower())
+        self.assertIn(self.agent.name, msg.subject)
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 0)
 
         roster_response = self.client.get(reverse("console_agent_roster"))
         self.assertEqual(roster_response.status_code, 200)

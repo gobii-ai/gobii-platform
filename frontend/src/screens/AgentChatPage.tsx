@@ -2703,7 +2703,7 @@ export function AgentChatPage({
     invite: AgentTransferInvite,
     action: 'accept' | 'decline',
   ) => {
-    const url = action === 'accept' ? invite.acceptUrl : invite.declineUrl
+    const url = action === 'accept' ? invite.accept_url : invite.decline_url
     const result = await respondToAgentTransferInvite(url)
     await queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
     if (action === 'accept' && result.agent?.chatUrl) {

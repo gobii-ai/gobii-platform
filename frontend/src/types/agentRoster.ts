@@ -46,15 +46,14 @@ export type AgentRosterEntry = {
 
 export type AgentTransferInvite = {
   id: string
-  agentId: string
-  agentName: string
-  agentAvatarUrl: string | null
-  initiatedByName: string
-  initiatedByEmail: string
-  recipientEmail: string
+  agent_id: string
+  agent_name: string
+  agent_avatar_url: string | null
+  initiated_by_name: string
+  initiated_by_email: string
+  recipient_email: string
   message: string
-  createdAt: string | null
-  createdAtDisplay: string
-  acceptUrl: string
-  declineUrl: string
+  created_at: string | null
+  accept_url: string
+  decline_url: string
 }
