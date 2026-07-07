@@ -6344,6 +6344,13 @@ class PersistentAgentTemplate(models.Model):
         default="",
         help_text="Optional complete meta description for the public template detail page.",
     )
+    omit_ai_agent_template_title_suffix = models.BooleanField(
+        default=False,
+        help_text=(
+            "Use the display name alone for the public detail page SEO and social title "
+            "instead of appending 'AI Agent Template'."
+        ),
+    )
     description = models.TextField()
     description_markdown = models.TextField(
         blank=True,

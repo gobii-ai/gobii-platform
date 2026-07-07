@@ -2277,7 +2277,9 @@ class PublicTemplateDetailView(TemplateView):
         else:
             template_description_html = linebreaksbr(self.template.description or "")
         category_label = public_template_category_label(self.template)
-        social_title = f"{self.template.display_name} AI Agent Template"
+        social_title = self.template.display_name
+        if not self.template.omit_ai_agent_template_title_suffix:
+            social_title = f"{social_title} AI Agent Template"
         template_schema_id = f"{canonical_detail_url}#template"
         webpage_schema_id = f"{canonical_detail_url}#webpage"
         breadcrumb_schema_id = f"{canonical_detail_url}#breadcrumb"

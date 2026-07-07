@@ -408,7 +408,7 @@ class PublicTemplateRouteTests(TestCase):
             password="pw",
         )
         public_profile = PublicProfile.objects.create(user=user, handle="finance-team")
-        PersistentAgentTemplate.objects.create(
+        template = PersistentAgentTemplate.objects.create(
             code="stripe-fraud-dispute-monitor",
             public_profile=public_profile,
             slug="stripe-fraud-dispute-monitor",
@@ -435,6 +435,26 @@ class PublicTemplateRouteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Stripe Fraud Dispute Monitor")
         self.assertContains(response, "Monitor Stripe disputes and flag risky activity.")
+        self.assertEqual(response.context["template_seo_title"], f"{template.display_name} AI Agent Template | Gobii")
+        self.assertEqual(response.context["template_social_title"], f"{template.display_name} AI Agent Template")
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_can_omit_ai_agent_template_from_title(self):
+        template = self.create_public_template(
+            code="clean-seo-title-template",
+            display_name="Clean SEO Title",
+            handle="clean-seo-title-template",
+            omit_ai_agent_template_title_suffix=True,
+        )
+
+        response = self.client.get("/library/finance/clean-seo-title-template/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["template_seo_title"], f"{template.display_name} | Gobii")
+        self.assertEqual(response.context["template_social_title"], template.display_name)
+        self.assertContains(response, f"<title>{template.display_name} | Gobii</title>", html=True)
+        self.assertContains(response, f'<meta property="og:title" content="{template.display_name}">')
+        self.assertNotContains(response, f"{template.display_name} AI Agent Template | Gobii")
 
     @tag("batch_public_templates")
     def test_public_template_detail_hides_related_templates_even_when_specified(self):

@@ -6218,7 +6218,7 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
             'fields': ('description', 'description_markdown', 'charter')
         }),
         ('SEO', {
-            'fields': ('seo_meta_description',)
+            'fields': ('seo_meta_description', 'omit_ai_agent_template_title_suffix')
         }),
         ('Detail Page Sections', {
             'fields': (
