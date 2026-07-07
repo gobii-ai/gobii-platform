@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentChatLayout } from './AgentChatLayout'
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import type { AppStore } from '../../store/appStore'
+import { createTestAppStore, getSubscriptionState, seedSubscriptionState, StoreProvider } from '../../test/storeTestUtils'
 import type { PlanSnapshot } from '../../types/agentChat'
 
 vi.mock('../../util/analytics', () => ({
@@ -240,7 +241,7 @@ function buildInitialSubscriptionState() {
 }
 
 function renderAgentChatLayout(props: Partial<React.ComponentProps<typeof AgentChatLayout>> = {}) {
-  return render(
+  return renderWithStore(
     <AgentChatLayout
       agentFirstName="Agent"
       agentName="Agent"
@@ -261,6 +262,18 @@ const initialPlan: PlanSnapshot = {
   messages: [],
 }
 
+let appStore: AppStore
+
+function renderWithStore(ui: React.ReactElement) {
+  return render(ui, {
+    wrapper: ({ children }) => (
+      <StoreProvider store={appStore}>
+        {children}
+      </StoreProvider>
+    ),
+  })
+}
+
 describe('AgentChatLayout upgrade modal gating', () => {
   beforeEach(() => {
     window.innerWidth = 1200
@@ -272,16 +285,17 @@ describe('AgentChatLayout upgrade modal gating', () => {
         removeItem: vi.fn(),
       },
     })
-    useSubscriptionStore.setState(buildInitialSubscriptionState())
+    appStore = createTestAppStore()
+    seedSubscriptionState(appStore, buildInitialSubscriptionState())
   })
 
   afterEach(() => {
     vi.useRealTimers()
-    useSubscriptionStore.setState(buildInitialSubscriptionState())
+    seedSubscriptionState(appStore, buildInitialSubscriptionState())
   })
 
   it('keeps trial onboarding open while the subscription plan is still loading', async () => {
-    useSubscriptionStore.setState({
+    seedSubscriptionState(appStore, {
       ...buildInitialSubscriptionState(),
       isLoading: true,
       isProprietaryMode: false,
@@ -293,10 +307,10 @@ describe('AgentChatLayout upgrade modal gating', () => {
     renderAgentChatLayout()
 
     expect(screen.queryByTestId('subscription-upgrade-modal')).not.toBeInTheDocument()
-    expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(true)
+    expect(getSubscriptionState(appStore).isUpgradeModalOpen).toBe(true)
 
     await act(async () => {
-      useSubscriptionStore.setState({
+      seedSubscriptionState(appStore, {
         isLoading: false,
         isProprietaryMode: true,
       })
@@ -305,11 +319,11 @@ describe('AgentChatLayout upgrade modal gating', () => {
     const modal = await screen.findByTestId('subscription-upgrade-modal')
     expect(modal).toHaveAttribute('data-source', 'trial_onboarding')
     expect(modal).toHaveAttribute('data-dismissible', 'false')
-    expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(true)
+    expect(getSubscriptionState(appStore).isUpgradeModalOpen).toBe(true)
   })
 
   it('closes the upgrade modal after plan hydration confirms proprietary mode is off', async () => {
-    useSubscriptionStore.setState({
+    seedSubscriptionState(appStore, {
       ...buildInitialSubscriptionState(),
       isLoading: false,
       isProprietaryMode: false,
@@ -320,12 +334,12 @@ describe('AgentChatLayout upgrade modal gating', () => {
     renderAgentChatLayout()
 
     await waitFor(() => {
-      expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(false)
+      expect(getSubscriptionState(appStore).isUpgradeModalOpen).toBe(false)
     })
   })
 
   it('renders the signup preview panel instead of the composer when requested', () => {
-    render(
+    renderWithStore(
       <AgentChatLayout
         agentFirstName="Agent"
         events={[]}
@@ -342,7 +356,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
   })
 
   it('renders the composer instead of the signup preview panel while planning', () => {
-    render(
+    renderWithStore(
       <AgentChatLayout
         agentFirstName="Agent"
         events={[]}
@@ -359,7 +373,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
   it('keeps skip planning available while spawn intent loading hides the composer', () => {
     const handleSkipPlanning = vi.fn()
 
-    render(
+    renderWithStore(
       <AgentChatLayout
         agentFirstName="Agent"
         events={[]}
@@ -378,7 +392,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
   })
 
   it('opens the settings panel when a chat message links to the current agent settings page', () => {
-    render(
+    renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
         agentFirstName="Agent"
@@ -397,7 +411,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
   it('routes current agent settings message links to the embedded full settings view callback', () => {
     const handleOpenFullSettings = vi.fn()
 
-    render(
+    renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
         agentFirstName="Agent"
@@ -416,7 +430,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
   it('routes app secret request message links to the embedded secret requests view', () => {
     const handleOpenAgentSecretRequests = vi.fn()
 
-    render(
+    renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
         agentFirstName="Agent"
@@ -433,7 +447,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
   it('routes app shell message links to the current gallery shell', () => {
     const handleOpenIntegrations = vi.fn()
 
-    render(
+    renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
         agentFirstName="Agent"
@@ -450,7 +464,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
   it('does not intercept app message links for a different agent', () => {
     const handleOpenAgentSecretRequests = vi.fn()
 
-    render(
+    renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
         agentFirstName="Agent"
@@ -469,7 +483,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     const handleOpenAgentEmailSettings = vi.fn()
     const handleOpenAgentFiles = vi.fn()
 
-    const { rerender } = render(
+    const { rerender } = renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
         agentFirstName="Agent"
@@ -511,7 +525,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
   })
 
   it('forces the sidebar into gallery mode while embedded settings are visible', () => {
-    const { rerender } = render(
+    const { rerender } = renderWithStore(
       <AgentChatLayout
         agentFirstName="Agent"
         events={[]}

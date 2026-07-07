@@ -1,16 +1,20 @@
 import { useEffect, useRef } from 'react'
-import { useAgentAuditStore } from '../stores/agentAuditStore'
+import { auditActions } from '../store/auditSlice'
+import { useAppDispatch } from '../store/hooks'
 
 const MAX_RETRIES = 5
 
 export function useAgentAuditSocket(agentId: string | null) {
-  const receiveEventRef = useRef(useAgentAuditStore.getState().receiveRealtimeEvent)
+  const dispatch = useAppDispatch()
+  const receiveEventRef = useRef((payload: any) => {
+    dispatch(auditActions.receiveRealtimeEvent(payload))
+  })
 
-  useEffect(() =>
-    useAgentAuditStore.subscribe((state) => {
-      receiveEventRef.current = state.receiveRealtimeEvent
-    }),
-  [])
+  useEffect(() => {
+    receiveEventRef.current = (payload: any) => {
+      dispatch(auditActions.receiveRealtimeEvent(payload))
+    }
+  }, [dispatch])
 
   const retryRef = useRef(0)
   const socketRef = useRef<WebSocket | null>(null)

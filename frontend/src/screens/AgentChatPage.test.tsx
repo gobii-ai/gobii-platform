@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { AgentChatPage } from './AgentChatPage'
-import { useSubscriptionStore } from '../stores/subscriptionStore'
+import type { AppStore } from '../store/appStore'
+import { createTestAppStore, seedSubscriptionState, StoreProvider } from '../test/storeTestUtils'
 
 class FakeNotification {
   static permission: NotificationPermission = 'granted'
@@ -393,7 +394,6 @@ vi.mock('../stores/agentChatStore', () => {
 
   return {
     useAgentChatStore,
-    setTimelineQueryClient: vi.fn(),
   }
 })
 
@@ -427,23 +427,35 @@ vi.mock('../hooks/usePageLifecycle', () => ({
   usePageLifecycle: vi.fn(),
 }))
 
-function renderAgentChatPage({ agentId = null }: { agentId?: string | null } = {}) {
-  const queryClient = new QueryClient({
+let appStore: AppStore
+let queryClient: QueryClient
+
+function createTestQueryClient() {
+  return new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
       },
     },
   })
+}
+
+function renderAgentChatPage({ agentId = null }: { agentId?: string | null } = {}) {
+  if (!appStore) {
+    queryClient = createTestQueryClient()
+    appStore = createTestAppStore({ queryClient })
+  }
 
   return render(
-    <QueryClientProvider client={queryClient}>
-      <AgentChatPage
-        agentId={agentId}
-        viewerUserId={1}
-        viewerEmail="user@example.com"
-      />
-    </QueryClientProvider>,
+    <StoreProvider store={appStore}>
+      <QueryClientProvider client={queryClient}>
+        <AgentChatPage
+          agentId={agentId}
+          viewerUserId={1}
+          viewerEmail="user@example.com"
+        />
+      </QueryClientProvider>
+    </StoreProvider>,
   )
 }
 
@@ -505,7 +517,9 @@ describe('AgentChatPage trial onboarding', () => {
     updateUserPreferencesMock.mockReset()
     updateUserPreferencesMock.mockResolvedValue({ preferences: {} })
     ensureAuthenticatedMock.mockClear()
-    useSubscriptionStore.setState(buildInitialSubscriptionState())
+    queryClient = createTestQueryClient()
+    appStore = createTestAppStore({ queryClient })
+    seedSubscriptionState(appStore, buildInitialSubscriptionState())
     timelineState.data = undefined
     timelineState.flatEvents = []
     timelineState.initialPageResponse = null
@@ -577,7 +591,7 @@ describe('AgentChatPage trial onboarding', () => {
   })
 
   it('keeps the pricing modal closed during signup preview auto-submit', async () => {
-    useSubscriptionStore.setState({
+    seedSubscriptionState(appStore, {
       ...buildInitialSubscriptionState(),
       personalSignupPreviewAvailable: true,
       personalSignupPreviewProcessingAvailable: true,
@@ -607,7 +621,7 @@ describe('AgentChatPage trial onboarding', () => {
   })
 
   it('treats signup preview as paused once processing is idle after refresh', async () => {
-    useSubscriptionStore.setState({
+    seedSubscriptionState(appStore, {
       ...buildInitialSubscriptionState(),
       personalSignupPreviewAvailable: true,
     })

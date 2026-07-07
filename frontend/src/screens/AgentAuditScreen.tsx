@@ -14,6 +14,8 @@ import {
 } from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
+import { auditActions } from '../store/auditSlice'
+import { useAppDispatch } from '../store/hooks'
 import type { AuditToolCallEvent, AuditErrorEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
 import {
   createSystemMessage,
@@ -141,6 +143,7 @@ function formatJudgeSuggestionType(value?: string | null): string {
 }
 
 export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAuditScreenProps) {
+  const dispatch = useAppDispatch()
   const {
     initialize,
     events,
@@ -188,6 +191,11 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [agentSearchResults, setAgentSearchResults] = useState<StaffAgentSearchResult[]>([])
   const [agentSearchLoading, setAgentSearchLoading] = useState(false)
   const [agentSearchError, setAgentSearchError] = useState<string | null>(null)
+  const latestEventsRef = useRef<AuditEvent[]>(events)
+
+  useEffect(() => {
+    latestEventsRef.current = events
+  }, [events])
   const pendingMessageScrollId = useRef<string | null>(null)
   useAgentAuditSocket(agentId)
   const auditExportUrl = useMemo(
@@ -427,7 +435,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
         editingMessage != null
           ? await updateSystemMessage(agentId, editingMessage.id, { body: messageBody })
           : await createSystemMessage(agentId, { body: messageBody })
-      useAgentAuditStore.getState().receiveRealtimeEvent(payload)
+      dispatch(auditActions.receiveRealtimeEvent(payload))
       resetMessageForm()
     } catch (err) {
       setMessageError(err instanceof Error ? err.message : 'Failed to save system message')
@@ -500,7 +508,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
       let targetId = getTargetMessageId(messageEvents, direction, activeMessageId)
       if (!targetId && direction === 'next' && hasMore && !loadingRef.current) {
         await loadMore()
-        const latestEvents = useAgentAuditStore.getState().events
+        const latestEvents = latestEventsRef.current
         const nextMessages = filterEvents(latestEvents).filter((event) => event.kind === 'message') as AuditMessageEvent[]
         targetId = getTargetMessageId(nextMessages, direction, activeMessageId)
       }

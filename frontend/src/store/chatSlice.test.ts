@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { sendAgentMessage } from '../api/agentChat'
 import type { TimelineEvent } from '../types/agentChat'
+import { createAppStore } from './appStore'
+import {
+  chatActions,
+  selectActiveChatStoreSnapshot,
+  sendMessage,
+  setAutoScrollPinned,
+} from './chatSlice'
 
 vi.mock('../api/agentChat', () => ({
   sendAgentMessage: vi.fn(),
   fetchProcessingStatus: vi.fn(),
 }))
-
-import { sendAgentMessage } from '../api/agentChat'
-import { useAgentChatStore } from './agentChatStore'
 
 function makeInsight(insightId: string, title: string) {
   return {
@@ -25,56 +31,64 @@ function makeInsight(insightId: string, title: string) {
   }
 }
 
-const initialState = useAgentChatStore.getState()
-
-describe('agentChatStore insight state', () => {
+describe('chatSlice insights', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useAgentChatStore.setState(initialState, true)
   })
 
   it('applies insight query results for the current agent', () => {
-    useAgentChatStore.getState().setAgentId('agent-1')
-    useAgentChatStore.getState().setInsightsForAgent('agent-1', [makeInsight('insight-1', 'First insight')])
+    const store = createAppStore()
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
+    store.dispatch(chatActions.insightsSetForAgent({
+      agentId: 'agent-1',
+      insights: [makeInsight('insight-1', 'First insight')],
+    }))
 
-    const state = useAgentChatStore.getState()
+    const state = selectActiveChatStoreSnapshot(store.getState())
     expect(state.insights).toEqual([makeInsight('insight-1', 'First insight')])
     expect(state.currentInsightIndex).toBe(0)
   })
 
   it('ignores stale insight results after switching agents', () => {
-    useAgentChatStore.getState().setAgentId('agent-1')
-    useAgentChatStore.getState().setAgentId('agent-2')
-    useAgentChatStore.getState().setInsightsForAgent('agent-1', [makeInsight('stale-insight', 'Stale insight')])
+    const store = createAppStore()
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-2' }))
+    store.dispatch(chatActions.insightsSetForAgent({
+      agentId: 'agent-1',
+      insights: [makeInsight('stale-insight', 'Stale insight')],
+    }))
 
-    expect(useAgentChatStore.getState().insights).toEqual([])
+    expect(selectActiveChatStoreSnapshot(store.getState()).insights).toEqual([])
 
-    useAgentChatStore.getState().setInsightsForAgent('agent-2', [makeInsight('fresh-insight', 'Fresh insight')])
+    store.dispatch(chatActions.insightsSetForAgent({
+      agentId: 'agent-2',
+      insights: [makeInsight('fresh-insight', 'Fresh insight')],
+    }))
 
-    const state = useAgentChatStore.getState()
+    const state = selectActiveChatStoreSnapshot(store.getState())
     expect(state.insights).toEqual([makeInsight('fresh-insight', 'Fresh insight')])
     expect(state.agentId).toBe('agent-2')
   })
 })
 
-describe('agentChatStore message sending', () => {
+describe('chatSlice message sending', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useAgentChatStore.setState(initialState, true)
   })
 
   it('adds an optimistic sending message before the backend send resolves', async () => {
+    const store = createAppStore()
     let resolveSend: (event: TimelineEvent) => void = () => {}
     vi.mocked(sendAgentMessage).mockReturnValue(new Promise<TimelineEvent>((resolve) => {
       resolveSend = resolve
     }))
-    useAgentChatStore.getState().setAgentId('agent-1')
-    useAgentChatStore.getState().setAutoScrollPinned(false)
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
+    store.dispatch(setAutoScrollPinned(false))
 
-    const sendResult = useAgentChatStore.getState().sendMessage('hello backend')
+    const sendResult = store.dispatch(sendMessage({ body: 'hello backend' }))
 
     expect(sendAgentMessage).toHaveBeenCalledWith('agent-1', 'hello backend', [])
-    const pendingEvents = useAgentChatStore.getState().pendingEvents
+    const pendingEvents = selectActiveChatStoreSnapshot(store.getState()).pendingEvents
     expect(pendingEvents).toHaveLength(1)
     expect(pendingEvents[0]).toMatchObject({
       kind: 'message',
@@ -83,7 +97,7 @@ describe('agentChatStore message sending', () => {
         status: 'sending',
       },
     })
-    expect(useAgentChatStore.getState().awaitingResponse).toBe(true)
+    expect(selectActiveChatStoreSnapshot(store.getState()).awaitingResponse).toBe(true)
 
     resolveSend({
       kind: 'message',
@@ -97,6 +111,6 @@ describe('agentChatStore message sending', () => {
         relativeTimestamp: null,
       },
     })
-    await sendResult
+    await sendResult.unwrap()
   })
 })

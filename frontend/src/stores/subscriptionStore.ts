@@ -1,17 +1,18 @@
-import { create } from 'zustand'
+import { useMemo, useSyncExternalStore } from 'react'
 
-import { HttpError, jsonFetch, scheduleLoginRedirect } from '../api/http'
-import { track, AnalyticsEvent } from '../util/analytics'
-
-export type PlanTier = 'free' | 'startup' | 'scale'
-export type UpgradeModalSource =
-  | 'banner'
-  | 'task_credits_callout'
-  | 'contact_cap_callout'
-  | 'intelligence_selector'
-  | 'trial_onboarding'
-  | 'agent_limit_error'
-  | 'unknown'
+import {
+  ensureAuthenticated,
+  selectSubscriptionState,
+  subscriptionActions,
+  type PlanTaskCreditsByPlan,
+  type PlanTier,
+  type SubscriptionState,
+  type TrialDaysByPlan,
+  type UpgradeModalOptions,
+  type UpgradeModalSource,
+} from '../store/subscriptionSlice'
+import type { AppDispatch } from '../store/appStore'
+import { useAppStore } from '../store/hooks'
 
 const CONTINUATION_UPGRADE_MODAL_SOURCES: readonly UpgradeModalSource[] = [
   'trial_onboarding',
@@ -21,43 +22,10 @@ const CONTINUATION_UPGRADE_MODAL_SOURCES: readonly UpgradeModalSource[] = [
 export function isContinuationUpgradeModalSource(
   source: UpgradeModalSource | string | null | undefined,
 ): boolean {
-  // This copy should only appear when the modal interrupted an in-progress action.
   return Boolean(source && CONTINUATION_UPGRADE_MODAL_SOURCES.includes(source as UpgradeModalSource))
 }
 
-type UpgradeModalOptions = {
-  dismissible?: boolean
-}
-
-export type TrialDaysByPlan = {
-  startup: number
-  scale: number
-}
-
-export type PlanTaskCreditsByPlan = {
-  startup: number
-  scale: number
-}
-
-type SubscriptionState = {
-  currentPlan: PlanTier | null
-  isLoading: boolean
-  isUpgradeModalOpen: boolean
-  upgradeModalSource: UpgradeModalSource | null
-  upgradeModalDismissible: boolean
-  isProprietaryMode: boolean
-  pricingModalAlmostFullScreen: boolean
-  ctaPricingCancelTextUnderBtn: boolean
-  ctaStartFreeTrial: boolean
-  ctaUnlockAgentCopy: boolean
-  ctaPickAPlan: boolean
-  ctaContinueAgentBtn: boolean
-  ctaNoChargeDuringTrial: boolean
-  personalSignupPreviewAvailable: boolean
-  personalSignupPreviewProcessingAvailable: boolean
-  trialDaysByPlan: TrialDaysByPlan
-  planTaskCreditsByPlan: PlanTaskCreditsByPlan
-  trialEligible: boolean
+type SubscriptionActions = {
   setCurrentPlan: (plan: PlanTier | null) => void
   setProprietaryMode: (isProprietary: boolean) => void
   setPricingModalAlmostFullScreen: (pricingModalAlmostFullScreen: boolean) => void
@@ -77,397 +45,44 @@ type SubscriptionState = {
   ensureAuthenticated: () => Promise<boolean>
 }
 
-export const useSubscriptionStore = create<SubscriptionState>((set) => ({
-  currentPlan: null,
-  isLoading: false,
-  isUpgradeModalOpen: false,
-  upgradeModalSource: null,
-  upgradeModalDismissible: true,
-  isProprietaryMode: false,
-  pricingModalAlmostFullScreen: true,
-  ctaPricingCancelTextUnderBtn: false,
-  ctaStartFreeTrial: false,
-  ctaUnlockAgentCopy: false,
-  ctaPickAPlan: false,
-  ctaContinueAgentBtn: false,
-  ctaNoChargeDuringTrial: false,
-  personalSignupPreviewAvailable: false,
-  personalSignupPreviewProcessingAvailable: false,
-  trialDaysByPlan: { startup: 0, scale: 0 },
-  planTaskCreditsByPlan: { startup: 500, scale: 10000 },
-  trialEligible: false,
-  setCurrentPlan: (plan) => set({ currentPlan: plan, isLoading: false }),
-  setProprietaryMode: (isProprietary) => set({ isProprietaryMode: isProprietary }),
-  setPricingModalAlmostFullScreen: (pricingModalAlmostFullScreen) => set({ pricingModalAlmostFullScreen }),
-  setCtaPricingCancelTextUnderBtn: (ctaPricingCancelTextUnderBtn) => set({ ctaPricingCancelTextUnderBtn }),
-  setCtaStartFreeTrial: (ctaStartFreeTrial) => set({ ctaStartFreeTrial }),
-  setCtaUnlockAgentCopy: (ctaUnlockAgentCopy) => set({ ctaUnlockAgentCopy }),
-  setCtaPickAPlan: (ctaPickAPlan) => set({ ctaPickAPlan }),
-  setCtaContinueAgentBtn: (ctaContinueAgentBtn) => set({ ctaContinueAgentBtn }),
-  setCtaNoChargeDuringTrial: (ctaNoChargeDuringTrial) => set({ ctaNoChargeDuringTrial }),
-  setPersonalSignupPreviewAvailable: (personalSignupPreviewAvailable) => set({ personalSignupPreviewAvailable }),
-  setPersonalSignupPreviewProcessingAvailable: (personalSignupPreviewProcessingAvailable) =>
-    set({ personalSignupPreviewProcessingAvailable }),
-  setTrialDaysByPlan: (trialDaysByPlan) => set({ trialDaysByPlan }),
-  setPlanTaskCreditsByPlan: (planTaskCreditsByPlan) => set({ planTaskCreditsByPlan }),
-  setTrialEligible: (trialEligible) => set({ trialEligible }),
-  openUpgradeModal: (source = 'unknown', options = {}) => set((state) => {
-    const resolvedSource = source ?? 'unknown'
-    const dismissible = options.dismissible ?? true
-    if (!state.isUpgradeModalOpen && typeof window !== 'undefined') {
-      track(AnalyticsEvent.UPGRADE_MODAL_OPENED, {
-        currentPlan: state.currentPlan,
-        source: resolvedSource,
-        isProprietaryMode: state.isProprietaryMode,
-      })
-    }
-    return {
-      isUpgradeModalOpen: true,
-      upgradeModalSource: resolvedSource,
-      upgradeModalDismissible: dismissible,
-    }
-  }),
-  closeUpgradeModal: () =>
-    set({ isUpgradeModalOpen: false, upgradeModalSource: null, upgradeModalDismissible: true }),
-  ensureAuthenticated: async () => {
-    if (typeof window === 'undefined') {
-      return false
-    }
-    try {
-      const data = await jsonFetch<UserPlanPayload>('/api/v1/user/plan/', {
-        method: 'GET',
-      })
-      if (!data || typeof data !== 'object') {
-        scheduleLoginRedirect()
-        return false
-      }
-      const plan = normalizePlan(data?.plan)
-      set({
-        currentPlan: plan,
-        isProprietaryMode: Boolean(data?.is_proprietary_mode),
-        pricingModalAlmostFullScreen: normalizeBoolean(data?.pricing_modal_almost_full_screen, true),
-        ctaPricingCancelTextUnderBtn: normalizeBoolean(data?.cta_pricing_cancel_text_under_btn),
-        ctaStartFreeTrial: normalizeBoolean(data?.cta_start_free_trial),
-        ctaUnlockAgentCopy: normalizeBoolean(data?.cta_unlock_agent_copy),
-        ctaPickAPlan: normalizeBoolean(data?.cta_pick_a_plan),
-        ctaContinueAgentBtn: normalizeBoolean(data?.cta_continue_agent_btn),
-        ctaNoChargeDuringTrial: normalizeBoolean(data?.cta_no_charge_during_trial),
-        personalSignupPreviewAvailable: normalizeBoolean(data?.personal_signup_preview_available),
-        personalSignupPreviewProcessingAvailable: normalizeBoolean(data?.personal_signup_preview_processing_available),
-        trialDaysByPlan: normalizeTrialDaysByPlan(data),
-        planTaskCreditsByPlan: normalizePlanTaskCreditsByPlan(data),
-        trialEligible: normalizeBoolean(data?.trial_eligible),
-        isLoading: false,
-      })
-      return true
-    } catch (error) {
-      if (error instanceof HttpError && error.status === 401) {
-        scheduleLoginRedirect()
-        return false
-      }
-      return true
-    }
-  },
-}))
+type SubscriptionStoreFacade = SubscriptionState & SubscriptionActions
 
-type UserPlanPayload = {
-  plan?: string | null
-  is_proprietary_mode?: boolean
-  pricing_modal_almost_full_screen?: boolean | string | null
-  cta_pricing_cancel_text_under_btn?: boolean | string | null
-  cta_start_free_trial?: boolean | string | null
-  cta_unlock_agent_copy?: boolean | string | null
-  cta_pick_a_plan?: boolean | string | null
-  cta_continue_agent_btn?: boolean | string | null
-  cta_no_charge_during_trial?: boolean | string | null
-  personal_signup_preview_available?: boolean | string | null
-  personal_signup_preview_processing_available?: boolean | string | null
-  startup_trial_days?: number | string | null
-  scale_trial_days?: number | string | null
-  startup_task_credits?: number | string | null
-  scale_task_credits?: number | string | null
-  trial_eligible?: boolean | string | null
-}
-
-type UserPlanResponse = {
-  plan: PlanTier | null
-  isProprietaryMode: boolean
-  pricingModalAlmostFullScreen: boolean
-  ctaPricingCancelTextUnderBtn: boolean
-  ctaStartFreeTrial: boolean
-  ctaUnlockAgentCopy: boolean
-  ctaPickAPlan: boolean
-  ctaContinueAgentBtn: boolean
-  ctaNoChargeDuringTrial: boolean
-  personalSignupPreviewAvailable: boolean
-  personalSignupPreviewProcessingAvailable: boolean
-  trialDaysByPlan: TrialDaysByPlan
-  planTaskCreditsByPlan: PlanTaskCreditsByPlan
-  trialEligible: boolean
-  authenticated: boolean
-}
-
-type HydratedSubscriptionState = Pick<
-  SubscriptionState,
-  | 'currentPlan'
-  | 'isLoading'
-  | 'isProprietaryMode'
-  | 'pricingModalAlmostFullScreen'
-  | 'ctaPricingCancelTextUnderBtn'
-  | 'ctaStartFreeTrial'
-  | 'ctaUnlockAgentCopy'
-  | 'ctaPickAPlan'
-  | 'ctaContinueAgentBtn'
-  | 'ctaNoChargeDuringTrial'
-  | 'personalSignupPreviewAvailable'
-  | 'personalSignupPreviewProcessingAvailable'
-  | 'trialDaysByPlan'
-  | 'planTaskCreditsByPlan'
-  | 'trialEligible'
->
-
-type BuildHydratedSubscriptionStateParams = Omit<HydratedSubscriptionState, 'isLoading'>
-
-function normalizePlan(plan: unknown): PlanTier | null {
-  if (plan && ['free', 'startup', 'scale'].includes(String(plan))) {
-    return plan as PlanTier
-  }
-  return null
-}
-
-function normalizeNonNegativeInteger(value: unknown, defaultValue = 0): number {
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric)) {
-    return defaultValue
-  }
-  return Math.max(0, Math.trunc(numeric))
-}
-
-function normalizeBoolean(value: unknown, defaultValue = false): boolean {
-  if (typeof value === 'boolean') {
-    return value
-  }
-  if (typeof value === 'string') {
-    return value.toLowerCase() === 'true'
-  }
-  return defaultValue
-}
-
-function normalizeTrialDaysByPlan(payload: UserPlanPayload | null | undefined): TrialDaysByPlan {
+function createSubscriptionActions(dispatch: AppDispatch): SubscriptionActions {
   return {
-    startup: normalizeNonNegativeInteger(payload?.startup_trial_days),
-    scale: normalizeNonNegativeInteger(payload?.scale_trial_days),
+    setCurrentPlan: (plan) => dispatch(subscriptionActions.setCurrentPlan(plan)),
+    setProprietaryMode: (isProprietary) => dispatch(subscriptionActions.setProprietaryMode(isProprietary)),
+    setPricingModalAlmostFullScreen: (value) => dispatch(subscriptionActions.setPricingModalAlmostFullScreen(value)),
+    setCtaPricingCancelTextUnderBtn: (value) => dispatch(subscriptionActions.setCtaPricingCancelTextUnderBtn(value)),
+    setCtaStartFreeTrial: (value) => dispatch(subscriptionActions.setCtaStartFreeTrial(value)),
+    setCtaUnlockAgentCopy: (value) => dispatch(subscriptionActions.setCtaUnlockAgentCopy(value)),
+    setCtaPickAPlan: (value) => dispatch(subscriptionActions.setCtaPickAPlan(value)),
+    setCtaContinueAgentBtn: (value) => dispatch(subscriptionActions.setCtaContinueAgentBtn(value)),
+    setCtaNoChargeDuringTrial: (value) => dispatch(subscriptionActions.setCtaNoChargeDuringTrial(value)),
+    setPersonalSignupPreviewAvailable: (value) => dispatch(subscriptionActions.setPersonalSignupPreviewAvailable(value)),
+    setPersonalSignupPreviewProcessingAvailable: (value) =>
+      dispatch(subscriptionActions.setPersonalSignupPreviewProcessingAvailable(value)),
+    setTrialDaysByPlan: (value) => dispatch(subscriptionActions.setTrialDaysByPlan(value)),
+    setPlanTaskCreditsByPlan: (value) => dispatch(subscriptionActions.setPlanTaskCreditsByPlan(value)),
+    setTrialEligible: (value) => dispatch(subscriptionActions.setTrialEligible(value)),
+    openUpgradeModal: (source = 'unknown', options = {}) =>
+      dispatch(subscriptionActions.openUpgradeModal({ source, options })),
+    closeUpgradeModal: () => dispatch(subscriptionActions.closeUpgradeModal()),
+    ensureAuthenticated: async () => dispatch(ensureAuthenticated()).unwrap(),
   }
 }
 
-function normalizePlanTaskCreditsByPlan(payload: UserPlanPayload | null | undefined): PlanTaskCreditsByPlan {
-  return {
-    startup: normalizeNonNegativeInteger(payload?.startup_task_credits, 500),
-    scale: normalizeNonNegativeInteger(payload?.scale_task_credits, 10000),
-  }
+export function useSubscriptionStore<T = SubscriptionStoreFacade>(selector?: (state: SubscriptionStoreFacade) => T): T {
+  const store = useAppStore()
+  const rootState = useSyncExternalStore(store.subscribe, store.getState, store.getState)
+  const state = selectSubscriptionState(rootState)
+  const actions = useMemo(() => createSubscriptionActions(store.dispatch), [store])
+  const facade = useMemo(() => ({ ...state, ...actions }), [actions, state])
+  return selector ? selector(facade) : (facade as T)
 }
 
-function buildHydratedSubscriptionState(
-  params: BuildHydratedSubscriptionStateParams,
-): HydratedSubscriptionState {
-  return {
-    ...params,
-    isLoading: false,
-  }
-}
-
-/**
- * Fetch the user's plan from the API.
- */
-async function fetchUserPlan(): Promise<UserPlanResponse> {
-  try {
-    const data = await jsonFetch<UserPlanPayload>('/api/v1/user/plan/', {
-      method: 'GET',
-    })
-    if (!data || typeof data !== 'object') {
-      return {
-        plan: null,
-        isProprietaryMode: false,
-        pricingModalAlmostFullScreen: true,
-        ctaPricingCancelTextUnderBtn: false,
-        ctaStartFreeTrial: false,
-        ctaUnlockAgentCopy: false,
-        ctaPickAPlan: false,
-        ctaContinueAgentBtn: false,
-        ctaNoChargeDuringTrial: false,
-        personalSignupPreviewAvailable: false,
-        personalSignupPreviewProcessingAvailable: false,
-        trialDaysByPlan: { startup: 0, scale: 0 },
-        planTaskCreditsByPlan: { startup: 500, scale: 10000 },
-        trialEligible: false,
-        authenticated: false,
-      }
-    }
-    const plan = normalizePlan(data?.plan)
-    return {
-      plan,
-      isProprietaryMode: Boolean(data?.is_proprietary_mode),
-      pricingModalAlmostFullScreen: normalizeBoolean(data?.pricing_modal_almost_full_screen, true),
-      ctaPricingCancelTextUnderBtn: normalizeBoolean(data?.cta_pricing_cancel_text_under_btn),
-      ctaStartFreeTrial: normalizeBoolean(data?.cta_start_free_trial),
-      ctaUnlockAgentCopy: normalizeBoolean(data?.cta_unlock_agent_copy),
-      ctaPickAPlan: normalizeBoolean(data?.cta_pick_a_plan),
-      ctaContinueAgentBtn: normalizeBoolean(data?.cta_continue_agent_btn),
-      ctaNoChargeDuringTrial: normalizeBoolean(data?.cta_no_charge_during_trial),
-      personalSignupPreviewAvailable: normalizeBoolean(data?.personal_signup_preview_available),
-      personalSignupPreviewProcessingAvailable: normalizeBoolean(data?.personal_signup_preview_processing_available),
-      trialDaysByPlan: normalizeTrialDaysByPlan(data),
-      planTaskCreditsByPlan: normalizePlanTaskCreditsByPlan(data),
-      trialEligible: normalizeBoolean(data?.trial_eligible),
-      authenticated: true,
-    }
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 401) {
-      return {
-        plan: null,
-        isProprietaryMode: false,
-        pricingModalAlmostFullScreen: true,
-        ctaPricingCancelTextUnderBtn: false,
-        ctaStartFreeTrial: false,
-        ctaUnlockAgentCopy: false,
-        ctaPickAPlan: false,
-        ctaContinueAgentBtn: false,
-        ctaNoChargeDuringTrial: false,
-        personalSignupPreviewAvailable: false,
-        personalSignupPreviewProcessingAvailable: false,
-        trialDaysByPlan: { startup: 0, scale: 0 },
-        planTaskCreditsByPlan: { startup: 500, scale: 10000 },
-        trialEligible: false,
-        authenticated: false,
-      }
-    }
-    return {
-      plan: null,
-      isProprietaryMode: false,
-      pricingModalAlmostFullScreen: true,
-      ctaPricingCancelTextUnderBtn: false,
-      ctaStartFreeTrial: false,
-      ctaUnlockAgentCopy: false,
-      ctaPickAPlan: false,
-      ctaContinueAgentBtn: false,
-      ctaNoChargeDuringTrial: false,
-      personalSignupPreviewAvailable: false,
-      personalSignupPreviewProcessingAvailable: false,
-      trialDaysByPlan: { startup: 0, scale: 0 },
-      planTaskCreditsByPlan: { startup: 500, scale: 10000 },
-      trialEligible: false,
-      authenticated: true,
-    }
-  }
-}
-
-/**
- * Initialize the subscription store from DOM data attributes,
- * falling back to API fetch if not present.
- * Call this once on app startup with the mount element.
- */
-export function initializeSubscriptionStore(mountElement: HTMLElement): void {
-  // Check for data attributes first (server-rendered templates)
-  const proprietaryAttr = mountElement.dataset.isProprietaryMode
-  const pricingModalAlmostFullScreenAttr = mountElement.dataset.pricingModalAlmostFullScreen
-  const ctaPricingCancelTextUnderBtnAttr = mountElement.dataset.ctaPricingCancelTextUnderBtn
-  const ctaStartFreeTrialAttr = mountElement.dataset.ctaStartFreeTrial
-  const ctaUnlockAgentCopyAttr = mountElement.dataset.ctaUnlockAgentCopy
-  const ctaPickAPlanAttr = mountElement.dataset.ctaPickAPlan
-  const ctaContinueAgentBtnAttr = mountElement.dataset.ctaContinueAgentBtn
-  const ctaNoChargeDuringTrialAttr = mountElement.dataset.ctaNoChargeDuringTrial
-  const personalSignupPreviewAvailableAttr = mountElement.dataset.personalSignupPreviewAvailable
-  const personalSignupPreviewProcessingAvailableAttr = mountElement.dataset.personalSignupPreviewProcessingAvailable
-  const planAttr = mountElement.dataset.userPlan
-  const trialEligibleAttr = mountElement.dataset.trialEligible
-  const trialDaysByPlan: TrialDaysByPlan = {
-    startup: normalizeNonNegativeInteger(mountElement.dataset.startupTrialDays),
-    scale: normalizeNonNegativeInteger(mountElement.dataset.scaleTrialDays),
-  }
-  const planTaskCreditsByPlan: PlanTaskCreditsByPlan = {
-    startup: normalizeNonNegativeInteger(mountElement.dataset.startupTaskCredits, 500),
-    scale: normalizeNonNegativeInteger(mountElement.dataset.scaleTaskCredits, 10000),
-  }
-
-  useSubscriptionStore.getState().setTrialDaysByPlan(trialDaysByPlan)
-  useSubscriptionStore.getState().setPlanTaskCreditsByPlan(planTaskCreditsByPlan)
-  useSubscriptionStore.getState().setPricingModalAlmostFullScreen(
-    normalizeBoolean(pricingModalAlmostFullScreenAttr, true),
-  )
-  useSubscriptionStore.getState().setCtaPricingCancelTextUnderBtn(
-    normalizeBoolean(ctaPricingCancelTextUnderBtnAttr),
-  )
-  useSubscriptionStore.getState().setCtaStartFreeTrial(normalizeBoolean(ctaStartFreeTrialAttr))
-  useSubscriptionStore.getState().setCtaUnlockAgentCopy(normalizeBoolean(ctaUnlockAgentCopyAttr))
-  useSubscriptionStore.getState().setCtaPickAPlan(normalizeBoolean(ctaPickAPlanAttr))
-  useSubscriptionStore.getState().setCtaContinueAgentBtn(normalizeBoolean(ctaContinueAgentBtnAttr))
-  useSubscriptionStore.getState().setCtaNoChargeDuringTrial(normalizeBoolean(ctaNoChargeDuringTrialAttr))
-  useSubscriptionStore.getState().setPersonalSignupPreviewAvailable(
-    normalizeBoolean(personalSignupPreviewAvailableAttr),
-  )
-  useSubscriptionStore.getState().setPersonalSignupPreviewProcessingAvailable(
-    normalizeBoolean(personalSignupPreviewProcessingAvailableAttr),
-  )
-
-  // If we have both data attributes, use them directly
-  if (
-    proprietaryAttr !== undefined
-    && planAttr
-    && ['free', 'startup', 'scale'].includes(planAttr)
-    && trialEligibleAttr !== undefined
-  ) {
-    useSubscriptionStore.setState(buildHydratedSubscriptionState({
-      currentPlan: planAttr as PlanTier,
-      isProprietaryMode: proprietaryAttr === 'true',
-      pricingModalAlmostFullScreen: normalizeBoolean(pricingModalAlmostFullScreenAttr, true),
-      ctaPricingCancelTextUnderBtn: normalizeBoolean(ctaPricingCancelTextUnderBtnAttr),
-      ctaStartFreeTrial: normalizeBoolean(ctaStartFreeTrialAttr),
-      ctaUnlockAgentCopy: normalizeBoolean(ctaUnlockAgentCopyAttr),
-      ctaPickAPlan: normalizeBoolean(ctaPickAPlanAttr),
-      ctaContinueAgentBtn: normalizeBoolean(ctaContinueAgentBtnAttr),
-      ctaNoChargeDuringTrial: normalizeBoolean(ctaNoChargeDuringTrialAttr),
-      personalSignupPreviewAvailable: normalizeBoolean(personalSignupPreviewAvailableAttr),
-      personalSignupPreviewProcessingAvailable: normalizeBoolean(personalSignupPreviewProcessingAvailableAttr),
-      trialDaysByPlan,
-      planTaskCreditsByPlan,
-      trialEligible: normalizeBoolean(trialEligibleAttr),
-    }))
-    return
-  }
-
-  // No data attributes (e.g., static app shell) - fetch from API
-  useSubscriptionStore.setState({ isLoading: true })
-  void fetchUserPlan().then(async ({
-    plan,
-    isProprietaryMode,
-    pricingModalAlmostFullScreen,
-    ctaPricingCancelTextUnderBtn,
-    ctaStartFreeTrial,
-    ctaUnlockAgentCopy,
-    ctaPickAPlan,
-    ctaContinueAgentBtn,
-    ctaNoChargeDuringTrial,
-    personalSignupPreviewAvailable,
-    personalSignupPreviewProcessingAvailable,
-    trialDaysByPlan: apiTrialDaysByPlan,
-    planTaskCreditsByPlan: apiPlanTaskCreditsByPlan,
-    trialEligible,
-  }) => {
-    useSubscriptionStore.setState(buildHydratedSubscriptionState({
-      currentPlan: plan,
-      isProprietaryMode,
-      pricingModalAlmostFullScreen,
-      ctaPricingCancelTextUnderBtn,
-      ctaStartFreeTrial,
-      ctaUnlockAgentCopy,
-      ctaPickAPlan,
-      ctaContinueAgentBtn,
-      ctaNoChargeDuringTrial,
-      personalSignupPreviewAvailable,
-      personalSignupPreviewProcessingAvailable,
-      trialDaysByPlan: apiTrialDaysByPlan,
-      planTaskCreditsByPlan: apiPlanTaskCreditsByPlan,
-      trialEligible,
-    }))
-  })
+export type {
+  PlanTier,
+  UpgradeModalSource,
+  TrialDaysByPlan,
+  PlanTaskCreditsByPlan,
 }

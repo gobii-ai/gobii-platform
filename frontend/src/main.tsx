@@ -2,10 +2,12 @@ import 'vite/modulepreload-polyfill'
 import { StrictMode, lazy, Suspense, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Provider } from 'react-redux'
 import { I18nProvider } from 'react-aria-components'
 import { Loader2 } from 'lucide-react'
 import type { LibraryAgentsPayload } from './api/library'
-import { initializeSubscriptionStore } from './stores/subscriptionStore'
+import { createAppStore } from './store/appStore'
+import { hydrateSubscriptionFromMountElement } from './store/subscriptionSlice'
 import { storeConsoleContextFromUrlSearch } from './util/consoleContextStorage'
 import './index.css'
 import './styles/consoleShell.css'
@@ -35,12 +37,14 @@ if (!mountNode) {
 const rootNode = mountNode
 const appName = mountNode.dataset.app ?? 'immersive-app'
 const shouldInitializeSubscriptionStore = appName !== 'library'
+const queryClient = new QueryClient()
+const appStore = createAppStore({ queryClient })
 
 storeConsoleContextFromUrlSearch()
 
 if (shouldInitializeSubscriptionStore) {
   // Initialize subscription state from data attributes
-  initializeSubscriptionStore(mountNode)
+  appStore.dispatch(hydrateSubscriptionFromMountElement(mountNode))
 }
 const isStaff = mountNode.dataset.isStaff === 'true'
 
@@ -192,7 +196,6 @@ switch (appName) {
     throw new Error(`Unsupported console React app: ${appName}`)
 }
 
-const queryClient = new QueryClient()
 const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US'
 
 async function renderApp() {
@@ -200,11 +203,13 @@ async function renderApp() {
 
   createRoot(rootNode).render(
     <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <I18nProvider locale={locale}>
-          <Suspense fallback={<LoadingFallback />}>{resolvedScreen}</Suspense>
-        </I18nProvider>
-      </QueryClientProvider>
+      <Provider store={appStore}>
+        <QueryClientProvider client={queryClient}>
+          <I18nProvider locale={locale}>
+            <Suspense fallback={<LoadingFallback />}>{resolvedScreen}</Suspense>
+          </I18nProvider>
+        </QueryClientProvider>
+      </Provider>
     </StrictMode>,
   )
 }

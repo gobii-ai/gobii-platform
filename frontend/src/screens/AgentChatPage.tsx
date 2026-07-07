@@ -81,7 +81,9 @@ import { useAgentChatNotifications } from '../hooks/useAgentChatNotifications'
 import { useRecentAgentSubscriptions } from '../hooks/useRecentAgentSubscriptions'
 import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
-import { useAgentChatStore, setTimelineQueryClient } from '../stores/agentChatStore'
+import { useAgentChatStore } from '../stores/agentChatStore'
+import { useAppDispatch } from '../store/hooks'
+import { chatActions, normalizeProcessingUpdate } from '../store/chatSlice'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
@@ -1053,6 +1055,7 @@ export function AgentChatPage({
   const routeAgentId = typeof agentId === 'string' ? agentId : null
   const shellSubview = useMemo(() => getAgentChatShellSubview(shellPathname), [shellPathname])
   const queryClient = useQueryClient()
+  const dispatch = useAppDispatch()
   const {
     currentPlan,
     isProprietaryMode,
@@ -1210,9 +1213,6 @@ export function AgentChatPage({
     return () => window.removeEventListener('popstate', handleShellLocationChange)
   }, [resetManualContextForExternalAgent])
 
-  // Set up queryClient bridge for the Zustand store
-  useEffect(() => { setTimelineQueryClient(queryClient) }, [queryClient])
-
   // React-query timeline data
   const timelineQuery = useAgentTimeline(activeAgentId, { enabled: agentContextReady && !isNewAgent })
   const flatEvents = useMemo(() => flattenTimelinePages(timelineQuery.data), [timelineQuery.data])
@@ -1225,13 +1225,14 @@ export function AgentChatPage({
   // Extract agent metadata from timeline response
   useEffect(() => {
     if (!initialPageResponse || !activeAgentId) return
-    const store = useAgentChatStore.getState()
-    if (store.agentId !== activeAgentId) return
     // Update processing state from timeline response
     const snapshot = initialPageResponse.processing_snapshot
     const processingActive = snapshot?.active ?? initialPageResponse.processing_active
     if (processingActive !== undefined) {
-      store.updateProcessing(snapshot ?? { active: processingActive, webTasks: [] })
+      dispatch(chatActions.processingUpdated({
+        agentId: activeAgentId,
+        snapshot: normalizeProcessingUpdate(snapshot ?? { active: processingActive, webTasks: [] }),
+      }))
     }
     // Update agent identity from timeline response
     const name = initialPageResponse.agent_name ?? null
@@ -1239,17 +1240,17 @@ export function AgentChatPage({
     const signupPreviewState = normalizeSignupPreviewState(initialPageResponse.signup_preview_state)
     const planningState = normalizePlanningState(initialPageResponse.planning_state)
     if (name || avatar || signupPreviewState !== 'none' || planningState !== 'skipped') {
-      store.updateAgentIdentity({
+      dispatch(chatActions.agentIdentityUpdated({
         agentId: activeAgentId,
         ...(name ? { agentName: name } : {}),
         ...(avatar ? { agentAvatarUrl: avatar } : {}),
         signupPreviewState,
         planningState,
-      })
+      }))
     }
-  }, [initialPageResponse, activeAgentId])
+  }, [dispatch, initialPageResponse, activeAgentId])
 
-  // Zustand store subscriptions (slimmed down — no more events/cursors/loading)
+  // Chat runtime store subscriptions (slimmed down — no more events/cursors/loading)
   const setAgentId = useAgentChatStore((state) => state.setAgentId)
   const storeAgentId = useAgentChatStore((state) => state.agentId)
   const storedAgentName = useAgentChatStore((state) => state.agentName)
@@ -1784,7 +1785,7 @@ export function AgentChatPage({
       mode: 'contiguous',
       maxNewerPages: RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES,
     })
-  }, [queryClient])
+  }, [dispatch, queryClient])
 
   const syncLatestTimeline = useCallback(async (
     agentIdToRefresh: string,
@@ -3051,10 +3052,10 @@ export function AgentChatPage({
     pendingHumanInputRequests: PendingHumanInputRequest[],
   ) => {
     replacePendingActionRequestsInCache(queryClient, targetAgentId, pendingActionRequests)
-    useAgentChatStore.getState().updateAgentIdentity({
+    dispatch(chatActions.agentIdentityUpdated({
       agentId: targetAgentId,
       planningState: nextPlanningState,
-    })
+    }))
     queryClient.setQueryData<InfiniteData<TimelinePage>>(
       timelineQueryKey(targetAgentId),
       (current) => {

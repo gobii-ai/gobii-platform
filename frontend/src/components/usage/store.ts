@@ -1,16 +1,11 @@
-import { create } from 'zustand'
+import { useMemo, useSyncExternalStore } from 'react'
 
+import { selectUsageState, usageActions, type UsageState, type UsageStatus } from '../../store/usageSlice'
+import type { AppDispatch } from '../../store/appStore'
+import { useAppStore } from '../../store/hooks'
 import type { UsageAgent, UsageSummaryResponse } from './types'
 
-type UsageStatus = 'idle' | 'loading' | 'success' | 'error'
-
-type UsageState = {
-  summary: UsageSummaryResponse | null
-  summaryStatus: UsageStatus
-  summaryErrorMessage: string | null
-  agents: UsageAgent[]
-  agentsStatus: UsageStatus
-  agentsErrorMessage: string | null
+type UsageActions = {
   setSummaryLoading: () => void
   setSummaryData: (summary: UsageSummaryResponse) => void
   setSummaryError: (message: string) => void
@@ -20,41 +15,27 @@ type UsageState = {
   reset: () => void
 }
 
-export const useUsageStore = create<UsageState>((set) => ({
-  summary: null,
-  summaryStatus: 'idle',
-  summaryErrorMessage: null,
-  agents: [],
-  agentsStatus: 'idle',
-  agentsErrorMessage: null,
-  setSummaryLoading: () => set({ summaryStatus: 'loading', summaryErrorMessage: null }),
-  setSummaryData: (summary) => set({
-    summary,
-    summaryStatus: 'success',
-    summaryErrorMessage: null,
-  }),
-  setSummaryError: (message) => set({
-    summaryStatus: 'error',
-    summaryErrorMessage: message,
-  }),
-  setAgentsLoading: () => set({ agentsStatus: 'loading', agentsErrorMessage: null }),
-  setAgentsData: (agents) => set({
-    agents,
-    agentsStatus: 'success',
-    agentsErrorMessage: null,
-  }),
-  setAgentsError: (message) => set({
-    agentsStatus: 'error',
-    agentsErrorMessage: message,
-  }),
-  reset: () => set({
-    summary: null,
-    summaryStatus: 'idle',
-    summaryErrorMessage: null,
-    agents: [],
-    agentsStatus: 'idle',
-    agentsErrorMessage: null,
-  }),
-}))
+type UsageStoreFacade = UsageState & UsageActions
+
+function createUsageActions(dispatch: AppDispatch): UsageActions {
+  return {
+    setSummaryLoading: () => dispatch(usageActions.summaryLoading()),
+    setSummaryData: (summary) => dispatch(usageActions.summaryLoaded(summary)),
+    setSummaryError: (message) => dispatch(usageActions.summaryFailed(message)),
+    setAgentsLoading: () => dispatch(usageActions.agentsLoading()),
+    setAgentsData: (agents) => dispatch(usageActions.agentsLoaded(agents)),
+    setAgentsError: (message) => dispatch(usageActions.agentsFailed(message)),
+    reset: () => dispatch(usageActions.resetUsageState()),
+  }
+}
+
+export function useUsageStore<T = UsageStoreFacade>(selector?: (state: UsageStoreFacade) => T): T {
+  const store = useAppStore()
+  const rootState = useSyncExternalStore(store.subscribe, store.getState, store.getState)
+  const state = selectUsageState(rootState)
+  const actions = useMemo(() => createUsageActions(store.dispatch), [store])
+  const facade = useMemo(() => ({ ...state, ...actions }), [actions, state])
+  return selector ? selector(facade) : (facade as T)
+}
 
 export type { UsageStatus }
