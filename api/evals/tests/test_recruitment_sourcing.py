@@ -1,6 +1,7 @@
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.agent.core.event_processing import _resolve_eval_mock_result
 from api.agent.system_skills.defaults import RECRUITMENT_SOURCING_SYSTEM_SKILL
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.recruitment_sourcing import (
@@ -93,6 +94,15 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
         self.assertEqual(names, apollo_names)
         self.assertIn(("Estimator", "excluded", "exclude"), case.response_term_groups)
         self.assertEqual(case.forbidden_response_terms, ())
+        self.assertEqual(
+            case.required_proximate_response_terms,
+            (
+                (
+                    ("Dana Lee", "dana-lee-eval"),
+                    ("outside approved geography", "outside geography", "not approved geography", "outside approved"),
+                ),
+            ),
+        )
 
     def test_source_fallback_blocks_apollo_paths(self):
         case = next(case for case in RECRUITMENT_SOURCING_CASES if case.slug == RECRUITMENT_SOURCING_SOURCE_FALLBACK)
@@ -105,14 +115,28 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
         )
         self.assertIn("mcp_brightdata_web_data_linkedin_company_profile", case.allowed_extra_tool_names)
         self.assertIn("mcp_brightdata_web_data_linkedin_person_profile", case.allowed_extra_tool_names)
+        self.assertIn("mcp_brightdata_web_data_linkedin_job_listings", case.allowed_extra_tool_names)
         self.assertIn("http_request", case.allowed_extra_tool_names)
         self.assertIn("mcp_brightdata_web_data_linkedin_people_search", case.mock_config)
         self.assertIn("mcp_brightdata_web_data_linkedin_company_profile", case.mock_config)
         self.assertIn("mcp_brightdata_web_data_linkedin_person_profile", case.mock_config)
-        self.assertEqual(case.mock_config["http_request"]["status"], "success")
+        self.assertIn("mcp_brightdata_web_data_linkedin_job_listings", case.mock_config)
         self.assertIn("apollo_io-search-contacts", case.forbidden_tool_names)
         self.assertIn("apollo_io-search-contacts", policy["stop_on_tool_names"])
         self.assertIn("http_request", policy["allowed_tool_names"])
+
+        directory_result = _resolve_eval_mock_result(
+            case.mock_config,
+            "http_request",
+            {"url": "https://www.nalsc.org/eval-directory"},
+        )
+        apollo_result = _resolve_eval_mock_result(
+            case.mock_config,
+            "http_request",
+            {"url": "https://api.apollo.io/v1/people/search"},
+        )
+        self.assertEqual(directory_result["status"], "success")
+        self.assertEqual(apollo_result["status"], "error")
 
     def test_dedupe_case_uses_ledger_not_new_sourcing(self):
         case = next(case for case in RECRUITMENT_SOURCING_CASES if case.slug == RECRUITMENT_SOURCING_DEDUPE_LEDGER)

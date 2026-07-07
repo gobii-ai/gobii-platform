@@ -62,6 +62,7 @@ class RecruitmentSourcingCase:
     forbidden_tool_names: tuple[str, ...] = ()
     response_term_groups: tuple[tuple[str, ...], ...] = ()
     forbidden_response_terms: tuple[str, ...] = ()
+    required_proximate_response_terms: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
     tags: tuple[str, ...] = field(default_factory=tuple)
     max_relevant_tool_calls: int = 10
     stop_on_human_input_request: bool = False
@@ -254,6 +255,12 @@ RECRUITMENT_SOURCING_CASES = (
             ("Priya Shah",),
             ("Estimator", "excluded", "exclude"),
         ),
+        required_proximate_response_terms=(
+            (
+                ("Dana Lee", "dana-lee-eval"),
+                ("outside approved geography", "outside geography", "not approved geography", "outside approved"),
+            ),
+        ),
         tags=("criteria",),
     ),
     RecruitmentSourcingCase(
@@ -271,6 +278,7 @@ RECRUITMENT_SOURCING_CASES = (
         allowed_extra_tool_names=(
             "mcp_brightdata_web_data_linkedin_company_profile",
             "mcp_brightdata_web_data_linkedin_person_profile",
+            "mcp_brightdata_web_data_linkedin_job_listings",
             "http_request",
         ),
         forbidden_tool_names=("apollo_io-search-contacts",),
@@ -354,21 +362,77 @@ RECRUITMENT_SOURCING_CASES = (
                     "evidence": "Attorney recruiting profile similar to boutique legal staffing archetypes.",
                 }
             ),
+            "mcp_brightdata_web_data_linkedin_job_listings": {
+                "status": "success",
+                "result": [
+                    {
+                        "title": "Attorney Recruiter",
+                        "company": "NorthStar Legal Search",
+                        "url": "https://northstarlegal.example.test/jobs/attorney-recruiter",
+                        "description": "Legal recruiting role at a boutique attorney search firm.",
+                    },
+                    {
+                        "title": "Legal Search Consultant",
+                        "company": "NALSC-style boutique legal search firm",
+                        "url": "https://www.nalsc.org/eval-directory",
+                        "description": "Archetype posting for attorney search and legal staffing.",
+                    },
+                ],
+                "content": {
+                    "items": [
+                        {
+                            "title": "Attorney Recruiter",
+                            "company": "NorthStar Legal Search",
+                            "url": "https://northstarlegal.example.test/jobs/attorney-recruiter",
+                            "description": "Legal recruiting role at a boutique attorney search firm.",
+                        },
+                        {
+                            "title": "Legal Search Consultant",
+                            "company": "NALSC-style boutique legal search firm",
+                            "url": "https://www.nalsc.org/eval-directory",
+                            "description": "Archetype posting for attorney search and legal staffing.",
+                        },
+                    ],
+                    "match_count": 2,
+                },
+            },
             "apollo_io-search-contacts": {
                 "status": "error",
                 "message": "Apollo must not be used in this fallback eval.",
             },
             "http_request": {
-                "status": "success",
-                "content": (
-                    "NALSC-style directory archetype for boutique legal search firms. "
-                    "NorthStar Legal Search focuses on attorney recruiting and legal staffing."
-                ),
-                "body": (
-                    "NALSC-style directory archetype for boutique legal search firms. "
-                    "NorthStar Legal Search focuses on attorney recruiting and legal staffing."
-                ),
-                "url": "https://www.nalsc.org/eval-directory",
+                "rules": [
+                    {
+                        "url_contains": "nalsc.org/eval-directory",
+                        "url_not_contains": ("apollo", "api.apollo.io"),
+                        "result": {
+                            "status": "success",
+                            "content": (
+                                "NALSC-style directory archetype for boutique legal search firms. "
+                                "NorthStar Legal Search focuses on attorney recruiting and legal staffing."
+                            ),
+                            "body": (
+                                "NALSC-style directory archetype for boutique legal search firms. "
+                                "NorthStar Legal Search focuses on attorney recruiting and legal staffing."
+                            ),
+                            "url": "https://www.nalsc.org/eval-directory",
+                        },
+                    },
+                    {
+                        "url_contains": "northstarlegal.example.test",
+                        "url_not_contains": ("apollo", "api.apollo.io"),
+                        "result": {
+                            "status": "success",
+                            "content": "NorthStar Legal Search is an attorney search and boutique legal recruiting team.",
+                            "body": "NorthStar Legal Search is an attorney search and boutique legal recruiting team.",
+                            "url": "https://northstarlegal.example.test/team",
+                        },
+                    },
+                ],
+                "default": {
+                    "status": "error",
+                    "message": "HTTP fallback mock only permits non-Apollo legal-search directory pages.",
+                },
             },
         },
         response_term_groups=(
@@ -376,6 +440,7 @@ RECRUITMENT_SOURCING_CASES = (
             ("archetype", "similar", "legal"),
         ),
         tags=("fallback",),
+        max_relevant_tool_calls=14,
     ),
     RecruitmentSourcingCase(
         slug=RECRUITMENT_SOURCING_DEDUPE_LEDGER,
@@ -500,7 +565,7 @@ def _candidate_response_bodies(run_id: str, agent_id: str, inbound) -> list[tupl
     for message in (
         PersistentAgentMessage.objects
         .filter(owner_agent_id=agent_id, is_outbound=True, timestamp__gt=inbound.timestamp)
-        .order_by("timestamp", "id")
+        .order_by("seq")
     ):
         bodies.append((message.body or "", message))
 
@@ -517,6 +582,22 @@ def _candidate_response_bodies(run_id: str, agent_id: str, inbound) -> list[tupl
         bodies.append((request.question or "", request))
 
     return bodies
+
+
+def _contains_proximate_terms(body: str, anchor_terms: tuple[str, ...], context_terms: tuple[str, ...]) -> bool:
+    normalized = body.lower()
+    context_window_chars = 320
+    for anchor in anchor_terms:
+        anchor_text = anchor.lower()
+        start = normalized.find(anchor_text)
+        while start != -1:
+            window_start = max(0, start - context_window_chars)
+            window_end = min(len(normalized), start + len(anchor_text) + context_window_chars)
+            window = normalized[window_start:window_end]
+            if any(context.lower() in window for context in context_terms):
+                return True
+            start = normalized.find(anchor_text, start + len(anchor_text))
+    return False
 
 
 class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
@@ -660,6 +741,7 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
         matched_body = ""
         matched_artifact = None
         final_missing_groups = list(case.response_term_groups)
+        final_missing_proximate_groups = list(case.required_proximate_response_terms)
         final_forbidden_terms: list[str] = []
         for body, artifact in response_bodies:
             missing_groups = [
@@ -667,15 +749,21 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
                 for terms in case.response_term_groups
                 if not any(response_contains_term(body, term) for term in terms)
             ]
+            missing_proximate_groups = [
+                terms
+                for terms in case.required_proximate_response_terms
+                if not _contains_proximate_terms(body, terms[0], terms[1])
+            ]
             forbidden_terms = [term for term in case.forbidden_response_terms if response_contains_term(body, term)]
             final_missing_groups = missing_groups
+            final_missing_proximate_groups = missing_proximate_groups
             final_forbidden_terms = forbidden_terms
-            if not missing_groups and not forbidden_terms:
+            if not missing_groups and not missing_proximate_groups and not forbidden_terms:
                 matched_body = body
                 matched_artifact = artifact
                 break
 
-        if final_missing_groups or final_forbidden_terms:
+        if final_missing_groups or final_missing_proximate_groups or final_forbidden_terms:
             latest_body = response_bodies[-1][0] if response_bodies else ""
             latest_artifact = response_bodies[-1][1] if response_bodies else None
             self.record_task_result(
@@ -685,6 +773,7 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
                 task_name="verify_response",
                 observed_summary=(
                     f"Missing expected term group(s) {final_missing_groups}; "
+                    f"missing proximate term group(s) {final_missing_proximate_groups}; "
                     f"forbidden response terms present {final_forbidden_terms}; body={latest_body[:800]!r}."
                 ),
                 artifacts={"response_artifact": latest_artifact} if latest_artifact else {},
