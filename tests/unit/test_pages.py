@@ -2225,6 +2225,32 @@ class SitemapTests(TestCase):
         self.assertIn("<loc>http://example.com/solutions/engineering/</loc>", content)
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_sitemap_deduplicates_library_category_slug_aliases(self):
+        for code, category in (
+            ("sitemap-hr-recruiting", "HR & Recruiting"),
+            ("sitemap-recruiting", "Recruiting"),
+        ):
+            PersistentAgentTemplate.objects.update_or_create(
+                code=code,
+                defaults={
+                    "public_profile": None,
+                    "slug": "",
+                    "display_name": code.replace("-", " ").title(),
+                    "tagline": "Keep recruiting work moving.",
+                    "description": "Tracks recruiting work.",
+                    "charter": "Coordinate recruiting updates.",
+                    "category": category,
+                    "is_active": True,
+                },
+            )
+
+        response = self.client.get("/sitemap.xml")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertEqual(content.count("<loc>http://example.com/library/recruiting/</loc>"), 1)
+
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_public_template_and_solution_urls_redirect_home_in_community_mode(self):
         for path in (

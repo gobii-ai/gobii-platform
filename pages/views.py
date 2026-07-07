@@ -4049,14 +4049,14 @@ class PublicTemplateCategorySitemap(sitemaps.Sitemap):
             .values_list("category", flat=True)
         )
         return sorted({
-            str(category or "").strip() or "Uncategorized"
+            public_template_category_slug_from_label(str(category or "").strip() or "Uncategorized")
             for category in category_values
         })
 
-    def location(self, category):
+    def location(self, category_slug):
         return reverse(
             "pages:library_category",
-            kwargs={"category_slug": public_template_category_slug_from_label(category)},
+            kwargs={"category_slug": category_slug},
         )
 
 
