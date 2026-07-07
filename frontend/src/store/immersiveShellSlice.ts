@@ -44,3 +44,4 @@ export const immersiveShellActions = immersiveShellSlice.actions
 export const immersiveShellReducer = immersiveShellSlice.reducer
 
 export const selectImmersiveShellState = (state: RootState): ImmersiveShellState => state.immersiveShell
+export const selectImmersiveShellActiveAgentId = (state: RootState): string | null => state.immersiveShell.activeAgentId

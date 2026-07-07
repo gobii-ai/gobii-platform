@@ -166,7 +166,6 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   }, [initialData.trial?.trialEndsAtIso])
 
   const {
-    currentPlan,
     isProprietaryMode,
     isUpgradeModalOpen,
     upgradeModalSource,
@@ -665,7 +664,6 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
 
       {isUpgradeModalOpen && !isOrg && isProprietaryMode ? (
         <SubscriptionUpgradeModal
-          currentPlan={currentPlan}
           onClose={closeUpgradeModal}
           onUpgrade={handlePlanSelect}
           source={upgradeModalSource ?? undefined}

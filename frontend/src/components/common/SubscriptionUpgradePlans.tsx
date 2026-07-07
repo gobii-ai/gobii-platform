@@ -71,7 +71,7 @@ function getPlanFeatures(planId: PlanTier, planTaskCreditsByPlan: PlanTaskCredit
 }
 
 type SubscriptionUpgradePlansProps = {
-  currentPlan: PlanTier | null
+  currentPlan?: PlanTier | null
   onUpgrade: (plan: PlanTier) => void
   variant?: 'modal' | 'inline'
   pricingLinkLabel?: string
@@ -84,7 +84,7 @@ type SubscriptionUpgradePlansProps = {
 }
 
 export function SubscriptionUpgradePlans({
-  currentPlan,
+  currentPlan: currentPlanOverride,
   onUpgrade,
   variant = 'modal',
   pricingLinkLabel = 'View full comparison',
@@ -96,6 +96,7 @@ export function SubscriptionUpgradePlans({
   signupPreviewState = null,
 }: SubscriptionUpgradePlansProps) {
   const {
+    currentPlan: storeCurrentPlan,
     trialDaysByPlan,
     planTaskCreditsByPlan,
     trialEligible,
@@ -105,6 +106,7 @@ export function SubscriptionUpgradePlans({
     ctaContinueAgentBtn,
     ctaNoChargeDuringTrial,
   } = useSubscriptionStore()
+  const currentPlan = currentPlanOverride ?? storeCurrentPlan
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
   const canSelectPlan = useCallback(
     (planId: PlanTier) => {

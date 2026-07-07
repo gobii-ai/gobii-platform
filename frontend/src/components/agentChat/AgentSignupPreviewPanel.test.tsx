@@ -53,7 +53,6 @@ describe('AgentSignupPreviewPanel', () => {
     renderSignupPreviewPanel({
       status: 'awaiting_signup_completion',
       agentName: 'Bob Smith',
-      currentPlan: 'free',
       onUpgrade: vi.fn(),
     })
 
@@ -67,7 +66,6 @@ describe('AgentSignupPreviewPanel', () => {
     renderSignupPreviewPanel({
       status: 'awaiting_first_reply_pause',
       agentName: '',
-      currentPlan: 'free',
       onUpgrade: vi.fn(),
     })
 

@@ -5,7 +5,6 @@ import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 type AgentUpgradePlansPanelProps = {
   title: string
   body: string
-  currentPlan: PlanTier | null
   onUpgrade?: (plan: PlanTier, source?: string) => void
   source: string
   trialCopyVariant?: 'default' | 'unlock_agent'
@@ -16,7 +15,6 @@ type AgentUpgradePlansPanelProps = {
 export function AgentUpgradePlansPanel({
   title,
   body,
-  currentPlan,
   onUpgrade,
   source,
   trialCopyVariant = 'default',
@@ -33,7 +31,6 @@ export function AgentUpgradePlansPanel({
         <div className="px-1.5 pb-1.5 sm:px-2.5 sm:pb-2.5">
           <div className="max-h-[min(40dvh,22rem)] overflow-y-auto overscroll-contain rounded-[1.15rem] bg-white/70 px-1 py-1 backdrop-blur-sm [-webkit-overflow-scrolling:touch] [touch-action:pan-y] sm:max-h-none sm:overflow-visible sm:px-1.5 sm:py-1.5">
             <SubscriptionUpgradePlans
-              currentPlan={currentPlan}
               onUpgrade={(plan) => onUpgrade?.(plan, source)}
               variant="inline"
               source={source}

@@ -972,7 +972,6 @@ export function ImmersiveApp({
       </div>
       {showShellUpgradeModal ? (
         <SubscriptionUpgradeModal
-          currentPlan={currentPlan}
           onClose={handleUpgradeModalDismiss}
           onUpgrade={handleUpgradeSelection}
           source={upgradeModalSource ?? undefined}

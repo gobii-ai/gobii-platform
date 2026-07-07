@@ -51,7 +51,7 @@ import {
 } from '../api/userPreferences'
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
-import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { AgentChatLayout, type AgentChatLayoutSidebarConfig } from '../components/agentChat/AgentChatLayout'
 import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
 import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
 import { EmbeddedAgentFilesPanel } from '../components/agentChat/EmbeddedAgentFilesPanel'
@@ -84,6 +84,7 @@ import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import { useAppDispatch } from '../store/hooks'
 import { chatActions, normalizeProcessingUpdate } from '../store/chatSlice'
+import { immersiveShellActions } from '../store/immersiveShellSlice'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
@@ -100,7 +101,6 @@ import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, Planni
 import type { BillingStatusInfo } from '../types/agentAddons'
 import type { AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
-import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { track, AnalyticsEvent } from '../util/analytics'
@@ -115,12 +115,6 @@ import {
 import { storeConsoleContext } from '../util/consoleContextStorage'
 import { navigateWithinApp } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
-
-function deriveFirstName(agentName?: string | null): string {
-  if (!agentName) return 'Agent'
-  const [first] = agentName.trim().split(/\s+/, 1)
-  return first || 'Agent'
-}
 
 const LOW_CREDIT_DAY_THRESHOLD = 2
 const ROSTER_REFRESH_INTERVAL_MS = 20_000
@@ -1166,6 +1160,18 @@ export function AgentChatPage({
   }, [activeAgentId])
 
   useEffect(() => {
+    dispatch(immersiveShellActions.setActiveAgentId(activeAgentId))
+  }, [activeAgentId, dispatch])
+
+  useEffect(() => {
+    dispatch(immersiveShellActions.setShellPathname(shellPathname))
+  }, [dispatch, shellPathname])
+
+  useEffect(() => {
+    dispatch(immersiveShellActions.setSelectionSidebarMode(selectionSidebarMode))
+  }, [dispatch, selectionSidebarMode])
+
+  useEffect(() => {
     if (agentId !== undefined) {
       return
     }
@@ -1256,33 +1262,20 @@ export function AgentChatPage({
   const storedAgentName = useAgentChatStore((state) => state.agentName)
   const storedAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
   const signupPreviewState = useAgentChatStore((state) => state.signupPreviewState)
-  const planningState = useAgentChatStore((state) => state.planningState)
   const sendMessage = useAgentChatStore((state) => state.sendMessage)
   const receiveRealtimeEvent = useAgentChatStore((state) => state.receiveRealtimeEvent)
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const processingActive = useAgentChatStore((state) => state.processingActive)
-  const processingStartedAt = useAgentChatStore((state) => state.processingStartedAt)
   const awaitingResponse = useAgentChatStore((state) => state.awaitingResponse)
-  const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
-  const nextScheduledAt = useAgentChatStore((state) => state.nextScheduledAt)
   const streaming = useAgentChatStore((state) => state.streaming)
   const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
   const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
-  const realtimeEventCursors = useAgentChatStore((state) => state.realtimeEventCursors)
-  const consumeRealtimeEventCursor = useAgentChatStore((state) => state.consumeRealtimeEventCursor)
   const persistPendingEventsToCache = useAgentChatStore((state) => state.persistPendingEventsToCache)
   const pendingEvents = useAgentChatStore((state) => state.pendingEvents)
   const setInsightsForAgent = useAgentChatStore((state) => state.setInsightsForAgent)
   const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
   const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
-  const dismissInsight = useAgentChatStore((state) => state.dismissInsight)
-  const setInsightsPaused = useAgentChatStore((state) => state.setInsightsPaused)
-  const setCurrentInsightIndex = useAgentChatStore((state) => state.setCurrentInsightIndex)
-  const insights = useAgentChatStore((state) => state.insights)
-  const currentInsightIndex = useAgentChatStore((state) => state.currentInsightIndex)
-  const dismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
-  const insightsPaused = useAgentChatStore((state) => state.insightsPaused)
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const previousViewedAgentIdRef = useRef<string | null>(activeAgentId)
@@ -1312,10 +1305,7 @@ export function AgentChatPage({
   const timelineHasMoreNewer = !isNewAgent ? hasMoreNewer : false
   const timelineHasUnseenActivity = !isNewAgent && isStoreSynced ? hasUnseenActivity : false
   const timelineProcessingActive = !isNewAgent && isStoreSynced ? processingActive : false
-  const timelineProcessingStartedAt = !isNewAgent && isStoreSynced ? processingStartedAt : null
   const timelineAwaitingResponse = !isNewAgent && isStoreSynced ? awaitingResponse : false
-  const timelineProcessingWebTasks = !isNewAgent && isStoreSynced ? processingWebTasks : []
-  const timelineNextScheduledAt = !isNewAgent && isStoreSynced ? nextScheduledAt : null
   const timelineStreaming = !isNewAgent && isStoreSynced ? streaming : null
   const timelineLoadingOlder = !isNewAgent ? timelineQuery.isFetchingPreviousPage : false
   const timelineLoadingNewer = !isNewAgent ? timelineQuery.isFetchingNextPage : false
@@ -2107,7 +2097,6 @@ export function AgentChatPage({
   const pendingAgentEmail = activeAgentId ? pendingAgentEmails[activeAgentId] ?? null : null
   const resolvedAgentEmail = activeRosterMeta?.email ?? pendingAgentEmail ?? agentEmail ?? null
   const resolvedAgentSms = activeRosterMeta?.sms ?? agentSms ?? null
-  const effectivePlanningState = isStoreSynced ? planningState : (activeRosterMeta?.planningState ?? 'skipped')
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
@@ -2213,7 +2202,6 @@ export function AgentChatPage({
   const [idleInsightsPending, setIdleInsightsPending] = useState(false)
   const spawnIntentAutoSubmittedRef = useRef(false)
   const spawnIntentRequestIdRef = useRef(0)
-  const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestPlanSnapshot = useMemo(
     () => getLatestPlanSnapshot(timelineEvents, initialPageResponse?.current_plan ?? null),
     [timelineEvents, initialPageResponse?.current_plan],
@@ -3180,45 +3168,11 @@ export function AgentChatPage({
     setIdleInsightsPending(false)
   }, [activeAgentId, idleInsightsAgentId, insightsQuery.isFetching])
 
-  // Get available insights (filtered for dismissed)
-  const availableInsights = useMemo(() => {
-    return insights.filter(
-      (insight) => !dismissedInsightIds.has(insight.insightId)
-    )
-  }, [insights, dismissedInsightIds])
-  const hydratedInsights = useMemo(() => {
-    if (!resolvedAgentEmail && !resolvedAgentSms) {
-      return availableInsights
-    }
-    return availableInsights.map((insight) => {
-      if (insight.insightType !== 'agent_setup') {
-        return insight
-      }
-      const metadata = insight.metadata as AgentSetupMetadata
-      const nextEmail = resolvedAgentEmail ?? metadata.agentEmail ?? null
-      const nextSms = resolvedAgentSms ?? metadata.sms?.agentNumber ?? null
-      if (nextEmail === metadata.agentEmail && nextSms === metadata.sms?.agentNumber) {
-        return insight
-      }
-      return {
-        ...insight,
-        metadata: {
-          ...metadata,
-          agentEmail: nextEmail,
-          sms: {
-            ...metadata.sms,
-            agentNumber: nextSms,
-          },
-        },
-      }
-    })
-  }, [availableInsights, resolvedAgentEmail, resolvedAgentSms])
   const insightsLoading = Boolean(
     !isNewAgent
     && !isCollaboratorOnly
     && !showSignupPreviewPanel
     && (idleInsightsPending || insightsQuery.isFetching)
-    && hydratedInsights.length === 0,
   )
 
   useEffect(() => {
@@ -4080,16 +4034,15 @@ export function AgentChatPage({
       />
     )
   ) : null
-  const chatLayoutSidebarProps = {
-    agentRoster: sidebarAgents,
+  const chatLayoutSidebar = useMemo<AgentChatLayoutSidebarConfig>(() => ({
+    agents: sidebarAgents,
     transferInvites: rosterQuery.data?.transferInvites ?? [],
     favoriteAgentIds,
     mutedAgentIds,
-    activeAgentId,
     insightsPanelExpandedPreference,
     switchingAgentId,
-    rosterLoading,
-    rosterError: rosterErrorMessage,
+    loading: rosterLoading,
+    errorMessage: rosterErrorMessage,
     onSelectAgent: handleSelectAgent,
     onRespondTransferInvite: handleRespondTransferInvite,
     onConfigureAgent: handleConfigureAgent,
@@ -4099,31 +4052,33 @@ export function AgentChatPage({
     createAgentDisabledReason,
     onBlockedCreateAgent: previewCreateAgentBlocked ? handleBlockedCreateAgent : undefined,
     teamTemplateMenu,
-    agentRosterSortMode,
-    onAgentRosterSortModeChange: handleAgentRosterSortModeChange,
+    rosterSortMode: agentRosterSortMode,
+    onRosterSortModeChange: handleAgentRosterSortModeChange,
     onInsightsPanelExpandedPreferenceChange: handleInsightsPanelExpandedPreferenceChange,
     contextSwitcher: contextSwitcher ?? undefined,
-    currentContext: effectiveContext,
-    sidebarBillingUrl: billingManageUrl,
-    onOpenBilling: immersiveShellOpenHandlers?.billing,
-    sidebarUsageUrl: appShellDestinations.usage,
-    onOpenUsage: immersiveShellOpenHandlers?.usage,
-    sidebarApiKeysUrl: appShellDestinations.apiKeys,
-    onOpenApiKeys: immersiveShellOpenHandlers?.apiKeys,
-    sidebarProfileUrl: appShellDestinations.profile,
-    onOpenProfile: immersiveShellOpenHandlers?.profile,
-    sidebarOrganizationUrl: appShellDestinations.organization,
-    onOpenOrganization: immersiveShellOpenHandlers?.organization,
-    sidebarSecretsUrl: appShellDestinations.secrets,
-    onOpenSecrets: immersiveShellOpenHandlers?.secrets,
-    sidebarIntegrationsUrl: appShellDestinations.integrations,
-    onOpenIntegrations: immersiveShellOpenHandlers?.integrations,
-    onOpenHelp: handleOpenSupport,
-    sidebarTodayCreditsUsed: sidebarTaskCredits?.usedToday ?? null,
-    sidebarCreditsResetOn: sidebarTaskCredits?.resetOn ?? null,
-    sidebarNotificationsEnabled: agentChatNotificationsEnabled,
-    sidebarNotificationStatus: notificationStatus,
-    onSidebarNotificationsEnabledChange: handleAgentChatNotificationsEnabledChange,
+    settings: {
+      context: effectiveContext,
+      billingUrl: billingManageUrl,
+      onOpenBilling: immersiveShellOpenHandlers?.billing,
+      usageUrl: appShellDestinations.usage,
+      onOpenUsage: immersiveShellOpenHandlers?.usage,
+      apiKeysUrl: appShellDestinations.apiKeys,
+      onOpenApiKeys: immersiveShellOpenHandlers?.apiKeys,
+      profileUrl: appShellDestinations.profile,
+      onOpenProfile: immersiveShellOpenHandlers?.profile,
+      organizationUrl: appShellDestinations.organization,
+      onOpenOrganization: immersiveShellOpenHandlers?.organization,
+      secretsUrl: appShellDestinations.secrets,
+      onOpenSecrets: immersiveShellOpenHandlers?.secrets,
+      integrationsUrl: appShellDestinations.integrations,
+      onOpenIntegrations: immersiveShellOpenHandlers?.integrations,
+      onOpenHelp: handleOpenSupport,
+      todayCreditsUsed: sidebarTaskCredits?.usedToday ?? null,
+      creditsResetOn: sidebarTaskCredits?.resetOn ?? null,
+      notificationsEnabled: agentChatNotificationsEnabled,
+      notificationStatus,
+      onNotificationsEnabledChange: handleAgentChatNotificationsEnabledChange,
+    },
     galleryShellPage: selectionPage,
     galleryShellPanel: selectionPage !== 'agents' ? selectionShellPanel : null,
     onGalleryShellPageChange: immersiveShellOpenHandlers ? onSelectionPageChange : undefined,
@@ -4133,7 +4088,54 @@ export function AgentChatPage({
     onBackFromEmbeddedSettings: handleExitEmbeddedSettings,
     scrollToAgentId,
     onScrolledToAgent,
-  }
+  }), [
+    agentChatNotificationsEnabled,
+    agentRosterSortMode,
+    appShellDestinations.apiKeys,
+    appShellDestinations.integrations,
+    appShellDestinations.organization,
+    appShellDestinations.profile,
+    appShellDestinations.secrets,
+    appShellDestinations.usage,
+    billingManageUrl,
+    contextSwitcher,
+    createAgentDisabledReason,
+    effectiveContext,
+    embeddedSettingsPanel,
+    embeddedSettingsTitle,
+    favoriteAgentIds,
+    handleAgentChatNotificationsEnabledChange,
+    handleAgentRosterSortModeChange,
+    handleBlockedCreateAgent,
+    handleConfigureAgent,
+    handleCreateAgent,
+    handleExitEmbeddedSettings,
+    handleInsightsPanelExpandedPreferenceChange,
+    handleOpenSupport,
+    handleRespondTransferInvite,
+    handleSelectAgent,
+    handleToggleAgentFavorite,
+    handleToggleAgentMute,
+    immersiveShellOpenHandlers,
+    insightsPanelExpandedPreference,
+    mutedAgentIds,
+    notificationStatus,
+    onScrolledToAgent,
+    onSelectionPageChange,
+    previewCreateAgentBlocked,
+    rosterErrorMessage,
+    rosterLoading,
+    rosterQuery.data?.transferInvites,
+    scrollToAgentId,
+    selectionPage,
+    selectionShellPanel,
+    showEmbeddedSettings,
+    sidebarAgents,
+    sidebarTaskCredits?.resetOn,
+    sidebarTaskCredits?.usedToday,
+    switchingAgentId,
+    teamTemplateMenu,
+  ])
 
   const activeAuditUrl = useMemo(() => {
     if (!activeAgentId) {
@@ -4268,7 +4270,6 @@ export function AgentChatPage({
       {createOrganizationModal}
       <AgentChatLayout
         agentId={activeAgentId}
-        agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
         agentAvatarUrl={resolvedAvatarUrl}
         agentEmail={resolvedAgentEmail}
         agentSms={resolvedAgentSms}
@@ -4284,7 +4285,7 @@ export function AgentChatPage({
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
         planSnapshot={latestPlanSnapshot}
-        {...chatLayoutSidebarProps}
+        sidebar={chatLayoutSidebar}
         onComposerFocus={handleComposerFocus}
         onComposerRequestScrollToBottom={scrollToBottom}
         onClose={onClose}
@@ -4328,14 +4329,11 @@ export function AgentChatPage({
         composerErrorShowUpgrade={sendMessageError ? false : Boolean(createAgentError?.showUpgradeCta)}
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
-        showSignupPreviewPanel={showSignupPreviewPanel}
         showSubscriptionExpiredPanel={
           !isNewAgent
           && effectiveBillingStatus?.delinquent
           && effectiveBillingStatus.reason === 'canceled'
         }
-        signupPreviewState={effectiveSignupPreviewState}
-        planningState={effectivePlanningState}
         onSkipPlanning={handleSkipPlanning}
         skipPlanningBusy={skipPlanningBusy}
         maxAttachmentBytes={maxChatUploadSizeBytes}
@@ -4351,18 +4349,10 @@ export function AgentChatPage({
         events={timelineEvents}
         displayEvents={displayEvents}
         statusExpansionTargets={statusExpansionTargets}
-        realtimeEventCursors={realtimeEventCursors}
-        onRealtimeEventAnimationConsumed={consumeRealtimeEventCursor}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
         newestCursor={timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : null}
-        processingActive={timelineProcessingActive}
-        processingStartedAt={timelineProcessingStartedAt}
-        awaitingResponse={timelineAwaitingResponse}
-        processingWebTasks={timelineProcessingWebTasks}
-        nextScheduledAt={timelineNextScheduledAt}
-        streaming={timelineStreaming}
         onSendMessage={handleSend}
         onRespondHumanInputRequest={handleRespondHumanInputRequest}
         onDismissHumanInputRequest={handleDismissHumanInputRequest}
@@ -4377,22 +4367,14 @@ export function AgentChatPage({
         onViewAllContactRequests={handleOpenEmbeddedContactRequests}
         onJumpToLatest={handleJumpToLatest}
         autoFocusComposer
-        autoScrollPinned={autoScrollPinned}
         isNearBottom={isNearBottom}
-        hasUnseenActivity={timelineHasUnseenActivity}
         timelineRef={captureTimelineRef}
         timelineContentRef={timelineContentRef}
         composerShellRef={composerShellRef}
         loadingOlder={timelineLoadingOlder}
         loadingNewer={timelineLoadingNewer}
         initialLoading={initialLoading}
-        insights={isNewAgent ? [] : hydratedInsights}
         insightsLoading={insightsLoading}
-        currentInsightIndex={currentInsightIndex}
-        onDismissInsight={dismissInsight}
-        onInsightIndexChange={setCurrentInsightIndex}
-        onPauseChange={setInsightsPaused}
-        isInsightsPaused={insightsPaused}
         llmIntelligence={llmIntelligence}
         currentLlmTier={resolvedIntelligenceTier}
         onLlmTierChange={handleIntelligenceChange}

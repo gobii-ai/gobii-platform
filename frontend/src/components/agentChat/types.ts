@@ -12,7 +12,7 @@ import type {
 } from '../../types/agentChat'
 
 export type AgentTimelineProps = AgentTimelineSnapshot & {
-  agentFirstName: string
+  agentFirstName?: string
 }
 
 export type {

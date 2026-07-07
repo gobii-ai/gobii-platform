@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Settings, X } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
+import { useAppSelector } from '../../store/hooks'
+import { selectImmersiveShellActiveAgentId } from '../../store/immersiveShellSlice'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
 import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
@@ -57,7 +59,7 @@ function clampContextMenuPosition(x: number, y: number): ContextMenuPosition {
   }
 }
 
-type ChatSidebarProps = {
+export type ChatSidebarProps = {
   agents?: AgentRosterEntry[]
   transferInvites?: AgentTransferInvite[]
   favoriteAgentIds?: string[]
@@ -97,7 +99,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   transferInvites = [],
   favoriteAgentIds = [],
   mutedAgentIds = [],
-  activeAgentId,
+  activeAgentId: activeAgentIdOverride,
   switchingAgentId,
   loading = false,
   errorMessage,
@@ -126,6 +128,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   scrollToAgentId = null,
   onScrolledToAgent,
 }: ChatSidebarProps) {
+  const shellActiveAgentId = useAppSelector(selectImmersiveShellActiveAgentId)
+  const activeAgentId = activeAgentIdOverride !== undefined ? activeAgentIdOverride : shellActiveAgentId
   const sidebarRootRef = useRef<HTMLElement | null>(null)
   const setSidebarRootRef = useCallback((node: HTMLElement | null) => {
     sidebarRootRef.current = node

@@ -7,7 +7,6 @@ type AgentSignupPreviewPanelProps = {
   status: SignupPreviewState
   agentId?: string | null
   agentName?: string | null
-  currentPlan: PlanTier | null
   onUpgrade?: (plan: PlanTier, source?: string) => void
 }
 
@@ -15,7 +14,6 @@ export function AgentSignupPreviewPanel({
   status,
   agentId,
   agentName,
-  currentPlan,
   onUpgrade,
 }: AgentSignupPreviewPanelProps) {
   const ctaUnlockAgentCopy = useSubscriptionStore((state) => state.ctaUnlockAgentCopy)
@@ -36,7 +34,6 @@ export function AgentSignupPreviewPanel({
     <AgentUpgradePlansPanel
       title={title}
       body={body}
-      currentPlan={currentPlan}
       onUpgrade={onUpgrade}
       source="signup_preview_panel"
       trialCopyVariant={ctaUnlockAgentCopy ? 'unlock_agent' : 'default'}

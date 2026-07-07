@@ -2,9 +2,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentChatLayout } from './AgentChatLayout'
+import { chatActions } from '../../store/chatSlice'
 import type { AppStore } from '../../store/appStore'
 import { createTestAppStore, getSubscriptionState, seedSubscriptionState, StoreProvider } from '../../test/storeTestUtils'
 import type { PlanSnapshot } from '../../types/agentChat'
+import type { PlanningState, SignupPreviewState } from '../../types/agentRoster'
 
 vi.mock('../../util/analytics', () => ({
   track: vi.fn(),
@@ -274,6 +276,23 @@ function renderWithStore(ui: React.ReactElement) {
   })
 }
 
+function seedChatIdentity({
+  agentId = 'agent-1',
+  signupPreviewState = 'none',
+  planningState = 'skipped',
+}: {
+  agentId?: string
+  signupPreviewState?: SignupPreviewState
+  planningState?: PlanningState
+}) {
+  appStore.dispatch(chatActions.agentSelected({ agentId }))
+  appStore.dispatch(chatActions.agentIdentityUpdated({
+    agentId,
+    signupPreviewState,
+    planningState,
+  }))
+}
+
 describe('AgentChatLayout upgrade modal gating', () => {
   beforeEach(() => {
     window.innerWidth = 1200
@@ -339,12 +358,17 @@ describe('AgentChatLayout upgrade modal gating', () => {
   })
 
   it('renders the signup preview panel instead of the composer when requested', () => {
+    seedSubscriptionState(appStore, {
+      ...buildInitialSubscriptionState(),
+      personalSignupPreviewAvailable: true,
+    })
+    seedChatIdentity({ signupPreviewState: 'awaiting_signup_completion' })
+
     renderWithStore(
       <AgentChatLayout
+        agentId="agent-1"
         agentFirstName="Agent"
         events={[]}
-        showSignupPreviewPanel
-        signupPreviewState="awaiting_signup_completion"
       />,
     )
 
@@ -356,13 +380,20 @@ describe('AgentChatLayout upgrade modal gating', () => {
   })
 
   it('renders the composer instead of the signup preview panel while planning', () => {
+    seedSubscriptionState(appStore, {
+      ...buildInitialSubscriptionState(),
+      personalSignupPreviewAvailable: true,
+    })
+    seedChatIdentity({
+      signupPreviewState: 'awaiting_first_reply_pause',
+      planningState: 'planning',
+    })
+
     renderWithStore(
       <AgentChatLayout
+        agentId="agent-1"
         agentFirstName="Agent"
         events={[]}
-        showSignupPreviewPanel
-        signupPreviewState="awaiting_first_reply_pause"
-        planningState="planning"
       />,
     )
 
@@ -372,13 +403,14 @@ describe('AgentChatLayout upgrade modal gating', () => {
 
   it('keeps skip planning available while spawn intent loading hides the composer', () => {
     const handleSkipPlanning = vi.fn()
+    seedChatIdentity({ planningState: 'planning' })
 
     renderWithStore(
       <AgentChatLayout
+        agentId="agent-1"
         agentFirstName="Agent"
         events={[]}
         spawnIntentLoading
-        planningState="planning"
         onSkipPlanning={handleSkipPlanning}
       />,
     )
@@ -452,7 +484,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
         agentId="agent-123"
         agentFirstName="Agent"
         events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/integrations' } as any]}
-        onOpenIntegrations={handleOpenIntegrations}
+        sidebar={{ settings: { onOpenIntegrations: handleOpenIntegrations } }}
       />,
     )
 
@@ -539,8 +571,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
         agentFirstName="Agent"
         agentName="Agent"
         events={[]}
-        showEmbeddedSettings
-        embeddedSettingsPanel={<div>Settings</div>}
+        sidebar={{ showEmbeddedSettings: true, embeddedSettingsPanel: <div>Settings</div> }}
       />,
     )
 
@@ -610,8 +641,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
         agentName="Agent"
         events={[]}
         planSnapshot={initialPlan}
-        showEmbeddedSettings
-        embeddedSettingsPanel={<div>Settings</div>}
+        sidebar={{ showEmbeddedSettings: true, embeddedSettingsPanel: <div>Settings</div> }}
       />,
     )
 

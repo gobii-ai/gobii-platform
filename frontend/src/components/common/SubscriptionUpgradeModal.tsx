@@ -10,7 +10,6 @@ import {
 import { SubscriptionUpgradePlans } from './SubscriptionUpgradePlans'
 
 type SubscriptionUpgradeModalProps = {
-  currentPlan: PlanTier | null
   onClose: () => void
   onUpgrade: (plan: PlanTier) => void
   source?: string
@@ -19,7 +18,6 @@ type SubscriptionUpgradeModalProps = {
 }
 
 export function SubscriptionUpgradeModal({
-  currentPlan,
   onClose,
   onUpgrade,
   source,
@@ -27,6 +25,7 @@ export function SubscriptionUpgradeModal({
   allowDowngrade = false,
 }: SubscriptionUpgradeModalProps) {
   const {
+    currentPlan,
     trialDaysByPlan,
     trialEligible,
     pricingModalAlmostFullScreen,
@@ -129,7 +128,6 @@ export function SubscriptionUpgradeModal({
 
           <div className={pricingModalAlmostFullScreen ? 'min-h-0 flex-1' : ''}>
             <SubscriptionUpgradePlans
-              currentPlan={currentPlan}
               onUpgrade={onUpgrade}
               source={source}
               allowDowngrade={allowDowngrade}
