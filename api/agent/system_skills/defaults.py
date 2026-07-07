@@ -20,6 +20,7 @@ APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
 HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
 CODE_WORK_SYSTEM_SKILL_KEY = "code_work"
+RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY = "recruitment_sourcing"
 
 
 def _custom_tool_development_prompt_available(agent) -> bool:
@@ -462,6 +463,112 @@ APOLLO_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
 )
 
 
+RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
+    name="Recruitment Sourcing",
+    search_summary=(
+        "Source, qualify, dedupe, and deliver recruiting candidates while preserving role requirements, "
+        "source constraints, and recruiter feedback."
+    ),
+    tool_names=("search_tools",),
+    enables=(
+        "intake role requirements and decide when enough information exists to begin sourcing",
+        "source candidates across available connected systems, professional networks, spreadsheets, databases, and public web data",
+        "qualify candidates against required, preferred, exclusion, geography, compensation, seniority, and work-setup criteria",
+        "dedupe candidate pipelines and maintain sourcing status across batches",
+        "deliver recruiter-ready candidate tables, CSVs, summaries, and follow-up batches",
+    ),
+    use_when=(
+        "the user asks to source, find, qualify, screen, shortlist, or deliver candidates for a job opening",
+        "the user asks for recruiting, talent sourcing, executive search, staffing, lead candidate, or pipeline work",
+        "the task references job descriptions, intake notes, test assignments, hiring criteria, recruiters, or candidate delivery",
+        "the task requires searching LinkedIn, Apollo, web sources, spreadsheets, databases, or existing candidate ledgers for people",
+        "the user gives feedback on sourced candidates and wants the search refined, expanded, or resumed",
+    ),
+    query_aliases=(
+        "recruitment",
+        "recruiting",
+        "recruiter",
+        "talent sourcing",
+        "candidate sourcing",
+        "candidate search",
+        "candidate screening",
+        "candidate pipeline",
+        "headhunting",
+        "executive search",
+        "staffing",
+        "shortlist candidates",
+        "find candidates",
+        "source candidates",
+        "hiring criteria",
+        "job description sourcing",
+        "linkedin sourcing",
+        "apollo sourcing",
+    ),
+    prompt_instructions=(
+        "Recruitment sourcing means finding candidates worth recruiter review, not filling a quota with keyword "
+        "matches. Treat the user's hiring criteria as the source of truth and preserve the difference between hard "
+        "requirements, preferred signals, exclusions, and open questions.\n"
+        "Do not begin active sourcing until you have enough role-specific information to screen responsibly. Strong "
+        "intake fields include role title, client or hiring team, job description or responsibilities, required "
+        "skills/credentials, seniority, work setup, location or time-zone rules, compensation or market constraints "
+        "when provided, recruiter or delivery owner, test or screening assignment, target companies or backgrounds, "
+        "and exclusion rules. If key screening criteria are missing, ask only for the missing facts. Do not treat "
+        "phrases like 'start today', 'start sourcing', or 'start sourcing today' as approval for a title/location-only "
+        "search when the user also says the job posting, requirements, required skills, or dealbreakers are not "
+        "available. Those phrases only express urgency. Explicit partial-search approval must be unambiguous, such as "
+        "the user saying they know the criteria are missing and still want a broad/general/partial search. Never tell "
+        "the user that 'start today' counts as explicit approval despite missing screening criteria. If the user "
+        "explicitly approves that partial search, proceed with the available facts and label the assumptions. If an "
+        "intake question cannot be created because it is too broad or has too many options, ask one concise blocking "
+        "question in chat and wait; the failed question attempt is not a user answer and is not approval to call "
+        "sourcing tools.\n"
+        "When materials conflict, prefer the most direct hiring-manager signal first, then intake notes/transcript, "
+        "then intake summary, then job posting, then test assignment, then later user clarification. Use later user "
+        "feedback to refine the search, but do not erase durable hard requirements unless the user clearly changes "
+        "them.\n"
+        "Use only job-relevant criteria. Do not evaluate, rank, infer, or filter candidates based on protected "
+        "characteristics. For global or lower-cost-market searches, follow the user's country, compensation, work "
+        "authorization, language, and remote/contract constraints without stereotyping individuals or implying "
+        "quality from nationality.\n"
+        "Choose sources based on the tools and permissions actually available. Prefer structured people/company "
+        "sources such as LinkedIn data tools, Apollo, ATS/CRM exports, Google Sheets, or existing SQLite ledgers "
+        "when they are connected and relevant. If a specific source is unavailable or blocked, use another approved "
+        "source or explain the limitation; do not pretend the missing source was checked. Use `search_tools` only "
+        "when you need to discover available tools or sources, not before every obvious sourcing action.\n"
+        "Search in bounded, explainable batches. Convert requirements into concrete queries: role/title synonyms, "
+        "must-have skills, target and adjacent companies, geography, remote/on-site rules, industry/domain signals, "
+        "credentials, and exclusion terms. Expand from examples by archetype when the user says examples are not "
+        "the complete list. Do not overfit to a single company list, title spelling, or source if adjacent profiles "
+        "would satisfy the role.\n"
+        "Verify each recommended candidate against the hard requirements before delivery. At minimum, check current "
+        "or recent title, company, location/work setup, role-relevant experience, source URL, and any explicit "
+        "dealbreakers. Apply conservative judgment: exclude or mark low confidence when evidence is weak, stale, "
+        "ambiguous, outside geography, too junior/senior, wrong function, wrong industry, or from an excluded company. "
+        "Never present an unverified or weak match as a strong fit just to hit a requested count.\n"
+        "Maintain a candidate ledger when the task spans more than one batch or has exclusion, feedback, or delivery "
+        "history. Track profile URL or stable source id, name, current title/company, location, confidence, status, "
+        "reasoning, source, delivery date, and recruiter feedback. Dedupe by profile URL first, then normalized name "
+        "plus company/location. Before each delivery, check prior delivered/rejected candidates and current client "
+        "or company exclusion lists when available.\n"
+        "Respond to recruiter feedback as data. Mark rejected, standing, contacted, duplicate, excluded, or needs "
+        "review candidates explicitly; identify the rule learned from the feedback; apply it to future sourcing; "
+        "and, when useful, update the search strategy in one or two concrete changes.\n"
+        "Deliver recruiter-ready output in the requested format. Candidate tables should include name, title, company, "
+        "location, source/profile URL, confidence or tier, and concise fit notes tied to the role criteria. Separate "
+        "tracks when the role has materially different searches, such as U.S. employee vs global contractor. Include "
+        "counts, source coverage, exclusions applied, duplicates skipped, low-confidence caveats, and what remains "
+        "to search. If the user asks for CSV only, deliver the CSV artifact without extra report files.\n"
+        "For outreach, sequence enrollment, revealing paid contact data, or sending candidates to recruiters, summarize "
+        "the exact side effects and recipients first unless the user has already clearly approved that action. Respect "
+        "contact permissions and never invent recruiter recipients or candidate contact details.\n"
+        "If source access is partial, a tool errors, or the requested candidate count cannot be met responsibly, report "
+        "the verified partial set, the reason the rest is blocked or low confidence, and the next bounded search path. "
+        "Quality and criteria fidelity beat volume."
+    ),
+)
+
+
 HUBSPOT_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=HUBSPOT_NATIVE_SYSTEM_SKILL_KEY,
     name="HubSpot",
@@ -857,6 +964,7 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,
+    RECRUITMENT_SOURCING_SYSTEM_SKILL.skill_key: RECRUITMENT_SOURCING_SYSTEM_SKILL,
     HUBSPOT_NATIVE_SYSTEM_SKILL.skill_key: HUBSPOT_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     DISCORD_NATIVE_SYSTEM_SKILL.skill_key: DISCORD_NATIVE_SYSTEM_SKILL,

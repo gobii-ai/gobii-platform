@@ -33,6 +33,10 @@ from api.evals.scenarios.apollo_native import (
     APOLLO_NATIVE_SCENARIO_SLUGS,
     APOLLO_NATIVE_SUITE_SLUG,
 )
+from api.evals.scenarios.recruitment_sourcing import (
+    RECRUITMENT_SOURCING_SCENARIO_SLUGS,
+    RECRUITMENT_SOURCING_SUITE_SLUG,
+)
 from api.evals.scenarios.hubspot_native import (
     HUBSPOT_NATIVE_SCENARIO_SLUGS,
     HUBSPOT_NATIVE_SUITE_SLUG,
@@ -121,6 +125,11 @@ register_builtin_suites(
             slug=APOLLO_NATIVE_SUITE_SLUG,
             description="Native Apollo system-skill evals over mocked Apollo REST APIs.",
             scenario_slugs=APOLLO_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=RECRUITMENT_SOURCING_SUITE_SLUG,
+            description="Recruitment sourcing system-skill evals over mocked candidate, source, and ledger tools.",
+            scenario_slugs=RECRUITMENT_SOURCING_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=HUBSPOT_NATIVE_SUITE_SLUG,
