@@ -1,5 +1,5 @@
 import type { ToolDetailProps } from '../../tooling/types'
-import { Section } from '../shared'
+import { EmptyToolResult, ExternalLinkText, MetaLine, ResultListSection, ToolResultCard } from '../shared'
 import { extractBrightDataArray } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
 import { shorten, toText } from '../brightDataUtils'
@@ -60,67 +60,55 @@ export function ReutersNewsDetail({ entry }: ToolDetailProps) {
   const articles = normalizeArticles(entry.result).slice(0, 6)
 
   if (!articles.length) {
-    return <p className="text-sm text-slate-500">No articles returned.</p>
+    return <EmptyToolResult compact>No articles returned.</EmptyToolResult>
   }
 
   return (
     <div className="space-y-4 text-sm text-slate-600">
-      <Section title="Articles">
-        <div className="space-y-3">
-          {articles.map((article, idx) => {
-            const published = formatDate(article.published)
-            const updated = formatDate(article.updated)
-            const metaParts = [article.author, published].filter(Boolean)
-            const statsParts = [updated ? `Updated ${updated}` : null].filter(Boolean)
-            const summary = shorten(article.description || article.content, 520)
+      <ResultListSection title="Articles">
+        {articles.map((article, idx) => {
+          const published = formatDate(article.published)
+          const updated = formatDate(article.updated)
+          const summary = shorten(article.description || article.content, 520)
 
-            return (
-              <div key={`${article.url ?? article.headline ?? idx}`} className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-slate-900">
-                    {article.url ? (
-                      <a href={article.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-                        {article.headline || article.url}
-                      </a>
-                    ) : (
-                      article.headline || 'Article'
-                    )}
-                  </span>
-                </div>
-                {metaParts.length ? (
-                  <p className="text-xs text-slate-500">{metaParts.join(' • ')}</p>
-                ) : null}
-                {statsParts.length ? (
-                  <p className="text-xs text-slate-500">{statsParts.join(' • ')}</p>
-                ) : null}
-                {article.topics.length ? (
-                  <p className="text-xs text-slate-500">Topics: {article.topics.join(', ')}</p>
-                ) : null}
-                {summary ? <p className="mt-2 leading-relaxed whitespace-pre-wrap text-slate-700">{summary}</p> : null}
-
-                {article.related.length ? (
-                  <div className="mt-2">
-                    <p className="text-xs font-semibold text-slate-700">Related</p>
-                    <ul className="mt-1 space-y-1">
-                      {article.related.slice(0, 4).map((item, relatedIdx) => (
-                        <li key={`${item.url ?? item.title ?? relatedIdx}`} className="text-xs text-slate-600">
-                          {item.url ? (
-                            <a href={item.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-                              {item.title || item.url}
-                            </a>
-                          ) : (
-                            item.title
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
+          return (
+            <ToolResultCard key={`${article.url ?? article.headline ?? idx}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-slate-900">
+                  {article.url ? (
+                    <ExternalLinkText href={article.url}>{article.headline || article.url}</ExternalLinkText>
+                  ) : (
+                    article.headline || 'Article'
+                  )}
+                </span>
               </div>
-            )
-          })}
-        </div>
-      </Section>
+              <MetaLine items={[article.author, published]} />
+              <MetaLine items={[updated ? `Updated ${updated}` : null]} />
+              {article.topics.length ? (
+                <p className="text-xs text-slate-500">Topics: {article.topics.join(', ')}</p>
+              ) : null}
+              {summary ? <p className="mt-2 leading-relaxed whitespace-pre-wrap text-slate-700">{summary}</p> : null}
+
+              {article.related.length ? (
+                <div className="mt-2">
+                  <p className="text-xs font-semibold text-slate-700">Related</p>
+                  <ul className="mt-1 space-y-1">
+                    {article.related.slice(0, 4).map((item, relatedIdx) => (
+                      <li key={`${item.url ?? item.title ?? relatedIdx}`} className="text-xs text-slate-600">
+                        {item.url ? (
+                          <ExternalLinkText href={item.url}>{item.title || item.url}</ExternalLinkText>
+                        ) : (
+                          item.title
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </ToolResultCard>
+          )
+        })}
+      </ResultListSection>
     </div>
   )
 }

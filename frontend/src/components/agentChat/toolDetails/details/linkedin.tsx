@@ -1,5 +1,5 @@
 import type { ToolDetailProps } from '../../tooling/types'
-import { KeyValueList, Section } from '../shared'
+import { EmptyToolResult, ExternalLinkText, KeyValueList, MetaLine, ResultListSection, Section, ToolResultCard } from '../shared'
 import { isNonEmptyString } from '../utils'
 import { toNumber } from '../brightDataUtils'
 import { parseResultObject, isPlainObject } from '../../../../util/objectUtils'
@@ -71,9 +71,9 @@ export function LinkedInPersonProfileDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Company',
           value: companyLink ? (
-            <a href={companyLink as string} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+            <ExternalLinkText href={companyLink as string}>
               {companyName}
-            </a>
+            </ExternalLinkText>
           ) : (
             companyName
           ),
@@ -86,9 +86,9 @@ export function LinkedInPersonProfileDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Profile',
           value: (
-            <a href={profileUrl} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+            <ExternalLinkText href={profileUrl}>
               {profileUrl}
-            </a>
+            </ExternalLinkText>
           ),
         }
       : null,
@@ -100,7 +100,7 @@ export function LinkedInPersonProfileDetail({ entry }: ToolDetailProps) {
   return (
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList items={infoItems} />
-      {!hasDetails ? <p className="text-slate-500">No profile details returned.</p> : null}
+      {!hasDetails ? <EmptyToolResult>No profile details returned.</EmptyToolResult> : null}
     </div>
   )
 }
@@ -146,9 +146,9 @@ export function LinkedInCompanyProfileDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Website',
           value: (
-            <a href={websiteUrl} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+            <ExternalLinkText href={websiteUrl}>
               {websiteUrl}
-            </a>
+            </ExternalLinkText>
           ),
         }
       : null,
@@ -164,9 +164,9 @@ export function LinkedInCompanyProfileDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'LinkedIn',
           value: (
-            <a href={profileUrl} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+            <ExternalLinkText href={profileUrl}>
               {profileUrl}
-            </a>
+            </ExternalLinkText>
           ),
         }
       : null,
@@ -178,7 +178,7 @@ export function LinkedInCompanyProfileDetail({ entry }: ToolDetailProps) {
   return (
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList items={infoItems} />
-      {!hasDetails ? <p className="text-slate-500">No company details returned.</p> : null}
+      {!hasDetails ? <EmptyToolResult>No company details returned.</EmptyToolResult> : null}
     </div>
   )
 }
@@ -326,13 +326,12 @@ export function LinkedInJobListingsDetail({ entry }: ToolDetailProps) {
   const jobs = normalizeJobListings(entry.result).slice(0, 10)
 
   if (!jobs.length) {
-    return <p className="text-sm text-slate-500">No job listings returned.</p>
+    return <EmptyToolResult compact>No job listings returned.</EmptyToolResult>
   }
 
   return (
     <div className="space-y-4 text-sm text-slate-600">
-      <Section title="Jobs">
-        <div className="space-y-3">
+      <ResultListSection title="Jobs">
           {jobs.map((job, idx) => {
             const metaParts = [
               job.company,
@@ -348,30 +347,25 @@ export function LinkedInJobListingsDetail({ entry }: ToolDetailProps) {
             const summary = shorten(job.summary)
 
             return (
-              <div key={`${job.title ?? job.company ?? 'job'}-${idx}`} className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-sm">
+              <ToolResultCard key={`${job.title ?? job.company ?? 'job'}-${idx}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-slate-900">
                     {job.url ? (
-                      <a href={job.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+                      <ExternalLinkText href={job.url}>
                         {job.title ?? 'Job listing'}
-                      </a>
+                      </ExternalLinkText>
                     ) : (
                       job.title ?? 'Job listing'
                     )}
                   </span>
                 </div>
-                {metaParts.length ? (
-                  <p className="text-xs text-slate-500">{metaParts.join(' • ')}</p>
-                ) : null}
-                {statParts.length ? (
-                  <p className="text-xs text-slate-500">{statParts.join(' • ')}</p>
-                ) : null}
+                <MetaLine items={metaParts} />
+                <MetaLine items={statParts} />
                 {summary ? <p className="mt-2 leading-relaxed text-slate-700">{summary}</p> : null}
-              </div>
+              </ToolResultCard>
             )
           })}
-        </div>
-      </Section>
+      </ResultListSection>
     </div>
   )
 }
@@ -380,13 +374,12 @@ export function LinkedInPostsDetail({ entry }: ToolDetailProps) {
   const posts = normalizePosts(entry.result).slice(0, 6)
 
   if (!posts.length) {
-    return <p className="text-sm text-slate-500">No posts returned.</p>
+    return <EmptyToolResult compact>No posts returned.</EmptyToolResult>
   }
 
   return (
     <div className="space-y-4 text-sm text-slate-600">
-      <Section title="Posts">
-        <div className="space-y-3">
+      <ResultListSection title="Posts">
           {posts.map((post, idx) => {
             const metaParts = [
               post.author,
@@ -399,33 +392,28 @@ export function LinkedInPostsDetail({ entry }: ToolDetailProps) {
             const summary = shorten(post.text, 420)
 
             return (
-              <div key={`${post.url ?? post.title ?? idx}`} className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-sm">
+              <ToolResultCard key={`${post.url ?? post.title ?? idx}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-slate-900">
                     {post.url ? (
-                      <a href={post.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+                      <ExternalLinkText href={post.url}>
                         {post.title || post.headline || post.url}
-                      </a>
+                      </ExternalLinkText>
                     ) : (
                       post.title || post.headline || 'LinkedIn post'
                     )}
                   </span>
                 </div>
-                {metaParts.length ? (
-                  <p className="text-xs text-slate-500">{metaParts.join(' • ')}</p>
-                ) : null}
-                {statsParts.length ? (
-                  <p className="text-xs text-slate-500">{statsParts.join(' • ')}</p>
-                ) : null}
+                <MetaLine items={metaParts} />
+                <MetaLine items={statsParts} />
                 {summary ? <p className="mt-2 leading-relaxed text-slate-700 whitespace-pre-wrap">{summary}</p> : null}
                 {post.hashtags.length ? (
                   <p className="mt-1 text-xs text-slate-500">{post.hashtags.join(' ')}</p>
                 ) : null}
-              </div>
+              </ToolResultCard>
             )
           })}
-        </div>
-      </Section>
+      </ResultListSection>
     </div>
   )
 }
@@ -444,9 +432,9 @@ export function LinkedInPeopleSearchDetail({ entry }: ToolDetailProps) {
                 <div className="flex flex-col gap-0.5">
                   <span className="font-semibold text-slate-800">
                     {item.url ? (
-                      <a href={item.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+                      <ExternalLinkText href={item.url}>
                         {item.name ?? item.url}
-                      </a>
+                      </ExternalLinkText>
                     ) : (
                       item.name ?? 'Unknown person'
                     )}
@@ -460,7 +448,7 @@ export function LinkedInPeopleSearchDetail({ entry }: ToolDetailProps) {
           </ul>
         </Section>
       ) : (
-        <p className="text-slate-500">No people found.</p>
+        <EmptyToolResult>No people found.</EmptyToolResult>
       )}
     </div>
   )

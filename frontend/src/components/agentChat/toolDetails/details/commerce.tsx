@@ -1,5 +1,5 @@
 import type { ToolDetailProps } from '../../tooling/types'
-import { KeyValueList, Section } from '../shared'
+import { EmptyToolResult, ExternalLinkText, KeyValueList, Section, ToolResultCard } from '../shared'
 import { extractBrightDataArray, extractBrightDataFirstRecord, extractBrightDataResultCount } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
 import { shorten, toNumber, toText } from '../brightDataUtils'
@@ -71,7 +71,7 @@ export function AmazonProductDetail({ entry }: ToolDetailProps) {
   const record = extractBrightDataFirstRecord(entry.result)
 
   if (!record) {
-    return <p className="text-sm text-slate-500">No product details returned.</p>
+    return <EmptyToolResult compact>No product details returned.</EmptyToolResult>
   }
 
   const title = toText(record.title)
@@ -97,9 +97,7 @@ export function AmazonProductDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Title',
           value: url ? (
-            <a href={url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-              {title}
-            </a>
+            <ExternalLinkText href={url}>{title}</ExternalLinkText>
           ) : (
             title
           ),
@@ -114,9 +112,7 @@ export function AmazonProductDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Seller',
           value: sellerUrl ? (
-            <a href={sellerUrl} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-              {seller}
-            </a>
+            <ExternalLinkText href={sellerUrl}>{seller}</ExternalLinkText>
           ) : (
             seller
           ),
@@ -163,7 +159,7 @@ export function AmazonProductDetail({ entry }: ToolDetailProps) {
       ) : null}
 
       {!infoItems.some(Boolean) && !features.length && !description ? (
-        <p className="text-slate-500">No product details returned.</p>
+        <EmptyToolResult>No product details returned.</EmptyToolResult>
       ) : null}
     </div>
   )
@@ -207,9 +203,7 @@ export function AmazonProductReviewsDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Product',
           value: productUrl ? (
-            <a href={productUrl} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-              {productName}
-            </a>
+            <ExternalLinkText href={productUrl}>{productName}</ExternalLinkText>
           ) : (
             productName
           ),
@@ -269,7 +263,7 @@ export function AmazonProductReviewsDetail({ entry }: ToolDetailProps) {
               ].filter(Boolean)
 
               return (
-                <div key={`${header}-${idx}`} className="rounded-lg border border-slate-200/70 bg-white px-3 py-2 shadow-sm">
+                <ToolResultCard key={`${header}-${idx}`} className="border-slate-200/70">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-slate-800">{header}</span>
                     {ratingLabel ? (
@@ -283,13 +277,13 @@ export function AmazonProductReviewsDetail({ entry }: ToolDetailProps) {
                     <p className="text-xs text-slate-500">{metaParts.join(' • ')}</p>
                   ) : null}
                   {text ? <p className="mt-2 leading-relaxed whitespace-pre-wrap text-slate-700">{text}</p> : null}
-                </div>
+                </ToolResultCard>
               )
             })}
           </div>
         </Section>
       ) : (
-        <p className="text-slate-500">No reviews returned.</p>
+        <EmptyToolResult>No reviews returned.</EmptyToolResult>
       )}
     </div>
   )
@@ -312,7 +306,7 @@ export function AmazonProductSearchDetail({ entry }: ToolDetailProps) {
   const domain = toText(items[0]?.domain)
 
   if (!items.length) {
-    return <p className="text-sm text-slate-500">No products returned.</p>
+    return <EmptyToolResult compact>No products returned.</EmptyToolResult>
   }
 
   return (

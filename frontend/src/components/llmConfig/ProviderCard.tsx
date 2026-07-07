@@ -13,6 +13,7 @@ import {
 } from 'react-aria-components'
 
 import * as llmApi from '../../api/llmConfig'
+import { CheckboxField, FormField, SelectInput, TextInput } from '../common/FormControls'
 import {
   actionKey,
   addEndpointOptions,
@@ -434,145 +435,96 @@ function ProviderEndpointForm({
     <div className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {isCreate && (
-          <div>
-            <label className="text-xs text-slate-500">Endpoint key</label>
-            <input value={key} onChange={(event) => setKey(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-          </div>
+          <FormField id="endpoint-key" label="Endpoint key">
+            <TextInput id="endpoint-key" value={key} onChange={(event) => setKey(event.target.value)} />
+          </FormField>
         )}
-        <div>
-          <label className="text-xs text-slate-500">Model identifier</label>
-          <input value={model} onChange={(event) => setModel(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-        </div>
+        <FormField id="endpoint-model" label="Model identifier">
+          <TextInput id="endpoint-model" value={model} onChange={(event) => setModel(event.target.value)} />
+        </FormField>
         {isLiteLLMEndpoint && (
-          <div>
-            <label className="text-xs text-slate-500">LiteLLM pricing model override</label>
-            <input
+          <FormField id="endpoint-pricing-model" label="LiteLLM pricing model override">
+            <TextInput
+              id="endpoint-pricing-model"
               value={pricingModel}
               onChange={(event) => setPricingModel(event.target.value)}
               placeholder="Optional"
-              className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             />
-          </div>
+          </FormField>
         )}
         {showTemperatureOverride && (
-          <div>
-            <label className="text-xs text-slate-500">Temperature override</label>
-            <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
-          </div>
+          <FormField id="endpoint-temperature" label="Temperature override">
+            <TextInput id="endpoint-temperature" type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="disabled:bg-slate-50 disabled:text-slate-400" />
+          </FormField>
         )}
-        <div className={isCreate ? 'md:col-span-2' : undefined}>
-          <label className="text-xs text-slate-500">API base URL</label>
-          <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://api.example.com/v1" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-        </div>
+        <FormField id="endpoint-api-base" label="API base URL" className={isCreate ? 'md:col-span-2' : undefined}>
+          <TextInput id="endpoint-api-base" value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://api.example.com/v1" />
+        </FormField>
         {isPersistent && (
-          <div className="md:col-span-2">
-            <label className="text-xs text-slate-500">OpenRouter preset</label>
-            <input
+          <FormField id="endpoint-openrouter-preset" label="OpenRouter preset" className="md:col-span-2">
+            <TextInput
+              id="endpoint-openrouter-preset"
               value={openrouterPreset}
               onChange={(event) => setOpenrouterPreset(event.target.value)}
               placeholder="Optional (OpenRouter only)"
-              className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             />
-          </div>
+          </FormField>
         )}
         {isBrowser && (
-          <div>
-            <label className="text-xs text-slate-500">Max output tokens</label>
-            <input type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="Default" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-          </div>
+          <FormField id="endpoint-max-output-tokens" label="Max output tokens">
+            <TextInput id="endpoint-max-output-tokens" type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="Default" />
+          </FormField>
         )}
         {isPersistent && (
-          <div>
-            <label className="text-xs text-slate-500">Max input tokens</label>
-            <input type="number" value={maxInputTokens} onChange={(event) => setMaxInputTokens(event.target.value)} placeholder="Automatic" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
-          </div>
+          <FormField id="endpoint-max-input-tokens" label="Max input tokens">
+            <TextInput id="endpoint-max-input-tokens" type="number" value={maxInputTokens} onChange={(event) => setMaxInputTokens(event.target.value)} placeholder="Automatic" />
+          </FormField>
         )}
       </div>
       <div className="flex flex-wrap gap-4 text-sm">
         {!isMediaGeneration && (
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-            Supports temperature
-          </label>
+          <CheckboxField id="endpoint-supports-temperature" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} label="Supports temperature" containerClassName="inline-flex items-center gap-2" />
         )}
         {!isMediaGeneration && (
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-            Vision
-          </label>
+          <CheckboxField id="endpoint-supports-vision" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} label="Vision" containerClassName="inline-flex items-center gap-2" />
         )}
         {isImageGeneration && (
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={supportsImageToImage}
-              onChange={(event) => setSupportsImageToImage(event.target.checked)}
-              className="rounded border-slate-300 text-blue-600 shadow-sm"
-            />
-            Supports image-to-image
-          </label>
+          <CheckboxField id="endpoint-supports-image-to-image" checked={supportsImageToImage} onChange={(event) => setSupportsImageToImage(event.target.checked)} label="Supports image-to-image" containerClassName="inline-flex items-center gap-2" />
         )}
         {isVideoGeneration && (
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={supportsImageToVideo}
-              onChange={(event) => setSupportsImageToVideo(event.target.checked)}
-              className="rounded border-slate-300 text-blue-600 shadow-sm"
-            />
-            Supports image-to-video
-          </label>
+          <CheckboxField id="endpoint-supports-image-to-video" checked={supportsImageToVideo} onChange={(event) => setSupportsImageToVideo(event.target.checked)} label="Supports image-to-video" containerClassName="inline-flex items-center gap-2" />
         )}
         {showReasoningControls && (
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={supportsReasoning}
-              onChange={(event) => {
-                setSupportsReasoning(event.target.checked)
-                if (!event.target.checked) setReasoningEffort('')
-              }}
-              className="rounded border-slate-300 text-blue-600 shadow-sm"
-            />
-            Reasoning
-          </label>
+          <CheckboxField id="endpoint-supports-reasoning" checked={supportsReasoning} onChange={(event) => {
+            setSupportsReasoning(event.target.checked)
+            if (!event.target.checked) setReasoningEffort('')
+          }} label="Reasoning" containerClassName="inline-flex items-center gap-2" />
         )}
         {isToolingEndpoint && (
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" checked={supportsToolChoice} onChange={(event) => setSupportsToolChoice(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-            Tool choice
-          </label>
+          <CheckboxField id="endpoint-supports-tool-choice" checked={supportsToolChoice} onChange={(event) => setSupportsToolChoice(event.target.checked)} label="Tool choice" containerClassName="inline-flex items-center gap-2" />
         )}
         {isToolingEndpoint && (
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" checked={parallelTools} onChange={(event) => setParallelTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-            Parallel calls
-          </label>
+          <CheckboxField id="endpoint-parallel-tools" checked={parallelTools} onChange={(event) => setParallelTools(event.target.checked)} label="Parallel calls" containerClassName="inline-flex items-center gap-2" />
         )}
         {isPersistent && (
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" checked={allowImpliedSend} onChange={(event) => setAllowImpliedSend(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-            Implied send
-          </label>
+          <CheckboxField id="endpoint-allow-implied-send" checked={allowImpliedSend} onChange={(event) => setAllowImpliedSend(event.target.checked)} label="Implied send" containerClassName="inline-flex items-center gap-2" />
         )}
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={lowLatency} onChange={(event) => setLowLatency(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-          Low latency
-        </label>
+        <CheckboxField id="endpoint-low-latency" checked={lowLatency} onChange={(event) => setLowLatency(event.target.checked)} label="Low latency" containerClassName="inline-flex items-center gap-2" />
       </div>
       {showReasoningControls && (
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
           <span className="font-semibold text-slate-700">Default reasoning effort</span>
-          <select
+          <SelectInput
+            id="endpoint-reasoning-effort"
             value={reasoningEffort}
             onChange={(event) => setReasoningEffort(event.target.value)}
             disabled={!supportsReasoning}
-            className="rounded-lg border border-slate-300 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+            className="mt-0 py-1.5 text-xs disabled:bg-slate-50 disabled:text-slate-400"
           >
             {reasoningEffortOptions.map((option) => (
               <option key={option.value || 'default'} value={option.value}>{option.label}</option>
             ))}
-          </select>
+          </SelectInput>
           {isCreate ? <span className="text-slate-400">Optional override when reasoning is enabled.</span> : null}
         </div>
       )}

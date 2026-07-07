@@ -97,7 +97,6 @@ export function GlobalSecretsScreen({ listUrl, ownerScope }: GlobalSecretsScreen
       {!isLoading && (
         <SecretTable
           secrets={secrets}
-          embedded
           title="Global Secrets"
           subtitle={subtitle}
           emptyMessage="No global secrets configured yet. Add your first secret to get started."

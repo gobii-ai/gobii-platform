@@ -27,7 +27,9 @@ import {
   SliderTrack,
   Switch as AriaSwitch,
 } from 'react-aria-components'
-import { Modal } from '../components/common/Modal'
+import { ActionConfirmDialog as CommonActionConfirmDialog } from '../components/common/ActionConfirmDialog'
+import { CheckboxField, FormField, SelectInput, TextInput } from '../components/common/FormControls'
+import { ModalForm } from '../components/common/ModalForm'
 import { AddCollaboratorModal } from '../components/agentSettings/AddCollaboratorModal'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
@@ -2538,7 +2540,6 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
         </div>
 
         <AllowlistContactsTable
-          embedded={embedded}
           rows={rows}
           disabled={saving}
           onRemoveRow={(row) => onRemoveRows([row])}
@@ -2603,7 +2604,6 @@ function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, on
         {error && <div className="text-xs text-rose-600">{error}</div>}
 
         <CollaboratorsTable
-          embedded={embedded}
           rows={rows}
           disabled={busy}
           canManage={canManage}
@@ -3195,20 +3195,23 @@ function PeerLinkModal({ mode, entry, candidates, defaults, onSubmit, onClose }:
   }
 
   return (
-    <Modal
+    <ModalForm
+      id="peer-link-form"
       title={isCreate ? 'Add Peer Link' : 'Edit Peer Link'}
       subtitle={isCreate ? 'Select an agent and quota limits.' : 'Adjust quota and feature flag controls for this link.'}
       onClose={onClose}
+      onSubmit={handleSubmit}
       widthClass="sm:max-w-lg"
+      submitLabel="Save Link"
+      submitDisabled={isCreate && !peerAgentId}
+      formClassName="space-y-5"
     >
-      <form className="space-y-5" onSubmit={handleSubmit}>
         {isCreate ? (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Agent</label>
-            <select
+          <FormField id="peer-link-agent" label="Agent">
+            <SelectInput
+              id="peer-link-agent"
               value={peerAgentId}
               onChange={(event) => setPeerAgentId(event.target.value)}
-              className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
               disabled={candidates.length === 0}
             >
               <option value="">Select an agent...</option>
@@ -3217,9 +3220,9 @@ function PeerLinkModal({ mode, entry, candidates, defaults, onSubmit, onClose }:
                   {candidate.name}
                 </option>
               ))}
-            </select>
+            </SelectInput>
             {candidates.length === 0 && <p className="text-xs text-gray-500 mt-1">No additional eligible agents available.</p>}
-          </div>
+          </FormField>
         ) : (
           <div>
             <span className="block text-sm font-medium text-gray-700">Agent</span>
@@ -3227,65 +3230,46 @@ function PeerLinkModal({ mode, entry, candidates, defaults, onSubmit, onClose }:
           </div>
         )}
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Messages per Window</label>
-          <input
+        <FormField id="peer-link-messages" label="Messages per Window">
+          <TextInput
+            id="peer-link-messages"
             type="number"
             min="1"
             value={messagesInput}
             onChange={(event) => setMessagesInput(event.target.value)}
-            className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
           />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Window Hours</label>
-          <input
+        </FormField>
+        <FormField id="peer-link-window" label="Window Hours">
+          <TextInput
+            id="peer-link-window"
             type="number"
             min="1"
             value={windowInput}
             onChange={(event) => setWindowInput(event.target.value)}
-            className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
           />
-        </div>
+        </FormField>
 
         {!isCreate && (
           <>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Feature Flag</label>
-              <input
+            <FormField id="peer-link-feature-flag" label="Feature Flag">
+              <TextInput
+                id="peer-link-feature-flag"
                 type="text"
                 value={featureFlag}
                 onChange={(event) => setFeatureFlag(event.target.value)}
                 placeholder="optional"
-                className="w-full py-2 px-3 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
               />
-            </div>
-            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={isEnabled}
-                onChange={(event) => setIsEnabled(event.target.checked)}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span>Link enabled</span>
-            </label>
+            </FormField>
+            <CheckboxField
+              id="peer-link-enabled"
+              checked={isEnabled}
+              onChange={(event) => setIsEnabled(event.target.checked)}
+              label="Link enabled"
+              containerClassName="inline-flex items-center gap-2"
+            />
           </>
         )}
-
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button type="button" className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isCreate && !peerAgentId}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60"
-          >
-            Save Link
-          </button>
-        </div>
-      </form>
-    </Modal>
+    </ModalForm>
   )
 }
 
@@ -3306,53 +3290,39 @@ function WebhookModal({ mode, webhook, onSubmit, onClose }: WebhookModalProps) {
   }
 
   return (
-    <Modal
+    <ModalForm
+      id="webhook-form"
       title={mode === 'create' ? 'Add Webhook' : 'Edit Webhook'}
       subtitle="Provide a human-friendly name and destination URL."
       onClose={onClose}
+      onSubmit={handleSubmit}
       widthClass="sm:max-w-lg"
+      submitLabel="Save Webhook"
+      formClassName="space-y-5"
     >
-      <form className="space-y-5" onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="webhook-name-field" className="block text-sm font-medium text-gray-700">
-            Webhook Name
-          </label>
-          <input
+        <FormField id="webhook-name-field" label="Webhook Name">
+          <TextInput
             type="text"
             id="webhook-name-field"
             name="webhook_name"
             required
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             placeholder="A descriptive name for this webhook"
           />
-        </div>
-        <div>
-          <label htmlFor="webhook-url-field" className="block text-sm font-medium text-gray-700">
-            Destination URL
-          </label>
-          <input
+        </FormField>
+        <FormField id="webhook-url-field" label="Destination URL">
+          <TextInput
             type="url"
             id="webhook-url-field"
             name="webhook_url"
             required
             value={url}
             onChange={(event) => setUrl(event.target.value)}
-            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             placeholder="https://example.com/webhooks/gobii"
           />
-        </div>
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button type="button" className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-            Save Webhook
-          </button>
-        </div>
-      </form>
-    </Modal>
+        </FormField>
+    </ModalForm>
   )
 }
 
@@ -3373,47 +3343,35 @@ function InboundWebhookModal({ mode, webhook, onSubmit, onClose }: InboundWebhoo
   }
 
   return (
-    <Modal
+    <ModalForm
+      id="inbound-webhook-form"
       title={mode === 'create' ? 'Add Inbound Webhook' : 'Edit Inbound Webhook'}
       subtitle="Save to generate or update the secret-bearing webhook URL."
       onClose={onClose}
+      onSubmit={handleSubmit}
       widthClass="sm:max-w-lg"
+      submitLabel="Save Inbound Webhook"
+      formClassName="space-y-5"
     >
-      <form className="space-y-5" onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="inbound-webhook-name-field" className="block text-sm font-medium text-gray-700">
-            Webhook Name
-          </label>
-          <input
+        <FormField id="inbound-webhook-name-field" label="Webhook Name">
+          <TextInput
             type="text"
             id="inbound-webhook-name-field"
             name="inbound_webhook_name"
             required
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             placeholder="A descriptive name for this inbound webhook"
           />
-        </div>
-        <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={isActive}
-            onChange={(event) => setIsActive(event.target.checked)}
-            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-          <span>Webhook active</span>
-        </label>
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button type="button" className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-            Save Inbound Webhook
-          </button>
-        </div>
-      </form>
-    </Modal>
+        </FormField>
+        <CheckboxField
+          id="inbound-webhook-active"
+          checked={isActive}
+          onChange={(event) => setIsActive(event.target.checked)}
+          label="Webhook active"
+          containerClassName="inline-flex items-center gap-2"
+        />
+    </ModalForm>
   )
 }
 
@@ -3627,12 +3585,6 @@ function ConfirmActionDialog({
   onClose,
 }: ConfirmActionDialogProps) {
   const [busy, setBusy] = useState(false)
-  const confirmClasses =
-    tone === 'danger'
-      ? 'inline-flex w-full justify-center rounded-md border border-transparent bg-red-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 sm:w-auto sm:text-sm disabled:opacity-60'
-      : 'inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:w-auto sm:text-sm disabled:opacity-60'
-  const cancelClasses =
-    'inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto sm:text-sm disabled:opacity-60'
 
   const handleConfirm = async () => {
     if (!onConfirm) {
@@ -3649,33 +3601,25 @@ function ConfirmActionDialog({
     }
   }
 
-  const footer = (
-    <>
-      <button type="button" className={confirmClasses} onClick={handleConfirm} disabled={busy}>
-        {busy ? 'Working…' : confirmLabel}
-      </button>
-      <button type="button" className={cancelClasses} onClick={onClose} disabled={busy}>
-        {cancelLabel}
-      </button>
-    </>
-  )
-
   return (
-    <Modal
+    <CommonActionConfirmDialog
+      open
       title={title}
       onClose={() => {
         if (!busy) {
           onClose()
         }
       }}
-      subtitle={typeof body === 'string' ? body : undefined}
+      description={typeof body === 'string' ? body : undefined}
       icon={tone === 'danger' ? Trash2 : Info}
-      iconBgClass={tone === 'danger' ? 'bg-red-100' : 'bg-blue-100'}
-      iconColorClass={tone === 'danger' ? 'text-red-600' : 'text-blue-600'}
+      confirmLabel={confirmLabel}
+      cancelLabel={cancelLabel}
+      busy={busy}
+      danger={tone === 'danger'}
+      onConfirm={handleConfirm}
       widthClass="sm:max-w-md"
-      footer={footer}
     >
       {typeof body === 'string' ? null : <div className="text-sm text-gray-600">{body}</div>}
-    </Modal>
+    </CommonActionConfirmDialog>
   )
 }

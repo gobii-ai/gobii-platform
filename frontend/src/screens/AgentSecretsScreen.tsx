@@ -142,7 +142,6 @@ export function AgentSecretsScreen({
         <>
           <SecretTable
             secrets={agentSecrets}
-            embedded
             title="Agent Secrets"
             subtitle={`Secrets specific to ${agentName}`}
             emptyMessage="No agent-specific secrets configured."
@@ -155,7 +154,6 @@ export function AgentSecretsScreen({
           <div>
             <SecretTable
               secrets={globalSecrets}
-              embedded
               readOnly
               title="Global Secrets"
               subtitle="Shared across all your agents. Agent-specific secrets override these on key conflict."

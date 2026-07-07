@@ -30,6 +30,7 @@ import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
+import { FormField, SelectInput, TextareaInput, TextInput } from '../components/common/FormControls'
 import { ModalForm } from '../components/common/ModalForm'
 import { CustomInstructionsSection } from '../components/settings/CustomInstructionsSection'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
@@ -185,20 +186,18 @@ function CreateOrganizationModal({ name, errors, busy, onNameChange, onClose, on
       id="organization-create-team-form" title="Create Team" onClose={onClose} onSubmit={onSubmit} widthClass="sm:max-w-lg"
       dismissible={!busy} submitLabel="Create Team" submittingLabel="Creating..." submitting={busy} errorMessages={errors}
     >
-      <label htmlFor="organization-create-team-name" className="block text-sm font-medium text-slate-700">
-        Team Name
-        <input
+      <FormField id="organization-create-team-name" label="Team Name">
+        <TextInput
           id="organization-create-team-name"
           type="text"
           required
           value={name}
           onChange={(event) => onNameChange(event.target.value)}
-          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
           placeholder="Acme Operations"
           autoFocus
           disabled={busy}
         />
-      </label>
+      </FormField>
     </ModalForm>
   )
 }
@@ -228,36 +227,28 @@ function AddMemberModal({ roles, email, role, seatsAvailable, errors, busy, onEm
       submitDisabled={submitDisabled && !busy}
       errorMessages={errors}
     >
-        <div>
-          <label htmlFor="organization-member-email" className="block text-sm font-medium text-slate-700">
-            Email
-          </label>
-          <input
+        <FormField id="organization-member-email" label="Email">
+          <TextInput
             id="organization-member-email"
             type="email"
             required
             value={email}
             onChange={(event) => onEmailChange(event.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             placeholder="teammate@example.com"
             autoFocus
           />
-        </div>
-        <div>
-          <label htmlFor="organization-member-role" className="block text-sm font-medium text-slate-700">
-            Role
-          </label>
-          <select
+        </FormField>
+        <FormField id="organization-member-role" label="Role">
+          <SelectInput
             id="organization-member-role"
             value={role}
             onChange={(event) => onRoleChange(event.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
             {roles.map((roleOption) => (
               <option key={roleOption.value} value={roleOption.value}>{roleOption.label}</option>
             ))}
-          </select>
-        </div>
+          </SelectInput>
+        </FormField>
         {noSeatsAvailable ? (
           <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
             No standard member seats are available. Select Solutions Partner or add seats first.
@@ -291,25 +282,24 @@ function CreateTemplateModal({ sourceAgents, sourceAgentId, errors, busy, onSour
       errorMessages={errors}
     >
       {hasSourceAgents ? (
-        <label htmlFor="organization-template-source-agent" className="block text-sm font-medium text-slate-700">
-          Source Agent
-          <select
+        <FormField
+          id="organization-template-source-agent"
+          label="Source Agent"
+          helpText={busy
+            ? 'Generating the template from this agent. This can take up to a minute.'
+            : 'Template generation can take up to a minute.'}
+        >
+          <SelectInput
             id="organization-template-source-agent"
             value={sourceAgentId}
             onChange={(event) => onSourceAgentChange(event.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             disabled={busy}
           >
             {sourceAgents.map((agent) => (
               <option key={agent.id} value={agent.id}>{agent.name}</option>
             ))}
-          </select>
-          <span className="mt-2 block text-xs font-normal text-slate-500">
-            {busy
-              ? 'Generating the template from this agent. This can take up to a minute.'
-              : 'Template generation can take up to a minute.'}
-          </span>
-        </label>
+          </SelectInput>
+        </FormField>
       ) : (
         <p className="text-sm text-slate-600">Create a team-owned agent before turning it into a template.</p>
       )}
@@ -346,44 +336,39 @@ function TemplateEditorModal({ mode, draft, intelligenceConfig, errors, busy, on
       formClassName="space-y-5"
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <label htmlFor="organization-template-name" className="block text-sm font-medium text-slate-700">
-          Name
-          <input
+        <FormField id="organization-template-name" label="Name">
+          <TextInput
             id="organization-template-name"
             type="text"
             value={draft.name}
             maxLength={255}
             placeholder="Customer Escalation Brief"
             onChange={(event) => updateDraft('name', event.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             disabled={busy}
           />
-        </label>
-        <label htmlFor="organization-template-tagline" className="block text-sm font-medium text-slate-700">
-          Short Description
-          <input
+        </FormField>
+        <FormField id="organization-template-tagline" label="Short Description">
+          <TextInput
             id="organization-template-tagline"
             type="text"
             value={draft.tagline}
             maxLength={255}
             placeholder="Drafts next actions."
             onChange={(event) => updateDraft('tagline', event.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             disabled={busy}
           />
-        </label>
+        </FormField>
       </div>
-      <label htmlFor="organization-template-charter" className="block text-sm font-medium text-slate-700">
-        Instructions
-        <textarea
+      <FormField id="organization-template-charter" label="Instructions">
+        <TextareaInput
           id="organization-template-charter"
           value={draft.charter}
           placeholder="Monitor priority accounts, summarize recent customer activity, identify stalled escalations, and recommend the next owner and action."
           onChange={(event) => updateDraft('charter', event.target.value)}
-          className="mt-1 block min-h-52 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          className="min-h-52"
           disabled={busy}
         />
-      </label>
+      </FormField>
       {intelligenceConfig ? (
         <div>
           <span className="mb-2 block text-sm font-medium text-slate-700">Intelligence</span>

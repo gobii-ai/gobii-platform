@@ -1,5 +1,5 @@
 import type { ToolDetailProps } from '../../tooling/types'
-import { KeyValueList, Section } from '../shared'
+import { EmptyToolResult, ExternalLinkText, KeyValueList, Section } from '../shared'
 import { extractBrightDataFirstRecord } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
 import { toNumber, toText } from '../brightDataUtils'
@@ -27,7 +27,7 @@ export function CrunchbaseCompanyDetail({ entry }: ToolDetailProps) {
   const record = extractBrightDataFirstRecord(entry.result)
 
   if (!record) {
-    return <p className="text-sm text-slate-500">No company details returned.</p>
+    return <EmptyToolResult compact>No company details returned.</EmptyToolResult>
   }
 
   const name = toText(record.name)
@@ -62,9 +62,7 @@ export function CrunchbaseCompanyDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Name',
           value: url ? (
-            <a href={url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-              {name}
-            </a>
+            <ExternalLinkText href={url}>{name}</ExternalLinkText>
           ) : (
             name
           ),
@@ -97,9 +95,9 @@ export function CrunchbaseCompanyDetail({ entry }: ToolDetailProps) {
             {similar.map((item) => (
               <li key={`${item.name}-${item.link ?? 'n/a'}`} className="rounded-lg border border-slate-200/80 px-3 py-2">
                 {item.link ? (
-                  <a href={item.link} target="_blank" rel="noreferrer" className="font-semibold text-indigo-600 underline">
+                  <ExternalLinkText href={item.link} className="font-semibold text-indigo-600 underline">
                     {item.name}
-                  </a>
+                  </ExternalLinkText>
                 ) : (
                   <span className="font-semibold text-slate-800">{item.name}</span>
                 )}
@@ -109,7 +107,7 @@ export function CrunchbaseCompanyDetail({ entry }: ToolDetailProps) {
         </Section>
       ) : null}
 
-      {!infoItems.some(Boolean) && !similar.length ? <p className="text-slate-500">No company details returned.</p> : null}
+      {!infoItems.some(Boolean) && !similar.length ? <EmptyToolResult>No company details returned.</EmptyToolResult> : null}
     </div>
   )
 }

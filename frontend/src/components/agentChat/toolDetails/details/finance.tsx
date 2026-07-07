@@ -1,5 +1,5 @@
 import type { ToolDetailProps } from '../../tooling/types'
-import { KeyValueList, Section } from '../shared'
+import { EmptyToolResult, ExternalLinkText, KeyValueList, Section } from '../shared'
 import { extractBrightDataFirstRecord } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
 import { toNumber } from '../brightDataUtils'
@@ -76,9 +76,7 @@ export function YahooFinanceBusinessDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Name',
           value: url ? (
-            <a href={url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-              {name}
-            </a>
+            <ExternalLinkText href={url}>{name}</ExternalLinkText>
           ) : (
             name
           ),
@@ -148,7 +146,7 @@ export function YahooFinanceBusinessDetail({ entry }: ToolDetailProps) {
         </Section>
       ) : null}
 
-      {!infoItems.some(Boolean) && !peers.length ? <p className="text-slate-500">No finance details returned.</p> : null}
+      {!infoItems.some(Boolean) && !peers.length ? <EmptyToolResult>No finance details returned.</EmptyToolResult> : null}
     </div>
   )
 }

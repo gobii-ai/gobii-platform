@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { HttpError, jsonRequest } from '../../../../api/http'
 import type { ToolDetailProps } from '../../tooling/types'
 import { isRecord, parseResultObject } from '../../../../util/objectUtils'
-import { KeyValueList, Section } from '../shared'
+import { ExternalLinkText, KeyValueList, Section, ToolResultCard } from '../shared'
 import { extractFirstUrl, isNonEmptyString, stringify } from '../utils'
 
 type ContactDetail = {
@@ -129,7 +129,7 @@ export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
         <Section title={`Question${requests.length === 1 ? '' : 's'}`}>
           <ol className="space-y-3">
             {requests.map((request, requestIndex) => (
-              <li key={`human-input-request-${requestIndex}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
+              <ToolResultCard as="li" key={`human-input-request-${requestIndex}`} className="bg-white/90 p-3">
                 <p className="whitespace-pre-line font-semibold text-slate-800">
                   {requests.length > 1 ? `${requestIndex + 1}. ` : ''}{request.question}
                 </p>
@@ -147,7 +147,7 @@ export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
                     ))}
                   </ol>
                 ) : null}
-              </li>
+              </ToolResultCard>
             ))}
           </ol>
         </Section>
@@ -183,9 +183,7 @@ export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Approval link',
           value: approvalUrl ? (
-            <a href={approvalUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">
-              {approvalRaw}
-            </a>
+            <ExternalLinkText href={approvalUrl}>{approvalRaw}</ExternalLinkText>
           ) : (
             approvalRaw
           ),
@@ -215,10 +213,10 @@ export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {
                   : null,
               ]
               return (
-                <li key={`contact-${index}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
+                <ToolResultCard as="li" key={`contact-${index}`} className="bg-white/90 p-3">
                   <p className="font-semibold text-slate-800">{heading}</p>
                   <KeyValueList items={contactItems} />
-                </li>
+                </ToolResultCard>
               )
             })}
           </ol>
@@ -389,9 +387,7 @@ export function SecureCredentialsDetail({ entry }: ToolDetailProps) {
       ? {
           label: 'Submission link',
           value: (
-            <a href={submissionUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">
-              {submissionUrl}
-            </a>
+            <ExternalLinkText href={submissionUrl}>{submissionUrl}</ExternalLinkText>
           ),
         }
       : null,
@@ -424,9 +420,9 @@ export function SecureCredentialsDetail({ entry }: ToolDetailProps) {
                   : null,
               ]
               return (
-                <li key={`credential-${index}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
+                <ToolResultCard as="li" key={`credential-${index}`} className="bg-white/90 p-3">
                   <KeyValueList items={credentialItems} />
-                </li>
+                </ToolResultCard>
               )
             })}
           </ol>

@@ -3,6 +3,7 @@ import { KeyRound } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
 import type { SecretDTO, CreateSecretPayload, UpdateSecretPayload } from '../../api/secrets'
+import { CheckboxField, FormField, SelectInput, TextareaInput, TextInput } from '../common/FormControls'
 import { ModalForm } from '../common/ModalForm'
 
 type SecretFormModalProps = {
@@ -95,101 +96,78 @@ export function SecretFormModal({
       errorMessages={allErrors}
       autoComplete="off"
     >
-        <div>
-          <label htmlFor="secret-name" className="block text-sm font-medium text-slate-700">
-            Name
-          </label>
-          <input
+        <FormField id="secret-name" label="Name">
+          <TextInput
             id="secret-name"
             type="text"
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             placeholder="e.g. API Key, Database Password"
           />
-        </div>
+        </FormField>
 
-        <div>
-          <label htmlFor="secret-type" className="block text-sm font-medium text-slate-700">
-            Type
-          </label>
-          <select
+        <FormField id="secret-type" label="Type">
+          <SelectInput
             id="secret-type"
             value={secretType}
             onChange={(e) => setSecretType(e.target.value as 'credential' | 'env_var')}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
             <option value="credential">Credential (domain-scoped)</option>
             <option value="env_var">Environment Variable (sandbox)</option>
-          </select>
-        </div>
+          </SelectInput>
+        </FormField>
 
         {secretType === 'credential' && (
-          <div>
-            <label htmlFor="secret-domain" className="block text-sm font-medium text-slate-700">
-              Domain Pattern
-            </label>
-            <input
+          <FormField id="secret-domain" label="Domain Pattern">
+            <TextInput
               id="secret-domain"
               type="text"
               required
               value={domainPattern}
               onChange={(e) => setDomainPattern(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
               placeholder="e.g. https://example.com, *.google.com"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
             />
-          </div>
+          </FormField>
         )}
 
-        <div>
-          <label htmlFor="secret-value" className="block text-sm font-medium text-slate-700">
-            Value {isEdit && <span className="text-slate-400">(leave blank to keep current)</span>}
-          </label>
-          <input
+        <FormField
+          id="secret-value"
+          label={<>Value {isEdit && <span className="text-slate-400">(leave blank to keep current)</span>}</>}
+        >
+          <TextInput
             id="secret-value"
             type="password"
             required={!isEdit}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             placeholder={isEdit ? 'Leave blank to keep current value' : 'Enter secret value'}
             autoComplete="new-password"
           />
-        </div>
+        </FormField>
 
-        <div>
-          <label htmlFor="secret-desc" className="block text-sm font-medium text-slate-700">
-            Description <span className="text-slate-400">(optional)</span>
-          </label>
-          <textarea
+        <FormField id="secret-desc" label={<>Description <span className="text-slate-400">(optional)</span></>}>
+          <TextareaInput
             id="secret-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             rows={2}
             placeholder="What is this secret used for?"
           />
-        </div>
+        </FormField>
 
         {showVisibilityToggle && !isEdit && (
-          <div className="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-            <input
-              id="secret-global"
-              type="checkbox"
-              checked={isGlobal}
-              onChange={(e) => setIsGlobal(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-            />
-            <label htmlFor="secret-global" className="text-sm text-slate-700">
-              <span className="font-medium">Global secret</span>
-              <span className="block text-xs text-slate-500">Share this secret across all your agents</span>
-            </label>
-          </div>
+          <CheckboxField
+            id="secret-global"
+            checked={isGlobal}
+            onChange={(e) => setIsGlobal(e.target.checked)}
+            label="Global secret"
+            helpText="Share this secret across all your agents"
+          />
         )}
     </ModalForm>
   )

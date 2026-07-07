@@ -2,6 +2,7 @@ import { PlugZap } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 
 import * as llmApi from '../../api/llmConfig'
+import { CheckboxField, FormField, SelectInput, TextInput } from '../common/FormControls'
 import { ModalForm } from '../common/ModalForm'
 
 const backendOptions: Array<{ value: llmApi.ProviderBrowserBackend; label: string }> = [
@@ -71,105 +72,93 @@ export function ProviderFormModal({ onCreate, onClose, busy }: ProviderFormModal
       autoComplete="off"
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Display name</span>
-          <input
+        <FormField id="llm-provider-display-name" label="Display name">
+          <TextInput
+            id="llm-provider-display-name"
             value={displayName}
             onChange={(event) => setDisplayName(event.currentTarget.value)}
-            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             placeholder="OpenRouter"
             autoFocus
           />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Provider key</span>
-          <input
+        </FormField>
+        <FormField id="llm-provider-key" label="Provider key">
+          <TextInput
+            id="llm-provider-key"
             type="text"
             value={key}
             onChange={(event) => setKey(event.currentTarget.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
-            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             placeholder="openrouter"
           />
-        </label>
-        <label className="block sm:col-span-2">
-          <span className="text-sm font-medium text-slate-700">Admin API key</span>
-          <input
+        </FormField>
+        <FormField id="llm-provider-api-key" label="Admin API key" className="sm:col-span-2">
+          <TextInput
+            id="llm-provider-api-key"
             type="password"
             value={apiKey}
             onChange={(event) => setApiKey(event.currentTarget.value)}
-            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             placeholder="Optional"
             autoComplete="new-password"
           />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Environment fallback</span>
-          <input
+        </FormField>
+        <FormField id="llm-provider-env-var" label="Environment fallback">
+          <TextInput
+            id="llm-provider-env-var"
             value={envVarName}
             onChange={(event) => setEnvVarName(event.currentTarget.value)}
-            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             placeholder="OPENROUTER_API_KEY"
           />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Model prefix</span>
-          <input
+        </FormField>
+        <FormField id="llm-provider-model-prefix" label="Model prefix">
+          <TextInput
+            id="llm-provider-model-prefix"
             value={modelPrefix}
             onChange={(event) => setModelPrefix(event.currentTarget.value)}
-            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             placeholder="openrouter/"
           />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Browser backend</span>
-          <select
+        </FormField>
+        <FormField id="llm-provider-browser-backend" label="Browser backend">
+          <SelectInput
+            id="llm-provider-browser-backend"
             value={browserBackend}
             onChange={(event) => setBrowserBackend(event.currentTarget.value as llmApi.ProviderBrowserBackend)}
-            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
           >
             {backendOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Vertex project</span>
-          <input
+          </SelectInput>
+        </FormField>
+        <FormField id="llm-provider-vertex-project" label="Vertex project">
+          <TextInput
+            id="llm-provider-vertex-project"
             value={vertexProject}
             onChange={(event) => setVertexProject(event.currentTarget.value)}
-            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             placeholder="Optional"
           />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Vertex location</span>
-          <input
+        </FormField>
+        <FormField id="llm-provider-vertex-location" label="Vertex location">
+          <TextInput
+            id="llm-provider-vertex-location"
             value={vertexLocation}
             onChange={(event) => setVertexLocation(event.currentTarget.value)}
-            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             placeholder="us-east4"
           />
-        </label>
+        </FormField>
       </div>
       <div className="flex flex-wrap gap-4 text-sm text-slate-700">
-        <label className="inline-flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(event) => setEnabled(event.currentTarget.checked)}
-            className="rounded border-slate-300 text-blue-600 shadow-sm"
-          />
-          Enabled
-        </label>
-        <label className="inline-flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={supportsSafetyIdentifier}
-            onChange={(event) => setSupportsSafetyIdentifier(event.currentTarget.checked)}
-            className="rounded border-slate-300 text-blue-600 shadow-sm"
-          />
-          Supports safety identifiers
-        </label>
+        <CheckboxField
+          id="llm-provider-enabled"
+          checked={enabled}
+          onChange={(event) => setEnabled(event.currentTarget.checked)}
+          label="Enabled"
+          containerClassName="inline-flex items-center gap-2"
+        />
+        <CheckboxField
+          id="llm-provider-supports-safety-identifier"
+          checked={supportsSafetyIdentifier}
+          onChange={(event) => setSupportsSafetyIdentifier(event.currentTarget.checked)}
+          label="Supports safety identifiers"
+          containerClassName="inline-flex items-center gap-2"
+        />
       </div>
     </ModalForm>
   )

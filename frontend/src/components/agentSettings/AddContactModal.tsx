@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Check, Mail } from 'lucide-react'
 import { Checkbox as AriaCheckbox } from 'react-aria-components'
 
+import { FormField, TextInput } from '../common/FormControls'
 import { ModalForm } from '../common/ModalForm'
 import type { AllowlistInput } from './contactTypes'
 
@@ -56,22 +57,18 @@ export function AddContactModal({ onSubmit, onClose }: AddContactModalProps) {
       errorMessages={error ? [error] : null}
       formClassName="space-y-5"
     >
-        <div>
-          <label htmlFor="allowlist-contact-address" className="block text-sm font-medium text-gray-700">
-            Email address
-          </label>
-          <input
+        <FormField id="allowlist-contact-address" label="Email address">
+          <TextInput
             id="allowlist-contact-address"
             type="email"
             autoFocus
             required
             value={address}
             onChange={(event) => setAddress(event.currentTarget.value)}
-            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             placeholder="email@example.com"
             disabled={submitting}
           />
-        </div>
+        </FormField>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <AriaCheckbox
