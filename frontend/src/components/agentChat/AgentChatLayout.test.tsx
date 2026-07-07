@@ -69,6 +69,10 @@ vi.mock('./ChatSidebar', () => ({
   ),
 }))
 
+vi.mock('./ProductAnnouncementBell', () => ({
+  ProductAnnouncementBell: () => null,
+}))
+
 vi.mock('./AgentChatBanner', () => ({
   AgentChatBanner: ({
     children,
