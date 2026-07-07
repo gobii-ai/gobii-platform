@@ -16,6 +16,7 @@ import {
   type SelectionShellPage,
 } from './SelectionShellPageSwitcher'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
+import { ProductAnnouncementBell } from './ProductAnnouncementBell'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
 import {
   TransferInviteDetails,
@@ -781,6 +782,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             {contextSwitcher ? (
               <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
             ) : null}
+            <ProductAnnouncementBell variant="sidebar" />
             {!collapsed ? (
               <button
                 type="button"
