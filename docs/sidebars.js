@@ -20,6 +20,25 @@ const sidebars = {
     },
     {
       type: 'category',
+      label: 'Core Concepts',
+      collapsed: false,
+      link: {
+        type: 'doc',
+        id: 'start-here/core-concepts',
+      },
+      items: [
+        'core-concepts/agents',
+        'core-concepts/organizations',
+        'core-concepts/tasks',
+        'core-concepts/task-credits',
+        'core-concepts/agent-contacts',
+        'core-concepts/dedicated-ips',
+        'core-concepts/intelligence-selector',
+        'core-concepts/files',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Using Gobii',
       link: {
         type: 'doc',
