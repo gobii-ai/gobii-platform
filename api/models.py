@@ -6429,6 +6429,16 @@ class PersistentAgentTemplate(models.Model):
         blank=True,
         help_text="Optional static asset path used for UI illustration.",
     )
+    social_image = models.ImageField(
+        upload_to="public_template_social_images/%Y/%m/%d/",
+        blank=True,
+        null=True,
+        max_length=512,
+        help_text=(
+            "Optional uploaded Open Graph/Twitter preview image for the public template "
+            "detail page. Prefer 1200x630."
+        ),
+    )
     priority = models.PositiveIntegerField(
         default=100,
         help_text="Lower numbers appear first in the directory UI.",

@@ -2224,6 +2224,21 @@ def _optional_static_public_url(path: str) -> str:
         return ""
 
 
+def _public_template_social_image_url(template: PersistentAgentTemplate) -> str:
+    if template.social_image:
+        try:
+            return _public_site_absolute_url(template.social_image.url)
+        except ValueError:
+            return ""
+
+    social_image_path = (
+        template.hero_image_path.strip()
+        if template.hero_image_path
+        else "images/gobii_fish_social_1280x640.png"
+    )
+    return _optional_static_public_url(social_image_path)
+
+
 class PublicTemplateLegacyDetailRedirectView(View):
     def get(self, request, *args, **kwargs):
         template = _get_active_public_template_by_legacy_path(
@@ -2264,12 +2279,7 @@ class PublicTemplateDetailView(TemplateView):
         canonical_category_url = _public_site_absolute_url(category_path)
         library_url = _public_site_absolute_url(reverse("pages:library"))
         home_url = _public_site_absolute_url(reverse("pages:home"))
-        social_image_path = (
-            self.template.hero_image_path.strip()
-            if self.template.hero_image_path
-            else "images/gobii_fish_social_1280x640.png"
-        )
-        social_image_url = _optional_static_public_url(social_image_path)
+        social_image_url = _public_template_social_image_url(self.template)
         seo_description = (self.template.seo_meta_description or "").strip() or Truncator(
             (self.template.description or self.template.tagline or "").strip()
         ).chars(160)
