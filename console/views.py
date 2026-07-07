@@ -9,7 +9,7 @@ from django.template.loader import render_to_string
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import UploadedFile
-from django.core.mail import send_mail
+from django.core.mail import BadHeaderError, send_mail
 from django.views.generic import TemplateView, View, DetailView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
@@ -35,6 +35,7 @@ from django.utils.formats import date_format
 from django.middleware.csrf import get_token
 from datetime import timedelta, datetime, timezone as dt_timezone
 from functools import wraps
+from smtplib import SMTPException
 import uuid
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -2688,101 +2689,155 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
         return redirect(_organization_app_path(org.id))
 
 
-class AgentTransferInviteRespondView(LoginRequiredMixin, View):
-    """Handle accept/decline actions for agent transfer invites."""
+def _agent_transfer_invite_queryset():
+    return AgentTransferInvite.objects.select_related("agent", "agent__user", "initiated_by")
+
+
+def _send_agent_transfer_owner_notification(request, action: str, original_owner, agent: PersistentAgent) -> None:
+    original_owner_email = getattr(original_owner, "email", "") or ""
+    if not original_owner_email:
+        return
+
+    recipient_name = request.user.get_full_name() or request.user.email
+    context = {
+        "owner_name": original_owner.get_full_name() or original_owner_email,
+        "recipient_name": recipient_name,
+        "agent": agent,
+        "agent_url": request.build_absolute_uri(_agent_settings_app_path(agent)),
+    }
+    if action == "accept":
+        subject = f"{recipient_name} accepted your agent {agent.name}"
+        text_template = "emails/agent_transfer_owner_accepted.txt"
+        html_template = "emails/agent_transfer_owner_accepted.html"
+        warning_label = "acceptance"
+    else:
+        subject = f"{recipient_name} declined your agent {agent.name}"
+        text_template = "emails/agent_transfer_owner_declined.txt"
+        html_template = "emails/agent_transfer_owner_declined.html"
+        warning_label = "decline"
+
+    try:
+        send_mail(
+            subject=subject,
+            message=render_to_string(text_template, context),
+            from_email=None,
+            recipient_list=[original_owner_email],
+            html_message=render_to_string(html_template, context),
+            fail_silently=True,
+        )
+    except (BadHeaderError, OSError, SMTPException) as email_exc:  # pragma: no cover - best effort
+        logger.warning(
+            "Failed to send transfer %s email to %s: %s",
+            warning_label,
+            original_owner_email,
+            email_exc,
+        )
+
+
+def _agent_transfer_response_agent_payload(request, agent: PersistentAgent) -> dict[str, Any]:
+    return {
+        "id": str(agent.id),
+        "name": agent.name or "",
+        "isActive": bool(agent.is_active),
+        "detailUrl": _agent_settings_app_path(agent),
+        "chatUrl": build_immersive_chat_url(
+            request,
+            agent.id,
+            return_to=f"{IMMERSIVE_APP_BASE_PATH}/agents",
+        ),
+    }
+
+
+def _process_agent_transfer_invite_response(request, invite: AgentTransferInvite, action: str) -> dict[str, Any]:
+    original_owner = invite.initiated_by
+    agent_before = invite.agent
+
+    if action == "accept":
+        invite = AgentTransferService.accept_invite(invite, request.user)
+        agent = PersistentAgent.objects.get(pk=invite.agent_id)
+        _send_agent_transfer_owner_notification(request, action, original_owner, agent)
+        if not agent.is_active:
+            message = f"You now own {agent.name}, but it has been paused because you are at your agent limit."
+        else:
+            message = f"You now own {agent.name}."
+        return {
+            "ok": True,
+            "action": action,
+            "message": message,
+            "agent": _agent_transfer_response_agent_payload(request, agent),
+        }
+
+    invite = AgentTransferService.decline_invite(invite, request.user)
+    _send_agent_transfer_owner_notification(request, action, original_owner, agent_before)
+    return {
+        "ok": True,
+        "action": action,
+        "message": "Transfer invitation declined.",
+        "agent": None,
+    }
+
+
+def _resolve_agent_transfer_invite_response_error(request, invite: AgentTransferInvite | None, action: str) -> tuple[str, int] | None:
+    if action not in {"accept", "decline"}:
+        return "Unsupported invite action.", 400
+    if invite is None:
+        return "Transfer invite not found.", 404
+    if invite.status != AgentTransferInvite.Status.PENDING:
+        return "This transfer invite has already been handled.", 409
+    user_email = (request.user.email or "").strip().lower()
+    if not user_email or (invite.to_email or "").strip().lower() != user_email:
+        return "This transfer invite is not addressed to your account.", 403
+    return None
+
+
+class AgentTransferInviteRespondAPIView(LoginRequiredMixin, View):
+    """JSON accept/decline endpoint for app sidebar transfer invites."""
 
     http_method_names = ["post"]
 
     def post(self, request, invite_id: uuid.UUID, action: str):
-        invite = get_object_or_404(
-            AgentTransferInvite.objects.select_related("agent", "agent__user"),
-            pk=invite_id,
-        )
-
-        if invite.status != AgentTransferInvite.Status.PENDING:
-            messages.info(request, "This transfer invite has already been handled.")
-            return redirect(IMMERSIVE_APP_BASE_PATH)
-
-        user_email = (request.user.email or "").lower()
-        if not user_email or invite.to_email.lower() != user_email:
-            messages.error(request, "This transfer invite is not addressed to your account.")
-            return redirect(IMMERSIVE_APP_BASE_PATH)
-
-        original_owner = invite.initiated_by
-        original_owner_email = getattr(original_owner, "email", "") or ""
-        agent_before = invite.agent
+        invite = _agent_transfer_invite_queryset().filter(pk=invite_id).first()
+        error = _resolve_agent_transfer_invite_response_error(request, invite, action)
+        if error:
+            message, status_code = error
+            return JsonResponse({"ok": False, "error": message}, status=status_code)
 
         try:
-            if action == 'accept':
-                invite = AgentTransferService.accept_invite(invite, request.user)
-                agent = invite.agent
-                agent.refresh_from_db(fields=["name", "is_active"])
-                if not agent.is_active:
-                    messages.warning(
-                        request,
-                        f"You now own {agent.name}, but it has been paused because you are at your agent limit.",
-                    )
-                else:
-                    messages.success(request, f"You now own {agent.name}.")
+            payload = _process_agent_transfer_invite_response(request, invite, action)
+        except AgentTransferDenied as exc:
+            return JsonResponse({"ok": False, "error": str(exc)}, status=403)
+        except AgentTransferError as exc:
+            return JsonResponse(
+                {"ok": False, "error": f"Could not process the transfer invite: {exc}"},
+                status=400,
+            )
+        return JsonResponse(payload)
 
-                if original_owner_email:
-                    try:
-                        agent_url = request.build_absolute_uri(_agent_settings_app_path(agent))
-                        context = {
-                            'owner_name': original_owner.get_full_name() or original_owner_email,
-                            'recipient_name': request.user.get_full_name() or request.user.email,
-                            'agent': agent,
-                            'agent_url': agent_url,
-                        }
-                        subject = f"{context['recipient_name']} accepted your agent {agent.name}"
-                        text_body = render_to_string('emails/agent_transfer_owner_accepted.txt', context)
-                        html_body = render_to_string('emails/agent_transfer_owner_accepted.html', context)
-                        send_mail(
-                            subject=subject,
-                            message=text_body,
-                            from_email=None,
-                            recipient_list=[original_owner_email],
-                            html_message=html_body,
-                            fail_silently=True,
-                        )
-                    except Exception as email_exc:  # pragma: no cover - best effort
-                        logger.warning(
-                            "Failed to send transfer acceptance email to %s: %s",
-                            original_owner_email,
-                            email_exc,
-                        )
-            elif action == 'decline':
-                invite = AgentTransferService.decline_invite(invite, request.user)
-                messages.info(request, "Transfer invitation declined.")
 
-                if original_owner_email:
-                    try:
-                        agent_url = request.build_absolute_uri(_agent_settings_app_path(agent_before))
-                        context = {
-                            'owner_name': original_owner.get_full_name() or original_owner_email,
-                            'recipient_name': request.user.get_full_name() or request.user.email,
-                            'agent': agent_before,
-                            'agent_url': agent_url,
-                        }
-                        subject = f"{context['recipient_name']} declined your agent {agent_before.name}"
-                        text_body = render_to_string('emails/agent_transfer_owner_declined.txt', context)
-                        html_body = render_to_string('emails/agent_transfer_owner_declined.html', context)
-                        send_mail(
-                            subject=subject,
-                            message=text_body,
-                            from_email=None,
-                            recipient_list=[original_owner_email],
-                            html_message=html_body,
-                            fail_silently=True,
-                        )
-                    except Exception as email_exc:  # pragma: no cover - best effort
-                        logger.warning(
-                            "Failed to send transfer decline email to %s: %s",
-                            original_owner_email,
-                            email_exc,
-                        )
+class AgentTransferInviteRespondView(LoginRequiredMixin, View):
+    """Handle legacy browser accept/decline actions for agent transfer invites."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, invite_id: uuid.UUID, action: str):
+        invite = get_object_or_404(_agent_transfer_invite_queryset(), pk=invite_id)
+        error = _resolve_agent_transfer_invite_response_error(request, invite, action)
+        if error:
+            message, _status_code = error
+            if invite.status != AgentTransferInvite.Status.PENDING:
+                messages.info(request, message)
             else:
-                messages.error(request, "Unsupported invite action.")
+                messages.error(request, message)
+            return redirect(IMMERSIVE_APP_BASE_PATH)
+
+        try:
+            payload = _process_agent_transfer_invite_response(request, invite, action)
+            if action == "accept" and payload.get("agent") and not payload["agent"]["isActive"]:
+                messages.warning(request, payload["message"])
+            elif action == "decline":
+                messages.info(request, payload["message"])
+            else:
+                messages.success(request, payload["message"])
         except AgentTransferDenied as exc:
             messages.error(request, str(exc))
         except AgentTransferError as exc:

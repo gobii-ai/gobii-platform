@@ -1,7 +1,7 @@
 import { Globe, ShieldCheck } from 'lucide-react'
 
 import type { PendingRequestedSecretsAction } from '../../types/agentChat'
-import { InlineInfoTooltipButton } from './InlineInfoTooltipButton'
+import { HoverInfoButton } from './InlineInfoTooltipButton'
 
 type PendingRequestedSecretsPanelProps = {
   action: PendingRequestedSecretsAction
@@ -110,7 +110,7 @@ export function PendingRequestedSecretsPanel({
               />
               <Globe className="h-4 w-4 text-sky-600" aria-hidden="true" />
               <span>Make global</span>
-              <InlineInfoTooltipButton
+              <HoverInfoButton
                 label="What Global does"
                 description="Makes this value available across agents in the current scope instead of storing it only for this agent."
                 disabled={disabled || busyAction !== null}

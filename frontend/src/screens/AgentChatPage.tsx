@@ -16,7 +16,7 @@ import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-que
 import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
-import { createAgent, updateAgent } from '../api/agents'
+import { createAgent, respondToAgentTransferInvite, updateAgent } from '../api/agents'
 import {
   currentOrganizationTemplatesQueryKey,
   fetchCurrentOrganizationTemplates,
@@ -94,7 +94,7 @@ import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
-import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
@@ -579,6 +579,7 @@ type AgentRosterQueryData = {
   insightsPanelExpanded?: boolean | null
   agentChatNotificationsEnabled?: boolean
   agents: AgentRosterEntry[]
+  transferInvites?: AgentTransferInvite[]
   llmIntelligence?: unknown
 }
 
@@ -2698,6 +2699,20 @@ export function AgentChatPage({
     [openAgentChat],
   )
 
+  const handleRespondTransferInvite = useCallback(async (
+    invite: AgentTransferInvite,
+    action: 'accept' | 'decline',
+  ) => {
+    const url = action === 'accept' ? invite.acceptUrl : invite.declineUrl
+    const result = await respondToAgentTransferInvite(url)
+    await queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+    if (action === 'accept' && result.agent?.chatUrl) {
+      if (!navigateWithinApp(result.agent.chatUrl)) {
+        window.location.assign(result.agent.chatUrl)
+      }
+    }
+  }, [queryClient])
+
   const handleOpenFullSettings = useCallback(() => {
     navigateToShellSubview('settings')
   }, [navigateToShellSubview])
@@ -3487,12 +3502,14 @@ export function AgentChatPage({
   }, [onSelectionPageChange, selectionPage])
   const selectionSidebarProps: SelectionSidebarProps = {
     agents: sidebarAgents,
+    transferInvites: rosterQuery.data?.transferInvites ?? [],
     favoriteAgentIds,
     mutedAgentIds,
     activeAgentId: null,
     loading: rosterLoading,
     errorMessage: rosterErrorMessage,
     onSelectAgent: handleSelectAgent,
+    onRespondTransferInvite: handleRespondTransferInvite,
     onConfigureAgent: handleConfigureAgent,
     onToggleAgentFavorite: handleToggleAgentFavorite,
     onToggleAgentMute: handleToggleAgentMute,
@@ -4031,6 +4048,7 @@ export function AgentChatPage({
   ) : null
   const chatLayoutSidebarProps = {
     agentRoster: sidebarAgents,
+    transferInvites: rosterQuery.data?.transferInvites ?? [],
     favoriteAgentIds,
     mutedAgentIds,
     activeAgentId,
@@ -4039,6 +4057,7 @@ export function AgentChatPage({
     rosterLoading,
     rosterError: rosterErrorMessage,
     onSelectAgent: handleSelectAgent,
+    onRespondTransferInvite: handleRespondTransferInvite,
     onConfigureAgent: handleConfigureAgent,
     onToggleAgentFavorite: handleToggleAgentFavorite,
     onToggleAgentMute: handleToggleAgentMute,

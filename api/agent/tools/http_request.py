@@ -53,8 +53,33 @@ def _truncate_api_error_message(message: str) -> str:
     return message[:API_ERROR_MESSAGE_MAX_CHARS].rstrip() + "... [truncated]"
 
 
-def _apollo_http_error_guidance(status_code: int) -> str:
-    if status_code in {401, 403, 404}:
+def _apollo_http_error_guidance(status_code: int, content: Any) -> str:
+    content_text = json.dumps(content) if isinstance(content, (dict, list)) else str(content or "")
+    content_lower = content_text.lower()
+    if status_code == 401:
+        return (
+            "Native Apollo auth was applied, but Apollo rejected authorization. Ask the user to reconnect Apollo "
+            "from /app/integrations before retrying."
+        )
+    if status_code == 403:
+        return (
+            "Native Apollo auth was applied, but Apollo denied access. Stop retrying the same request; explain "
+            "that the connected Apollo account may lack the required plan, master API key access, or scopes for "
+            "this endpoint."
+        )
+    if status_code == 422:
+        if "people/match" in content_lower or "bulk_match" in content_lower:
+            return (
+                "Apollo could not process the enrichment payload. Use documented `/people/match` or "
+                "`/people/bulk_match` fields such as `id`, `email`, `name`, `linkedin_url`, and organization "
+                "details; do not send legacy keys such as `personId`. For batches, treat invalid or unmatched "
+                "people as row-level misses where possible instead of crashing the whole workflow."
+            )
+        return (
+            "Apollo could not process the request body. Check parameter names, required fields, value formats, "
+            "and Content-Type before retrying; do not repeat the same malformed payload."
+        )
+    if status_code == 404:
         return (
             "Native Apollo auth was applied. Check the Apollo endpoint and required scopes before asking "
             "for credentials. For people search, use POST https://api.apollo.io/api/v1/mixed_people/api_search "
@@ -89,7 +114,7 @@ def _google_drive_http_error_guidance(status_code: int, content: Any) -> str:
 
 def _native_http_error_guidance(provider_key: str, status_code: int, content: Any) -> str:
     if provider_key == "apollo":
-        return _apollo_http_error_guidance(status_code)
+        return _apollo_http_error_guidance(status_code, content)
     if provider_key == "google_drive":
         return _google_drive_http_error_guidance(status_code, content)
     return "Check the native integration connection, requested scopes, endpoint, and request body before retrying."

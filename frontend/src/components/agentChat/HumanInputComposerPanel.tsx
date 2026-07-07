@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { ArrowUp } from 'lucide-react'
 
 import type { PendingHumanInputRequest } from '../../types/agentChat'
-import { InlineInfoTooltipButton } from './InlineInfoTooltipButton'
+import { HoverInfoButton } from './InlineInfoTooltipButton'
 import { orderHumanInputRequests } from './humanInputOrdering'
 
 export const HUMAN_INPUT_OTHER_OPTION_KEY = '__other__'
@@ -146,7 +146,7 @@ export function HumanInputComposerPanel({
                       {option.title}
                     </div>
                   </button>
-                  <InlineInfoTooltipButton
+                  <HoverInfoButton
                     label={`More information about ${option.title}`}
                     description={option.description}
                     disabled={disabled || isBusy}

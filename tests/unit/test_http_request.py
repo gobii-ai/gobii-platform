@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
 from api.models import BrowserUseAgent, PersistentAgent
-from api.agent.tools.http_request import execute_http_request
+from api.agent.tools.http_request import _native_http_error_guidance, execute_http_request
 
 
 def _make_mock_response(content: bytes, content_type: str, status_code: int = 200):
@@ -158,6 +158,22 @@ class HttpRequestJsonParsingTests(TestCase):
 
         _, kwargs = mock_request.call_args
         self.assertEqual(kwargs["headers"]["User-Agent"], "agent/1.0")
+
+    def test_apollo_auth_plan_and_validation_error_guidance_is_specific(self):
+        reconnect_guidance = _native_http_error_guidance("apollo", 401, {"error": "Unauthorized"})
+        plan_guidance = _native_http_error_guidance("apollo", 403, {"error": "Forbidden"})
+        validation_guidance = _native_http_error_guidance(
+            "apollo",
+            422,
+            {"error": "Unprocessable Entity", "path": "/api/v1/people/match"},
+        )
+
+        self.assertIn("reconnect Apollo", reconnect_guidance)
+        self.assertIn("Stop retrying", plan_guidance)
+        self.assertIn("required plan", plan_guidance)
+        self.assertIn("master API key", plan_guidance)
+        self.assertIn("do not send legacy keys such as `personId`", validation_guidance)
+        self.assertIn("row-level misses", validation_guidance)
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")

@@ -197,7 +197,8 @@ APOLLO_COOKBOOK = NativeApiCookbook(
                 "For one person, match with email or rich identity details through `/people/match`. For multiple people, "
                 "send `/people/bulk_match` with `details` containing at most 10 person objects per request. Include enough "
                 "identity data to match reliably, such as email, LinkedIn URL, first/last name plus organization domain or "
-                "organization ID. Email-only enrichment can proceed without phone reveal. Phone reveal requires "
+                "organization ID. When following up from Apollo people search, pass the returned person `id`; do not invent "
+                "legacy keys such as `personId`. Email-only enrichment can proceed without phone reveal. Phone reveal requires "
                 "`reveal_phone_number=true` and an explicit HTTPS `webhook_url`."
             ),
             response_shape=(
@@ -205,9 +206,10 @@ APOLLO_COOKBOOK = NativeApiCookbook(
             ),
             guardrails=(
                 "A 200 with blank person or missing email is no_match/no_email, not integration failure. Never invent webhook URLs; "
-                "wait for webhook payloads when Apollo returns `request_id`. If `/people/bulk_match` returns 400, do not retry "
-                "the same malformed batch; fix the payload, reduce to smaller batches or single `/people/match` calls, and "
-                "keep each bulk request to 10 people or fewer."
+                "wait for webhook payloads when Apollo returns `request_id`. If `/people/bulk_match` returns 400 or 422, do not "
+                "retry the same malformed batch; fix the payload, reduce to smaller batches or single `/people/match` calls, "
+                "treat invalid or unmatched records as row-level misses where possible, and keep each bulk request to 10 people "
+                "or fewer."
             ),
         ),
         _recipe(
