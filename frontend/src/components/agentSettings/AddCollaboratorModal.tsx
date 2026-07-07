@@ -2,6 +2,7 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { Mail, UserPlus } from 'lucide-react'
 
+import { FormField, TextInput } from '../common/FormControls'
 import { ModalForm } from '../common/ModalForm'
 
 type AddCollaboratorModalProps = {
@@ -50,25 +51,22 @@ export function AddCollaboratorModal({ onSubmit, onClose }: AddCollaboratorModal
       errorMessages={error ? [error] : null}
       formClassName="space-y-5"
     >
-        <div>
-          <label htmlFor="collaborator-email-field" className="block text-sm font-medium text-gray-700">
-            Collaborator email
-          </label>
+        <FormField id="collaborator-email-field" label="Collaborator email">
           <div className="relative mt-1">
             <Mail className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" aria-hidden="true" />
-            <input
+            <TextInput
               id="collaborator-email-field"
               type="email"
               autoFocus
               required
               value={email}
               onChange={(event) => setEmail(event.currentTarget.value)}
-              className="block w-full rounded-lg border border-gray-300 px-3 py-2 pl-9 text-sm shadow-sm focus:border-emerald-500 focus:ring-emerald-500"
+              className="mt-0 pl-9 focus:border-emerald-500 focus:ring-emerald-500"
               placeholder="name@company.com"
               disabled={submitting}
             />
           </div>
-        </div>
+        </FormField>
     </ModalForm>
   )
 }

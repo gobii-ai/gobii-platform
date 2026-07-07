@@ -8,6 +8,7 @@ from django.urls import reverse
 
 from api.admin import CustomUserAdmin, CustomUserAdminForm
 from api.models import (
+    BrowserUseAgent,
     ImmutableUserFlagSlugError,
     UserFlagAssignment,
     UserFlagChoiceGroup,
@@ -236,6 +237,26 @@ class DynamicUserFlagAdminTests(TestCase):
             response,
             f'name="{CustomUserAdminForm.user_flag_field_name(self.flag)}"',
         )
+
+    def test_user_change_form_links_agents_without_rendering_agent_inline_formset(self):
+        BrowserUseAgent.objects.bulk_create(
+            [
+                BrowserUseAgent(user=self.target_user, name=f"Inline Agent {index}")
+                for index in range(12)
+            ]
+        )
+
+        response = self.client.get(self._change_url())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Agents")
+        self.assertContains(
+            response,
+            reverse("admin:api_browseruseagent_changelist") + f"?user__id__exact={self.target_user.pk}",
+        )
+        self.assertContains(response, "View all&nbsp;12 agents")
+        self.assertNotContains(response, 'name="agents-TOTAL_FORMS"')
+        self.assertNotContains(response, "Inline Agent 0")
 
     def test_user_add_form_preserves_stock_useradmin_add_fields(self):
         response = self.client.get(self._add_url())

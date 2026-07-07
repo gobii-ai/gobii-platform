@@ -11,6 +11,8 @@ import {
 } from '../api/apiKeys'
 import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
+import { FormField, TextInput } from '../components/common/FormControls'
 import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
 import { Modal } from '../components/common/Modal'
 import { ModalForm } from '../components/common/ModalForm'
@@ -99,21 +101,17 @@ function CreateApiKeyModal({
       submitting={busy}
       errorMessages={errors}
     >
-        <div>
-          <label htmlFor="api-key-name" className="block text-sm font-medium text-slate-700">
-            Key Name
-          </label>
-          <input
+        <FormField id="api-key-name" label="Key Name">
+          <TextInput
             id="api-key-name"
             type="text"
             required
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             autoFocus
             onFocus={(event) => event.currentTarget.select()}
           />
-        </div>
+        </FormField>
     </ModalForm>
   )
 }
@@ -203,40 +201,22 @@ function ConfirmApiKeyActionModal({
     }
   }
 
-  const footer = (
-    <>
-      <button
-        type="button"
-        className="inline-flex w-full justify-center rounded-md border border-transparent bg-red-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm"
-        onClick={handleConfirm}
-        disabled={busy}
-      >
-        {busy ? 'Working...' : confirmLabel}
-      </button>
-      <button
-        type="button"
-        className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm"
-        onClick={onClose}
-        disabled={busy}
-      >
-        Cancel
-      </button>
-    </>
-  )
-
   return (
-    <Modal
+    <ActionConfirmDialog
+      open
       title={title}
-      subtitle={subtitle}
+      description={subtitle}
       onClose={onClose}
-      footer={footer}
+      onConfirm={handleConfirm}
+      confirmLabel={confirmLabel}
+      busy={busy}
+      danger
       widthClass="sm:max-w-lg"
       icon={icon}
-      iconBgClass="bg-red-100"
-      iconColorClass="text-red-600"
+      localError={error}
     >
-      {error ? <p className="text-sm text-red-600">{error}</p> : <p className="text-sm text-slate-600">This change takes effect immediately.</p>}
-    </Modal>
+      <p className="text-sm text-slate-600">This change takes effect immediately.</p>
+    </ActionConfirmDialog>
   )
 }
 

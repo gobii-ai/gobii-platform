@@ -1,5 +1,6 @@
 from typing import Any
 
+from django.db import DatabaseError, IntegrityError
 from django.http import HttpRequest, JsonResponse
 from django.views.generic import DetailView
 
@@ -15,7 +16,7 @@ from console.daily_credit import build_agent_daily_credit_context, serialize_dai
 from console.mixins import AgentOwnerContextOverrideMixin
 from console.agent_chat.access import resolve_manageable_agent_for_request, user_can_manage_agent, user_is_collaborator
 from api.agent.tasks.process_events import process_agent_events_task
-from api.models import CommsAllowlistEntry
+from api.models import CommsAllowlistEntry, UserPhoneNumber
 
 class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailView):
     """Shared backend for agent settings payloads and mutations."""
@@ -124,7 +125,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         )
 
         # Always include allowlist configuration (flag removed)
-        from api.models import CommsAllowlistEntry
         context['show_allowlist'] = True
         context['whitelist_policy'] = agent.whitelist_policy
         context['allowlist_entries'] = CommsAllowlistEntry.objects.filter(
@@ -199,7 +199,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         # Check if owner has verified phone for SMS display
         try:
-            from api.models import UserPhoneNumber
             owner_phone = UserPhoneNumber.objects.filter(
                 user=agent.user, 
                 is_verified=True
@@ -310,7 +309,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         pending_contact_requests: int | None = None,
         email_verified: bool | None = None,
     ) -> dict[str, object]:
-        from api.models import CommsAllowlistEntry, AgentAllowlistInvite
+        from api.models import AgentAllowlistInvite
         from api.services.email_verification import has_verified_email
 
         entries_qs = entries
@@ -467,6 +466,269 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 ],
             ).exists()
         return False
+
+    def _build_allowlist_ajax_success_payload(
+        self,
+        request,
+        agent: PersistentAgent,
+        *,
+        max_contacts_per_agent: int | None,
+    ) -> dict[str, object]:
+        entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
+        pending_invites = AgentAllowlistInvite.objects.filter(
+            agent=agent,
+            status=AgentAllowlistInvite.InviteStatus.PENDING
+        ).order_by('channel', 'address')
+
+        owner_email = agent.user.email
+        try:
+            phone_obj = UserPhoneNumber.objects.filter(
+                user=agent.user,
+                is_verified=True
+            ).first()
+            owner_phone = phone_obj.phone_number if phone_obj else None
+        except (AttributeError, DatabaseError):
+            owner_phone = None
+
+        html = render_to_string('console/partials/_allowlist_entries_inline.html', {
+            'allowlist_entries': entries,
+            'pending_invites': pending_invites,
+            'owner_email': owner_email,
+            'owner_phone': owner_phone,
+        })
+
+        active_count = CommsAllowlistEntry.objects.filter(
+            agent=agent,
+            is_active=True
+        ).count()
+        pending_count = AgentAllowlistInvite.objects.filter(
+            agent=agent,
+            status=AgentAllowlistInvite.InviteStatus.PENDING
+        ).count()
+        total_count = active_count + pending_count
+        contact_counts = get_agent_contact_counts(agent)
+        if contact_counts is not None:
+            total_count = contact_counts["total"]
+
+        return {
+            'success': True,
+            'html': html,
+            'active_count': total_count,
+            'allowlist': self._serialize_allowlist_state(
+                agent,
+                entries=entries,
+                pending_invites=pending_invites,
+                owner_email=owner_email,
+                owner_phone=owner_phone,
+                active_count=active_count,
+                pending_count=pending_count,
+                total_count=total_count,
+                max_contacts=max_contacts_per_agent,
+            ),
+            'collaborators': self._serialize_collaborator_state(
+                agent,
+                counts=contact_counts,
+                max_contacts=max_contacts_per_agent,
+                can_manage=self._can_manage_collaborators(request.user, agent),
+            ),
+        }
+
+    def _allowlist_ajax_success_response(
+        self,
+        request,
+        agent: PersistentAgent,
+        *,
+        max_contacts_per_agent: int | None,
+    ) -> JsonResponse:
+        return JsonResponse(
+            self._build_allowlist_ajax_success_payload(
+                request,
+                agent,
+                max_contacts_per_agent=max_contacts_per_agent,
+            )
+        )
+
+    def _handle_add_allowlist_ajax(
+        self,
+        request,
+        agent: PersistentAgent,
+        *,
+        max_contacts_per_agent: int | None,
+    ) -> JsonResponse:
+        channel = request.POST.get('channel', 'email')
+        address = request.POST.get('address', '').strip()
+        sms_contact_purpose = (request.POST.get('sms_contact_purpose') or '').strip() or None
+        sms_contact_purpose_details = (
+            request.POST.get('sms_contact_purpose_details') or ''
+        ).strip() or None
+        sms_contact_permission_attested = _posted_bool(
+            request.POST.get('sms_contact_permission_attested')
+        )
+
+        if not address:
+            return JsonResponse({'success': False, 'error': 'Address is required'})
+
+        existing_entry = None
+        try:
+            existing_entry = CommsAllowlistEntry.objects.filter(
+                agent=agent,
+                channel=channel,
+                address=address
+            ).first()
+
+            if existing_entry:
+                if existing_entry.is_active:
+                    return JsonResponse({'success': False, 'error': 'This address is already in the allowlist'})
+
+                existing_entry.is_active = True
+                allow_inbound = request.POST.get('allow_inbound')
+                allow_outbound = request.POST.get('allow_outbound')
+                update_fields = ['is_active', 'allow_inbound', 'allow_outbound']
+                if allow_inbound is not None:
+                    existing_entry.allow_inbound = allow_inbound.lower() == 'true'
+                if allow_outbound is not None:
+                    existing_entry.allow_outbound = allow_outbound.lower() == 'true'
+                if channel == CommsChannel.SMS:
+                    if 'sms_contact_purpose' in request.POST:
+                        existing_entry.sms_contact_purpose = sms_contact_purpose
+                        update_fields.append('sms_contact_purpose')
+                    if 'sms_contact_purpose_details' in request.POST:
+                        existing_entry.sms_contact_purpose_details = sms_contact_purpose_details
+                        update_fields.append('sms_contact_purpose_details')
+                    if 'sms_contact_permission_attested' in request.POST:
+                        existing_entry.sms_contact_permission_attested = (
+                            sms_contact_permission_attested
+                        )
+                        update_fields.append('sms_contact_permission_attested')
+                existing_entry.save(update_fields=update_fields)
+                entry = existing_entry
+            else:
+                allow_inbound = request.POST.get('allow_inbound', 'true').lower() == 'true'
+                allow_outbound = request.POST.get('allow_outbound', 'true').lower() == 'true'
+
+                entry = CommsAllowlistEntry.objects.create(
+                    agent=agent,
+                    channel=channel,
+                    address=address,
+                    is_active=True,
+                    allow_inbound=allow_inbound,
+                    allow_outbound=allow_outbound,
+                    sms_contact_purpose=sms_contact_purpose if channel == CommsChannel.SMS else None,
+                    sms_contact_purpose_details=(
+                        sms_contact_purpose_details if channel == CommsChannel.SMS else None
+                    ),
+                    sms_contact_permission_attested=(
+                        sms_contact_permission_attested if channel == CommsChannel.SMS else None
+                    ),
+                )
+
+                contact_props = Analytics.with_org_properties(
+                    {
+                        'agent_id': str(agent.id),
+                        'channel': channel,
+                        'address': address,
+                    },
+                    organization=getattr(agent, "organization", None),
+                )
+                Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.AGENT_CONTACTS_APPROVED,
+                    source=AnalyticsSource.WEB,
+                    properties=contact_props.copy(),
+                )
+
+            if channel == CommsChannel.SMS:
+                track_sms_contact_approval(
+                    user_id=request.user.id,
+                    agent=agent,
+                    address=entry.address,
+                    approval_source="agent_detail_allowlist_ajax",
+                    approval_action="reactivate" if existing_entry else "create",
+                    allow_inbound=entry.allow_inbound,
+                    allow_outbound=entry.allow_outbound,
+                    can_configure=entry.can_configure,
+                    sms_contact_purpose=entry.sms_contact_purpose,
+                    sms_contact_purpose_details=entry.sms_contact_purpose_details,
+                    sms_contact_permission_attested=entry.sms_contact_permission_attested,
+                    allowlist_entry_id=str(entry.id),
+                )
+
+            process_agent_events_task.delay(str(agent.id))
+            if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+                agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+                agent.save(update_fields=['whitelist_policy'])
+
+            return self._allowlist_ajax_success_response(
+                request,
+                agent,
+                max_contacts_per_agent=max_contacts_per_agent,
+            )
+        except ValidationError as exc:
+            if existing_entry and existing_entry.pk:
+                existing_entry.refresh_from_db()
+            return JsonResponse({'success': False, 'error': _format_validation_error(exc)})
+        except IntegrityError:
+            return JsonResponse({'success': False, 'error': 'This address is already in the allowlist'})
+        except Exception as exc:
+            return JsonResponse({'success': False, 'error': str(exc)})
+
+    def _handle_remove_allowlist_ajax(
+        self,
+        request,
+        agent: PersistentAgent,
+        *,
+        max_contacts_per_agent: int | None,
+    ) -> JsonResponse:
+        entry_id = request.POST.get('entry_id')
+        try:
+            CommsAllowlistEntry.objects.filter(agent=agent, id=entry_id).delete()
+            return self._allowlist_ajax_success_response(
+                request,
+                agent,
+                max_contacts_per_agent=max_contacts_per_agent,
+            )
+        except Exception as exc:
+            return JsonResponse({'success': False, 'error': str(exc)})
+
+    def _handle_cancel_invite_ajax(
+        self,
+        request,
+        agent: PersistentAgent,
+        *,
+        max_contacts_per_agent: int | None,
+    ) -> JsonResponse:
+        invite_id = request.POST.get('invite_id')
+        try:
+            AgentAllowlistInvite.objects.filter(agent=agent, id=invite_id).delete()
+            return self._allowlist_ajax_success_response(
+                request,
+                agent,
+                max_contacts_per_agent=max_contacts_per_agent,
+            )
+        except Exception as exc:
+            return JsonResponse({'success': False, 'error': str(exc)})
+
+    def _handle_allowlist_ajax_action(
+        self,
+        request,
+        agent: PersistentAgent,
+        action: str,
+        *,
+        max_contacts_per_agent: int | None,
+    ) -> JsonResponse | None:
+        handlers = {
+            'add_allowlist': self._handle_add_allowlist_ajax,
+            'remove_allowlist': self._handle_remove_allowlist_ajax,
+            'cancel_invite': self._handle_cancel_invite_ajax,
+        }
+        handler = handlers.get(action)
+        if handler is None:
+            return None
+        return handler(
+            request,
+            agent,
+            max_contacts_per_agent=max_contacts_per_agent,
+        )
 
     def _build_mcp_servers_payload(
         self,
@@ -935,356 +1197,16 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             'reassign_org',
         }
         if is_ajax and action in ajax_actions:
-            from api.models import CommsAllowlistEntry
-            from django.db import IntegrityError
+            allowlist_response = self._handle_allowlist_ajax_action(
+                request,
+                agent,
+                action,
+                max_contacts_per_agent=max_contacts_per_agent,
+            )
+            if allowlist_response is not None:
+                return allowlist_response
 
-            if action == 'add_allowlist':
-                channel = request.POST.get('channel', 'email')
-                address = request.POST.get('address', '').strip()
-                sms_contact_purpose = (request.POST.get('sms_contact_purpose') or '').strip() or None
-                sms_contact_purpose_details = (
-                    request.POST.get('sms_contact_purpose_details') or ''
-                ).strip() or None
-                sms_contact_permission_attested = _posted_bool(
-                    request.POST.get('sms_contact_permission_attested')
-                )
-                
-                if not address:
-                    return JsonResponse({'success': False, 'error': 'Address is required'})
-                
-                try:
-                    # Check if they're already in the allowlist
-                    existing_entry = CommsAllowlistEntry.objects.filter(
-                        agent=agent,
-                        channel=channel,
-                        address=address
-                    ).first()
-                    
-                    if existing_entry:
-                        if existing_entry.is_active:
-                            return JsonResponse({'success': False, 'error': 'This address is already in the allowlist'})
-                        else:
-                            # Reactivate the existing entry and update inbound/outbound settings
-                            existing_entry.is_active = True
-                            # Update inbound/outbound settings from POST or keep existing
-                            allow_inbound = request.POST.get('allow_inbound')
-                            allow_outbound = request.POST.get('allow_outbound')
-                            update_fields = ['is_active', 'allow_inbound', 'allow_outbound']
-                            if allow_inbound is not None:
-                                existing_entry.allow_inbound = allow_inbound.lower() == 'true'
-                            if allow_outbound is not None:
-                                existing_entry.allow_outbound = allow_outbound.lower() == 'true'
-                            if channel == CommsChannel.SMS:
-                                if 'sms_contact_purpose' in request.POST:
-                                    existing_entry.sms_contact_purpose = sms_contact_purpose
-                                    update_fields.append('sms_contact_purpose')
-                                if 'sms_contact_purpose_details' in request.POST:
-                                    existing_entry.sms_contact_purpose_details = sms_contact_purpose_details
-                                    update_fields.append('sms_contact_purpose_details')
-                                if 'sms_contact_permission_attested' in request.POST:
-                                    existing_entry.sms_contact_permission_attested = (
-                                        sms_contact_permission_attested
-                                    )
-                                    update_fields.append('sms_contact_permission_attested')
-                            existing_entry.save(update_fields=update_fields)
-                            entry = existing_entry
-                    else:
-                        # Directly create the allowlist entry (skip invitation process)
-                        # Get inbound/outbound settings from POST or default to both
-                        allow_inbound = request.POST.get('allow_inbound', 'true').lower() == 'true'
-                        allow_outbound = request.POST.get('allow_outbound', 'true').lower() == 'true'
-                        
-                        entry = CommsAllowlistEntry.objects.create(
-                            agent=agent,
-                            channel=channel,
-                            address=address,
-                            is_active=True,
-                            allow_inbound=allow_inbound,
-                            allow_outbound=allow_outbound,
-                            sms_contact_purpose=sms_contact_purpose if channel == CommsChannel.SMS else None,
-                            sms_contact_purpose_details=(
-                                sms_contact_purpose_details if channel == CommsChannel.SMS else None
-                            ),
-                            sms_contact_permission_attested=(
-                                sms_contact_permission_attested if channel == CommsChannel.SMS else None
-                            ),
-                        )
-
-                        contact_props = Analytics.with_org_properties(
-                            {
-                                'agent_id': str(agent.id),
-                                'channel': channel,
-                                'address': address,
-                            },
-                            organization=getattr(agent, "organization", None),
-                        )
-                        Analytics.track_event(
-                            user_id=request.user.id,
-                            event=AnalyticsEvent.AGENT_CONTACTS_APPROVED,
-                            source=AnalyticsSource.WEB,
-                            properties=contact_props.copy(),
-                        )
-
-                    if channel == CommsChannel.SMS:
-                        track_sms_contact_approval(
-                            user_id=request.user.id,
-                            agent=agent,
-                            address=entry.address,
-                            approval_source="agent_detail_allowlist_ajax",
-                            approval_action="reactivate" if existing_entry else "create",
-                            allow_inbound=entry.allow_inbound,
-                            allow_outbound=entry.allow_outbound,
-                            can_configure=entry.can_configure,
-                            sms_contact_purpose=entry.sms_contact_purpose,
-                            sms_contact_purpose_details=entry.sms_contact_purpose_details,
-                            sms_contact_permission_attested=entry.sms_contact_permission_attested,
-                            allowlist_entry_id=str(entry.id),
-                        )
-
-                    from api.agent.tasks.process_events import process_agent_events_task
-                    process_agent_events_task.delay(str(agent.id))
-                    
-                    # Switch agent to manual allowlist mode if not already
-                    # (though it should already be manual with our new changes)
-                    if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
-                        agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
-                        agent.save(update_fields=['whitelist_policy'])
-                    
-                    # Render updated list
-                    entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
-                    
-                    # We no longer create pending invites from the agent config page
-                    # but there might be some from other flows, so we still check
-                    pending_invites = AgentAllowlistInvite.objects.filter(
-                        agent=agent, 
-                        status=AgentAllowlistInvite.InviteStatus.PENDING
-                    ).order_by('channel', 'address')
-                    
-                    # Add owner information for display
-                    owner_email = agent.user.email
-                    owner_phone = None
-                    try:
-                        from api.models import UserPhoneNumber
-                        phone_obj = UserPhoneNumber.objects.filter(
-                            user=agent.user, 
-                            is_verified=True
-                        ).first()
-                        owner_phone = phone_obj.phone_number if phone_obj else None
-                    except:
-                        pass
-                    
-                    html = render_to_string('console/partials/_allowlist_entries_inline.html', {
-                        'allowlist_entries': entries,
-                        'pending_invites': pending_invites,
-                        'owner_email': owner_email,
-                        'owner_phone': owner_phone,
-                    })
-                    
-                    # Count active entries for the counter
-                    active_count = CommsAllowlistEntry.objects.filter(
-                        agent=agent,
-                        is_active=True
-                    ).count()
-                    
-                    # Also count any remaining pending invitations from other flows
-                    pending_count = AgentAllowlistInvite.objects.filter(
-                        agent=agent,
-                        status=AgentAllowlistInvite.InviteStatus.PENDING
-                    ).count()
-                    total_count = active_count + pending_count
-                    contact_counts = get_agent_contact_counts(agent)
-                    if contact_counts is not None:
-                        total_count = contact_counts["total"]
-                    allowlist_payload = self._serialize_allowlist_state(
-                        agent,
-                        entries=entries,
-                        pending_invites=pending_invites,
-                        owner_email=owner_email,
-                        owner_phone=owner_phone,
-                        active_count=active_count,
-                        pending_count=pending_count,
-                        total_count=total_count,
-                        max_contacts=max_contacts_per_agent,
-                    )
-                    collaborators_payload = self._serialize_collaborator_state(
-                        agent,
-                        counts=contact_counts,
-                        max_contacts=max_contacts_per_agent,
-                        can_manage=self._can_manage_collaborators(request.user, agent),
-                    )
-
-                    return JsonResponse({
-                        'success': True,
-                        'html': html,
-                        'active_count': total_count,
-                        'allowlist': allowlist_payload,
-                        'collaborators': collaborators_payload,
-                    })
-                    
-                except ValidationError as e:
-                    existing_entry = locals().get('existing_entry')
-                    if existing_entry and existing_entry.pk:
-                        existing_entry.refresh_from_db()
-                    return JsonResponse({'success': False, 'error': _format_validation_error(e)})
-                except IntegrityError:
-                    return JsonResponse({'success': False, 'error': 'This address is already in the allowlist'})
-                except Exception as e:
-                    return JsonResponse({'success': False, 'error': str(e)})
-            
-            elif action == 'remove_allowlist':
-                entry_id = request.POST.get('entry_id')
-                
-                try:
-                    CommsAllowlistEntry.objects.filter(agent=agent, id=entry_id).delete()
-                    
-                    # Render updated list
-                    entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
-                    pending_invites = AgentAllowlistInvite.objects.filter(
-                        agent=agent, 
-                        status=AgentAllowlistInvite.InviteStatus.PENDING
-                    ).order_by('channel', 'address')
-                    
-                    # Add owner information for display
-                    owner_email = agent.user.email
-                    owner_phone = None
-                    try:
-                        from api.models import UserPhoneNumber
-                        phone_obj = UserPhoneNumber.objects.filter(
-                            user=agent.user, 
-                            is_verified=True
-                        ).first()
-                        owner_phone = phone_obj.phone_number if phone_obj else None
-                    except:
-                        pass
-                    
-                    html = render_to_string('console/partials/_allowlist_entries_inline.html', {
-                        'allowlist_entries': entries,
-                        'pending_invites': pending_invites,
-                        'owner_email': owner_email,
-                        'owner_phone': owner_phone,
-                    })
-
-                    # Count active entries AND pending invitations for the counter
-                    active_count = CommsAllowlistEntry.objects.filter(
-                        agent=agent,
-                        is_active=True
-                    ).count()
-                    pending_count = AgentAllowlistInvite.objects.filter(
-                        agent=agent,
-                        status=AgentAllowlistInvite.InviteStatus.PENDING
-                    ).count()
-                    total_count = active_count + pending_count
-                    contact_counts = get_agent_contact_counts(agent)
-                    if contact_counts is not None:
-                        total_count = contact_counts["total"]
-                    allowlist_payload = self._serialize_allowlist_state(
-                        agent,
-                        entries=entries,
-                        pending_invites=pending_invites,
-                        owner_email=owner_email,
-                        owner_phone=owner_phone,
-                        active_count=active_count,
-                        pending_count=pending_count,
-                        total_count=total_count,
-                        max_contacts=max_contacts_per_agent,
-                    )
-
-                    collaborators_payload = self._serialize_collaborator_state(
-                        agent,
-                        counts=contact_counts,
-                        max_contacts=max_contacts_per_agent,
-                        can_manage=self._can_manage_collaborators(request.user, agent),
-                    )
-
-                    return JsonResponse({
-                        'success': True,
-                        'html': html,
-                        'active_count': total_count,
-                        'allowlist': allowlist_payload,
-                        'collaborators': collaborators_payload,
-                    })
-                    
-                except Exception as e:
-                    return JsonResponse({'success': False, 'error': str(e)})
-            
-            elif action == 'cancel_invite':
-                invite_id = request.POST.get('invite_id')
-                
-                try:
-                    # Find and delete the invitation
-                    AgentAllowlistInvite.objects.filter(agent=agent, id=invite_id).delete()
-                    
-                    # Render updated list
-                    entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
-                    pending_invites = AgentAllowlistInvite.objects.filter(
-                        agent=agent, 
-                        status=AgentAllowlistInvite.InviteStatus.PENDING
-                    ).order_by('channel', 'address')
-                    
-                    # Add owner information for display
-                    owner_email = agent.user.email
-                    owner_phone = None
-                    try:
-                        from api.models import UserPhoneNumber
-                        phone_obj = UserPhoneNumber.objects.filter(
-                            user=agent.user, 
-                            is_verified=True
-                        ).first()
-                        owner_phone = phone_obj.phone_number if phone_obj else None
-                    except:
-                        pass
-                    
-                    html = render_to_string('console/partials/_allowlist_entries_inline.html', {
-                        'allowlist_entries': entries,
-                        'pending_invites': pending_invites,
-                        'owner_email': owner_email,
-                        'owner_phone': owner_phone,
-                    })
-                    
-                    # Count active entries AND pending invitations for the counter
-                    active_count = CommsAllowlistEntry.objects.filter(
-                        agent=agent,
-                        is_active=True
-                    ).count()
-                    pending_count = AgentAllowlistInvite.objects.filter(
-                        agent=agent,
-                        status=AgentAllowlistInvite.InviteStatus.PENDING
-                    ).count()
-                    total_count = active_count + pending_count
-                    contact_counts = get_agent_contact_counts(agent)
-                    if contact_counts is not None:
-                        total_count = contact_counts["total"]
-                    allowlist_payload = self._serialize_allowlist_state(
-                        agent,
-                        entries=entries,
-                        pending_invites=pending_invites,
-                        owner_email=owner_email,
-                        owner_phone=owner_phone,
-                        active_count=active_count,
-                        pending_count=pending_count,
-                        total_count=total_count,
-                        max_contacts=max_contacts_per_agent,
-                    )
-
-                    collaborators_payload = self._serialize_collaborator_state(
-                        agent,
-                        counts=contact_counts,
-                        max_contacts=max_contacts_per_agent,
-                        can_manage=self._can_manage_collaborators(request.user, agent),
-                    )
-
-                    return JsonResponse({
-                        'success': True,
-                        'html': html,
-                        'active_count': total_count,
-                        'allowlist': allowlist_payload,
-                        'collaborators': collaborators_payload,
-                    })
-                    
-                except Exception as e:
-                    return JsonResponse({'success': False, 'error': str(e)})
-
-            elif action == 'add_collaborator':
+            if action == 'add_collaborator':
                 if not self._can_manage_collaborators(request.user, agent):
                     return JsonResponse({'success': False, 'error': 'Not authorized to invite collaborators.'}, status=403)
 

@@ -38,11 +38,10 @@ type UsageAgentLeaderboardProps = {
   effectiveRange: DateRangeValue | null
   fallbackRange: DateRangeValue | null
   agentIds: string[]
-  embedded?: boolean
 }
 
-function SortIndicator({ state, embedded = false }: { state: false | 'asc' | 'desc'; embedded?: boolean }) {
-  const baseClasses = `h-3 w-3 ${embedded ? 'text-slate-500' : 'text-slate-400'}`
+function SortIndicator({ state }: { state: false | 'asc' | 'desc' }) {
+  const baseClasses = 'h-3 w-3 text-slate-500'
 
   if (state === 'asc') {
     return (
@@ -97,11 +96,10 @@ function SortIndicator({ state, embedded = false }: { state: false | 'asc' | 'de
 type SortableHeaderProps = {
   column: Column<LeaderboardRow, unknown>
   align?: 'left' | 'right'
-  embedded?: boolean
   children: ReactNode
 }
 
-function SortableHeader({ column, align = 'left', embedded = false, children }: SortableHeaderProps) {
+function SortableHeader({ column, align = 'left', children }: SortableHeaderProps) {
   const isSorted = column.getIsSorted()
 
   const handleClick = () => {
@@ -123,10 +121,10 @@ function SortableHeader({ column, align = 'left', embedded = false, children }: 
           handleClick()
         }
       }}
-      className={`flex w-full items-center gap-2 text-xs font-medium uppercase tracking-wider ${embedded ? 'text-slate-400' : 'text-slate-500'} ${alignmentClass}`}
+      className={`flex w-full items-center gap-2 text-xs font-medium uppercase tracking-wider text-slate-400 ${alignmentClass}`}
     >
       <span>{children}</span>
-      <SortIndicator state={isSorted} embedded={embedded} />
+      <SortIndicator state={isSorted} />
     </button>
   )
 }
@@ -134,21 +132,16 @@ function SortableHeader({ column, align = 'left', embedded = false, children }: 
 function LeaderboardAgentCell({
   row,
   rank,
-  embedded = false,
 }: {
   row: LeaderboardRow
   rank: number
-  embedded?: boolean
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className={`inline-flex items-center gap-2 text-sm font-medium ${embedded ? 'text-slate-100' : 'text-slate-900'}`}>
+      <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-100">
         <span>{row.name}</span>
         {row.isDeleted ? (
-          <span className={embedded
-            ? 'rounded-full border border-rose-300/25 bg-rose-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-200'
-            : 'rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-700'}
-          >
+          <span className="rounded-full border border-rose-300/25 bg-rose-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-200">
             Deleted
           </span>
         ) : null}
@@ -158,7 +151,7 @@ function LeaderboardAgentCell({
   )
 }
 
-export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds, embedded = false }: UsageAgentLeaderboardProps) {
+export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds }: UsageAgentLeaderboardProps) {
   const baseRange = effectiveRange ?? fallbackRange
 
   const creditFormatter = useMemo(
@@ -223,12 +216,11 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
       {
         accessorKey: 'name',
         enableSorting: true,
-        header: ({ column }) => <SortableHeader column={column} embedded={embedded}>Agent</SortableHeader>,
+        header: ({ column }) => <SortableHeader column={column}>Agent</SortableHeader>,
         cell: ({ row, table }) => (
           <LeaderboardAgentCell
             row={row.original}
             rank={table.getRowModel().rows.indexOf(row) + 1}
-            embedded={embedded}
           />
         ),
       },
@@ -237,13 +229,13 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
         accessorFn: (row) => row.tasksTotal,
         enableSorting: true,
         header: ({ column }) => (
-          <SortableHeader column={column} align="right" embedded={embedded}>
+          <SortableHeader column={column} align="right">
             Credits
           </SortableHeader>
         ),
         cell: ({ getValue }) => {
           const value = Number(getValue<number>())
-          return <span className={`whitespace-nowrap text-sm font-semibold ${embedded ? 'text-slate-100' : 'text-slate-900'}`}>{creditFormatter.format(value)}</span>
+          return <span className="whitespace-nowrap text-sm font-semibold text-slate-100">{creditFormatter.format(value)}</span>
         },
         sortingFn: 'basic',
       },
@@ -252,13 +244,13 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
         accessorFn: (row) => row.tasksPerDay,
         enableSorting: true,
         header: ({ column }) => (
-          <SortableHeader column={column} align="right" embedded={embedded}>
+          <SortableHeader column={column} align="right">
             Credits / Day
           </SortableHeader>
         ),
         cell: ({ getValue }) => {
           const value = Number(getValue<number>())
-          return <span className={`whitespace-nowrap text-sm ${embedded ? 'text-slate-200' : 'text-slate-900'}`}>{creditFormatter.format(value)}</span>
+          return <span className="whitespace-nowrap text-sm text-slate-200">{creditFormatter.format(value)}</span>
         },
         sortingFn: 'basic',
       },
@@ -267,7 +259,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
         accessorFn: () => null,
         enableSorting: false,
         header: () => (
-          <div className={`flex w-full justify-end text-right text-xs font-medium uppercase tracking-wider ${embedded ? 'text-slate-400' : 'text-slate-500'}`}>
+          <div className="flex w-full justify-end text-right text-xs font-medium uppercase tracking-wider text-slate-400">
             Actions
           </div>
         ),
@@ -287,7 +279,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
             <a
               href={configureHref}
               onClick={(event) => handleAppAnchorClick(event, configureHref)}
-              className={embedded ? 'text-sm font-semibold text-sky-300 hover:text-sky-200' : 'text-sm font-semibold text-indigo-600 hover:text-indigo-500'}
+              className="text-sm font-semibold text-sky-300 hover:text-sky-200"
             >
               Configure
             </a>
@@ -295,7 +287,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
         },
       },
     ]
-  }, [creditFormatter, embedded])
+  }, [creditFormatter])
 
   const table = useReactTable({
     data: rows,
@@ -310,24 +302,16 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
   const hasOverflowRows = sortedRows.length > DEFAULT_VISIBLE_ROWS
   const visibleRows = showAllRows ? sortedRows : sortedRows.slice(0, DEFAULT_VISIBLE_ROWS)
 
-  const sectionClassName = embedded
-    ? getSettingsSurfaceClassName({ variant: 'embedded', roundedClassName: 'rounded-xl' })
-    : 'gobii-card-base'
-  const headerClassName = embedded ? 'px-6 py-4' : 'border-b border-white/50 px-6 py-4'
-  const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-slate-900'
-  const subtitleClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-600'
-  const tableClassName = embedded ? 'w-full' : 'w-full divide-y divide-white/40'
-  const tableHeadClassName = embedded ? 'bg-slate-950/40' : 'bg-gray-50/50'
-  const tableBodyClassName = embedded ? 'divide-y divide-slate-200/10' : 'divide-y divide-gray-200/70'
-  const emptyCellClassName = embedded
-    ? 'px-3 md:px-6 py-4 text-center text-sm text-slate-400'
-    : 'px-3 md:px-6 py-4 text-center text-sm text-slate-500'
-  const errorCellClassName = embedded
-    ? 'px-3 md:px-6 py-4 text-center text-sm text-rose-300'
-    : 'px-3 md:px-6 py-4 text-center text-sm text-red-600'
-  const toggleClassName = embedded
-    ? 'text-sm font-semibold text-sky-300 hover:text-sky-200'
-    : 'text-sm font-semibold text-indigo-600 hover:text-indigo-500'
+  const sectionClassName = getSettingsSurfaceClassName({ variant: 'embedded', roundedClassName: 'rounded-xl' })
+  const headerClassName = 'px-6 py-4'
+  const titleClassName = 'text-lg font-semibold text-slate-50'
+  const subtitleClassName = 'text-sm text-slate-400'
+  const tableClassName = 'w-full'
+  const tableHeadClassName = 'bg-slate-950/40'
+  const tableBodyClassName = 'divide-y divide-slate-200/10'
+  const emptyCellClassName = 'px-3 md:px-6 py-4 text-center text-sm text-slate-400'
+  const errorCellClassName = 'px-3 md:px-6 py-4 text-center text-sm text-rose-300'
+  const toggleClassName = 'text-sm font-semibold text-sky-300 hover:text-sky-200'
 
   return (
     <section className={sectionClassName}>
@@ -405,7 +389,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
         </table>
       </div>
       {hasOverflowRows ? (
-        <div className={embedded ? 'border-t border-slate-200/10 px-6 py-4' : 'border-t border-white/50 px-6 py-4'}>
+        <div className="border-t border-slate-200/10 px-6 py-4">
           <button type="button" className={toggleClassName} onClick={() => setShowAllRows((current) => !current)}>
             {showAllRows ? 'Show less' : `Show more (${sortedRows.length - DEFAULT_VISIBLE_ROWS})`}
           </button>

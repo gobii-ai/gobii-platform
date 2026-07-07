@@ -152,3 +152,69 @@ export function KeyValueList({ items }: { items: Array<{ label: string; value: R
     </dl>
   )
 }
+
+export function ExternalLinkText({
+  href,
+  children,
+  className = 'text-indigo-600 underline',
+}: {
+  href: string
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className={className}>
+      {children}
+    </a>
+  )
+}
+
+export function EmptyToolResult({
+  children,
+  compact = false,
+}: {
+  children: ReactNode
+  compact?: boolean
+}) {
+  return <p className={compact ? 'text-sm text-slate-500' : 'text-slate-500'}>{children}</p>
+}
+
+export function ToolResultCard({
+  children,
+  className = '',
+  as: Component = 'div',
+}: {
+  children: ReactNode
+  className?: string
+  as?: 'div' | 'li'
+}) {
+  return (
+    <Component className={`rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-sm ${className}`.trim()}>
+      {children}
+    </Component>
+  )
+}
+
+export function MetaLine({ items }: { items: Array<string | null | undefined | false> }) {
+  const filtered = items.filter(Boolean) as string[]
+  if (!filtered.length) return null
+  return <p className="text-xs text-slate-500">{filtered.join(' • ')}</p>
+}
+
+export function ResultListSection({
+  title,
+  children,
+  columns = false,
+}: {
+  title: string
+  children: ReactNode
+  columns?: boolean
+}) {
+  return (
+    <Section title={title}>
+      <div className={columns ? 'grid grid-cols-1 gap-3 md:grid-cols-2' : 'space-y-3'}>
+        {children}
+      </div>
+    </Section>
+  )
+}

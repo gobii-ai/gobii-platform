@@ -2098,36 +2098,6 @@ class TaskCreditInlineForUser(admin.TabularInline):
         return obj.remaining
     remaining_display.short_description = "Remaining"
 
-class BrowserUseAgentInlineForUser(admin.TabularInline):
-    model = BrowserUseAgent
-    extra = 0
-    fields = ("name", "created_at", "tasks_for_this_agent_link", "view_agent_link")
-    readonly_fields = ("name", "created_at", "tasks_for_this_agent_link", "view_agent_link")
-    show_change_link = False # Using custom link
-
-    def tasks_for_this_agent_link(self, obj):
-        if obj.pk:
-            url = (
-                reverse("admin:api_browseruseagenttask_changelist")
-                + f"?agent__id__exact={obj.pk}"
-            )
-            return format_html('<a href="{}">View Tasks</a>', url)
-        return "N/A (Agent not saved)"
-    tasks_for_this_agent_link.short_description = "Tasks"
-
-    def view_agent_link(self, obj):
-        if obj.pk:
-            url = reverse("admin:api_browseruseagent_change", args=[obj.pk])
-            return format_html('<a href="{}">View/Edit {}</a>', url, obj.name or "Agent")
-        return "N/A (Agent not saved)"
-    view_agent_link.short_description = "Agent Page"
-
-    def has_add_permission(self, request, obj=None):
-        return False
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-
 class UserFlagsInlineForUser(admin.StackedInline):
     model = UserFlags
     extra = 1
@@ -2610,8 +2580,9 @@ class CustomUserAdmin(UserAdmin):
     form = CustomUserAdminForm
     change_list_template = "admin/user_change_list.html"
     USER_FLAG_SEARCH_PATTERN = re.compile(r"^(?P<slug>[-A-Za-z0-9_]+)=(?P<value>true|false)$")
-    # Keep lightweight inlines only (flags, referral, agents); omit heavy TaskCredit inline.
-    inlines = [UserFlagsInlineForUser, UserReferralInlineForUser, BrowserUseAgentInlineForUser]
+    # Keep inlines to single-row relations; high-volume related models make the
+    # user change form exceed Django's POST field limit.
+    inlines = [UserFlagsInlineForUser, UserReferralInlineForUser]
 
     actions = ['queue_rollup_for_selected_users', 'sync_latest_fingerprint_visit_for_selected_users']
 
@@ -2853,6 +2824,7 @@ class CustomUserAdmin(UserAdmin):
     def get_readonly_fields(self, request, obj=None):
         base = super().get_readonly_fields(request, obj)
         return base + (
+            "agents_summary_link",
             "taskcredit_summary_link",
             "timezone_display",
             "execution_paused_at_display",
@@ -2867,6 +2839,7 @@ class CustomUserAdmin(UserAdmin):
         configured_user_flag_fields = self._user_flag_field_names()
         if configured_user_flag_fields:
             fieldsets.append(("Configured User Flags", {"fields": configured_user_flag_fields}))
+        fieldsets.append(("Agents", {"fields": ("agents_summary_link",)}))
         fieldsets.append(("Task Credits", {"fields": ("taskcredit_summary_link",)}))
         if obj is not None:
             fieldsets.append(
@@ -2928,6 +2901,17 @@ class CustomUserAdmin(UserAdmin):
             remaining,
             url,
         )
+
+    @admin.display(description="Agents")
+    def agents_summary_link(self, obj):
+        if obj is None or not obj.pk:
+            return "N/A"
+        count = obj.agents.count()
+        url = (
+            reverse("admin:api_browseruseagent_changelist")
+            + f"?user__id__exact={obj.pk}"
+        )
+        return format_html('<a href="{}">View all&nbsp;{} agents</a>', url, count)
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)

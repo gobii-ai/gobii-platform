@@ -912,13 +912,7 @@ class _CorrAggregate:
         return self.cov / math.sqrt(denom)
 
 
-class _StddevSampAggregate:
-    """Aggregate for sample standard deviation (STDDEV/STDDEV_SAMP).
-
-    Uses Welford's online algorithm for numerical stability.
-    Returns sqrt(sum((x - mean)^2) / (N-1)) - sample std dev.
-    """
-
+class _WelfordAggregate:
     def __init__(self) -> None:
         self.count = 0
         self.mean = 0.0
@@ -939,6 +933,10 @@ class _StddevSampAggregate:
         delta2 = x_val - self.mean
         self.m2 += delta * delta2
 
+
+class _StddevSampAggregate(_WelfordAggregate):
+    """Aggregate for sample standard deviation (STDDEV/STDDEV_SAMP)."""
+
     def finalize(self) -> Optional[float]:
         if self.count < 2:
             return None
@@ -946,31 +944,8 @@ class _StddevSampAggregate:
         return math.sqrt(variance)
 
 
-class _StddevPopAggregate:
-    """Aggregate for population standard deviation (STDDEV_POP).
-
-    Returns sqrt(sum((x - mean)^2) / N) - population std dev.
-    """
-
-    def __init__(self) -> None:
-        self.count = 0
-        self.mean = 0.0
-        self.m2 = 0.0
-
-    def step(self, x: Optional[float]) -> None:
-        if x is None:
-            return
-        try:
-            x_val = float(x)
-        except (TypeError, ValueError):
-            return
-        if not math.isfinite(x_val):
-            return
-        self.count += 1
-        delta = x_val - self.mean
-        self.mean += delta / self.count
-        delta2 = x_val - self.mean
-        self.m2 += delta * delta2
+class _StddevPopAggregate(_WelfordAggregate):
+    """Aggregate for population standard deviation (STDDEV_POP)."""
 
     def finalize(self) -> Optional[float]:
         if self.count < 1:
@@ -979,31 +954,8 @@ class _StddevPopAggregate:
         return math.sqrt(variance)
 
 
-class _VarianceSampAggregate:
-    """Aggregate for sample variance (VARIANCE/VAR_SAMP).
-
-    Returns sum((x - mean)^2) / (N-1).
-    """
-
-    def __init__(self) -> None:
-        self.count = 0
-        self.mean = 0.0
-        self.m2 = 0.0
-
-    def step(self, x: Optional[float]) -> None:
-        if x is None:
-            return
-        try:
-            x_val = float(x)
-        except (TypeError, ValueError):
-            return
-        if not math.isfinite(x_val):
-            return
-        self.count += 1
-        delta = x_val - self.mean
-        self.mean += delta / self.count
-        delta2 = x_val - self.mean
-        self.m2 += delta * delta2
+class _VarianceSampAggregate(_WelfordAggregate):
+    """Aggregate for sample variance (VARIANCE/VAR_SAMP)."""
 
     def finalize(self) -> Optional[float]:
         if self.count < 2:
@@ -1011,31 +963,8 @@ class _VarianceSampAggregate:
         return self.m2 / (self.count - 1)
 
 
-class _VariancePopAggregate:
-    """Aggregate for population variance (VAR_POP).
-
-    Returns sum((x - mean)^2) / N.
-    """
-
-    def __init__(self) -> None:
-        self.count = 0
-        self.mean = 0.0
-        self.m2 = 0.0
-
-    def step(self, x: Optional[float]) -> None:
-        if x is None:
-            return
-        try:
-            x_val = float(x)
-        except (TypeError, ValueError):
-            return
-        if not math.isfinite(x_val):
-            return
-        self.count += 1
-        delta = x_val - self.mean
-        self.mean += delta / self.count
-        delta2 = x_val - self.mean
-        self.m2 += delta * delta2
+class _VariancePopAggregate(_WelfordAggregate):
+    """Aggregate for population variance (VAR_POP)."""
 
     def finalize(self) -> Optional[float]:
         if self.count < 1:

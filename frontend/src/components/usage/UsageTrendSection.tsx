@@ -42,7 +42,6 @@ type UsageTrendSectionProps = {
   fallbackRange: DateRangeValue | null
   timezone?: string
   agentIds: string[]
-  embedded?: boolean
 }
 
 type TooltipPrimitiveValue = number | string | Date | null | undefined
@@ -53,7 +52,6 @@ export function UsageTrendSection({
   fallbackRange,
   timezone,
   agentIds,
-  embedded = false,
 }: UsageTrendSectionProps) {
   const baseRange = effectiveRange ?? fallbackRange
   const chartRef = useRef<ReactEChartsCore>(null)
@@ -152,13 +150,13 @@ export function UsageTrendSection({
     return {
       ...(palette.length ? { color: palette } : {}),
       textStyle: {
-        color: embedded ? '#cbd5e1' : '#334155',
+        color: '#cbd5e1',
       },
       tooltip: {
         trigger: 'axis',
-        backgroundColor: embedded ? 'rgba(15, 23, 42, 0.96)' : undefined,
-        borderColor: embedded ? 'rgba(148, 163, 184, 0.25)' : undefined,
-        textStyle: embedded ? { color: '#f8fafc' } : undefined,
+        backgroundColor: 'rgba(15, 23, 42, 0.96)',
+        borderColor: 'rgba(148, 163, 184, 0.25)',
+        textStyle: { color: '#f8fafc' },
         valueFormatter: (value: TooltipFormatterValue, _dataIndex: number) => {
           const numericValue = Array.isArray(value) ? value[0] : value
           return typeof numericValue === 'number' ? creditFormatter.format(numericValue) : `${numericValue ?? ''}`
@@ -172,7 +170,7 @@ export function UsageTrendSection({
         ],
         top: 0,
         textStyle: {
-          color: embedded ? '#cbd5e1' : '#334155',
+          color: '#cbd5e1',
         },
       },
       grid: {
@@ -187,16 +185,16 @@ export function UsageTrendSection({
         boundaryGap: false,
         axisLabel: {
           interval: trendData.resolution === 'hour' ? 2 : 'auto',
-          color: embedded ? '#94a3b8' : '#64748b',
+          color: '#94a3b8',
         },
         axisLine: {
           lineStyle: {
-            color: embedded ? 'rgba(148, 163, 184, 0.25)' : '#cbd5e1',
+            color: 'rgba(148, 163, 184, 0.25)',
           },
         },
         axisTick: {
           lineStyle: {
-            color: embedded ? 'rgba(148, 163, 184, 0.25)' : '#cbd5e1',
+            color: 'rgba(148, 163, 184, 0.25)',
           },
         },
       },
@@ -205,11 +203,11 @@ export function UsageTrendSection({
         min: 0,
         axisLabel: {
           formatter: (value: number | string) => (typeof value === 'number' ? creditFormatter.format(value) : `${value}`),
-          color: embedded ? '#94a3b8' : '#64748b',
+          color: '#94a3b8',
         },
         splitLine: {
           lineStyle: {
-            color: embedded ? 'rgba(148, 163, 184, 0.14)' : '#e2e8f0',
+            color: 'rgba(148, 163, 184, 0.14)',
           },
         },
       },
@@ -224,16 +222,16 @@ export function UsageTrendSection({
           z: 3,
           lineStyle: {
             width: 2.5,
-            color: embedded ? '#e0f2fe' : '#0f172a',
+            color: '#e0f2fe',
           },
           itemStyle: {
-            color: embedded ? '#e0f2fe' : '#0f172a',
+            color: '#e0f2fe',
           },
           data: currentSeries,
         },
       ],
     }
-  }, [creditFormatter, embedded, timezone, trendData])
+  }, [creditFormatter, timezone, trendData])
 
   const hasData = useMemo(() => {
     if (!trendData) {
@@ -280,22 +278,16 @@ export function UsageTrendSection({
     ? 'No task activity recorded for this window.'
     : 'Select a billing period to view task trends.'
 
-  const sectionClassName = embedded
-    ? getSettingsSurfaceClassName({
-      variant: 'embedded',
-      roundedClassName: 'rounded-xl',
-      className: 'flex flex-col gap-4 p-6',
-    })
-    : 'gobii-card-base flex flex-col gap-4 p-6'
-  const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-slate-900'
-  const subtitleClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-500'
-  const loadingClassName = embedded
-    ? 'flex h-full items-center justify-center text-sm text-slate-400'
-    : 'flex h-full items-center justify-center text-sm text-slate-400'
-  const errorClassName = embedded
-    ? 'flex h-full items-center justify-center text-sm text-rose-300'
-    : 'flex h-full items-center justify-center text-sm text-red-600'
-  const emptyClassName = embedded ? 'text-slate-400' : 'text-slate-400'
+  const sectionClassName = getSettingsSurfaceClassName({
+    variant: 'embedded',
+    roundedClassName: 'rounded-xl',
+    className: 'flex flex-col gap-4 p-6',
+  })
+  const titleClassName = 'text-lg font-semibold text-slate-50'
+  const subtitleClassName = 'text-sm text-slate-400'
+  const loadingClassName = 'flex h-full items-center justify-center text-sm text-slate-400'
+  const errorClassName = 'flex h-full items-center justify-center text-sm text-rose-300'
+  const emptyClassName = 'text-slate-400'
 
   return (
     <section className={sectionClassName}>

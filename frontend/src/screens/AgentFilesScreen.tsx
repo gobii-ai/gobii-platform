@@ -440,12 +440,11 @@ export function AgentFilesScreen({
               </span>
             </div>
           ) : null}
-          <FileManagerBreadcrumbs breadcrumbs={breadcrumbs} embedded onNavigate={handleNavigateTo} />
+          <FileManagerBreadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigateTo} />
           {canManage && isCreatingFolder ? (
             <CreateFolderForm
               folderName={newFolderName}
               isBusy={isBusy}
-              embedded
               onNameChange={handleFolderNameChange}
               onSubmit={handleCreateFolderSubmit}
             />
@@ -459,7 +458,6 @@ export function AgentFilesScreen({
             isBusy={isBusy}
             isLoading={filesQuery.isPending}
             errorMessage={errorMessage}
-            embedded
             canManage={canManage}
             currentFolderId={currentFolderId}
             parentFolderPath={parentFolderPath}

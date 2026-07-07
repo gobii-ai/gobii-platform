@@ -314,7 +314,6 @@ export function UsageScreen() {
           subtitle={description}
         />
         <UsagePeriodHeader
-          embedded
           periodInfo={periodInfo}
           isPickerOpen={isPickerOpen}
           onOpenChange={handlePickerOpenChange}
@@ -338,15 +337,13 @@ export function UsageScreen() {
             selectedAgentIds,
             onSelectionChange: handleAgentSelectionChange,
             variant: 'condensed',
-            embedded: true,
           }}
         />
       </header>
 
-      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} embedded />
+      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} />
 
       <UsageTrendSection
-        embedded
         effectiveRange={boundedEffectiveRange}
         fallbackRange={boundedSummaryRange}
         timezone={summary?.period.timezone}
@@ -354,7 +351,6 @@ export function UsageScreen() {
       />
 
       <UsageAgentLeaderboard
-        embedded
         effectiveRange={boundedEffectiveRange}
         fallbackRange={boundedSummaryRange}
         agentIds={selectedAgentArray}
