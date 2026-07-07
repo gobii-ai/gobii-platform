@@ -3946,16 +3946,19 @@ class StaticViewSitemap(sitemaps.Sitemap):
         ]
         # Proprietary pages live behind the hosted marketing site; community builds expose docs instead.
         if settings.GOBII_PROPRIETARY_MODE:
-            items.insert(1, 'proprietary:pricing')
-            items.insert(2, 'proprietary:teams')
-            items.insert(3, 'proprietary:tos')
-            items.insert(4, 'proprietary:privacy')
-            items.insert(5, 'proprietary:about')
-            items.insert(6, 'proprietary:team')
-            items.insert(7, 'proprietary:careers')
-            items.insert(8, 'proprietary:blog_index')
-            items.insert(9, 'proprietary:comparisons')
-            items.insert(10, 'pages:recruiting_contact')
+            items[1:1] = [
+                'proprietary:pricing',
+                'proprietary:teams',
+                'proprietary:tos',
+                'proprietary:privacy',
+                'proprietary:about',
+                'proprietary:team',
+                'proprietary:careers',
+                'proprietary:blog_index',
+                'proprietary:comparisons',
+                'pages:solutions',
+                'pages:recruiting_contact',
+            ]
         else:
             items.append('pages:docs_index')
         return items
