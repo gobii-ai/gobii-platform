@@ -77,10 +77,6 @@ class Migration(migrations.Migration):
             model_name="productannouncementread",
             index=models.Index(fields=["user", "announcement"], name="prod_ann_read_user_ann_idx"),
         ),
-        migrations.AddIndex(
-            model_name="productannouncementread",
-            index=models.Index(fields=["announcement", "user"], name="prod_ann_read_ann_user_idx"),
-        ),
         migrations.AddConstraint(
             model_name="productannouncementread",
             constraint=models.UniqueConstraint(

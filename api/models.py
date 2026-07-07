@@ -1175,7 +1175,6 @@ class ProductAnnouncementRead(models.Model):
         ]
         indexes = [
             models.Index(fields=["user", "announcement"], name="prod_ann_read_user_ann_idx"),
-            models.Index(fields=["announcement", "user"], name="prod_ann_read_ann_user_idx"),
         ]
 
     def __str__(self):

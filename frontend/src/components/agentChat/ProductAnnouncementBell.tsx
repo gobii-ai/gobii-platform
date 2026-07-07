@@ -212,26 +212,26 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
     markReadMutation.mutate({ announcementIds: [announcementId] })
   }, [markReadMutation])
 
-  const handleOpenAnnouncement = useCallback(async (announcement: ProductAnnouncement) => {
-    if (!announcement.isRead) {
-      try {
-        await markReadMutation.mutateAsync({ announcementIds: [announcement.id] })
-      } catch {
-        return
-      }
-    }
+  const handleOpenAnnouncement = useCallback((announcement: ProductAnnouncement) => {
     setSelectedAnnouncementId(announcement.id)
+    if (!announcement.isRead) {
+      markReadMutation.mutate({ announcementIds: [announcement.id] })
+    }
   }, [markReadMutation])
 
-  const handleAction = useCallback(async (announcement: ProductAnnouncement) => {
+  const handleAction = useCallback((announcement: ProductAnnouncement) => {
     const actionUrl = announcement.actionUrl
     if (!actionUrl || typeof window === 'undefined') {
       return
     }
     if (!announcement.isRead) {
-      await markReadMutation.mutateAsync({ announcementIds: [announcement.id] })
+      markReadMutation.mutate({ announcementIds: [announcement.id] })
     }
-    window.location.assign(actionUrl)
+    if (actionUrl.startsWith('/')) {
+      window.location.assign(actionUrl)
+      return
+    }
+    window.open(actionUrl, '_blank', 'noopener,noreferrer')
   }, [markReadMutation])
 
   const panel = (
@@ -245,7 +245,7 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
       selectedAnnouncement={selectedAnnouncement}
       onRetry={() => void announcementsQuery.refetch()}
       onBackToList={() => setSelectedAnnouncementId(null)}
-      onOpenAnnouncement={(announcement) => void handleOpenAnnouncement(announcement)}
+      onOpenAnnouncement={handleOpenAnnouncement}
       onMarkAllRead={handleMarkAllRead}
       onMarkRead={handleMarkRead}
       onAction={handleAction}

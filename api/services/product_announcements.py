@@ -79,13 +79,18 @@ def mark_product_announcements_read(
 ) -> dict[str, object]:
     visible_qs = visible_product_announcements_queryset()
     if mark_all:
-        target_ids = list(visible_qs.values_list("id", flat=True))
+        target_ids = list(
+            visible_qs
+            .exclude(read_receipts__user=user)
+            .values_list("id", flat=True)
+        )
     else:
         target_ids = list(announcement_ids or [])
         if target_ids:
             target_ids = list(
                 visible_qs
                 .filter(id__in=target_ids)
+                .exclude(read_receipts__user=user)
                 .values_list("id", flat=True)
             )
 

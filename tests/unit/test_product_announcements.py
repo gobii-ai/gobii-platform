@@ -128,6 +128,11 @@ class ProductAnnouncementApiTests(TestCase):
 
     def test_mark_read_rejects_invalid_payloads(self):
         invalid_payloads = [
+            [],
+            ["not-an-object"],
+            "not-an-object",
+            True,
+            None,
             {},
             {"all": False},
             {"all": True, "announcementIds": [str(self._create_announcement("Bad Both").id)]},
