@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import json
+import math
 
 from django.test import SimpleTestCase, tag
 
@@ -44,3 +45,65 @@ class SqliteGuardrailsMaintenanceTests(SimpleTestCase):
         self.assertIn("needle", snippets[0])
         self.assertIn("A" * 80, snippets[0])
         self.assertIn("B" * 80, snippets[0])
+
+    def test_statistical_aggregates_match_sample_and_population_semantics(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                conn.execute("CREATE TABLE values_table (value);")
+                conn.executemany(
+                    "INSERT INTO values_table (value) VALUES (?);",
+                    [(1,), (2,), (3,), (None,), ("not-a-number",)],
+                )
+
+                row = conn.execute(
+                    """
+                    SELECT
+                        STDDEV(value),
+                        STDEV(value),
+                        STDDEV_SAMP(value),
+                        STDDEV_POP(value),
+                        VARIANCE(value),
+                        VAR_SAMP(value),
+                        VAR_POP(value)
+                    FROM values_table;
+                    """
+                ).fetchone()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+        self.assertEqual(row[0], 1.0)
+        self.assertEqual(row[1], 1.0)
+        self.assertEqual(row[2], 1.0)
+        self.assertAlmostEqual(row[3], math.sqrt(2 / 3))
+        self.assertEqual(row[4], 1.0)
+        self.assertEqual(row[5], 1.0)
+        self.assertAlmostEqual(row[6], 2 / 3)
+
+    def test_statistical_aggregates_handle_single_numeric_row(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                conn.execute("CREATE TABLE values_table (value);")
+                conn.execute("INSERT INTO values_table (value) VALUES (5);")
+                row = conn.execute(
+                    """
+                    SELECT
+                        STDDEV(value),
+                        STDDEV_POP(value),
+                        VARIANCE(value),
+                        VAR_POP(value)
+                    FROM values_table;
+                    """
+                ).fetchone()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+        self.assertIsNone(row[0])
+        self.assertEqual(row[1], 0.0)
+        self.assertIsNone(row[2])
+        self.assertEqual(row[3], 0.0)

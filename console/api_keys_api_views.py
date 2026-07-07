@@ -10,7 +10,12 @@ from django.views import View
 
 from api.models import ApiKey, OrganizationMembership
 from api.services.email_verification import has_verified_email
-from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
+from console.api_helpers import (
+    ApiLoginRequiredMixin,
+    _parse_json_body,
+    _permission_denied_response,
+    _validation_error_payload,
+)
 from console.context_helpers import build_console_context
 from console.forms import ApiKeyForm
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -29,23 +34,6 @@ API_KEY_MANAGE_ROLES = {
 API_KEY_VIEW_ROLES = API_KEY_MANAGE_ROLES | {
     OrganizationMembership.OrgRole.BILLING,
 }
-
-
-def _permission_denied_response(exc: PermissionDenied) -> JsonResponse:
-    messages = getattr(exc, "args", None)
-    message = str(messages[0]) if messages else "Permission denied."
-    return JsonResponse({"error": message}, status=403)
-
-
-def _validation_error_payload(exc: ValidationError) -> dict[str, list[str]]:
-    if hasattr(exc, "message_dict"):
-        return {
-            field: [str(message) for message in messages]
-            for field, messages in exc.message_dict.items()
-        }
-    if hasattr(exc, "messages"):
-        return {"__all__": [str(message) for message in exc.messages]}
-    return {"__all__": [str(exc)]}
 
 
 def _form_error_payload(form: ApiKeyForm) -> dict[str, list[str]]:
