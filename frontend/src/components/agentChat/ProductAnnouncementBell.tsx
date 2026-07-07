@@ -166,16 +166,14 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
   }, [markReadMutation])
 
   const handleAction = useCallback(async (announcement: ProductAnnouncement) => {
-    if (!announcement.actionUrl || typeof window === 'undefined') {
+    const actionUrl = announcement.actionUrl
+    if (!actionUrl || typeof window === 'undefined') {
       return
     }
-    try {
-      if (!announcement.isRead) {
-        await markReadMutation.mutateAsync({ announcementIds: [announcement.id] })
-      }
-    } finally {
-      window.location.assign(announcement.actionUrl)
+    if (!announcement.isRead) {
+      await markReadMutation.mutateAsync({ announcementIds: [announcement.id] })
     }
+    window.location.assign(actionUrl)
   }, [markReadMutation])
 
   const panel = (
