@@ -1,4 +1,4 @@
-import type { KeyboardEvent, MouseEvent, ReactNode, Ref, MutableRefObject } from 'react'
+import type { KeyboardEvent, MouseEvent, ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Flag, Loader2, Zap } from 'lucide-react'
 import '../../styles/agentChatLegacy.css'
@@ -16,7 +16,7 @@ import { PlanPanel } from './PlanPanel'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
 import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
-import { AgentSubscriptionExpiredPanel } from './AgentSubscriptionExpiredPanel'
+import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
@@ -160,18 +160,6 @@ function getAppMessageLinkShellPage(href: string): AppMessageLinkShellPage | nul
   } catch {
     return null
   }
-}
-
-function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
-  if (!ref) {
-    return
-  }
-  if (typeof ref === 'function') {
-    ref(value)
-    return
-  }
-  const mutableRef = ref as MutableRefObject<T | null>
-  mutableRef.current = value
 }
 
 type AgentChatLayoutProps = AgentTimelineProps & {
@@ -604,7 +592,6 @@ export function AgentChatLayout({
   const [planPreviewExiting, setPlanPreviewExiting] = useState(false)
   const [planHoverPreviewVisible, setPlanHoverPreviewVisible] = useState(false)
   const [planHoverPreviewExiting, setPlanHoverPreviewExiting] = useState(false)
-  const [composerUnavailableShellNode, setComposerUnavailableShellNode] = useState<HTMLDivElement | null>(null)
   const [reportMessage, setReportMessage] = useState<AgentMessage | null>(null)
   const [reportSubmitting, setReportSubmitting] = useState(false)
   const [reportError, setReportError] = useState<string | null>(null)
@@ -640,10 +627,6 @@ export function AgentChatLayout({
     }
     return `agent-chat-high-priority-dismissed:${agentId}:${highPriorityBannerId}`
   }, [agentId, highPriorityBannerDismissible, highPriorityBannerId])
-  const captureComposerUnavailableShellRef = useCallback((node: HTMLDivElement | null) => {
-    setComposerUnavailableShellNode(node)
-    assignRef(composerShellRef, node)
-  }, [composerShellRef])
 
   const handleSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
     if (showGalleryShellPanel && mode !== 'gallery') {
@@ -856,39 +839,6 @@ export function AgentChatLayout({
     const stored = window.localStorage.getItem(highPriorityDismissKey)
     setHighPriorityDismissed(stored === 'true')
   }, [highPriorityDismissKey])
-
-  useEffect(() => {
-    const node = composerUnavailableShellNode
-    if (!node || typeof window === 'undefined') {
-      return
-    }
-
-    const updateComposerHeight = () => {
-      const height = node.getBoundingClientRect().height
-      document.documentElement.style.setProperty('--composer-height', `${height}px`)
-      const jumpButton = document.getElementById('jump-to-latest')
-      if (jumpButton) {
-        jumpButton.style.setProperty('--composer-height', `${height}px`)
-      }
-    }
-
-    updateComposerHeight()
-    window.addEventListener('resize', updateComposerHeight)
-    const observer = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(updateComposerHeight)
-      : null
-    observer?.observe(node)
-
-    return () => {
-      observer?.disconnect()
-      window.removeEventListener('resize', updateComposerHeight)
-      document.documentElement.style.removeProperty('--composer-height')
-      const jumpButton = document.getElementById('jump-to-latest')
-      if (jumpButton) {
-        jumpButton.style.removeProperty('--composer-height')
-      }
-    }
-  }, [composerUnavailableShellNode])
 
   // Track upsell message visibility with sessionStorage deduplication
   useEffect(() => {
@@ -1743,7 +1693,7 @@ export function AgentChatLayout({
           {/* Composer at bottom of flex layout */}
           {spawnIntentLoading ? (
             <div
-              ref={captureComposerUnavailableShellRef}
+              ref={composerShellRef}
               className="flex items-center justify-center py-10"
               aria-live="polite"
               aria-busy="true"
@@ -1767,7 +1717,7 @@ export function AgentChatLayout({
               </div>
             </div>
           ) : effectiveShowSignupPreviewPanel ? (
-            <div ref={captureComposerUnavailableShellRef}>
+            <div ref={composerShellRef}>
               <AgentSignupPreviewPanel
                 status={signupPreviewState}
                 agentId={agentId}
@@ -1790,10 +1740,13 @@ export function AgentChatLayout({
               ) : null}
             </div>
           ) : effectiveShowSubscriptionExpiredPanel ? (
-            <div ref={captureComposerUnavailableShellRef}>
-              <AgentSubscriptionExpiredPanel
+            <div ref={composerShellRef}>
+              <AgentUpgradePlansPanel
+                title="Choose a plan to continue"
+                body="Your agents are still here. Start a plan to resume messaging and create new agents."
                 currentPlan={subscriptionPlan}
                 onUpgrade={onUpgrade}
+                source="subscription_expired_panel"
               />
               {showComposerUnavailableSkipPlanning ? (
                 <div className="agent-chat-skip-planning-fallback">

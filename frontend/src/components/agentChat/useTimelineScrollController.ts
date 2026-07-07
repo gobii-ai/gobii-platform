@@ -374,12 +374,23 @@ export function useTimelineScrollController({
       return
     }
 
+    const updateComposerHeight = () => {
+      if (!composerNode) {
+        return
+      }
+      const height = composerNode.getBoundingClientRect().height
+      document.documentElement.style.setProperty('--composer-height', `${height}px`)
+      document.getElementById('jump-to-latest')?.style.setProperty('--composer-height', `${height}px`)
+    }
+
     const observer = new ResizeObserver(() => {
       syncMeasurements(container)
+      updateComposerHeight()
       if (pinnedRef.current && !prependAnchorRef.current) {
         scrollToBottomAcrossFrames(2)
       }
     })
+    updateComposerHeight()
     observer.observe(container)
     if (contentNode) {
       observer.observe(contentNode)
@@ -387,7 +398,11 @@ export function useTimelineScrollController({
     if (composerNode) {
       observer.observe(composerNode)
     }
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      document.documentElement.style.removeProperty('--composer-height')
+      document.getElementById('jump-to-latest')?.style.removeProperty('--composer-height')
+    }
   }, [composerNode, contentNode, scrollToBottomAcrossFrames, syncMeasurements, timelineNode])
 
   useEffect(() => () => {

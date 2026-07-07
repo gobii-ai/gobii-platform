@@ -3,21 +3,16 @@
   --embedded-border: rgba(196, 181, 253, 0.16);
   --embedded-text: rgba(248, 245, 255, 0.96);
   --embedded-muted: rgba(196, 181, 253, 0.74);
-  --billing-panel: rgba(15, 23, 42, 0.62);
-  --billing-panel-strong: rgba(30, 41, 59, 0.68);
-  --billing-panel-hover: rgba(30, 64, 175, 0.26);
-  --billing-border: rgba(196, 181, 253, 0.22);
-  --billing-border-strong: rgba(226, 232, 240, 0.34);
-  --billing-icon-bg: rgba(37, 99, 235, 0.18);
-  --billing-icon-text: rgba(147, 197, 253, 0.98);
+  --embedded-panel: rgba(15, 23, 42, 0.62);
+  --embedded-panel-hover: rgba(30, 64, 175, 0.26);
+  --embedded-panel-strong: rgba(30, 41, 59, 0.68);
+  --embedded-border-strong: rgba(226, 232, 240, 0.34);
   color-scheme: dark;
   color: var(--embedded-text);
   --console-card-surface: var(--embedded-surface);
   --console-card-border: 1px solid var(--embedded-border);
   --console-card-radius: 1.1rem;
   --console-card-shadow: none;
-  --console-card-backdrop-filter: none;
-  --console-card-webkit-backdrop-filter: none;
 }
 
 .billing-screen--embedded :is(.text-slate-900, .text-slate-800, .text-slate-700) {
@@ -28,17 +23,17 @@
   color: var(--embedded-muted);
 }
 
-.billing-screen--embedded :is(.border-slate-200, .border-slate-300, .border-slate-400) {
-  border-color: var(--billing-border);
+.billing-screen--embedded :is(.border-slate-200, .border-slate-300, .border-slate-400, [class~='border-t']) {
+  border-color: var(--embedded-border);
 }
 
 .billing-screen--embedded :is(div, section, button, label, textarea, input)[class~='bg-white'] {
-  background-color: var(--billing-panel);
+  background-color: var(--embedded-panel);
 }
 
 .billing-screen--embedded :is(button, label)[class~='bg-white']:not(:disabled):hover,
 .billing-screen--embedded :is(div, label)[class*='hover:bg-blue-50']:hover {
-  background-color: var(--billing-panel-hover);
+  background-color: var(--embedded-panel-hover);
   border-color: rgba(96, 165, 250, 0.42);
 }
 
@@ -46,17 +41,18 @@
   border-color: rgba(96, 165, 250, 0.58);
 }
 
-.billing-screen--embedded :is(div, section)[class~='p-5'] {
-  background-color: rgba(15, 23, 42, 0.28);
-  border-color: var(--billing-border-strong);
+.billing-screen--embedded :is(div, section)[class~='p-5'],
+.billing-screen--embedded div[class~='bg-slate-900'] {
+  background-color: var(--embedded-panel-strong);
+  border-color: var(--embedded-border-strong);
 }
 
-.billing-screen--embedded :is(div)[class~='bg-blue-50'] {
-  background-color: var(--billing-icon-bg);
+.billing-screen--embedded .bg-blue-50 {
+  background-color: rgba(37, 99, 235, 0.18);
 }
 
-.billing-screen--embedded :is(.text-blue-700) {
-  color: var(--billing-icon-text);
+.billing-screen--embedded [class~='bg-amber-50'] {
+  background-color: rgba(120, 53, 15, 0.3);
 }
 
 .billing-screen--embedded button[class~='bg-slate-900'] {
@@ -68,41 +64,24 @@
   background-color: #1d4ed8;
 }
 
-.billing-screen--embedded div[class~='bg-slate-900'] {
-  background-color: var(--billing-panel-strong);
-  border: 1px solid var(--billing-border-strong);
-}
-
-.billing-screen--embedded [class~='border-t'] {
-  border-top-color: var(--billing-border);
-}
-
-.billing-screen--embedded :is(.border-rose-200, .border-rose-300) {
-  border-color: rgba(251, 113, 133, 0.38);
-}
-
-.billing-screen--embedded :is(.text-rose-700, .text-rose-800) {
-  color: rgba(253, 164, 175, 0.98);
-}
-
-.billing-screen--embedded :is(.border-emerald-200, .border-emerald-300) {
-  border-color: rgba(52, 211, 153, 0.36);
+.billing-screen--embedded .text-blue-700 {
+  color: rgba(147, 197, 253, 0.98);
 }
 
 .billing-screen--embedded :is(.text-emerald-700, .text-emerald-800) {
   color: rgba(110, 231, 183, 0.98);
 }
 
-.billing-screen--embedded :is(.border-amber-200, .border-amber-300) {
-  border-color: rgba(251, 191, 36, 0.36);
+.billing-screen--embedded :is(.text-rose-700, .text-rose-800) {
+  color: rgba(253, 164, 175, 0.98);
 }
 
 .billing-screen--embedded :is(.text-amber-700, .text-amber-800, .text-amber-900) {
   color: rgba(252, 211, 77, 0.96);
 }
 
-.billing-screen--embedded :is(div, button)[class~='bg-amber-50'] {
-  background-color: rgba(120, 53, 15, 0.3);
+.billing-screen--embedded :is(.border-rose-200, .border-rose-300, .border-emerald-200, .border-emerald-300, .border-amber-200, .border-amber-300) {
+  border-color: rgba(226, 232, 240, 0.34);
 }
 
 .billing-screen--embedded :is(input, textarea) {

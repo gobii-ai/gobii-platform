@@ -580,9 +580,7 @@ export const AgentComposer = memo(function AgentComposer({
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const [appsModal, showAppsModal] = useModal()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const shellRef = useRef<HTMLDivElement | null>(null)
   const composedShellRef = useCallback((node: HTMLDivElement | null) => {
-    shellRef.current = node
     if (typeof externalShellRef === 'function') {
       externalShellRef(node)
       return
@@ -1155,34 +1153,6 @@ export const AgentComposer = memo(function AgentComposer({
     }, 100)
     return () => clearTimeout(timer)
   }, [autoFocus, focusKey, moveTextareaCursorToEnd])
-
-  useEffect(() => {
-    const node = shellRef.current
-    if (!node || typeof window === 'undefined') return
-
-    const updateComposerHeight = () => {
-      const height = node.getBoundingClientRect().height
-      document.documentElement.style.setProperty('--composer-height', `${height}px`)
-      const jumpButton = document.getElementById('jump-to-latest')
-      if (jumpButton) {
-        jumpButton.style.setProperty('--composer-height', `${height}px`)
-      }
-    }
-
-    updateComposerHeight()
-
-    const observer = new ResizeObserver(updateComposerHeight)
-    observer.observe(node)
-
-    return () => {
-      observer.disconnect()
-      document.documentElement.style.removeProperty('--composer-height')
-      const jumpButton = document.getElementById('jump-to-latest')
-      if (jumpButton) {
-        jumpButton.style.removeProperty('--composer-height')
-      }
-    }
-  }, [])
 
   const activePendingActions = activePendingActionTab?.actions ?? []
   const activePendingAction =
