@@ -143,7 +143,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
     const updateHeight = () => {
       const height = node.getBoundingClientRect().height
+      const primaryHeight = node.querySelector<HTMLElement>('.banner')?.getBoundingClientRect().height ?? height
       document.documentElement.style.setProperty('--agent-chat-banner-height', `${height}px`)
+      document.documentElement.style.setProperty('--agent-chat-primary-banner-height', `${primaryHeight}px`)
     }
 
     updateHeight()
@@ -153,6 +155,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     return () => {
       observer.disconnect()
       document.documentElement.style.removeProperty('--agent-chat-banner-height')
+      document.documentElement.style.removeProperty('--agent-chat-primary-banner-height')
     }
   }, [])
 

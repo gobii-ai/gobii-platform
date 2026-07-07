@@ -95,6 +95,7 @@ import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type { BillingStatusInfo } from '../types/agentAddons'
 import type { AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
@@ -256,6 +257,8 @@ function resolveBillingAlertMessage(reason?: string | null): string {
     case 'unpaid':
     case 'incomplete':
       return 'We were unable to collect your subscription payment.'
+    case 'canceled':
+      return 'Your subscription has ended.'
     case 'invoice_retrying':
       return 'Your latest invoice payment failed and Stripe is retrying automatically.'
     default:
@@ -299,8 +302,24 @@ function resolveSendMessagePausedMessage(resumeAt?: string | null): string {
   return `${resolveAccountPauseMessage(resumeAt)} Sending new messages is disabled until billing resumes.`
 }
 
-function resolveSendMessageDisabledMessage(): string {
+function resolveSendMessageDisabledMessage(reason?: string | null): string {
+  if (reason === 'canceled') {
+    return 'Choose a plan to send more messages.'
+  }
   return 'Resolve billing before sending more messages.'
+}
+
+function resolveEffectiveBillingStatus(
+  selectedAgentBillingStatus: BillingStatusInfo | null,
+  currentContextBillingStatus: BillingStatusInfo | null,
+): BillingStatusInfo | null {
+  if (currentContextBillingStatus?.delinquent) {
+    return currentContextBillingStatus
+  }
+  if (selectedAgentBillingStatus?.delinquent) {
+    return selectedAgentBillingStatus
+  }
+  return currentContextBillingStatus ?? selectedAgentBillingStatus
 }
 
 function readSelectionSidebarModePreference(): 'collapsed' | 'list' | 'gallery' | null {
@@ -2404,9 +2423,7 @@ export function AgentChatPage({
   }, [isNewAgent, isSelectionView, resolvedAgentName])
 
   const rosterErrorMessage = rosterQuery.isError
-    ? rosterQuery.error instanceof Error
-      ? rosterQuery.error.message
-      : 'Unable to load agents right now.'
+    ? safeErrorMessage(rosterQuery.error, 'Unable to load agents right now.')
     : null
   const fallbackAgent = useMemo<AgentRosterEntry | null>(() => {
     if (!activeAgentId) {
@@ -2596,6 +2613,10 @@ export function AgentChatPage({
   const selectedAgentAccountPause = addonsPayload?.status?.accountPause ?? null
   const currentContextBillingStatus = rosterQuery.data?.billingStatus ?? null
   const currentContextAccountPause = rosterQuery.data?.accountPause ?? null
+  const effectiveBillingStatus = resolveEffectiveBillingStatus(
+    selectedAgentBillingStatus,
+    currentContextBillingStatus,
+  )
   const currentContextCanCreateAgents = (
     rosterQuery.data?.context.canCreateAgents
     ?? effectiveContext?.canCreateAgents
@@ -2603,8 +2624,8 @@ export function AgentChatPage({
   )
   const sendMessageDisabledReason = !isNewAgent && selectedAgentAccountPause?.paused
     ? resolveSendMessagePausedMessage(selectedAgentAccountPause.resumeAt)
-    : (!isNewAgent && selectedAgentBillingStatus?.delinquent
-      ? resolveSendMessageDisabledMessage()
+    : (!isNewAgent && effectiveBillingStatus?.delinquent
+      ? resolveSendMessageDisabledMessage(effectiveBillingStatus.reason)
       : null)
   const previewCreateAgentBlocked = !currentContextBillingStatus?.delinquent
     && !currentContextAccountPause?.paused
@@ -3373,7 +3394,7 @@ export function AgentChatPage({
     onOpenSecrets,
     onOpenUsage,
   ])
-  const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
+  const bannerBillingStatus = effectiveBillingStatus
   const bannerAccountPause = selectedAgentAccountPause?.paused
     ? selectedAgentAccountPause
     : currentContextAccountPause?.paused
@@ -3399,10 +3420,12 @@ export function AgentChatPage({
       return null
     }
     return {
-      id: 'billing-delinquent',
-      title: 'Billing issue needs attention',
-      message: `${resolveBillingAlertMessage(bannerBillingStatus.reason)} Visit billing to fix this and avoid disruption.`,
-      actionLabel: 'Open billing',
+      id: bannerBillingStatus.reason === 'canceled' ? 'billing-inactive' : 'billing-delinquent',
+      title: bannerBillingStatus.reason === 'canceled' ? 'Choose a plan to continue' : 'Billing issue needs attention',
+      message: bannerBillingStatus.reason === 'canceled'
+        ? 'Your agents are still here. Start a plan to resume messaging and create new agents.'
+        : `${resolveBillingAlertMessage(bannerBillingStatus.reason)} Visit billing to fix this and avoid disruption.`,
+      actionLabel: bannerBillingStatus.reason === 'canceled' ? 'Upgrade' : 'Open billing',
       actionHref: billingManageUrl,
       dismissible: false,
       tone: 'critical' as const,
@@ -4121,7 +4144,9 @@ export function AgentChatPage({
     return null
   }, [activeAgentId, agentId, auditUrl, auditUrlTemplate, rosterAgents])
 
-  const timelineErrorMessage = timelineQuery.error instanceof Error ? timelineQuery.error.message : null
+  const timelineErrorMessage = timelineQuery.error
+    ? safeErrorMessage(timelineQuery.error, 'Unable to load agent timeline right now.')
+    : null
   const topLevelError = (isStoreSynced ? timelineErrorMessage : null) || (sessionStatus === 'error' ? sessionError : null)
 
   if (isSelectionView) {
@@ -4292,6 +4317,11 @@ export function AgentChatPage({
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
         showSignupPreviewPanel={showSignupPreviewPanel}
+        showSubscriptionExpiredPanel={
+          !isNewAgent
+          && effectiveBillingStatus?.delinquent
+          && effectiveBillingStatus.reason === 'canceled'
+        }
         signupPreviewState={effectiveSignupPreviewState}
         planningState={effectivePlanningState}
         onSkipPlanning={handleSkipPlanning}

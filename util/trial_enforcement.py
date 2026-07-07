@@ -27,8 +27,9 @@ class TrialRequiredValidationError(ValidationError):
 PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH = "personal_free_trial_enforcement"
 # Chat-only recovery path: include incomplete so users with an unfinished checkout
 # can get back into chat long enough to resolve billing, without reopening broader
-# personal-agent creation or API-key access.
-PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES = {"past_due", "unpaid", "incomplete"}
+# personal-agent creation or API-key access. Canceled users can still inspect their
+# existing agents; creating new work remains gated by normal active-plan checks.
+PERSONAL_CHAT_ALLOWED_INACTIVE_STATUSES = {"past_due", "unpaid", "incomplete", "canceled"}
 
 
 def is_personal_trial_enforcement_enabled() -> bool:
@@ -74,7 +75,7 @@ def _normalize_subscription_status(value: object) -> str | None:
     return normalized or None
 
 
-def _has_delinquent_personal_subscription(user) -> bool:
+def _has_inactive_personal_subscription_for_chat(user) -> bool:
     customer = get_stripe_customer(user)
     if customer is None:
         return False
@@ -98,7 +99,7 @@ def _has_delinquent_personal_subscription(user) -> bool:
         status = _normalize_subscription_status(stripe_data.get("status"))
     if status is None:
         status = _normalize_subscription_status(getattr(candidate_subscription, "status", None))
-    return status in PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES
+    return status in PERSONAL_CHAT_ALLOWED_INACTIVE_STATUSES
 
 
 def can_user_use_personal_agents_and_api(user) -> bool:
@@ -145,12 +146,12 @@ def can_user_access_personal_agent_chat(user) -> bool:
     if not user or not getattr(user, "pk", None):
         return False
 
-    # Let delinquent paid users reach chat so the UI can direct them back to billing.
+    # Let inactive paid users reach chat so the UI can direct them back to billing.
     cache_attr = "_personal_agent_chat_access_allowed"
     cached = getattr(user, cache_attr, None)
     if cached is not None:
         return bool(cached)
 
-    allowed = _has_delinquent_personal_subscription(user)
+    allowed = _has_inactive_personal_subscription_for_chat(user)
     setattr(user, cache_attr, bool(allowed))
     return bool(allowed)

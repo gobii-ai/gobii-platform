@@ -618,14 +618,14 @@ class AgentChatAccessTests(TestCase):
         mock_process_delay.assert_called_once_with(str(self.personal_agent.id))
 
     @patch("util.trial_enforcement.can_user_use_personal_agents_and_api", return_value=False)
-    def test_chat_access_ignores_historical_past_due_subscription(self, _mock_normal_access):
+    def test_chat_access_allows_current_canceled_subscription(self, _mock_normal_access):
         customer = self._fake_customer_with_subscriptions([
             self._fake_subscription("past_due", current_period_end=100, created=100),
             self._fake_subscription("canceled", current_period_end=200, created=200),
         ])
 
         with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
-            self.assertFalse(can_user_access_personal_agent_chat(self.user))
+            self.assertTrue(can_user_access_personal_agent_chat(self.user))
 
     @patch("util.trial_enforcement.can_user_use_personal_agents_and_api", return_value=False)
     def test_chat_access_allows_current_past_due_subscription(self, _mock_normal_access):
@@ -636,6 +636,41 @@ class AgentChatAccessTests(TestCase):
 
         with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
             self.assertTrue(can_user_access_personal_agent_chat(self.user))
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("util.trial_enforcement.get_active_subscription", return_value=None)
+    def test_resolve_agent_allows_personal_owner_with_canceled_subscription(
+        self,
+        _mock_get_active_subscription,
+    ):
+        customer = self._fake_customer_with_subscription_status("canceled")
+
+        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
+            agent = resolve_agent(
+                self.user,
+                self.client.session,
+                str(self.personal_agent.id),
+                allow_delinquent_personal_chat=True,
+            )
+
+        self.assertEqual(agent.id, self.personal_agent.id)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("util.trial_enforcement.get_active_subscription", return_value=None)
+    def test_roster_includes_personal_agent_with_canceled_subscription(self, _mock_get_active_subscription):
+        customer = self._fake_customer_with_subscription_status("canceled")
+        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer), \
+             patch("console.agent_addons.get_stripe_customer", return_value=customer):
+            response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        roster_ids = {entry["id"] for entry in payload.get("agents", [])}
+        self.assertIn(str(self.personal_agent.id), roster_ids)
+        billing_status = payload.get("billingStatus", {})
+        self.assertTrue(billing_status.get("delinquent"))
+        self.assertTrue(billing_status.get("actionable"))
+        self.assertEqual(billing_status.get("reason"), "canceled")
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     @patch("console.insight_views._get_burn_rate_insight", return_value=None)
