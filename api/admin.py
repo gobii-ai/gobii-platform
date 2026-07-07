@@ -2904,6 +2904,8 @@ class CustomUserAdmin(UserAdmin):
 
     @admin.display(description="Agents")
     def agents_summary_link(self, obj):
+        if obj is None or not obj.pk:
+            return "N/A"
         count = obj.agents.count()
         url = (
             reverse("admin:api_browseruseagent_changelist")

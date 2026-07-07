@@ -16,7 +16,7 @@ from console.daily_credit import build_agent_daily_credit_context, serialize_dai
 from console.mixins import AgentOwnerContextOverrideMixin
 from console.agent_chat.access import resolve_manageable_agent_for_request, user_can_manage_agent, user_is_collaborator
 from api.agent.tasks.process_events import process_agent_events_task
-from api.models import CommsAllowlistEntry
+from api.models import CommsAllowlistEntry, UserPhoneNumber
 
 class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailView):
     """Shared backend for agent settings payloads and mutations."""
@@ -125,7 +125,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         )
 
         # Always include allowlist configuration (flag removed)
-        from api.models import CommsAllowlistEntry
         context['show_allowlist'] = True
         context['whitelist_policy'] = agent.whitelist_policy
         context['allowlist_entries'] = CommsAllowlistEntry.objects.filter(
@@ -200,7 +199,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         # Check if owner has verified phone for SMS display
         try:
-            from api.models import UserPhoneNumber
             owner_phone = UserPhoneNumber.objects.filter(
                 user=agent.user, 
                 is_verified=True
@@ -311,7 +309,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         pending_contact_requests: int | None = None,
         email_verified: bool | None = None,
     ) -> dict[str, object]:
-        from api.models import CommsAllowlistEntry, AgentAllowlistInvite
+        from api.models import AgentAllowlistInvite
         from api.services.email_verification import has_verified_email
 
         entries_qs = entries
