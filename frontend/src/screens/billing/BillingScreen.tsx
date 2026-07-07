@@ -19,6 +19,7 @@ import { SubscriptionSummary } from './SubscriptionSummary'
 import { ConfirmDialog } from './ConfirmDialog'
 import { useBillingNudgeVisibility } from './useBillingNudgeVisibility'
 import { useConfirmPostAction } from './useConfirmPostAction'
+import './billing.css'
 
 type DedicatedRemovePrompt = {
   proxyId: string

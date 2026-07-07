@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ADDON_PACK_QUANTITY = 999
 DELINQUENT_SUBSCRIPTION_STATUSES = {"past_due", "unpaid", "incomplete"}
+INACTIVE_SUBSCRIPTION_PROMPT_STATUSES = {"canceled"}
 ACTION_REQUIRED_INTENT_STATUSES = {"requires_action", "requires_payment_method"}
 
 
@@ -123,6 +124,8 @@ def _build_billing_status_payload(owner, owner_type: str, *, can_open_billing: b
     )
 
     if subscription_status in DELINQUENT_SUBSCRIPTION_STATUSES:
+        reason = subscription_status
+    elif subscription_status in INACTIVE_SUBSCRIPTION_PROMPT_STATUSES:
         reason = subscription_status
     elif payment_intent_status in ACTION_REQUIRED_INTENT_STATUSES:
         reason = payment_intent_status

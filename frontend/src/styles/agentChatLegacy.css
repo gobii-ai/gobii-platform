@@ -5216,7 +5216,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    min-height: var(--agent-chat-banner-height, 3.5rem);
+    min-height: var(--agent-chat-primary-banner-height, 3.5rem);
     padding: 0.875rem 0.375rem 0;
     margin-bottom: 1rem;
     flex-shrink: 0;

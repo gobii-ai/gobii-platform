@@ -7,6 +7,7 @@ import {
   type AgentWebSessionSnapshot,
 } from '../api/agentChat'
 import { HttpError } from '../api/http'
+import { safeErrorMessage } from '../api/safeErrorMessage'
 import { usePageLifecycle, type PageLifecycleSuspendReason } from './usePageLifecycle'
 
 const MIN_HEARTBEAT_INTERVAL_MS = 15_000
@@ -28,16 +29,7 @@ type UseAgentWebSessionOptions = {
 
 function describeError(error: unknown): string {
   if (error instanceof HttpError) {
-    if (typeof error.body === 'string' && error.body) {
-      return error.body
-    }
-    if (error.body && typeof error.body === 'object' && 'error' in error.body) {
-      const { error: bodyError } = error.body as { error?: unknown }
-      if (typeof bodyError === 'string' && bodyError) {
-        return bodyError
-      }
-    }
-    return `${error.status} ${error.statusText}`
+    return safeErrorMessage(error, `${error.status} ${error.statusText}`)
   }
   if (error instanceof TypeError) {
     return 'Network connection lost. Retrying…'

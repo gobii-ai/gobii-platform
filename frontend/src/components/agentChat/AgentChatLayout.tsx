@@ -16,6 +16,7 @@ import { PlanPanel } from './PlanPanel'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
 import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
+import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
@@ -319,6 +320,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
   showSignupPreviewPanel?: boolean
+  showSubscriptionExpiredPanel?: boolean
   signupPreviewState?: SignupPreviewState
   planningState?: PlanningState
   onSkipPlanning?: () => void | Promise<void>
@@ -517,6 +519,7 @@ export function AgentChatLayout({
   composerError = null,
   composerErrorShowUpgrade = false,
   showSignupPreviewPanel = false,
+  showSubscriptionExpiredPanel = false,
   signupPreviewState = 'none',
   planningState = 'skipped',
   onSkipPlanning,
@@ -1041,7 +1044,8 @@ export function AgentChatLayout({
     ? 'Finish signup to manage settings and collaborate.'
     : null
   const effectiveShowSignupPreviewPanel = showSignupPreviewPanel && planningState !== 'planning'
-  const composerUnavailable = spawnIntentLoading || effectiveShowSignupPreviewPanel
+  const effectiveShowSubscriptionExpiredPanel = showSubscriptionExpiredPanel && planningState !== 'planning'
+  const composerUnavailable = spawnIntentLoading || effectiveShowSignupPreviewPanel || effectiveShowSubscriptionExpiredPanel
   const showComposerUnavailableSkipPlanning = composerUnavailable && planningState === 'planning'
   const skipPlanningDisabled = !canManageAgent || !onSkipPlanning || skipPlanningBusy
   const canOpenQuickSettings = Boolean(onUpdateDailyCredits || (llmIntelligence && onLlmTierChange))
@@ -1577,6 +1581,7 @@ export function AgentChatLayout({
               message={highPriorityBanner.message}
               actionLabel={highPriorityBanner.actionLabel}
               actionHref={highPriorityBanner.actionHref}
+              onAction={highPriorityBanner.onAction}
               dismissible={highPriorityBannerDismissible}
               tone={highPriorityBanner.tone}
               onDismiss={highPriorityBannerDismissible ? handleHighPriorityDismiss : undefined}
@@ -1688,7 +1693,12 @@ export function AgentChatLayout({
 
           {/* Composer at bottom of flex layout */}
           {spawnIntentLoading ? (
-            <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
+            <div
+              ref={composerShellRef}
+              className="flex items-center justify-center py-10"
+              aria-live="polite"
+              aria-busy="true"
+            >
               <div className="flex flex-col items-center gap-3 text-center">
                 <Loader2 size={28} className="animate-spin text-blue-600" aria-hidden="true" />
                 <div>
@@ -1708,7 +1718,7 @@ export function AgentChatLayout({
               </div>
             </div>
           ) : effectiveShowSignupPreviewPanel ? (
-            <>
+            <div ref={composerShellRef}>
               <AgentSignupPreviewPanel
                 status={signupPreviewState}
                 agentId={agentId}
@@ -1716,20 +1726,17 @@ export function AgentChatLayout({
                 currentPlan={subscriptionPlan}
                 onUpgrade={onUpgrade}
               />
-              {showComposerUnavailableSkipPlanning ? (
-                <div className="agent-chat-skip-planning-fallback">
-                  <button
-                    type="button"
-                    className="composer-skip-planning-button"
-                    onClick={() => void onSkipPlanning?.()}
-                    disabled={skipPlanningDisabled}
-                    title={canManageAgent ? 'Skip Planning' : 'Only managers can skip planning'}
-                  >
-                    {skipPlanningBusy ? 'Skipping...' : 'Skip Planning'}
-                  </button>
-                </div>
-              ) : null}
-            </>
+            </div>
+          ) : effectiveShowSubscriptionExpiredPanel ? (
+            <div ref={composerShellRef}>
+              <AgentUpgradePlansPanel
+                title="Choose a plan to continue"
+                body="Your agents are still here. Start a plan to resume messaging and create new agents."
+                currentPlan={subscriptionPlan}
+                onUpgrade={onUpgrade}
+                source="subscription_expired_panel"
+              />
+            </div>
           ) : (
             <AgentComposer
               agentId={activeAgentId ?? agentId ?? null}
