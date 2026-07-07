@@ -38,6 +38,7 @@ from config.socialaccount_adapter import (
 from constants.feature_flags import (
     STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED,
 )
+from pages import homepage_schema
 from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
@@ -89,6 +90,38 @@ class HomePageTests(TestCase):
         return " ".join(
             segment for segment in button.stripped_strings if segment and segment != "→"
         ).strip()
+
+    def _get_homepage_schema_nodes(self, **settings_overrides):
+        schema_settings = {
+            "GOBII_PROPRIETARY_MODE": True,
+            "PUBLIC_BRAND_NAME": "Gobii",
+            "PUBLIC_SITE_URL": "https://gobii.ai",
+            "PUBLIC_CONTACT_EMAIL": "hello@gobii.ai",
+            "PUBLIC_SUPPORT_EMAIL": "support@gobii.ai",
+            "PUBLIC_GITHUB_URL": "https://github.com/gobii-ai",
+            "PUBLIC_HUGGINGFACE_URL": "https://huggingface.co/gobii-ai",
+            "PUBLIC_G2_URL": "https://www.g2.com/products/gobii/reviews",
+            "PUBLIC_SAASHUB_URL": "https://www.saashub.com/gobii",
+            "PUBLIC_DISCORD_URL": "https://discord.gg/yyDB8GwxtE",
+            "PUBLIC_X_URL": "https://x.com/gobii_ai",
+            "PUBLIC_LINKEDIN_URL": "https://www.linkedin.com/company/gobii-ai",
+            "PUBLIC_MEDIUM_URL": "https://medium.com/gobiiai",
+        }
+        schema_settings.update(settings_overrides)
+
+        with override_settings(**schema_settings):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        scripts = soup.find_all("script", {"type": "application/ld+json"})
+        self.assertEqual(len(scripts), 1)
+        structured_data = json.loads(scripts[0].string)
+        self.assertEqual(structured_data["@context"], "https://schema.org")
+        graph = structured_data["@graph"]
+        nodes = {node["@id"]: node for node in graph}
+        self.assertEqual(len(nodes), len(graph))
+        return response, structured_data, nodes
 
     def test_home_page_renders(self):
         """Basic smoke test for home page."""
@@ -166,6 +199,7 @@ class HomePageTests(TestCase):
         self.assertIsNone(soup.find("meta", property="og:title"))
         self.assertIsNone(soup.find("meta", attrs={"name": "twitter:card"}))
         self.assertIsNone(soup.find("meta", attrs={"name": "twitter:image"}))
+        self.assertEqual(soup.find_all("script", {"type": "application/ld+json"}), [])
 
     @override_settings(
         PUBLIC_SITE_URL="https://gobii.ai",
@@ -192,28 +226,96 @@ class HomePageTests(TestCase):
             soup.find("meta", property="og:title")["content"],
             "Vendor Security Watch - Gobii",
         )
+        self.assertEqual(soup.find_all("script", {"type": "application/ld+json"}), [])
+
+    def test_home_page_schema_is_single_json_ld_graph(self):
+        response, structured_data, nodes = self._get_homepage_schema_nodes()
+
+        self.assertContains(response, 'type="application/ld+json"', count=1)
+        self.assertEqual(
+            set(nodes),
+            {
+                "https://gobii.ai/#organization",
+                "https://gobii.ai/#website",
+                "https://gobii.ai/#homepage",
+                "https://gobii.ai/#software",
+            },
+        )
+        self.assertFalse(
+            any(node["@type"] in {"FAQPage", "BreadcrumbList"} for node in structured_data["@graph"])
+        )
+
+        organization_schema = nodes["https://gobii.ai/#organization"]
+        self.assertEqual(organization_schema["@type"], "Organization")
+        self.assertEqual(organization_schema["name"], "Gobii")
+        self.assertEqual(organization_schema["url"], "https://gobii.ai/")
+        self.assertEqual(
+            organization_schema["logo"],
+            "https://gobii.ai/static/images/gobii_fish_icon_512.png",
+        )
+        self.assertIn("https://github.com/gobii-ai", organization_schema["sameAs"])
+        self.assertIn("https://www.linkedin.com/company/gobii-ai", organization_schema["sameAs"])
+        self.assertIn("https://medium.com/gobiiai", organization_schema["sameAs"])
+        self.assertEqual(
+            organization_schema["contactPoint"],
+            [
+                {
+                    "@type": "ContactPoint",
+                    "contactType": "sales",
+                    "email": "hello@gobii.ai",
+                },
+                {
+                    "@type": "ContactPoint",
+                    "contactType": "customer support",
+                    "email": "support@gobii.ai",
+                },
+            ],
+        )
+
+        website_schema = nodes["https://gobii.ai/#website"]
+        self.assertEqual(website_schema["@type"], "WebSite")
+        self.assertEqual(website_schema["publisher"], {"@id": "https://gobii.ai/#organization"})
+        self.assertNotIn("potentialAction", website_schema)
+
+        webpage_schema = nodes["https://gobii.ai/#homepage"]
+        self.assertEqual(webpage_schema["@type"], "WebPage")
+        self.assertEqual(webpage_schema["url"], "https://gobii.ai/")
+        self.assertEqual(webpage_schema["isPartOf"], {"@id": "https://gobii.ai/#website"})
+        self.assertEqual(webpage_schema["about"], {"@id": "https://gobii.ai/#software"})
+        self.assertEqual(webpage_schema["mainEntity"], {"@id": "https://gobii.ai/#software"})
+        self.assertEqual(webpage_schema["publisher"], {"@id": "https://gobii.ai/#organization"})
+        self.assertEqual(
+            webpage_schema["significantLink"],
+            [
+                "https://gobii.ai/teams/",
+                "https://gobii.ai/solutions/",
+                "https://gobii.ai/pricing/",
+                "https://gobii.ai/library/",
+                "https://gobii.ai/comparisons/",
+            ],
+        )
+
+        software_schema = nodes["https://gobii.ai/#software"]
+        self.assertEqual(software_schema["@type"], "SoftwareApplication")
+        self.assertEqual(software_schema["name"], "Gobii")
+        self.assertEqual(software_schema["url"], "https://gobii.ai/")
+        self.assertEqual(software_schema["applicationCategory"], "BusinessApplication")
+        self.assertEqual(software_schema["operatingSystem"], "Web")
+        self.assertEqual(software_schema["description"], homepage_schema.HOMEPAGE_SOFTWARE_DESCRIPTION)
+        self.assertEqual(software_schema["featureList"], homepage_schema.HOMEPAGE_SOFTWARE_FEATURES)
+        self.assertNotIn("offers", software_schema)
 
     def test_home_page_organization_schema_uses_configured_linkedin_url(self):
         linkedin_url = "https://www.linkedin.com/company/example-ai"
         g2_url = "https://www.g2.com/products/gobii/reviews"
         saashub_url = "https://www.saashub.com/gobii"
 
-        with override_settings(
+        _, _, nodes = self._get_homepage_schema_nodes(
             PUBLIC_LINKEDIN_URL=linkedin_url,
             PUBLIC_G2_URL=g2_url,
             PUBLIC_SAASHUB_URL=saashub_url,
-        ):
-            response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        schemas = [
-            json.loads(script.string)
-            for script in soup.find_all("script", {"type": "application/ld+json"})
-        ]
-        organization_schema = next(
-            schema for schema in schemas if schema.get("@id", "").endswith("/#organization")
         )
+        organization_schema = nodes["https://gobii.ai/#organization"]
 
         self.assertIn(linkedin_url, organization_schema["sameAs"])
         self.assertNotIn("https://www.linkedin.com/company/gobii-ai", organization_schema["sameAs"])
@@ -225,22 +327,12 @@ class HomePageTests(TestCase):
         g2_url = "https://www.g2.com/products/gobii/reviews"
         saashub_url = "https://www.saashub.com/gobii"
 
-        with override_settings(
+        _, _, nodes = self._get_homepage_schema_nodes(
             PUBLIC_LINKEDIN_URL="",
             PUBLIC_G2_URL=g2_url,
             PUBLIC_SAASHUB_URL=saashub_url,
-        ):
-            response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        schemas = [
-            json.loads(script.string)
-            for script in soup.find_all("script", {"type": "application/ld+json"})
-        ]
-        organization_schema = next(
-            schema for schema in schemas if schema.get("@id", "").endswith("/#organization")
         )
+        organization_schema = nodes["https://gobii.ai/#organization"]
 
         self.assertNotIn("https://www.linkedin.com/company/gobii-ai", organization_schema["sameAs"])
         self.assertIn("https://huggingface.co/gobii-ai", organization_schema["sameAs"])
@@ -248,50 +340,20 @@ class HomePageTests(TestCase):
         self.assertIn(saashub_url, organization_schema["sameAs"])
 
     def test_home_page_organization_schema_omits_empty_huggingface_url(self):
-        with override_settings(PUBLIC_HUGGINGFACE_URL=""):
-            response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        schemas = [
-            json.loads(script.string)
-            for script in soup.find_all("script", {"type": "application/ld+json"})
-        ]
-        organization_schema = next(
-            schema for schema in schemas if schema.get("@id", "").endswith("/#organization")
-        )
+        _, _, nodes = self._get_homepage_schema_nodes(PUBLIC_HUGGINGFACE_URL="")
+        organization_schema = nodes["https://gobii.ai/#organization"]
 
         self.assertNotIn("https://huggingface.co/gobii-ai", organization_schema["sameAs"])
 
     def test_home_page_organization_schema_omits_empty_g2_url(self):
-        with override_settings(PUBLIC_G2_URL=""):
-            response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        schemas = [
-            json.loads(script.string)
-            for script in soup.find_all("script", {"type": "application/ld+json"})
-        ]
-        organization_schema = next(
-            schema for schema in schemas if schema.get("@id", "").endswith("/#organization")
-        )
+        _, _, nodes = self._get_homepage_schema_nodes(PUBLIC_G2_URL="")
+        organization_schema = nodes["https://gobii.ai/#organization"]
 
         self.assertNotIn("https://www.g2.com/products/gobii/reviews", organization_schema["sameAs"])
 
     def test_home_page_organization_schema_omits_empty_saashub_url(self):
-        with override_settings(PUBLIC_SAASHUB_URL=""):
-            response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        schemas = [
-            json.loads(script.string)
-            for script in soup.find_all("script", {"type": "application/ld+json"})
-        ]
-        organization_schema = next(
-            schema for schema in schemas if schema.get("@id", "").endswith("/#organization")
-        )
+        _, _, nodes = self._get_homepage_schema_nodes(PUBLIC_SAASHUB_URL="")
+        organization_schema = nodes["https://gobii.ai/#organization"]
 
         self.assertNotIn("https://www.saashub.com/gobii", organization_schema["sameAs"])
 

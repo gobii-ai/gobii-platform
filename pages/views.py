@@ -161,6 +161,10 @@ from .homepage_cache import (
     get_homepage_integrations_payload,
     get_homepage_pretrained_payload,
 )
+from .homepage_schema import (
+    HOMEPAGE_SOCIAL_IMAGE_PATH,
+    build_homepage_structured_data,
+)
 from .public_template_urls import (
     public_template_category_label,
     public_template_category_path,
@@ -249,7 +253,6 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "trello": "images/integrations/pipedream/trello.svg",
 }
 HOMEPAGE_META_TITLE_SUFFIX = "AI Coworkers for Teams With Real Work to Do"
-HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
 
@@ -1331,6 +1334,17 @@ class HomePage(TemplateView):
 
             context['recent_agents_remaining'] = max(fallback_total - len(recent_agents), 0)
             context['recent_agents_total'] = fallback_total
+
+        if (
+            settings.GOBII_PROPRIETARY_MODE
+            and (not context.get("default_charter") or context.get("agent_charter_saved"))
+        ):
+            context["home_structured_data_json"] = html_safe_json_dumps(
+                build_homepage_structured_data(
+                    page_title=context["home_meta_title"],
+                    page_description=context["home_meta_description"],
+                )
+            )
 
         return context
 
