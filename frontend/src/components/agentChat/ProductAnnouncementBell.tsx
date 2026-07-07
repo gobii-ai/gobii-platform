@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Bell, Check, Loader2 } from 'lucide-react'
+import { Bell, Check, ChevronLeft, Loader2 } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import type { ProductAnnouncement } from '../../api/productAnnouncements'
@@ -41,7 +41,10 @@ type AnnouncementPanelProps = {
   unreadCount: number
   markBusy: boolean
   variant: 'sidebar' | 'mobile'
+  selectedAnnouncement: ProductAnnouncement | null
   onRetry: () => void
+  onBackToList: () => void
+  onOpenAnnouncement: (announcement: ProductAnnouncement) => void
   onMarkAllRead: () => void
   onMarkRead: (announcementId: string) => void
   onAction: (announcement: ProductAnnouncement) => void
@@ -54,11 +57,51 @@ function AnnouncementPanel({
   unreadCount,
   markBusy,
   variant,
+  selectedAnnouncement,
   onRetry,
+  onBackToList,
+  onOpenAnnouncement,
   onMarkAllRead,
   onMarkRead,
   onAction,
 }: AnnouncementPanelProps) {
+  if (selectedAnnouncement) {
+    return (
+      <div className="product-announcement-panel" data-variant={variant}>
+        <div className="product-announcement-panel__detail-header">
+          <button
+            type="button"
+            className="product-announcement-panel__back"
+            onClick={onBackToList}
+            aria-label="Back to updates"
+          >
+            <ChevronLeft className="product-announcement-panel__back-icon" aria-hidden="true" />
+            <span>Updates</span>
+          </button>
+          {selectedAnnouncement.publishedAt ? (
+            <time className="product-announcement-panel__item-date" dateTime={selectedAnnouncement.publishedAt}>
+              {formatPublishedAt(selectedAnnouncement.publishedAt)}
+            </time>
+          ) : null}
+        </div>
+        <div className="product-announcement-panel__detail">
+          <h2 className="product-announcement-panel__detail-title">{selectedAnnouncement.title}</h2>
+          <p className="product-announcement-panel__detail-body">{selectedAnnouncement.body}</p>
+          {selectedAnnouncement.actionLabel && selectedAnnouncement.actionUrl ? (
+            <button
+              type="button"
+              className="product-announcement-panel__action"
+              onClick={() => onAction(selectedAnnouncement)}
+              disabled={markBusy}
+            >
+              {selectedAnnouncement.actionLabel}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="product-announcement-panel" data-variant={variant}>
       <div className="product-announcement-panel__header">
@@ -105,35 +148,34 @@ function AnnouncementPanel({
               className="product-announcement-panel__item"
               data-read={announcement.isRead ? 'true' : 'false'}
             >
-              <div className="product-announcement-panel__item-header">
+              <button
+                type="button"
+                className="product-announcement-panel__item-main"
+                onClick={() => onOpenAnnouncement(announcement)}
+                disabled={markBusy}
+                aria-label={`Open "${announcement.title}"`}
+              >
                 <div className="product-announcement-panel__item-copy">
-                  <h3 className="product-announcement-panel__item-title">{announcement.title}</h3>
-                  {announcement.publishedAt ? (
-                    <time className="product-announcement-panel__item-date" dateTime={announcement.publishedAt}>
-                      {formatPublishedAt(announcement.publishedAt)}
-                    </time>
-                  ) : null}
+                  <div className="product-announcement-panel__item-header">
+                    <h3 className="product-announcement-panel__item-title">{announcement.title}</h3>
+                    {announcement.publishedAt ? (
+                      <time className="product-announcement-panel__item-date" dateTime={announcement.publishedAt}>
+                        {formatPublishedAt(announcement.publishedAt)}
+                      </time>
+                    ) : null}
+                  </div>
+                  <p className="product-announcement-panel__preview">{announcement.body}</p>
                 </div>
-                {!announcement.isRead ? (
-                  <button
-                    type="button"
-                    className="product-announcement-panel__read-button"
-                    aria-label={`Mark "${announcement.title}" as read`}
-                    onClick={() => onMarkRead(announcement.id)}
-                    disabled={markBusy}
-                  >
-                    <Check className="product-announcement-panel__read-icon" aria-hidden="true" />
-                  </button>
-                ) : null}
-              </div>
-              <p className="product-announcement-panel__body">{announcement.body}</p>
-              {announcement.actionLabel && announcement.actionUrl ? (
+              </button>
+              {!announcement.isRead ? (
                 <button
                   type="button"
-                  className="product-announcement-panel__action"
-                  onClick={() => onAction(announcement)}
+                  className="product-announcement-panel__read-button"
+                  aria-label={`Mark "${announcement.title}" as read`}
+                  onClick={() => onMarkRead(announcement.id)}
+                  disabled={markBusy}
                 >
-                  {announcement.actionLabel}
+                  <Check className="product-announcement-panel__read-icon" aria-hidden="true" />
                 </button>
               ) : null}
             </article>
@@ -146,6 +188,7 @@ function AnnouncementPanel({
 
 export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnouncementBellProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [selectedAnnouncementId, setSelectedAnnouncementId] = useState<string | null>(null)
   const announcementsQuery = useProductAnnouncements()
   const markReadMutation = useMarkProductAnnouncementsRead()
   const announcements = announcementsQuery.data?.announcements ?? []
@@ -153,6 +196,10 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
   const hasUnread = announcementsQuery.data?.hasUnread ?? false
   const label = useMemo(() => resolveUnreadLabel(unreadCount), [unreadCount])
   const markBusy = markReadMutation.isPending
+  const selectedAnnouncement = useMemo(
+    () => announcements.find((announcement) => announcement.id === selectedAnnouncementId) ?? null,
+    [announcements, selectedAnnouncementId],
+  )
 
   const handleMarkAllRead = useCallback(() => {
     if (unreadCount <= 0) {
@@ -163,6 +210,17 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
 
   const handleMarkRead = useCallback((announcementId: string) => {
     markReadMutation.mutate({ announcementIds: [announcementId] })
+  }, [markReadMutation])
+
+  const handleOpenAnnouncement = useCallback(async (announcement: ProductAnnouncement) => {
+    if (!announcement.isRead) {
+      try {
+        await markReadMutation.mutateAsync({ announcementIds: [announcement.id] })
+      } catch {
+        return
+      }
+    }
+    setSelectedAnnouncementId(announcement.id)
   }, [markReadMutation])
 
   const handleAction = useCallback(async (announcement: ProductAnnouncement) => {
@@ -184,7 +242,10 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
       unreadCount={unreadCount}
       markBusy={markBusy}
       variant={variant}
+      selectedAnnouncement={selectedAnnouncement}
       onRetry={() => void announcementsQuery.refetch()}
+      onBackToList={() => setSelectedAnnouncementId(null)}
+      onOpenAnnouncement={(announcement) => void handleOpenAnnouncement(announcement)}
       onMarkAllRead={handleMarkAllRead}
       onMarkRead={handleMarkRead}
       onAction={handleAction}
