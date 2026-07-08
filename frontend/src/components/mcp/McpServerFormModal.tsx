@@ -11,8 +11,9 @@ import {
   type McpServerPayload,
 } from '../../api/mcp'
 import { HttpError } from '../../api/http'
-import { safeErrorMessage } from '../../api/safeErrorMessage'
+import { fieldErrorMessages, safeErrorMessage } from '../../api/safeErrorMessage'
 import { useMcpOAuth } from '../../hooks/useMcpOAuth'
+import { FormField, SelectInput, TextareaInput, TextInput } from '../common/FormControls'
 import { Modal } from '../common/Modal'
 import { ModalForm } from '../common/ModalForm'
 
@@ -58,6 +59,90 @@ const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 const createBlankHeaders = (): HeaderEntry[] => [{ ...BLANK_HEADER }]
 const createBlankEnvEntries = (): EnvEntry[] => [{ ...BLANK_ENV }]
+
+function KeyValueEntryEditor<TEntry extends HeaderEntry | EnvEntry>({
+  entries,
+  entryLabel,
+  addLabel,
+  keyLabel,
+  keyPlaceholder,
+  valueLabel,
+  onAdd,
+  onChange,
+  onRemove,
+}: {
+  entries: TEntry[]
+  entryLabel: string
+  addLabel: string
+  keyLabel: string
+  keyPlaceholder?: string
+  valueLabel: string
+  onAdd: () => void
+  onChange: (index: number, key: 'key' | 'value', value: string) => void
+  onRemove: (index: number) => void
+}) {
+  const entryIdPrefix = entryLabel.toLowerCase().replace(/\W+/g, '-').replace(/^-|-$/g, '')
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-medium text-slate-600">{entryLabel}</label>
+        <button type="button" className="text-xs font-medium text-blue-600 hover:text-blue-700" onClick={onAdd}>
+          {addLabel}
+        </button>
+      </div>
+      <div className="space-y-3">
+        {entries.map((entry, index) => (
+          <div key={`${entryLabel}-${index}`} className="flex flex-col gap-3 sm:flex-row">
+            <div className="sm:flex-1">
+              <label className="text-xs font-medium text-slate-500">{keyLabel}</label>
+              <TextInput
+                id={`${entryIdPrefix}-${index}-key`}
+                type="text"
+                inputClassName="rounded-lg focus:border-blue-500 focus:ring-blue-500"
+                value={entry.key}
+                onChange={(event) => onChange(index, 'key', event.target.value)}
+                placeholder={keyPlaceholder}
+              />
+            </div>
+            <div className="sm:flex-1">
+              <label className="text-xs font-medium text-slate-500">{valueLabel}</label>
+              <TextInput
+                id={`${entryIdPrefix}-${index}-value`}
+                type="text"
+                inputClassName="rounded-lg focus:border-blue-500 focus:ring-blue-500"
+                value={entry.value}
+                onChange={(event) => onChange(index, 'value', event.target.value)}
+              />
+            </div>
+            <div className="sm:w-auto sm:self-end">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                onClick={() => onRemove(index)}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function FieldErrorList({ errors }: { errors: string[] }) {
+  if (errors.length === 0) {
+    return null
+  }
+  return (
+    <>
+      {errors.map((error) => (
+        <span key={error} className="block">{error}</span>
+      ))}
+    </>
+  )
+}
 
 export function McpServerFormModal({
   mode,
@@ -115,12 +200,16 @@ export function McpServerFormModal({
   }, [oauthStore.requiresManualClient])
 
   useEffect(() => {
-    if (getFieldErrors('headers', formErrors).length > 0) {
+    if (fieldErrorMessages('headers', formErrors).length > 0) {
       setHeadersExpanded(true)
     }
   }, [formErrors])
 
   const nonFieldErrors = formErrors?.non_field_errors ?? []
+  const displayNameErrors = [
+    ...fieldErrorMessages('display_name', formErrors),
+    ...fieldErrorMessages('name', formErrors),
+  ]
   const showMetadataSection = ownerScope === 'platform'
   const showPipedreamPrefetchApps = ownerScope === 'platform' && state.slug.trim().toLowerCase() === 'pipedream'
 
@@ -283,11 +372,20 @@ export function McpServerFormModal({
       formClassName="space-y-6 p-1"
     >
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700">Display Name</label>
-            <input
+          <FormField
+            id="mcp-server-display-name"
+            label="Display Name"
+            helpText={(
+              <>
+                Identifier: <span className="font-mono text-slate-700">{state.slug || 'auto-generated'}</span>
+              </>
+            )}
+            error={displayNameErrors.length > 0 ? <FieldErrorList errors={displayNameErrors} /> : null}
+          >
+            <TextInput
+              id="mcp-server-display-name"
               type="text"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+              inputClassName="rounded-lg focus:border-blue-500 focus:ring-blue-500"
               value={state.displayName}
               onChange={(event) => {
                 const value = event.target.value
@@ -299,20 +397,7 @@ export function McpServerFormModal({
               }}
               required
             />
-            <p className="text-xs text-slate-500">
-              Identifier: <span className="font-mono text-slate-700">{state.slug || 'auto-generated'}</span>
-            </p>
-            {getFieldErrors('display_name', formErrors).map((error) => (
-              <p key={error} className="text-xs text-red-600">
-                {error}
-              </p>
-            ))}
-            {getFieldErrors('name', formErrors).map((error) => (
-              <p key={error} className="text-xs text-red-600">
-                {error}
-              </p>
-            ))}
-          </div>
+          </FormField>
 
           <div>
             <label className="block text-sm font-medium text-slate-700">Connection Type</label>
@@ -357,19 +442,19 @@ export function McpServerFormModal({
                 )}
               </div>
             </div>
-            {getFieldErrors('url', formErrors).map((error) => (
+            {fieldErrorMessages('url', formErrors).map((error) => (
               <p key={error} className="text-xs text-red-600">
                 {error}
               </p>
             ))}
             {state.connectionType === 'stdio' &&
-              getFieldErrors('command', formErrors).map((error) => (
+              fieldErrorMessages('command', formErrors).map((error) => (
                 <p key={error} className="text-xs text-red-600">
                   {error}
                 </p>
               ))}
             {state.connectionType === 'stdio' &&
-              getFieldErrors('command_args', formErrors).map((error) => (
+              fieldErrorMessages('command_args', formErrors).map((error) => (
                 <p key={error} className="text-xs text-red-600">
                   {error}
                 </p>
@@ -379,58 +464,22 @@ export function McpServerFormModal({
           {allowCommands && state.connectionType === 'stdio' && (
             <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 space-y-4">
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-slate-600">Environment variables</label>
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-blue-600 hover:text-blue-700"
-                    onClick={() =>
-                      setState((prev) => ({ ...prev, environmentEntries: [...prev.environmentEntries, { ...BLANK_ENV }] }))
-                    }
-                  >
-                    Add variable
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {state.environmentEntries.map((entry, index) => (
-                    <div key={`env-${index}`} className="flex flex-col gap-3 sm:flex-row">
-                      <div className="sm:flex-1">
-                        <label className="text-xs font-medium text-slate-500">Key</label>
-                        <input
-                          type="text"
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                          value={entry.key}
-                          onChange={(event) => handleEnvChange(index, 'key', event.target.value, setState)}
-                          placeholder="API_KEY"
-                        />
-                      </div>
-                      <div className="sm:flex-1">
-                        <label className="text-xs font-medium text-slate-500">Value</label>
-                        <input
-                          type="text"
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                          value={entry.value}
-                          onChange={(event) => handleEnvChange(index, 'value', event.target.value, setState)}
-                        />
-                      </div>
-                      <div className="sm:w-auto sm:self-end">
-                        <button
-                          type="button"
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-                          onClick={() =>
-                            setState((prev) => {
-                              const entries = prev.environmentEntries.filter((_, idx) => idx !== index)
-                              return { ...prev, environmentEntries: entries.length ? entries : createBlankEnvEntries() }
-                            })
-                          }
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {getFieldErrors('environment', formErrors).map((error) => (
+                <KeyValueEntryEditor
+                  entries={state.environmentEntries}
+                  entryLabel="Environment variables"
+                  addLabel="Add variable"
+                  keyLabel="Key"
+                  keyPlaceholder="API_KEY"
+                  valueLabel="Value"
+                  onAdd={() => setState((prev) => ({ ...prev, environmentEntries: [...prev.environmentEntries, { ...BLANK_ENV }] }))}
+                  onChange={(index, key, value) => handleEnvChange(index, key, value, setState)}
+                  onRemove={(index) =>
+                    setState((prev) => {
+                      const entries = prev.environmentEntries.filter((_, idx) => idx !== index)
+                      return { ...prev, environmentEntries: entries.length ? entries : createBlankEnvEntries() }
+                    })}
+                />
+                {fieldErrorMessages('environment', formErrors).map((error) => (
                   <p key={error} className="text-xs text-red-600">
                     {error}
                   </p>
@@ -440,38 +489,40 @@ export function McpServerFormModal({
           )}
 
           {state.connectionType !== 'stdio' && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Authentication</label>
-              <select
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+            <FormField
+              id="mcp-server-auth-method"
+              label="Authentication"
+              error={fieldErrorMessages('auth_method', formErrors).length > 0 ? <FieldErrorList errors={fieldErrorMessages('auth_method', formErrors)} /> : null}
+            >
+              <SelectInput
+                id="mcp-server-auth-method"
+                inputClassName="rounded-lg focus:border-blue-500 focus:ring-blue-500"
                 value={state.authMethod}
                 onChange={(event) => setState((prev) => ({ ...prev, authMethod: event.target.value }))}
               >
                 <option value="none">None</option>
                 <option value="bearer_token">Bearer Token</option>
                 <option value="oauth2">OAuth 2.0</option>
-              </select>
-              {getFieldErrors('auth_method', formErrors).map((error) => (
-                <p key={error} className="text-xs text-red-600">
-                  {error}
-                </p>
-              ))}
-            </div>
+              </SelectInput>
+            </FormField>
           )}
 
           {state.connectionType !== 'stdio' && state.authMethod === 'bearer_token' && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Bearer Token</label>
-              <input
+            <FormField
+              id="mcp-server-bearer-token"
+              label="Bearer Token"
+              helpText="Stored securely and sent as the Authorization header."
+            >
+              <TextInput
+                id="mcp-server-bearer-token"
                 type="password"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                inputClassName="rounded-lg focus:border-blue-500 focus:ring-blue-500"
                 value={state.bearerToken}
                 onChange={(event) => setState((prev) => ({ ...prev, bearerToken: event.target.value }))}
                 autoComplete="off"
                 placeholder="Enter secure token"
               />
-              <p className="text-xs text-slate-500">Stored securely and sent as the Authorization header.</p>
-            </div>
+            </FormField>
           )}
 
           {ownerScope === 'organization' && (
@@ -481,43 +532,41 @@ export function McpServerFormModal({
           )}
 
           {showPipedreamPrefetchApps && (
-            <div className="space-y-2 rounded-lg border border-slate-200 bg-white px-4 py-4">
-              <label className="block text-sm font-semibold text-slate-700">Prefetch Apps</label>
-              <textarea
-                className="min-h-28 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:ring-blue-500"
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-4">
+              <FormField
+                id="mcp-server-prefetch-apps"
+                label="Prefetch Apps"
+                helpText="One Pipedream app slug per line, or separate with commas."
+                error={fieldErrorMessages('prefetch_apps', formErrors).length > 0 ? <FieldErrorList errors={fieldErrorMessages('prefetch_apps', formErrors)} /> : null}
+              >
+                <TextareaInput
+                id="mcp-server-prefetch-apps"
+                inputClassName="min-h-28 rounded-lg font-mono focus:border-blue-500 focus:ring-blue-500"
                 value={state.prefetchAppsInput}
                 onChange={(event) => setState((prev) => ({ ...prev, prefetchAppsInput: event.target.value }))}
                 placeholder={'google_sheets\ngreenhouse\ngoogle_docs'}
               />
-              <p className="text-xs text-slate-500">
-                One Pipedream app slug per line, or separate with commas.
-              </p>
-              {getFieldErrors('prefetch_apps', formErrors).map((error) => (
-                <p key={error} className="text-xs text-red-600">
-                  {error}
-                </p>
-              ))}
+              </FormField>
             </div>
           )}
 
           {showMetadataSection && (
-            <div className="space-y-2 rounded-lg border border-slate-200 bg-white px-4 py-4">
-              <label className="block text-sm font-semibold text-slate-700">Metadata</label>
-              <textarea
-                className="min-h-36 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:ring-blue-500"
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-4">
+              <FormField
+                id="mcp-server-metadata"
+                label="Metadata"
+                helpText="Optional JSON object for platform server behavior such as environment fallbacks and integration metadata."
+                error={fieldErrorMessages('metadata', formErrors).length > 0 ? <FieldErrorList errors={fieldErrorMessages('metadata', formErrors)} /> : null}
+              >
+                <TextareaInput
+                id="mcp-server-metadata"
+                inputClassName="min-h-36 rounded-lg font-mono focus:border-blue-500 focus:ring-blue-500"
                 value={state.metadataJson}
                 onChange={(event) => setState((prev) => ({ ...prev, metadataJson: event.target.value }))}
                 placeholder={'{\n  "env_fallback": {\n    "WEB_UNLOCKER_ZONE": "WEB_UNLOCKER_ZONE_FALLBACK"\n  }\n}'}
                 spellCheck={false}
               />
-              <p className="text-xs text-slate-500">
-                Optional JSON object for platform server behavior such as environment fallbacks and integration metadata.
-              </p>
-              {getFieldErrors('metadata', formErrors).map((error) => (
-                <p key={error} className="text-xs text-red-600">
-                  {error}
-                </p>
-              ))}
+              </FormField>
             </div>
           )}
         </div>
@@ -657,55 +706,21 @@ export function McpServerFormModal({
             </button>
             {headersExpanded && (
               <div className="space-y-4 border-t border-slate-100 px-4 py-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-slate-700">Header entries</p>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-blue-600 hover:text-blue-700"
-                    onClick={() => setState((prev) => ({ ...prev, headers: [...prev.headers, { ...BLANK_HEADER }] }))}
-                  >
-                    Add Header
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {state.headers.map((entry, index) => (
-                    <div key={`header-${index}`} className="flex flex-col gap-3 sm:flex-row">
-                      <div className="sm:flex-1">
-                        <label className="text-xs font-medium text-slate-500">Header</label>
-                        <input
-                          type="text"
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                          value={entry.key}
-                          onChange={(event) => handleHeaderChange(index, 'key', event.target.value, setState)}
-                        />
-                      </div>
-                      <div className="sm:flex-1">
-                        <label className="text-xs font-medium text-slate-500">Value</label>
-                        <input
-                          type="text"
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                          value={entry.value}
-                          onChange={(event) => handleHeaderChange(index, 'value', event.target.value, setState)}
-                        />
-                      </div>
-                      <div className="sm:w-auto sm:self-end">
-                        <button
-                          type="button"
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-                          onClick={() =>
-                            setState((prev) => {
-                              const headers = prev.headers.filter((_, idx) => idx !== index)
-                              return { ...prev, headers: headers.length ? headers : createBlankHeaders() }
-                            })
-                          }
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {getFieldErrors('headers', formErrors).map((error) => (
+                <KeyValueEntryEditor
+                  entries={state.headers}
+                  entryLabel="Header entries"
+                  addLabel="Add Header"
+                  keyLabel="Header"
+                  valueLabel="Value"
+                  onAdd={() => setState((prev) => ({ ...prev, headers: [...prev.headers, { ...BLANK_HEADER }] }))}
+                  onChange={(index, key, value) => handleHeaderChange(index, key, value, setState)}
+                  onRemove={(index) =>
+                    setState((prev) => {
+                      const headers = prev.headers.filter((_, idx) => idx !== index)
+                      return { ...prev, headers: headers.length ? headers : createBlankHeaders() }
+                    })}
+                />
+                {fieldErrorMessages('headers', formErrors).map((error) => (
                   <p key={error} className="text-xs text-red-600">
                     {error}
                   </p>
@@ -976,17 +991,6 @@ function slugify(value: string): string {
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 64)
-}
-
-function getFieldErrors(field: string, errors?: FormErrors | null): string[] {
-  if (!errors) {
-    return []
-  }
-  return errors[field] || errors[toSnakeCase(field)] || []
-}
-
-function toSnakeCase(value: string): string {
-  return value.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`)
 }
 
 function statusLabel(status: OAuthStatus): string {

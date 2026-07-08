@@ -1,9 +1,17 @@
 import { useMemo } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
-import { Clock3, Trash2, UserPlus, Users } from 'lucide-react'
+import { Clock3, UserPlus, Users } from 'lucide-react'
 
 import type { CollaboratorTableRow } from './contactTypes'
+import {
+  EmbeddedRemoveButton,
+  EmbeddedStatusBadge,
+  EmbeddedTableFrame,
+  EmbeddedTableHeader,
+  embeddedTableBodyClassName,
+  embeddedTableHeadClassName,
+} from './embeddedTablePrimitives'
 
 type CollaboratorsTableProps = {
   rows: CollaboratorTableRow[]
@@ -13,27 +21,23 @@ type CollaboratorsTableProps = {
 }
 
 function renderStatus(row: CollaboratorTableRow) {
-  const pendingAmberClassName = 'inline-flex items-center gap-1 rounded-full border border-amber-300/20 bg-amber-950/35 px-2.5 py-1 text-xs font-semibold text-amber-200'
-  const pendingRoseClassName = 'inline-flex rounded-full border border-rose-300/20 bg-rose-950/35 px-2.5 py-1 text-xs font-semibold text-rose-200'
-  const activeClassName = 'inline-flex rounded-full border border-emerald-300/20 bg-emerald-950/35 px-2.5 py-1 text-xs font-semibold text-emerald-200'
-
   if (row.pendingType === 'create') {
-    return <span className={pendingAmberClassName}>Pending create</span>
+    return <EmbeddedStatusBadge tone="pending">Pending create</EmbeddedStatusBadge>
   }
   if (row.pendingType === 'remove') {
-    return <span className={pendingRoseClassName}>Pending removal</span>
+    return <EmbeddedStatusBadge tone="danger">Pending removal</EmbeddedStatusBadge>
   }
   if (row.pendingType === 'cancel_invite') {
-    return <span className={pendingRoseClassName}>Pending cancel</span>
+    return <EmbeddedStatusBadge tone="danger">Pending cancel</EmbeddedStatusBadge>
   }
   if (row.kind === 'active') {
-    return <span className={activeClassName}>Active</span>
+    return <EmbeddedStatusBadge tone="active">Active</EmbeddedStatusBadge>
   }
   return (
-    <span className={pendingAmberClassName}>
+    <EmbeddedStatusBadge tone="pending">
       <Clock3 className="h-3 w-3" aria-hidden="true" />
       Pending invite
-    </span>
+    </EmbeddedStatusBadge>
   )
 }
 
@@ -43,17 +47,11 @@ export function CollaboratorsTable({
   canManage,
   onRemove,
 }: CollaboratorsTableProps) {
-  const embeddedTableWrapperClassName = 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35'
-  const embeddedTableHeadClassName = 'bg-slate-950/45'
-  const embeddedTableBodyClassName = 'bg-transparent'
-  const embeddedDestructiveButtonClassName =
-    'inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-1.5 text-xs font-semibold text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:opacity-50'
-
   const columns = useMemo<ColumnDef<CollaboratorTableRow>[]>(
     () => [
       {
         id: 'collaborator',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Collaborator</span>,
+        header: () => <EmbeddedTableHeader>Collaborator</EmbeddedTableHeader>,
         cell: ({ row }) => {
           const icon =
             row.original.kind === 'active'
@@ -80,12 +78,12 @@ export function CollaboratorsTable({
       },
       {
         id: 'status',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</span>,
+        header: () => <EmbeddedTableHeader>Status</EmbeddedTableHeader>,
         cell: ({ row }) => renderStatus(row.original),
       },
       {
         id: 'actions',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</span>,
+        header: () => <EmbeddedTableHeader>Actions</EmbeddedTableHeader>,
         cell: ({ row }) => {
           if (!canManage) {
             return <span className="text-xs text-slate-500">Managed by owner/admin</span>
@@ -100,20 +98,14 @@ export function CollaboratorsTable({
           }
 
           return (
-            <button
-              type="button"
-              onClick={() => onRemove(row.original)}
-              disabled={disabled}
-              className={embeddedDestructiveButtonClassName}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+            <EmbeddedRemoveButton onClick={() => onRemove(row.original)} disabled={disabled}>
               {row.original.kind === 'active' ? 'Remove' : 'Cancel invite'}
-            </button>
+            </EmbeddedRemoveButton>
           )
         },
       },
     ],
-    [canManage, disabled, onRemove, embeddedDestructiveButtonClassName],
+    [canManage, disabled, onRemove],
   )
 
   const table = useReactTable({
@@ -124,8 +116,7 @@ export function CollaboratorsTable({
   })
 
   return (
-    <div className={embeddedTableWrapperClassName}>
-      <div className="overflow-x-auto">
+    <EmbeddedTableFrame>
         <table className="min-w-full border-collapse">
           <thead className={embeddedTableHeadClassName}>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -164,7 +155,6 @@ export function CollaboratorsTable({
             )}
           </tbody>
         </table>
-      </div>
-    </div>
+    </EmbeddedTableFrame>
   )
 }

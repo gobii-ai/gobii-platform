@@ -36,6 +36,38 @@ export function safeErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MESSAG
   return fallback
 }
 
+export function apiErrorMessages(error: unknown, fallback = DEFAULT_ERROR_MESSAGE): string[] {
+  if (error instanceof HttpError && error.body && typeof error.body === 'object') {
+    const body = error.body as Record<string, unknown>
+    if (body.errors && typeof body.errors === 'object') {
+      const messages = Object.values(body.errors as Record<string, unknown>).flatMap((value) => (
+        Array.isArray(value) ? value.map(String) : [String(value)]
+      ))
+      if (messages.length > 0) {
+        return messages
+      }
+    }
+    if (body.error) {
+      return [String(body.error)]
+    }
+  }
+  return [safeErrorMessage(error, fallback)]
+}
+
+export function fieldErrorMessages(
+  field: string,
+  errors?: Record<string, string[]> | null,
+): string[] {
+  if (!errors) {
+    return []
+  }
+  return errors[field] || errors[toSnakeCase(field)] || []
+}
+
+function toSnakeCase(value: string): string {
+  return value.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`)
+}
+
 function isHtmlResponse(value: string): boolean {
   const normalized = value.slice(0, 200).toLowerCase()
   return normalized.includes('<!doctype') || normalized.includes('<html') || normalized.includes('<body')

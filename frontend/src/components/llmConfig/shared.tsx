@@ -832,166 +832,136 @@ export function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: T
   return { ranges: mappedRanges, tiers: mappedTiers }
 }
 
+type WeightedEndpointSource = {
+  id: string
+  endpoint_id: string
+  endpoint_key: string
+  label: string
+  weight: number
+  extraction_endpoint_id?: string | null
+  extraction_endpoint_key?: string | null
+  extraction_label?: string | null
+}
+
+type WeightedTierSource<E extends WeightedEndpointSource = WeightedEndpointSource> = {
+  id: string
+  description?: string | null
+  order: number
+  endpoints: E[]
+  intelligence_tier?: llmApi.IntelligenceTier | null
+}
+
+function mapWeightedEndpoints<E extends WeightedEndpointSource>(
+  endpoints: E[],
+  extraEndpoint?: (endpoint: E) => Partial<TierEndpoint>,
+): TierEndpoint[] {
+  const normalized = normalizeTierEndpointWeights(endpoints)
+  return endpoints.map((endpoint) => ({
+    id: endpoint.id,
+    endpointId: endpoint.endpoint_id,
+    label: endpoint.label,
+    weight: normalized[endpoint.id] ?? 0,
+    ...extraEndpoint?.(endpoint),
+  }))
+}
+
+function mapWeightedTiers<E extends WeightedEndpointSource, T extends WeightedTierSource<E>>(
+  tiers: T[],
+  {
+    rangeId,
+    fallbackKey,
+    intelligenceTier = () => null,
+    extraTier,
+    extraEndpoint,
+  }: {
+    rangeId: string
+    fallbackKey: (tier: Tier) => string
+    intelligenceTier?: (tier: T) => llmApi.IntelligenceTier | null
+    extraTier?: (tier: T) => Partial<Tier>
+    extraEndpoint?: (endpoint: E) => Partial<TierEndpoint>
+  },
+): Tier[] {
+  const mapped = tiers.map((tier) => ({
+    id: tier.id,
+    name: (tier.description || '').trim(),
+    order: tier.order,
+    rangeId,
+    intelligenceTier: intelligenceTier(tier),
+    endpoints: mapWeightedEndpoints(tier.endpoints, extraEndpoint),
+    ...extraTier?.(tier),
+  }))
+  applySequentialFallbackNames(mapped, fallbackKey)
+  return mapped
+}
+
 export function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
   if (!policy) return []
-  const tiers = policy.tiers.map((tier) => {
-    const normalized = normalizeTierEndpointWeights(tier.endpoints)
-    return {
-      id: tier.id,
-      name: (tier.description || '').trim(),
-      order: tier.order,
-      rangeId: 'browser',
-      intelligenceTier: tier.intelligence_tier,
-      endpoints: tier.endpoints.map((endpoint) => ({
-        id: endpoint.id,
-        endpointId: endpoint.endpoint_id,
-        label: endpoint.label,
-        weight: normalized[endpoint.id] ?? 0,
-        extractionEndpointId: endpoint.extraction_endpoint_id ?? null,
-        extractionEndpointKey: endpoint.extraction_endpoint_key ?? null,
-        extractionLabel: endpoint.extraction_label ?? null,
-      })),
-    }
+  return mapWeightedTiers(policy.tiers, {
+    rangeId: 'browser',
+    fallbackKey: (tier) => `${tier.rangeId}:${getTierKey(tier)}`,
+    intelligenceTier: (tier) => tier.intelligence_tier,
+    extraEndpoint: (endpoint) => ({
+      extractionEndpointId: endpoint.extraction_endpoint_id ?? null,
+      extractionEndpointKey: endpoint.extraction_endpoint_key ?? null,
+      extractionLabel: endpoint.extraction_label ?? null,
+    }),
   })
-  applySequentialFallbackNames(tiers, (tier) => `${tier.rangeId}:${getTierKey(tier)}`)
-  return tiers
 }
 
 export function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
-  const mapped = tiers.map((tier) => {
-    const normalized = normalizeTierEndpointWeights(tier.endpoints)
-    return {
-      id: tier.id,
-      name: (tier.description || '').trim(),
-      order: tier.order,
-      rangeId: 'embedding',
-      intelligenceTier: null,
-      endpoints: tier.endpoints.map((endpoint) => ({
-        id: endpoint.id,
-        endpointId: endpoint.endpoint_id,
-        label: endpoint.label,
-        weight: normalized[endpoint.id] ?? 0,
-      })),
-    }
+  return mapWeightedTiers(tiers, {
+    rangeId: 'embedding',
+    fallbackKey: () => 'embedding',
   })
-  applySequentialFallbackNames(mapped, () => 'embedding')
-  return mapped
 }
 
 export function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
-  const mapped = tiers.map((tier) => {
-    const normalized = normalizeTierEndpointWeights(tier.endpoints)
-    return {
-      id: tier.id,
-      name: (tier.description || '').trim(),
-      order: tier.order,
-      rangeId: 'file_handler',
-      intelligenceTier: null,
-      endpoints: tier.endpoints.map((endpoint) => ({
-        id: endpoint.id,
-        endpointId: endpoint.endpoint_id,
-        label: endpoint.label,
-        weight: normalized[endpoint.id] ?? 0,
-      })),
-    }
+  return mapWeightedTiers(tiers, {
+    rangeId: 'file_handler',
+    fallbackKey: () => 'file_handler',
   })
-  applySequentialFallbackNames(mapped, () => 'file_handler')
-  return mapped
 }
 
 export function mapImageGenerationTiers(
   tiers: llmApi.ImageGenerationTier[] = [],
   useCase: ImageGenerationUseCase,
 ): Tier[] {
-  const mapped = tiers.map((tier) => {
-    const normalized = normalizeTierEndpointWeights(tier.endpoints)
-    return {
-      id: tier.id,
-      name: (tier.description || '').trim(),
-      order: tier.order,
-      rangeId: 'image_generation',
-      imageUseCase: useCase,
-      intelligenceTier: null,
-      endpoints: tier.endpoints.map((endpoint) => ({
-        id: endpoint.id,
-        endpointId: endpoint.endpoint_id,
-        label: endpoint.label,
-        weight: normalized[endpoint.id] ?? 0,
-      })),
-    }
+  return mapWeightedTiers(tiers, {
+    rangeId: 'image_generation',
+    fallbackKey: () => `image_generation:${useCase}`,
+    extraTier: () => ({ imageUseCase: useCase }),
   })
-  applySequentialFallbackNames(mapped, () => `image_generation:${useCase}`)
-  return mapped
 }
 
 export function mapVideoGenerationTiers(
   tiers: llmApi.VideoGenerationTier[] = [],
   useCase: VideoGenerationUseCase,
 ): Tier[] {
-  const mapped = tiers.map((tier) => {
-    const normalized = normalizeTierEndpointWeights(tier.endpoints)
-    return {
-      id: tier.id,
-      name: (tier.description || '').trim(),
-      order: tier.order,
-      rangeId: 'video_generation',
-      intelligenceTier: null,
-      endpoints: tier.endpoints.map((endpoint) => ({
-        id: endpoint.id,
-        endpointId: endpoint.endpoint_id,
-        label: endpoint.label,
-        weight: normalized[endpoint.id] ?? 0,
-      })),
-    }
+  return mapWeightedTiers(tiers, {
+    rangeId: 'video_generation',
+    fallbackKey: () => `video_generation:${useCase}`,
   })
-  applySequentialFallbackNames(mapped, () => `video_generation:${useCase}`)
-  return mapped
 }
 
 // Profile-based mapping functions
 export function mapBrowserTiersFromProfile(tiers: llmApi.ProfileBrowserTier[] = []): Tier[] {
-  const mapped = tiers.map((tier) => {
-    const normalized = normalizeTierEndpointWeights(tier.endpoints)
-    return {
-      id: tier.id,
-      name: (tier.description || '').trim(),
-      order: tier.order,
-      rangeId: 'browser',
-      intelligenceTier: tier.intelligence_tier,
-      endpoints: tier.endpoints.map((endpoint) => ({
-        id: endpoint.id,
-        endpointId: endpoint.endpoint_id,
-        label: endpoint.label,
-        weight: normalized[endpoint.id] ?? 0,
-        extractionEndpointId: endpoint.extraction_endpoint_id ?? null,
-        extractionEndpointKey: endpoint.extraction_endpoint_key ?? null,
-        extractionLabel: endpoint.extraction_label ?? null,
-      })),
-    }
+  return mapWeightedTiers(tiers, {
+    rangeId: 'browser',
+    fallbackKey: (tier) => `browser:${getTierKey(tier)}`,
+    intelligenceTier: (tier) => tier.intelligence_tier,
+    extraEndpoint: (endpoint) => ({
+      extractionEndpointId: endpoint.extraction_endpoint_id ?? null,
+      extractionEndpointKey: endpoint.extraction_endpoint_key ?? null,
+      extractionLabel: endpoint.extraction_label ?? null,
+    }),
   })
-  applySequentialFallbackNames(mapped, (tier) => `browser:${getTierKey(tier)}`)
-  return mapped
 }
 
 export function mapEmbeddingTiersFromProfile(tiers: llmApi.ProfileEmbeddingTier[] = []): Tier[] {
-  const mapped = tiers.map((tier) => {
-    const normalized = normalizeTierEndpointWeights(tier.endpoints)
-    return {
-      id: tier.id,
-      name: (tier.description || '').trim(),
-      order: tier.order,
-      rangeId: 'embedding',
-      intelligenceTier: null,
-      endpoints: tier.endpoints.map((endpoint) => ({
-        id: endpoint.id,
-        endpointId: endpoint.endpoint_id,
-        label: endpoint.label,
-        weight: normalized[endpoint.id] ?? 0,
-      })),
-    }
+  return mapWeightedTiers(tiers, {
+    rangeId: 'embedding',
+    fallbackKey: () => 'embedding',
   })
-  applySequentialFallbackNames(mapped, () => 'embedding')
-  return mapped
 }
 
 export const useLlmConfigFeedback = useAsyncFeedback

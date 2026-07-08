@@ -4,6 +4,16 @@ import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-tabl
 import { ArrowDownToLine, ArrowUpFromLine, Mail, Phone, Trash2 } from 'lucide-react'
 
 import type { AllowlistTableRow } from './contactTypes'
+import {
+  EmbeddedRemoveButton,
+  EmbeddedStatusBadge,
+  EmbeddedTableFrame,
+  EmbeddedTableHeader,
+  embeddedBulkBannerClassName,
+  embeddedBulkButtonClassName,
+  embeddedTableBodyClassName,
+  embeddedTableHeadClassName,
+} from './embeddedTablePrimitives'
 
 type AllowlistContactsTableProps = {
   rows: AllowlistTableRow[]
@@ -17,36 +27,23 @@ function isRowSelectable(row: AllowlistTableRow) {
 }
 
 function renderStatus(row: AllowlistTableRow) {
-  const pendingAmberClassName = 'inline-flex rounded-full border border-amber-300/20 bg-amber-950/35 px-2.5 py-1 text-xs font-semibold text-amber-200'
-  const pendingRoseClassName = 'inline-flex rounded-full border border-rose-300/20 bg-rose-950/35 px-2.5 py-1 text-xs font-semibold text-rose-200'
-  const activeClassName = 'inline-flex rounded-full border border-emerald-300/20 bg-emerald-950/35 px-2.5 py-1 text-xs font-semibold text-emerald-200'
-
   if (row.pendingType === 'create') {
-    return <span className={pendingAmberClassName}>Pending create</span>
+    return <EmbeddedStatusBadge tone="pending">Pending create</EmbeddedStatusBadge>
   }
   if (row.pendingType === 'remove') {
-    return <span className={pendingRoseClassName}>Pending removal</span>
+    return <EmbeddedStatusBadge tone="danger">Pending removal</EmbeddedStatusBadge>
   }
   if (row.pendingType === 'cancel_invite') {
-    return <span className={pendingRoseClassName}>Pending cancel</span>
+    return <EmbeddedStatusBadge tone="danger">Pending cancel</EmbeddedStatusBadge>
   }
   if (row.kind === 'invite') {
-    return <span className={pendingAmberClassName}>Invite pending</span>
+    return <EmbeddedStatusBadge tone="pending">Invite pending</EmbeddedStatusBadge>
   }
-  return <span className={activeClassName}>Allowed</span>
+  return <EmbeddedStatusBadge tone="active">Allowed</EmbeddedStatusBadge>
 }
 
 export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, onRemoveRows }: AllowlistContactsTableProps) {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
-  const embeddedTableWrapperClassName = 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35'
-  const embeddedTableHeadClassName = 'bg-slate-950/45'
-  const embeddedTableBodyClassName = 'bg-transparent'
-  const embeddedDestructiveButtonClassName =
-    'inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-1.5 text-xs font-semibold text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:opacity-50'
-  const embeddedBulkBannerClassName =
-    'flex flex-col gap-3 rounded-xl border border-sky-300/20 bg-sky-950/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between'
-  const embeddedBulkButtonClassName =
-    'inline-flex items-center justify-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-3 py-2 text-sm font-semibold text-sky-100 transition-colors hover:border-sky-200/40 hover:bg-sky-900/75 disabled:opacity-50'
 
   useEffect(() => {
     const selectableIds = new Set(rows.filter(isRowSelectable).map((row) => row.id))
@@ -100,7 +97,7 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
       },
       {
         id: 'contact',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Contact</span>,
+        header: () => <EmbeddedTableHeader>Contact</EmbeddedTableHeader>,
         cell: ({ row }) => {
           const Icon = row.original.channel.toLowerCase() === 'sms' ? Phone : Mail
           return (
@@ -120,7 +117,7 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
       },
       {
         id: 'permissions',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Permissions</span>,
+        header: () => <EmbeddedTableHeader>Permissions</EmbeddedTableHeader>,
         cell: ({ row }) => (
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-xs text-slate-600">
@@ -136,12 +133,12 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
       },
       {
         id: 'status',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</span>,
+        header: () => <EmbeddedTableHeader>Status</EmbeddedTableHeader>,
         cell: ({ row }) => renderStatus(row.original),
       },
       {
         id: 'actions',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</span>,
+        header: () => <EmbeddedTableHeader>Actions</EmbeddedTableHeader>,
         cell: ({ row }) => {
           const actionIsPending = row.original.pendingType === 'remove' || row.original.pendingType === 'cancel_invite'
           if (actionIsPending) {
@@ -153,20 +150,14 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
           }
 
           return (
-            <button
-              type="button"
-              onClick={() => onRemoveRow(row.original)}
-              disabled={disabled}
-              className={embeddedDestructiveButtonClassName}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+            <EmbeddedRemoveButton onClick={() => onRemoveRow(row.original)} disabled={disabled}>
               {row.original.kind === 'invite' ? 'Cancel invite' : 'Remove'}
-            </button>
+            </EmbeddedRemoveButton>
           )
         },
       },
     ]
-  }, [disabled, onRemoveRow, embeddedDestructiveButtonClassName])
+  }, [disabled, onRemoveRow])
 
   const table = useReactTable({
     data: rows,
@@ -199,8 +190,7 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
         </div>
       )}
 
-      <div className={embeddedTableWrapperClassName}>
-        <div className="overflow-x-auto">
+      <EmbeddedTableFrame>
           <table className="min-w-full border-collapse">
             <thead className={embeddedTableHeadClassName}>
               {table.getHeaderGroups().map((headerGroup) => (
@@ -240,8 +230,7 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
               )}
             </tbody>
           </table>
-        </div>
-      </div>
+      </EmbeddedTableFrame>
     </div>
   )
 }

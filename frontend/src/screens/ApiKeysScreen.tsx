@@ -9,7 +9,7 @@ import {
   revokeApiKey,
   type ApiKeyDTO,
 } from '../api/apiKeys'
-import { HttpError } from '../api/http'
+import { apiErrorMessages } from '../api/safeErrorMessage'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { FormField, TextInput } from '../components/common/FormControls'
@@ -41,24 +41,6 @@ function formatDate(value: string | null): string {
   return dateFormatter.format(date)
 }
 
-function formatErrors(error: unknown, fallback: string): string[] {
-  if (error instanceof HttpError && typeof error.body === 'object' && error.body) {
-    const body = error.body as Record<string, unknown>
-    if (body.errors && typeof body.errors === 'object') {
-      return Object.values(body.errors as Record<string, unknown>).flatMap((messages) => (
-        Array.isArray(messages) ? messages.map(String) : [String(messages)]
-      ))
-    }
-    if (body.error) {
-      return [String(body.error)]
-    }
-  }
-  if (error instanceof Error) {
-    return [error.message]
-  }
-  return [fallback]
-}
-
 function CreateApiKeyModal({
   onClose,
   onCreated,
@@ -79,7 +61,7 @@ function CreateApiKeyModal({
       onCreated({ name: payload.api_key.name, rawKey: payload.raw_key })
       onClose()
     } catch (error) {
-      setErrors(formatErrors(error, 'Unable to create API key.'))
+      setErrors(apiErrorMessages(error, 'Unable to create API key.'))
     } finally {
       setBusy(false)
     }
@@ -195,7 +177,7 @@ function ConfirmApiKeyActionModal({
       await onConfirm()
       onClose()
     } catch (err) {
-      setError(formatErrors(err, 'Unable to update API key.')[0] ?? 'Unable to update API key.')
+      setError(apiErrorMessages(err, 'Unable to update API key.')[0] ?? 'Unable to update API key.')
     } finally {
       setBusy(false)
     }

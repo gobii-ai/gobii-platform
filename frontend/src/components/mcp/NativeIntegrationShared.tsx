@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, FileText, Loader2, Plug, Table2 } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, FileText, FolderOpen, Loader2, Plug, Table2, Unplug } from 'lucide-react'
 
 import type {
   NativeIntegrationAccessibleFile,
@@ -262,6 +262,235 @@ export function NativeProviderIconTile({ provider }: { provider: NativeIntegrati
     <span className={icon?.tileClassName ?? DEFAULT_NATIVE_PROVIDER_TILE_CLASS_NAME}>
       <NativeProviderIcon provider={provider} framed />
     </span>
+  )
+}
+
+type NativePendingKind = 'connect' | 'disconnect' | 'picker' | null
+
+export function NativeIntegrationSummaryCell({
+  provider,
+  descriptionClassName = 'mt-1 line-clamp-2 text-sm text-slate-600',
+  showConnectedBadge = false,
+}: {
+  provider: NativeIntegrationProvider
+  descriptionClassName?: string
+  showConnectedBadge?: boolean
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <NativeProviderIconTile provider={provider} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-semibold text-slate-900">{provider.displayName}</p>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+            Native
+          </span>
+          {showConnectedBadge && provider.connected ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+              <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+              Connected
+            </span>
+          ) : null}
+        </div>
+        {provider.description ? <p className={descriptionClassName}>{provider.description}</p> : null}
+      </div>
+    </div>
+  )
+}
+
+export function NativeIntegrationStatusBadge({ connected }: { connected: boolean }) {
+  if (connected) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+        Connected
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
+      Workspace
+    </span>
+  )
+}
+
+export function NativeIntegrationPickerButton({
+  pendingKind,
+  disabled,
+  onClick,
+  minWidth = true,
+}: {
+  pendingKind: NativePendingKind
+  disabled: boolean
+  onClick: () => void
+  minWidth?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      className={[
+        'inline-flex items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60',
+        minWidth ? 'min-w-28' : '',
+      ].filter(Boolean).join(' ')}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {pendingKind === 'picker' ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      ) : (
+        <FolderOpen className="h-4 w-4" aria-hidden="true" />
+      )}
+      Select Files
+    </button>
+  )
+}
+
+export function NativeIntegrationConnectionButton({
+  connected,
+  pendingKind,
+  disabled,
+  onConnect,
+  onDisconnect,
+  disconnectTone = 'danger',
+  minWidth = true,
+}: {
+  connected: boolean
+  pendingKind: NativePendingKind
+  disabled: boolean
+  onConnect: () => void
+  onDisconnect: () => void
+  disconnectTone?: 'danger' | 'neutral'
+  minWidth?: boolean
+}) {
+  if (connected) {
+    return (
+      <button
+        type="button"
+        className={[
+          'inline-flex items-center justify-center gap-2 rounded-md border bg-white px-3 py-2 text-sm font-semibold transition disabled:opacity-60',
+          minWidth ? 'min-w-28' : '',
+          disconnectTone === 'danger'
+            ? 'border-red-200 text-red-700 hover:bg-red-50'
+            : 'border-slate-200 text-slate-700 hover:bg-slate-50',
+        ].filter(Boolean).join(' ')}
+        onClick={onDisconnect}
+        disabled={disabled}
+      >
+        {pendingKind === 'disconnect' ? (
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <Unplug className="h-4 w-4" aria-hidden="true" />
+        )}
+        Disconnect
+      </button>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      className={[
+        'inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60',
+        minWidth ? 'min-w-28' : '',
+      ].filter(Boolean).join(' ')}
+      onClick={onConnect}
+      disabled={disabled}
+    >
+      {pendingKind === 'connect' ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      ) : (
+        <Plug className="h-4 w-4" aria-hidden="true" />
+      )}
+      Connect
+    </button>
+  )
+}
+
+export function NativeIntegrationActionButtons({
+  provider,
+  pendingKind,
+  disabled,
+  onConnect,
+  onDisconnect,
+  onPicker,
+  disconnectTone,
+  minWidth = true,
+}: {
+  provider: NativeIntegrationProvider
+  pendingKind: NativePendingKind
+  disabled: boolean
+  onConnect: () => void
+  onDisconnect: () => void
+  onPicker: () => void
+  disconnectTone?: 'danger' | 'neutral'
+  minWidth?: boolean
+}) {
+  const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
+  return (
+    <>
+      {pickerEnabled ? (
+        <NativeIntegrationPickerButton
+          pendingKind={pendingKind}
+          disabled={disabled}
+          onClick={onPicker}
+          minWidth={minWidth}
+        />
+      ) : null}
+      <NativeIntegrationConnectionButton
+        connected={provider.connected}
+        pendingKind={pendingKind}
+        disabled={disabled}
+        onConnect={onConnect}
+        onDisconnect={onDisconnect}
+        disconnectTone={disconnectTone}
+        minWidth={minWidth}
+      />
+    </>
+  )
+}
+
+export function NativeIntegrationGridRow({
+  provider,
+  pendingKind,
+  disabled,
+  onConnect,
+  onDisconnect,
+  onPicker,
+  gridClassName = 'grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] sm:items-start',
+}: {
+  provider: NativeIntegrationProvider
+  pendingKind: NativePendingKind
+  disabled: boolean
+  onConnect: () => void
+  onDisconnect: () => void
+  onPicker: () => void
+  gridClassName?: string
+}) {
+  const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
+  return (
+    <div className="px-4 py-3">
+      <div className={gridClassName}>
+        <NativeIntegrationSummaryCell provider={provider} />
+        <div>
+          <NativeIntegrationStatusBadge connected={provider.connected} />
+        </div>
+        <div className="flex justify-start md:justify-end">
+          {pickerEnabled ? (
+            <NativeIntegrationPickerButton pendingKind={pendingKind} disabled={disabled} onClick={onPicker} />
+          ) : null}
+        </div>
+        <div className="flex justify-start md:justify-end">
+          <NativeIntegrationConnectionButton
+            connected={provider.connected}
+            pendingKind={pendingKind}
+            disabled={disabled}
+            onConnect={onConnect}
+            onDisconnect={onDisconnect}
+          />
+        </div>
+      </div>
+      <NativeIntegrationFilesDisclosure provider={provider} />
+    </div>
   )
 }
 

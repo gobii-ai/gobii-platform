@@ -608,6 +608,31 @@ export function AgentChatLayout({
   const planPreviewExitTimeoutRef = useRef<number | null>(null)
   const planHoverExitTimeoutRef = useRef<number | null>(null)
   const suppressPlanHoverPreviewRef = useRef(false)
+  const clearPlanPreviewTimers = useCallback(() => {
+    if (planPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewTimeoutRef.current)
+      planPreviewTimeoutRef.current = null
+    }
+    if (planPreviewExitTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewExitTimeoutRef.current)
+      planPreviewExitTimeoutRef.current = null
+    }
+    if (planHoverExitTimeoutRef.current !== null) {
+      window.clearTimeout(planHoverExitTimeoutRef.current)
+      planHoverExitTimeoutRef.current = null
+    }
+  }, [])
+  const resetPlanPreviewState = useCallback((options: { closeSheet?: boolean } = {}) => {
+    if (options.closeSheet) {
+      setPlanSheetOpen(false)
+    }
+    setPlanPreviewSnapshot(null)
+    setPlanPreviewExiting(false)
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(false)
+    clearPlanPreviewTimers()
+    suppressPlanHoverPreviewRef.current = false
+  }, [clearPlanPreviewTimers])
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
@@ -1245,24 +1270,8 @@ export function AgentChatLayout({
       return
     }
     setCurrentPlanPanelMode(() => 'docked')
-    setPlanPreviewSnapshot(null)
-    setPlanPreviewExiting(false)
-    setPlanHoverPreviewVisible(false)
-    setPlanHoverPreviewExiting(false)
-    if (planPreviewTimeoutRef.current !== null) {
-      window.clearTimeout(planPreviewTimeoutRef.current)
-      planPreviewTimeoutRef.current = null
-    }
-    if (planPreviewExitTimeoutRef.current !== null) {
-      window.clearTimeout(planPreviewExitTimeoutRef.current)
-      planPreviewExitTimeoutRef.current = null
-    }
-    if (planHoverExitTimeoutRef.current !== null) {
-      window.clearTimeout(planHoverExitTimeoutRef.current)
-      planHoverExitTimeoutRef.current = null
-    }
-    suppressPlanHoverPreviewRef.current = false
-  }, [planPanelMode, setCurrentPlanPanelMode, showPlanInterface])
+    resetPlanPreviewState()
+  }, [planPanelMode, resetPlanPreviewState, setCurrentPlanPanelMode, showPlanInterface])
 
   const handleFloatingPlanClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -1281,49 +1290,15 @@ export function AgentChatLayout({
 
   useEffect(() => {
     if (!showPlanInterface) {
-      setPlanSheetOpen(false)
-      setPlanPreviewSnapshot(null)
-      setPlanPreviewExiting(false)
-      setPlanHoverPreviewVisible(false)
-      setPlanHoverPreviewExiting(false)
-      if (planPreviewTimeoutRef.current !== null) {
-        window.clearTimeout(planPreviewTimeoutRef.current)
-        planPreviewTimeoutRef.current = null
-      }
-      if (planPreviewExitTimeoutRef.current !== null) {
-        window.clearTimeout(planPreviewExitTimeoutRef.current)
-        planPreviewExitTimeoutRef.current = null
-      }
-      if (planHoverExitTimeoutRef.current !== null) {
-        window.clearTimeout(planHoverExitTimeoutRef.current)
-        planHoverExitTimeoutRef.current = null
-      }
-      suppressPlanHoverPreviewRef.current = false
+      resetPlanPreviewState({ closeSheet: true })
     }
-  }, [showPlanInterface])
+  }, [resetPlanPreviewState, showPlanInterface])
 
   useEffect(() => {
-    setPlanSheetOpen(false)
-    setPlanPreviewSnapshot(null)
-    setPlanPreviewExiting(false)
-    setPlanHoverPreviewVisible(false)
-    setPlanHoverPreviewExiting(false)
+    resetPlanPreviewState({ closeSheet: true })
     previousPlanStateRef.current = null
     previousPlanSnapshotRef.current = null
-    if (planPreviewTimeoutRef.current !== null) {
-      window.clearTimeout(planPreviewTimeoutRef.current)
-      planPreviewTimeoutRef.current = null
-    }
-    if (planPreviewExitTimeoutRef.current !== null) {
-      window.clearTimeout(planPreviewExitTimeoutRef.current)
-      planPreviewExitTimeoutRef.current = null
-    }
-    if (planHoverExitTimeoutRef.current !== null) {
-      window.clearTimeout(planHoverExitTimeoutRef.current)
-      planHoverExitTimeoutRef.current = null
-    }
-    suppressPlanHoverPreviewRef.current = false
-  }, [agentId])
+  }, [agentId, resetPlanPreviewState])
 
   useEffect(() => {
     const total = (displayPlanSnapshot?.todoCount ?? 0) + (displayPlanSnapshot?.doingCount ?? 0) + (displayPlanSnapshot?.doneCount ?? 0)
@@ -1346,23 +1321,7 @@ export function AgentChatLayout({
     }
 
     if (previous.total === 0 && total > 0) {
-      setPlanPreviewSnapshot(null)
-      setPlanPreviewExiting(false)
-      setPlanHoverPreviewVisible(false)
-      setPlanHoverPreviewExiting(false)
-      if (planPreviewTimeoutRef.current !== null) {
-        window.clearTimeout(planPreviewTimeoutRef.current)
-        planPreviewTimeoutRef.current = null
-      }
-      if (planPreviewExitTimeoutRef.current !== null) {
-        window.clearTimeout(planPreviewExitTimeoutRef.current)
-        planPreviewExitTimeoutRef.current = null
-      }
-      if (planHoverExitTimeoutRef.current !== null) {
-        window.clearTimeout(planHoverExitTimeoutRef.current)
-        planHoverExitTimeoutRef.current = null
-      }
-      suppressPlanHoverPreviewRef.current = false
+      resetPlanPreviewState()
       if (active || hasCompletedPlanDeliverables(displayPlanSnapshot)) {
         setCurrentPlanPanelMode(() => 'docked')
       }
@@ -1396,22 +1355,14 @@ export function AgentChatLayout({
         planPreviewExitTimeoutRef.current = null
       }, 180)
     }, 5000)
-  }, [displayPlanSnapshot, hasStoredPlanPanelMode, planPanelMode, setCurrentPlanPanelMode, showPlanInterface])
+  }, [displayPlanSnapshot, hasStoredPlanPanelMode, planPanelMode, resetPlanPreviewState, setCurrentPlanPanelMode, showPlanInterface])
 
   useEffect(() => {
     return () => {
-      if (planPreviewTimeoutRef.current !== null) {
-        window.clearTimeout(planPreviewTimeoutRef.current)
-      }
-      if (planPreviewExitTimeoutRef.current !== null) {
-        window.clearTimeout(planPreviewExitTimeoutRef.current)
-      }
-      if (planHoverExitTimeoutRef.current !== null) {
-        window.clearTimeout(planHoverExitTimeoutRef.current)
-      }
+      clearPlanPreviewTimers()
       suppressPlanHoverPreviewRef.current = false
     }
-  }, [])
+  }, [clearPlanPreviewTimers])
 
   const handlePlanMessageClick = useCallback((messageId: string) => {
     if (typeof document === 'undefined') {

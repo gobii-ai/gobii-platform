@@ -296,6 +296,18 @@ def _require_current_org(request):
     return org, membership, None
 
 
+def _require_current_org_role(request, roles, message: str):
+    try:
+        org, membership, error = _require_current_org(request)
+    except PermissionDenied as exc:
+        return None, None, _json_error(str(exc), status=404)
+    if error:
+        return None, None, error
+    if membership.role not in roles:
+        return None, None, _json_error(message, status=403)
+    return org, membership, None
+
+
 def _lock_organization(org: Organization) -> Organization:
     return Organization.objects.select_for_update().get(pk=org.pk)
 
@@ -502,14 +514,9 @@ class CurrentOrganizationTemplateAPIView(LoginRequiredMixin, View):
 
     @transaction.atomic
     def post(self, request):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_role(request, MEMBER_MANAGE_ROLES, "You do not have permission to manage templates.")
         if error:
             return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage templates.", status=403)
 
         payload, error = _parse_json_body(request)
         if error:
@@ -579,14 +586,9 @@ class CurrentOrganizationTemplateDetailAPIView(LoginRequiredMixin, View):
 
     @transaction.atomic
     def patch(self, request, template_id):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_role(request, MEMBER_MANAGE_ROLES, "You do not have permission to manage templates.")
         if error:
             return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage templates.", status=403)
 
         payload, error = _parse_json_body(request)
         if error:
@@ -624,14 +626,9 @@ class CurrentOrganizationTemplateDetailAPIView(LoginRequiredMixin, View):
 
     @transaction.atomic
     def delete(self, request, template_id):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_role(request, MEMBER_MANAGE_ROLES, "You do not have permission to manage templates.")
         if error:
             return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage templates.", status=403)
 
         template = get_object_or_404(
             PersistentAgentTemplate.objects.select_related("preferred_llm_tier"),
@@ -690,14 +687,9 @@ class CurrentOrganizationInviteAPIView(LoginRequiredMixin, View):
 
     @transaction.atomic
     def post(self, request):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_role(request, MEMBER_MANAGE_ROLES, "You do not have permission to manage members.")
         if error:
             return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage members.", status=403)
 
         payload, error = _parse_json_body(request)
         if error:
@@ -759,14 +751,9 @@ class CurrentOrganizationInviteDetailAPIView(LoginRequiredMixin, View):
 
     @transaction.atomic
     def delete(self, request, token: str):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_role(request, MEMBER_MANAGE_ROLES, "You do not have permission to manage members.")
         if error:
             return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage members.", status=403)
 
         invite = get_object_or_404(OrganizationInvite, org=org, token=token)
         if invite.accepted_at or invite.revoked_at:
@@ -797,14 +784,9 @@ class CurrentOrganizationInviteResendAPIView(LoginRequiredMixin, View):
 
     @transaction.atomic
     def post(self, request, token: str):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_role(request, MEMBER_MANAGE_ROLES, "You do not have permission to manage members.")
         if error:
             return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage members.", status=403)
 
         invite = get_object_or_404(OrganizationInvite, org=org, token=token)
         if invite.accepted_at or invite.revoked_at or invite.expires_at < timezone.now():
@@ -840,14 +822,9 @@ class CurrentOrganizationMemberAPIView(LoginRequiredMixin, View):
 
     @transaction.atomic
     def patch(self, request, user_id: int):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_role(request, MEMBER_MANAGE_ROLES, "You do not have permission to manage members.")
         if error:
             return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage members.", status=403)
 
         payload, error = _parse_json_body(request)
         if error:
@@ -906,14 +883,9 @@ class CurrentOrganizationMemberAPIView(LoginRequiredMixin, View):
 
     @transaction.atomic
     def delete(self, request, user_id: int):
-        try:
-            org, membership, error = _require_current_org(request)
-        except PermissionDenied as exc:
-            return _json_error(str(exc), status=404)
+        org, membership, error = _require_current_org_role(request, MEMBER_MANAGE_ROLES, "You do not have permission to manage members.")
         if error:
             return error
-        if membership.role not in MEMBER_MANAGE_ROLES:
-            return _json_error("You do not have permission to manage members.", status=403)
         if request.user.id == user_id:
             return _json_error("You cannot remove yourself.", status=400)
 

@@ -3,13 +3,8 @@ import os
 from typing import Any, Dict
 
 from api.models import PersistentAgent
-from api.agent.files.filespace_service import write_bytes_to_dir
-from api.agent.files.attachment_helpers import build_signed_filespace_download_url
-from api.agent.tools.attachment_guidance import build_attachment_result_message
-from api.agent.tools.file_export_helpers import resolve_export_target
-from api.agent.tools.agent_variables import set_agent_variable
+from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 from api.agent.tools.sqlite_query_runner import run_sqlite_select
-from api.services.system_settings import get_max_file_size
 
 DISALLOWED_EXPORT_HINTS = {
     "csv": "Use create_csv to write CSV files.",
@@ -156,43 +151,17 @@ def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
     else:
         content_to_write = content
 
-    content_bytes = content_to_write.encode("utf-8")
-    max_size = get_max_file_size()
-    if max_size and len(content_bytes) > max_size:
-        return {
-            "status": "error",
-            "message": (
-                "File content exceeds maximum allowed size "
-                f"({len(content_bytes)} bytes > {max_size} bytes)."
-            ),
-        }
-
     extension = _infer_extension(path, mime_type)
-    result = write_bytes_to_dir(
+    result = write_agent_export(
         agent=agent,
-        content_bytes=content_bytes,
+        content_bytes=content_to_write.encode("utf-8"),
         extension=extension,
         mime_type=mime_type,
         path=path,
         overwrite=overwrite,
+        size_label="File content",
+        include_message=True,
+        inline=lambda var_ref, _signed_url: f"[Download]({var_ref})",
+        inline_html=lambda var_ref, _signed_url: f"<a href='{var_ref}'>Download</a>",
     )
-    if result.get("status") != "ok":
-        return result
-
-    file_path = result.get("path")
-    node_id = result.get("node_id")
-    signed_url = build_signed_filespace_download_url(
-        agent_id=str(agent.id),
-        node_id=node_id,
-    )
-    set_agent_variable(file_path, signed_url)
-
-    var_ref = f"$[{file_path}]"
-    return {
-        "status": "ok",
-        "message": build_attachment_result_message(var_ref),
-        "file": var_ref,
-        "inline": f"[Download]({var_ref})",
-        "inline_html": f"<a href='{var_ref}'>Download</a>",
-        "attach": var_ref,
-    }
+    return result

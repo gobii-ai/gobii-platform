@@ -7,10 +7,8 @@ from typing import Any, Dict
 from urllib.parse import unquote_to_bytes
 
 from api.models import PersistentAgent
-from api.agent.files.filespace_service import write_bytes_to_dir
-from api.agent.files.attachment_helpers import build_signed_filespace_download_url
-from api.agent.tools.file_export_helpers import resolve_export_target
-from api.agent.tools.agent_variables import set_agent_variable, substitute_variables_as_data_uris
+from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
+from api.agent.tools.agent_variables import substitute_variables_as_data_uris
 from api.services.system_settings import get_max_file_size
 from util.text_sanitizer import decode_unicode_escapes
 
@@ -583,31 +581,14 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if not pdf_bytes:
         return {"status": "error", "message": "PDF generation returned empty output."}
 
-    result = write_bytes_to_dir(
+    return write_agent_export(
         agent=agent,
         content_bytes=pdf_bytes,
         extension=EXTENSION,
         mime_type=MIME_TYPE,
         path=path,
         overwrite=overwrite,
+        size_label="PDF",
+        inline=lambda var_ref, _signed_url: f"[Download]({var_ref})",
+        inline_html=lambda var_ref, _signed_url: f"<a href='{var_ref}'>Download</a>",
     )
-    if result.get("status") != "ok":
-        return result
-
-    # Set variable using path as name (unique, human-readable)
-    file_path = result.get("path")
-    node_id = result.get("node_id")
-    signed_url = build_signed_filespace_download_url(
-        agent_id=str(agent.id),
-        node_id=node_id,
-    )
-    set_agent_variable(file_path, signed_url)
-
-    var_ref = f"$[{file_path}]"
-    return {
-        "status": "ok",
-        "file": var_ref,
-        "inline": f"[Download]({var_ref})",
-        "inline_html": f"<a href='{var_ref}'>Download</a>",
-        "attach": var_ref,
-    }

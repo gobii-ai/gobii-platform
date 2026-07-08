@@ -128,14 +128,12 @@ tracer = trace.get_tracer('gobii.utils')
 
 
 def generate_ulid() -> str:
-    """Return a 26-character, time-ordered ULID string."""
     return str(ulid.new())
 
 DEFAULT_INTELLIGENCE_TIER_KEY = "standard"
 
 
 class IntelligenceTier(models.Model):
-    """Configurable intelligence tier for LLM routing and credit multipliers."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.SlugField(max_length=32, unique=True)
@@ -260,17 +258,14 @@ WEB_AGENT_ADDRESS_RE = re.compile(r"^web://agent/(?P<agent_id>[0-9a-fA-F-]+)$")
 
 
 def build_web_user_address(user_id: int, agent_id: uuid.UUID | str) -> str:
-    """Return canonical address for a user participating in web chat with an agent."""
     return f"web://user/{user_id}/agent/{agent_id}"
 
 
 def build_web_agent_address(agent_id: uuid.UUID | str) -> str:
-    """Return canonical address for the agent's web chat identity."""
     return f"web://agent/{agent_id}"
 
 
 def parse_web_user_address(address: str) -> Tuple[Optional[int], Optional[str]]:
-    """Parse a user web-chat address and return (user_id, agent_id) if valid."""
     match = WEB_USER_ADDRESS_RE.match((address or "").strip())
     if not match:
         return None, None
@@ -282,33 +277,26 @@ def parse_web_user_address(address: str) -> Tuple[Optional[int], Optional[str]]:
 
 
 def build_inbound_webhook_sender_address(webhook_id: uuid.UUID | str) -> str:
-    """Return canonical sender address for inbound webhook events."""
     return f"webhook://source/{webhook_id}"
 
 
 def build_inbound_webhook_agent_address(agent_id: uuid.UUID | str) -> str:
-    """Return canonical recipient address for inbound webhook delivery to an agent."""
     return f"webhook://agent/{agent_id}"
 
 
 def _hash(raw: str) -> str:
-    """Return SHA256 hexdigest for given raw string."""
     return hashlib.sha256(raw.encode()).hexdigest()
 
 def get_default_execution_environment() -> str:
-    """Return the default execution environment from GOBII_RELEASE_ENV."""
     return os.getenv("GOBII_RELEASE_ENV", "local")
 
 
 class PersistentAgentQuerySet(models.QuerySet):
-    """Custom queryset helpers for PersistentAgent."""
 
     def alive(self):
-        """Exclude soft-deleted agents."""
         return self.filter(is_deleted=False)
 
     def non_eval(self):
-        """Exclude agents created for eval runs."""
         return self.exclude(execution_environment="eval")
 
 
@@ -644,7 +632,6 @@ class UserQuota(models.Model):
 
 
 class UserFlags(models.Model):
-    """Optional per-user feature flags/switches."""
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -683,15 +670,14 @@ class UserFlags(models.Model):
 
 
 class ImmutableUserFlagSlugError(ValueError):
-    """Raised when attempting to change an existing configured user flag slug."""
+    pass
 
 
 class ImmutableUserFlagChoiceError(ValueError):
-    """Raised when attempting to change immutable configured user flag choice fields."""
+    pass
 
 
 class UserFlagDefinition(models.Model):
-    """Admin-managed configuration for dynamic per-user flags."""
 
     slug = models.SlugField(
         max_length=64,
@@ -721,7 +707,6 @@ class UserFlagDefinition(models.Model):
 
 
 class UserFlagChoiceGroup(models.Model):
-    """Admin-facing single-select group backed by concrete user flag assignments."""
 
     slug = models.SlugField(
         max_length=64,
@@ -756,7 +741,6 @@ class UserFlagChoiceGroup(models.Model):
 
 
 class UserFlagChoiceOption(models.Model):
-    """One admin-select option that maps to a concrete user flag definition."""
 
     group = models.ForeignKey(
         UserFlagChoiceGroup,
@@ -813,7 +797,6 @@ def prevent_user_flag_choice_option_delete(sender, instance, **kwargs):
 
 
 class UserFlagAssignment(models.Model):
-    """Presence of a row means the user flag is enabled for that user."""
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -840,7 +823,6 @@ class UserFlagAssignment(models.Model):
 
 
 class UserEmail(models.Model):
-    """Staff-managed analytics events that trigger Customer.io user emails."""
 
     name = models.CharField(max_length=120)
     event_name = models.CharField(max_length=200, unique=True)
@@ -858,7 +840,6 @@ class UserEmail(models.Model):
 
 
 class UserPreference(models.Model):
-    """Per-user application preferences persisted across devices."""
 
     class AgentRosterSortMode(models.TextChoices):
         RECENT = "recent", "Most recent"
@@ -1096,7 +1077,6 @@ class UserPreference(models.Model):
 
 
 def validate_product_announcement_action_url(value: str) -> None:
-    """Allow same-site paths and normal web URLs while rejecting script-like targets."""
     url = (value or "").strip()
     if not url:
         return
@@ -1112,7 +1092,6 @@ def validate_product_announcement_action_url(value: str) -> None:
 
 
 class ProductAnnouncement(models.Model):
-    """Product update shown to logged-in users in the app announcement bell."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=160)
@@ -1155,7 +1134,6 @@ class ProductAnnouncement(models.Model):
 
 
 class ProductAnnouncementRead(models.Model):
-    """Per-user read state for product announcements."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     announcement = models.ForeignKey(
@@ -1186,7 +1164,6 @@ class ProductAnnouncementRead(models.Model):
 
 
 def _user_is_vip(self):
-    """Safe VIP accessor that tolerates missing flags rows."""
     if not getattr(self, "pk", None):
         return False
 
@@ -1203,7 +1180,6 @@ def _user_is_vip(self):
 
 
 def _user_is_freemium_grandfathered(self):
-    """Safe freemium-grandfathered accessor that tolerates missing flags rows."""
     if not getattr(self, "pk", None):
         return False
 
@@ -1230,10 +1206,6 @@ if not hasattr(UserModel, "is_freemium_grandfathered"):
 
 
 class UserReferral(models.Model):
-    """
-    Stores a user's referral code for sharing with others.
-    Created lazily when user first requests their referral link.
-    """
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -1256,7 +1228,6 @@ class UserReferral(models.Model):
 
     @classmethod
     def generate_code(cls, length=8, max_attempts=100):
-        """Generate a random alphanumeric referral code."""
         alphabet = string.ascii_uppercase + string.digits
         # Remove ambiguous characters (0, O, I, 1, L)
         alphabet = alphabet.replace('0', '').replace('O', '').replace('I', '').replace('1', '').replace('L', '')
@@ -1268,7 +1239,6 @@ class UserReferral(models.Model):
 
     @classmethod
     def get_or_create_for_user(cls, user):
-        """Get existing referral code or create one for the user."""
         try:
             return cls.objects.get(user=user)
         except cls.DoesNotExist:
@@ -1282,7 +1252,6 @@ class UserReferral(models.Model):
 
     @classmethod
     def get_user_by_code(cls, code):
-        """Look up the user who owns a given referral code. Returns None if not found."""
         try:
             return cls.objects.select_related('user').get(referral_code=code).user
         except cls.DoesNotExist:
@@ -1290,7 +1259,6 @@ class UserReferral(models.Model):
 
 
 class TaskCredit(models.Model):
-    """Discrete block of task credits granted to a user."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -1403,7 +1371,6 @@ class TaskCredit(models.Model):
 
 
 class TaskCreditConfig(models.Model):
-    """Singleton configuration for default task credit consumption."""
 
     singleton_id = models.PositiveSmallIntegerField(
         primary_key=True,
@@ -1439,7 +1406,6 @@ class TaskCreditConfig(models.Model):
 
 
 class BurnRateSnapshot(models.Model):
-    """Cached burn-rate metrics for owners and agents."""
 
     class ScopeType(models.TextChoices):
         USER = "user", "User"
@@ -1495,7 +1461,6 @@ class BurnRateSnapshot(models.Model):
 
 
 class ReferralIncentiveConfig(models.Model):
-    """Singleton configuration for referral incentive grants."""
 
     singleton_id = models.PositiveSmallIntegerField(
         primary_key=True,
@@ -1565,7 +1530,6 @@ class ReferralIncentiveConfig(models.Model):
 
 
 class Plan(models.Model):
-    """Stable plan identity (e.g., free, startup, scale)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     slug = models.CharField(
@@ -1594,7 +1558,6 @@ class Plan(models.Model):
 
 
 class PlanVersion(models.Model):
-    """Versioned entitlements + marketing copy for a plan."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     plan = models.ForeignKey(
@@ -1666,7 +1629,6 @@ class PlanBillingIntervalChoices(models.TextChoices):
 
 
 class PlanVersionPrice(models.Model):
-    """Stripe price mapping for a plan version."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     plan_version = models.ForeignKey(
@@ -1715,7 +1677,6 @@ class EntitlementValueTypeChoices(models.TextChoices):
 
 
 class EntitlementDefinition(models.Model):
-    """Definition of a plan entitlement key/value."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.CharField(max_length=128, unique=True)
@@ -1736,7 +1697,6 @@ class EntitlementDefinition(models.Model):
 
 
 class PlanVersionEntitlement(models.Model):
-    """Entitlement values scoped to a plan version."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     plan_version = models.ForeignKey(
@@ -1779,7 +1739,6 @@ class PlanVersionEntitlement(models.Model):
 
 
 class DailyCreditConfig(models.Model):
-    """Per-plan configuration controlling soft target UI + pacing."""
 
     id = models.BigAutoField(primary_key=True)
     plan_version = models.ForeignKey(
@@ -1913,7 +1872,6 @@ class VisionDetailLevelChoices(models.TextChoices):
 
 
 class BrowserConfig(models.Model):
-    """Per-plan browser agent configuration."""
 
     id = models.BigAutoField(primary_key=True)
     plan_version = models.ForeignKey(
@@ -1988,7 +1946,6 @@ class BrowserConfig(models.Model):
 
 
 class ToolConfig(models.Model):
-    """Per-plan tool configuration."""
 
     id = models.BigAutoField(primary_key=True)
     plan_version = models.ForeignKey(
@@ -2072,7 +2029,6 @@ class ToolConfig(models.Model):
 
 
 class ToolRateLimit(models.Model):
-    """Per-plan hourly rate limits for specific tools."""
 
     plan = models.ForeignKey(
         "ToolConfig",
@@ -2120,7 +2076,6 @@ class ToolRateLimit(models.Model):
 
 
 class PromptConfig(models.Model):
-    """Singleton configuration controlling prompt and history limits."""
 
     singleton_id = models.PositiveSmallIntegerField(
         primary_key=True,
@@ -2330,7 +2285,6 @@ class PromptConfig(models.Model):
 
 
 class ToolCreditCost(models.Model):
-    """Per-tool overrides for task credit consumption."""
 
     tool_name = models.CharField(
         max_length=255,
@@ -2422,12 +2376,10 @@ class BrowserUseAgent(models.Model):
 
     @classmethod
     def select_random_proxy(cls):
-        """Select a random proxy, preferring ones with recent successful health checks and static IPs"""
         return cls._select_proxy_with_health_preference()
     
     @classmethod
     def _shared_proxy_queryset(cls):
-        """Return proxies eligible for the shared pool (excluding actively allocated dedicated proxies)."""
         return ProxyServer.objects.filter(
             Q(is_dedicated=False) | Q(is_dedicated=True, dedicated_allocation__isnull=True),
             is_active=True,
@@ -2435,7 +2387,6 @@ class BrowserUseAgent(models.Model):
 
     @classmethod
     def _select_proxy_with_health_preference(cls):
-        """Select proxy with preference for recent health check passes"""
         from datetime import timedelta
         from django.utils import timezone
 
@@ -2950,7 +2901,6 @@ def initialize_new_user_resources(sender, instance, created, **kwargs):
 
 
 class PaidPlanIntent(models.Model):
-    """Track users who have shown interest in paid plans"""
 
     class PlanChoices(models.TextChoices):
         STARTUP = 'startup', 'Startup'
@@ -2988,7 +2938,6 @@ class PaidPlanIntent(models.Model):
 
 
 class ProxyServer(models.Model):
-    """Generic proxy server configuration"""
     
     class ProxyType(models.TextChoices):
         HTTP = "HTTP", "HTTP"
@@ -3087,7 +3036,6 @@ class ProxyServer(models.Model):
 
     @property
     def proxy_url(self) -> str:
-        """Generate proxy URL for use with requests library"""
         scheme = self.proxy_type.lower()
         if self.username and self.password:
             return f"{scheme}://{self.username}:{self.password}@{self.host}:{self.port}"
@@ -3095,12 +3043,10 @@ class ProxyServer(models.Model):
 
     @property
     def requires_auth(self) -> bool:
-        """Check if this proxy requires authentication"""
         return bool(self.username and self.password)
 
     @property
     def is_dedicated_allocated(self) -> bool:
-        """Return True when this dedicated proxy is currently assigned to an owner."""
         if not self.is_dedicated:
             return False
         try:
@@ -3112,15 +3058,6 @@ class ProxyServer(models.Model):
         return allocation is not None
 
     def record_health_check(self, passed: bool) -> bool:
-        """
-        Record the result of a health check and potentially deactivate the proxy.
-
-        Args:
-            passed: Whether the health check passed
-
-        Returns:
-            True if the proxy was deactivated as a result of this check
-        """
         from django.conf import settings
         from django.db.models import F
 
@@ -3163,7 +3100,6 @@ class ProxyServer(models.Model):
         return deactivated
 
     def set_dedicated_state(self, *, dedicated: bool, save: bool = True) -> None:
-        """Toggle dedicated state with optional persistence hook."""
         self.is_dedicated = dedicated
         if save:
             self.save(update_fields=["is_dedicated", "updated_at"])
@@ -3196,7 +3132,6 @@ class DedicatedProxyAllocationManager(models.Manager.from_queryset(DedicatedProx
 
 
 class DedicatedProxyAllocation(models.Model):
-    """Ownership record for a dedicated proxy reserved to a user or organization."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     proxy = models.OneToOneField(
@@ -3264,7 +3199,6 @@ class DedicatedProxyAllocation(models.Model):
         return super().save(*args, **kwargs)
 
     def release(self):
-        """Release this allocation back to the pool."""
         self.delete()
 
     @staticmethod
@@ -3288,12 +3222,6 @@ class DedicatedProxyAllocation(models.Model):
 # --------------------------------------------------------------------------- #
 
 class LLMProvider(models.Model):
-    """Vendor-level provider configuration and credentials.
-
-    Credentials may come from an encrypted admin-set value or an environment
-    variable (env_var_name). At runtime, the effective key is chosen as
-    admin-set if present, otherwise from env.
-    """
 
     class BrowserBackend(models.TextChoices):
         OPENAI = "OPENAI", "OpenAI"
@@ -3344,7 +3272,6 @@ class LLMProvider(models.Model):
 
 
 class PersistentModelEndpoint(models.Model):
-    """Model endpoint for persistent agents (LiteLLM)."""
 
     class ReasoningEffort(models.TextChoices):
         MINIMAL = "minimal", "Minimal"
@@ -3426,7 +3353,6 @@ class PersistentModelEndpoint(models.Model):
 
 
 class PersistentTokenRange(models.Model):
-    """Token ranges for selecting persistent LLM tiers."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=64, unique=True)
@@ -3445,7 +3371,6 @@ class PersistentTokenRange(models.Model):
 
 
 class PersistentLLMTier(models.Model):
-    """Tier within a token range for persistent agents."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     token_range = models.ForeignKey(PersistentTokenRange, on_delete=models.CASCADE, related_name="tiers")
@@ -3478,7 +3403,6 @@ class PersistentLLMTier(models.Model):
 
 
 class PersistentTierEndpoint(models.Model):
-    """Weighted association between a Persistent tier and a model endpoint."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(PersistentLLMTier, on_delete=models.CASCADE, related_name="tier_endpoints")
@@ -3502,7 +3426,6 @@ class PersistentTierEndpoint(models.Model):
 
 
 class EmbeddingsModelEndpoint(models.Model):
-    """Embeddings endpoint configuration used for text similarity scoring."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_text_embed_small'")
@@ -3550,7 +3473,6 @@ class EmbeddingsModelEndpoint(models.Model):
 
 
 class EmbeddingsLLMTier(models.Model):
-    """Fallback tier ordering for embeddings endpoints."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order = models.PositiveIntegerField(unique=True, help_text="1-based order across all embedding tiers.")
@@ -3567,7 +3489,6 @@ class EmbeddingsLLMTier(models.Model):
 
 
 class EmbeddingsTierEndpoint(models.Model):
-    """Weighted association between an embeddings tier and an endpoint."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(
@@ -3594,7 +3515,6 @@ class EmbeddingsTierEndpoint(models.Model):
 
 
 class FileHandlerModelEndpoint(models.Model):
-    """File handler endpoint configuration used for file-to-markdown conversion."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_gpt4o_file_handler'")
@@ -3646,7 +3566,6 @@ class FileHandlerModelEndpoint(models.Model):
 
 
 class FileHandlerLLMTier(models.Model):
-    """Fallback tier ordering for file handler endpoints."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order = models.PositiveIntegerField(unique=True, help_text="1-based order across all file handler tiers.")
@@ -3663,7 +3582,6 @@ class FileHandlerLLMTier(models.Model):
 
 
 class FileHandlerTierEndpoint(models.Model):
-    """Weighted association between a file handler tier and an endpoint."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(
@@ -3690,7 +3608,6 @@ class FileHandlerTierEndpoint(models.Model):
 
 
 class ImageGenerationModelEndpoint(models.Model):
-    """Image generation endpoint configuration used by the create_image tool."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openrouter_flux_schnell'")
@@ -3742,7 +3659,6 @@ class ImageGenerationModelEndpoint(models.Model):
 
 
 class ImageGenerationLLMTier(models.Model):
-    """Fallback tier ordering for image generation endpoints."""
 
     class UseCase(models.TextChoices):
         CREATE_IMAGE = ("create_image", "Create Image")
@@ -3775,7 +3691,6 @@ class ImageGenerationLLMTier(models.Model):
 
 
 class ImageGenerationTierEndpoint(models.Model):
-    """Weighted association between an image-generation tier and an endpoint."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(
@@ -3802,7 +3717,6 @@ class ImageGenerationTierEndpoint(models.Model):
 
 
 class VideoGenerationModelEndpoint(models.Model):
-    """Video generation endpoint configuration used by the create_video tool."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_sora2'")
@@ -3854,7 +3768,6 @@ class VideoGenerationModelEndpoint(models.Model):
 
 
 class VideoGenerationLLMTier(models.Model):
-    """Fallback tier ordering for video generation endpoints."""
 
     class UseCase(models.TextChoices):
         CREATE_VIDEO = ("create_video", "Create Video")
@@ -3886,7 +3799,6 @@ class VideoGenerationLLMTier(models.Model):
 
 
 class VideoGenerationTierEndpoint(models.Model):
-    """Weighted association between a video-generation tier and an endpoint."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(
@@ -3913,7 +3825,6 @@ class VideoGenerationTierEndpoint(models.Model):
 
 
 class BrowserModelEndpoint(models.Model):
-    """Model endpoint for browser-use agents (Chat clients)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openrouter_glm_45'")
@@ -3956,7 +3867,6 @@ class BrowserModelEndpoint(models.Model):
 
 
 class BrowserLLMPolicy(models.Model):
-    """Active browser-use LLM policy (tiers)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=128, unique=True)
@@ -3970,7 +3880,6 @@ class BrowserLLMPolicy(models.Model):
 
 
 class BrowserLLMTier(models.Model):
-    """Tier within a browser-use policy."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     policy = models.ForeignKey(BrowserLLMPolicy, on_delete=models.CASCADE, related_name="tiers")
@@ -3993,7 +3902,6 @@ class BrowserLLMTier(models.Model):
 
 
 class BrowserTierEndpoint(models.Model):
-    """Weighted association between a Browser tier and a model endpoint."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(BrowserLLMTier, on_delete=models.CASCADE, related_name="tier_endpoints")
@@ -4022,16 +3930,6 @@ class BrowserTierEndpoint(models.Model):
 # --------------------------------------------------------------------------- #
 
 class LLMRoutingProfile(models.Model):
-    """Top-level container for a complete LLM routing configuration.
-
-    A routing profile groups together the full failover/tier configuration for:
-    - Persistent agents (token-range-based tiers)
-    - Browser agents (policy-based tiers)
-    - Embeddings (simple tier ordering)
-
-    Only one profile can be active at a time for runtime routing. Evals can
-    override the active profile by specifying a profile on EvalSuiteRun.
-    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.SlugField(
@@ -4117,7 +4015,6 @@ class LLMRoutingProfile(models.Model):
 
 
 class ProfileTokenRange(models.Model):
-    """Token range within a routing profile for persistent agent tier selection."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile = models.ForeignKey(
@@ -4149,7 +4046,6 @@ class ProfileTokenRange(models.Model):
 
 
 class ProfilePersistentTier(models.Model):
-    """Failover tier within a profile's token range for persistent agents."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     token_range = models.ForeignKey(
@@ -4179,7 +4075,6 @@ class ProfilePersistentTier(models.Model):
 
 
 class ProfilePersistentTierEndpoint(models.Model):
-    """Weighted endpoint assignment within a profile's persistent tier."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(
@@ -4215,7 +4110,6 @@ class ProfilePersistentTierEndpoint(models.Model):
 
 
 class ProfileBrowserTier(models.Model):
-    """Browser agent failover tier within a routing profile."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile = models.ForeignKey(
@@ -4245,7 +4139,6 @@ class ProfileBrowserTier(models.Model):
 
 
 class ProfileBrowserTierEndpoint(models.Model):
-    """Weighted endpoint assignment within a profile's browser tier."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(
@@ -4281,7 +4174,6 @@ class ProfileBrowserTierEndpoint(models.Model):
 
 
 class ProfileEmbeddingsTier(models.Model):
-    """Embeddings failover tier within a routing profile."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile = models.ForeignKey(
@@ -4304,7 +4196,6 @@ class ProfileEmbeddingsTier(models.Model):
 
 
 class ProfileEmbeddingsTierEndpoint(models.Model):
-    """Weighted endpoint assignment within a profile's embeddings tier."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(
@@ -4331,7 +4222,6 @@ class ProfileEmbeddingsTierEndpoint(models.Model):
 
 
 class DecodoCredential(models.Model):
-    """Decodo dedicated residential IP credentials"""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     username = models.CharField(max_length=128)
@@ -4350,7 +4240,6 @@ class DecodoCredential(models.Model):
 
 
 class DecodoIPBlock(models.Model):
-    """Decodo dedicated residential IP block"""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     credential = models.ForeignKey(
@@ -4385,7 +4274,6 @@ class DecodoIPBlock(models.Model):
 
 
 class DecodoIP(models.Model):
-    """Individual Decodo IP address with location and ISP information"""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ip_block = models.ForeignKey(
@@ -4448,7 +4336,6 @@ class DecodoIP(models.Model):
 
 
 class DecodoLowInventoryAlert(models.Model):
-    """Record low-inventory alert sends for Decodo proxy capacity."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     sent_on = models.DateField(help_text="Local date when the alert was sent.")
@@ -4484,10 +4371,6 @@ class ExecutionPauseReasonChoices(models.TextChoices):
 
 
 class UserBilling(models.Model):
-    """
-    Billing information associated with a user.
-    Each user has a one-to-one relationship with UserBilling.
-    """
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -4577,7 +4460,6 @@ class TrialPromoNoPaymentMethodEndBehaviorChoices(models.TextChoices):
 
 
 class TrialPromo(models.Model):
-    """Configurable special-access trial offer backed by Stripe Checkout."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=120)
@@ -4685,7 +4567,6 @@ class TrialPromo(models.Model):
 
 
 class TrialPromoAllowedEmail(models.Model):
-    """Email address allowed to redeem one specific trial promo."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     promo = models.ForeignKey(
@@ -4726,7 +4607,6 @@ class TrialPromoRedemptionStatusChoices(models.TextChoices):
 
 
 class TrialPromoRedemption(models.Model):
-    """Tracks a user's reserved/started Stripe Checkout for a trial promo."""
 
     COUNTED_STATUSES = (
         TrialPromoRedemptionStatusChoices.CHECKOUT_COMPLETED,
@@ -4780,7 +4660,6 @@ class TrialPromoRedemption(models.Model):
 
 
 class StripeCheckoutContext(models.Model):
-    """Immutable checkout context used to correlate delayed billing webhooks."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     stripe_customer_id = models.CharField(max_length=255, db_index=True)
@@ -4840,7 +4719,6 @@ class AddonEntitlementQuerySet(models.QuerySet):
 
 
 class AddonEntitlement(models.Model):
-    """Purchased add-ons that uplift usage limits or enable premium features."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -4911,7 +4789,6 @@ class AddonEntitlement(models.Model):
 
 
 class UserAttribution(models.Model):
-    """Persist first/last touch attribution details for a user."""
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -5012,7 +4889,6 @@ class UserIdentitySignalTypeChoices(models.TextChoices):
 
 
 class UserIdentitySignal(models.Model):
-    """Normalized identity signals used for trial-abuse matching."""
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -5060,7 +4936,6 @@ class UserFingerprintVisitFetchStatusChoices(models.TextChoices):
 
 
 class UserFingerprintVisit(models.Model):
-    """Stored Fingerprint event data for later review and risk-policy work."""
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -5174,7 +5049,6 @@ class UserTrialEligibilityManualActionChoices(models.TextChoices):
 
 
 class UserTrialEligibility(models.Model):
-    """Persist the current trial decision and any manual support override."""
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -5227,7 +5101,6 @@ class UserTrialEligibility(models.Model):
 
 
 class UserTrialActivation(models.Model):
-    """Persist the current activation state for an individual trial user."""
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -5251,7 +5124,6 @@ class UserTrialActivation(models.Model):
 
 
 class ReferralGrant(models.Model):
-    """Audit record for referral credit grants."""
 
     class ReferralTypeChoices(models.TextChoices):
         DIRECT = "direct", "Direct"
@@ -5314,7 +5186,6 @@ class ReferralGrant(models.Model):
 
 
 class OrganizationBilling(models.Model):
-    """Billing data for an organization (mirrors the user billing fields where applicable)."""
 
     organization = models.OneToOneField(
         'Organization',
@@ -5493,7 +5364,6 @@ class OrganizationBilling(models.Model):
 
 
 class UserPhoneNumber(models.Model):
-    """Phone numbers associated with a user."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -5535,7 +5405,6 @@ class UserPhoneNumber(models.Model):
         return f"{self.user_id}:{self.phone_number}"
 
 class StripeConfig(models.Model):
-    """Per-environment Stripe credentials and identifiers."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     release_env = models.CharField(
@@ -6067,7 +5936,6 @@ class StripeConfig(models.Model):
 
 
 class StripeConfigEntry(models.Model):
-    """Individual Stripe configuration value scoped to an environment."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     config = models.ForeignKey(
@@ -6128,7 +5996,6 @@ class StripeConfigEntry(models.Model):
 
 
 class SystemSetting(models.Model):
-    """System-level configuration override stored in the database."""
 
     key = models.CharField(max_length=128, unique=True)
     value_text = models.TextField(blank=True, default="")
@@ -6180,11 +6047,6 @@ class SystemSetting(models.Model):
 
 
 class MeteringBatch(models.Model):
-    """Audit record linking a batch of reserved usage to a Stripe meter event.
-
-    Each batch corresponds to a unique meter_batch_key reserved on usage rows.
-    We also persist the idempotency key used with Stripe for exactly-once semantics.
-    """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -6234,7 +6096,6 @@ class MeteringBatch(models.Model):
         return f"MeteringBatch({self.batch_key}) owner={owner} qty={self.rounded_quantity}"
 
 class ProxyHealthCheckSpec(models.Model):
-    """Specification for proxy health check tests"""
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=128, help_text="Human-readable name for this health check")
@@ -6256,7 +6117,6 @@ class ProxyHealthCheckSpec(models.Model):
 
 
 class ProxyHealthCheckResult(models.Model):
-    """Result of running a health check on a specific proxy"""
     
     class Status(models.TextChoices):
         PASSED = "PASSED", "Passed"
@@ -6328,14 +6188,12 @@ class ProxyHealthCheckResult(models.Model):
     
     @property
     def passed(self) -> bool:
-        """Convenience property to check if the health check passed"""
         return self.status == self.Status.PASSED
 
 
 # Persistent Agents Models
 
 class PublicProfile(models.Model):
-    """Public profile handle for sharing templates."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
@@ -6365,7 +6223,6 @@ class PublicProfile(models.Model):
 
 
 class PersistentAgentTemplate(models.Model):
-    """Curated template for pre-configured always-on pretrained workers."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     code = models.SlugField(
@@ -6583,7 +6440,6 @@ class PersistentAgentTemplate(models.Model):
 
 
 class PersistentAgentTemplateRelatedTemplate(models.Model):
-    """Ordered related-template link for public template detail pages."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source_template = models.ForeignKey(
@@ -6644,7 +6500,6 @@ class PersistentAgentTemplateRelatedTemplate(models.Model):
 
 
 class PersistentAgentTemplateUrlAlias(models.Model):
-    """Legacy handle-scoped URL slug for a public template."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     template = models.ForeignKey(
@@ -6677,7 +6532,6 @@ class PersistentAgentTemplateUrlAlias(models.Model):
 
 
 class PersistentAgentTemplateLike(models.Model):
-    """User-scoped like for a shared template."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     template = models.ForeignKey(
@@ -6711,7 +6565,6 @@ class PersistentAgentTemplateLike(models.Model):
 
 
 class ToolFriendlyName(models.Model):
-    """Human-friendly labels for tool identifiers surfaced in templates."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tool_name = models.CharField(
@@ -6738,9 +6591,6 @@ class ToolFriendlyName(models.Model):
 
 
 class PersistentAgent(models.Model):
-    """
-    A persistent agent that runs automatically on a schedule.
-    """
     objects = PersistentAgentQuerySet.as_manager()
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -6859,7 +6709,6 @@ class PersistentAgent(models.Model):
 
     @property
     def preferred_proxy(self):
-        """Return the proxy selected on the backing browser agent, if any."""
         try:
             return self.browser_use_agent.preferred_proxy
         except (BrowserUseAgent.DoesNotExist, AttributeError):
@@ -7034,7 +6883,6 @@ class PersistentAgent(models.Model):
         ]
 
     def clean(self):
-        """Custom validation for the agent."""
         super().clean()
         if self.organization_id:
             self._validate_org_seats()
@@ -7094,7 +6942,6 @@ class PersistentAgent(models.Model):
             return None
 
     def get_avatar_url(self) -> str | None:
-        """Return a usable URL for the agent avatar, if set."""
         file_field = self.avatar
         if not self.has_avatar or not self.pk:
             return None
@@ -7112,7 +6959,6 @@ class PersistentAgent(models.Model):
             return None
 
     def get_avatar_thumbnail_url(self) -> str | None:
-        """Return a URL for the cached live-chat avatar thumbnail, if set."""
         thumbnail_url = self._get_avatar_proxy_url(
             "agent_avatar_thumbnail",
             version=self.get_avatar_thumbnail_version(),
@@ -7193,7 +7039,6 @@ class PersistentAgent(models.Model):
         return bool(update_fields) or side_effects_applied
 
     def apply_persisted_soft_delete_side_effects(self) -> bool:
-        """Apply persisted soft-delete cleanup that should only run after the row is saved."""
         if not self.pk:
             return False
 
@@ -7252,7 +7097,6 @@ class PersistentAgent(models.Model):
         return bool(update_fields)
 
     def get_daily_credit_soft_target(self) -> Decimal | None:
-        """Return the configured soft daily credit target, or None if unlimited."""
         limit = self.daily_credit_limit
         if limit is None:
             return None
@@ -7262,7 +7106,6 @@ class PersistentAgent(models.Model):
         return limit_value
 
     def get_daily_credit_hard_limit(self) -> Decimal | None:
-        """Return the derived hard limit (2× soft target) or None for unlimited agents."""
         from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 
         soft_target = self.get_daily_credit_soft_target()
@@ -7278,7 +7121,6 @@ class PersistentAgent(models.Model):
         return (soft_target * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def get_daily_credit_usage(self, usage_date=None) -> Decimal:
-        """Return the credits consumed by this agent on the given date."""
         usage_date = usage_date or timezone.localdate()
         start = datetime.datetime.combine(usage_date, datetime.time.min)
         if timezone.is_naive(start):
@@ -7296,7 +7138,6 @@ class PersistentAgent(models.Model):
         return total if total is not None else Decimal("0")
 
     def get_daily_credit_soft_target_remaining(self, usage_date=None) -> Decimal | None:
-        """Return remaining credits before the soft target is exceeded."""
         soft_target = self.get_daily_credit_soft_target()
         if soft_target is None:
             return None
@@ -7307,7 +7148,6 @@ class PersistentAgent(models.Model):
         return remaining
 
     def get_daily_credit_remaining(self, usage_date=None) -> Decimal | None:
-        """Return remaining credits before the derived hard limit is enforced."""
         limit = self.get_daily_credit_hard_limit()
         if limit is None:
             return None
@@ -7317,7 +7157,6 @@ class PersistentAgent(models.Model):
 
     @tracer.start_as_current_span("WHITELIST PersistentAgent Inbound Sender Check")
     def is_sender_whitelisted(self, channel: CommsChannel | str, address: str) -> bool:
-        """Check if an inbound address/number is allowed to contact this agent."""
         channel_val = channel.value if isinstance(channel, CommsChannel) else str(channel)
         addr = (address or "").strip()
         addr_lower = addr.lower()
@@ -7338,7 +7177,6 @@ class PersistentAgent(models.Model):
 
     @tracer.start_as_current_span("WHITELIST PersistentAgent Outbound Recipient Check")
     def is_recipient_whitelisted(self, channel: CommsChannel | str, address: str) -> bool:
-        """Check if an outbound address/number is allowed for this agent."""
         channel_val = channel.value if isinstance(channel, CommsChannel) else str(channel)
         addr = (address or "").strip()
 
@@ -7361,7 +7199,6 @@ class PersistentAgent(models.Model):
         return self._is_allowed_default(channel_val, addr)
 
     def is_internal_responder_identity(self, channel: CommsChannel | str, address: str) -> bool:
-        """Return whether the identity belongs to an internal agent principal."""
         channel_val = channel.value if isinstance(channel, CommsChannel) else str(channel)
         addr_raw = (address or "").strip()
 
@@ -7434,7 +7271,6 @@ class PersistentAgent(models.Model):
         ).exists()
 
     def _legacy_owner_only(self, channel_val: str, address: str) -> bool:
-        """Original behavior: only owner's email or verified phone allowed."""
         addr_raw = (address or "").strip()
         addr_lower = addr_raw.lower()
         if channel_val == CommsChannel.EMAIL:
@@ -7451,16 +7287,6 @@ class PersistentAgent(models.Model):
         return False
 
     def _is_in_manual_allowlist(self, channel_val: str, address: str, direction: str = "both") -> bool:
-        """Return True if address is present in the agent-level manual allowlist for the given channel.
-        
-        Args:
-            channel_val: The communication channel (email, sms, etc.)
-            address: The address to check
-            direction: "inbound" (can send to agent), "outbound" (agent can send to), or "both"
-        
-        Owner is always implicitly allowed even with manual allowlist policy.
-        For org-owned agents, org members are also implicitly allowed.
-        """
         addr = (address or "").strip()
         if channel_val == CommsChannel.EMAIL:
             # Normalize display-name formats like "Name <email@example.com>"
@@ -7555,7 +7381,6 @@ class PersistentAgent(models.Model):
             return False
 
     def _is_allowed_web_address(self, address: str, direction: str = "both") -> bool:
-        """Return True if a web chat address is permitted for the requested direction."""
         addr = (address or "").strip()
         user_id, agent_id = parse_web_user_address(addr)
 
@@ -7609,7 +7434,6 @@ class PersistentAgent(models.Model):
         return False
 
     def _is_allowed_default(self, channel_val: str, address: str) -> bool:
-        """Default allow rules: owner-only for user-owned agents; org members for org-owned agents."""
         addr_raw = (address or "").strip()
         addr_lower = addr_raw.lower()
         # Email rules
@@ -7671,7 +7495,6 @@ class PersistentAgent(models.Model):
         return False
 
     def _remove_celery_beat_task(self):
-        """Removes the associated Celery Beat schedule task."""
         from celery import current_app as celery_app
         from redbeat import RedBeatSchedulerEntry
 
@@ -7693,10 +7516,6 @@ class PersistentAgent(models.Model):
             )
 
     def _sync_celery_beat_task(self):
-        """
-        Creates, updates, or removes the Celery Beat task based on the agent's
-        current state (schedule and is_active). This operation is atomic.
-        """
         from celery import current_app as celery_app
         from redbeat import RedBeatSchedulerEntry
         from api.agent.core.schedule_parser import ScheduleParser
@@ -7892,7 +7711,6 @@ class PersistentAgent(models.Model):
 
 
 class PersistentAgentKanbanCard(models.Model):
-    """Kanban card assigned to a persistent agent."""
 
     class Status(models.TextChoices):
         TODO = "todo", "To Do"
@@ -7935,7 +7753,6 @@ class PersistentAgentKanbanCard(models.Model):
 
 
 class PersistentAgentKanbanEvent(models.Model):
-    """Persisted kanban timeline event for chat rehydration."""
 
     class Action(models.TextChoices):
         CREATED = "created", "Created"
@@ -7973,7 +7790,6 @@ class PersistentAgentKanbanEvent(models.Model):
 
 
 class PersistentAgentKanbanEventTitle(models.Model):
-    """Snapshot titles stored alongside a kanban event."""
 
     class Status(models.TextChoices):
         TODO = "todo", "To Do"
@@ -8000,7 +7816,6 @@ class PersistentAgentKanbanEventTitle(models.Model):
 
 
 class PersistentAgentKanbanEventChange(models.Model):
-    """Stored kanban change metadata for a timeline event."""
 
     class Action(models.TextChoices):
         CREATED = "created", "Created"
@@ -8042,7 +7857,6 @@ class PersistentAgentKanbanEventChange(models.Model):
 
 
 class PersistentAgentPlanDeliverable(models.Model):
-    """Current plan deliverable referenced by an agent."""
 
     class Kind(models.TextChoices):
         FILE = "file", "File"
@@ -8080,7 +7894,6 @@ class PersistentAgentPlanDeliverable(models.Model):
 
 
 class MCPServerConfig(models.Model):
-    """Configurable MCP server definition scoped to platform, org, or user."""
 
     RESERVED_PLATFORM_NAMES = {"pipedream"}
 
@@ -8158,7 +7971,6 @@ class MCPServerConfig(models.Model):
         return f"MCPServerConfig<{self.name} scope={self.scope} owner={owner}>"
 
     def clean(self):
-        """Validate scope ownership and transport requirements."""
         super().clean()
         if self.scope == self.Scope.PLATFORM:
             if self.organization_id or self.user_id:
@@ -8221,7 +8033,6 @@ class MCPServerConfig(models.Model):
 
 
 class PipedreamAppSelection(models.Model):
-    """Owner-scoped extra Pipedream app slugs selected in the console."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
@@ -8288,7 +8099,6 @@ class PipedreamAppSelection(models.Model):
 
 
 class PersistentAgentSystemMessageBroadcast(models.Model):
-    """Represents a single broadcast directive duplicated for all agents."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     body = models.TextField(help_text="Directive text sent to all persistent agents.")
@@ -8312,9 +8122,6 @@ class PersistentAgentSystemMessageBroadcast(models.Model):
 
 
 class PersistentAgentSystemMessage(models.Model):
-    """
-    High-priority system directives delivered into an agent's unified history.
-    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -8360,7 +8167,6 @@ class PersistentAgentSystemMessage(models.Model):
 
 
 class PersistentAgentJudgeSuggestion(models.Model):
-    """Advisory suggestion produced by the internal trajectory judge."""
 
     class SuggestionType(models.TextChoices):
         INTELLIGENCE_UPGRADE = "intelligence_upgrade", "Intelligence Upgrade"
@@ -8425,7 +8231,6 @@ class PersistentAgentJudgeSuggestion(models.Model):
 
 
 class PersistentAgentMCPServer(models.Model):
-    """Explicit mapping for personal MCP servers enabled on an agent."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -8452,8 +8257,46 @@ class PersistentAgentMCPServer(models.Model):
         ]
 
 
-class MCPServerOAuthCredential(models.Model):
-    """Encrypted OAuth credential store for MCP servers."""
+class EncryptedTextModelMixin:
+    encrypted_text_error_message = "Failed to decrypt encrypted text payload"
+    encrypted_text_reraise = False
+    encrypted_text_exception_types = (Exception,)
+
+    @staticmethod
+    def _encrypt_text(value: str | None) -> bytes | None:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    def _decrypt_text(self, payload: bytes | None) -> str:
+        if not payload:
+            return ""
+        try:
+            from .encryption import SecretsEncryption
+
+            return SecretsEncryption.decrypt_value(payload)
+        except self.encrypted_text_exception_types:
+            logger.exception(self.encrypted_text_error_message)
+            if self.encrypted_text_reraise:
+                raise
+            return ""
+
+
+def encrypted_text_property(field_name: str):
+    def getter(instance) -> str:
+        return instance._decrypt_text(getattr(instance, field_name))
+
+    def setter(instance, value: str | None) -> None:
+        setattr(instance, field_name, instance._encrypt_text(value))
+
+    return property(getter, setter)
+
+
+class MCPServerOAuthCredential(EncryptedTextModelMixin, models.Model):
+
+    encrypted_text_error_message = "Failed to decrypt MCP OAuth credential payload"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     server_config = models.OneToOneField(
@@ -8496,62 +8339,15 @@ class MCPServerOAuthCredential(models.Model):
     def __str__(self) -> str:  # pragma: no cover - display helper
         return f"MCPServerOAuthCredential<{self.server_config_id}>"
 
-    # Encrypted field helpers -------------------------------------------------
-    @staticmethod
-    def _encrypt_text(value: str | None) -> bytes | None:
-        if not value:
-            return None
-        from .encryption import SecretsEncryption
-
-        return SecretsEncryption.encrypt_value(value)
-
-    @staticmethod
-    def _decrypt_text(payload: bytes | None) -> str:
-        if not payload:
-            return ""
-        try:
-            from .encryption import SecretsEncryption
-
-            return SecretsEncryption.decrypt_value(payload)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to decrypt MCP OAuth credential payload")
-            return ""
-
-    @property
-    def client_secret(self) -> str:
-        return self._decrypt_text(self.client_secret_encrypted)
-
-    @client_secret.setter
-    def client_secret(self, value: str | None) -> None:
-        self.client_secret_encrypted = self._encrypt_text(value)
-
-    @property
-    def access_token(self) -> str:
-        return self._decrypt_text(self.access_token_encrypted)
-
-    @access_token.setter
-    def access_token(self, value: str | None) -> None:
-        self.access_token_encrypted = self._encrypt_text(value)
-
-    @property
-    def refresh_token(self) -> str:
-        return self._decrypt_text(self.refresh_token_encrypted)
-
-    @refresh_token.setter
-    def refresh_token(self, value: str | None) -> None:
-        self.refresh_token_encrypted = self._encrypt_text(value)
-
-    @property
-    def id_token(self) -> str:
-        return self._decrypt_text(self.id_token_encrypted)
-
-    @id_token.setter
-    def id_token(self, value: str | None) -> None:
-        self.id_token_encrypted = self._encrypt_text(value)
+    client_secret = encrypted_text_property("client_secret_encrypted")
+    access_token = encrypted_text_property("access_token_encrypted")
+    refresh_token = encrypted_text_property("refresh_token_encrypted")
+    id_token = encrypted_text_property("id_token_encrypted")
 
 
-class MCPServerOAuthSession(models.Model):
-    """Ephemeral OAuth session state for MCP authentication flows."""
+class MCPServerOAuthSession(EncryptedTextModelMixin, models.Model):
+
+    encrypted_text_error_message = "Failed to decrypt MCP OAuth session payload"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     server_config = models.ForeignKey(
@@ -8600,41 +8396,8 @@ class MCPServerOAuthSession(models.Model):
     def __str__(self) -> str:  # pragma: no cover - display helper
         return f"MCPServerOAuthSession<{self.server_config_id} state={self.state}>"
 
-    @staticmethod
-    def _encrypt_text(value: str | None) -> bytes | None:
-        if not value:
-            return None
-        from .encryption import SecretsEncryption
-
-        return SecretsEncryption.encrypt_value(value)
-
-    @staticmethod
-    def _decrypt_text(payload: bytes | None) -> str:
-        if not payload:
-            return ""
-        try:
-            from .encryption import SecretsEncryption
-
-            return SecretsEncryption.decrypt_value(payload)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to decrypt MCP OAuth session payload")
-            return ""
-
-    @property
-    def code_verifier(self) -> str:
-        return self._decrypt_text(self.code_verifier_encrypted)
-
-    @code_verifier.setter
-    def code_verifier(self, value: str | None) -> None:
-        self.code_verifier_encrypted = self._encrypt_text(value)
-
-    @property
-    def client_secret(self) -> str:
-        return self._decrypt_text(self.client_secret_encrypted)
-
-    @client_secret.setter
-    def client_secret(self, value: str | None) -> None:
-        self.client_secret_encrypted = self._encrypt_text(value)
+    code_verifier = encrypted_text_property("code_verifier_encrypted")
+    client_secret = encrypted_text_property("client_secret_encrypted")
 
     def has_expired(self) -> bool:
         from django.utils import timezone
@@ -8648,12 +8411,6 @@ class MCPServerOAuthSession(models.Model):
 
 
 class PersistentAgentEnabledTool(models.Model):
-    """Normalized record of a tool enabled for a persistent agent.
-
-    Replaces the old JSON fields on PersistentAgent:
-    - enabled_mcp_tools (list[str])
-    - mcp_tool_usage (dict[str -> last_used_epoch_seconds])
-    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -8695,7 +8452,6 @@ class PersistentAgentEnabledTool(models.Model):
 
 
 class PersistentAgentCustomTool(models.Model):
-    """Agent-authored custom tool metadata backed by source code in filespace."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -8782,7 +8538,6 @@ def global_skill_custom_tool_upload_to(instance, filename: str) -> str:
 
 
 class GlobalAgentSkill(models.Model):
-    """Platform-managed reusable skill template available to all compatible agents."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=128, unique=True)
@@ -8850,7 +8605,6 @@ class GlobalAgentSkill(models.Model):
 
 
 class GlobalAgentSkillCustomTool(models.Model):
-    """Bundled custom tool source stored with a global skill template."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     global_skill = models.ForeignKey(
@@ -8946,7 +8700,6 @@ class GlobalAgentSkillCustomTool(models.Model):
 
 
 class PersistentAgentSkill(models.Model):
-    """Versioned workflow skill authored by a persistent agent."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -9007,7 +8760,6 @@ class PersistentAgentSkill(models.Model):
 
 
 class PersistentAgentSystemSkillState(models.Model):
-    """Per-agent enablement and recency state for code-defined system skills."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -9083,7 +8835,6 @@ class SecretModelMixin:
         return SecretKeyGenerator.generate_unique_key_from_name(name_for_key, existing_keys)
 
     def _clean_secret_fields(self):
-        """Validate type-specific scope, domain, and key formatting."""
         integration_type = getattr(self.SecretType, "INTEGRATION", None)
         if self.secret_type == self.SecretType.ENV_VAR:
             self.domain_pattern = self.ENV_VAR_DOMAIN_SENTINEL
@@ -9116,7 +8867,6 @@ class SecretModelMixin:
                     raise ValidationError({"key": str(e)})
 
     def _can_generate_key(self):
-        """Override in subclass if extra conditions are needed."""
         return True
 
     def set_value(self, value: str):
@@ -9133,9 +8883,6 @@ class SecretModelMixin:
 
 
 class PersistentAgentSecret(SecretModelMixin, models.Model):
-    """
-    A secret (encrypted key-value pair) for a persistent agent, scoped to a domain pattern.
-    """
 
     class SecretType(models.TextChoices):
         CREDENTIAL = "credential", "Credential"
@@ -9223,12 +8970,6 @@ class PersistentAgentSecret(SecretModelMixin, models.Model):
 
     @property
     def is_requested(self) -> bool:
-        """
-        Check if this secret has been requested but doesn't have a value yet.
-        
-        Returns:
-            True if the secret is requested, False otherwise
-        """
         return self.requested
 
     def __str__(self):
@@ -9238,7 +8979,6 @@ class PersistentAgentSecret(SecretModelMixin, models.Model):
 
 
 class GlobalSecret(SecretModelMixin, models.Model):
-    """An encrypted secret owned by a user or organization, shared across all their agents."""
 
     class SecretType(models.TextChoices):
         CREDENTIAL = "credential", "Credential"
@@ -9361,7 +9101,6 @@ class GlobalSecret(SecretModelMixin, models.Model):
 
 
 class PersistentAgentWebhook(models.Model):
-    """Outbound webhook endpoint configured for a persistent agent."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -9400,7 +9139,6 @@ class PersistentAgentWebhook(models.Model):
             self.url = self.url.strip()
 
     def record_delivery(self, status_code: int | None, error_message: str | None = None) -> None:
-        """Persist the latest delivery attempt metadata."""
         self.last_triggered_at = timezone.now()
         self.last_response_status = status_code
         self.last_error_message = (error_message or "")[:2000]
@@ -9409,8 +9147,10 @@ class PersistentAgentWebhook(models.Model):
         )
 
 
-class PersistentAgentInboundWebhook(models.Model):
-    """Inbound webhook endpoint configured for a persistent agent."""
+class PersistentAgentInboundWebhook(EncryptedTextModelMixin, models.Model):
+
+    encrypted_text_error_message = "Failed to decrypt inbound webhook secret"
+    encrypted_text_reraise = True
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -9441,33 +9181,7 @@ class PersistentAgentInboundWebhook(models.Model):
     def __str__(self) -> str:  # pragma: no cover - display helper
         return f"{self.name} inbound webhook"
 
-    @staticmethod
-    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
-        if not value:
-            return None
-        from .encryption import SecretsEncryption
-
-        return SecretsEncryption.encrypt_value(value)
-
-    @staticmethod
-    def _decrypt_text(payload: Optional[bytes]) -> str:
-        if not payload:
-            return ""
-        try:
-            from .encryption import SecretsEncryption
-
-            return SecretsEncryption.decrypt_value(payload)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to decrypt inbound webhook secret")
-            raise
-
-    @property
-    def secret(self) -> str:
-        return self._decrypt_text(self.secret_encrypted)
-
-    @secret.setter
-    def secret(self, value: Optional[str]) -> None:
-        self.secret_encrypted = self._encrypt_text(value)
+    secret = encrypted_text_property("secret_encrypted")
 
     @staticmethod
     def generate_secret() -> str:
@@ -9504,8 +9218,9 @@ class PersistentAgentInboundWebhook(models.Model):
         return super().save(*args, **kwargs)
 
 
-class PersistentAgentPipedreamTriggerSubscription(models.Model):
-    """Pipedream Connect trigger deployed on behalf of an agent."""
+class PersistentAgentPipedreamTriggerSubscription(EncryptedTextModelMixin, models.Model):
+
+    encrypted_text_error_message = "Failed to decrypt Pipedream trigger subscription secret"
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -9552,44 +9267,11 @@ class PersistentAgentPipedreamTriggerSubscription(models.Model):
         ordering = ["app_slug", "event_type", "platform_channel"]
 
     @staticmethod
-    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
-        if not value:
-            return None
-        from .encryption import SecretsEncryption
-
-        return SecretsEncryption.encrypt_value(value)
-
-    @staticmethod
-    def _decrypt_text(payload: Optional[bytes]) -> str:
-        if not payload:
-            return ""
-        try:
-            from .encryption import SecretsEncryption
-
-            return SecretsEncryption.decrypt_value(payload)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to decrypt Pipedream trigger subscription secret")
-            return ""
-
-    @staticmethod
     def generate_webhook_secret() -> str:
         return secrets.token_urlsafe(32)
 
-    @property
-    def webhook_secret(self) -> str:
-        return self._decrypt_text(self.webhook_secret_encrypted)
-
-    @webhook_secret.setter
-    def webhook_secret(self, value: Optional[str]) -> None:
-        self.webhook_secret_encrypted = self._encrypt_text(value)
-
-    @property
-    def signing_key(self) -> str:
-        return self._decrypt_text(self.signing_key_encrypted)
-
-    @signing_key.setter
-    def signing_key(self, value: Optional[str]) -> None:
-        self.signing_key_encrypted = self._encrypt_text(value)
+    webhook_secret = encrypted_text_property("webhook_secret_encrypted")
+    signing_key = encrypted_text_property("signing_key_encrypted")
 
     def matches_webhook_secret(self, candidate: str | None) -> bool:
         if not candidate:
@@ -9633,7 +9315,6 @@ class PersistentAgentPipedreamTriggerSubscription(models.Model):
 
 
 class PersistentAgentDiscordOAuthSession(models.Model):
-    """Short-lived Discord OAuth state for claiming guilds for an agent owner."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     state = models.CharField(max_length=128, unique=True)
@@ -9689,7 +9370,6 @@ class PersistentAgentDiscordOAuthSession(models.Model):
 
 
 class PersistentAgentDiscordGuild(models.Model):
-    """Discord guild claimed by a Gobii user or organization through OAuth."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     guild_id = models.CharField(max_length=32)
@@ -9748,7 +9428,6 @@ class PersistentAgentDiscordGuild(models.Model):
 
 
 class PersistentAgentDiscordChannelSubscription(models.Model):
-    """Agent subscription to one Discord guild/channel pair."""
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -9803,8 +9482,10 @@ class PersistentAgentDiscordChannelSubscription(models.Model):
         return f"DiscordSubscription<{self.guild_id}:{label}:{self.agent_id}>"
 
 
-class PersistentAgentDiscordWebhook(models.Model):
-    """Discord channel webhook reused for native bot outbound messages."""
+class PersistentAgentDiscordWebhook(EncryptedTextModelMixin, models.Model):
+
+    encrypted_text_error_message = "Failed to decrypt Discord webhook token"
+    encrypted_text_exception_types = (ValueError,)
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     guild = models.ForeignKey(
@@ -9829,40 +9510,13 @@ class PersistentAgentDiscordWebhook(models.Model):
         ]
         ordering = ["guild__name", "channel_id"]
 
-    @staticmethod
-    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
-        if not value:
-            return None
-        from .encryption import SecretsEncryption
-
-        return SecretsEncryption.encrypt_value(value)
-
-    @staticmethod
-    def _decrypt_text(payload: Optional[bytes]) -> str:
-        if not payload:
-            return ""
-        from .encryption import SecretsEncryption
-
-        try:
-            return SecretsEncryption.decrypt_value(payload)
-        except ValueError:
-            logger.exception("Failed to decrypt Discord webhook token")
-            return ""
-
-    @property
-    def webhook_token(self) -> str:
-        return self._decrypt_text(self.webhook_token_encrypted)
-
-    @webhook_token.setter
-    def webhook_token(self, value: Optional[str]) -> None:
-        self.webhook_token_encrypted = self._encrypt_text(value)
+    webhook_token = encrypted_text_property("webhook_token_encrypted")
 
     def __str__(self) -> str:  # pragma: no cover - display helper
         return f"DiscordWebhook<{self.guild_id}:{self.channel_id}>"
 
 
 class PersistentAgentDiscordWebhookEcho(models.Model):
-    """Short-lived marker used to suppress an agent's own Discord webhook echo."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -9898,7 +9552,6 @@ class PersistentAgentDiscordWebhookEcho(models.Model):
 
 
 class PersistentAgentCommsEndpoint(models.Model):
-    """Channel-agnostic communication endpoint (address/number/etc.)."""
 
     class EndpointManager(models.Manager):
         @staticmethod
@@ -9970,7 +9623,6 @@ class PersistentAgentCommsEndpoint(models.Model):
 
 
 class CommsAllowlistEntry(models.Model):
-    """Manual allowlist entry for agent communications (agent-level only)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -10118,7 +9770,6 @@ class CommsAllowlistEntry(models.Model):
 
 
 class AgentAllowlistInvite(models.Model):
-    """Pending invitation for someone to join an agent's allowlist."""
     
     class InviteStatus(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -10245,15 +9896,12 @@ class AgentAllowlistInvite(models.Model):
         return result
     
     def is_expired(self):
-        """Check if this invitation has expired."""
         return timezone.now() > self.expires_at
     
     def can_be_accepted(self):
-        """Check if this invitation can still be accepted."""
         return self.status == self.InviteStatus.PENDING and not self.is_expired()
     
     def accept(self):
-        """Accept this invitation and create the allowlist entry."""
         if not self.can_be_accepted():
             raise ValueError("This invitation cannot be accepted")
         
@@ -10288,7 +9936,6 @@ class AgentAllowlistInvite(models.Model):
         return entry
     
     def reject(self):
-        """Reject this invitation."""
         if self.status != self.InviteStatus.PENDING:
             raise ValueError("This invitation has already been responded to")
         
@@ -10305,7 +9952,6 @@ def _generate_collaborator_invite_token() -> str:
 
 
 class AgentCollaborator(models.Model):
-    """User collaborators who can chat with an agent and access shared files."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -10379,7 +10025,6 @@ class AgentCollaborator(models.Model):
 
 
 class AgentCollaboratorInvite(models.Model):
-    """Invitation for a user to collaborate on an agent."""
 
     class InviteStatus(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -10532,7 +10177,6 @@ def _generate_transfer_token() -> str:
 
 
 class AgentTransferInvite(models.Model):
-    """Invitation representing a pending agent ownership transfer."""
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -10590,7 +10234,6 @@ class AgentTransferInvite(models.Model):
 
 
 class CommsAllowlistRequest(models.Model):
-    """Request from agent to add a contact to allowlist."""
     
     class RequestStatus(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -10717,13 +10360,11 @@ class CommsAllowlistRequest(models.Model):
         )
     
     def is_expired(self):
-        """Check if this request has expired."""
         if not self.expires_at:
             return False
         return timezone.now() > self.expires_at
     
     def can_be_approved(self):
-        """Check if this request can still be approved."""
         return self.status == self.RequestStatus.PENDING and not self.is_expired()
 
     def save(self, *args, **kwargs):
@@ -10734,13 +10375,6 @@ class CommsAllowlistRequest(models.Model):
         return result
     
     def approve(self, invited_by, skip_limit_check=False, skip_invitation=True):
-        """Approve this request by creating an invitation or direct allowlist entry.
-        
-        Args:
-            invited_by: User approving the request
-            skip_limit_check: Skip validation of contact limits
-            skip_invitation: If True, directly create allowlist entry instead of invitation
-        """
         import secrets
         from datetime import timedelta
         
@@ -10873,7 +10507,6 @@ class CommsAllowlistRequest(models.Model):
         return invitation
     
     def reject(self):
-        """Reject this request."""
         if self.status != self.RequestStatus.PENDING:
             raise ValueError("This request has already been responded to")
         
@@ -10886,7 +10519,6 @@ class CommsAllowlistRequest(models.Model):
 
 
 class AgentSpawnRequest(models.Model):
-    """Request from an agent to create a specialized peer agent."""
 
     class RequestStatus(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -11112,7 +10744,6 @@ class AgentSpawnRequest(models.Model):
 
 
 class PersistentAgentEmailEndpoint(models.Model):
-    """Email-specific metadata for an endpoint."""
 
     endpoint = models.OneToOneField(
         PersistentAgentCommsEndpoint,
@@ -11128,11 +10759,6 @@ class PersistentAgentEmailEndpoint(models.Model):
 
 
 class AgentEmailAccount(models.Model):
-    """Per-agent email account for BYO SMTP/IMAP.
-
-    One-to-one with an agent-owned email endpoint. SMTP used for outbound in
-    Phase 1; IMAP config stored for Phase 2.
-    """
 
     class SmtpSecurity(models.TextChoices):
         SSL = "ssl", "SSL"
@@ -11296,8 +10922,10 @@ class AgentEmailAccount(models.Model):
                 raise ValidationError({"imap_auth": "Custom mode does not support OAuth 2.0"})
 
 
-class AgentEmailOAuthCredential(models.Model):
-    """Encrypted OAuth credential store for agent email accounts."""
+class AgentEmailOAuthCredential(EncryptedTextModelMixin, models.Model):
+
+    encrypted_text_error_message = "Failed to decrypt email OAuth credential payload"
+    encrypted_text_reraise = True
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account = models.OneToOneField(
@@ -11339,61 +10967,16 @@ class AgentEmailOAuthCredential(models.Model):
     def __str__(self) -> str:  # pragma: no cover - display helper
         return f"AgentEmailOAuthCredential<{self.account_id}>"
 
-    @staticmethod
-    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
-        if not value:
-            return None
-        from .encryption import SecretsEncryption
-
-        return SecretsEncryption.encrypt_value(value)
-
-    @staticmethod
-    def _decrypt_text(payload: Optional[bytes]) -> str:
-        if not payload:
-            return ""
-        try:
-            from .encryption import SecretsEncryption
-
-            return SecretsEncryption.decrypt_value(payload)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to decrypt email OAuth credential payload")
-            raise
-
-    @property
-    def client_secret(self) -> str:
-        return self._decrypt_text(self.client_secret_encrypted)
-
-    @client_secret.setter
-    def client_secret(self, value: Optional[str]) -> None:
-        self.client_secret_encrypted = self._encrypt_text(value)
-
-    @property
-    def access_token(self) -> str:
-        return self._decrypt_text(self.access_token_encrypted)
-
-    @access_token.setter
-    def access_token(self, value: Optional[str]) -> None:
-        self.access_token_encrypted = self._encrypt_text(value)
-
-    @property
-    def refresh_token(self) -> str:
-        return self._decrypt_text(self.refresh_token_encrypted)
-
-    @refresh_token.setter
-    def refresh_token(self, value: Optional[str]) -> None:
-        self.refresh_token_encrypted = self._encrypt_text(value)
-
-    @property
-    def id_token(self) -> str:
-        return self._decrypt_text(self.id_token_encrypted)
-
-    @id_token.setter
-    def id_token(self, value: Optional[str]) -> None:
-        self.id_token_encrypted = self._encrypt_text(value)
+    client_secret = encrypted_text_property("client_secret_encrypted")
+    access_token = encrypted_text_property("access_token_encrypted")
+    refresh_token = encrypted_text_property("refresh_token_encrypted")
+    id_token = encrypted_text_property("id_token_encrypted")
 
 
-class AgentEmailOAuthSession(models.Model):
-    """Ephemeral OAuth session state for agent email authentication flows."""
+class AgentEmailOAuthSession(EncryptedTextModelMixin, models.Model):
+
+    encrypted_text_error_message = "Failed to decrypt email OAuth session payload"
+    encrypted_text_reraise = True
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account = models.ForeignKey(
@@ -11440,45 +11023,11 @@ class AgentEmailOAuthSession(models.Model):
     def __str__(self) -> str:  # pragma: no cover - display helper
         return f"AgentEmailOAuthSession<{self.account_id} state={self.state}>"
 
-    @staticmethod
-    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
-        if not value:
-            return None
-        from .encryption import SecretsEncryption
-
-        return SecretsEncryption.encrypt_value(value)
-
-    @staticmethod
-    def _decrypt_text(payload: Optional[bytes]) -> str:
-        if not payload:
-            return ""
-        try:
-            from .encryption import SecretsEncryption
-
-            return SecretsEncryption.decrypt_value(payload)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to decrypt email OAuth session payload")
-            raise
-
-    @property
-    def client_secret(self) -> str:
-        return self._decrypt_text(self.client_secret_encrypted)
-
-    @client_secret.setter
-    def client_secret(self, value: Optional[str]) -> None:
-        self.client_secret_encrypted = self._encrypt_text(value)
-
-    @property
-    def code_verifier(self) -> str:
-        return self._decrypt_text(self.code_verifier_encrypted)
-
-    @code_verifier.setter
-    def code_verifier(self, value: Optional[str]) -> None:
-        self.code_verifier_encrypted = self._encrypt_text(value)
+    client_secret = encrypted_text_property("client_secret_encrypted")
+    code_verifier = encrypted_text_property("code_verifier_encrypted")
 
 
 class PersistentAgentSmsEndpoint(models.Model):
-    """SMS-specific metadata for an endpoint."""
 
     endpoint = models.OneToOneField(
         PersistentAgentCommsEndpoint,
@@ -11494,7 +11043,6 @@ class PersistentAgentSmsEndpoint(models.Model):
 
 
 class PersistentAgentConversation(models.Model):
-    """A logical conversation / thread across any channel."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     channel = models.CharField(max_length=32, choices=CommsChannel.choices)
@@ -11547,7 +11095,6 @@ class PersistentAgentConversation(models.Model):
 
 
 class AgentPeerLink(models.Model):
-    """Symmetric link allowing direct messaging between two agents."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent_a = models.ForeignKey(
@@ -11622,11 +11169,9 @@ class AgentPeerLink(models.Model):
 
     @staticmethod
     def build_pair_key(agent_a_id: uuid.UUID | str, agent_b_id: uuid.UUID | str) -> str:
-        """Return stable pair key for two agent IDs."""
         return "::".join(sorted([str(agent_a_id), str(agent_b_id)]))
 
     def get_other_agent(self, agent: "PersistentAgent") -> PersistentAgent | None:
-        """Return the counterpart agent for the provided agent instance."""
         if not agent:
             return None
         if agent.id == self.agent_a_id:
@@ -11636,7 +11181,6 @@ class AgentPeerLink(models.Model):
         return None
 
     def remove_preserving_history(self) -> None:
-        """Delete this peer link without deleting its historical conversation or messages."""
         try:
             conversation = self.conversation
         except PersistentAgentConversation.DoesNotExist:
@@ -11720,7 +11264,6 @@ class AgentPeerLink(models.Model):
 
 
 class AgentCommPeerState(models.Model):
-    """Rolling credit bucket tracking peer DM quotas per channel."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     link = models.ForeignKey(
@@ -11764,7 +11307,6 @@ class AgentCommPeerState(models.Model):
             raise ValidationError("debounce_seconds cannot be negative.")
 
     def reset_window(self) -> None:
-        """Reset the rolling quota window."""
         now = timezone.now()
         self.window_reset_at = now + timedelta(hours=self.window_hours)
         self.credits_remaining = self.messages_per_window
@@ -11785,7 +11327,6 @@ class AgentCommPeerState(models.Model):
 
 
 class PersistentAgentConversationParticipant(models.Model):
-    """Members participating in a conversation."""
 
     class ParticipantRole(models.TextChoices):
         AGENT = "agent", "Agent"
@@ -11817,7 +11358,6 @@ class PersistentAgentConversationParticipant(models.Model):
 
 
 class PersistentAgentMessage(models.Model):
-    """Normalized message across any channel or conversation."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # Switched from autoincrement bigint to ULID string (26 chars, lexicographically time-ordered)
@@ -11923,11 +11463,6 @@ class PersistentAgentMessage(models.Model):
         return f"MSG[{self.seq}] {direction} {preview}..."
 
     def save(self, *args, **kwargs):
-        """Persist message and auto-fill denormalised owner pointer.
-
-        Sequence (`seq`) is now generated automatically via ULID default, so we
-        only need to ensure the owner_agent back-reference is set.
-        """
 
         # Auto-populate owner_agent if missing for denormalization & index use
         if self.owner_agent_id is None:
@@ -11940,7 +11475,6 @@ class PersistentAgentMessage(models.Model):
 
 
 class PersistentAgentMessageRead(models.Model):
-    """Per-user read state for outbound persistent agent messages."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     message = models.ForeignKey(
@@ -11970,7 +11504,6 @@ class PersistentAgentMessageRead(models.Model):
 
 
 class PersistentAgentHumanInputRequest(models.Model):
-    """Pending or answered human-input prompt tied to a conversation."""
 
     class InputMode(models.TextChoices):
         OPTIONS_PLUS_TEXT = "options_plus_text", "Options plus text"
@@ -12077,7 +11610,6 @@ class PersistentAgentHumanInputRequest(models.Model):
 
 
 class PersistentAgentEmailFooter(models.Model):
-    """Reusable snippets appended to outbound emails for eligible agents."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=128, help_text="Label to identify this footer in admin.")
@@ -12121,7 +11653,6 @@ class PersistentAgentMessageAttachment(models.Model):
 
 
 class PersistentAgentWebSession(models.Model):
-    """Represents an interactive web chat session between a user and an agent."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -12157,7 +11688,6 @@ class PersistentAgentWebSession(models.Model):
         return f"WebSession<{self.agent_id}:{self.user_id}:{self.session_key}>"
 
 class PersistentAgentCompletion(models.Model):
-    """Represents a single LLM completion within a persistent agent run."""
 
     class CompletionType(models.TextChoices):
         ORCHESTRATOR = ("orchestrator", "Orchestrator")
@@ -12301,7 +11831,6 @@ class PersistentAgentCompletion(models.Model):
 
 
 class PersistentAgentError(models.Model):
-    """Database-backed error event tied to a persistent agent."""
 
     class Category(models.TextChoices):
         LLM_COMPLETION = "LLM_COMPLETION", "LLM Completion"
@@ -12353,7 +11882,6 @@ class PersistentAgentError(models.Model):
 
 
 class PersistentAgentStep(models.Model):
-    """A single action taken by a PersistentAgent (tool call, internal reasoning, etc.)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -12498,7 +12026,6 @@ class PersistentAgentStep(models.Model):
 
 
 class PersistentAgentToolCall(models.Model):
-    """Details for a step that involved invoking an external / internal tool."""
 
     # Re-use the Step's PK to keep a strict 1-1 relationship
     step = models.OneToOneField(
@@ -12543,7 +12070,6 @@ class PersistentAgentToolCall(models.Model):
 
 
 class PersistentAgentCronTrigger(models.Model):
-    """Denotes that a step was created due to a scheduled cron execution."""
 
     step = models.OneToOneField(
         "PersistentAgentStep",
@@ -12568,13 +12094,6 @@ class PersistentAgentCronTrigger(models.Model):
 
 
 class PersistentAgentCommsSnapshot(models.Model):
-    """Materialized summary of all communications for an agent up to a given moment.
-
-    Snapshots are generated incrementally: each snapshot summarizes everything up to
-    `snapshot_until` by combining the previous snapshot (if any) with messages since
-    that timestamp.  Only model structure is defined here; generation logic lives
-    elsewhere.
-    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -12617,11 +12136,6 @@ class PersistentAgentCommsSnapshot(models.Model):
 
 
 class PersistentAgentStepSnapshot(models.Model):
-    """Materialized summary of all agent *steps* up to a specific time.
-
-    Like the comms snapshot, this is built incrementally using the previous
-    snapshot plus all steps executed after that cut-off.
-    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -12659,13 +12173,6 @@ class PersistentAgentStepSnapshot(models.Model):
 
 
 class PersistentAgentSystemStep(models.Model):
-    """Denotes that a step was created by an **internal system process** (scheduler, snapshotter, etc.).
-
-    Mirrors `PersistentAgentCronTrigger`, keeping the audit model parallel to
-    `PersistentAgentToolCall` and `PersistentAgentCronTrigger`.  A step gets
-    one — and only one — satellite record, so we reuse the PK via a
-    OneToOneField.
-    """
 
     class Code(models.TextChoices):
         PROCESS_EVENTS = "PROCESS_EVENTS", "Process Events"
@@ -12704,7 +12211,6 @@ class PersistentAgentSystemStep(models.Model):
 
 
 class PersistentAgentPromptArchive(models.Model):
-    """Metadata for archived rendered prompts stored outside the primary DB."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -12736,7 +12242,6 @@ class PersistentAgentPromptArchive(models.Model):
         ]
 
     def delete(self, using=None, keep_parents=False):
-        """Remove the archived payload from storage before deleting the row."""
         storage_key = self.storage_key
         if storage_key:
             try:
@@ -12751,7 +12256,6 @@ class PersistentAgentPromptArchive(models.Model):
 
 
 class OutboundMessageAttempt(models.Model):
-    """Append-only log of every delivery or retry attempt for an outbound message."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     message = models.ForeignKey(
@@ -12789,7 +12293,6 @@ class OutboundMessageAttempt(models.Model):
 
 
 class PipedreamConnectSession(models.Model):
-    """Tracks a Pipedream Connect token lifecycle for an agent."""
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -12837,10 +12340,6 @@ class PipedreamConnectSession(models.Model):
 
 
 class UsageThresholdSent(models.Model):
-    """
-    One row per (user, calendar month, threshold) that has already triggered
-    a task‑usage notice.  Presence of the row = email/event has been sent.
-    """
 
     # ------------------------------------------------------------------ PK/uniqueness
     user        = models.ForeignKey(
@@ -12885,13 +12384,6 @@ class UsageThresholdSent(models.Model):
         )
 
 class SmsNumber(models.Model):
-    """
-    Represents a phone number that can be used for SMS communication.
-    This is a simple model to store phone numbers with basic metadata.
-
-    Note: Twilio is currently the only supported provider, but this model
-    is designed to be extensible for future SMS providers.
-    """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     sid = models.CharField(  # PNxxxxxxxxxxxxxxxxxxxxxxxxxxxx
         max_length=34, unique=True
@@ -12931,7 +12423,6 @@ class SmsNumber(models.Model):
 
 
 def _generate_short_code(length: int = 6) -> str:
-    """Generate an alphabetic short code."""
     if length < 3:
         length = 3
     chars = string.ascii_letters
@@ -12939,7 +12430,6 @@ def _generate_short_code(length: int = 6) -> str:
 
 
 class LinkShortener(models.Model):
-    """Map a short alphabetic code to a full URL."""
 
     code_validator = RegexValidator(
         regex=r"^[A-Za-z]{3,}$",
@@ -12991,7 +12481,6 @@ class LinkShortener(models.Model):
         LinkShortener.objects.filter(pk=self.pk).update(hits=models.F("hits") + 1)
 
     def get_absolute_url(self) -> str:
-        """Return the full URL for this short code."""
         from django.urls import reverse
         return reverse("short_link", kwargs={"code": self.code})
 
@@ -13007,19 +12496,11 @@ class LinkShortener(models.Model):
 # --------------------------------------------------------------------
 
 def agent_fs_upload_to(instance: "AgentFsNode", filename: str) -> str:
-    """
-    Stable object-store key:
-    agent_fs/<filespace_uuid>/<node_uuid>/<sanitized_original_filename>
-    """
     safe = get_valid_filename(os.path.basename(filename or "file"))
     return f"agent_fs/{instance.filespace_id}/{instance.id}/{safe}"
 
 
 class AgentFileSpace(models.Model):
-    """
-    A logical filesystem root that can be mounted by one or more PersistentAgents.
-    Keeps things future-proof for sharing a working set across agents.
-    """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=128, help_text="Human-friendly name for this filespace")
     owner_user = models.ForeignKey(
@@ -13054,10 +12535,6 @@ class AgentFileSpace(models.Model):
 
 
 class AgentFileSpaceAccess(models.Model):
-    """
-    Access control linking agents to filespaces.
-    Keeps it simple: role is OWNER / WRITER / READER.
-    """
     class Role(models.TextChoices):
         OWNER = "OWNER", "Owner"
         WRITER = "WRITER", "Writer"
@@ -13107,15 +12584,6 @@ class AgentFsNodeQuerySet(models.QuerySet):
 
 
 class AgentFsNode(models.Model):
-    """
-    Single, unified node type for both directories and files.
-
-    Design principles:
-    - Adjacency list (parent pointer) + cached 'path' for human-readable path.
-    - Object store key is stable (based on node UUID) and independent of name/moves.
-    - Unique name per directory, case-sensitive (simple & predictable).
-    - Efficient listing via (filespace, parent) index; traversal via parent chain.
-    """
     class NodeType(models.TextChoices):
         DIR = "dir", "Directory"
         FILE = "file", "File"
@@ -13138,16 +12606,13 @@ class AgentFsNode(models.Model):
     )
     node_type = models.CharField(max_length=8, choices=NodeType.choices)
 
-    # Display name (what users see). For files, include extension here.
     name = models.CharField(max_length=255, help_text="Directory or file name (no path separators)")
 
-    # Cached human-readable path (e.g., '/foo/bar/baz.txt'). Updated on rename/move.
     path = models.TextField(
         blank=True,
         help_text="Cached absolute path within the filespace for quick lookups and UI."
     )
 
-    # Binary content (only for FILE nodes). Stored via Django Storage (GCS in prod, MinIO locally).
     content = models.FileField(
         upload_to=agent_fs_upload_to,
         max_length=512,
@@ -13156,7 +12621,6 @@ class AgentFsNode(models.Model):
         help_text="Binary content for files. Empty for directories."
     )
 
-    # Metadata (files only; optional precomputed values)
     size_bytes = models.PositiveBigIntegerField(null=True, blank=True)
     mime_type = models.CharField(max_length=127, blank=True)
     checksum_sha256 = models.CharField(max_length=64, blank=True)
@@ -13170,7 +12634,6 @@ class AgentFsNode(models.Model):
         help_text="Agent that created this node, if applicable."
     )
 
-    # Soft delete (trash) support
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
@@ -13180,15 +12643,13 @@ class AgentFsNode(models.Model):
     objects = AgentFsNodeQuerySet.as_manager()
 
     class Meta:
-        ordering = ["node_type", "name"]  # dirs then files (since 'dir' < 'file'), then alpha name
+        ordering = ["node_type", "name"]
         constraints = [
-            # Unique name within a directory in a given filespace (excluding deleted nodes)
             models.UniqueConstraint(
                 fields=["filespace", "parent", "name"],
                 condition=models.Q(is_deleted=False),
                 name="unique_name_per_directory"
             ),
-            # Unique name for root-level nodes (where parent IS NULL and not deleted)
             models.UniqueConstraint(
                 fields=["filespace", "name"],
                 condition=models.Q(parent__isnull=True, is_deleted=False),
@@ -13207,34 +12668,27 @@ class AgentFsNode(models.Model):
         prefix = "DIR" if self.node_type == self.NodeType.DIR else "FILE"
         return f"{prefix} {self.path or self.name}"
 
-    # -------------------------- Validation & Helpers --------------------------
-
     def clean(self):
         super().clean()
 
-        # Name cannot contain path separators or null bytes
         if not self.name or "/" in self.name or "\x00" in self.name:
             raise ValidationError({"name": "Name must be non-empty and contain no '/' or null bytes."})
 
-        # Parent must be a directory (if provided)
         if self.parent_id:
             if self.parent.filespace_id != self.filespace_id:
                 raise ValidationError({"parent": "Parent must belong to the same filespace."})
             if self.parent.node_type != self.NodeType.DIR:
                 raise ValidationError({"parent": "Parent must be a directory node."})
 
-            # Prevent cycles
             cur = self.parent
             while cur is not None:
                 if cur.pk == self.pk:
                     raise ValidationError({"parent": "Cannot set a node as a descendant of itself."})
                 cur = cur.parent
 
-        # File nodes shouldn't be deleted without timestamp, and vice versa; keep it light.
         if self.is_deleted and not self.deleted_at:
             self.deleted_at = timezone.now()
 
-        # Content constraints
         if self.node_type == self.NodeType.DIR:
             self.content = None
             self.size_bytes = None
@@ -13261,30 +12715,18 @@ class AgentFsNode(models.Model):
                 old_path = None
                 old_is_deleted = None
 
-        # compute or refresh path cache before saving
         self.path = self._compute_path()
 
-        # If a file, try to capture size if available
         if self.node_type == self.NodeType.FILE and self.content and hasattr(self.content, "size"):
             self.size_bytes = self.content.size
 
         self.full_clean()
         super().save(*args, **kwargs)
 
-        # If path has changed due to rename or move, update descendants' path cache FIRST
-        # This must happen before propagating deletion to ensure descendants are found correctly
-        # Keep it simple and explicit; acceptable for pragmatic sizes.
         if old_path and old_path != self.path and self.node_type == self.NodeType.DIR:
-            # Example:
-            #   old_path = /a/b
-            #   new_path = /x/y
-            # Children paths start with old_path + '/'
             prefix = old_path.rstrip("/") + "/"
             new_prefix = self.path.rstrip("/") + "/"
 
-            # Fast, safe bulk update: replace the leading prefix with the new prefix
-            # using SQL substring/concat instead of Python-side per-row recompute.
-            # Works across backends via Django functions.
             from django.db.models import Value
             from django.db.models.functions import Concat, Substr
 
@@ -13293,16 +12735,12 @@ class AgentFsNode(models.Model):
                 .filter(filespace=self.filespace, path__startswith=prefix)
                 .update(path=Concat(Value(new_prefix), Substr('path', old_prefix_len + 1))))
 
-        # Handle subtree deletion: if this directory was just marked as deleted, 
-        # propagate deletion to all descendants in the same transaction
-        # This happens AFTER path updates to ensure descendants are found correctly
         if (self.node_type == self.NodeType.DIR and 
             self.is_deleted and 
             old_is_deleted is not None and 
             not old_is_deleted):
             self._propagate_deletion_to_descendants()
 
-    # Convenience flags
     @property
     def is_dir(self) -> bool:
         return self.node_type == self.NodeType.DIR
@@ -13312,10 +12750,6 @@ class AgentFsNode(models.Model):
         return self.node_type == self.NodeType.FILE
 
     def object_key_for(self, filename: str | None = None) -> str:
-        """
-        Compute the exact object-store key we will use for a new upload.
-        Safe to call before saving, because UUIDs are generated client-side.
-        """
         base = filename or self.name or "file"
         basename = os.path.basename(base)
         if not basename:  # Handle empty basename from paths like "///"
@@ -13325,30 +12759,20 @@ class AgentFsNode(models.Model):
 
     @property
     def object_key(self) -> str | None:
-        """
-        The key of the *current* blob (if any). Falls back to the key we
-        would use if we uploaded now using self.name.
-        """
         if self.content and getattr(self.content, "name", None):
             return self.content.name
         return self.object_key_for()
 
     def _propagate_deletion_to_descendants(self):
-        """
-        Internal method to propagate soft deletion to all descendants.
-        Called automatically when a directory is marked as deleted.
-        """
         if self.node_type != self.NodeType.DIR:
             return
         
-        # Find all descendants that are not already deleted
         descendants = AgentFsNode.objects.filter(
             filespace=self.filespace,
             path__startswith=self.path.rstrip("/") + "/",
             is_deleted=False
         )
         
-        # Bulk update all descendants to mark them as deleted
         now = timezone.now()
         descendants.update(
             is_deleted=True,
@@ -13356,16 +12780,6 @@ class AgentFsNode(models.Model):
         )
 
     def trash_subtree(self):
-        """
-        Public helper method to soft-delete this node and all its descendants.
-        
-        This is a convenience method that can be used instead of setting
-        is_deleted=True manually. It ensures consistent behavior for subtree deletion.
-        
-        Returns:
-            int: Number of nodes that were deleted (including this node)
-        """
-        # Count descendants that will be deleted
         if self.node_type == self.NodeType.DIR:
             descendant_count = AgentFsNode.objects.filter(
                 filespace=self.filespace,
@@ -13375,35 +12789,21 @@ class AgentFsNode(models.Model):
         else:
             descendant_count = 0
         
-        # Mark this node as deleted (will trigger automatic descendant deletion if it's a directory)
         self.is_deleted = True
         self.deleted_at = timezone.now()
         self.save(update_fields=['is_deleted', 'deleted_at'])
         
-        # Return total count of deleted nodes (this node + descendants)
         return 1 + descendant_count
 
     def restore_subtree(self):
-        """
-        Restore this node and all its descendants from soft deletion.
-        
-        Note: This will only restore nodes that were deleted. It will not
-        restore nodes whose ancestors are still deleted (those would be
-        inaccessible anyway).
-        
-        Returns:
-            int: Number of nodes that were restored (including this node)
-        """
         count = 0
         
-        # Restore this node if it was deleted
         if self.is_deleted:
             self.is_deleted = False
             self.deleted_at = None
             self.save(update_fields=['is_deleted', 'deleted_at'])
             count += 1
         
-        # If this is a directory, restore all descendants
         if self.node_type == self.NodeType.DIR:
             descendants = AgentFsNode.objects.filter(
                 filespace=self.filespace,
@@ -13420,15 +12820,6 @@ class AgentFsNode(models.Model):
         return count
 
     def get_descendants(self, include_deleted=False):
-        """
-        Get all descendants of this node.
-        
-        Args:
-            include_deleted (bool): Whether to include soft-deleted nodes
-            
-        Returns:
-            QuerySet: All descendant nodes
-        """
         if self.node_type != self.NodeType.DIR:
             return AgentFsNode.objects.none()
         
@@ -13444,7 +12835,6 @@ class AgentFsNode(models.Model):
 
 
 class ComputeSnapshot(models.Model):
-    """Disk-only snapshot metadata for sandbox compute sessions."""
 
     class Status(models.TextChoices):
         READY = "ready", "Ready"
@@ -13476,7 +12866,6 @@ class ComputeSnapshot(models.Model):
 
 
 class AgentComputeSession(models.Model):
-    """Control-plane metadata for a per-agent sandbox session."""
 
     class State(models.TextChoices):
         RUNNING = "running", "Running"
@@ -13531,7 +12920,6 @@ class AgentComputeSession(models.Model):
 # Auto-provision a default filespace for new PersistentAgents
 @receiver(pre_save, sender=PersistentAgent)
 def enforce_org_seats_before_save(sender, instance: PersistentAgent, **kwargs):
-    """Prevent creating or reassigning org-owned agents without purchased seats."""
     if not instance.organization_id:
         return
 
@@ -13582,7 +12970,6 @@ def create_default_filespace_for_agent(sender, instance: PersistentAgent, create
 
 @receiver(pre_delete, sender=PersistentAgent)
 def cleanup_redis_budget_data(sender, instance: PersistentAgent, **kwargs):
-    """Clean up Redis budget data when a PersistentAgent is deleted."""
     from config.redis_client import get_redis_client
     
     agent_id = str(instance.id)
@@ -14004,7 +13391,6 @@ class EvalRunTask(models.Model):
 # =============================================================================
 
 def _touch_routing_profile(profile):
-    """Touch the profile's updated_at to invalidate preferred provider cache."""
     if profile:
         LLMRoutingProfile.objects.filter(pk=profile.pk).update(updated_at=timezone.now())
 

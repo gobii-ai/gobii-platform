@@ -26,13 +26,31 @@ from console.api_views import _resolve_mcp_owner
 from util.integrations import pipedream_status
 
 
+def _pipedream_disabled_response():
+    status = pipedream_status()
+    if not status.enabled:
+        return JsonResponse({"error": status.reason}, status=503)
+    return None
+
+
+def _resolve_pipedream_agent(request: HttpRequest, agent_id: str):
+    error = _pipedream_disabled_response()
+    if error:
+        return None, error
+    return resolve_manageable_agent_for_request(
+        request,
+        agent_id,
+        allow_delinquent_personal_chat=True,
+    ), None
+
+
 class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get", "patch"]
 
     def get(self, request: HttpRequest, *args, **kwargs):
-        status = pipedream_status()
-        if not status.enabled:
-            return JsonResponse({"error": status.reason}, status=503)
+        error = _pipedream_disabled_response()
+        if error:
+            return error
         owner_scope, owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
         state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)
         try:
@@ -42,9 +60,9 @@ class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
         return JsonResponse(payload)
 
     def patch(self, request: HttpRequest, *args, **kwargs):
-        status = pipedream_status()
-        if not status.enabled:
-            return JsonResponse({"error": status.reason}, status=503)
+        error = _pipedream_disabled_response()
+        if error:
+            return error
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -82,15 +100,9 @@ class AgentPipedreamAppsAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args, **kwargs):
-        status = pipedream_status()
-        if not status.enabled:
-            return JsonResponse({"error": status.reason}, status=503)
-
-        agent = resolve_manageable_agent_for_request(
-            request,
-            agent_id,
-            allow_delinquent_personal_chat=True,
-        )
+        agent, error = _resolve_pipedream_agent(request, agent_id)
+        if error:
+            return error
         try:
             payload = list_agent_pipedream_app_rows(agent, query=str(request.GET.get("q") or ""))
         except (PipedreamCatalogError, PipedreamConnectionError) as exc:
@@ -102,15 +114,9 @@ class AgentPipedreamAppAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["delete"]
 
     def delete(self, request: HttpRequest, agent_id: str, app_slug: str, *args, **kwargs):
-        status = pipedream_status()
-        if not status.enabled:
-            return JsonResponse({"error": status.reason}, status=503)
-
-        agent = resolve_manageable_agent_for_request(
-            request,
-            agent_id,
-            allow_delinquent_personal_chat=True,
-        )
+        agent, error = _resolve_pipedream_agent(request, agent_id)
+        if error:
+            return error
         try:
             payload = remove_agent_pipedream_app(agent, app_slug)
         except ValueError as exc:
@@ -122,15 +128,9 @@ class AgentPipedreamAppConnectAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, app_slug: str, *args, **kwargs):
-        status = pipedream_status()
-        if not status.enabled:
-            return JsonResponse({"error": status.reason}, status=503)
-
-        agent = resolve_manageable_agent_for_request(
-            request,
-            agent_id,
-            allow_delinquent_personal_chat=True,
-        )
+        agent, error = _resolve_pipedream_agent(request, agent_id)
+        if error:
+            return error
         try:
             payload = start_agent_pipedream_app_connect(agent, app_slug)
         except ValueError as exc:
@@ -151,15 +151,9 @@ class AgentPipedreamAppConnectionAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["delete"]
 
     def delete(self, request: HttpRequest, agent_id: str, app_slug: str, *args, **kwargs):
-        status = pipedream_status()
-        if not status.enabled:
-            return JsonResponse({"error": status.reason}, status=503)
-
-        agent = resolve_manageable_agent_for_request(
-            request,
-            agent_id,
-            allow_delinquent_personal_chat=True,
-        )
+        agent, error = _resolve_pipedream_agent(request, agent_id)
+        if error:
+            return error
         try:
             payload = disconnect_agent_pipedream_app(agent, app_slug)
         except ValueError as exc:
@@ -173,9 +167,9 @@ class PipedreamAppAgentConnectionsAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, app_slug: str, *args, **kwargs):
-        status = pipedream_status()
-        if not status.enabled:
-            return JsonResponse({"error": status.reason}, status=503)
+        error = _pipedream_disabled_response()
+        if error:
+            return error
 
         owner_scope, _owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
         try:
@@ -196,9 +190,9 @@ class PipedreamAppSearchAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args, **kwargs):
-        status = pipedream_status()
-        if not status.enabled:
-            return JsonResponse({"error": status.reason}, status=503)
+        error = _pipedream_disabled_response()
+        if error:
+            return error
         _resolve_mcp_owner(request)
         query = str(request.GET.get("q") or "").strip()
         if not query:
