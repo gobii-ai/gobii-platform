@@ -22,7 +22,7 @@ from pages.public_template_urls import (
 )
 
 LIBRARY_CACHE_KEY = "pages:library:payload:v1"
-LIBRARY_OFFICIAL_CACHE_KEY = "pages:library:payload:official:v1"
+LIBRARY_OFFICIAL_CACHE_KEY = "pages:library:payload:official:v2"
 LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY = "pages:library:category_slug_map:v1"
 LIBRARY_CACHE_TTL_SECONDS = 120
 LIBRARY_DEFAULT_PAGE_SIZE = 24
@@ -42,7 +42,7 @@ def _library_queryset():
 
 
 def _official_template_filter():
-    return Q(is_official=True) | Q(public_profile__isnull=True)
+    return Q(is_official=True)
 
 
 def _normalized_category_expression():
@@ -266,7 +266,7 @@ def _build_library_payload(
             "publicProfileHandle": template.public_profile.handle if template.public_profile_id else "",
             "templateSlug": public_template_route_slug(template),
             "templateUrl": public_template_detail_path(template),
-            "isOfficial": template.is_official or not template.public_profile_id,
+            "isOfficial": template.is_official,
             "likeCount": template.like_count,
             "isLiked": template.is_liked,
         }

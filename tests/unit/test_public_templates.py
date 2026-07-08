@@ -915,6 +915,7 @@ class LibraryViewTests(TestCase):
         slug: str = "",
         category: str = "Team Ops",
         display_name: str = "Library Curated Template",
+        is_official: bool = False,
     ):
         return PersistentAgentTemplate.objects.create(
             code=code,
@@ -925,6 +926,7 @@ class LibraryViewTests(TestCase):
             description=f"{display_name} description.",
             charter=f"{display_name} charter.",
             category=category,
+            is_official=is_official,
             is_active=True,
         )
 
@@ -964,7 +966,7 @@ class LibraryViewTests(TestCase):
         self.assertEqual(curated_agent["templateSlug"], curated_template.code)
         self.assertEqual(curated_agent["templateUrl"], "/library/team-ops/gobii-project-manager/")
         self.assertEqual(curated_agent["publicProfileHandle"], "")
-        self.assertTrue(curated_agent["isOfficial"])
+        self.assertFalse(curated_agent["isOfficial"])
         self.assertContains(response, "Most popular shared Gobii agents")
         self.assertContains(response, public_template.display_name)
         self.assertContains(response, curated_template.display_name)
@@ -1005,10 +1007,16 @@ class LibraryViewTests(TestCase):
             display_name="Budget Beacon",
             handle="finance-owner",
         )
-        curated_template = self.create_curated_template(
+        official_template = self.create_curated_template(
             code="ops-briefing",
             category="Operations",
             display_name="Ops Briefing",
+            is_official=True,
+        )
+        profileless_template = self.create_curated_template(
+            code="vendor-price-watch",
+            category="Operations",
+            display_name="Vendor Price Watch",
         )
         self.create_public_template(
             code="research-scout",
@@ -1025,18 +1033,21 @@ class LibraryViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["libraryTotalAgents"], 3)
+        self.assertEqual(payload["libraryTotalAgents"], 4)
         self.assertEqual(payload["officialTotalAgents"], 1)
         self.assertEqual(payload["libraryTotalLikes"], 0)
-        curated_agent = next(agent for agent in payload["agents"] if agent["id"] == str(curated_template.id))
-        self.assertEqual(curated_agent["templateUrl"], "/library/operations/ops-briefing/")
-        self.assertTrue(curated_agent["isOfficial"])
+        official_agent = next(agent for agent in payload["agents"] if agent["id"] == str(official_template.id))
+        self.assertEqual(official_agent["templateUrl"], "/library/operations/ops-briefing/")
+        self.assertTrue(official_agent["isOfficial"])
+        profileless_agent = next(agent for agent in payload["agents"] if agent["id"] == str(profileless_template.id))
+        self.assertFalse(profileless_agent["isOfficial"])
+        self.assertEqual(profileless_agent["publicProfileHandle"], "")
 
         self.assertEqual(official_response.status_code, 200)
         official_payload = official_response.json()
         self.assertTrue(official_payload["officialOnly"])
         self.assertEqual(official_payload["totalAgents"], 1)
-        self.assertEqual([agent["id"] for agent in official_payload["agents"]], [str(curated_template.id)])
+        self.assertEqual([agent["id"] for agent in official_payload["agents"]], [str(official_template.id)])
 
         self.assertEqual(category_response.status_code, 200)
         category_payload = category_response.json()
