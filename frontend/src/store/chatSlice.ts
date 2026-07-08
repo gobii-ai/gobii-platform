@@ -37,6 +37,14 @@ type MessageSignature = {
 export type AgentChatIdentityState = {
   agentName: string | null
   agentAvatarUrl: string | null
+  agentEmail: string | null
+  agentSms: string | null
+  auditUrl: string | null
+  agentIsOrgOwned: boolean
+  canManageAgent: boolean
+  isCollaborator: boolean
+  hideInsightsPanel: boolean
+  enabledIntegrationTabs: Record<string, true>
   signupPreviewState: SignupPreviewState
   planningState: PlanningState
 }
@@ -47,6 +55,9 @@ export type AgentChatProcessingState = {
   awaitingResponse: boolean
   processingWebTasks: ProcessingWebTask[]
   nextScheduledAt: string | null
+  stopProcessingBusy: boolean
+  stopProcessingRequested: boolean
+  skipPlanningBusy: boolean
 }
 
 export type AgentChatStreamState = {
@@ -92,6 +103,14 @@ function createInitialSession(): AgentChatSession {
     identity: {
       agentName: null,
       agentAvatarUrl: null,
+      agentEmail: null,
+      agentSms: null,
+      auditUrl: null,
+      agentIsOrgOwned: false,
+      canManageAgent: true,
+      isCollaborator: false,
+      hideInsightsPanel: false,
+      enabledIntegrationTabs: {},
       signupPreviewState: 'none',
       planningState: 'skipped',
     },
@@ -101,6 +120,9 @@ function createInitialSession(): AgentChatSession {
       awaitingResponse: false,
       processingWebTasks: [],
       nextScheduledAt: null,
+      stopProcessingBusy: false,
+      stopProcessingRequested: false,
+      skipPlanningBusy: false,
     },
     stream: {
       streaming: null,
@@ -195,6 +217,15 @@ function resolveNextScheduledAt(snapshot: ProcessingSnapshot, fallback: string |
     return null
   }
   return fallback
+}
+
+function normalizeEnabledIntegrationTabs(tabs: Record<string, boolean | true> | null | undefined): Record<string, true> {
+  if (!tabs) {
+    return {}
+  }
+  return Object.fromEntries(
+    Object.entries(tabs).filter(([, enabled]) => Boolean(enabled)).map(([key]) => [key, true]),
+  )
 }
 
 function buildTimelineThinkingStream(event: ThinkingEvent): StreamState {
@@ -622,6 +653,14 @@ const chatSlice = createSlice({
         options?: {
           agentName?: string | null
           agentAvatarUrl?: string | null
+          agentEmail?: string | null
+          agentSms?: string | null
+          auditUrl?: string | null
+          agentIsOrgOwned?: boolean
+          canManageAgent?: boolean
+          isCollaborator?: boolean
+          hideInsightsPanel?: boolean
+          enabledIntegrationTabs?: Record<string, boolean | true> | null
           processingActive?: boolean
           signupPreviewState?: SignupPreviewState | null
           planningState?: PlanningState | null
@@ -649,6 +688,30 @@ const chatSlice = createSlice({
       if (Object.prototype.hasOwnProperty.call(options ?? {}, 'agentAvatarUrl')) {
         session.identity.agentAvatarUrl = options?.agentAvatarUrl ?? null
       }
+      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'agentEmail')) {
+        session.identity.agentEmail = options?.agentEmail ?? null
+      }
+      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'agentSms')) {
+        session.identity.agentSms = options?.agentSms ?? null
+      }
+      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'auditUrl')) {
+        session.identity.auditUrl = options?.auditUrl ?? null
+      }
+      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'agentIsOrgOwned')) {
+        session.identity.agentIsOrgOwned = Boolean(options?.agentIsOrgOwned)
+      }
+      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'canManageAgent')) {
+        session.identity.canManageAgent = options?.canManageAgent ?? true
+      }
+      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'isCollaborator')) {
+        session.identity.isCollaborator = Boolean(options?.isCollaborator)
+      }
+      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'hideInsightsPanel')) {
+        session.identity.hideInsightsPanel = Boolean(options?.hideInsightsPanel)
+      }
+      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'enabledIntegrationTabs')) {
+        session.identity.enabledIntegrationTabs = normalizeEnabledIntegrationTabs(options?.enabledIntegrationTabs)
+      }
       if (Object.prototype.hasOwnProperty.call(options ?? {}, 'signupPreviewState')) {
         session.identity.signupPreviewState = options?.signupPreviewState ?? 'none'
       }
@@ -659,12 +722,35 @@ const chatSlice = createSlice({
     processingUpdated(state, action: PayloadAction<{ agentId: string; snapshot: ProcessingSnapshot }>) {
       applyProcessingUpdate(ensureSession(state, action.payload.agentId), action.payload.snapshot)
     },
+    stopProcessingStateUpdated(
+      state,
+      action: PayloadAction<{ agentId: string; busy?: boolean; requested?: boolean }>,
+    ) {
+      const session = ensureSession(state, action.payload.agentId)
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'busy')) {
+        session.processing.stopProcessingBusy = Boolean(action.payload.busy)
+      }
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'requested')) {
+        session.processing.stopProcessingRequested = Boolean(action.payload.requested)
+      }
+    },
+    skipPlanningBusySet(state, action: PayloadAction<{ agentId: string; busy: boolean }>) {
+      ensureSession(state, action.payload.agentId).processing.skipPlanningBusy = action.payload.busy
+    },
     agentIdentityUpdated(
       state,
       action: PayloadAction<{
         agentId?: string | null
         agentName?: string | null
         agentAvatarUrl?: string | null
+        agentEmail?: string | null
+        agentSms?: string | null
+        auditUrl?: string | null
+        agentIsOrgOwned?: boolean
+        canManageAgent?: boolean
+        isCollaborator?: boolean
+        hideInsightsPanel?: boolean
+        enabledIntegrationTabs?: Record<string, boolean | true> | null
         signupPreviewState?: SignupPreviewState | null
         planningState?: PlanningState | null
       }>,
@@ -677,6 +763,30 @@ const chatSlice = createSlice({
       }
       if (Object.prototype.hasOwnProperty.call(action.payload, 'agentAvatarUrl')) {
         session.identity.agentAvatarUrl = action.payload.agentAvatarUrl ?? null
+      }
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'agentEmail')) {
+        session.identity.agentEmail = action.payload.agentEmail ?? null
+      }
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'agentSms')) {
+        session.identity.agentSms = action.payload.agentSms ?? null
+      }
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'auditUrl')) {
+        session.identity.auditUrl = action.payload.auditUrl ?? null
+      }
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'agentIsOrgOwned')) {
+        session.identity.agentIsOrgOwned = Boolean(action.payload.agentIsOrgOwned)
+      }
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'canManageAgent')) {
+        session.identity.canManageAgent = action.payload.canManageAgent ?? true
+      }
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'isCollaborator')) {
+        session.identity.isCollaborator = Boolean(action.payload.isCollaborator)
+      }
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'hideInsightsPanel')) {
+        session.identity.hideInsightsPanel = Boolean(action.payload.hideInsightsPanel)
+      }
+      if (Object.prototype.hasOwnProperty.call(action.payload, 'enabledIntegrationTabs')) {
+        session.identity.enabledIntegrationTabs = normalizeEnabledIntegrationTabs(action.payload.enabledIntegrationTabs)
       }
       if (Object.prototype.hasOwnProperty.call(action.payload, 'signupPreviewState')) {
         session.identity.signupPreviewState = action.payload.signupPreviewState ?? 'none'

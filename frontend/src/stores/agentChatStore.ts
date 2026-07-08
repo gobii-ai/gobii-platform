@@ -39,12 +39,23 @@ export type AgentChatState = {
   awaitingResponse: boolean
   processingWebTasks: ProcessingWebTask[]
   nextScheduledAt: string | null
+  stopProcessingBusy: boolean
+  stopProcessingRequested: boolean
+  skipPlanningBusy: boolean
   autoScrollPinned: boolean
   autoScrollPinSuppressedUntil: number | null
   pendingEvents: TimelineEvent[]
   realtimeEventCursors: Set<string>
   agentName: string | null
   agentAvatarUrl: string | null
+  agentEmail: string | null
+  agentSms: string | null
+  auditUrl: string | null
+  agentIsOrgOwned: boolean
+  canManageAgent: boolean
+  isCollaborator: boolean
+  hideInsightsPanel: boolean
+  enabledIntegrationTabs: Record<string, true>
   signupPreviewState: SignupPreviewState
   planningState: PlanningState
   insights: InsightEvent[]
@@ -58,6 +69,14 @@ export type AgentChatState = {
     options?: {
       agentName?: string | null
       agentAvatarUrl?: string | null
+      agentEmail?: string | null
+      agentSms?: string | null
+      auditUrl?: string | null
+      agentIsOrgOwned?: boolean
+      canManageAgent?: boolean
+      isCollaborator?: boolean
+      hideInsightsPanel?: boolean
+      enabledIntegrationTabs?: Record<string, boolean | true> | null
       processingActive?: boolean
       signupPreviewState?: SignupPreviewState | null
       planningState?: PlanningState | null
@@ -73,6 +92,14 @@ export type AgentChatState = {
     agentId?: string | null
     agentName?: string | null
     agentAvatarUrl?: string | null
+    agentEmail?: string | null
+    agentSms?: string | null
+    auditUrl?: string | null
+    agentIsOrgOwned?: boolean
+    canManageAgent?: boolean
+    isCollaborator?: boolean
+    hideInsightsPanel?: boolean
+    enabledIntegrationTabs?: Record<string, boolean | true> | null
     signupPreviewState?: SignupPreviewState | null
     planningState?: PlanningState | null
   }) => void
@@ -104,12 +131,23 @@ function createActions(dispatch: AppDispatch, getState: () => RootState): Omit<
   | 'awaitingResponse'
   | 'processingWebTasks'
   | 'nextScheduledAt'
+  | 'stopProcessingBusy'
+  | 'stopProcessingRequested'
+  | 'skipPlanningBusy'
   | 'autoScrollPinned'
   | 'autoScrollPinSuppressedUntil'
   | 'pendingEvents'
   | 'realtimeEventCursors'
   | 'agentName'
   | 'agentAvatarUrl'
+  | 'agentEmail'
+  | 'agentSms'
+  | 'auditUrl'
+  | 'agentIsOrgOwned'
+  | 'canManageAgent'
+  | 'isCollaborator'
+  | 'hideInsightsPanel'
+  | 'enabledIntegrationTabs'
   | 'signupPreviewState'
   | 'planningState'
   | 'insights'

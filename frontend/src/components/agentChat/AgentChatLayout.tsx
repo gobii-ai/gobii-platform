@@ -8,7 +8,7 @@ import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
 import { AgentTimelinePane } from './AgentTimelinePane'
 import { ChatSidebar, type ChatSidebarProps } from './ChatSidebar'
-import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
+import { AgentChatBanner } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
@@ -52,7 +52,11 @@ import {
 import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
 import { useAgentChatStore } from '../../stores/agentChatStore'
 import { useAppSelector } from '../../store/hooks'
-import { selectImmersiveShellActiveAgentId } from '../../store/immersiveShellSlice'
+import {
+  selectImmersiveShellActiveAgentId,
+  selectImmersiveShellConnection,
+  selectImmersiveShellViewer,
+} from '../../store/immersiveShellSlice'
 
 type TaskQuotaInfo = {
   available: number
@@ -194,20 +198,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   displayEvents?: SimplifiedTimelineItem[]
   statusExpansionTargets?: StatusExpansionTargets
   agentId?: string | null
-  agentAvatarUrl?: string | null
-  agentEmail?: string | null
-  agentSms?: string | null
-  agentName?: string | null
-  auditUrl?: string | null
-  agentIsOrgOwned?: boolean
-  canManageAgent?: boolean
-  isCollaborator?: boolean
-  hideInsightsPanel?: boolean
-  viewerUserId?: number | null
-  viewerEmail?: string | null
-  connectionStatus?: ConnectionStatusTone
-  connectionLabel?: string
-  connectionDetail?: string | null
   sidebar?: AgentChatLayoutSidebarConfig
   autoFocusComposer?: boolean
   planSnapshot?: PlanSnapshot | null
@@ -236,8 +226,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   taskPackUpdating?: boolean
   onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
   onStopProcessing?: () => void | Promise<void>
-  stopProcessingBusy?: boolean
-  stopProcessingRequested?: boolean
   addonsTrial?: TrialInfo | null
   taskQuota?: TaskQuotaInfo | null
   showPurchaseSeatsPrompt?: boolean
@@ -246,7 +234,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
   highPriorityBanner?: HighPriorityBannerConfig | null
-  onLoadNewer?: () => void
   onJumpToLatest?: () => void
   onClose?: () => void
   onShare?: () => void
@@ -276,23 +263,16 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   llmTierError?: string | null
   onOpenTaskPacks?: () => void
   spawnIntentLoading?: boolean
-  starterPromptsDisabled?: boolean
   composerDisabled?: boolean
   composerDisabledReason?: string | null
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
   showSubscriptionExpiredPanel?: boolean
   onSkipPlanning?: () => void | Promise<void>
-  skipPlanningBusy?: boolean
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
-  googleSheetsDriveTabEnabled?: boolean
-  apolloNativeTabEnabled?: boolean
-  hubspotNativeTabEnabled?: boolean
-  discordNativeTabEnabled?: boolean
-  metaAdsTabEnabled?: boolean
   pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInputRequest?: (
     response:
@@ -321,27 +301,17 @@ type AgentChatLayoutProps = AgentTimelineProps & {
 
 type PlanPanelMode = 'docked' | 'hidden'
 const EMPTY_REALTIME_CURSORS = new Set<string>()
+const GOOGLE_SHEETS_DRIVE_TAB_KEY = 'googleSheetsDrive'
+const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
+const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
+const DISCORD_NATIVE_TAB_KEY = 'discordNative'
+const META_ADS_TAB_KEY = 'metaAds'
 
 export function AgentChatLayout({
-  agentFirstName: agentFirstNameOverride,
   events,
   displayEvents,
   statusExpansionTargets,
   agentId,
-  agentAvatarUrl,
-  agentEmail,
-  agentSms,
-  agentName,
-  auditUrl,
-  agentIsOrgOwned = false,
-  canManageAgent = true,
-  isCollaborator = false,
-  hideInsightsPanel = false,
-  viewerUserId,
-  viewerEmail,
-  connectionStatus,
-  connectionLabel,
-  connectionDetail,
   sidebar,
   autoFocusComposer = false,
   planSnapshot,
@@ -370,8 +340,6 @@ export function AgentChatLayout({
   taskPackUpdating = false,
   onUpdateTaskPacks,
   onStopProcessing,
-  stopProcessingBusy = false,
-  stopProcessingRequested = false,
   addonsTrial = null,
   taskQuota = null,
   showPurchaseSeatsPrompt = false,
@@ -407,23 +375,16 @@ export function AgentChatLayout({
   llmTierError = null,
   onOpenTaskPacks,
   spawnIntentLoading = false,
-  starterPromptsDisabled = false,
   composerDisabled = false,
   composerDisabledReason = null,
   composerError = null,
   composerErrorShowUpgrade = false,
   showSubscriptionExpiredPanel = false,
   onSkipPlanning,
-  skipPlanningBusy = false,
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
-  googleSheetsDriveTabEnabled = false,
-  apolloNativeTabEnabled = false,
-  hubspotNativeTabEnabled = false,
-  discordNativeTabEnabled = false,
-  metaAdsTabEnabled = false,
   pendingActionRequests = [],
   onRespondHumanInputRequest,
   onDismissHumanInputRequest,
@@ -497,12 +458,26 @@ export function AgentChatLayout({
   const onSidebarNotificationsEnabledChange = sidebarSettingsConfig?.onNotificationsEnabledChange
   const runtimeAgentId = useAgentChatStore((state) => state.agentId)
   const shellActiveAgentId = useAppSelector(selectImmersiveShellActiveAgentId)
+  const shellViewer = useAppSelector(selectImmersiveShellViewer)
+  const shellConnection = useAppSelector(selectImmersiveShellConnection)
   const activeAgentId = shellActiveAgentId ?? agentId ?? null
-  const agentFirstName = agentFirstNameOverride ?? deriveAgentFirstName(agentName)
+  const runtimeAgentName = useAgentChatStore((state) => state.agentName)
+  const runtimeAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
+  const runtimeAgentEmail = useAgentChatStore((state) => state.agentEmail)
+  const runtimeAgentSms = useAgentChatStore((state) => state.agentSms)
+  const runtimeAuditUrl = useAgentChatStore((state) => state.auditUrl)
+  const runtimeAgentIsOrgOwned = useAgentChatStore((state) => state.agentIsOrgOwned)
+  const runtimeCanManageAgent = useAgentChatStore((state) => state.canManageAgent)
+  const runtimeIsCollaborator = useAgentChatStore((state) => state.isCollaborator)
+  const runtimeHideInsightsPanel = useAgentChatStore((state) => state.hideInsightsPanel)
+  const runtimeEnabledIntegrationTabs = useAgentChatStore((state) => state.enabledIntegrationTabs)
   const runtimeProcessingActive = useAgentChatStore((state) => state.processingActive)
   const runtimeAwaitingResponse = useAgentChatStore((state) => state.awaitingResponse)
   const runtimeProcessingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const runtimeNextScheduledAt = useAgentChatStore((state) => state.nextScheduledAt)
+  const runtimeStopProcessingBusy = useAgentChatStore((state) => state.stopProcessingBusy)
+  const runtimeStopProcessingRequested = useAgentChatStore((state) => state.stopProcessingRequested)
+  const runtimeSkipPlanningBusy = useAgentChatStore((state) => state.skipPlanningBusy)
   const runtimeStreaming = useAgentChatStore((state) => state.streaming)
   const runtimeAutoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
   const runtimeHasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
@@ -523,12 +498,36 @@ export function AgentChatLayout({
   const awaitingResponse = runtimeSynced ? runtimeAwaitingResponse : false
   const processingWebTasks = runtimeSynced ? runtimeProcessingWebTasks : []
   const nextScheduledAt = runtimeSynced ? runtimeNextScheduledAt : null
+  const stopProcessingBusy = runtimeSynced ? runtimeStopProcessingBusy : false
+  const stopProcessingRequested = runtimeSynced ? runtimeStopProcessingRequested : false
+  const skipPlanningBusy = runtimeSynced ? runtimeSkipPlanningBusy : false
   const streaming = runtimeSynced ? runtimeStreaming : null
   const autoScrollPinned = runtimeSynced ? runtimeAutoScrollPinned : true
   const hasUnseenActivity = runtimeSynced ? runtimeHasUnseenActivity : false
   const planningState = runtimeSynced ? runtimePlanningState : 'skipped'
   const storeSignupPreviewState = runtimeSynced ? runtimeSignupPreviewState : 'none'
   const realtimeEventCursors = runtimeSynced ? runtimeRealtimeEventCursors : EMPTY_REALTIME_CURSORS
+  const agentName = runtimeSynced ? runtimeAgentName : null
+  const agentAvatarUrl = runtimeSynced ? runtimeAgentAvatarUrl : null
+  const agentEmail = runtimeSynced ? runtimeAgentEmail : null
+  const agentSms = runtimeSynced ? runtimeAgentSms : null
+  const auditUrl = runtimeSynced ? runtimeAuditUrl : null
+  const agentIsOrgOwned = runtimeSynced ? runtimeAgentIsOrgOwned : false
+  const canManageAgent = runtimeSynced ? runtimeCanManageAgent : true
+  const isCollaborator = runtimeSynced ? runtimeIsCollaborator : false
+  const hideInsightsPanel = runtimeSynced ? runtimeHideInsightsPanel : false
+  const enabledIntegrationTabs = runtimeSynced ? runtimeEnabledIntegrationTabs : {}
+  const googleSheetsDriveTabEnabled = Boolean(enabledIntegrationTabs[GOOGLE_SHEETS_DRIVE_TAB_KEY])
+  const apolloNativeTabEnabled = Boolean(enabledIntegrationTabs[APOLLO_NATIVE_TAB_KEY])
+  const hubspotNativeTabEnabled = Boolean(enabledIntegrationTabs[HUBSPOT_NATIVE_TAB_KEY])
+  const discordNativeTabEnabled = Boolean(enabledIntegrationTabs[DISCORD_NATIVE_TAB_KEY])
+  const metaAdsTabEnabled = Boolean(enabledIntegrationTabs[META_ADS_TAB_KEY])
+  const agentFirstName = deriveAgentFirstName(agentName)
+  const viewerUserId = shellViewer.userId
+  const viewerEmail = shellViewer.email
+  const connectionStatus = shellConnection.status
+  const connectionLabel = shellConnection.label
+  const connectionDetail = shellConnection.detail
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineRenderEvents), [timelineRenderEvents])
   const signupPreviewState = useMemo<SignupPreviewState>(() => {
     if (
@@ -1615,7 +1614,7 @@ export function AgentChatLayout({
             starterPromptCount={starterPromptCount}
             starterPromptSubmitting={starterPromptSubmitting}
             starterPrompts={starterPrompts}
-            starterPromptsDisabled={starterPromptsDisabled}
+            starterPromptsDisabled={composerDisabled}
             starterPromptsLoading={starterPromptsLoading}
             statusExpansionTargets={statusExpansionTargets}
             streaming={streaming}

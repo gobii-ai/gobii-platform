@@ -11,9 +11,7 @@ import type {
   PlanSnapshot,
 } from '../../types/agentChat'
 
-export type AgentTimelineProps = AgentTimelineSnapshot & {
-  agentFirstName?: string
-}
+export type AgentTimelineProps = AgentTimelineSnapshot
 
 export type {
   TimelineEvent,

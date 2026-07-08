@@ -129,6 +129,11 @@ const APOLLO_NATIVE_SYSTEM_SKILL_KEY = 'apollo_native'
 const HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = 'hubspot_native'
 const DISCORD_NATIVE_SYSTEM_SKILL_KEY = 'discord_native'
 const META_ADS_SYSTEM_SKILL_KEY = 'meta_ads_platform'
+const GOOGLE_SHEETS_DRIVE_TAB_KEY = 'googleSheetsDrive'
+const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
+const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
+const DISCORD_NATIVE_TAB_KEY = 'discordNative'
+const META_ADS_TAB_KEY = 'metaAds'
 
 function withTemplateLaunchNonce(path: string): string {
   if (typeof window === 'undefined') {
@@ -1172,6 +1177,13 @@ export function AgentChatPage({
   }, [dispatch, selectionSidebarMode])
 
   useEffect(() => {
+    dispatch(immersiveShellActions.setViewer({
+      userId: viewerUserId ?? null,
+      email: viewerEmail ?? null,
+    }))
+  }, [dispatch, viewerEmail, viewerUserId])
+
+  useEffect(() => {
     if (agentId !== undefined) {
       return
     }
@@ -1267,6 +1279,8 @@ export function AgentChatPage({
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const processingActive = useAgentChatStore((state) => state.processingActive)
   const awaitingResponse = useAgentChatStore((state) => state.awaitingResponse)
+  const stopProcessingBusy = useAgentChatStore((state) => state.stopProcessingBusy)
+  const skipPlanningBusy = useAgentChatStore((state) => state.skipPlanningBusy)
   const streaming = useAgentChatStore((state) => state.streaming)
   const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
@@ -2193,9 +2207,6 @@ export function AgentChatPage({
   const [teamTemplateLaunchBusyId, setTeamTemplateLaunchBusyId] = useState<string | null>(null)
   const [teamTemplateLaunchError, setTeamTemplateLaunchError] = useState<string | null>(null)
   const [sendMessageError, setSendMessageError] = useState<string | null>(null)
-  const [stopProcessingBusy, setStopProcessingBusy] = useState(false)
-  const [stopProcessingRequested, setStopProcessingRequested] = useState(false)
-  const [skipPlanningBusy, setSkipPlanningBusy] = useState(false)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
   const [idleInsightsAgentId, setIdleInsightsAgentId] = useState<string | null>(null)
@@ -2304,6 +2315,13 @@ export function AgentChatPage({
     },
     [isNewAgent, sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
   )
+  useEffect(() => {
+    dispatch(immersiveShellActions.setConnection({
+      status: connectionIndicator.status,
+      label: connectionIndicator.label,
+      detail: connectionIndicator.detail ?? null,
+    }))
+  }, [connectionIndicator.detail, connectionIndicator.label, connectionIndicator.status, dispatch])
 
   useEffect(() => {
     if (isNewAgent) {
@@ -3018,20 +3036,29 @@ export function AgentChatPage({
     if (!activeAgentId || stopProcessingBusy) {
       return
     }
-    setStopProcessingRequested(true)
-    setStopProcessingBusy(true)
+    dispatch(chatActions.stopProcessingStateUpdated({
+      agentId: activeAgentId,
+      requested: true,
+      busy: true,
+    }))
     setSendMessageError(null)
     try {
       await stopAgentProcessing(activeAgentId)
       void refreshProcessing()
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
     } catch (error) {
-      setStopProcessingRequested(false)
+      dispatch(chatActions.stopProcessingStateUpdated({
+        agentId: activeAgentId,
+        requested: false,
+      }))
       setSendMessageError(safeErrorMessage(error) || 'Unable to stop agent right now.')
     } finally {
-      setStopProcessingBusy(false)
+      dispatch(chatActions.stopProcessingStateUpdated({
+        agentId: activeAgentId,
+        busy: false,
+      }))
     }
-  }, [activeAgentId, queryClient, refreshProcessing, stopProcessingBusy])
+  }, [activeAgentId, dispatch, queryClient, refreshProcessing, stopProcessingBusy])
 
   const applyPlanningMutationResult = useCallback((
     targetAgentId: string,
@@ -3086,7 +3113,7 @@ export function AgentChatPage({
     if (!activeAgentId || skipPlanningBusy) {
       return
     }
-    setSkipPlanningBusy(true)
+    dispatch(chatActions.skipPlanningBusySet({ agentId: activeAgentId, busy: true }))
     setSendMessageError(null)
     try {
       const result = await skipAgentPlanning(activeAgentId)
@@ -3099,9 +3126,9 @@ export function AgentChatPage({
     } catch (error) {
       setSendMessageError(safeErrorMessage(error) || 'Unable to skip planning right now.')
     } finally {
-      setSkipPlanningBusy(false)
+      dispatch(chatActions.skipPlanningBusySet({ agentId: activeAgentId, busy: false }))
     }
-  }, [activeAgentId, applyPlanningMutationResult, skipPlanningBusy])
+  }, [activeAgentId, applyPlanningMutationResult, dispatch, skipPlanningBusy])
 
   // Start/stop insight rotation based on processing state
   const isProcessing = allowAgentRefresh && (timelineProcessingActive || timelineAwaitingResponse || (timelineStreaming && !timelineStreaming.done))
@@ -3118,12 +3145,25 @@ export function AgentChatPage({
   })
   useEffect(() => {
     if (!isProcessing) {
-      setStopProcessingRequested(false)
+      if (activeAgentId) {
+        dispatch(chatActions.stopProcessingStateUpdated({
+          agentId: activeAgentId,
+          requested: false,
+        }))
+      }
     }
-  }, [isProcessing])
+  }, [activeAgentId, dispatch, isProcessing])
   useEffect(() => {
-    setStopProcessingRequested(false)
-  }, [activeAgentId])
+    if (!activeAgentId) {
+      return
+    }
+    dispatch(chatActions.stopProcessingStateUpdated({
+      agentId: activeAgentId,
+      requested: false,
+      busy: false,
+    }))
+    dispatch(chatActions.skipPlanningBusySet({ agentId: activeAgentId, busy: false }))
+  }, [activeAgentId, dispatch])
   useEffect(() => {
     if (isProcessing) {
       startInsightRotation()
@@ -4157,6 +4197,49 @@ export function AgentChatPage({
     return null
   }, [activeAgentId, agentId, auditUrl, auditUrlTemplate, rosterAgents])
 
+  useEffect(() => {
+    if (!activeAgentId) {
+      return
+    }
+    dispatch(chatActions.agentIdentityUpdated({
+      agentId: activeAgentId,
+      agentName: isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent'),
+      agentAvatarUrl: resolvedAvatarUrl,
+      agentEmail: resolvedAgentEmail,
+      agentSms: resolvedAgentSms,
+      auditUrl: activeAuditUrl,
+      agentIsOrgOwned: resolvedIsOrgOwned || effectiveContext?.type === 'organization',
+      canManageAgent: activeCanManageAgent,
+      isCollaborator: isCollaboratorOnly,
+      hideInsightsPanel: isCollaboratorOnly,
+      enabledIntegrationTabs: {
+        [GOOGLE_SHEETS_DRIVE_TAB_KEY]: googleSheetsDriveTabEnabled,
+        [APOLLO_NATIVE_TAB_KEY]: apolloNativeTabEnabled,
+        [HUBSPOT_NATIVE_TAB_KEY]: hubspotNativeTabEnabled,
+        [DISCORD_NATIVE_TAB_KEY]: discordNativeTabEnabled,
+        [META_ADS_TAB_KEY]: metaAdsTabEnabled,
+      },
+    }))
+  }, [
+    activeAgentId,
+    activeAuditUrl,
+    activeCanManageAgent,
+    apolloNativeTabEnabled,
+    discordNativeTabEnabled,
+    dispatch,
+    effectiveContext?.type,
+    googleSheetsDriveTabEnabled,
+    hubspotNativeTabEnabled,
+    isCollaboratorOnly,
+    isNewAgent,
+    metaAdsTabEnabled,
+    resolvedAgentEmail,
+    resolvedAgentName,
+    resolvedAgentSms,
+    resolvedAvatarUrl,
+    resolvedIsOrgOwned,
+  ])
+
   const timelineErrorMessage = timelineQuery.error
     ? safeErrorMessage(timelineQuery.error, 'Unable to load agent timeline right now.')
     : null
@@ -4270,20 +4353,6 @@ export function AgentChatPage({
       {createOrganizationModal}
       <AgentChatLayout
         agentId={activeAgentId}
-        agentAvatarUrl={resolvedAvatarUrl}
-        agentEmail={resolvedAgentEmail}
-        agentSms={resolvedAgentSms}
-        agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
-        auditUrl={activeAuditUrl}
-        agentIsOrgOwned={resolvedIsOrgOwned || effectiveContext?.type === 'organization'}
-        isCollaborator={isCollaboratorOnly}
-        canManageAgent={activeCanManageAgent}
-        hideInsightsPanel={isCollaboratorOnly}
-        viewerUserId={viewerUserId ?? null}
-        viewerEmail={viewerEmail ?? null}
-        connectionStatus={connectionIndicator.status}
-        connectionLabel={connectionIndicator.label}
-        connectionDetail={connectionIndicator.detail}
         planSnapshot={latestPlanSnapshot}
         sidebar={chatLayoutSidebar}
         onComposerFocus={handleComposerFocus}
@@ -4335,16 +4404,10 @@ export function AgentChatPage({
           && effectiveBillingStatus.reason === 'canceled'
         }
         onSkipPlanning={handleSkipPlanning}
-        skipPlanningBusy={skipPlanningBusy}
         maxAttachmentBytes={maxChatUploadSizeBytes}
         pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
         nativeIntegrationsUrl={nativeIntegrationsUrl}
-        googleSheetsDriveTabEnabled={googleSheetsDriveTabEnabled}
-        apolloNativeTabEnabled={apolloNativeTabEnabled}
-        hubspotNativeTabEnabled={hubspotNativeTabEnabled}
-        discordNativeTabEnabled={discordNativeTabEnabled}
-        metaAdsTabEnabled={metaAdsTabEnabled}
         pendingActionRequests={pendingActionRequests}
         events={timelineEvents}
         displayEvents={displayEvents}
@@ -4382,10 +4445,7 @@ export function AgentChatPage({
         llmTierSaving={intelligenceBusy}
         llmTierError={intelligenceError}
         onStopProcessing={handleStopProcessing}
-        stopProcessingBusy={stopProcessingBusy}
-        stopProcessingRequested={stopProcessingRequested}
         spawnIntentLoading={showSpawnIntentLoader}
-        starterPromptsDisabled={Boolean(sendMessageDisabledReason)}
       />
     </div>
   )

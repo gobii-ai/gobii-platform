@@ -168,6 +168,10 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
   const { useSubscriptionStore: mockedUseSubscriptionStore } = await vi.importActual<
     typeof import('../stores/subscriptionStore')
   >('../stores/subscriptionStore')
+  const { useAppSelector: mockedUseAppSelector } = await vi.importActual<
+    typeof import('../store/hooks')
+  >('../store/hooks')
+  const emptyEnabledIntegrationTabs: Record<string, true> = {}
 
   return {
     AgentChatLayout: ({
@@ -175,11 +179,6 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       agentId,
       sidebar,
       onOpenFullSettings,
-      googleSheetsDriveTabEnabled,
-      apolloNativeTabEnabled,
-      hubspotNativeTabEnabled,
-      discordNativeTabEnabled,
-      metaAdsTabEnabled,
       events,
     }: {
       spawnIntentLoading?: boolean
@@ -196,11 +195,6 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
         }
       }
       onOpenFullSettings?: () => void
-      googleSheetsDriveTabEnabled?: boolean
-      apolloNativeTabEnabled?: boolean
-      hubspotNativeTabEnabled?: boolean
-      discordNativeTabEnabled?: boolean
-      metaAdsTabEnabled?: boolean
       events?: Array<{
         kind: string
         message?: {
@@ -214,6 +208,9 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
         upgradeModalSource,
         upgradeModalDismissible,
       } = mockedUseSubscriptionStore()
+      const enabledIntegrationTabs = mockedUseAppSelector((state) => (
+        agentId ? state.chat.sessionsByAgentId[agentId]?.identity.enabledIntegrationTabs ?? emptyEnabledIntegrationTabs : emptyEnabledIntegrationTabs
+      ))
       const configureTarget = sidebar?.agents?.find((agent) => agent.id !== agentId) ?? sidebar?.agents?.[0] ?? null
       const sidebarNotificationsEnabled = sidebar?.settings?.notificationsEnabled
       const hasAgentReply = events?.some((event) => event.kind === 'message' && event.message?.status !== 'sending') ?? false
@@ -232,11 +229,11 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="embedded-settings-open">{String(Boolean(sidebar?.showEmbeddedSettings))}</div>
           <div data-testid="notifications-enabled">{String(Boolean(sidebarNotificationsEnabled))}</div>
           <div data-testid="notification-status">{sidebar?.settings?.notificationStatus ?? ''}</div>
-          <div data-testid="google-sheets-drive-tab-enabled">{String(Boolean(googleSheetsDriveTabEnabled))}</div>
-          <div data-testid="apollo-native-tab-enabled">{String(Boolean(apolloNativeTabEnabled))}</div>
-          <div data-testid="hubspot-native-tab-enabled">{String(Boolean(hubspotNativeTabEnabled))}</div>
-          <div data-testid="discord-native-tab-enabled">{String(Boolean(discordNativeTabEnabled))}</div>
-          <div data-testid="meta-ads-tab-enabled">{String(Boolean(metaAdsTabEnabled))}</div>
+          <div data-testid="google-sheets-drive-tab-enabled">{String(Boolean(enabledIntegrationTabs.googleSheetsDrive))}</div>
+          <div data-testid="apollo-native-tab-enabled">{String(Boolean(enabledIntegrationTabs.apolloNative))}</div>
+          <div data-testid="hubspot-native-tab-enabled">{String(Boolean(enabledIntegrationTabs.hubspotNative))}</div>
+          <div data-testid="discord-native-tab-enabled">{String(Boolean(enabledIntegrationTabs.discordNative))}</div>
+          <div data-testid="meta-ads-tab-enabled">{String(Boolean(enabledIntegrationTabs.metaAds))}</div>
           <div data-testid="timeline-event-count">{events?.length ?? 0}</div>
           {events?.map((event, index) => (
             event.kind === 'message' ? (

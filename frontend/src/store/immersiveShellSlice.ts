@@ -2,11 +2,26 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 
 import type { RootState } from './appStore'
 
+export type ImmersiveConnectionStatus = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
+
+export type ImmersiveShellViewerState = {
+  userId: number | null
+  email: string | null
+}
+
+export type ImmersiveShellConnectionState = {
+  status: ImmersiveConnectionStatus
+  label: string
+  detail: string | null
+}
+
 export type ImmersiveShellState = {
   activeAgentId: string | null
   shellPathname: string
   selectionSidebarMode: string | null
   currentAppPanel: string | null
+  viewer: ImmersiveShellViewerState
+  connection: ImmersiveShellConnectionState
   modals: Record<string, boolean>
 }
 
@@ -15,6 +30,15 @@ const initialState: ImmersiveShellState = {
   shellPathname: '',
   selectionSidebarMode: null,
   currentAppPanel: null,
+  viewer: {
+    userId: null,
+    email: null,
+  },
+  connection: {
+    status: 'connecting',
+    label: 'Connecting',
+    detail: null,
+  },
   modals: {},
 }
 
@@ -34,6 +58,12 @@ const immersiveShellSlice = createSlice({
     setCurrentAppPanel(state, action: PayloadAction<string | null>) {
       state.currentAppPanel = action.payload
     },
+    setViewer(state, action: PayloadAction<ImmersiveShellViewerState>) {
+      state.viewer = action.payload
+    },
+    setConnection(state, action: PayloadAction<ImmersiveShellConnectionState>) {
+      state.connection = action.payload
+    },
     setModalOpen(state, action: PayloadAction<{ key: string; open: boolean }>) {
       state.modals[action.payload.key] = action.payload.open
     },
@@ -45,3 +75,5 @@ export const immersiveShellReducer = immersiveShellSlice.reducer
 
 export const selectImmersiveShellState = (state: RootState): ImmersiveShellState => state.immersiveShell
 export const selectImmersiveShellActiveAgentId = (state: RootState): string | null => state.immersiveShell.activeAgentId
+export const selectImmersiveShellViewer = (state: RootState): ImmersiveShellViewerState => state.immersiveShell.viewer
+export const selectImmersiveShellConnection = (state: RootState): ImmersiveShellConnectionState => state.immersiveShell.connection
