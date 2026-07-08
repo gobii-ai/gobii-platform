@@ -8077,7 +8077,7 @@
     font-size: 1rem;
     line-height: 1.25;
 }
-:is(.profile-screen__eyebrow, .organization-screen__table th, .profile-screen__field span, .organization-screen__setting-title) {
+:is(.profile-screen__eyebrow, .organization-screen__table th, .profile-screen__field span, .profile-screen__field label, .organization-screen__setting-title) {
     color: rgba(224, 213, 255, 0.84);
     font-size: 0.76rem;
     font-weight: 700;
@@ -8169,6 +8169,23 @@
 .profile-screen :is(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']), select, textarea):focus {
     border-color: rgba(125, 211, 252, 0.54);
     background: rgba(20, 16, 45, 0.86);
+}
+.profile-screen__phone-input {
+    display: grid;
+    grid-template-columns: 6.3rem minmax(0, 1fr);
+    gap: 0.5rem;
+    width: 100%;
+    min-width: 0;
+}
+.profile-screen :is(.profile-screen__phone-country, .profile-screen__phone-tel) {
+    min-width: 0;
+}
+.profile-screen .profile-screen__phone-country {
+    width: 100%;
+    padding-right: 0.45rem;
+    padding-left: 0.6rem;
+    font-size: 0.84rem;
+    font-weight: 750;
 }
 :is(.profile-screen__button, .profile-screen__icon-button, .profile-screen__status) {
     display: inline-flex;

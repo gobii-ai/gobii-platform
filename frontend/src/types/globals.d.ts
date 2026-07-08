@@ -115,6 +115,13 @@ type ChurnKeyGlobal = {
   created?: boolean
   init?: (action: 'show', options: ChurnKeyInitOptions) => void
 }
+type LibPhoneNumberGlobal = {
+  AsYouType?: new (region: string) => { input: (value: string) => string }
+  parsePhoneNumber?: (value: string, region?: string) => {
+    number?: string
+    formatNational?: () => string
+  }
+}
 
 declare global {
   interface Window {
@@ -122,6 +129,7 @@ declare global {
     gtag?: Gtag
     gobiiTrackCta?: GobiiTrackCta
     churnkey?: ChurnKeyGlobal
+    libphonenumber?: LibPhoneNumberGlobal
   }
 }
 

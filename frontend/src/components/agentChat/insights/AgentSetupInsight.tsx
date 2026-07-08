@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Check, CheckCircle2, Copy, Download, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Check, CheckCircle2, Copy, Download, Mail, MessageSquare, Pencil, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -15,6 +15,12 @@ import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
 import { getReturnToPath } from '../../../util/returnTo'
 import { downloadVCard } from '../../../util/vcard'
+import {
+  DEFAULT_PHONE_REGION,
+  PhoneNumberInput,
+  formatPhoneE164,
+  formatPhoneNational,
+} from '../../common/PhoneNumberInput'
 import '../../../styles/insights.css'
 
 // Staggered animation variants for insight panels
@@ -56,15 +62,6 @@ const badgeVariants = {
   },
 }
 
-declare global {
-  interface Window {
-    libphonenumber?: {
-      AsYouType: new (region: string) => { input: (value: string) => string }
-      parsePhoneNumber: (value: string, region?: string) => { number: string; formatNational: () => string }
-    }
-  }
-}
-
 type AgentSetupInsightProps = {
   insight: InsightEvent
 }
@@ -88,56 +85,16 @@ function describeError(error: unknown): string {
   return 'Something went wrong. Please try again.'
 }
 
-function getDefaultRegion(): string {
-  if (typeof navigator === 'undefined') {
-    return 'US'
-  }
-  const parts = (navigator.language || 'en-US').split('-')
-  return (parts[1] || 'US').toUpperCase()
-}
-
-function formatPhoneDisplay(number: string, region: string): string {
-  const trimmed = number.trim()
-  if (!trimmed || typeof window === 'undefined') {
-    return number
-  }
-  const lib = window.libphonenumber
-  if (!lib?.parsePhoneNumber) {
-    return number
-  }
-  try {
-    return lib.parsePhoneNumber(trimmed, region).formatNational()
-  } catch {
-    return number
-  }
-}
-
-function formatPhoneE164(raw: string, region: string): string {
-  const trimmed = raw.trim()
-  if (!trimmed || typeof window === 'undefined') {
-    return trimmed
-  }
-  const lib = window.libphonenumber
-  if (!lib?.parsePhoneNumber) {
-    return trimmed
-  }
-  try {
-    return lib.parsePhoneNumber(trimmed, region).number || trimmed
-  } catch {
-    return trimmed
-  }
-}
-
 export function AgentSetupInsight({
   insight,
 }: AgentSetupInsightProps) {
   const metadata = insight.metadata as AgentSetupMetadata
   const panel = (metadata.panel ?? 'always_on') as AgentSetupPanel
-  const region = useMemo(() => getDefaultRegion(), [])
 
   const [phone, setPhone] = useState<AgentSetupPhone | null>(metadata.sms.userPhone ?? null)
   const [smsEnabled, setSmsEnabled] = useState(metadata.sms.enabled)
   const [agentNumber, setAgentNumber] = useState<string | null>(metadata.sms.agentNumber ?? null)
+  const [phoneRegion, setPhoneRegion] = useState(DEFAULT_PHONE_REGION)
   const [phoneInput, setPhoneInput] = useState('')
   const [codeInput, setCodeInput] = useState('')
   const [smsAction, setSmsAction] = useState<string | null>(null)
@@ -167,8 +124,8 @@ export function AgentSetupInsight({
     return () => window.clearTimeout(timer)
   }, [cooldown])
 
-  const phoneDisplay = phone?.number ? formatPhoneDisplay(phone.number, region) : ''
-  const agentNumberDisplay = agentNumber ? formatPhoneDisplay(agentNumber, region) : ''
+  const phoneDisplay = phone?.number ? formatPhoneNational(phone.number, phoneRegion) : ''
+  const agentNumberDisplay = agentNumber ? formatPhoneNational(agentNumber, phoneRegion) : ''
   const agentDisplayName = metadata.agentName?.trim() || 'Agent'
   const agentEmail = metadata.agentEmail ?? null
   const phoneVerified = Boolean(phone?.isVerified)
@@ -250,7 +207,7 @@ export function AgentSetupInsight({
     setSmsError(null)
     setSmsAction('add')
     try {
-      const formatted = formatPhoneE164(trimmed, region)
+      const formatted = formatPhoneE164(trimmed, phoneRegion)
       const response = await addUserPhone(formatted)
       setPhone(response.phone ?? null)
       setPhoneInput('')
@@ -260,7 +217,7 @@ export function AgentSetupInsight({
     } finally {
       setSmsAction(null)
     }
-  }, [phoneInput, region, metadata.agentId])
+  }, [phoneInput, phoneRegion, metadata.agentId])
 
   const handleVerify = useCallback(async () => {
     const trimmed = codeInput.trim()
@@ -463,13 +420,15 @@ export function AgentSetupInsight({
             </div>
           ) : !phone ? (
             <div className="sms-hero__form">
-              <input
-                className="sms-hero__input"
-                type="tel"
-                autoComplete="tel"
-                placeholder="+1 415 555 0133"
+              <PhoneNumberInput
+                className="sms-hero__phone-input"
+                inputClassName="sms-hero__input"
+                selectClassName="sms-hero__country-select"
                 value={phoneInput}
-                onChange={(event) => setPhoneInput(event.target.value)}
+                region={phoneRegion}
+                onValueChange={setPhoneInput}
+                onRegionChange={setPhoneRegion}
+                disabled={smsBusy}
               />
               <button
                 type="button"
@@ -514,6 +473,16 @@ export function AgentSetupInsight({
               <div className="sms-hero__verified">
                 <CheckCircle2 size={16} strokeWidth={2.2} />
                 <span>{phoneDisplay}</span>
+                <button
+                  type="button"
+                  className="sms-hero__edit-number"
+                  onClick={handleDeletePhone}
+                  disabled={smsBusy}
+                  aria-label="Change number"
+                  title="Change number"
+                >
+                  <Pencil size={13} strokeWidth={2.2} />
+                </button>
               </div>
               <button
                 type="button"
@@ -523,11 +492,6 @@ export function AgentSetupInsight({
               >
                 {smsAction === 'enable' ? 'Enabling...' : 'Enable SMS'}
               </button>
-              <div className="sms-hero__links">
-                <button type="button" className="sms-hero__link" onClick={handleDeletePhone} disabled={smsBusy}>
-                  Change number
-                </button>
-              </div>
             </div>
           ) : (
             <div className="sms-hero__form">

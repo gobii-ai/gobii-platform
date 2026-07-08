@@ -24,6 +24,12 @@ import { HttpError } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { updateUserCustomInstructions, updateUserProfile } from '../../api/userProfile'
 import type { UserProfileFormState, UserProfilePayload } from '../../api/userProfile'
+import {
+  DEFAULT_PHONE_REGION,
+  PhoneNumberInput,
+  formatPhoneE164,
+  formatPhoneNational,
+} from '../../components/common/PhoneNumberInput'
 import { CustomInstructionsSection } from '../../components/settings/CustomInstructionsSection'
 
 type ProfileScreenProps = {
@@ -155,11 +161,13 @@ function PhoneSection({
   onPhoneChange: (phone: PhoneState | null) => void
 }) {
   const [phoneNumber, setPhoneNumber] = useState('')
+  const [phoneRegion, setPhoneRegion] = useState(DEFAULT_PHONE_REGION)
   const [verificationCode, setVerificationCode] = useState('')
   const [busyAction, setBusyAction] = useState<'add' | 'verify' | 'resend' | 'delete' | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const verifiedAt = formatDateTime(phone?.verifiedAt ?? null)
+  const phoneDisplay = phone?.number ? formatPhoneNational(phone.number, phoneRegion) : ''
   const resendDisabled = Boolean(phone?.cooldownRemaining && phone.cooldownRemaining > 0)
 
   const runPhoneAction = useCallback(async (
@@ -204,24 +212,29 @@ function PhoneSection({
           className="profile-screen__inline-form"
           onSubmit={(event) => {
             event.preventDefault()
-            const normalized = phoneNumber.trim()
-            if (!normalized) {
+            const trimmed = phoneNumber.trim()
+            if (!trimmed) {
               setError('Phone number is required.')
               return
             }
+            const normalized = formatPhoneE164(trimmed, phoneRegion)
             void runPhoneAction('add', () => addUserPhone(normalized), 'Verification code sent.')
           }}
         >
-          <label className="profile-screen__field">
-            <span>SMS Number</span>
-            <input
-              type="tel"
+          <div className="profile-screen__field profile-screen__field--phone">
+            <label htmlFor="profile-phone-number-input">SMS Number</label>
+            <PhoneNumberInput
+              id="profile-phone-number-input"
+              className="profile-screen__phone-input"
+              inputClassName="profile-screen__phone-tel"
+              selectClassName="profile-screen__phone-country"
               value={phoneNumber}
-              onChange={(event) => setPhoneNumber(event.target.value)}
-              placeholder="+15551234567"
-              autoComplete="tel"
+              region={phoneRegion}
+              onValueChange={setPhoneNumber}
+              onRegionChange={setPhoneRegion}
+              disabled={busyAction === 'add'}
             />
-          </label>
+          </div>
           <button
             type="submit"
             className="profile-screen__button profile-screen__button--primary"
@@ -234,7 +247,7 @@ function PhoneSection({
       ) : (
         <div className="profile-screen__phone-current">
           <div>
-            <p className="profile-screen__phone-number">{phone.number}</p>
+            <p className="profile-screen__phone-number">{phoneDisplay}</p>
             {phone.isVerified ? (
               <p className="profile-screen__muted">Verified{verifiedAt ? ` ${verifiedAt}` : ''}</p>
             ) : (
