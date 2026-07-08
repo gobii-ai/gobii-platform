@@ -198,25 +198,11 @@ vi.mock('../common/SubscriptionUpgradePlans', () => ({
 }))
 
 vi.mock('./AgentSignupPreviewPanel', () => ({
-  AgentSignupPreviewPanel: ({ status }: { status: string }) => (
-    <div data-testid="signup-preview-panel" data-status={status} />
-  ),
+  AgentSignupPreviewPanel: () => <div data-testid="signup-preview-panel" />,
 }))
 
 vi.mock('../common/SubscriptionUpgradeModal', () => ({
-  SubscriptionUpgradeModal: ({
-    source,
-    dismissible,
-  }: {
-    source?: string
-    dismissible?: boolean
-  }) => (
-    <div
-      data-testid="subscription-upgrade-modal"
-      data-source={source ?? ''}
-      data-dismissible={String(Boolean(dismissible))}
-    />
-  ),
+  SubscriptionUpgradeModal: () => <div data-testid="subscription-upgrade-modal" />,
 }))
 
 function buildInitialSubscriptionState() {
@@ -338,9 +324,10 @@ describe('AgentChatLayout upgrade modal gating', () => {
     })
 
     const modal = await screen.findByTestId('subscription-upgrade-modal')
-    expect(modal).toHaveAttribute('data-source', 'trial_onboarding')
-    expect(modal).toHaveAttribute('data-dismissible', 'false')
+    expect(modal).toBeInTheDocument()
     expect(getSubscriptionState(appStore).isUpgradeModalOpen).toBe(true)
+    expect(getSubscriptionState(appStore).upgradeModalSource).toBe('trial_onboarding')
+    expect(getSubscriptionState(appStore).upgradeModalDismissible).toBe(false)
   })
 
   it('closes the upgrade modal after plan hydration confirms proprietary mode is off', async () => {
@@ -373,10 +360,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
       />,
     )
 
-    expect(screen.getByTestId('signup-preview-panel')).toHaveAttribute(
-      'data-status',
-      'awaiting_signup_completion',
-    )
+    expect(screen.getByTestId('signup-preview-panel')).toBeInTheDocument()
     expect(screen.queryByTestId('agent-composer')).not.toBeInTheDocument()
   })
 

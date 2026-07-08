@@ -685,8 +685,6 @@ export function ImmersiveApp({
   const ensureAuthenticated = useSubscriptionStore((state) => state.ensureAuthenticated)
   const isUpgradeModalOpen = useSubscriptionStore((state) => state.isUpgradeModalOpen)
   const upgradeModalSource = useSubscriptionStore((state) => state.upgradeModalSource)
-  const upgradeModalDismissible = useSubscriptionStore((state) => state.upgradeModalDismissible)
-  const currentPlan = useSubscriptionStore((state) => state.currentPlan)
   const isProprietaryMode = useSubscriptionStore((state) => state.isProprietaryMode)
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
 
@@ -870,17 +868,6 @@ export function ImmersiveApp({
   const handleOpenIntegrations = useCallback(() => navigateToShellPage('integrations'), [navigateToShellPage])
   const handleOpenApiKeys = useCallback(() => navigateToShellPage('api-keys'), [navigateToShellPage])
 
-  const handleUpgradeModalDismiss = useCallback(() => {
-    if (!upgradeModalDismissible) {
-      return
-    }
-    track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {
-      currentPlan,
-      source: upgradeModalSource ?? 'unknown',
-    })
-    closeUpgradeModal()
-  }, [closeUpgradeModal, currentPlan, upgradeModalDismissible, upgradeModalSource])
-
   const handleUpgradeSelection = useCallback(async (plan: PlanTier) => {
     const source = upgradeModalSource ?? 'unknown'
     const authenticated = await ensureAuthenticated()
@@ -972,10 +959,7 @@ export function ImmersiveApp({
       </div>
       {showShellUpgradeModal ? (
         <SubscriptionUpgradeModal
-          onClose={handleUpgradeModalDismiss}
           onUpgrade={handleUpgradeSelection}
-          source={upgradeModalSource ?? undefined}
-          dismissible={upgradeModalDismissible}
         />
       ) : null}
     </div>

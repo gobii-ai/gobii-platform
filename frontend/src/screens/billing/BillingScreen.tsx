@@ -169,7 +169,6 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     isProprietaryMode,
     isUpgradeModalOpen,
     upgradeModalSource,
-    upgradeModalDismissible,
     openUpgradeModal,
     closeUpgradeModal,
   } = useSubscriptionStore()
@@ -664,10 +663,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
 
       {isUpgradeModalOpen && !isOrg && isProprietaryMode ? (
         <SubscriptionUpgradeModal
-          onClose={closeUpgradeModal}
           onUpgrade={handlePlanSelect}
-          source={upgradeModalSource ?? undefined}
-          dismissible={upgradeModalDismissible}
           allowDowngrade
         />
       ) : null}

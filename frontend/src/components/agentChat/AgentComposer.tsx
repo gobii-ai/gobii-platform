@@ -19,6 +19,7 @@ import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask 
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import { useAgentChatStore } from '../../stores/agentChatStore'
 import { track, AnalyticsEvent } from '../../util/analytics'
 import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
@@ -61,6 +62,15 @@ function getBurnRateUsageLevel(metadata: BurnRateMetadata): 'normal' | 'warning'
 
 const DEFAULT_INSIGHT_TAB_COLOR = '#AA74CE'
 const INLINE_HTML_TAG_PATTERN = /<\/?[a-z][\s\S]*>/i
+const GOOGLE_SHEETS_DRIVE_TAB_KEY = 'googleSheetsDrive'
+const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
+const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
+const DISCORD_NATIVE_TAB_KEY = 'discordNative'
+const META_ADS_TAB_KEY = 'metaAds'
+
+function deriveAgentFirstName(agentName?: string | null): string {
+  return agentName?.trim().split(/\s+/)[0] || 'Agent'
+}
 
 function getInsightTabColor(insight: InsightEvent): string {
   if (insight.insightType === 'burn_rate') {
@@ -504,13 +514,13 @@ type AgentComposerProps = {
 }
 
 export const AgentComposer = memo(function AgentComposer({
-  agentId = null,
-  agentName = null,
+  agentId: agentIdOverride,
+  agentName: agentNameOverride,
   onSubmit,
   pendingActionRequests = [],
-  planningState = 'skipped',
+  planningState: planningStateOverride,
   onSkipPlanning,
-  skipPlanningBusy = false,
+  skipPlanningBusy: skipPlanningBusyOverride,
   onRespondHumanInput,
   onDismissHumanInput,
   onResolveSpawnRequest,
@@ -526,20 +536,20 @@ export const AgentComposer = memo(function AgentComposer({
   onRequestScrollToBottom,
   insightsPanelExpandedPreference = null,
   onInsightsPanelExpandedPreferenceChange,
-  agentFirstName = 'Agent',
+  agentFirstName: agentFirstNameOverride,
   isProcessing = false,
-  processingTasks = [],
-  insights = [],
+  processingTasks: processingTasksOverride,
+  insights: insightsOverride,
   insightsLoading = false,
-  currentInsightIndex = 0,
-  onDismissInsight,
-  onInsightIndexChange,
-  onPauseChange,
-  isInsightsPaused = false,
+  currentInsightIndex: currentInsightIndexOverride,
+  onDismissInsight: onDismissInsightOverride,
+  onInsightIndexChange: onInsightIndexChangeOverride,
+  onPauseChange: onPauseChangeOverride,
+  isInsightsPaused: isInsightsPausedOverride,
   onOpenUsage,
   onOpenQuickSettings,
   usageUrl = '/app/usage',
-  hideInsightsPanel = false,
+  hideInsightsPanel: hideInsightsPanelOverride,
   intelligenceConfig = null,
   intelligenceTier = null,
   onIntelligenceChange,
@@ -547,24 +557,91 @@ export const AgentComposer = memo(function AgentComposer({
   intelligenceBusy = false,
   intelligenceError = null,
   onOpenTaskPacks,
-  canManageAgent = true,
+  canManageAgent: canManageAgentOverride,
   onStopProcessing,
-  stopProcessingBusy = false,
-  stopProcessingRequested = false,
+  stopProcessingBusy: stopProcessingBusyOverride,
+  stopProcessingRequested: stopProcessingRequestedOverride,
   submitError = null,
   showSubmitErrorUpgrade = false,
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
-  googleSheetsDriveTabEnabled = false,
-  apolloNativeTabEnabled = false,
-  hubspotNativeTabEnabled = false,
-  discordNativeTabEnabled = false,
-  metaAdsTabEnabled = false,
+  googleSheetsDriveTabEnabled: googleSheetsDriveTabEnabledOverride,
+  apolloNativeTabEnabled: apolloNativeTabEnabledOverride,
+  hubspotNativeTabEnabled: hubspotNativeTabEnabledOverride,
+  discordNativeTabEnabled: discordNativeTabEnabledOverride,
+  metaAdsTabEnabled: metaAdsTabEnabledOverride,
   compact = false,
   externalShellRef,
 }: AgentComposerProps) {
+  const storeAgentId = useAgentChatStore((state) => state.agentId)
+  const storeAgentName = useAgentChatStore((state) => state.agentName)
+  const storeAgentEmail = useAgentChatStore((state) => state.agentEmail)
+  const storeAgentSms = useAgentChatStore((state) => state.agentSms)
+  const storePlanningState = useAgentChatStore((state) => state.planningState)
+  const storeSkipPlanningBusy = useAgentChatStore((state) => state.skipPlanningBusy)
+  const storeProcessingTasks = useAgentChatStore((state) => state.processingWebTasks)
+  const storeInsights = useAgentChatStore((state) => state.insights)
+  const storeDismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
+  const storeCurrentInsightIndex = useAgentChatStore((state) => state.currentInsightIndex)
+  const storeDismissInsight = useAgentChatStore((state) => state.dismissInsight)
+  const storeSetCurrentInsightIndex = useAgentChatStore((state) => state.setCurrentInsightIndex)
+  const storeSetInsightsPaused = useAgentChatStore((state) => state.setInsightsPaused)
+  const storeIsInsightsPaused = useAgentChatStore((state) => state.insightsPaused)
+  const storeHideInsightsPanel = useAgentChatStore((state) => state.hideInsightsPanel)
+  const storeCanManageAgent = useAgentChatStore((state) => state.canManageAgent)
+  const storeStopProcessingBusy = useAgentChatStore((state) => state.stopProcessingBusy)
+  const storeStopProcessingRequested = useAgentChatStore((state) => state.stopProcessingRequested)
+  const storeEnabledIntegrationTabs = useAgentChatStore((state) => state.enabledIntegrationTabs)
+  const agentId = agentIdOverride !== undefined ? agentIdOverride : storeAgentId
+  const agentName = agentNameOverride !== undefined ? agentNameOverride : storeAgentName
+  const planningState = planningStateOverride ?? storePlanningState
+  const skipPlanningBusy = skipPlanningBusyOverride ?? storeSkipPlanningBusy
+  const agentFirstName = agentFirstNameOverride ?? deriveAgentFirstName(agentName)
+  const processingTasks = processingTasksOverride ?? storeProcessingTasks
+  const baseInsights = insightsOverride ?? storeInsights.filter((insight) => !storeDismissedInsightIds.has(insight.insightId))
+  const currentInsightIndex = currentInsightIndexOverride ?? storeCurrentInsightIndex
+  const onDismissInsight = onDismissInsightOverride ?? storeDismissInsight
+  const onInsightIndexChange = onInsightIndexChangeOverride ?? storeSetCurrentInsightIndex
+  const onPauseChange = onPauseChangeOverride ?? storeSetInsightsPaused
+  const isInsightsPaused = isInsightsPausedOverride ?? storeIsInsightsPaused
+  const hideInsightsPanel = hideInsightsPanelOverride ?? storeHideInsightsPanel
+  const canManageAgent = canManageAgentOverride ?? storeCanManageAgent
+  const stopProcessingBusy = stopProcessingBusyOverride ?? storeStopProcessingBusy
+  const stopProcessingRequested = stopProcessingRequestedOverride ?? storeStopProcessingRequested
+  const googleSheetsDriveTabEnabled = googleSheetsDriveTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[GOOGLE_SHEETS_DRIVE_TAB_KEY])
+  const apolloNativeTabEnabled = apolloNativeTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[APOLLO_NATIVE_TAB_KEY])
+  const hubspotNativeTabEnabled = hubspotNativeTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[HUBSPOT_NATIVE_TAB_KEY])
+  const discordNativeTabEnabled = discordNativeTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[DISCORD_NATIVE_TAB_KEY])
+  const metaAdsTabEnabled = metaAdsTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[META_ADS_TAB_KEY])
+  const insights = useMemo(() => {
+    if (!storeAgentEmail && !storeAgentSms) {
+      return baseInsights
+    }
+    return baseInsights.map((insight) => {
+      if (insight.insightType !== 'agent_setup') {
+        return insight
+      }
+      const metadata = insight.metadata as AgentSetupMetadata
+      const nextEmail = storeAgentEmail ?? metadata.agentEmail ?? null
+      const nextSms = storeAgentSms ?? metadata.sms?.agentNumber ?? null
+      if (nextEmail === metadata.agentEmail && nextSms === metadata.sms?.agentNumber) {
+        return insight
+      }
+      return {
+        ...insight,
+        metadata: {
+          ...metadata,
+          agentEmail: nextEmail,
+          sms: {
+            ...(metadata.sms ?? {}),
+            agentNumber: nextSms,
+          },
+        },
+      }
+    })
+  }, [baseInsights, storeAgentEmail, storeAgentSms])
   const [body, setBody] = useState(() => readAgentChatMessageDraft(agentId))
   const [attachments, setAttachments] = useState<File[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)

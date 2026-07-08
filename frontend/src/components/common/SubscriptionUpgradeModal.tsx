@@ -7,35 +7,43 @@ import {
   useSubscriptionStore,
   type PlanTier,
 } from '../../stores/subscriptionStore'
+import { track } from '../../util/analytics'
+import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { SubscriptionUpgradePlans } from './SubscriptionUpgradePlans'
 
 type SubscriptionUpgradeModalProps = {
-  onClose: () => void
   onUpgrade: (plan: PlanTier) => void
-  source?: string
-  dismissible?: boolean
   allowDowngrade?: boolean
 }
 
 export function SubscriptionUpgradeModal({
-  onClose,
   onUpgrade,
-  source,
-  dismissible = true,
   allowDowngrade = false,
 }: SubscriptionUpgradeModalProps) {
   const {
     currentPlan,
+    isProprietaryMode,
+    upgradeModalSource,
+    upgradeModalDismissible,
     trialDaysByPlan,
     trialEligible,
     pricingModalAlmostFullScreen,
     ctaPickAPlan,
+    closeUpgradeModal,
   } = useSubscriptionStore()
+  const source = upgradeModalSource ?? undefined
+  const dismissible = upgradeModalDismissible
   const handleClose = useCallback(() => {
-    if (dismissible) {
-      onClose()
+    if (!dismissible) {
+      return
     }
-  }, [dismissible, onClose])
+    track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {
+      currentPlan,
+      source: upgradeModalSource ?? 'unknown',
+      isProprietaryMode,
+    })
+    closeUpgradeModal()
+  }, [closeUpgradeModal, currentPlan, dismissible, isProprietaryMode, upgradeModalSource])
 
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
   const useTrialCopy = (
@@ -57,7 +65,7 @@ export function SubscriptionUpgradeModal({
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && dismissible) {
-        onClose()
+        handleClose()
       }
     }
     document.addEventListener('keydown', handleKey)
@@ -67,7 +75,7 @@ export function SubscriptionUpgradeModal({
       document.removeEventListener('keydown', handleKey)
       document.body.style.overflow = originalOverflow
     }
-  }, [dismissible, onClose])
+  }, [dismissible, handleClose])
 
   if (typeof document === 'undefined') {
     return null
@@ -117,7 +125,7 @@ export function SubscriptionUpgradeModal({
                 <button
                   type="button"
                   className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-500"
-                  onClick={onClose}
+                  onClick={handleClose}
                   aria-label="Close dialog"
                 >
                   <X className="h-5 w-5" strokeWidth={2} />

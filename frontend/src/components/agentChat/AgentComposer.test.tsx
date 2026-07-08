@@ -25,6 +25,31 @@ vi.mock('../../stores/subscriptionStore', () => ({
   }),
 }))
 
+vi.mock('../../stores/agentChatStore', () => ({
+  useAgentChatStore: (selector?: (state: any) => any) => {
+    const state = {
+      agentId: 'agent-1',
+      agentName: 'Test Agent',
+      planningState: 'skipped',
+      skipPlanningBusy: false,
+      processingWebTasks: [],
+      insights: [],
+      dismissedInsightIds: new Set<string>(),
+      currentInsightIndex: 0,
+      dismissInsight: () => undefined,
+      setCurrentInsightIndex: () => undefined,
+      setInsightsPaused: () => undefined,
+      insightsPaused: false,
+      hideInsightsPanel: false,
+      canManageAgent: true,
+      stopProcessingBusy: false,
+      stopProcessingRequested: false,
+      enabledIntegrationTabs: {},
+    }
+    return selector ? selector(state) : state
+  },
+}))
+
 vi.mock('./insights', () => ({
   InsightEventCard: ({ insight }: { insight: InsightEvent }) => (
     <div data-testid="insight-card">{insight.title}</div>

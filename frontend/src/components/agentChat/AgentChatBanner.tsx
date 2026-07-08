@@ -3,34 +3,23 @@ import { Check, CreditCard, EllipsisVertical, ListTodo, Mail, MessageSquare, Set
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import { useAgentChatStore } from '../../stores/agentChatStore'
+import { useAppSelector } from '../../store/hooks'
+import { selectImmersiveShellConnection } from '../../store/immersiveShellSlice'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { PlanSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
-import type { SignupPreviewState } from '../../types/agentRoster'
 import type { AgentChatSidebarMode } from './sidebarMode'
 import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem } from './uiPrimitives'
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 
 type AgentChatBannerProps = {
-  agentId?: string | null
-  agentName: string
-  agentAvatarUrl?: string | null
-  agentEmail?: string | null
-  agentSms?: string | null
-  auditUrl?: string | null
-  isOrgOwned?: boolean
-  canManageAgent?: boolean
-  isCollaborator?: boolean
-  connectionStatus?: ConnectionStatusTone
-  connectionLabel?: string
-  connectionDetail?: string | null
   planSnapshot?: PlanSnapshot | null
   planPanelMode?: 'docked' | 'hidden'
   onPlanOpen?: () => void
   onPlanHoverChange?: (hovered: boolean) => void
-  processingActive?: boolean
   dailyCreditsStatus?: DailyCreditsStatus | null
   showPurchaseSeatsButton?: boolean
   onPurchaseSeats?: () => void
@@ -47,7 +36,6 @@ type AgentChatBannerProps = {
   publicShareDisabled?: boolean
   publicShareDisabledReason?: string | null
   sidebarMode?: AgentChatSidebarMode
-  signupPreviewState?: SignupPreviewState
   children?: ReactNode
 }
 
@@ -65,22 +53,10 @@ function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; labe
 }
 
 export const AgentChatBanner = memo(function AgentChatBanner({
-  agentId,
-  agentName,
-  agentAvatarUrl,
-  agentEmail,
-  agentSms,
-  auditUrl,
-  isOrgOwned = false,
-  canManageAgent = true,
-  isCollaborator = false,
-  connectionStatus = 'connecting',
-  connectionLabel = 'Connecting',
   planSnapshot,
   planPanelMode = 'docked',
   onPlanOpen,
   onPlanHoverChange,
-  processingActive = false,
   dailyCreditsStatus,
   showPurchaseSeatsButton = false,
   onPurchaseSeats,
@@ -97,10 +73,23 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   publicShareDisabled = false,
   publicShareDisabledReason = null,
   sidebarMode = 'list',
-  signupPreviewState = 'none',
   children,
 }: AgentChatBannerProps) {
-  const trimmedName = agentName.trim() || 'Agent'
+  const agentId = useAgentChatStore((state) => state.agentId)
+  const agentName = useAgentChatStore((state) => state.agentName)
+  const agentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
+  const agentEmail = useAgentChatStore((state) => state.agentEmail)
+  const agentSms = useAgentChatStore((state) => state.agentSms)
+  const auditUrl = useAgentChatStore((state) => state.auditUrl)
+  const isOrgOwned = useAgentChatStore((state) => state.agentIsOrgOwned)
+  const canManageAgent = useAgentChatStore((state) => state.canManageAgent)
+  const isCollaborator = useAgentChatStore((state) => state.isCollaborator)
+  const processingActive = useAgentChatStore((state) => state.processingActive)
+  const signupPreviewState = useAgentChatStore((state) => state.signupPreviewState)
+  const connection = useAppSelector(selectImmersiveShellConnection)
+  const connectionStatus = connection.status
+  const connectionLabel = connection.label
+  const trimmedName = agentName?.trim() || 'Agent'
   const bannerRef = useRef<HTMLDivElement | null>(null)
   const [animate, setAnimate] = useState(false)
   const hasAnimatedRef = useRef(false)

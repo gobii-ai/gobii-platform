@@ -152,11 +152,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
     loadMore,
     hasMore,
     loadTimeline,
-    timeline,
-    timelineLoading,
-    timelineError,
     jumpToTime,
-    selectedTimestamp: selectedDay,
     processingActive,
     setSelectedDay,
     setProcessingActive,
@@ -921,7 +917,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
             className="hidden lg:block lg:sticky lg:top-[112px] lg:min-h-[520px] lg:pt-4"
             style={timelineMaxHeight ? { maxHeight: `${timelineMaxHeight}px` } : undefined}
           >
-            <AuditTimeline buckets={timeline} loading={timelineLoading} error={timelineError} selectedDay={selectedDay} onSelect={handleJumpToTimestamp} processingActive={processingActive} />
+            <AuditTimeline onSelect={handleJumpToTimestamp} />
           </div>
         </div>
       </div>

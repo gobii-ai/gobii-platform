@@ -1,21 +1,28 @@
 import type { SignupPreviewState } from '../../types/agentRoster'
 import type { PlanTier } from '../../stores/subscriptionStore'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import { useAgentChatStore } from '../../stores/agentChatStore'
 import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
 
 type AgentSignupPreviewPanelProps = {
-  status: SignupPreviewState
+  status?: SignupPreviewState
   agentId?: string | null
   agentName?: string | null
   onUpgrade?: (plan: PlanTier, source?: string) => void
 }
 
 export function AgentSignupPreviewPanel({
-  status,
-  agentId,
-  agentName,
+  status: statusOverride,
+  agentId: agentIdOverride,
+  agentName: agentNameOverride,
   onUpgrade,
 }: AgentSignupPreviewPanelProps) {
+  const storeStatus = useAgentChatStore((state) => state.signupPreviewState)
+  const storeAgentId = useAgentChatStore((state) => state.agentId)
+  const storeAgentName = useAgentChatStore((state) => state.agentName)
+  const status = statusOverride ?? storeStatus
+  const agentId = agentIdOverride ?? storeAgentId
+  const agentName = agentNameOverride ?? storeAgentName
   const ctaUnlockAgentCopy = useSubscriptionStore((state) => state.ctaUnlockAgentCopy)
   const isPaused = status === 'awaiting_signup_completion'
   const resolvedAgentName = agentName?.trim() || 'Your agent'
