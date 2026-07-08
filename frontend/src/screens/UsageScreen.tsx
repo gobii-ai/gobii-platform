@@ -13,7 +13,9 @@ import type {
   DateRangeValue,
   PeriodInfo,
   UsageAgent,
+  UsageStatus,
   UsageSummaryQueryInput,
+  UsageSummaryResponse,
 } from '../components/usage'
 import {
   cloneRange,
@@ -26,8 +28,6 @@ import {
 } from '../components/usage/utils'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
-import { selectUsageState, usageActions } from '../store/usageSlice'
-import { useAppDispatch, useAppSelector } from '../store/hooks'
 
 
 type SelectionMode = 'billing' | 'custom'
@@ -38,25 +38,20 @@ const formatContextCaption = (contextName: string, timezone: string): string => 
 }
 
 export function UsageScreen() {
-  const dispatch = useAppDispatch()
   const [appliedRange, setAppliedRange] = useState<DateRangeValue | null>(null)
   const [calendarRange, setCalendarRange] = useState<DateRangeValue | null>(null)
   const [isPickerOpen, setPickerOpen] = useState(false)
   const [selectionMode, setSelectionMode] = useState<SelectionMode>('billing')
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set())
+  const [summary, setSummary] = useState<UsageSummaryResponse | null>(null)
+  const [summaryStatus, setSummaryStatus] = useState<UsageStatus>('idle')
+  const [summaryErrorMessage, setSummaryErrorMessage] = useState<string | null>(null)
+  const [agents, setAgents] = useState<UsageAgent[]>([])
+  const [agentsStatus, setAgentsStatus] = useState<UsageStatus>('idle')
+  const [agentsErrorMessage, setAgentsErrorMessage] = useState<string | null>(null)
 
   const initialPeriodRef = useRef<DateRangeValue | null>(null)
   const anchorDayRef = useRef<number | null>(null)
-
-  // Persisted API data so the UI stays responsive while React Query loads.
-  const {
-    summary,
-    summaryStatus,
-    summaryErrorMessage,
-    agents,
-    agentsStatus,
-    agentsErrorMessage,
-  } = useAppSelector(selectUsageState)
 
   // Agents are stable enough that we cache them globally and reuse between tabs.
   const agentsQuery = useQuery({
@@ -65,19 +60,22 @@ export function UsageScreen() {
     refetchOnWindowFocus: false,
   })
 
-  // Keep the local store aligned with the React Query lifecycle so components can react synchronously.
+  // Keep local display state aligned with the React Query lifecycle so the page can retain prior data while refreshing.
   useEffect(() => {
     if (agentsQuery.isPending) {
-      dispatch(usageActions.agentsLoading())
+      setAgentsStatus('loading')
+      setAgentsErrorMessage(null)
     }
-  }, [agentsQuery.isPending, dispatch])
+  }, [agentsQuery.isPending])
 
   // When the agents list changes, drop any stale selections the user can no longer access.
   useEffect(() => {
     if (agentsQuery.data) {
-      dispatch(usageActions.agentsLoaded(agentsQuery.data.agents))
+      setAgents(agentsQuery.data.agents)
+      setAgentsStatus('success')
+      setAgentsErrorMessage(null)
     }
-  }, [agentsQuery.data, dispatch])
+  }, [agentsQuery.data])
 
   useEffect(() => {
     if (agentsQuery.isError) {
@@ -85,9 +83,21 @@ export function UsageScreen() {
         agentsQuery.error instanceof Error
           ? agentsQuery.error.message
           : 'Unable to load agents or API data right now.'
-      dispatch(usageActions.agentsFailed(message))
+      setAgentsStatus('error')
+      setAgentsErrorMessage(message)
     }
-  }, [agentsQuery.error, agentsQuery.isError, dispatch])
+  }, [agentsQuery.error, agentsQuery.isError])
+
+  const handleSummaryStatusChange = useCallback((status: UsageStatus, message: string | null = null) => {
+    setSummaryStatus(status)
+    setSummaryErrorMessage(message)
+  }, [])
+
+  const handleSummaryLoaded = useCallback((nextSummary: UsageSummaryResponse) => {
+    setSummary(nextSummary)
+    setSummaryStatus('success')
+    setSummaryErrorMessage(null)
+  }, [])
 
   useEffect(() => {
     if (!agents.length) {
@@ -340,7 +350,15 @@ export function UsageScreen() {
         />
       </header>
 
-      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} />
+      <UsageMetricsGrid
+        queryInput={queryInput}
+        agentIds={selectedAgentArray}
+        agents={agents}
+        agentsStatus={agentsStatus}
+        agentsErrorMessage={agentsErrorMessage}
+        onSummaryStatusChange={handleSummaryStatusChange}
+        onSummaryLoaded={handleSummaryLoaded}
+      />
 
       <UsageTrendSection
         effectiveRange={boundedEffectiveRange}

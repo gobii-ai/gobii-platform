@@ -3,6 +3,19 @@ import { useEffect } from 'react'
 import type { TimelineResponse } from '../api/agentChat'
 import { chatActions, normalizeProcessingUpdate } from '../store/chatSlice'
 import { useAppDispatch } from '../store/hooks'
+import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
+
+function normalizeSignupPreviewState(value: unknown): SignupPreviewState {
+  return value === 'awaiting_first_reply_pause' || value === 'awaiting_signup_completion'
+    ? value
+    : 'none'
+}
+
+function normalizePlanningState(value: unknown): PlanningState {
+  return value === 'planning' || value === 'completed' || value === 'skipped'
+    ? value
+    : 'skipped'
+}
 
 export function usePendingActionsBridge(
   activeAgentId: string | null,
@@ -26,8 +39,8 @@ export function usePendingActionsBridge(
 
     const name = initialPageResponse.agent_name ?? null
     const avatar = initialPageResponse.agent_avatar_url ?? null
-    const signupPreviewState = initialPageResponse.signup_preview_state ?? 'none'
-    const planningState = initialPageResponse.planning_state ?? 'skipped'
+    const signupPreviewState = normalizeSignupPreviewState(initialPageResponse.signup_preview_state)
+    const planningState = normalizePlanningState(initialPageResponse.planning_state)
     if (name || avatar || signupPreviewState !== 'none' || planningState !== 'skipped') {
       dispatch(chatActions.agentIdentityUpdated({
         agentId: activeAgentId,

@@ -15,7 +15,7 @@ import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
 import { AgentPipedreamAppsModal } from '../mcp/AgentPipedreamAppsModal'
 import type { PendingActionMutationResult } from '../../api/agentChat'
-import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
+import type { PendingActionRequest, PendingHumanInputRequest } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
@@ -31,7 +31,6 @@ import {
   writeAgentChatMessageDraft,
 } from '../../util/agentChatDraftStorage'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
-import type { PlanningState } from '../../types/agentRoster'
 import { useModal } from '../../hooks/useModal'
 import { AgentChatMenuItem } from './uiPrimitives'
 
@@ -442,13 +441,9 @@ function ComposerActionMenu({
 }
 
 type AgentComposerProps = {
-  agentId?: string | null
-  agentName?: string | null
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   pendingActionRequests?: PendingActionRequest[]
-  planningState?: PlanningState
   onSkipPlanning?: () => void | Promise<void>
-  skipPlanningBusy?: boolean
   onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
   onDismissHumanInput?: (requestId: string) => Promise<void>
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
@@ -471,23 +466,13 @@ type AgentComposerProps = {
   focusKey?: string | null
   onFocus?: () => void
   onRequestScrollToBottom?: () => void
-  // Working panel props
   insightsPanelExpandedPreference?: boolean | null
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
-  agentFirstName?: string
   isProcessing?: boolean
-  processingTasks?: ProcessingWebTask[]
-  insights?: InsightEvent[]
   insightsLoading?: boolean
-  currentInsightIndex?: number
-  onDismissInsight?: (insightId: string) => void
-  onInsightIndexChange?: (index: number) => void
-  onPauseChange?: (paused: boolean) => void
-  isInsightsPaused?: boolean
   onOpenUsage?: () => void
   onOpenQuickSettings?: () => void
   usageUrl?: string | null
-  hideInsightsPanel?: boolean
   intelligenceConfig?: LlmIntelligenceConfig | null
   intelligenceTier?: string | null
   onIntelligenceChange?: (tier: string) => Promise<boolean>
@@ -495,33 +480,21 @@ type AgentComposerProps = {
   intelligenceBusy?: boolean
   intelligenceError?: string | null
   onOpenTaskPacks?: () => void
-  canManageAgent?: boolean
   onStopProcessing?: () => void | Promise<void>
-  stopProcessingBusy?: boolean
-  stopProcessingRequested?: boolean
   submitError?: string | null
   showSubmitErrorUpgrade?: boolean
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
-  googleSheetsDriveTabEnabled?: boolean
-  apolloNativeTabEnabled?: boolean
-  hubspotNativeTabEnabled?: boolean
-  discordNativeTabEnabled?: boolean
-  metaAdsTabEnabled?: boolean
   compact?: boolean
   externalShellRef?: Ref<HTMLDivElement>
 }
 
 export const AgentComposer = memo(function AgentComposer({
-  agentId: agentIdOverride,
-  agentName: agentNameOverride,
   onSubmit,
   pendingActionRequests = [],
-  planningState: planningStateOverride,
   onSkipPlanning,
-  skipPlanningBusy: skipPlanningBusyOverride,
   onRespondHumanInput,
   onDismissHumanInput,
   onResolveSpawnRequest,
@@ -537,20 +510,11 @@ export const AgentComposer = memo(function AgentComposer({
   onRequestScrollToBottom,
   insightsPanelExpandedPreference = null,
   onInsightsPanelExpandedPreferenceChange,
-  agentFirstName: agentFirstNameOverride,
   isProcessing = false,
-  processingTasks: processingTasksOverride,
-  insights: insightsOverride,
   insightsLoading = false,
-  currentInsightIndex: currentInsightIndexOverride,
-  onDismissInsight: onDismissInsightOverride,
-  onInsightIndexChange: onInsightIndexChangeOverride,
-  onPauseChange: onPauseChangeOverride,
-  isInsightsPaused: isInsightsPausedOverride,
   onOpenUsage,
   onOpenQuickSettings,
   usageUrl = '/app/usage',
-  hideInsightsPanel: hideInsightsPanelOverride,
   intelligenceConfig = null,
   intelligenceTier = null,
   onIntelligenceChange,
@@ -558,21 +522,13 @@ export const AgentComposer = memo(function AgentComposer({
   intelligenceBusy = false,
   intelligenceError = null,
   onOpenTaskPacks,
-  canManageAgent: canManageAgentOverride,
   onStopProcessing,
-  stopProcessingBusy: stopProcessingBusyOverride,
-  stopProcessingRequested: stopProcessingRequestedOverride,
   submitError = null,
   showSubmitErrorUpgrade = false,
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
-  googleSheetsDriveTabEnabled: googleSheetsDriveTabEnabledOverride,
-  apolloNativeTabEnabled: apolloNativeTabEnabledOverride,
-  hubspotNativeTabEnabled: hubspotNativeTabEnabledOverride,
-  discordNativeTabEnabled: discordNativeTabEnabledOverride,
-  metaAdsTabEnabled: metaAdsTabEnabledOverride,
   compact = false,
   externalShellRef,
 }: AgentComposerProps) {
@@ -582,9 +538,6 @@ export const AgentComposer = memo(function AgentComposer({
   const storeAgentName = activeSession.identity.agentName
   const storeAgentEmail = activeSession.identity.agentEmail
   const storeAgentSms = activeSession.identity.agentSms
-  const storePlanningState = activeSession.identity.planningState
-  const storeSkipPlanningBusy = activeSession.processing.skipPlanningBusy
-  const storeProcessingTasks = activeSession.processing.processingWebTasks
   const storeInsights = useMemo(
     () => activeSession.insights.insightIds
       .map((id) => activeSession.insights.insightsById[id])
@@ -595,46 +548,37 @@ export const AgentComposer = memo(function AgentComposer({
     () => new Set(Object.keys(activeSession.insights.dismissedInsightIds)),
     [activeSession.insights.dismissedInsightIds],
   )
-  const storeCurrentInsightIndex = activeSession.insights.currentInsightIndex
-  const storeDismissInsight = useCallback(
+  const onDismissInsight = useCallback(
     (insightId: string) => dispatch(chatActions.insightDismissed(insightId)),
     [dispatch],
   )
-  const storeSetCurrentInsightIndex = useCallback(
+  const onInsightIndexChange = useCallback(
     (index: number) => dispatch(chatActions.currentInsightIndexSet(index)),
     [dispatch],
   )
-  const storeSetInsightsPaused = useCallback(
+  const onPauseChange = useCallback(
     (paused: boolean) => dispatch(chatActions.insightsPausedSet(paused)),
     [dispatch],
   )
-  const storeIsInsightsPaused = activeSession.insights.insightsPaused
-  const storeHideInsightsPanel = activeSession.identity.hideInsightsPanel
-  const storeCanManageAgent = activeSession.identity.canManageAgent
-  const storeStopProcessingBusy = activeSession.processing.stopProcessingBusy
-  const storeStopProcessingRequested = activeSession.processing.stopProcessingRequested
   const storeEnabledIntegrationTabs = activeSession.identity.enabledIntegrationTabs
-  const agentId = agentIdOverride !== undefined ? agentIdOverride : storeAgentId
-  const agentName = agentNameOverride !== undefined ? agentNameOverride : storeAgentName
-  const planningState = planningStateOverride ?? storePlanningState
-  const skipPlanningBusy = skipPlanningBusyOverride ?? storeSkipPlanningBusy
-  const agentFirstName = agentFirstNameOverride ?? deriveAgentFirstName(agentName)
-  const processingTasks = processingTasksOverride ?? storeProcessingTasks
-  const baseInsights = insightsOverride ?? storeInsights.filter((insight) => !storeDismissedInsightIds.has(insight.insightId))
-  const currentInsightIndex = currentInsightIndexOverride ?? storeCurrentInsightIndex
-  const onDismissInsight = onDismissInsightOverride ?? storeDismissInsight
-  const onInsightIndexChange = onInsightIndexChangeOverride ?? storeSetCurrentInsightIndex
-  const onPauseChange = onPauseChangeOverride ?? storeSetInsightsPaused
-  const isInsightsPaused = isInsightsPausedOverride ?? storeIsInsightsPaused
-  const hideInsightsPanel = hideInsightsPanelOverride ?? storeHideInsightsPanel
-  const canManageAgent = canManageAgentOverride ?? storeCanManageAgent
-  const stopProcessingBusy = stopProcessingBusyOverride ?? storeStopProcessingBusy
-  const stopProcessingRequested = stopProcessingRequestedOverride ?? storeStopProcessingRequested
-  const googleSheetsDriveTabEnabled = googleSheetsDriveTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[GOOGLE_SHEETS_DRIVE_TAB_KEY])
-  const apolloNativeTabEnabled = apolloNativeTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[APOLLO_NATIVE_TAB_KEY])
-  const hubspotNativeTabEnabled = hubspotNativeTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[HUBSPOT_NATIVE_TAB_KEY])
-  const discordNativeTabEnabled = discordNativeTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[DISCORD_NATIVE_TAB_KEY])
-  const metaAdsTabEnabled = metaAdsTabEnabledOverride ?? Boolean(storeEnabledIntegrationTabs[META_ADS_TAB_KEY])
+  const agentId = storeAgentId
+  const agentName = storeAgentName
+  const planningState = activeSession.identity.planningState
+  const skipPlanningBusy = activeSession.processing.skipPlanningBusy
+  const agentFirstName = deriveAgentFirstName(agentName)
+  const processingTasks = activeSession.processing.processingWebTasks
+  const baseInsights = storeInsights.filter((insight) => !storeDismissedInsightIds.has(insight.insightId))
+  const currentInsightIndex = activeSession.insights.currentInsightIndex
+  const isInsightsPaused = activeSession.insights.insightsPaused
+  const hideInsightsPanel = activeSession.identity.hideInsightsPanel
+  const canManageAgent = activeSession.identity.canManageAgent
+  const stopProcessingBusy = activeSession.processing.stopProcessingBusy
+  const stopProcessingRequested = activeSession.processing.stopProcessingRequested
+  const googleSheetsDriveTabEnabled = Boolean(storeEnabledIntegrationTabs[GOOGLE_SHEETS_DRIVE_TAB_KEY])
+  const apolloNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[APOLLO_NATIVE_TAB_KEY])
+  const hubspotNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[HUBSPOT_NATIVE_TAB_KEY])
+  const discordNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[DISCORD_NATIVE_TAB_KEY])
+  const metaAdsTabEnabled = Boolean(storeEnabledIntegrationTabs[META_ADS_TAB_KEY])
   const insights = useMemo(() => {
     if (!storeAgentEmail && !storeAgentSms) {
       return baseInsights

@@ -1116,14 +1116,6 @@ export function AgentChatPage({
       dispatch(chatActions.insightsSetForAgent({ agentId: targetAgentId, insights })),
     [dispatch],
   )
-  const startInsightRotation = useCallback(
-    () => dispatch(chatActions.insightRotationStarted()),
-    [dispatch],
-  )
-  const stopInsightRotation = useCallback(
-    () => dispatch(chatActions.insightRotationStopped()),
-    [dispatch],
-  )
   const setAutoScrollPinned = useCallback(
     (pinned: boolean) => dispatch(setAutoScrollPinnedThunk(pinned)),
     [dispatch],
@@ -2834,13 +2826,6 @@ export function AgentChatPage({
     }))
     dispatch(chatActions.skipPlanningBusySet({ agentId: activeAgentId, busy: false }))
   }, [activeAgentId, dispatch])
-  useEffect(() => {
-    if (isProcessing) {
-      startInsightRotation()
-    } else {
-      stopInsightRotation()
-    }
-  }, [isProcessing, startInsightRotation, stopInsightRotation])
   useEffect(() => {
     if (!activeAgentId || storeAgentId !== activeAgentId || !insightsQuery.data) {
       return

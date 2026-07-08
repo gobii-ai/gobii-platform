@@ -81,7 +81,6 @@ export type AgentChatInsightsState = {
   insightsById: Record<string, InsightEvent>
   insightIds: string[]
   currentInsightIndex: number
-  insightProcessingStartedAt: number | null
   dismissedInsightIds: Record<string, true>
   insightsPaused: boolean
 }
@@ -144,7 +143,6 @@ export type CreateAgentWorkflowState = {
 export type ChatState = {
   activeAgentId: string | null
   sessionsByAgentId: Record<string, AgentChatSession>
-  recentAgentIds: string[]
   createAgent: CreateAgentWorkflowState
 }
 
@@ -191,7 +189,6 @@ export function createInitialSession(): AgentChatSession {
       insightsById: {},
       insightIds: [],
       currentInsightIndex: 0,
-      insightProcessingStartedAt: null,
       dismissedInsightIds: {},
       insightsPaused: false,
     },
@@ -205,7 +202,6 @@ export function createInitialSession(): AgentChatSession {
 export const initialChatState: ChatState = {
   activeAgentId: null,
   sessionsByAgentId: {},
-  recentAgentIds: [],
   createAgent: {
     error: null,
     trialOnboardingTarget: null,
@@ -219,9 +215,6 @@ export const initialChatState: ChatState = {
 function ensureSession(state: ChatState, agentId: string): AgentChatSession {
   if (!state.sessionsByAgentId[agentId]) {
     state.sessionsByAgentId[agentId] = createInitialSession()
-  }
-  if (!state.recentAgentIds.includes(agentId)) {
-    state.recentAgentIds.push(agentId)
   }
   return state.sessionsByAgentId[agentId]
 }
@@ -757,9 +750,6 @@ const chatSlice = createSlice({
   name: 'chat',
   initialState: initialChatState,
   reducers: {
-    resetChatState() {
-      return initialChatState
-    },
     agentSelected: (
       state,
       action: PayloadAction<{
@@ -825,9 +815,6 @@ const chatSlice = createSlice({
     },
     createAgentDraftMetadataSet(state, action: PayloadAction<CreateAgentDraftMetadata | null>) {
       state.createAgent.draftMetadata = action.payload
-    },
-    createAgentWorkflowReset(state) {
-      state.createAgent = initialChatState.createAgent
     },
     agentIdentityUpdated(
       state,
@@ -995,19 +982,6 @@ const chatSlice = createSlice({
         session.insights.currentInsightIndex,
         Math.max(0, session.insights.insightIds.length - 1),
       )
-    },
-    insightRotationStarted(state) {
-      const session = getSession(state, state.activeAgentId)
-      if (session) {
-        session.insights.insightProcessingStartedAt = Date.now()
-        session.insights.insightsPaused = false
-      }
-    },
-    insightRotationStopped(state) {
-      const session = getSession(state, state.activeAgentId)
-      if (session) {
-        session.insights.insightsPaused = false
-      }
     },
     insightDismissed(state, action: PayloadAction<string>) {
       const session = getSession(state, state.activeAgentId)

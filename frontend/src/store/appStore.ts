@@ -10,7 +10,6 @@ import { immersiveShellReducer } from './immersiveShellSlice'
 import { registerImmersiveShellListeners } from './listeners/immersiveShellListeners'
 import { registerSubscriptionListeners } from './listeners/subscriptionListeners'
 import { subscriptionReducer } from './subscriptionSlice'
-import { usageReducer } from './usageSlice'
 
 export type AppStoreExtra = {
   queryClient: QueryClient | null
@@ -23,7 +22,6 @@ const rootReducer = combineReducers({
   chat: chatReducer,
   immersiveShell: immersiveShellReducer,
   subscription: subscriptionReducer,
-  usage: usageReducer,
 })
 
 export type RootState = ReturnType<typeof rootReducer>

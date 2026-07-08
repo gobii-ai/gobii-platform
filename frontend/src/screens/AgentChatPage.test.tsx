@@ -82,8 +82,6 @@ const {
     refreshProcessing: vi.fn(),
     persistPendingEventsToCache: vi.fn(),
     setInsightsForAgent: vi.fn(),
-    startInsightRotation: vi.fn(),
-    stopInsightRotation: vi.fn(),
     dismissInsight: vi.fn(),
     setInsightsPaused: vi.fn(),
     setCurrentInsightIndex: vi.fn(),

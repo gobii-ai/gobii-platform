@@ -5,9 +5,9 @@ import { parseDate } from '@internationalized/date'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { InsightGauge } from '../common/InsightGauge'
 import { fetchUsageSummary } from './api'
-import { selectUsageState, usageActions } from '../../store/usageSlice'
-import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import type {
+  UsageAgent,
+  UsageStatus,
   UsageSummaryQueryInput,
   UsageSummaryResponse,
 } from './types'
@@ -26,17 +26,22 @@ type MetricCard = {
 type UsageMetricsGridProps = {
   queryInput: UsageSummaryQueryInput
   agentIds: string[]
+  agents: UsageAgent[]
+  agentsStatus: UsageStatus
+  agentsErrorMessage: string | null
+  onSummaryLoaded?: (summary: UsageSummaryResponse) => void
+  onSummaryStatusChange?: (status: UsageStatus, message?: string | null) => void
 }
 
-export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps) {
-  const dispatch = useAppDispatch()
-  const {
-    summary,
-    agents,
-    agentsStatus,
-    agentsErrorMessage,
-  } = useAppSelector(selectUsageState)
-
+export function UsageMetricsGrid({
+  queryInput,
+  agentIds,
+  agents,
+  agentsStatus,
+  agentsErrorMessage,
+  onSummaryLoaded,
+  onSummaryStatusChange,
+}: UsageMetricsGridProps) {
   const agentKey = agentIds.length ? agentIds.slice().sort().join(',') : 'all'
 
   const {
@@ -53,29 +58,31 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
 
   useEffect(() => {
     if (isPending) {
-      dispatch(usageActions.summaryLoading())
+      onSummaryStatusChange?.('loading')
     }
-  }, [dispatch, isPending])
+  }, [isPending, onSummaryStatusChange])
 
   useEffect(() => {
     if (data) {
-      dispatch(usageActions.summaryLoaded(data))
+      onSummaryLoaded?.(data)
     }
-  }, [data, dispatch])
+  }, [data, onSummaryLoaded])
 
   useEffect(() => {
     if (isError) {
-      const message = error instanceof Error ? error.message : 'Unable to load usage metrics right now.'
-      dispatch(usageActions.summaryFailed(message))
+      onSummaryStatusChange?.(
+        'error',
+        error instanceof Error ? error.message : 'Unable to load usage metrics right now.',
+      )
     }
-  }, [dispatch, error, isError])
+  }, [error, isError, onSummaryStatusChange])
 
   const creditFormatter = useMemo(
     () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
     [],
   )
 
-  const resolvedSummary = data ?? summary
+  const resolvedSummary = data
   const activeAgentCount = useMemo(
     () => agents.filter((agent) => agent.id !== API_AGENT_ID && !agent.is_deleted).length,
     [agents],
