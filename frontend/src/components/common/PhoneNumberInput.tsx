@@ -2,6 +2,7 @@ import { useCallback, useRef, type ChangeEvent } from 'react'
 
 import {
   DEFAULT_PHONE_REGION,
+  getSupportedPhoneRegion,
   isSupportedPhoneRegion,
   SUPPORTED_PHONE_REGIONS,
 } from './phoneCountries'
@@ -44,6 +45,57 @@ function getCursorForDigitPosition(value: string, digitPosition: number): number
   return value.length
 }
 
+function getDigits(value: string): string {
+  return value.replace(/\D/g, '')
+}
+
+function isNanpRegion(region: string): boolean {
+  return getSupportedPhoneRegion(region).dialCode === '+1'
+}
+
+function stripNanpCountryCode(digits: string): string {
+  return digits.length > 10 && digits.startsWith('1') ? digits.slice(1) : digits
+}
+
+function formatNanpNational(value: string): string {
+  const digits = stripNanpCountryCode(getDigits(value)).slice(0, 10)
+  if (digits.length <= 3) {
+    return digits
+  }
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
+  }
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+}
+
+function formatPhoneInputFallback(value: string, region: string): string {
+  if (isNanpRegion(region)) {
+    return formatNanpNational(value)
+  }
+  return value
+}
+
+function formatPhoneE164Fallback(value: string, region: string): string {
+  const trimmed = value.trim()
+  const digits = getDigits(trimmed)
+  if (!digits) {
+    return trimmed
+  }
+  if (trimmed.startsWith('+')) {
+    return `+${digits}`
+  }
+  const country = getSupportedPhoneRegion(region)
+  const dialDigits = getDigits(country.dialCode)
+  if (isNanpRegion(region)) {
+    const nationalDigits = stripNanpCountryCode(digits)
+    return nationalDigits.length === 10 ? `${country.dialCode}${nationalDigits}` : trimmed
+  }
+  if (digits.startsWith(dialDigits) && digits.length > dialDigits.length) {
+    return `+${digits}`
+  }
+  return `${country.dialCode}${digits}`
+}
+
 export function normalizePhoneRegion(region: string): string {
   const normalized = region.toUpperCase()
   return isSupportedPhoneRegion(normalized) ? normalized : DEFAULT_PHONE_REGION
@@ -56,44 +108,50 @@ export function formatPhoneNational(number: string, region = DEFAULT_PHONE_REGIO
   }
   const parser = window.libphonenumber?.parsePhoneNumber
   if (!parser) {
-    return number
+    return formatPhoneInputFallback(number, region)
   }
   try {
     const parsed = parser(trimmed, normalizePhoneRegion(region))
-    return parsed.formatNational?.() ?? number
+    return parsed.formatNational?.() ?? formatPhoneInputFallback(number, region)
   } catch {
-    return number
+    return formatPhoneInputFallback(number, region)
   }
 }
 
 export function formatPhoneInputValue(value: string, region = DEFAULT_PHONE_REGION): string {
-  if (!value || typeof window === 'undefined') {
+  if (!value) {
     return value
+  }
+  if (typeof window === 'undefined') {
+    return formatPhoneInputFallback(value, region)
   }
   const Formatter = window.libphonenumber?.AsYouType
   if (!Formatter) {
-    return value
+    return formatPhoneInputFallback(value, region)
   }
   try {
     return new Formatter(normalizePhoneRegion(region)).input(value)
   } catch {
-    return value
+    return formatPhoneInputFallback(value, region)
   }
 }
 
 export function formatPhoneE164(value: string, region = DEFAULT_PHONE_REGION): string {
   const trimmed = value.trim()
-  if (!trimmed || typeof window === 'undefined') {
+  if (!trimmed) {
     return trimmed
+  }
+  if (typeof window === 'undefined') {
+    return formatPhoneE164Fallback(trimmed, region)
   }
   const parser = window.libphonenumber?.parsePhoneNumber
   if (!parser) {
-    return trimmed
+    return formatPhoneE164Fallback(trimmed, region)
   }
   try {
-    return parser(trimmed, normalizePhoneRegion(region)).number ?? trimmed
+    return parser(trimmed, normalizePhoneRegion(region)).number ?? formatPhoneE164Fallback(trimmed, region)
   } catch {
-    return trimmed
+    return formatPhoneE164Fallback(trimmed, region)
   }
 }
 

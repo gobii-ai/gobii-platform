@@ -364,6 +364,28 @@
   max-width: 19rem;
 }
 
+.sms-hero__phone-submit-group {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 20rem;
+  min-width: 18rem;
+  max-width: 27rem;
+}
+
+.sms-hero__phone-submit-group .sms-hero__phone-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.sms-hero__phone-submit-group--code .sms-hero__input {
+  flex: 1 1 auto;
+  max-width: none;
+  min-width: 0;
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+}
+
 .sms-hero__country-select {
   flex: 0 0 5.1rem;
   width: 5.1rem;
@@ -384,6 +406,10 @@
   max-width: none;
   min-width: 0;
   border-radius: 0 6px 6px 0;
+}
+
+.sms-hero__phone-submit-group .sms-hero__phone-input .sms-hero__input {
+  border-radius: 0;
 }
 
 .sms-hero__country-select:focus,
@@ -417,6 +443,37 @@
 .sms-hero__button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.sms-hero__button--input-action {
+  flex: 0 0 auto;
+  border-radius: 0 6px 6px 0;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.sms-hero__button--input-action:hover:not(:disabled) {
+  transform: none;
+}
+
+.sms-hero__button--input-middle {
+  border-radius: 0;
+}
+
+.sms-hero__button--input-cancel {
+  min-width: 0;
+  padding: 0 0.625rem;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+  background: rgba(255, 255, 255, 0.9);
+  color: #64748b;
+}
+
+.sms-hero__button--input-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 1);
+  color: #334155;
+  box-shadow: none;
 }
 
 .sms-hero__button--secondary {
@@ -555,6 +612,10 @@
     min-width: 12rem;
   }
 
+  .sms-hero__phone-submit-group {
+    min-width: 16rem;
+  }
+
   .sms-hero__country-select {
     height: 32px;
   }
@@ -605,6 +666,12 @@
     max-width: none;
   }
 
+  .sms-hero__phone-submit-group {
+    flex-basis: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
   .sms-hero__country-select {
     height: 28px;
     flex-basis: 4.85rem;
@@ -620,224 +687,255 @@
 }
 
 /* ==========================================================================
-   Collab Grid - Two compact panels side by side
+   Always-On Panel
    ========================================================================== */
 
-.collab-grid {
-  display: flex;
-  gap: 0.75rem;
+.always-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 1rem;
   width: 100%;
   height: 100%;
-  padding: 0 1.25rem 0.625rem;
+  padding: 0 1.5rem 0.75rem;
   box-sizing: border-box;
-  align-items: stretch;
 }
 
-.collab-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  gap: 0.25rem 0.75rem;
-  flex: 1;
-  min-width: 0;
-  padding: 0.625rem 0.875rem;
-  background: rgba(255, 255, 255, 0.55);
-  border-radius: 0.625rem;
-  border: 1px solid rgba(226, 232, 240, 0.7);
-}
-
-.collab-row__icon {
+.always-panel__icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.75rem;
-  border-radius: 0.625rem;
-  grid-row: 1 / -1;
-  align-self: stretch;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.875rem;
+  background: rgba(99, 102, 241, 0.12);
+  color: #4f46e5;
 }
 
-.collab-row__icon svg {
-  width: 20px;
-  height: 20px;
-}
-
-.collab-row__icon--blue {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
-}
-
-.collab-row__icon--cyan {
-  background: rgba(14, 165, 233, 0.15);
-  color: #0ea5e9;
-}
-
-.collab-row__main {
-  grid-column: 2;
-  grid-row: 1;
+.always-panel__content {
   min-width: 0;
 }
 
-.collab-row__title {
-  display: block;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #1e293b;
-  line-height: 1.25;
-}
-
-.collab-row__desc {
-  display: block;
-  font-size: 0.75rem;
-  color: #64748b;
-  line-height: 1.35;
-  margin-top: 0.125rem;
-}
-
-.collab-row__actions {
+.always-panel__header {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  grid-column: 2;
-  grid-row: 2;
+  gap: 0.625rem;
+  min-width: 0;
 }
 
-.collab-row__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3125rem;
-  padding: 0.4375rem 0.75rem;
-  border-radius: 0.4375rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+.always-panel__label {
+  color: #64748b;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.collab-row__btn--cyan {
-  background: linear-gradient(135deg, #0ea5e9, #0284c7);
-  color: white;
-  text-decoration: none;
-}
-
-.collab-row__btn--cyan:hover {
-  background: linear-gradient(135deg, #0284c7, #0369a1);
-}
-
-.collab-row__status {
+.always-panel__status {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.375rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.collab-row__status--active {
+  height: 1.5rem;
+  padding: 0 0.625rem;
+  border-radius: 999px;
   background: rgba(16, 185, 129, 0.12);
-  color: #059669;
+  color: #047857;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
-.collab-row__status-dot {
+.always-panel__status-dot {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
   background: #10b981;
-  animation: status-pulse 2s ease-in-out infinite;
+  box-shadow: 0 0 0 0.1875rem rgba(16, 185, 129, 0.14);
 }
 
-@keyframes status-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+.always-panel__title {
+  display: block;
+  margin-top: 0.25rem;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
-.collab-row__btn:disabled,
-.collab-row__btn[aria-disabled='true'] {
-  opacity: 0.5;
-  cursor: not-allowed;
+.always-panel__subtitle {
+  display: block;
+  margin-top: 0.1875rem;
+  color: #64748b;
+  font-size: 0.8125rem;
+  line-height: 1.35;
 }
 
-@container (max-width: 700px) {
-  .collab-grid {
-    flex-direction: column;
-    gap: 0.375rem;
-    padding: 0 0.75rem 0.375rem;
+@container (max-width: 420px) {
+  .always-panel {
+    grid-template-columns: 1fr;
+    gap: 0.625rem;
+    padding: 0 0.75rem 0.5rem;
   }
 
-  .collab-row {
-    grid-template-columns: auto 1fr auto;
-    grid-template-rows: 1fr;
-    padding: 0.5rem 0.625rem;
-    gap: 0.5rem;
-  }
-
-  .collab-row__icon {
-    grid-row: 1;
-    width: 2rem;
-    border-radius: 0.375rem;
-  }
-
-  .collab-row__icon svg {
-    width: 16px;
-    height: 16px;
-  }
-
-  .collab-row__main {
-    grid-row: 1;
-    display: flex;
-    align-items: center;
-  }
-
-  .collab-row__desc {
+  .always-panel__icon {
     display: none;
   }
 
-  .collab-row__actions {
-    grid-column: 3;
-    grid-row: 1;
-  }
-
-  .collab-row__title {
-    font-size: 0.8125rem;
-  }
-
-  .collab-row__btn {
-    padding: 0.375rem 0.5rem;
-    font-size: 0.6875rem;
+  .always-panel__header {
+    flex-wrap: wrap;
   }
 }
 
-@container (max-width: 480px) {
-  .collab-grid {
-    padding: 0 0.5rem 0.25rem;
-    gap: 0.25rem;
+/* ==========================================================================
+   Email Panel
+   ========================================================================== */
+
+.email-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  height: 100%;
+  padding: 0 1.5rem 0.75rem;
+  box-sizing: border-box;
+}
+
+.email-panel__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.875rem;
+  background: rgba(14, 165, 233, 0.14);
+  color: #0284c7;
+}
+
+.email-panel__content {
+  min-width: 0;
+}
+
+.email-panel__label {
+  display: block;
+  color: #64748b;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.email-panel__address {
+  display: block;
+  min-width: 0;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-panel__address-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  margin-top: 0.1875rem;
+}
+
+.email-panel__address:hover {
+  color: #0284c7;
+}
+
+.email-panel__subtitle {
+  display: block;
+  margin-top: 0.1875rem;
+  color: #64748b;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.email-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.email-panel__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 2.25rem;
+  padding: 0 0.875rem;
+  border-radius: 0.5rem;
+  border: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.email-panel__button--primary {
+  background: #0ea5e9;
+  color: #ffffff;
+  box-shadow: 0 0.5rem 1rem rgba(14, 165, 233, 0.18);
+}
+
+.email-panel__button--primary:hover {
+  background: #0284c7;
+}
+
+.email-panel__button--secondary {
+  background: rgba(14, 165, 233, 0.1);
+  color: #0369a1;
+}
+
+.email-panel__button--secondary:hover {
+  background: rgba(14, 165, 233, 0.16);
+}
+
+@container (max-width: 520px) {
+  .email-panel {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.75rem;
+    padding: 0 0.875rem 0.5rem;
   }
 
-  .collab-row {
-    padding: 0.375rem 0.5rem;
-    gap: 0.375rem;
+  .email-panel__actions {
+    justify-content: flex-start;
   }
 
-  .collab-row__icon {
-    width: 1.75rem;
-    border-radius: 0.3125rem;
+  .email-panel__address-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
+@container (max-width: 420px) {
+  .email-panel {
+    grid-template-columns: 1fr;
+    gap: 0.625rem;
+    padding: 0 0.75rem 0.5rem;
   }
 
-  .collab-row__icon svg {
-    width: 14px;
-    height: 14px;
+  .email-panel__icon {
+    display: none;
   }
 
-  .collab-row__title {
+  .email-panel__button {
+    height: 2rem;
+    padding: 0 0.625rem;
     font-size: 0.75rem;
-  }
-
-  .collab-row__btn {
-    padding: 0.3125rem 0.5rem;
-    font-size: 0.6875rem;
   }
 }
 

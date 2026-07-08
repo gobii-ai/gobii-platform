@@ -25,6 +25,7 @@ export type UserProfilePayload = {
   referralLink: string
   emailVerification: EmailVerificationState
   phone: PhoneState | null
+  pendingPhone?: PhoneState | null
 }
 
 export type UserProfileErrorPayload = {

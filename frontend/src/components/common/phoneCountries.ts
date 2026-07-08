@@ -45,3 +45,7 @@ export const SUPPORTED_PHONE_REGIONS: SupportedPhoneRegion[] = [
 export function isSupportedPhoneRegion(region: string): boolean {
   return SUPPORTED_PHONE_REGIONS.some((item) => item.region === region)
 }
+
+export function getSupportedPhoneRegion(region: string): SupportedPhoneRegion {
+  return SUPPORTED_PHONE_REGIONS.find((item) => item.region === region) ?? SUPPORTED_PHONE_REGIONS[0]
+}

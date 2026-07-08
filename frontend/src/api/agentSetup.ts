@@ -9,12 +9,14 @@ export type PhoneState = {
 
 export type PhoneResponse = {
   phone: PhoneState | null
+  pendingPhone?: PhoneState | null
 }
 
 export type EnableSmsResponse = {
   agentSms: { number: string } | null
   userPhone: PhoneState | null
-  preferredContactMethod: 'sms'
+  pendingPhone?: PhoneState | null
+  preferredContactMethod: 'sms' | null
 }
 
 export function addUserPhone(phoneNumber: string): Promise<PhoneResponse> {
@@ -28,6 +30,14 @@ export function addUserPhone(phoneNumber: string): Promise<PhoneResponse> {
 export function deleteUserPhone(): Promise<PhoneResponse> {
   return jsonRequest<PhoneResponse>('/console/api/user/phone/', {
     method: 'DELETE',
+    includeCsrf: true,
+  })
+}
+
+export function cancelUserPhoneVerification(): Promise<PhoneResponse> {
+  return jsonRequest<PhoneResponse>('/console/api/user/phone/cancel/', {
+    method: 'POST',
+    json: {},
     includeCsrf: true,
   })
 }
@@ -50,6 +60,14 @@ export function resendUserPhone(): Promise<PhoneResponse> {
 
 export function enableAgentSms(agentId: string): Promise<EnableSmsResponse> {
   return jsonRequest<EnableSmsResponse>(`/console/api/agents/${agentId}/sms/enable/`, {
+    method: 'POST',
+    json: {},
+    includeCsrf: true,
+  })
+}
+
+export function disableAgentSms(agentId: string): Promise<EnableSmsResponse> {
+  return jsonRequest<EnableSmsResponse>(`/console/api/agents/${agentId}/sms/disable/`, {
     method: 'POST',
     json: {},
     includeCsrf: true,

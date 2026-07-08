@@ -69,6 +69,7 @@ export type AgentSetupMetadata = {
     enabled: boolean
     agentNumber?: string | null
     userPhone?: AgentSetupPhone | null
+    pendingUserPhone?: AgentSetupPhone | null
     emailVerified?: boolean
   }
   organization: {

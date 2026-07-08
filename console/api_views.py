@@ -132,6 +132,7 @@ from api.models import (
     AgentFsNode,
     Organization,
     OrganizationMembership,
+    UserPhoneNumber,
     UserPreference,
     UserEmail,
     AddonEntitlement,
@@ -237,8 +238,14 @@ from console.context_helpers import build_console_context, resolve_console_conte
 from console.context_overrides import get_context_override
 from console.agent_context import resolve_context_override_for_agent
 from console.billing_initial_data import build_billing_initial_data
-from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm, UserProfileForm
-from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
+from console.forms import MCPServerConfigForm, PhoneVerifyForm, UserProfileForm
+from console.phone_utils import (
+    get_pending_phone,
+    get_phone_cooldown_remaining,
+    get_primary_phone,
+    serialize_phone,
+    serialize_phone_state,
+)
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
 from console.support_requests import (
@@ -628,6 +635,8 @@ def _serialize_user_profile_payload(request: HttpRequest) -> dict[str, Any]:
     form = UserProfileForm(instance=user)
     base_url = request.build_absolute_uri("/").rstrip("/")
     phone = get_primary_phone(user)
+    pending_phone = get_pending_phone(user)
+    verified_phone = phone if phone and phone.is_verified else None
     return {
         "profile": {
             "firstName": user.first_name or "",
@@ -643,7 +652,8 @@ def _serialize_user_profile_payload(request: HttpRequest) -> dict[str, Any]:
             track=False,
         ),
         "emailVerification": _serialize_email_verification(user),
-        "phone": serialize_phone(phone),
+        "phone": serialize_phone(verified_phone),
+        "pendingPhone": serialize_phone(pending_phone),
     }
 
 
@@ -3335,33 +3345,13 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
         })
 
 
-def _extract_phone_form_error(form: PhoneAddForm) -> str:
-    error_msg = "Enter a valid phone number."
-    try:
-        data = form.errors.as_data()
-        for errors in data.values():
-            for err in errors:
-                if getattr(err, "code", None) == "unsupported_region":
-                    return "Phone numbers from this country are not yet supported."
-    except Exception:
-        pass
-    return error_msg
-
-
 class UserPhoneAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get", "post", "delete"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        phone = get_primary_phone(request.user)
-        return JsonResponse({"phone": serialize_phone(phone)})
+        return JsonResponse(serialize_phone_state(request.user))
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        if get_primary_phone(request.user):
-            return JsonResponse(
-                {"error": "Delete your existing phone number before adding a new one."},
-                status=400,
-            )
-
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:
@@ -3371,39 +3361,84 @@ class UserPhoneAPIView(ApiLoginRequiredMixin, View):
         if not raw_number:
             return JsonResponse({"error": "Phone number is required."}, status=400)
 
-        form = PhoneAddForm(
-            {
-                "phone_number": raw_number,
-                "phone_number_hidden": raw_number,
-            },
-            user=request.user,
-        )
-
-        if not form.is_valid():
-            return JsonResponse({"error": _extract_phone_form_error(form)}, status=400)
+        from util.phone import validate_and_format_e164
 
         try:
-            phone = form.save()
+            phone_formatted = validate_and_format_e164(raw_number)
+        except ValidationError as exc:
+            if getattr(exc, "code", None) == "unsupported_region":
+                return JsonResponse({"error": "Phone numbers from this country are not yet supported."}, status=400)
+            return JsonResponse({"error": "Enter a valid phone number."}, status=400)
+
+        primary_phone = get_primary_phone(request.user)
+        if primary_phone and primary_phone.phone_number == phone_formatted:
+            return JsonResponse(serialize_phone_state(request.user))
+
+        existing_pending = get_pending_phone(request.user)
+        if existing_pending and existing_pending.phone_number == phone_formatted:
+            return JsonResponse(serialize_phone_state(request.user))
+
+        try:
+            if existing_pending:
+                existing_pending.delete()
+            phone = UserPhoneNumber.objects.create(
+                user=request.user,
+                phone_number=phone_formatted,
+                is_verified=False,
+                is_primary=primary_phone is None,
+                verified_at=None,
+            )
+            sid = sms.start_verification(phone_number=phone_formatted)
+            phone.last_verification_attempt = timezone.now()
+            phone.verification_sid = sid
+            phone.save(update_fields=["last_verification_attempt", "verification_sid", "updated_at"])
         except IntegrityError:
             return JsonResponse({"error": "This phone number is already in use."}, status=400)
         except ValidationError as exc:
             message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to add phone number."
             return JsonResponse({"error": message_text}, status=400)
+        except Exception as exc:
+            return JsonResponse({"error": f"Error sending verification: {exc}"}, status=400)
 
-        return JsonResponse({"phone": serialize_phone(phone)})
+        return JsonResponse(serialize_phone_state(request.user))
 
     def delete(self, request: HttpRequest, *args: Any, **kwargs: Any):
         phone = get_primary_phone(request.user)
         if phone:
             phone.delete()
-        return JsonResponse({"phone": None})
+        pending_phone = get_pending_phone(request.user)
+        if pending_phone:
+            pending_phone.delete()
+        return JsonResponse(serialize_phone_state(request.user))
+
+
+class UserPhoneCancelAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        pending_phone = get_pending_phone(request.user)
+        if not pending_phone:
+            return JsonResponse(serialize_phone_state(request.user))
+
+        remaining = get_phone_cooldown_remaining(pending_phone)
+        if remaining > 0:
+            return JsonResponse(
+                {
+                    **serialize_phone_state(request.user),
+                    "error": "Please wait before trying another phone number.",
+                },
+                status=400,
+            )
+
+        pending_phone.delete()
+        return JsonResponse(serialize_phone_state(request.user))
 
 
 class UserPhoneVerifyAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        phone = get_primary_phone(request.user)
+        phone = get_pending_phone(request.user) or get_primary_phone(request.user)
         if not phone:
             return JsonResponse({"error": "Add a phone number first."}, status=400)
 
@@ -3430,22 +3465,51 @@ class UserPhoneVerifyAPIView(ApiLoginRequiredMixin, View):
 
         try:
             verified_phone = form.save()
+            if not verified_phone.is_primary:
+                old_primary_phone = get_primary_phone(request.user)
+                with transaction.atomic():
+                    old_sms_endpoint = None
+                    if old_primary_phone:
+                        old_sms_endpoint = PersistentAgentCommsEndpoint.objects.filter(
+                            channel=CommsChannel.SMS,
+                            address__iexact=old_primary_phone.phone_number,
+                            owner_agent__isnull=True,
+                        ).first()
+                        old_primary_phone.is_primary = False
+                        old_primary_phone.save(update_fields=["is_primary", "updated_at"])
+
+                    verified_phone.is_primary = True
+                    verified_phone.save(update_fields=["is_primary", "updated_at"])
+
+                    if old_sms_endpoint:
+                        new_sms_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                            channel=CommsChannel.SMS,
+                            address=verified_phone.phone_number,
+                            defaults={"owner_agent": None},
+                        )
+                        PersistentAgent.objects.filter(
+                            user=request.user,
+                            preferred_contact_endpoint=old_sms_endpoint,
+                        ).update(preferred_contact_endpoint=new_sms_endpoint)
+
+                    if old_primary_phone:
+                        old_primary_phone.delete()
         except ValidationError as exc:
             message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to verify code."
             return JsonResponse({"error": message_text}, status=400)
 
-        return JsonResponse({"phone": serialize_phone(verified_phone)})
+        return JsonResponse(serialize_phone_state(request.user))
 
 
 class UserPhoneResendAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        phone = get_primary_phone(request.user)
+        phone = get_pending_phone(request.user) or get_primary_phone(request.user)
         if not phone:
             return JsonResponse({"error": "Add a phone number first."}, status=400)
         if phone.is_verified:
-            return JsonResponse({"phone": serialize_phone(phone)})
+            return JsonResponse(serialize_phone_state(request.user))
 
         remaining = get_phone_cooldown_remaining(phone)
         if remaining == 0:
@@ -3457,7 +3521,7 @@ class UserPhoneResendAPIView(ApiLoginRequiredMixin, View):
             phone.verification_sid = sid
             phone.save(update_fields=["last_verification_attempt", "verification_sid", "updated_at"])
 
-        return JsonResponse({"phone": serialize_phone(phone)})
+        return JsonResponse(serialize_phone_state(request.user))
 
 
 class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
@@ -3529,7 +3593,33 @@ class AgentSmsEnableAPIView(ApiLoginRequiredMixin, View):
         return JsonResponse({
             "agentSms": {"number": agent_sms_endpoint.address},
             "userPhone": serialize_phone(phone),
+            "pendingPhone": serialize_phone(get_pending_phone(request.user)),
             "preferredContactMethod": "sms",
+        })
+
+
+class AgentSmsDisableAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id)
+        preferred_endpoint = agent.preferred_contact_endpoint
+
+        if preferred_endpoint and preferred_endpoint.channel == CommsChannel.SMS:
+            address_belongs_to_user = UserPhoneNumber.objects.filter(
+                user=request.user,
+                phone_number__iexact=preferred_endpoint.address,
+            ).exists()
+            if address_belongs_to_user or preferred_endpoint.owner_agent_id is None:
+                agent.preferred_contact_endpoint = None
+                agent.save(update_fields=["preferred_contact_endpoint"])
+
+        agent_sms_endpoint = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
+        return JsonResponse({
+            "agentSms": {"number": agent_sms_endpoint.address} if agent_sms_endpoint else None,
+            "userPhone": serialize_phone(get_primary_phone(request.user)),
+            "pendingPhone": serialize_phone(get_pending_phone(request.user)),
+            "preferredContactMethod": None,
         })
 
 

@@ -14,6 +14,7 @@ import {
 
 import {
   addUserPhone,
+  cancelUserPhoneVerification,
   deleteUserPhone,
   resendEmailVerification,
   resendUserPhone,
@@ -155,24 +156,44 @@ function EmailVerificationSection({
 
 function PhoneSection({
   phone,
+  pendingPhone,
   onPhoneChange,
 }: {
   phone: PhoneState | null
-  onPhoneChange: (phone: PhoneState | null) => void
+  pendingPhone: PhoneState | null
+  onPhoneChange: (phone: PhoneState | null, pendingPhone: PhoneState | null) => void
 }) {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [phoneRegion, setPhoneRegion] = useState(DEFAULT_PHONE_REGION)
+  const [replacingPhone, setReplacingPhone] = useState(false)
   const [verificationCode, setVerificationCode] = useState('')
-  const [busyAction, setBusyAction] = useState<'add' | 'verify' | 'resend' | 'delete' | null>(null)
+  const [busyAction, setBusyAction] = useState<'add' | 'verify' | 'resend' | 'cancel' | 'delete' | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [pendingCooldown, setPendingCooldown] = useState(pendingPhone?.cooldownRemaining ?? 0)
   const verifiedAt = formatDateTime(phone?.verifiedAt ?? null)
   const phoneDisplay = phone?.number ? formatPhoneNational(phone.number, phoneRegion) : ''
-  const resendDisabled = Boolean(phone?.cooldownRemaining && phone.cooldownRemaining > 0)
+  const pendingDisplay = pendingPhone?.number ? formatPhoneNational(pendingPhone.number, phoneRegion) : ''
+  const resendDisabled = pendingCooldown > 0
+  const showAddForm = !pendingPhone && (!phone || replacingPhone)
+
+  useEffect(() => {
+    setPendingCooldown(pendingPhone?.cooldownRemaining ?? 0)
+  }, [pendingPhone?.cooldownRemaining])
+
+  useEffect(() => {
+    if (pendingCooldown <= 0) {
+      return undefined
+    }
+    const timer = window.setTimeout(() => {
+      setPendingCooldown((current) => Math.max(current - 1, 0))
+    }, 1000)
+    return () => window.clearTimeout(timer)
+  }, [pendingCooldown])
 
   const runPhoneAction = useCallback(async (
-    action: 'add' | 'verify' | 'resend' | 'delete',
-    fn: () => Promise<{ phone: PhoneState | null }>,
+    action: 'add' | 'verify' | 'resend' | 'cancel' | 'delete',
+    fn: () => Promise<{ phone: PhoneState | null; pendingPhone?: PhoneState | null }>,
     successMessage: string,
   ) => {
     setBusyAction(action)
@@ -180,13 +201,18 @@ function PhoneSection({
     setError(null)
     try {
       const result = await fn()
-      onPhoneChange(result.phone)
+      onPhoneChange(result.phone, result.pendingPhone ?? null)
       setMessage(successMessage)
       if (action === 'add') {
         setPhoneNumber('')
+        setReplacingPhone(false)
       }
       if (action === 'verify') {
         setVerificationCode('')
+      }
+      if (action === 'cancel') {
+        setVerificationCode('')
+        setReplacingPhone(false)
       }
     } catch (err) {
       setError(safeErrorMessage(err))
@@ -207,7 +233,7 @@ function PhoneSection({
         </div>
       </div>
 
-      {!phone ? (
+      {showAddForm ? (
         <form
           className="profile-screen__inline-form"
           onSubmit={(event) => {
@@ -244,7 +270,7 @@ function PhoneSection({
             {busyAction === 'add' ? 'Sending...' : 'Add Phone'}
           </button>
         </form>
-      ) : (
+      ) : phone ? (
         <div className="profile-screen__phone-current">
           <div>
             <p className="profile-screen__phone-number">{phoneDisplay}</p>
@@ -256,6 +282,19 @@ function PhoneSection({
           </div>
           <button
             type="button"
+            className="profile-screen__button profile-screen__button--secondary"
+            onClick={() => {
+              setReplacingPhone(true)
+              setPhoneNumber('')
+              setError(null)
+              setMessage(null)
+            }}
+            disabled={busyAction !== null || Boolean(pendingPhone)}
+          >
+            Replace
+          </button>
+          <button
+            type="button"
             className="profile-screen__icon-button profile-screen__icon-button--danger"
             onClick={() => void runPhoneAction('delete', deleteUserPhone, 'Phone number removed.')}
             disabled={busyAction === 'delete'}
@@ -264,9 +303,9 @@ function PhoneSection({
             <Trash2 className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-      )}
+      ) : null}
 
-      {phone && !phone.isVerified ? (
+      {pendingPhone ? (
         <form
           className="profile-screen__verify-form"
           onSubmit={(event) => {
@@ -279,6 +318,7 @@ function PhoneSection({
             void runPhoneAction('verify', () => verifyUserPhone(code), 'Phone number verified.')
           }}
         >
+          {pendingDisplay ? <p className="profile-screen__muted">Verifying {pendingDisplay}</p> : null}
           <label className="profile-screen__field">
             <span>Verification Code</span>
             <input
@@ -305,7 +345,15 @@ function PhoneSection({
               disabled={busyAction === 'resend' || resendDisabled}
             >
               <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-              {resendDisabled ? `Resend in ${phone.cooldownRemaining}s` : 'Resend'}
+              {resendDisabled ? `Resend in ${pendingCooldown}s` : 'Resend'}
+            </button>
+            <button
+              type="button"
+              className="profile-screen__button profile-screen__button--secondary"
+              onClick={() => void runPhoneAction('cancel', cancelUserPhoneVerification, 'Phone verification canceled.')}
+              disabled={busyAction === 'cancel' || pendingCooldown > 0}
+            >
+              {pendingCooldown > 0 ? `Cancel in ${pendingCooldown}s` : 'Cancel'}
             </button>
           </div>
         </form>
@@ -507,7 +555,8 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
 
       <PhoneSection
         phone={data.phone}
-        onPhoneChange={(phone) => setData((current) => ({ ...current, phone }))}
+        pendingPhone={data.pendingPhone ?? null}
+        onPhoneChange={(phone, pendingPhone) => setData((current) => ({ ...current, phone, pendingPhone }))}
       />
     </div>
   )
