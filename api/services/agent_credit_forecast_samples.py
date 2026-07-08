@@ -14,24 +14,39 @@ from api.services.agent_credit_forecasts import (
 )
 
 
+DEFAULT_BATCH_SIZE = 100
+
+
 SOURCE_QUERY = """
-WITH enabled_tools AS (
+WITH recent_agents AS (
     SELECT
-        agent_id,
-        array_agg(tool_full_name ORDER BY tool_full_name) AS tools
+        step.agent_id,
+        MAX(step.created_at) AS last_observed_at_source
+    FROM api_persistentagentstep step
+    JOIN api_persistentagent agent ON agent.id = step.agent_id
+    WHERE step.credits_cost IS NOT NULL
+      AND COALESCE(agent.planning_plan, agent.charter, '') <> ''
+    GROUP BY step.agent_id
+    ORDER BY MAX(step.created_at) DESC
+    LIMIT %s
+),
+enabled_tools AS (
+    SELECT
+        enabled.agent_id,
+        array_agg(enabled.tool_full_name ORDER BY enabled.tool_full_name) AS tools
     FROM api_persistentagentenabledtool
-    GROUP BY agent_id
+    JOIN recent_agents recent ON recent.agent_id = enabled.agent_id
+    GROUP BY enabled.agent_id
 ),
 charged_steps AS (
     SELECT
-        agent_id,
+        step.agent_id,
         COUNT(*) AS charged_step_count,
-        MIN(created_at) AS first_step_at,
-        MAX(created_at) AS last_step_at,
-        SUM(credits_cost) AS total_credits
-    FROM api_persistentagentstep
-    WHERE credits_cost IS NOT NULL
-    GROUP BY agent_id
+        SUM(step.credits_cost) AS total_credits
+    FROM api_persistentagentstep step
+    JOIN recent_agents recent ON recent.agent_id = step.agent_id
+    WHERE step.credits_cost IS NOT NULL
+    GROUP BY step.agent_id
 ),
 tool_calls AS (
     SELECT
@@ -39,6 +54,7 @@ tool_calls AS (
         COUNT(*) AS tool_call_count
     FROM api_persistentagenttoolcall tool_call
     JOIN api_persistentagentstep step ON step.id = tool_call.step_id
+    JOIN recent_agents recent ON recent.agent_id = step.agent_id
     GROUP BY step.agent_id
 )
 SELECT
@@ -52,7 +68,7 @@ SELECT
     tier.credit_multiplier AS tier_credit_multiplier,
     agent.created_at AS created_at_source,
     agent.planning_completed_at AS planning_completed_at_source,
-    charged.last_step_at AS last_observed_at_source,
+    recent.last_observed_at_source AS last_observed_at_source,
     COALESCE(enabled_tools.tools, ARRAY[]::varchar[]) AS enabled_tools,
     COALESCE(charged.charged_step_count, 0) AS charged_step_count,
     COALESCE(tool_calls.tool_call_count, 0) AS tool_call_count,
@@ -66,18 +82,16 @@ SELECT
     ), 0) AS first_run_credits,
     COALESCE(charged.total_credits, 0) AS observed_total_credits,
     GREATEST(
-        EXTRACT(EPOCH FROM (COALESCE(charged.last_step_at, agent.created_at) - agent.created_at)) / 86400.0,
+        EXTRACT(EPOCH FROM (COALESCE(recent.last_observed_at_source, agent.created_at) - agent.created_at)) / 86400.0,
         1.0
     ) AS observation_days
-FROM api_persistentagent agent
+FROM recent_agents recent
+JOIN api_persistentagent agent ON agent.id = recent.agent_id
 LEFT JOIN api_intelligencetier tier ON tier.id = agent.preferred_llm_tier_id
 LEFT JOIN enabled_tools ON enabled_tools.agent_id = agent.id
 LEFT JOIN charged_steps charged ON charged.agent_id = agent.id
 LEFT JOIN tool_calls ON tool_calls.agent_id = agent.id
-WHERE COALESCE(charged.charged_step_count, 0) > 0
-  AND COALESCE(agent.planning_plan, agent.charter, '') <> ''
-ORDER BY COALESCE(charged.last_step_at, agent.created_at) DESC
-LIMIT %s
+ORDER BY recent.last_observed_at_source DESC
 """
 
 
@@ -95,24 +109,31 @@ def seed_agent_credit_forecast_samples(
     generate_embeddings: bool = False,
     skip_existing_embeddings: bool = False,
     dry_run: bool = False,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> AgentCreditForecastSampleSeedResult:
-    rows = list(fetch_source_rows(max(1, int(limit))))
+    normalized_limit = max(1, int(limit))
+    normalized_batch_size = max(1, int(batch_size))
     if dry_run:
+        row_count = sum(1 for _row in fetch_source_rows(normalized_limit, batch_size=normalized_batch_size))
         return AgentCreditForecastSampleSeedResult(
-            upserted=len(rows),
+            upserted=row_count,
             embedded=0,
             skipped_embeddings=0,
             dry_run=True,
         )
 
-    samples: list[HistoricalAgentCostSample] = []
-    with transaction.atomic():
-        for row in rows:
-            samples.append(upsert_sample(row))
-
+    upserted = 0
     embedded = 0
     skipped_embeddings = 0
-    if generate_embeddings:
+
+    for rows in _batched(fetch_source_rows(normalized_limit, batch_size=normalized_batch_size), normalized_batch_size):
+        with transaction.atomic():
+            samples = [upsert_sample(row) for row in rows]
+
+        upserted += len(samples)
+        if not generate_embeddings:
+            continue
+
         for sample in samples:
             if skip_existing_embeddings and sample_has_current_embedding(sample):
                 skipped_embeddings += 1
@@ -123,18 +144,22 @@ def seed_agent_credit_forecast_samples(
                 embedded += 1
 
     return AgentCreditForecastSampleSeedResult(
-        upserted=len(samples),
+        upserted=upserted,
         embedded=embedded,
         skipped_embeddings=skipped_embeddings,
     )
 
 
-def fetch_source_rows(limit: int):
-    with connection.cursor() as cursor:
+def fetch_source_rows(limit: int, *, batch_size: int = DEFAULT_BATCH_SIZE):
+    with connection.chunked_cursor() as cursor:
         cursor.execute(SOURCE_QUERY, [limit])
         columns = [column[0] for column in cursor.description]
-        for row in cursor.fetchall():
-            yield dict(zip(columns, row))
+        while True:
+            rows = cursor.fetchmany(max(1, int(batch_size)))
+            if not rows:
+                break
+            for row in rows:
+                yield dict(zip(columns, row))
 
 
 def upsert_sample(row: dict) -> HistoricalAgentCostSample:
@@ -208,6 +233,17 @@ def sample_has_current_embedding(sample: HistoricalAgentCostSample) -> bool:
         )
         row = cursor.fetchone()
     return bool(row and row[0])
+
+
+def _batched(rows, batch_size: int):
+    batch = []
+    for row in rows:
+        batch.append(row)
+        if len(batch) >= batch_size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 def _decimal(value) -> Decimal | None:

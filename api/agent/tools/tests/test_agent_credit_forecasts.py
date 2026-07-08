@@ -278,6 +278,8 @@ class AgentCreditForecastIntegrationTests(TestCase):
             "seed_agent_credit_forecast_samples",
             "--limit",
             "1",
+            "--batch-size",
+            "1",
             "--generate-embeddings",
             verbosity=0,
         )
@@ -325,6 +327,8 @@ class AgentCreditForecastIntegrationTests(TestCase):
             "seed_agent_credit_forecast_samples",
             "--limit",
             "1",
+            "--batch-size",
+            "1",
             "--generate-embeddings",
             "--skip-existing-embeddings",
             verbosity=0,
@@ -335,6 +339,7 @@ class AgentCreditForecastIntegrationTests(TestCase):
 
     @override_settings(
         AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_LIMIT=123,
+        AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_BATCH_SIZE=25,
         AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_GENERATE_EMBEDDINGS=True,
         AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_SKIP_EXISTING_EMBEDDINGS=True,
     )
@@ -356,4 +361,5 @@ class AgentCreditForecastIntegrationTests(TestCase):
             limit=123,
             generate_embeddings=True,
             skip_existing_embeddings=True,
+            batch_size=25,
         )

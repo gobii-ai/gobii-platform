@@ -16,6 +16,7 @@ def refresh_agent_credit_forecast_samples_task(self) -> dict:
             limit=settings.AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_LIMIT,
             generate_embeddings=settings.AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_GENERATE_EMBEDDINGS,
             skip_existing_embeddings=settings.AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_SKIP_EXISTING_EMBEDDINGS,
+            batch_size=settings.AGENT_CREDIT_FORECAST_SAMPLE_REFRESH_BATCH_SIZE,
         )
         span.set_attribute("agent_credit_forecast_samples.upserted", result.upserted)
         span.set_attribute("agent_credit_forecast_samples.embedded", result.embedded)

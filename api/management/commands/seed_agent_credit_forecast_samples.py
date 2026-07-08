@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from api.services.agent_credit_forecast_samples import seed_agent_credit_forecast_samples
+from api.services.agent_credit_forecast_samples import DEFAULT_BATCH_SIZE, seed_agent_credit_forecast_samples
 
 
 class Command(BaseCommand):
@@ -8,6 +8,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--limit", type=int, default=5000)
+        parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
         parser.add_argument("--generate-embeddings", action="store_true")
         parser.add_argument("--skip-existing-embeddings", action="store_true")
         parser.add_argument("--dry-run", action="store_true")
@@ -18,6 +19,7 @@ class Command(BaseCommand):
             generate_embeddings=bool(options["generate_embeddings"]),
             skip_existing_embeddings=bool(options["skip_existing_embeddings"]),
             dry_run=bool(options["dry_run"]),
+            batch_size=max(1, int(options["batch_size"])),
         )
 
         if result.dry_run:
