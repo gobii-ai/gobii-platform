@@ -1,0 +1,399 @@
+{% extends "base.html" %}
+{% load static %}
+{% load cta_tags %}
+
+{% block title %}{{ solution_seo_title }}{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+{% include "solutions/_seo_meta.html" %}
+{% endblock %}
+
+{% block content %}
+<section class="relative isolate overflow-hidden bg-white">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 pb-14 pt-6 sm:px-8 sm:pb-16 sm:pt-8 lg:grid-cols-2 lg:items-start lg:gap-12 lg:px-12 lg:pb-20 lg:pt-10">
+    <div class="relative z-10 max-w-xl xl:max-w-2xl">
+      <nav class="flex items-center gap-2 text-sm text-slate-600" aria-label="Breadcrumb">
+        <a href="{% url 'pages:solutions' %}" class="font-medium text-indigo-700 hover:text-indigo-900">Solutions</a>
+        <i data-lucide="chevron-right" class="h-4 w-4 text-slate-400"></i>
+        <a href="{% url 'pages:solution' slug='sales' %}" class="font-medium text-indigo-700 hover:text-indigo-900">Sales</a>
+      </nav>
+
+      <p class="mt-8 text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Human-reviewed sales automation</p>
+      <h1 class="mt-5 max-w-xl text-4xl font-light leading-[1.08] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl xl:max-w-2xl">
+        AI sales agent for supervised pipeline work
+      </h1>
+      <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
+        A Gobii AI sales agent can find prospects, research accounts, enrich lead data, prepare outreach, and keep handoffs moving while your team stays in control of targeting, messaging, and relationship decisions.
+      </p>
+
+      <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+        <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="sales_ai_agent_hero" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-800 sm:w-auto">
+            {% if not user.is_authenticated or solution_spawn_requires_trial %}
+              {% cta_text "cta_sales_ai_agent_launch_btn_unauth" fallback="Start Free Trial" %}
+            {% else %}
+              {% cta_text "cta_sales_ai_agent_launch_btn_auth" fallback="Spawn Lead Hunter" %}
+            {% endif %}
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </form>
+        <a href="#sales-agent-workflows" class="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-6 py-3 text-sm font-semibold text-indigo-800 transition hover:border-indigo-300 hover:bg-indigo-50">
+          See workflows
+        </a>
+      </div>
+      {% if solution_trial_days > 0 %}
+        {% if not user.is_authenticated or solution_spawn_requires_trial %}
+          <p class="mt-3 text-sm font-medium text-slate-500">{{ solution_trial_days }}-day free trial.</p>
+        {% endif %}
+      {% endif %}
+      {% include "solutions/_crawlable_related_link.html" %}
+
+      <dl class="mt-12 grid max-w-2xl grid-cols-1 gap-4 sm:grid-cols-3">
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">Best fit</dt>
+          <dd class="mt-2 text-sm leading-6 text-slate-800">Repeatable research and qualification work</dd>
+        </div>
+        <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-800">Output</dt>
+          <dd class="mt-2 text-sm leading-6 text-slate-800">Source-linked leads, briefs, and exports</dd>
+        </div>
+        <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">Control</dt>
+          <dd class="mt-2 text-sm leading-6 text-slate-800">Seller review before outreach decisions</dd>
+        </div>
+      </dl>
+    </div>
+
+    <div class="relative hidden overflow-hidden rounded-bl-lg lg:block lg:min-h-[520px]" aria-hidden="true">
+      <img
+        src="{% static 'images/solutions/sales-hero.jpg' %}"
+        srcset="{% static 'images/solutions/sales-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/sales-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/sales-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/sales-hero-1920.jpg' %} 1920w,
+                {% static 'images/solutions/sales-hero.jpg' %} 2816w"
+        sizes="(max-width: 1279px) 42vw, 520px"
+        alt=""
+        class="h-full w-full object-cover object-[58%_center] lg:min-h-[520px]"
+        width="1200"
+        height="900"
+        loading="eager"
+        fetchpriority="high"
+        decoding="async"
+      >
+      <div class="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-white via-white/80 to-white/0"></div>
+      <div class="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-white via-white/45 to-white/0"></div>
+    </div>
+  </div>
+</section>
+
+<section id="sales-agent-workflows" class="bg-white py-16 scroll-mt-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">What it does</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Give the AI teammate a defined sales workflow</h2>
+        <p class="mt-5 text-base leading-7 text-slate-700">
+          The best AI sales agent work is concrete. Give Gobii the inputs, sources, output format, schedule, and review points, then let the agent handle the repetitive browser and data work around your pipeline.
+        </p>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <article class="rounded-lg border border-indigo-100 bg-white p-5">
+          <i data-lucide="search" class="h-5 w-5 text-indigo-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Prospecting</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Turn ICP criteria into recurring searches across approved sources, then collect accounts and contacts that appear to match.</p>
+        </article>
+        <article class="rounded-lg border border-emerald-100 bg-white p-5">
+          <i data-lucide="list-checks" class="h-5 w-5 text-emerald-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Qualification</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Compare each lead against target industries, roles, company size, geography, tech stack, funding signals, and disqualifiers.</p>
+        </article>
+        <article class="rounded-lg border border-sky-100 bg-white p-5">
+          <i data-lucide="building-2" class="h-5 w-5 text-sky-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Account research</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Prepare account briefs with source links, company context, recent signals, decision-maker notes, and why the prospect may matter.</p>
+        </article>
+        <article class="rounded-lg border border-amber-100 bg-white p-5">
+          <i data-lucide="send" class="h-5 w-5 text-amber-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Outreach prep</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Draft talking points and first-pass messages that sellers can edit, approve, reject, or use as input for their sales engagement tool.</p>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Buying guide</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Which type of AI sales agent should you buy?</h2>
+        <p class="mt-5 text-base leading-7 text-slate-700">
+          The label gets used for very different products. Match the agent to the job: CRM upkeep, outbound volume, calls, or source-linked research that a seller can review before anything reaches a buyer.
+        </p>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="database" class="h-5 w-5 text-indigo-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">CRM-native agents</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Best for updating records, summarizing activity, and scoring accounts inside Salesforce, HubSpot, or another CRM. Gobii can prepare the research and fields before that handoff.</p>
+        </article>
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="megaphone" class="h-5 w-5 text-emerald-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Outbound BDR agents</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Best for high-volume prospecting and sequencing. Gobii fits when you want review-ready lead research and message angles, not unreviewed auto-sending.</p>
+        </article>
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="phone-call" class="h-5 w-5 text-sky-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Voice and calling agents</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Best for phone qualification, call routing, or meeting booking. This Gobii workflow is not an autonomous caller or WhatsApp sender; it prepares briefs and handoff data for approved tools.</p>
+        </article>
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="workflow" class="h-5 w-5 text-amber-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Research workflow agents</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Best for browsing approved sources, enriching leads, filling sheets, triggering webhooks, and producing source-linked account briefs. This is where Lead Hunter is designed to start.</p>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-indigo-950 py-16 text-white">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Workflow ownership</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">Use an AI sales employee where repetition slows the team down</h2>
+        <p class="mt-5 text-base leading-7 text-indigo-100">
+          Gobii is not positioned as a black-box replacement for sales judgment. It is a persistent AI teammate that handles the research and preparation around outbound work so sellers can spend more time on the parts that need context and trust.
+        </p>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-lg border border-white/15 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">Inputs</span>
+          <p class="mt-3 text-sm leading-6 text-indigo-100">ICP criteria, priority accounts, connected sheets, source lists, CRM exports, market notes, and past lead feedback.</p>
+        </div>
+        <div class="rounded-lg border border-white/15 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">Actions</span>
+          <p class="mt-3 text-sm leading-6 text-indigo-100">Search sources, inspect pages, enrich records, compare fit, summarize findings, and prepare review-ready outputs.</p>
+        </div>
+        <div class="rounded-lg border border-white/15 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">Outputs</span>
+          <p class="mt-3 text-sm leading-6 text-indigo-100">Lead lists, account briefs, source URLs, fit notes, enrichment fields, outreach drafts, and handoff summaries.</p>
+        </div>
+        <div class="rounded-lg border border-white/15 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-violet-300">Review</span>
+          <p class="mt-3 text-sm leading-6 text-indigo-100">Sales or RevOps checks fit, verifies sources, edits messaging, and decides which prospects should enter active outreach.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Where it fits</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Automate the middle of sales research, not the human relationship</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        Sales teams often have tools for databases, CRM, sequencing, and calls. The slow part is the connective work between those systems: finding context, checking fit, cleaning records, and keeping handoffs current. That is where an AI sales agent can be useful.
+      </p>
+
+      <div class="mt-8 grid gap-4 sm:grid-cols-2">
+        <div class="rounded-lg border border-slate-200 p-4">
+          <i data-lucide="database" class="h-5 w-5 text-slate-700"></i>
+          <h3 class="mt-3 text-sm font-semibold text-slate-950">CRM handoff</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">Prepare reviewed fields, fit notes, source URLs, and account context for Salesforce, HubSpot, or CRM-ready imports.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 p-4">
+          <i data-lucide="file-spreadsheet" class="h-5 w-5 text-slate-700"></i>
+          <h3 class="mt-3 text-sm font-semibold text-slate-950">Sheets and CSV</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">Write structured batches to Google Sheets or CSV with reviewer status, disqualifiers, enrichment fields, and links back to sources.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 p-4">
+          <i data-lucide="webhook" class="h-5 w-5 text-slate-700"></i>
+          <h3 class="mt-3 text-sm font-semibold text-slate-950">Webhooks</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">Trigger work from form fills, CRM lists, meeting events, or scheduled checks, then send approved results downstream.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 p-4">
+          <i data-lucide="send" class="h-5 w-5 text-slate-700"></i>
+          <h3 class="mt-3 text-sm font-semibold text-slate-950">Sales engagement</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">Prepare talking points and drafts for Outreach, Salesloft, Apollo, or similar tools while keeping send decisions with the team.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-indigo-100 bg-indigo-50 p-6">
+      <h3 class="text-xl font-semibold text-slate-950">When not to use one</h3>
+      <ul class="mt-5 space-y-4 text-sm leading-6 text-slate-700">
+        <li class="flex gap-3">
+          <i data-lucide="x-circle" class="mt-0.5 h-5 w-5 flex-none text-rose-600"></i>
+          <span>Do not use an AI sales agent for unreviewed outreach when accuracy, consent, or brand voice needs a human check.</span>
+        </li>
+        <li class="flex gap-3">
+          <i data-lucide="x-circle" class="mt-0.5 h-5 w-5 flex-none text-rose-600"></i>
+          <span>Do not delegate relationship calls, negotiation, sensitive account strategy, or compliance decisions to an unattended workflow.</span>
+        </li>
+        <li class="flex gap-3">
+          <i data-lucide="x-circle" class="mt-0.5 h-5 w-5 flex-none text-rose-600"></i>
+          <span>Do not start with vague goals. The agent needs clear inputs, allowed sources, quality criteria, and output expectations.</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Start with Lead Hunter</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Deploy a focused AI agent before building a broad sales program</h2>
+        <p class="mt-5 text-base leading-7 text-slate-700">
+          Lead Hunter is the closest Gobii starting point for this page: an always-on prospecting partner that searches approved sources, qualifies leads against your ICP, and prepares review-ready batches.
+        </p>
+        <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_lead_hunter" data-analytics-placement="lead_hunter" data-analytics-intent="spawn_agent">
+            {% csrf_token %}
+            <input type="hidden" name="source_page" value="sales_ai_agent_lead_hunter" />
+            <input type="hidden" name="trial_onboarding" value="1" />
+            <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+            <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-800 sm:w-auto">
+              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Lead Hunter{% endif %}
+              <i data-lucide="arrow-right" class="h-4 w-4"></i>
+            </button>
+          </form>
+          <a href="{% url 'pages:pretrained_worker_detail' slug='lead-hunter' %}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-6 py-3 text-sm font-semibold text-indigo-800 transition hover:border-indigo-300 hover:bg-indigo-50">
+            View template
+          </a>
+        </div>
+        <figure class="mt-8 overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <img
+            src="{% static 'images/blog/newsletters/newsletter-2026-01-20-watch-your-agents-work-in-real-time-hero.png' %}"
+            alt="Gobii agent workspace showing a completed agent update and always-on status"
+            class="w-full object-cover"
+            width="854"
+            height="749"
+            loading="lazy"
+            decoding="async"
+          >
+          <figcaption class="px-4 pb-4 pt-3 text-xs leading-5 text-slate-600">
+            Real Gobii workspace screenshot: an agent posts a structured update and keeps working in the background. Sales workflows use the same reviewed-output pattern.
+          </figcaption>
+        </figure>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-5 sm:col-span-2">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">Example output</span>
+          <h3 class="mt-3 text-lg font-semibold text-slate-950">Lead Hunter output example</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">A reviewed batch can include source-linked account context like this example, not a live customer record.</p>
+          <dl class="mt-5 grid gap-4 text-sm sm:grid-cols-2">
+            <div>
+              <dt class="font-semibold text-slate-950">Account</dt>
+              <dd class="mt-1 leading-6 text-slate-700">Mid-market HR software vendor</dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-slate-950">Fit signal</dt>
+              <dd class="mt-1 leading-6 text-slate-700">Hiring RevOps and expanding outbound capacity</dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-slate-950">Sources</dt>
+              <dd class="mt-1 leading-6 text-slate-700">Careers page, product page, recent funding or news link</dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-slate-950">Handoff</dt>
+              <dd class="mt-1 leading-6 text-slate-700">ICP notes, buyer hypothesis, CRM-ready fields, and an outreach angle</dd>
+            </div>
+          </dl>
+          <p class="mt-5 text-sm font-medium leading-6 text-emerald-900">
+            Sample batch metric: 25 qualified prospects with source links prepared for morning review.
+          </p>
+        </div>
+        <div class="rounded-lg border border-slate-200 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Step 1</span>
+          <h3 class="mt-3 text-lg font-semibold text-slate-950">Define the ICP</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Give the agent industries, titles, geography, company size, tech stack, buying signals, exclusions, and examples of good leads.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Step 2</span>
+          <h3 class="mt-3 text-lg font-semibold text-slate-950">Choose sources</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Limit the workflow to approved websites, sheets, company lists, databases, CRM exports, or webhook-fed inputs.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Step 3</span>
+          <h3 class="mt-3 text-lg font-semibold text-slate-950">Set review rules</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Decide who reviews lead quality, what fields matter, and which outputs are allowed to move downstream.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Step 4</span>
+          <h3 class="mt-3 text-lg font-semibold text-slate-950">Tune the workflow</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Use seller feedback to narrow sources, update disqualifiers, change cadence, and improve the handoff format.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.8fr_1.2fr] lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Questions buyers ask</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">AI sales agent FAQ</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        These are the practical questions to answer before putting an AI sales agent into a live pipeline workflow.
+      </p>
+      <a href="{% url 'proprietary:pricing' %}" class="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-indigo-700 hover:text-indigo-900">
+        View Gobii pricing
+        <i data-lucide="arrow-right" class="h-4 w-4"></i>
+      </a>
+    </div>
+
+    <div class="space-y-3">
+      {% for item in solution_faq_items %}
+        <details class="group rounded-lg border border-slate-200 bg-white p-5"{% if forloop.first %} open{% endif %}>
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-6">
+            <span class="text-base font-semibold text-slate-950">{{ item.question }}</span>
+            <i data-lucide="plus" class="mt-0.5 h-5 w-5 flex-none text-slate-500 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">{{ item.answer }}</p>
+        </details>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="bg-indigo-950 py-16 text-white">
+  <div class="mx-auto max-w-4xl px-6 text-center sm:px-8 lg:px-12">
+    <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Ready to test the workflow?</p>
+    <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">Start with a reviewed prospecting agent</h2>
+    <p class="mx-auto mt-5 max-w-2xl text-base leading-7 text-indigo-100">
+      Give Gobii a sales workflow with clear criteria, approved sources, and a human review point. The agent can prepare the pipeline work; your team decides what moves forward.
+    </p>
+    <div class="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+      <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_final" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
+        {% csrf_token %}
+        <input type="hidden" name="source_page" value="sales_ai_agent_final" />
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+        <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-6 py-3 text-sm font-semibold text-indigo-950 transition hover:bg-indigo-50 sm:w-auto">
+          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Lead Hunter{% endif %}
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </button>
+      </form>
+      <a href="{% url 'pages:solution' slug='sales' %}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-white/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
+        Explore sales solution
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}
