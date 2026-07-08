@@ -136,10 +136,9 @@ SMS_RELEASE_CANDIDATES_PREFILL_SOURCE = "release_candidates"
 
 
 def register_simple_admin(model, **attrs):
-    admin.site.register(
-        model,
-        type(f"{model.__name__}Admin", (admin.ModelAdmin,), {"__module__": __name__, **attrs}),
-    )
+    admin_class = type(f"{model.__name__}Admin", (admin.ModelAdmin,), {"__module__": __name__, **attrs})
+    admin.site.register(model, admin_class)
+    return admin_class
 
 
 for _model, _attrs in (
@@ -165,8 +164,10 @@ for _model, _attrs in (
     (AgentComputeSession, {"list_display": ("agent", "state", "pod_name", "namespace", "proxy_server", "workspace_snapshot", "last_activity_at", "lease_expires_at", "last_filespace_sync_at", "updated_at"), "list_filter": ("state", "namespace", "proxy_server", "created_at"), "search_fields": ("agent__name", "agent__user__email", "agent__organization__name", "agent__id", "pod_name", "namespace"), "raw_id_fields": ("agent", "proxy_server", "workspace_snapshot"), "readonly_fields": ("created_at", "updated_at"), "list_select_related": ("agent", "proxy_server", "workspace_snapshot")}),
     (ComputeSnapshot, {"list_display": ("id", "agent", "status", "k8s_snapshot_name", "size_bytes", "created_at"), "list_filter": ("status", "created_at"), "search_fields": ("id", "agent__name", "agent__user__email", "k8s_snapshot_name"), "raw_id_fields": ("agent",), "readonly_fields": ("created_at",), "list_select_related": ("agent",)}),
 ):
-    register_simple_admin(_model, **_attrs)
-del _model, _attrs
+    _admin_class = register_simple_admin(_model, **_attrs)
+    if _model is OrganizationBilling:
+        OrganizationBillingAdmin = _admin_class
+del _model, _attrs, _admin_class
 
 
 # 2.10.1 has removed some fields we still want to see, but their own admin still references them

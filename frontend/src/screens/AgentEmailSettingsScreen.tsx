@@ -117,7 +117,7 @@ function MailTextField({
       <input
         type={type}
         min={min}
-        value={String(draft[field])}
+        value={draft[field] ?? ''}
         onChange={(event) => {
           const value = event.currentTarget.value
           updateDraft((current) => ({ ...current, [field]: value }))
@@ -148,7 +148,7 @@ function MailSelectField({
     <div>
       <label className="text-sm font-semibold text-slate-700">{label}</label>
       <select
-        value={String(draft[field])}
+        value={draft[field] ?? ''}
         onChange={(event) => {
           const value = event.currentTarget.value
           updateDraft((current) => ({ ...current, [field]: value }))
