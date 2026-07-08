@@ -20,12 +20,10 @@ from api.agent.core.llm_utils import run_completion
 from api.agent.core.provider_hints import provider_hint_from_model
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.files.attachment_helpers import (
-    build_signed_filespace_download_url,
     load_signed_filespace_download_payload,
 )
-from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
-from api.agent.tools.agent_variables import set_agent_variable
-from api.agent.tools.file_export_helpers import resolve_export_target
+from api.agent.files.filespace_service import get_or_create_default_filespace
+from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 
 logger = logging.getLogger(__name__)
 
@@ -555,33 +553,19 @@ def execute_create_image(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         }
 
     extension = _extension_for_mime(mime_type)
-    result = write_bytes_to_dir(
+    return write_agent_export(
         agent=agent,
         content_bytes=image_bytes,
         extension=extension,
         mime_type=mime_type,
         path=path,
         overwrite=overwrite,
+        size_label="Image",
+        inline=lambda _var_ref, signed_url: f"![Generated image]({signed_url})",
+        inline_html=lambda _var_ref, signed_url: f"<img src='{signed_url}' alt='Generated image' />",
+        extra={
+            "endpoint_key": selected_config.endpoint_key,
+            "model": selected_config.model,
+            "source_image_count": len(source_image_data_uris),
+        },
     )
-    if result.get("status") != "ok":
-        return result
-
-    file_path = result.get("path")
-    node_id = result.get("node_id")
-    signed_url = build_signed_filespace_download_url(
-        agent_id=str(agent.id),
-        node_id=node_id,
-    )
-    set_agent_variable(file_path, signed_url)
-
-    var_ref = f"$[{file_path}]"
-    return {
-        "status": "ok",
-        "file": var_ref,
-        "inline": f"![Generated image]({signed_url})",
-        "inline_html": f"<img src='{signed_url}' alt='Generated image' />",
-        "attach": var_ref,
-        "endpoint_key": selected_config.endpoint_key,
-        "model": selected_config.model,
-        "source_image_count": len(source_image_data_uris),
-    }

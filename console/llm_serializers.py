@@ -1,7 +1,5 @@
 """Serialization helpers for the console LLM configuration UI."""
 
-from __future__ import annotations
-
 import os
 from typing import Any
 
@@ -169,6 +167,73 @@ def _serialize_weighted_endpoint_reference(endpoint, tier_endpoint) -> dict[str,
     }
 
 
+def _serialize_intelligence_tier(tier: IntelligenceTier) -> dict[str, Any]:
+    return {
+        "key": tier.key,
+        "display_name": tier.display_name,
+        "rank": tier.rank,
+        "credit_multiplier": str(tier.credit_multiplier),
+    }
+
+
+def _serialize_persistent_tier_endpoint(tier_endpoint) -> dict[str, Any]:
+    endpoint = tier_endpoint.endpoint
+    return {
+        "id": str(tier_endpoint.id),
+        "endpoint_id": str(endpoint.id),
+        "label": f"{endpoint.provider.display_name} · {endpoint.litellm_model}",
+        "weight": float(tier_endpoint.weight),
+        "endpoint_key": endpoint.key,
+        "reasoning_effort_override": tier_endpoint.reasoning_effort_override,
+        "supports_reasoning": endpoint.supports_reasoning,
+        "endpoint_reasoning_effort": endpoint.reasoning_effort,
+    }
+
+
+def _serialize_browser_tier_endpoint(tier_endpoint) -> dict[str, Any]:
+    endpoint = tier_endpoint.endpoint
+    extraction = tier_endpoint.extraction_endpoint
+    return {
+        "id": str(tier_endpoint.id),
+        "endpoint_id": str(endpoint.id),
+        "label": f"{endpoint.provider.display_name} · {endpoint.browser_model}",
+        "weight": float(tier_endpoint.weight),
+        "endpoint_key": endpoint.key,
+        "extraction_endpoint_id": str(extraction.id) if extraction else None,
+        "extraction_endpoint_key": extraction.key if extraction else None,
+        "extraction_label": (
+            f"{extraction.provider.display_name} · {extraction.browser_model}"
+            if extraction
+            else None
+        ),
+    }
+
+
+def _serialize_intelligence_tiers(tiers, endpoint_serializer) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": str(tier.id),
+            "order": tier.order,
+            "description": tier.description,
+            "intelligence_tier": _serialize_intelligence_tier(tier.intelligence_tier),
+            "endpoints": [endpoint_serializer(te) for te in tier.tier_endpoints.all()],
+        }
+        for tier in tiers
+    ]
+
+
+def _serialize_profile_endpoint(endpoint) -> dict[str, Any] | None:
+    if not endpoint:
+        return None
+    provider_name = endpoint.provider.display_name if endpoint.provider else "Unlinked"
+    return {
+        "endpoint_id": str(endpoint.id),
+        "endpoint_key": endpoint.key,
+        "label": f"{provider_name} · {endpoint.litellm_model}",
+        "model": endpoint.litellm_model,
+    }
+
+
 def _serialize_weighted_tier_payload(tiers) -> list[dict[str, Any]]:
     payload: list[dict[str, Any]] = []
     for tier in tiers:
@@ -297,44 +362,13 @@ def build_llm_overview() -> dict[str, Any]:
 
     persistent_payload: list[dict[str, Any]] = []
     for token_range in persistent_ranges:
-        tiers_payload: list[dict[str, Any]] = []
-        for tier in token_range.tiers.all():
-            tier_endpoints = []
-            for te in tier.tier_endpoints.all():
-                endpoint = te.endpoint
-                tier_endpoints.append(
-                    {
-                        "id": str(te.id),
-                        "endpoint_id": str(endpoint.id),
-                        "label": f"{endpoint.provider.display_name} · {endpoint.litellm_model}",
-                        "weight": float(te.weight),
-                        "endpoint_key": endpoint.key,
-                        "reasoning_effort_override": te.reasoning_effort_override,
-                        "supports_reasoning": endpoint.supports_reasoning,
-                        "endpoint_reasoning_effort": endpoint.reasoning_effort,
-                    }
-                )
-            tiers_payload.append(
-                {
-                    "id": str(tier.id),
-                    "order": tier.order,
-                    "description": tier.description,
-                    "intelligence_tier": {
-                        "key": tier.intelligence_tier.key,
-                        "display_name": tier.intelligence_tier.display_name,
-                        "rank": tier.intelligence_tier.rank,
-                        "credit_multiplier": str(tier.intelligence_tier.credit_multiplier),
-                    },
-                    "endpoints": tier_endpoints,
-                }
-            )
         persistent_payload.append(
             {
                 "id": str(token_range.id),
                 "name": token_range.name,
                 "min_tokens": token_range.min_tokens,
                 "max_tokens": token_range.max_tokens,
-                "tiers": tiers_payload,
+                "tiers": _serialize_intelligence_tiers(token_range.tiers.all(), _serialize_persistent_tier_endpoint),
             }
         )
 
@@ -362,46 +396,10 @@ def build_llm_overview() -> dict[str, Any]:
 
     browser_payload: dict[str, Any] | None = None
     if policy:
-        tiers_payload: list[dict[str, Any]] = []
-        for tier in policy.tiers.all():
-            tier_endpoints = []
-            for te in tier.tier_endpoints.all():
-                endpoint = te.endpoint
-                extraction = te.extraction_endpoint
-                tier_endpoints.append(
-                    {
-                        "id": str(te.id),
-                        "endpoint_id": str(endpoint.id),
-                        "label": f"{endpoint.provider.display_name} · {endpoint.browser_model}",
-                        "weight": float(te.weight),
-                        "endpoint_key": endpoint.key,
-                        "extraction_endpoint_id": str(extraction.id) if extraction else None,
-                        "extraction_endpoint_key": extraction.key if extraction else None,
-                        "extraction_label": (
-                            f"{extraction.provider.display_name} · {extraction.browser_model}"
-                            if extraction
-                            else None
-                        ),
-                    }
-                )
-            tiers_payload.append(
-                {
-                    "id": str(tier.id),
-                    "order": tier.order,
-                    "description": tier.description,
-                    "intelligence_tier": {
-                        "key": tier.intelligence_tier.key,
-                        "display_name": tier.intelligence_tier.display_name,
-                        "rank": tier.intelligence_tier.rank,
-                        "credit_multiplier": str(tier.intelligence_tier.credit_multiplier),
-                    },
-                    "endpoints": tier_endpoints,
-                }
-            )
         browser_payload = {
             "id": str(policy.id),
             "name": policy.name,
-            "tiers": tiers_payload,
+            "tiers": _serialize_intelligence_tiers(policy.tiers.all(), _serialize_browser_tier_endpoint),
         }
 
     embedding_tiers = EmbeddingsLLMTier.objects.prefetch_related(
@@ -449,15 +447,7 @@ def build_llm_overview() -> dict[str, Any]:
         "browser_endpoints": BrowserModelEndpoint.objects.filter(enabled=True).count(),
         "premium_persistent_tiers": PersistentLLMTier.objects.filter(intelligence_tier__key="premium").count(),
     }
-    intelligence_tiers = [
-        {
-            "key": tier.key,
-            "display_name": tier.display_name,
-            "rank": tier.rank,
-            "credit_multiplier": str(tier.credit_multiplier),
-        }
-        for tier in IntelligenceTier.objects.order_by("rank")
-    ]
+    intelligence_tiers = [_serialize_intelligence_tier(tier) for tier in IntelligenceTier.objects.order_by("rank")]
 
     return {
         "stats": stats,
@@ -510,114 +500,19 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
     Serialize a full routing profile with all nested config.
     Expects the profile to have prefetched related objects.
     """
-    # Persistent config: token ranges -> tiers -> endpoints
     persistent_ranges: list[dict[str, Any]] = []
     for token_range in profile.persistent_token_ranges.all():
-        tiers_payload: list[dict[str, Any]] = []
-        for tier in token_range.tiers.all():
-            tier_endpoints = []
-            for te in tier.tier_endpoints.all():
-                endpoint = te.endpoint
-                tier_endpoints.append({
-                    "id": str(te.id),
-                    "endpoint_id": str(endpoint.id),
-                    "label": f"{endpoint.provider.display_name} · {endpoint.litellm_model}",
-                    "weight": float(te.weight),
-                    "endpoint_key": endpoint.key,
-                    "reasoning_effort_override": te.reasoning_effort_override,
-                    "supports_reasoning": endpoint.supports_reasoning,
-                    "endpoint_reasoning_effort": endpoint.reasoning_effort,
-                })
-            tiers_payload.append({
-                "id": str(tier.id),
-                "order": tier.order,
-                "description": tier.description,
-                "intelligence_tier": {
-                    "key": tier.intelligence_tier.key,
-                    "display_name": tier.intelligence_tier.display_name,
-                    "rank": tier.intelligence_tier.rank,
-                    "credit_multiplier": str(tier.intelligence_tier.credit_multiplier),
-                },
-                "endpoints": tier_endpoints,
-            })
         persistent_ranges.append({
             "id": str(token_range.id),
             "name": token_range.name,
             "min_tokens": token_range.min_tokens,
             "max_tokens": token_range.max_tokens,
-            "tiers": tiers_payload,
+            "tiers": _serialize_intelligence_tiers(token_range.tiers.all(), _serialize_persistent_tier_endpoint),
         })
 
-    # Browser config: tiers -> endpoints
-    browser_tiers: list[dict[str, Any]] = []
-    for tier in profile.browser_tiers.all():
-        tier_endpoints = []
-        for te in tier.tier_endpoints.all():
-            endpoint = te.endpoint
-            extraction = te.extraction_endpoint
-            tier_endpoints.append({
-                "id": str(te.id),
-                "endpoint_id": str(endpoint.id),
-                "label": f"{endpoint.provider.display_name} · {endpoint.browser_model}",
-                "weight": float(te.weight),
-                "endpoint_key": endpoint.key,
-                "extraction_endpoint_id": str(extraction.id) if extraction else None,
-                "extraction_endpoint_key": extraction.key if extraction else None,
-                "extraction_label": (
-                    f"{extraction.provider.display_name} · {extraction.browser_model}"
-                    if extraction
-                    else None
-                ),
-            })
-        browser_tiers.append({
-            "id": str(tier.id),
-            "order": tier.order,
-            "description": tier.description,
-            "intelligence_tier": {
-                "key": tier.intelligence_tier.key,
-                "display_name": tier.intelligence_tier.display_name,
-                "rank": tier.intelligence_tier.rank,
-                "credit_multiplier": str(tier.intelligence_tier.credit_multiplier),
-            },
-            "endpoints": tier_endpoints,
-        })
+    browser_tiers = _serialize_intelligence_tiers(profile.browser_tiers.all(), _serialize_browser_tier_endpoint)
 
-    # Embeddings config: tiers -> endpoints
     embedding_tiers = _serialize_weighted_tier_payload(profile.embeddings_tiers.all())
-
-    # Eval judge endpoint info
-    eval_judge_endpoint = None
-    if profile.eval_judge_endpoint:
-        ep = profile.eval_judge_endpoint
-        provider_name = ep.provider.display_name if ep.provider else "Unlinked"
-        eval_judge_endpoint = {
-            "endpoint_id": str(ep.id),
-            "endpoint_key": ep.key,
-            "label": f"{provider_name} · {ep.litellm_model}",
-            "model": ep.litellm_model,
-        }
-
-    summarization_endpoint = None
-    if profile.summarization_endpoint:
-        ep = profile.summarization_endpoint
-        provider_name = ep.provider.display_name if ep.provider else "Unlinked"
-        summarization_endpoint = {
-            "endpoint_id": str(ep.id),
-            "endpoint_key": ep.key,
-            "label": f"{provider_name} · {ep.litellm_model}",
-            "model": ep.litellm_model,
-        }
-
-    agent_judge_endpoint = None
-    if profile.agent_judge_endpoint:
-        ep = profile.agent_judge_endpoint
-        provider_name = ep.provider.display_name if ep.provider else "Unlinked"
-        agent_judge_endpoint = {
-            "endpoint_id": str(ep.id),
-            "endpoint_key": ep.key,
-            "label": f"{provider_name} · {ep.litellm_model}",
-            "model": ep.litellm_model,
-        }
 
     return {
         "id": str(profile.id),
@@ -629,9 +524,9 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
         "created_at": profile.created_at.isoformat() if profile.created_at else None,
         "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
         "cloned_from_id": str(profile.cloned_from_id) if profile.cloned_from_id else None,
-        "eval_judge_endpoint": eval_judge_endpoint,
-        "summarization_endpoint": summarization_endpoint,
-        "agent_judge_endpoint": agent_judge_endpoint,
+        "eval_judge_endpoint": _serialize_profile_endpoint(profile.eval_judge_endpoint),
+        "summarization_endpoint": _serialize_profile_endpoint(profile.summarization_endpoint),
+        "agent_judge_endpoint": _serialize_profile_endpoint(profile.agent_judge_endpoint),
         "persistent": {"ranges": persistent_ranges},
         "browser": {"tiers": browser_tiers},
         "embeddings": {"tiers": embedding_tiers},
@@ -651,7 +546,6 @@ def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
     """
     Fetch a routing profile with all nested relations prefetched for serialization.
     """
-    # Prefetch for persistent: token_ranges -> tiers -> tier_endpoints -> endpoint.provider
     persistent_tier_endpoint_prefetch = Prefetch(
         "tier_endpoints",
         queryset=ProfilePersistentTierEndpoint.objects.select_related("endpoint__provider").order_by("endpoint__litellm_model"),
@@ -667,7 +561,6 @@ def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
         queryset=ProfileTokenRange.objects.prefetch_related(persistent_tier_prefetch).order_by("min_tokens"),
     )
 
-    # Prefetch for browser: browser_tiers -> tier_endpoints -> endpoint.provider
     browser_tier_endpoint_prefetch = Prefetch(
         "tier_endpoints",
         queryset=ProfileBrowserTierEndpoint.objects.select_related(
@@ -682,7 +575,6 @@ def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
         ).order_by("intelligence_tier__rank", "order"),
     )
 
-    # Prefetch for embeddings: embeddings_tiers -> tier_endpoints -> endpoint.provider
     embedding_tier_endpoint_prefetch = Prefetch(
         "tier_endpoints",
         queryset=ProfileEmbeddingsTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),

@@ -134,6 +134,41 @@ import zstandard as zstd
 SMS_RELEASE_CANDIDATES_SESSION_KEY = "admin_sms_release_candidates_phone_numbers"
 SMS_RELEASE_CANDIDATES_PREFILL_SOURCE = "release_candidates"
 
+
+def register_simple_admin(model, **attrs):
+    admin.site.register(
+        model,
+        type(f"{model.__name__}Admin", (admin.ModelAdmin,), {"__module__": __name__, **attrs}),
+    )
+
+
+for _model, _attrs in (
+    (UserQuota, {"list_display": ("user", "agent_limit", "max_intelligence_tier"), "search_fields": ("user__email", "user__id")}),
+    (UserEmail, {"list_display": ("name", "event_name", "is_active", "updated_at"), "list_filter": ("is_active",), "search_fields": ("name", "event_name"), "readonly_fields": ("created_at", "updated_at"), "fields": ("name", "event_name", "is_active", "created_at", "updated_at")}),
+    (TrialPromoAllowedEmail, {"list_display": ("normalized_email", "promo", "created_at"), "list_filter": ("promo", "created_at"), "search_fields": ("normalized_email", "promo__name", "promo__code_label"), "readonly_fields": ("created_at",)}),
+    (Plan, {"list_display": ("slug", "is_org", "is_active", "created_at", "updated_at"), "search_fields": ("slug",), "list_filter": ("is_org", "is_active"), "readonly_fields": ("created_at", "updated_at"), "fields": ("slug", "is_org", "is_active", "created_at", "updated_at")}),
+    (PlanVersion, {"list_display": ("plan", "version_code", "legacy_plan_code", "is_active_for_new_subs", "display_name", "effective_start_at", "effective_end_at", "updated_at"), "search_fields": ("plan__slug", "version_code", "legacy_plan_code", "display_name"), "list_filter": ("plan", "is_active_for_new_subs"), "list_select_related": ("plan",), "autocomplete_fields": ("plan",), "readonly_fields": ("created_at", "updated_at"), "fieldsets": ((None, {"fields": ("plan", "version_code", "legacy_plan_code", "is_active_for_new_subs")}), ("Marketing", {"fields": ("display_name", "tagline", "description", "marketing_features")}), ("Availability", {"fields": ("effective_start_at", "effective_end_at")}), ("Metadata", {"fields": ("created_at", "updated_at")}))}),
+    (PlanVersionPrice, {"list_display": ("plan_version", "kind", "billing_interval", "price_id", "product_id", "updated_at"), "search_fields": ("price_id", "product_id", "plan_version__plan__slug", "plan_version__version_code", "plan_version__legacy_plan_code"), "list_filter": ("kind", "billing_interval"), "list_select_related": ("plan_version",), "autocomplete_fields": ("plan_version",), "readonly_fields": ("created_at", "updated_at"), "fields": ("plan_version", "kind", "billing_interval", "price_id", "product_id", "created_at", "updated_at")}),
+    (EntitlementDefinition, {"list_display": ("key", "display_name", "value_type", "unit", "updated_at"), "search_fields": ("key", "display_name", "description"), "list_filter": ("value_type",), "readonly_fields": ("created_at", "updated_at"), "fields": ("key", "display_name", "description", "value_type", "unit", "created_at", "updated_at")}),
+    (ToolCreditCost, {"list_display": ("tool_name", "credit_cost", "updated_at"), "search_fields": ("tool_name",), "list_filter": ("updated_at",), "readonly_fields": ("created_at", "updated_at"), "fieldsets": ((None, {"fields": ("tool_name", "credit_cost")}), ("Metadata", {"fields": ("created_at", "updated_at")}))}),
+    (BrowserUseAgentTaskStep, {"list_display": ("id", "task", "step_number", "is_result", "created_at"), "list_filter": ("is_result", "created_at"), "search_fields": ("task__id", "description"), "ordering": ("-created_at",)}),
+    (PaidPlanIntent, {"list_display": ("user", "plan_name", "requested_at"), "list_filter": ("plan_name", "requested_at"), "search_fields": ("user__email", "user__username"), "ordering": ("-requested_at",), "readonly_fields": ("requested_at", "id")}),
+    (PersistentAgentEmailFooter, {"list_display": ("name", "is_active", "updated_at"), "list_filter": ("is_active",), "search_fields": ("name", "html_content", "text_content"), "ordering": ("name",), "readonly_fields": ("created_at", "updated_at")}),
+    (BrowserLLMPolicy, {"list_display": ("name", "is_active"), "list_filter": ("is_active",), "search_fields": ("name",)}),
+    (AgentFileSpaceAccess, {"list_display": ("filespace", "agent", "role", "is_default", "granted_at"), "list_filter": ("role", "is_default", "filespace", "agent"), "search_fields": ("filespace__name", "agent__name"), "raw_id_fields": ("filespace", "agent"), "ordering": ("-granted_at",)}),
+    (PersistentAgentSkill, {"list_display": ("name", "version", "agent", "global_skill", "updated_at", "created_at"), "list_filter": ("global_skill", "created_at", "updated_at"), "search_fields": ("name", "description", "instructions", "global_skill__name", "agent__name", "agent__user__email"), "raw_id_fields": ("agent", "global_skill"), "ordering": ("name", "-version", "-updated_at"), "list_select_related": ("agent", "global_skill")}),
+    (AgentCommPeerState, {"list_display": ("link", "channel", "messages_per_window", "window_hours", "credits_remaining", "window_reset_at", "last_message_at"), "list_filter": ("channel",), "search_fields": ("link__agent_a__name", "link__agent_b__name", "link__pair_key"), "autocomplete_fields": ("link",), "readonly_fields": ("created_at", "updated_at"), "fieldsets": ((None, {"fields": ("link", "channel", "messages_per_window", "window_hours", "credits_remaining", "window_reset_at", "last_message_at", "debounce_seconds", "created_at", "updated_at")}),)}),
+    (OrganizationBilling, {"list_select_related": ("organization", "plan_version", "plan_version__plan"), "autocomplete_fields": ("plan_version",), "list_display": ("id", "organization_id", "organization", "subscription", "plan_version", "billing_cycle_anchor", "stripe_customer_id", "stripe_subscription_id", "cancel_at", "cancel_at_period_end", "execution_paused", "execution_pause_reason", "execution_pause_resume_at"), "list_filter": ("subscription", "cancel_at_period_end", "execution_paused", "execution_pause_reason"), "search_fields": ("id", "organization__name", "organization__id", "stripe_customer_id", "stripe_subscription_id", "plan_version__plan__slug", "plan_version__version_code", "plan_version__legacy_plan_code"), "readonly_fields": ("id", "organization", "created_at", "updated_at")}),
+    (PublicProfile, {"list_display": ("handle", "user", "updated_at"), "search_fields": ("handle", "user__email"), "ordering": ("handle",), "readonly_fields": ("created_at", "updated_at")}),
+    (ToolFriendlyName, {"list_display": ("tool_name", "display_name", "updated_at"), "search_fields": ("tool_name", "display_name"), "ordering": ("tool_name",), "readonly_fields": ("created_at", "updated_at")}),
+    (EvalRunTask, {"list_display": ("run", "sequence", "name", "status", "assertion_type", "started_at", "finished_at"), "list_filter": ("status", "assertion_type", "run__scenario_slug"), "search_fields": ("name", "run__scenario_slug", "run__id"), "raw_id_fields": ("run", "first_step", "first_message", "first_browser_task"), "readonly_fields": ("created_at", "updated_at")}),
+    (AgentComputeSession, {"list_display": ("agent", "state", "pod_name", "namespace", "proxy_server", "workspace_snapshot", "last_activity_at", "lease_expires_at", "last_filespace_sync_at", "updated_at"), "list_filter": ("state", "namespace", "proxy_server", "created_at"), "search_fields": ("agent__name", "agent__user__email", "agent__organization__name", "agent__id", "pod_name", "namespace"), "raw_id_fields": ("agent", "proxy_server", "workspace_snapshot"), "readonly_fields": ("created_at", "updated_at"), "list_select_related": ("agent", "proxy_server", "workspace_snapshot")}),
+    (ComputeSnapshot, {"list_display": ("id", "agent", "status", "k8s_snapshot_name", "size_bytes", "created_at"), "list_filter": ("status", "created_at"), "search_fields": ("id", "agent__name", "agent__user__email", "k8s_snapshot_name"), "raw_id_fields": ("agent",), "readonly_fields": ("created_at",), "list_select_related": ("agent",)}),
+):
+    register_simple_admin(_model, **_attrs)
+del _model, _attrs
+
+
 # 2.10.1 has removed some fields we still want to see, but their own admin still references them
 admin.site.unregister(Customer)
 
@@ -177,12 +212,6 @@ class ApiKeyAdmin(admin.ModelAdmin):
         if obj.organization_id:
             return obj.organization
         return obj.user
-
-@admin.register(UserQuota)
-class UserQuotaAdmin(admin.ModelAdmin):
-    list_display = ("user", "agent_limit", "max_intelligence_tier")
-    search_fields = ("user__email", "user__id")
-
 
 @admin.register(UserFlagDefinition)
 class UserFlagDefinitionAdmin(admin.ModelAdmin):
@@ -259,15 +288,6 @@ class UserFlagChoiceOptionAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
-
-
-@admin.register(UserEmail)
-class UserEmailAdmin(admin.ModelAdmin):
-    list_display = ("name", "event_name", "is_active", "updated_at")
-    list_filter = ("is_active",)
-    search_fields = ("name", "event_name")
-    readonly_fields = ("created_at", "updated_at")
-    fields = ("name", "event_name", "is_active", "created_at", "updated_at")
 
 
 @admin.register(StripeConfig)
@@ -445,14 +465,6 @@ class TrialPromoAdmin(admin.ModelAdmin):
         if obj is None or not getattr(obj, "pk", None):
             return 0
         return obj.allowed_emails.count()
-
-
-@admin.register(TrialPromoAllowedEmail)
-class TrialPromoAllowedEmailAdmin(admin.ModelAdmin):
-    list_display = ("normalized_email", "promo", "created_at")
-    list_filter = ("promo", "created_at")
-    search_fields = ("normalized_email", "promo__name", "promo__code_label")
-    readonly_fields = ("created_at",)
 
 
 @admin.register(TrialPromoRedemption)
@@ -980,73 +992,6 @@ class UserReferralAdmin(admin.ModelAdmin):
         return obj.user.email if obj.user else '-'
 
 
-@admin.register(Plan)
-class PlanAdmin(admin.ModelAdmin):
-    list_display = ("slug", "is_org", "is_active", "created_at", "updated_at")
-    search_fields = ("slug",)
-    list_filter = ("is_org", "is_active")
-    readonly_fields = ("created_at", "updated_at")
-    fields = ("slug", "is_org", "is_active", "created_at", "updated_at")
-
-
-@admin.register(PlanVersion)
-class PlanVersionAdmin(admin.ModelAdmin):
-    list_display = (
-        "plan",
-        "version_code",
-        "legacy_plan_code",
-        "is_active_for_new_subs",
-        "display_name",
-        "effective_start_at",
-        "effective_end_at",
-        "updated_at",
-    )
-    search_fields = ("plan__slug", "version_code", "legacy_plan_code", "display_name")
-    list_filter = ("plan", "is_active_for_new_subs")
-    list_select_related = ("plan",)
-    autocomplete_fields = ("plan",)
-    readonly_fields = ("created_at", "updated_at")
-    fieldsets = (
-        (None, {"fields": ("plan", "version_code", "legacy_plan_code", "is_active_for_new_subs")}),
-        ("Marketing", {"fields": ("display_name", "tagline", "description", "marketing_features")}),
-        ("Availability", {"fields": ("effective_start_at", "effective_end_at")}),
-        ("Metadata", {"fields": ("created_at", "updated_at")}),
-    )
-
-
-@admin.register(PlanVersionPrice)
-class PlanVersionPriceAdmin(admin.ModelAdmin):
-    list_display = (
-        "plan_version",
-        "kind",
-        "billing_interval",
-        "price_id",
-        "product_id",
-        "updated_at",
-    )
-    search_fields = (
-        "price_id",
-        "product_id",
-        "plan_version__plan__slug",
-        "plan_version__version_code",
-        "plan_version__legacy_plan_code",
-    )
-    list_filter = ("kind", "billing_interval")
-    list_select_related = ("plan_version",)
-    autocomplete_fields = ("plan_version",)
-    readonly_fields = ("created_at", "updated_at")
-    fields = ("plan_version", "kind", "billing_interval", "price_id", "product_id", "created_at", "updated_at")
-
-
-@admin.register(EntitlementDefinition)
-class EntitlementDefinitionAdmin(admin.ModelAdmin):
-    list_display = ("key", "display_name", "value_type", "unit", "updated_at")
-    search_fields = ("key", "display_name", "description")
-    list_filter = ("value_type",)
-    readonly_fields = ("created_at", "updated_at")
-    fields = ("key", "display_name", "description", "value_type", "unit", "created_at", "updated_at")
-
-
 @admin.register(PlanVersionEntitlement)
 class PlanVersionEntitlementAdmin(admin.ModelAdmin):
     list_display = ("plan_version", "entitlement", "value_summary", "currency", "updated_at")
@@ -1493,18 +1438,6 @@ class PromptConfigAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):  # pragma: no cover
         return False
-
-
-@admin.register(ToolCreditCost)
-class ToolCreditCostAdmin(admin.ModelAdmin):
-    list_display = ("tool_name", "credit_cost", "updated_at")
-    search_fields = ("tool_name",)
-    list_filter = ("updated_at",)
-    readonly_fields = ("created_at", "updated_at")
-    fieldsets = (
-        (None, {"fields": ("tool_name", "credit_cost")}),
-        ("Metadata", {"fields": ("created_at", "updated_at")}),
-    )
 
 
 @admin.register(MeteringBatch)
@@ -2056,22 +1989,6 @@ class BrowserUseAgentTaskAdmin(admin.ModelAdmin):
             self.message_user(request, f"Error queuing garbage collection: {e}", messages.ERROR)
         changelist_url = reverse('admin:api_browseruseagenttask_changelist')
         return HttpResponseRedirect(changelist_url)
-
-@admin.register(BrowserUseAgentTaskStep)
-class BrowserUseAgentTaskStepAdmin(admin.ModelAdmin):
-    list_display = ("id", "task", "step_number", "is_result", "created_at")
-    list_filter = ("is_result", "created_at")
-    search_fields = ("task__id", "description")
-    ordering = ("-created_at",)
-
-@admin.register(PaidPlanIntent)
-class PaidPlanIntentAdmin(admin.ModelAdmin):
-    list_display = ("user", "plan_name", "requested_at")
-    list_filter = ("plan_name", "requested_at")
-    search_fields = ("user__email", "user__username")
-    ordering = ("-requested_at",)
-    readonly_fields = ("requested_at", "id")
-
 
 @admin.register(UsageThresholdSent)
 class UsageThresholdSentAdmin(admin.ModelAdmin):
@@ -4500,23 +4417,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             }
             return TemplateResponse(request, "admin/api/persistentagent/simulate_sms.html", context)
 
-@admin.register(PersistentAgentSkill)
-class PersistentAgentSkillAdmin(admin.ModelAdmin):
-    list_display = ("name", "version", "agent", "global_skill", "updated_at", "created_at")
-    list_filter = ("global_skill", "created_at", "updated_at")
-    search_fields = (
-        "name",
-        "description",
-        "instructions",
-        "global_skill__name",
-        "agent__name",
-        "agent__user__email",
-    )
-    raw_id_fields = ("agent", "global_skill")
-    ordering = ("name", "-version", "-updated_at")
-    list_select_related = ("agent", "global_skill")
-
-
 @admin.register(GlobalAgentSkill)
 class GlobalAgentSkillAdmin(admin.ModelAdmin):
     change_list_template = "admin/globalagentskill_change_list.html"
@@ -5160,15 +5060,6 @@ class PersistentAgentMessageAdmin(admin.ModelAdmin):
     conversation_link.short_description = "Thread"
 
 
-@admin.register(PersistentAgentEmailFooter)
-class PersistentAgentEmailFooterAdmin(admin.ModelAdmin):
-    list_display = ("name", "is_active", "updated_at")
-    list_filter = ("is_active",)
-    search_fields = ("name", "html_content", "text_content")
-    ordering = ("name",)
-    readonly_fields = ("created_at", "updated_at")
-
-
 @admin.register(AgentPeerLink)
 class AgentPeerLinkAdmin(admin.ModelAdmin):
     list_display = (
@@ -5229,43 +5120,6 @@ class AgentPeerLinkAdmin(admin.ModelAdmin):
             url = reverse("admin:api_persistentagentconversation_change", args=[conversation.pk])
             return format_html('<a href="{}">Open thread</a>', url)
         return "—"
-
-
-@admin.register(AgentCommPeerState)
-class AgentCommPeerStateAdmin(admin.ModelAdmin):
-    list_display = (
-        'link',
-        'channel',
-        'messages_per_window',
-        'window_hours',
-        'credits_remaining',
-        'window_reset_at',
-        'last_message_at',
-    )
-    list_filter = ('channel',)
-    search_fields = (
-        'link__agent_a__name',
-        'link__agent_b__name',
-        'link__pair_key',
-    )
-    autocomplete_fields = ('link',)
-    readonly_fields = ('created_at', 'updated_at')
-    fieldsets = (
-        (None, {
-            'fields': (
-                'link',
-                'channel',
-                'messages_per_window',
-                'window_hours',
-                'credits_remaining',
-                'window_reset_at',
-                'last_message_at',
-                'debounce_seconds',
-                'created_at',
-                'updated_at',
-            )
-        }),
-    )
 
 
 @admin.register(PersistentAgentConversation)
@@ -5528,39 +5382,6 @@ class UserBillingAdmin(admin.ModelAdmin):
             f"Anchor alignment complete: updated={updated}, skipped={skipped}, errors={errors}",
             level=messages.INFO,
         )
-
-
-@admin.register(OrganizationBilling)
-class OrganizationBillingAdmin(admin.ModelAdmin):
-    list_select_related = ('organization', 'plan_version', 'plan_version__plan')
-    autocomplete_fields = ('plan_version',)
-    list_display = [
-        'id',
-        'organization_id',
-        'organization',
-        'subscription',
-        'plan_version',
-        'billing_cycle_anchor',
-        'stripe_customer_id',
-        'stripe_subscription_id',
-        'cancel_at',
-        'cancel_at_period_end',
-        'execution_paused',
-        'execution_pause_reason',
-        'execution_pause_resume_at',
-    ]
-    list_filter = ['subscription', 'cancel_at_period_end', 'execution_paused', 'execution_pause_reason']
-    search_fields = [
-        'id',
-        'organization__name',
-        'organization__id',
-        'stripe_customer_id',
-        'stripe_subscription_id',
-        'plan_version__plan__slug',
-        'plan_version__version_code',
-        'plan_version__legacy_plan_code',
-    ]
-    readonly_fields = ['id', 'organization', 'created_at', 'updated_at']
 
 
 @admin.action(description="Sync numbers from Twilio")
@@ -6007,13 +5828,6 @@ class IntelligenceTierAdmin(admin.ModelAdmin):
         return super().save_model(request, obj, form, change)
 
 
-@admin.register(BrowserLLMPolicy)
-class BrowserLLMPolicyAdmin(admin.ModelAdmin):
-    list_display = ("name", "is_active")
-    list_filter = ("is_active",)
-    search_fields = ("name",)
-
-
 @admin.register(PersistentAgentMessageAttachment)
 class PersistentAgentMessageAttachmentAdmin(admin.ModelAdmin):
     list_display = (
@@ -6117,15 +5931,6 @@ class AgentFileSpaceAdmin(admin.ModelAdmin):
         return format_html('<a href="{}">Open Nodes</a>', url)
 
 
-@admin.register(AgentFileSpaceAccess)
-class AgentFileSpaceAccessAdmin(admin.ModelAdmin):
-    list_display = ('filespace', 'agent', 'role', 'is_default', 'granted_at')
-    list_filter = ('role', 'is_default', 'filespace', 'agent')
-    search_fields = ('filespace__name', 'agent__name')
-    raw_id_fields = ('filespace', 'agent')
-    ordering = ('-granted_at',)
-
-
 @admin.register(AgentFsNode)
 class AgentFsNodeAdmin(admin.ModelAdmin):
     list_display = (
@@ -6205,14 +6010,6 @@ class AgentFsNodeAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(reverse('admin:api_agentfsnode_change', args=[object_id]))
 
 
-@admin.register(PublicProfile)
-class PublicProfileAdmin(admin.ModelAdmin):
-    list_display = ("handle", "user", "updated_at")
-    search_fields = ("handle", "user__email")
-    ordering = ("handle",)
-    readonly_fields = ("created_at", "updated_at")
-
-
 class PersistentAgentTemplateRelatedTemplateInline(admin.TabularInline):
     model = PersistentAgentTemplateRelatedTemplate
     fk_name = "source_template"
@@ -6282,23 +6079,6 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(ToolFriendlyName)
-class ToolFriendlyNameAdmin(admin.ModelAdmin):
-    list_display = ('tool_name', 'display_name', 'updated_at')
-    search_fields = ('tool_name', 'display_name')
-    ordering = ('tool_name',)
-    readonly_fields = ('created_at', 'updated_at')
-
-
-@admin.register(EvalRunTask)
-class EvalRunTaskAdmin(admin.ModelAdmin):
-    list_display = ('run', 'sequence', 'name', 'status', 'assertion_type', 'started_at', 'finished_at')
-    list_filter = ('status', 'assertion_type', 'run__scenario_slug')
-    search_fields = ('name', 'run__scenario_slug', 'run__id')
-    raw_id_fields = ('run', 'first_step', 'first_message', 'first_browser_task')
-    readonly_fields = ('created_at', 'updated_at')
-
-
 class EvalRunTaskInline(admin.TabularInline):
     model = EvalRunTask
     extra = 0
@@ -6316,41 +6096,3 @@ class EvalRunAdmin(admin.ModelAdmin):
     raw_id_fields = ('agent', 'initiated_by')
     readonly_fields = ('created_at', 'updated_at', 'tokens_used', 'credits_cost', 'completion_count', 'step_count')
     inlines = [EvalRunTaskInline]
-
-
-@admin.register(AgentComputeSession)
-class AgentComputeSessionAdmin(admin.ModelAdmin):
-    list_display = (
-        "agent",
-        "state",
-        "pod_name",
-        "namespace",
-        "proxy_server",
-        "workspace_snapshot",
-        "last_activity_at",
-        "lease_expires_at",
-        "last_filespace_sync_at",
-        "updated_at",
-    )
-    list_filter = ("state", "namespace", "proxy_server", "created_at")
-    search_fields = (
-        "agent__name",
-        "agent__user__email",
-        "agent__organization__name",
-        "agent__id",
-        "pod_name",
-        "namespace",
-    )
-    raw_id_fields = ("agent", "proxy_server", "workspace_snapshot")
-    readonly_fields = ("created_at", "updated_at")
-    list_select_related = ("agent", "proxy_server", "workspace_snapshot")
-
-
-@admin.register(ComputeSnapshot)
-class ComputeSnapshotAdmin(admin.ModelAdmin):
-    list_display = ("id", "agent", "status", "k8s_snapshot_name", "size_bytes", "created_at")
-    list_filter = ("status", "created_at")
-    search_fields = ("id", "agent__name", "agent__user__email", "k8s_snapshot_name")
-    raw_id_fields = ("agent",)
-    readonly_fields = ("created_at",)
-    list_select_related = ("agent",)

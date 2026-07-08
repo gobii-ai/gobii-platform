@@ -21,7 +21,7 @@ from api.agent.core.token_usage import log_agent_completion
 from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.agent.tools.agent_variables import set_agent_variable
-from api.agent.tools.file_export_helpers import resolve_export_target
+from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 
 logger = logging.getLogger(__name__)
 
@@ -729,31 +729,20 @@ def execute_create_video(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             "message": f"Video generation failed for all configured endpoints ({detail}).",
         }
 
-    result = write_bytes_to_dir(
+    return write_agent_export(
         agent=agent,
         content_bytes=video_bytes,
         extension=".mp4",
         mime_type="video/mp4",
         path=path,
         overwrite=overwrite,
+        size_label="Video",
+        extra={
+            "endpoint_key": selected_config.endpoint_key,
+            "model": selected_config.model,
+            "has_source_image": source_image is not None,
+        },
+        write_bytes_func=write_bytes_to_dir,
+        signed_url_func=build_signed_filespace_download_url,
+        set_variable_func=set_agent_variable,
     )
-    if result.get("status") != "ok":
-        return result
-
-    file_path = result.get("path")
-    node_id = result.get("node_id")
-    signed_url = build_signed_filespace_download_url(
-        agent_id=str(agent.id),
-        node_id=node_id,
-    )
-    set_agent_variable(file_path, signed_url)
-
-    var_ref = f"$[{file_path}]"
-    return {
-        "status": "ok",
-        "file": var_ref,
-        "attach": var_ref,
-        "endpoint_key": selected_config.endpoint_key,
-        "model": selected_config.model,
-        "has_source_image": source_image is not None,
-    }

@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from api.models import PersistentAgent
 from .sqlite_query_runner import run_sqlite_select
-from .agent_variables import set_agent_variable
+from .file_export_helpers import write_agent_export
 
 logger = logging.getLogger(__name__)
 
@@ -584,42 +584,21 @@ def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     # Save to filespace - this is the source of truth
     try:
-        from api.agent.files.filespace_service import write_bytes_to_dir
-        from api.agent.files.attachment_helpers import build_signed_filespace_download_url
-
         save_path = _build_chart_save_path(chart_type)
-
-        save_result = write_bytes_to_dir(
+        save_result = write_agent_export(
             agent=agent,
             content_bytes=svg_bytes,
             extension=".svg",
             mime_type="image/svg+xml",
             path=save_path,
             overwrite=True,
+            size_label="Chart",
+            inline=lambda var_ref, _signed_url: f"![]({var_ref})",
+            inline_html=lambda var_ref, _signed_url: f"<img src='{var_ref}'>",
         )
-
         if save_result.get("status") != "ok":
             return {"status": "error", "message": f"Failed to save chart: {save_result.get('message', 'unknown error')}"}
-
-        node_id = save_result.get("node_id")
-        signed_url = build_signed_filespace_download_url(
-            agent_id=str(agent.id),
-            node_id=node_id,
-        )
-
-        # Set variable using path as name (unique, human-readable)
-        path = save_result.get("path")
-        set_agent_variable(path, signed_url)
-
-        # Return with ready-to-use references
-        var_ref = f"$[{path}]"
-        return {
-            "status": "ok",
-            "file": var_ref,
-            "inline": f"![]({var_ref})",
-            "inline_html": f"<img src='{var_ref}'>",
-            "attach": var_ref,
-        }
+        return save_result
 
     except Exception as e:
         logger.exception("Failed to save chart for agent %s: %s", agent.id, e)
