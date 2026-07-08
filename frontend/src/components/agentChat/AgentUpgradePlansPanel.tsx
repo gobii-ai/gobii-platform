@@ -1,4 +1,4 @@
-import type { PlanTier } from '../../stores/subscriptionStore'
+import type { PlanTier } from '../../store/subscriptionSlice'
 import type { SignupPreviewState } from '../../types/agentRoster'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 

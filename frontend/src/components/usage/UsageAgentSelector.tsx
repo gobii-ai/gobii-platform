@@ -11,7 +11,7 @@ import {
 } from 'react-aria-components'
 
 import type { UsageAgent } from './types'
-import type { UsageStatus } from './store'
+import type { UsageStatus } from '../../store/usageSlice'
 
 type UsageAgentSelectorProps = {
   agents: UsageAgent[]

@@ -100,6 +100,21 @@ export type AgentChatSession = {
   workflow: AgentChatWorkflowState
 }
 
+type AgentIdentityUpdateInput = {
+  agentName?: string | null
+  agentAvatarUrl?: string | null
+  agentEmail?: string | null
+  agentSms?: string | null
+  auditUrl?: string | null
+  agentIsOrgOwned?: boolean
+  canManageAgent?: boolean
+  isCollaborator?: boolean
+  hideInsightsPanel?: boolean
+  enabledIntegrationTabs?: Record<string, boolean | true> | null
+  signupPreviewState?: SignupPreviewState | null
+  planningState?: PlanningState | null
+}
+
 export type SpawnIntentStatus = 'idle' | 'loading' | 'ready' | 'done'
 export type TrialOnboardingTarget = Exclude<AgentSpawnIntent['onboarding_target'], null>
 
@@ -133,7 +148,7 @@ export type ChatState = {
   createAgent: CreateAgentWorkflowState
 }
 
-function createInitialSession(): AgentChatSession {
+export function createInitialSession(): AgentChatSession {
   return {
     identity: {
       agentName: null,
@@ -213,6 +228,45 @@ function ensureSession(state: ChatState, agentId: string): AgentChatSession {
 
 function getSession(state: ChatState, agentId: string | null | undefined): AgentChatSession | null {
   return agentId ? state.sessionsByAgentId[agentId] ?? null : null
+}
+
+function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpdateInput | null | undefined) {
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentName')) {
+    session.identity.agentName = update?.agentName ?? null
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentAvatarUrl')) {
+    session.identity.agentAvatarUrl = update?.agentAvatarUrl ?? null
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentEmail')) {
+    session.identity.agentEmail = update?.agentEmail ?? null
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentSms')) {
+    session.identity.agentSms = update?.agentSms ?? null
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'auditUrl')) {
+    session.identity.auditUrl = update?.auditUrl ?? null
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentIsOrgOwned')) {
+    session.identity.agentIsOrgOwned = Boolean(update?.agentIsOrgOwned)
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'canManageAgent')) {
+    session.identity.canManageAgent = update?.canManageAgent ?? true
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'isCollaborator')) {
+    session.identity.isCollaborator = Boolean(update?.isCollaborator)
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'hideInsightsPanel')) {
+    session.identity.hideInsightsPanel = Boolean(update?.hideInsightsPanel)
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'enabledIntegrationTabs')) {
+    session.identity.enabledIntegrationTabs = normalizeEnabledIntegrationTabs(update?.enabledIntegrationTabs)
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'signupPreviewState')) {
+    session.identity.signupPreviewState = update?.signupPreviewState ?? 'none'
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'planningState')) {
+    session.identity.planningState = update?.planningState ?? 'skipped'
+  }
 }
 
 function coerceProcessingSnapshot(snapshot: Partial<ProcessingSnapshot> | null | undefined): ProcessingSnapshot {
@@ -603,7 +657,15 @@ export const sendMessage = createAsyncThunk<
 })
 
 function reduceStreamEvent(session: AgentChatSession, payload: StreamEventPayload): { session: AgentChatSession; shouldInvalidateQuery: boolean } {
-  const nextSession: AgentChatSession = JSON.parse(JSON.stringify(session)) as AgentChatSession
+  const nextSession: AgentChatSession = {
+    ...session,
+    processing: { ...session.processing },
+    stream: {
+      ...session.stream,
+      streaming: session.stream.streaming ? { ...session.stream.streaming } : null,
+    },
+    timelineUi: { ...session.timelineUi },
+  }
   const isStart = payload.status === 'start'
   const isDone = payload.status === 'done'
   const isDelta = payload.status === 'delta'
@@ -702,21 +764,7 @@ const chatSlice = createSlice({
       state,
       action: PayloadAction<{
         agentId: string | null
-        options?: {
-          agentName?: string | null
-          agentAvatarUrl?: string | null
-          agentEmail?: string | null
-          agentSms?: string | null
-          auditUrl?: string | null
-          agentIsOrgOwned?: boolean
-          canManageAgent?: boolean
-          isCollaborator?: boolean
-          hideInsightsPanel?: boolean
-          enabledIntegrationTabs?: Record<string, boolean | true> | null
-          processingActive?: boolean
-          signupPreviewState?: SignupPreviewState | null
-          planningState?: PlanningState | null
-        }
+        options?: AgentIdentityUpdateInput & { processingActive?: boolean }
       }>,
     ) => {
       const { agentId, options } = action.payload
@@ -734,42 +782,7 @@ const chatSlice = createSlice({
         session.processing.processingActive = Boolean(options?.processingActive)
         session.processing.processingStartedAt = options?.processingActive ? Date.now() : null
       }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'agentName')) {
-        session.identity.agentName = options?.agentName ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'agentAvatarUrl')) {
-        session.identity.agentAvatarUrl = options?.agentAvatarUrl ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'agentEmail')) {
-        session.identity.agentEmail = options?.agentEmail ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'agentSms')) {
-        session.identity.agentSms = options?.agentSms ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'auditUrl')) {
-        session.identity.auditUrl = options?.auditUrl ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'agentIsOrgOwned')) {
-        session.identity.agentIsOrgOwned = Boolean(options?.agentIsOrgOwned)
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'canManageAgent')) {
-        session.identity.canManageAgent = options?.canManageAgent ?? true
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'isCollaborator')) {
-        session.identity.isCollaborator = Boolean(options?.isCollaborator)
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'hideInsightsPanel')) {
-        session.identity.hideInsightsPanel = Boolean(options?.hideInsightsPanel)
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'enabledIntegrationTabs')) {
-        session.identity.enabledIntegrationTabs = normalizeEnabledIntegrationTabs(options?.enabledIntegrationTabs)
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'signupPreviewState')) {
-        session.identity.signupPreviewState = options?.signupPreviewState ?? 'none'
-      }
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'planningState')) {
-        session.identity.planningState = options?.planningState ?? 'skipped'
-      }
+      applyIdentityUpdate(session, options)
     },
     processingUpdated(state, action: PayloadAction<{ agentId: string; snapshot: ProcessingSnapshot }>) {
       applyProcessingUpdate(ensureSession(state, action.payload.agentId), action.payload.snapshot)
@@ -820,59 +833,11 @@ const chatSlice = createSlice({
       state,
       action: PayloadAction<{
         agentId?: string | null
-        agentName?: string | null
-        agentAvatarUrl?: string | null
-        agentEmail?: string | null
-        agentSms?: string | null
-        auditUrl?: string | null
-        agentIsOrgOwned?: boolean
-        canManageAgent?: boolean
-        isCollaborator?: boolean
-        hideInsightsPanel?: boolean
-        enabledIntegrationTabs?: Record<string, boolean | true> | null
-        signupPreviewState?: SignupPreviewState | null
-        planningState?: PlanningState | null
-      }>,
+      } & AgentIdentityUpdateInput>,
     ) {
       const agentId = action.payload.agentId ?? state.activeAgentId
       if (!agentId) return
-      const session = ensureSession(state, agentId)
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'agentName')) {
-        session.identity.agentName = action.payload.agentName ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'agentAvatarUrl')) {
-        session.identity.agentAvatarUrl = action.payload.agentAvatarUrl ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'agentEmail')) {
-        session.identity.agentEmail = action.payload.agentEmail ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'agentSms')) {
-        session.identity.agentSms = action.payload.agentSms ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'auditUrl')) {
-        session.identity.auditUrl = action.payload.auditUrl ?? null
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'agentIsOrgOwned')) {
-        session.identity.agentIsOrgOwned = Boolean(action.payload.agentIsOrgOwned)
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'canManageAgent')) {
-        session.identity.canManageAgent = action.payload.canManageAgent ?? true
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'isCollaborator')) {
-        session.identity.isCollaborator = Boolean(action.payload.isCollaborator)
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'hideInsightsPanel')) {
-        session.identity.hideInsightsPanel = Boolean(action.payload.hideInsightsPanel)
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'enabledIntegrationTabs')) {
-        session.identity.enabledIntegrationTabs = normalizeEnabledIntegrationTabs(action.payload.enabledIntegrationTabs)
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'signupPreviewState')) {
-        session.identity.signupPreviewState = action.payload.signupPreviewState ?? 'none'
-      }
-      if (Object.prototype.hasOwnProperty.call(action.payload, 'planningState')) {
-        session.identity.planningState = action.payload.planningState ?? 'skipped'
-      }
+      applyIdentityUpdate(ensureSession(state, agentId), action.payload)
     },
     messageSendStarted(state, action: PayloadAction<{ agentId: string }>) {
       const session = ensureSession(state, action.payload.agentId)
@@ -1099,8 +1064,5 @@ export const chatReducer = chatSlice.reducer
 export {
   selectActiveChatAgentId,
   selectActiveChatSession,
-  selectActiveChatStoreSnapshot,
-  selectChatState,
   selectCreateAgentWorkflow,
-  selectCurrentInsight,
 } from './chatSelectors'

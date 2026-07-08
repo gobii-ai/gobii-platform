@@ -5,7 +5,8 @@ import { parseDate } from '@internationalized/date'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { InsightGauge } from '../common/InsightGauge'
 import { fetchUsageSummary } from './api'
-import { useUsageStore } from './store'
+import { selectUsageState, usageActions } from '../../store/usageSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import type {
   UsageSummaryQueryInput,
   UsageSummaryResponse,
@@ -28,13 +29,13 @@ type UsageMetricsGridProps = {
 }
 
 export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps) {
-  const setSummaryLoading = useUsageStore((state) => state.setSummaryLoading)
-  const setSummaryData = useUsageStore((state) => state.setSummaryData)
-  const setSummaryError = useUsageStore((state) => state.setSummaryError)
-  const summary = useUsageStore((state) => state.summary)
-  const agents = useUsageStore((state) => state.agents)
-  const agentsStatus = useUsageStore((state) => state.agentsStatus)
-  const agentsErrorMessage = useUsageStore((state) => state.agentsErrorMessage)
+  const dispatch = useAppDispatch()
+  const {
+    summary,
+    agents,
+    agentsStatus,
+    agentsErrorMessage,
+  } = useAppSelector(selectUsageState)
 
   const agentKey = agentIds.length ? agentIds.slice().sort().join(',') : 'all'
 
@@ -52,22 +53,22 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
 
   useEffect(() => {
     if (isPending) {
-      setSummaryLoading()
+      dispatch(usageActions.summaryLoading())
     }
-  }, [isPending, setSummaryLoading])
+  }, [dispatch, isPending])
 
   useEffect(() => {
     if (data) {
-      setSummaryData(data)
+      dispatch(usageActions.summaryLoaded(data))
     }
-  }, [data, setSummaryData])
+  }, [data, dispatch])
 
   useEffect(() => {
     if (isError) {
       const message = error instanceof Error ? error.message : 'Unable to load usage metrics right now.'
-      setSummaryError(message)
+      dispatch(usageActions.summaryFailed(message))
     }
-  }, [error, isError, setSummaryError])
+  }, [dispatch, error, isError])
 
   const creditFormatter = useMemo(
     () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),

@@ -1,4 +1,4 @@
-import { useMemo, type Ref } from 'react'
+import { useCallback, useMemo, type Ref } from 'react'
 import { Loader2 } from 'lucide-react'
 import { TimelineEventItem } from './TimelineEventItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
@@ -12,8 +12,8 @@ import { StarterPromptSuggestions, type StarterPrompt } from './StarterPromptSug
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import type { AgentMessage } from '../../types/agentChat'
 import type { StatusExpansionTargets } from './statusExpansion'
-import { useAgentChatStore } from '../../stores/agentChatStore'
-import { useAppSelector } from '../../store/hooks'
+import { chatActions, selectActiveChatSession } from '../../store/chatSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
 
 function timelineEventKey(event: SimplifiedTimelineItem): string {
@@ -133,14 +133,22 @@ export function AgentTimelinePane({
   timelineRef,
   typingStatusText,
 }: AgentTimelinePaneProps) {
-  const agentName = useAgentChatStore((state) => state.agentName)
-  const agentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
-  const animateCursors = useAgentChatStore((state) => state.realtimeEventCursors)
-  const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
-  const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
-  const nextScheduledAt = useAgentChatStore((state) => state.nextScheduledAt)
-  const onIncomingAnimationConsumed = useAgentChatStore((state) => state.consumeRealtimeEventCursor)
-  const streaming = useAgentChatStore((state) => state.streaming)
+  const dispatch = useAppDispatch()
+  const activeSession = useAppSelector(selectActiveChatSession)
+  const agentName = activeSession.identity.agentName
+  const agentAvatarUrl = activeSession.identity.agentAvatarUrl
+  const animateCursors = useMemo(
+    () => new Set(Object.keys(activeSession.timelineUi.realtimeEventCursorIds)),
+    [activeSession.timelineUi.realtimeEventCursorIds],
+  )
+  const autoScrollPinned = activeSession.timelineUi.autoScrollPinned
+  const hasUnseenActivity = activeSession.timelineUi.hasUnseenActivity
+  const nextScheduledAt = activeSession.processing.nextScheduledAt
+  const onIncomingAnimationConsumed = useCallback(
+    (cursor: string) => dispatch(chatActions.realtimeEventCursorConsumed(cursor)),
+    [dispatch],
+  )
+  const streaming = activeSession.stream.streaming
   const viewer = useAppSelector(selectImmersiveShellViewer)
   const agentFirstName = deriveAgentFirstName(agentName)
   const viewerEmail = viewer.email

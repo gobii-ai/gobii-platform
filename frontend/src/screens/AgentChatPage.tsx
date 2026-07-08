@@ -66,14 +66,21 @@ import { useAgentChatNotifications } from '../hooks/useAgentChatNotifications'
 import { useRecentAgentSubscriptions } from '../hooks/useRecentAgentSubscriptions'
 import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
-import { useAgentResourceStatusBridge } from '../hooks/useAgentResourceStatusBridge'
 import { useCreateAgentWorkflow } from '../hooks/useCreateAgentWorkflow'
 import { useImmersiveShellBridge } from '../hooks/useImmersiveShellBridge'
 import { usePendingActionsBridge } from '../hooks/usePendingActionsBridge'
 import { useRosterPreferencesBridge } from '../hooks/useRosterPreferencesBridge'
-import { useAgentChatStore } from '../stores/agentChatStore'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { chatActions } from '../store/chatSlice'
+import {
+  chatActions,
+  persistPendingEventsToCache as persistPendingEventsToCacheThunk,
+  receiveRealtimeEvent as receiveRealtimeEventThunk,
+  refreshProcessing as refreshProcessingThunk,
+  selectActiveChatAgentId,
+  selectActiveChatSession,
+  sendMessage as sendMessageThunk,
+  setAutoScrollPinned as setAutoScrollPinnedThunk,
+} from '../store/chatSlice'
 import {
   immersiveShellActions,
 } from '../store/immersiveShellSlice'
@@ -95,12 +102,13 @@ import {
   selectDraftIntelligenceTier,
   updateAgentIntelligenceTier,
 } from '../store/agentSettingsSlice'
-import {
-  selectAddonsResourceStatus,
-  selectQuickSettingsResourceStatus,
-} from '../store/agentResourceStatusSlice'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
-import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
+import {
+  ensureAuthenticated,
+  selectSubscriptionState,
+  subscriptionActions,
+  type PlanTier,
+} from '../store/subscriptionSlice'
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import {
   refreshTimelineLatestInCache,
@@ -116,6 +124,7 @@ import type { BillingStatusInfo } from '../types/agentAddons'
 import type { AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
+import type { InsightEvent } from '../types/insight'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { track, AnalyticsEvent } from '../util/analytics'
 import { sortRosterEntries } from '../util/agentRosterSort'
@@ -937,11 +946,9 @@ export function AgentChatPage({
   const {
     currentPlan,
     isProprietaryMode,
-    ensureAuthenticated,
     upgradeModalSource,
-    openUpgradeModal,
     personalSignupPreviewAvailable,
-  } = useSubscriptionStore()
+  } = useAppSelector(selectSubscriptionState)
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const pendingCreateRef = useRef<{
@@ -1059,31 +1066,68 @@ export function AgentChatPage({
   )
   usePendingActionsBridge(activeAgentId, initialPageResponse)
 
-  // Chat runtime store subscriptions (slimmed down — no more events/cursors/loading)
-  const setAgentId = useAgentChatStore((state) => state.setAgentId)
-  const storeAgentId = useAgentChatStore((state) => state.agentId)
-  const storedAgentName = useAgentChatStore((state) => state.agentName)
-  const storedAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
-  const signupPreviewState = useAgentChatStore((state) => state.signupPreviewState)
-  const sendMessage = useAgentChatStore((state) => state.sendMessage)
-  const receiveRealtimeEvent = useAgentChatStore((state) => state.receiveRealtimeEvent)
-  const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
-  const processingActive = useAgentChatStore((state) => state.processingActive)
-  const awaitingResponse = useAgentChatStore((state) => state.awaitingResponse)
-  const stopProcessingBusy = useAgentChatStore((state) => state.stopProcessingBusy)
-  const skipPlanningBusy = useAgentChatStore((state) => state.skipPlanningBusy)
-  const streaming = useAgentChatStore((state) => state.streaming)
-  const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
-  const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
-  const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
-  const persistPendingEventsToCache = useAgentChatStore((state) => state.persistPendingEventsToCache)
-  const pendingEvents = useAgentChatStore((state) => state.pendingEvents)
-  const storePendingActionRequests = useAgentChatStore((state) => state.pendingActions)
-  const setInsightsForAgent = useAgentChatStore((state) => state.setInsightsForAgent)
-  const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
-  const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
-  const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
-  const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
+  const storeAgentId = useAppSelector(selectActiveChatAgentId)
+  const activeChatSession = useAppSelector(selectActiveChatSession)
+  const storedAgentName = activeChatSession.identity.agentName
+  const storedAgentAvatarUrl = activeChatSession.identity.agentAvatarUrl
+  const signupPreviewState = activeChatSession.identity.signupPreviewState
+  const hasUnseenActivity = activeChatSession.timelineUi.hasUnseenActivity
+  const processingActive = activeChatSession.processing.processingActive
+  const awaitingResponse = activeChatSession.processing.awaitingResponse
+  const stopProcessingBusy = activeChatSession.processing.stopProcessingBusy
+  const skipPlanningBusy = activeChatSession.processing.skipPlanningBusy
+  const streaming = activeChatSession.stream.streaming
+  const streamingLastUpdatedAt = activeChatSession.stream.streamingLastUpdatedAt
+  const pendingEvents = activeChatSession.timelineUi.pendingEvents
+  const storePendingActionRequests = activeChatSession.workflow.pendingActions
+  const autoScrollPinned = activeChatSession.timelineUi.autoScrollPinned
+  const setAgentId = useCallback(
+    (nextAgentId: string | null, options?: Parameters<typeof chatActions.agentSelected>[0]['options']) => {
+      dispatch(chatActions.agentSelected({ agentId: nextAgentId, options }))
+    },
+    [dispatch],
+  )
+  const sendMessage = useCallback(
+    async (body: string, attachments?: File[]) => {
+      await dispatch(sendMessageThunk({ body, attachments })).unwrap()
+    },
+    [dispatch],
+  )
+  const receiveRealtimeEvent = useCallback(
+    (event: TimelineEvent) => dispatch(receiveRealtimeEventThunk(event)),
+    [dispatch],
+  )
+  const finalizeStreaming = useCallback(
+    () => dispatch(chatActions.streamingFinalized()),
+    [dispatch],
+  )
+  const refreshProcessing = useCallback(
+    async () => {
+      await dispatch(refreshProcessingThunk()).unwrap()
+    },
+    [dispatch],
+  )
+  const persistPendingEventsToCache = useCallback(
+    () => dispatch(persistPendingEventsToCacheThunk()),
+    [dispatch],
+  )
+  const setInsightsForAgent = useCallback(
+    (targetAgentId: string, insights: InsightEvent[]) =>
+      dispatch(chatActions.insightsSetForAgent({ agentId: targetAgentId, insights })),
+    [dispatch],
+  )
+  const startInsightRotation = useCallback(
+    () => dispatch(chatActions.insightRotationStarted()),
+    [dispatch],
+  )
+  const stopInsightRotation = useCallback(
+    () => dispatch(chatActions.insightRotationStopped()),
+    [dispatch],
+  )
+  const setAutoScrollPinned = useCallback(
+    (pinned: boolean) => dispatch(setAutoScrollPinnedThunk(pinned)),
+    [dispatch],
+  )
   const previousViewedAgentIdRef = useRef<string | null>(activeAgentId)
 
   useEffect(() => {
@@ -1880,7 +1924,7 @@ export function AgentChatPage({
   })
   const [teamTemplateLaunchBusyId, setTeamTemplateLaunchBusyId] = useState<string | null>(null)
   const [teamTemplateLaunchError, setTeamTemplateLaunchError] = useState<string | null>(null)
-  const sendMessageError = useAgentChatStore((state) => state.sendMessageError)
+  const sendMessageError = activeChatSession.workflow.sendMessageError
   const [idleInsightsAgentId, setIdleInsightsAgentId] = useState<string | null>(null)
   const [idleInsightsPending, setIdleInsightsPending] = useState(false)
   const latestPlanSnapshot = useMemo(
@@ -1911,20 +1955,16 @@ export function AgentChatPage({
   } = useAgentQuickSettings(activeAgentId, { enabled: allowDeferredAgentPanelRequests })
   const {
     data: queryAddonsPayload,
-    isLoading: queryAddonsLoading,
-    error: queryAddonsError,
     refetch: refetchAddons,
     updateAddons,
     updating: queryAddonsUpdating,
   } = useAgentAddons(activeAgentId, { enabled: allowDeferredAgentPanelRequests })
-  const quickSettingsResourceStatus = useAppSelector(selectQuickSettingsResourceStatus(activeAgentId))
-  const addonsResourceStatus = useAppSelector(selectAddonsResourceStatus(activeAgentId))
   const quickSettingsPayload = queryQuickSettingsPayload
   const addonsPayload = queryAddonsPayload
-  const quickSettingsLoading = quickSettingsResourceStatus?.status === 'loading' || queryQuickSettingsLoading
-  const quickSettingsError = quickSettingsResourceStatus?.errorMessage ?? queryQuickSettingsError
-  const quickSettingsUpdating = quickSettingsResourceStatus?.updating ?? queryQuickSettingsUpdating
-  const addonsUpdating = addonsResourceStatus?.updating ?? queryAddonsUpdating
+  const quickSettingsLoading = queryQuickSettingsLoading
+  const quickSettingsError = queryQuickSettingsError
+  const quickSettingsUpdating = queryQuickSettingsUpdating
+  const addonsUpdating = queryAddonsUpdating
   const contextSwitcher = useMemo(() => {
     if (!showContextSwitcher) {
       return null
@@ -2497,7 +2537,7 @@ export function AgentChatPage({
 
   const handleUpgrade = useCallback(async (plan: PlanTier, source?: string) => {
     const resolvedSource = source ?? upgradeModalSource ?? 'upgrade_modal'
-    const authenticated = await ensureAuthenticated()
+    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
     if (!authenticated) {
       return
     }
@@ -2514,7 +2554,7 @@ export function AgentChatPage({
     }
     const checkoutUrl = appendReturnTo(checkoutPath, returnToPath)
     window.open(checkoutUrl, '_top')
-  }, [ensureAuthenticated, onboardingTarget, requiresTrialPlanSelection, upgradeModalSource])
+  }, [dispatch, onboardingTarget, requiresTrialPlanSelection, upgradeModalSource])
 
   useEffect(() => {
     if (!showSignupPreviewPanel || !activeAgentId) {
@@ -2610,7 +2650,10 @@ export function AgentChatPage({
         const errorState = buildCreateAgentError(err, isProprietaryMode)
         if (errorState.requiresTrialPlanSelection) {
           dispatch(chatActions.createAgentTrialOnboardingTargetSet(errorState.trialOnboardingTarget ?? 'agent_ui'))
-          openUpgradeModal('trial_onboarding', { dismissible: false })
+          dispatch(subscriptionActions.openUpgradeModal({
+            source: 'trial_onboarding',
+            options: { dismissible: false },
+          }))
         }
         dispatch(chatActions.createAgentErrorSet(errorState))
         console.error('Failed to create agent:', err)
@@ -2621,7 +2664,6 @@ export function AgentChatPage({
       dispatch,
       isProprietaryMode,
       onAgentCreated,
-      openUpgradeModal,
       personalSignupPreviewAvailable,
       queryClient,
       setPendingAgentEmails,
@@ -2933,8 +2975,6 @@ export function AgentChatPage({
     : null
   const {
     data: queryUsageSummary,
-    isLoading: queryUsageSummaryLoading,
-    error: queryUsageSummaryError,
   } = useQuery<UsageSummaryResponse, Error>({
     queryKey: ['usage-summary', 'agent-chat', usageContextKey],
     queryFn: ({ signal }) => fetchUsageSummary({}, signal),
@@ -2943,27 +2983,6 @@ export function AgentChatPage({
     enabled: shouldFetchUsageSummary,
   })
   const usageSummary = queryUsageSummary
-  useAgentResourceStatusBridge({
-    activeAgentId,
-    quickSettings: {
-      data: queryQuickSettingsPayload,
-      error: queryQuickSettingsError,
-      isLoading: queryQuickSettingsLoading,
-      updating: queryQuickSettingsUpdating,
-    },
-    addons: {
-      data: queryAddonsPayload,
-      error: queryAddonsError,
-      isLoading: queryAddonsLoading,
-      updating: queryAddonsUpdating,
-    },
-    usageSummary: {
-      data: queryUsageSummary,
-      enabled: shouldFetchUsageSummary,
-      error: queryUsageSummaryError,
-      isLoading: queryUsageSummaryLoading,
-    },
-  })
   const burnRateTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
   const {
     data: burnRateSummary,
@@ -3371,7 +3390,7 @@ export function AgentChatPage({
     }
     // If this is a new agent, create it first then navigate to it
     if (isNewAgent) {
-      const authenticated = await ensureAuthenticated()
+      const authenticated = await dispatch(ensureAuthenticated()).unwrap()
       if (!authenticated) {
         return
       }
@@ -3469,7 +3488,6 @@ export function AgentChatPage({
     createNewAgent,
     currentPlan,
     dispatch,
-    ensureAuthenticated,
     extraTasksEnabled,
     hasUnlimitedQuota,
     isNewAgent,
@@ -3620,8 +3638,11 @@ export function AgentChatPage({
     if (!isNewAgent || !spawnFlow || !requiresTrialPlanSelection) {
       return
     }
-    openUpgradeModal('trial_onboarding', { dismissible: false })
-  }, [isNewAgent, openUpgradeModal, requiresTrialPlanSelection, spawnFlow])
+    dispatch(subscriptionActions.openUpgradeModal({
+      source: 'trial_onboarding',
+      options: { dismissible: false },
+    }))
+  }, [dispatch, isNewAgent, requiresTrialPlanSelection, spawnFlow])
 
   useEffect(() => {
     if (!isNewAgent || !spawnFlow || spawnIntentStatus === 'loading') {

@@ -1,7 +1,8 @@
 import type { SignupPreviewState } from '../../types/agentRoster'
-import type { PlanTier } from '../../stores/subscriptionStore'
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
-import { useAgentChatStore } from '../../stores/agentChatStore'
+import type { PlanTier } from '../../store/subscriptionSlice'
+import { selectSubscriptionState } from '../../store/subscriptionSlice'
+import { selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
+import { useAppSelector } from '../../store/hooks'
 import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
 
 type AgentSignupPreviewPanelProps = {
@@ -17,13 +18,14 @@ export function AgentSignupPreviewPanel({
   agentName: agentNameOverride,
   onUpgrade,
 }: AgentSignupPreviewPanelProps) {
-  const storeStatus = useAgentChatStore((state) => state.signupPreviewState)
-  const storeAgentId = useAgentChatStore((state) => state.agentId)
-  const storeAgentName = useAgentChatStore((state) => state.agentName)
+  const activeSession = useAppSelector(selectActiveChatSession)
+  const storeAgentId = useAppSelector(selectActiveChatAgentId)
+  const storeStatus = activeSession.identity.signupPreviewState
+  const storeAgentName = activeSession.identity.agentName
   const status = statusOverride ?? storeStatus
   const agentId = agentIdOverride ?? storeAgentId
   const agentName = agentNameOverride ?? storeAgentName
-  const ctaUnlockAgentCopy = useSubscriptionStore((state) => state.ctaUnlockAgentCopy)
+  const ctaUnlockAgentCopy = useAppSelector((state) => selectSubscriptionState(state).ctaUnlockAgentCopy)
   const isPaused = status === 'awaiting_signup_completion'
   const resolvedAgentName = agentName?.trim() || 'Your agent'
   const title = ctaUnlockAgentCopy

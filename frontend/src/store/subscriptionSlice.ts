@@ -17,6 +17,17 @@ export type UpgradeModalOptions = {
   dismissible?: boolean
 }
 
+const CONTINUATION_UPGRADE_MODAL_SOURCES: readonly UpgradeModalSource[] = [
+  'trial_onboarding',
+  'agent_limit_error',
+]
+
+export function isContinuationUpgradeModalSource(
+  source: UpgradeModalSource | string | null | undefined,
+): boolean {
+  return Boolean(source && CONTINUATION_UPGRADE_MODAL_SOURCES.includes(source as UpgradeModalSource))
+}
+
 export type TrialDaysByPlan = {
   startup: number
   scale: number

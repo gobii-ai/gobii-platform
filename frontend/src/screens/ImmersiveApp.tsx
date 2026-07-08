@@ -16,7 +16,13 @@ import { OrganizationInviteAcceptPage } from './organization/OrganizationInviteA
 import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
 import { ImmersiveSecretsPage } from './secrets/ImmersiveSecretsPage'
 import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
-import { type PlanTier, useSubscriptionStore } from '../stores/subscriptionStore'
+import {
+  ensureAuthenticated,
+  selectSubscriptionState,
+  subscriptionActions,
+  type PlanTier,
+} from '../store/subscriptionSlice'
+import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { track } from '../util/analytics'
 import { APP_NAVIGATE_EVENT } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
@@ -680,12 +686,12 @@ export function ImmersiveApp({
   const [selectionRefreshKey, setSelectionRefreshKey] = useState(0)
   const hasSkippedInitialSegmentPage = useRef(false)
   const rosterQuery = useAgentRoster()
-  const openUpgradeModal = useSubscriptionStore((state) => state.openUpgradeModal)
-  const closeUpgradeModal = useSubscriptionStore((state) => state.closeUpgradeModal)
-  const ensureAuthenticated = useSubscriptionStore((state) => state.ensureAuthenticated)
-  const isUpgradeModalOpen = useSubscriptionStore((state) => state.isUpgradeModalOpen)
-  const upgradeModalSource = useSubscriptionStore((state) => state.upgradeModalSource)
-  const isProprietaryMode = useSubscriptionStore((state) => state.isProprietaryMode)
+  const dispatch = useAppDispatch()
+  const {
+    isUpgradeModalOpen,
+    upgradeModalSource,
+    isProprietaryMode,
+  } = useAppSelector(selectSubscriptionState)
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
 
   useEffect(() => {
@@ -699,11 +705,11 @@ export function ImmersiveApp({
     let shouldOpen = true
 
     const openRequestedUpgradeModal = async () => {
-      const authenticated = await ensureAuthenticated()
+      const authenticated = await dispatch(ensureAuthenticated()).unwrap()
       if (!shouldOpen || !authenticated) {
         return
       }
-      openUpgradeModal('unknown')
+      dispatch(subscriptionActions.openUpgradeModal({ source: 'unknown' }))
       const nextPath = stripQueryParams(
         location.pathname,
         location.search,
@@ -718,7 +724,7 @@ export function ImmersiveApp({
     return () => {
       shouldOpen = false
     }
-  }, [ensureAuthenticated, location.hash, location.pathname, location.search, openUpgradeModal])
+  }, [dispatch, location.hash, location.pathname, location.search])
 
   useEffect(() => {
     if (!embed || window.parent === window) {
@@ -870,7 +876,7 @@ export function ImmersiveApp({
 
   const handleUpgradeSelection = useCallback(async (plan: PlanTier) => {
     const source = upgradeModalSource ?? 'unknown'
-    const authenticated = await ensureAuthenticated()
+    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
     if (!authenticated) {
       return
     }
@@ -878,10 +884,10 @@ export function ImmersiveApp({
       plan,
       source,
     })
-    closeUpgradeModal()
+    dispatch(subscriptionActions.closeUpgradeModal())
     const checkoutPath = plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/'
     window.open(appendReturnTo(checkoutPath), '_top')
-  }, [closeUpgradeModal, ensureAuthenticated, upgradeModalSource])
+  }, [dispatch, upgradeModalSource])
 
   const showShellUpgradeModal = (
     route.kind !== 'agent-chat'

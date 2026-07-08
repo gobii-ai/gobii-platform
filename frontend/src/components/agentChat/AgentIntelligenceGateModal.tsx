@@ -1,7 +1,7 @@
 import { Lock, Zap } from 'lucide-react'
 
 import type { IntelligenceTierKey } from '../../types/llmIntelligence'
-import type { PlanTier } from '../../stores/subscriptionStore'
+import type { PlanTier } from '../../store/subscriptionSlice'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
 

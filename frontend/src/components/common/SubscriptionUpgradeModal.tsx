@@ -4,9 +4,11 @@ import { X } from 'lucide-react'
 
 import {
   isContinuationUpgradeModalSource,
-  useSubscriptionStore,
   type PlanTier,
-} from '../../stores/subscriptionStore'
+  selectSubscriptionState,
+  subscriptionActions,
+} from '../../store/subscriptionSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { SubscriptionUpgradePlans } from './SubscriptionUpgradePlans'
@@ -20,6 +22,7 @@ export function SubscriptionUpgradeModal({
   onUpgrade,
   allowDowngrade = false,
 }: SubscriptionUpgradeModalProps) {
+  const dispatch = useAppDispatch()
   const {
     currentPlan,
     isProprietaryMode,
@@ -29,8 +32,7 @@ export function SubscriptionUpgradeModal({
     trialEligible,
     pricingModalAlmostFullScreen,
     ctaPickAPlan,
-    closeUpgradeModal,
-  } = useSubscriptionStore()
+  } = useAppSelector(selectSubscriptionState)
   const source = upgradeModalSource ?? undefined
   const dismissible = upgradeModalDismissible
   const handleClose = useCallback(() => {
@@ -42,8 +44,8 @@ export function SubscriptionUpgradeModal({
       source: upgradeModalSource ?? 'unknown',
       isProprietaryMode,
     })
-    closeUpgradeModal()
-  }, [closeUpgradeModal, currentPlan, dismissible, isProprietaryMode, upgradeModalSource])
+    dispatch(subscriptionActions.closeUpgradeModal())
+  }, [currentPlan, dismissible, dispatch, isProprietaryMode, upgradeModalSource])
 
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
   const useTrialCopy = (

@@ -12,10 +12,16 @@ import {
   Settings,
   Stethoscope,
 } from 'lucide-react'
-import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
-import { auditActions } from '../store/auditSlice'
-import { useAppDispatch } from '../store/hooks'
+import {
+  auditActions,
+  initializeAudit,
+  jumpAuditToTime,
+  loadAuditTimeline,
+  loadMoreAudit,
+  selectAuditState,
+} from '../store/auditSlice'
+import { useAppDispatch, useAppSelector } from '../store/hooks'
 import type { AuditToolCallEvent, AuditErrorEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
 import {
   createSystemMessage,
@@ -145,18 +151,44 @@ function formatJudgeSuggestionType(value?: string | null): string {
 export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAuditScreenProps) {
   const dispatch = useAppDispatch()
   const {
-    initialize,
     events,
     loading,
     error,
-    loadMore,
     hasMore,
-    loadTimeline,
-    jumpToTime,
     processingActive,
-    setSelectedDay,
-    setProcessingActive,
-  } = useAgentAuditStore((state) => state)
+  } = useAppSelector(selectAuditState)
+  const initialize = useCallback(
+    async (targetAgentId: string) => {
+      await dispatch(initializeAudit(targetAgentId)).unwrap()
+    },
+    [dispatch],
+  )
+  const loadMore = useCallback(
+    async () => {
+      await dispatch(loadMoreAudit()).unwrap()
+    },
+    [dispatch],
+  )
+  const loadTimeline = useCallback(
+    async (targetAgentId: string) => {
+      await dispatch(loadAuditTimeline(targetAgentId)).unwrap()
+    },
+    [dispatch],
+  )
+  const jumpToTime = useCallback(
+    async (day: string) => {
+      await dispatch(jumpAuditToTime(day)).unwrap()
+    },
+    [dispatch],
+  )
+  const setSelectedDay = useCallback(
+    (day: string | null) => dispatch(auditActions.setSelectedDay(day)),
+    [dispatch],
+  )
+  const setProcessingActive = useCallback(
+    (active: boolean) => dispatch(auditActions.setProcessingActive(active)),
+    [dispatch],
+  )
   const [promptState, setPromptState] = useState<Record<string, PromptState>>({})
   const eventsRef = useRef<HTMLDivElement | null>(null)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)

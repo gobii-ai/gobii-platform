@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentComposer } from './AgentComposer'
 import type { PendingActionRequest } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
+import { createTestAppStore, seedSubscriptionState, StoreProvider } from '../../test/storeTestUtils'
 
 vi.mock('../../util/analytics', () => ({
   AnalyticsEvent: {
@@ -15,39 +16,6 @@ vi.mock('../../util/analytics', () => ({
     UPGRADE_CHECKOUT_REDIRECTED: 'Upgrade Checkout Redirected',
   },
   track: vi.fn(),
-}))
-
-vi.mock('../../stores/subscriptionStore', () => ({
-  useSubscriptionStore: () => ({
-    isProprietaryMode: true,
-    openUpgradeModal: vi.fn(),
-    ensureAuthenticated: vi.fn(async () => true),
-  }),
-}))
-
-vi.mock('../../stores/agentChatStore', () => ({
-  useAgentChatStore: (selector?: (state: any) => any) => {
-    const state = {
-      agentId: 'agent-1',
-      agentName: 'Test Agent',
-      planningState: 'skipped',
-      skipPlanningBusy: false,
-      processingWebTasks: [],
-      insights: [],
-      dismissedInsightIds: new Set<string>(),
-      currentInsightIndex: 0,
-      dismissInsight: () => undefined,
-      setCurrentInsightIndex: () => undefined,
-      setInsightsPaused: () => undefined,
-      insightsPaused: false,
-      hideInsightsPanel: false,
-      canManageAgent: true,
-      stopProcessingBusy: false,
-      stopProcessingRequested: false,
-      enabledIntegrationTabs: {},
-    }
-    return selector ? selector(state) : state
-  },
 }))
 
 vi.mock('./insights', () => ({
@@ -229,6 +197,15 @@ function makeInsight(): InsightEvent {
 }
 
 function renderAgentComposer(props: Partial<React.ComponentProps<typeof AgentComposer>> = {}) {
+  const store = createTestAppStore()
+  seedSubscriptionState(store, {
+    currentPlan: 'free',
+    isProprietaryMode: true,
+  })
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
+    <StoreProvider store={store}>{children}</StoreProvider>
+  )
+
   return render(
     <AgentComposer
       agentId="agent-1"
@@ -243,6 +220,7 @@ function renderAgentComposer(props: Partial<React.ComponentProps<typeof AgentCom
       processingTasks={[]}
       {...props}
     />,
+    { wrapper: Wrapper },
   )
 }
 

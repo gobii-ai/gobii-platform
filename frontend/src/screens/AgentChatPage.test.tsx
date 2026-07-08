@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { AgentChatPage } from './AgentChatPage'
 import type { AppStore } from '../store/appStore'
+import { chatActions } from '../store/chatSlice'
 import { createTestAppStore, seedSubscriptionState, StoreProvider } from '../test/storeTestUtils'
 
 class FakeNotification {
@@ -24,7 +25,6 @@ const {
   updateAgentMock,
   fetchAgentSpawnIntentMock,
   updateUserPreferencesMock,
-  ensureAuthenticatedMock,
   rosterContext,
   rosterState,
   llmIntelligence,
@@ -35,7 +35,6 @@ const {
   updateAgentMock: vi.fn(),
   fetchAgentSpawnIntentMock: vi.fn(),
   updateUserPreferencesMock: vi.fn(),
-  ensureAuthenticatedMock: vi.fn(async () => true),
   rosterContext: {
     type: 'personal',
     id: 'user-1',
@@ -165,9 +164,6 @@ vi.mock('../components/usage/api', () => ({
 }))
 
 vi.mock('../components/agentChat/AgentChatLayout', async () => {
-  const { useSubscriptionStore: mockedUseSubscriptionStore } = await vi.importActual<
-    typeof import('../stores/subscriptionStore')
-  >('../stores/subscriptionStore')
   const { useAppSelector: mockedUseAppSelector } = await vi.importActual<
     typeof import('../store/hooks')
   >('../store/hooks')
@@ -207,7 +203,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
         isUpgradeModalOpen,
         upgradeModalSource,
         upgradeModalDismissible,
-      } = mockedUseSubscriptionStore()
+      } = mockedUseAppSelector((state) => state.subscription)
       const enabledIntegrationTabs = mockedUseAppSelector((state) => (
         agentId ? state.chat.sessionsByAgentId[agentId]?.identity.enabledIntegrationTabs ?? emptyEnabledIntegrationTabs : emptyEnabledIntegrationTabs
       ))
@@ -386,19 +382,6 @@ vi.mock('../hooks/useConsoleContextSwitcher', () => ({
   })),
 }))
 
-vi.mock('../stores/agentChatStore', () => {
-  const useAgentChatStore = Object.assign(
-    (selector: (state: typeof agentChatStoreState) => unknown) => selector(agentChatStoreState),
-    {
-      getState: () => agentChatStoreState,
-    },
-  )
-
-  return {
-    useAgentChatStore,
-  }
-})
-
 vi.mock('../hooks/useAgentTimeline', () => ({
   useAgentTimeline: vi.fn(() => ({
     data: timelineState.data,
@@ -480,7 +463,6 @@ function buildInitialSubscriptionState() {
     personalSignupPreviewProcessingAvailable: false,
     trialDaysByPlan: { startup: 14, scale: 14 },
     trialEligible: true,
-    ensureAuthenticated: ensureAuthenticatedMock,
   }
 }
 
@@ -518,7 +500,6 @@ describe('AgentChatPage trial onboarding', () => {
     fetchAgentSpawnIntentMock.mockReset()
     updateUserPreferencesMock.mockReset()
     updateUserPreferencesMock.mockResolvedValue({ preferences: {} })
-    ensureAuthenticatedMock.mockClear()
     queryClient = createTestQueryClient()
     appStore = createTestAppStore({ queryClient })
     seedSubscriptionState(appStore, buildInitialSubscriptionState())
@@ -688,7 +669,6 @@ describe('AgentChatPage trial onboarding', () => {
         planningState: 'skipped',
       },
     ]
-    agentChatStoreState.agentId = 'agent-1'
     timelineState.flatEvents = [
       {
         kind: 'message',
@@ -703,25 +683,28 @@ describe('AgentChatPage trial onboarding', () => {
         },
       },
     ]
-    agentChatStoreState.pendingEvents = [
-      {
-        kind: 'message',
-        cursor: '2000:message:local-1',
-        message: {
-          id: 'local-1',
-          bodyText: 'Pending hello',
-          isOutbound: false,
-          channel: 'web',
-          timestamp: sentAt,
-          relativeTimestamp: null,
-          clientId: 'local-1',
-          status: 'sending',
-        },
+    const pendingEvent = {
+      kind: 'message' as const,
+      cursor: '2000:message:local-1',
+      message: {
+        id: 'local-1',
+        bodyText: 'Pending hello',
+        isOutbound: false,
+        channel: 'web',
+        timestamp: sentAt,
+        relativeTimestamp: null,
+        clientId: 'local-1',
+        status: 'sending' as const,
       },
-    ]
+    }
 
     window.history.pushState({}, '', '/app/agents/agent-1')
     renderAgentChatPage({ agentId: 'agent-1' })
+    appStore.dispatch(chatActions.autoScrollPinnedSet({ agentId: 'agent-1', pinned: false }))
+    appStore.dispatch(chatActions.realtimeEventReceived({
+      agentId: 'agent-1',
+      event: pendingEvent,
+    }))
 
     await waitFor(() => {
       expect(screen.getByTestId('timeline-event-count')).toHaveTextContent('2')

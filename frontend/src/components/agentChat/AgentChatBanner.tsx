@@ -2,9 +2,9 @@ import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from '
 import { Check, CreditCard, EllipsisVertical, ListTodo, Mail, MessageSquare, Settings, Share2, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
-import { useAgentChatStore } from '../../stores/agentChatStore'
-import { useAppSelector } from '../../store/hooks'
+import { ensureAuthenticated, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
+import { selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { selectImmersiveShellConnection } from '../../store/immersiveShellSlice'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -75,17 +75,19 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   sidebarMode = 'list',
   children,
 }: AgentChatBannerProps) {
-  const agentId = useAgentChatStore((state) => state.agentId)
-  const agentName = useAgentChatStore((state) => state.agentName)
-  const agentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
-  const agentEmail = useAgentChatStore((state) => state.agentEmail)
-  const agentSms = useAgentChatStore((state) => state.agentSms)
-  const auditUrl = useAgentChatStore((state) => state.auditUrl)
-  const isOrgOwned = useAgentChatStore((state) => state.agentIsOrgOwned)
-  const canManageAgent = useAgentChatStore((state) => state.canManageAgent)
-  const isCollaborator = useAgentChatStore((state) => state.isCollaborator)
-  const processingActive = useAgentChatStore((state) => state.processingActive)
-  const signupPreviewState = useAgentChatStore((state) => state.signupPreviewState)
+  const dispatch = useAppDispatch()
+  const activeSession = useAppSelector(selectActiveChatSession)
+  const agentId = useAppSelector(selectActiveChatAgentId)
+  const agentName = activeSession.identity.agentName
+  const agentAvatarUrl = activeSession.identity.agentAvatarUrl
+  const agentEmail = activeSession.identity.agentEmail
+  const agentSms = activeSession.identity.agentSms
+  const auditUrl = activeSession.identity.auditUrl
+  const isOrgOwned = activeSession.identity.agentIsOrgOwned
+  const canManageAgent = activeSession.identity.canManageAgent
+  const isCollaborator = activeSession.identity.isCollaborator
+  const processingActive = activeSession.processing.processingActive
+  const signupPreviewState = activeSession.identity.signupPreviewState
   const connection = useAppSelector(selectImmersiveShellConnection)
   const connectionStatus = connection.status
   const connectionLabel = connection.label
@@ -98,9 +100,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const {
     currentPlan,
     isProprietaryMode,
-    openUpgradeModal,
-    ensureAuthenticated,
-  } = useSubscriptionStore()
+  } = useAppSelector(selectSubscriptionState)
   const canShowBannerActions = canManageAgent !== false && !isCollaborator
   const showPurchaseSeatsCta = canShowBannerActions && showPurchaseSeatsButton && Boolean(onPurchaseSeats)
 
@@ -115,7 +115,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const upgradeButtonLabel = currentPlan === 'free' ? 'Upgrade to Pro' : 'Upgrade to Scale'
 
   const handleBannerUpgradeClick = useCallback(async () => {
-    const authenticated = await ensureAuthenticated()
+    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
     if (!authenticated) {
       return
     }
@@ -123,8 +123,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
       currentPlan,
       targetPlan,
     })
-    openUpgradeModal('banner')
-  }, [currentPlan, ensureAuthenticated, openUpgradeModal, targetPlan])
+    dispatch(subscriptionActions.openUpgradeModal({ source: 'banner' }))
+  }, [currentPlan, dispatch, targetPlan])
 
   useEffect(() => {
     const node = bannerRef.current

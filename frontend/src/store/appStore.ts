@@ -2,7 +2,6 @@ import { combineReducers, configureStore, createListenerMiddleware, type Unknown
 import type { ThunkDispatch } from 'redux-thunk'
 import type { QueryClient } from '@tanstack/react-query'
 
-import { agentResourceStatusReducer } from './agentResourceStatusSlice'
 import { agentRosterPreferencesReducer } from './agentRosterPreferencesSlice'
 import { agentSettingsReducer } from './agentSettingsSlice'
 import { auditReducer } from './auditSlice'
@@ -18,7 +17,6 @@ export type AppStoreExtra = {
 }
 
 const rootReducer = combineReducers({
-  agentResourceStatus: agentResourceStatusReducer,
   agentRosterPreferences: agentRosterPreferencesReducer,
   agentSettings: agentSettingsReducer,
   audit: auditReducer,

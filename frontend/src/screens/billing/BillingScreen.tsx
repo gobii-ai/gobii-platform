@@ -5,7 +5,8 @@ import { jsonRequest } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { SaveBar } from '../../components/common/SaveBar'
 import { SubscriptionUpgradeModal } from '../../components/common/SubscriptionUpgradeModal'
-import { type PlanTier, useSubscriptionStore } from '../../stores/subscriptionStore'
+import { selectSubscriptionState, subscriptionActions, type PlanTier } from '../../store/subscriptionSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 
@@ -165,13 +166,12 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(d)
   }, [initialData.trial?.trialEndsAtIso])
 
+  const reduxDispatch = useAppDispatch()
   const {
     isProprietaryMode,
     isUpgradeModalOpen,
     upgradeModalSource,
-    openUpgradeModal,
-    closeUpgradeModal,
-  } = useSubscriptionStore()
+  } = useAppSelector(selectSubscriptionState)
 
   const [draft, dispatch] = useReducer(billingDraftReducer, initialDraftState(initialData))
   const [saving, setSaving] = useState(false)
@@ -244,11 +244,11 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       plan,
       source: upgradeModalSource ?? 'billing',
     })
-    closeUpgradeModal()
+    reduxDispatch(subscriptionActions.closeUpgradeModal())
     setPlanConfirmTarget(plan)
     setPlanConfirmError(null)
     setPlanConfirmOpen(true)
-  }, [closeUpgradeModal, upgradeModalSource])
+  }, [reduxDispatch, upgradeModalSource])
 
   const handleFreeUpgradeClick = useCallback(() => {
     track(AnalyticsEvent.CTA_FREE_UPGRADE_PLAN, {
@@ -265,11 +265,11 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const handlePlanActionClick = useCallback(() => {
     if (!showPlanAction) return
     if (initialData.paidSubscriber) {
-      openUpgradeModal('unknown')
+      reduxDispatch(subscriptionActions.openUpgradeModal({ source: 'unknown' }))
       return
     }
     handleFreeUpgradeClick()
-  }, [showPlanAction, initialData.paidSubscriber, openUpgradeModal, handleFreeUpgradeClick])
+  }, [showPlanAction, initialData.paidSubscriber, reduxDispatch, handleFreeUpgradeClick])
 
   const handleManageInStripe = useCallback(async () => {
     const stripePortalUrl = initialData.endpoints.stripePortalUrl

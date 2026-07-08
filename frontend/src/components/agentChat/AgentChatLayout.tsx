@@ -35,9 +35,10 @@ import type {
 import type { SignupPreviewState } from '../../types/agentRoster'
 import {
   isContinuationUpgradeModalSource,
-  useSubscriptionStore,
+  selectSubscriptionState,
+  subscriptionActions,
   type PlanTier,
-} from '../../stores/subscriptionStore'
+} from '../../store/subscriptionSlice'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
@@ -49,8 +50,8 @@ import {
   hasCompletedPlanDeliverables,
 } from './planSnapshotUtils'
 import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
-import { useAgentChatStore } from '../../stores/agentChatStore'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import { selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
 import {
   immersiveShellActions,
   selectImmersiveShellActiveAgentId,
@@ -403,7 +404,6 @@ export function AgentChatLayout({
     currentPlan: subscriptionPlan,
     isLoading: subscriptionLoading,
     isUpgradeModalOpen,
-    closeUpgradeModal,
     upgradeModalSource,
     upgradeModalDismissible,
     isProprietaryMode,
@@ -411,7 +411,7 @@ export function AgentChatLayout({
     personalSignupPreviewAvailable,
     trialDaysByPlan,
     trialEligible,
-  } = useSubscriptionStore()
+  } = useAppSelector(selectSubscriptionState)
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
   const useTrialUpgradeCopy = (
     trialEligible
@@ -453,27 +453,36 @@ export function AgentChatLayout({
   const sidebarNotificationsEnabled = sidebarSettingsConfig?.notificationsEnabled ?? true
   const sidebarNotificationStatus = sidebarSettingsConfig?.notificationStatus ?? 'off'
   const onSidebarNotificationsEnabledChange = sidebarSettingsConfig?.onNotificationsEnabledChange
-  const runtimeAgentId = useAgentChatStore((state) => state.agentId)
+  const runtimeAgentId = useAppSelector(selectActiveChatAgentId)
+  const runtimeSession = useAppSelector(selectActiveChatSession)
   const shellActiveAgentId = useAppSelector(selectImmersiveShellActiveAgentId)
   const shellViewer = useAppSelector(selectImmersiveShellViewer)
   const activeAgentId = shellActiveAgentId ?? agentId ?? null
-  const runtimeAgentName = useAgentChatStore((state) => state.agentName)
-  const runtimeAgentIsOrgOwned = useAgentChatStore((state) => state.agentIsOrgOwned)
-  const runtimeCanManageAgent = useAgentChatStore((state) => state.canManageAgent)
-  const runtimeIsCollaborator = useAgentChatStore((state) => state.isCollaborator)
-  const runtimeProcessingActive = useAgentChatStore((state) => state.processingActive)
-  const runtimeAwaitingResponse = useAgentChatStore((state) => state.awaitingResponse)
-  const runtimeProcessingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
-  const runtimeNextScheduledAt = useAgentChatStore((state) => state.nextScheduledAt)
-  const runtimeStopProcessingRequested = useAgentChatStore((state) => state.stopProcessingRequested)
-  const runtimeSkipPlanningBusy = useAgentChatStore((state) => state.skipPlanningBusy)
-  const runtimeStreaming = useAgentChatStore((state) => state.streaming)
-  const runtimeAutoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
-  const runtimeHasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
-  const runtimeSignupPreviewState = useAgentChatStore((state) => state.signupPreviewState)
-  const runtimePlanningState = useAgentChatStore((state) => state.planningState)
-  const runtimeInsights = useAgentChatStore((state) => state.insights)
-  const runtimeDismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
+  const runtimeAgentName = runtimeSession.identity.agentName
+  const runtimeAgentIsOrgOwned = runtimeSession.identity.agentIsOrgOwned
+  const runtimeCanManageAgent = runtimeSession.identity.canManageAgent
+  const runtimeIsCollaborator = runtimeSession.identity.isCollaborator
+  const runtimeProcessingActive = runtimeSession.processing.processingActive
+  const runtimeAwaitingResponse = runtimeSession.processing.awaitingResponse
+  const runtimeProcessingWebTasks = runtimeSession.processing.processingWebTasks
+  const runtimeNextScheduledAt = runtimeSession.processing.nextScheduledAt
+  const runtimeStopProcessingRequested = runtimeSession.processing.stopProcessingRequested
+  const runtimeSkipPlanningBusy = runtimeSession.processing.skipPlanningBusy
+  const runtimeStreaming = runtimeSession.stream.streaming
+  const runtimeAutoScrollPinned = runtimeSession.timelineUi.autoScrollPinned
+  const runtimeHasUnseenActivity = runtimeSession.timelineUi.hasUnseenActivity
+  const runtimeSignupPreviewState = runtimeSession.identity.signupPreviewState
+  const runtimePlanningState = runtimeSession.identity.planningState
+  const runtimeInsights = useMemo(
+    () => runtimeSession.insights.insightIds
+      .map((id) => runtimeSession.insights.insightsById[id])
+      .filter(Boolean),
+    [runtimeSession.insights.insightIds, runtimeSession.insights.insightsById],
+  )
+  const runtimeDismissedInsightIds = useMemo(
+    () => new Set(Object.keys(runtimeSession.insights.dismissedInsightIds)),
+    [runtimeSession.insights.dismissedInsightIds],
+  )
   const expectedRuntimeAgentId = activeAgentId ?? agentId ?? null
   const runtimeSynced = runtimeAgentId === expectedRuntimeAgentId
   const processingActive = runtimeSynced ? runtimeProcessingActive : false
@@ -708,16 +717,16 @@ export function AgentChatLayout({
       return
     }
     if (isCollaborator) {
-      closeUpgradeModal()
+      dispatch(subscriptionActions.closeUpgradeModal())
       return
     }
     if (subscriptionLoading) {
       return
     }
     if (!isProprietaryMode) {
-      closeUpgradeModal()
+      dispatch(subscriptionActions.closeUpgradeModal())
     }
-  }, [closeUpgradeModal, isCollaborator, isProprietaryMode, isUpgradeModalOpen, subscriptionLoading])
+  }, [dispatch, isCollaborator, isProprietaryMode, isUpgradeModalOpen, subscriptionLoading])
 
   const handleUpgradeModalDismiss = useCallback(() => {
     if (!upgradeModalDismissible) {
@@ -727,13 +736,13 @@ export function AgentChatLayout({
       currentPlan: subscriptionPlan,
       source: upgradeModalSource ?? 'unknown',
     })
-    closeUpgradeModal()
-  }, [closeUpgradeModal, subscriptionPlan, upgradeModalDismissible, upgradeModalSource])
+    dispatch(subscriptionActions.closeUpgradeModal())
+  }, [dispatch, subscriptionPlan, upgradeModalDismissible, upgradeModalSource])
 
   const handleUpgradeSelection = useCallback((plan: PlanTier) => {
     onUpgrade?.(plan)
-    closeUpgradeModal()
-  }, [closeUpgradeModal, onUpgrade])
+    dispatch(subscriptionActions.closeUpgradeModal())
+  }, [dispatch, onUpgrade])
 
   const resolvedOpenTaskPacks = useMemo(
     () =>

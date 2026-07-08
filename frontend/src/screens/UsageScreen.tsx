@@ -7,7 +7,6 @@ import {
   UsageTrendSection,
   UsageMetricsGrid,
   UsageAgentLeaderboard,
-  useUsageStore,
 } from '../components/usage'
 import {fetchUsageAgents} from '../components/usage/api'
 import type {
@@ -27,6 +26,8 @@ import {
 } from '../components/usage/utils'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
+import { selectUsageState, usageActions } from '../store/usageSlice'
+import { useAppDispatch, useAppSelector } from '../store/hooks'
 
 
 type SelectionMode = 'billing' | 'custom'
@@ -37,6 +38,7 @@ const formatContextCaption = (contextName: string, timezone: string): string => 
 }
 
 export function UsageScreen() {
+  const dispatch = useAppDispatch()
   const [appliedRange, setAppliedRange] = useState<DateRangeValue | null>(null)
   const [calendarRange, setCalendarRange] = useState<DateRangeValue | null>(null)
   const [isPickerOpen, setPickerOpen] = useState(false)
@@ -47,17 +49,14 @@ export function UsageScreen() {
   const anchorDayRef = useRef<number | null>(null)
 
   // Persisted API data so the UI stays responsive while React Query loads.
-  const summary = useUsageStore((state) => state.summary)
-  const summaryStatus = useUsageStore((state) => state.summaryStatus)
-  const summaryErrorMessage = useUsageStore((state) => state.summaryErrorMessage)
-
-  const agents = useUsageStore((state) => state.agents)
-  const agentsStatus = useUsageStore((state) => state.agentsStatus)
-  const agentsErrorMessage = useUsageStore((state) => state.agentsErrorMessage)
-
-  const setAgentsLoading = useUsageStore((state) => state.setAgentsLoading)
-  const setAgentsData = useUsageStore((state) => state.setAgentsData)
-  const setAgentsError = useUsageStore((state) => state.setAgentsError)
+  const {
+    summary,
+    summaryStatus,
+    summaryErrorMessage,
+    agents,
+    agentsStatus,
+    agentsErrorMessage,
+  } = useAppSelector(selectUsageState)
 
   // Agents are stable enough that we cache them globally and reuse between tabs.
   const agentsQuery = useQuery({
@@ -69,16 +68,16 @@ export function UsageScreen() {
   // Keep the local store aligned with the React Query lifecycle so components can react synchronously.
   useEffect(() => {
     if (agentsQuery.isPending) {
-      setAgentsLoading()
+      dispatch(usageActions.agentsLoading())
     }
-  }, [agentsQuery.isPending, setAgentsLoading])
+  }, [agentsQuery.isPending, dispatch])
 
   // When the agents list changes, drop any stale selections the user can no longer access.
   useEffect(() => {
     if (agentsQuery.data) {
-      setAgentsData(agentsQuery.data.agents)
+      dispatch(usageActions.agentsLoaded(agentsQuery.data.agents))
     }
-  }, [agentsQuery.data, setAgentsData])
+  }, [agentsQuery.data, dispatch])
 
   useEffect(() => {
     if (agentsQuery.isError) {
@@ -86,9 +85,9 @@ export function UsageScreen() {
         agentsQuery.error instanceof Error
           ? agentsQuery.error.message
           : 'Unable to load agents or API data right now.'
-      setAgentsError(message)
+      dispatch(usageActions.agentsFailed(message))
     }
-  }, [agentsQuery.error, agentsQuery.isError, setAgentsError])
+  }, [agentsQuery.error, agentsQuery.isError, dispatch])
 
   useEffect(() => {
     if (!agents.length) {

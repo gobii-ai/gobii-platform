@@ -3,10 +3,11 @@ import { Check, ChevronRight, Rocket, Sparkles } from 'lucide-react'
 
 import {
   isContinuationUpgradeModalSource,
-  useSubscriptionStore,
   type PlanTaskCreditsByPlan,
   type PlanTier,
-} from '../../stores/subscriptionStore'
+  selectSubscriptionState,
+} from '../../store/subscriptionSlice'
+import { useAppSelector } from '../../store/hooks'
 import type { SignupPreviewState } from '../../types/agentRoster'
 import { appendReturnTo } from '../../util/returnTo'
 import { track } from '../../util/analytics'
@@ -105,7 +106,7 @@ export function SubscriptionUpgradePlans({
     ctaStartFreeTrial,
     ctaContinueAgentBtn,
     ctaNoChargeDuringTrial,
-  } = useSubscriptionStore()
+  } = useAppSelector(selectSubscriptionState)
   const currentPlan = currentPlanOverride ?? storeCurrentPlan
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
   const canSelectPlan = useCallback(

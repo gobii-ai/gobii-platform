@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ExternalLink, Search, ShieldCheck, Wand2 } from 'lucide-react'
-import { useAgentChatStore } from '../../stores/agentChatStore'
+import { selectActiveChatSession } from '../../store/chatSlice'
+import { useAppSelector } from '../../store/hooks'
 import { formatRelativeTimestamp } from '../../util/time'
 import { getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
 import { extractBrightDataSearchQuery } from '../tooling/brightdata'
@@ -1052,7 +1053,7 @@ export function ToolClusterLivePreview({
 }: ToolClusterLivePreviewProps) {
   const reduceMotion = useReducedMotion()
   const shouldAnimateIncoming = !reduceMotion && animateIncoming
-  const processingActive = useAgentChatStore((state) => state.processingActive)
+  const processingActive = useAppSelector(selectActiveChatSession).processing.processingActive
   const [newEntryIds, setNewEntryIds] = useState<string[]>([])
   const previousEntryIdsRef = useRef<string[] | null>(null)
   const newEntryTimeoutRef = useRef<number | null>(null)

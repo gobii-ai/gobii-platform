@@ -18,8 +18,9 @@ import type { PendingActionMutationResult } from '../../api/agentChat'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
-import { useAgentChatStore } from '../../stores/agentChatStore'
+import { ensureAuthenticated, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
+import { chatActions, selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { track, AnalyticsEvent } from '../../util/analytics'
 import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
@@ -575,25 +576,44 @@ export const AgentComposer = memo(function AgentComposer({
   compact = false,
   externalShellRef,
 }: AgentComposerProps) {
-  const storeAgentId = useAgentChatStore((state) => state.agentId)
-  const storeAgentName = useAgentChatStore((state) => state.agentName)
-  const storeAgentEmail = useAgentChatStore((state) => state.agentEmail)
-  const storeAgentSms = useAgentChatStore((state) => state.agentSms)
-  const storePlanningState = useAgentChatStore((state) => state.planningState)
-  const storeSkipPlanningBusy = useAgentChatStore((state) => state.skipPlanningBusy)
-  const storeProcessingTasks = useAgentChatStore((state) => state.processingWebTasks)
-  const storeInsights = useAgentChatStore((state) => state.insights)
-  const storeDismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
-  const storeCurrentInsightIndex = useAgentChatStore((state) => state.currentInsightIndex)
-  const storeDismissInsight = useAgentChatStore((state) => state.dismissInsight)
-  const storeSetCurrentInsightIndex = useAgentChatStore((state) => state.setCurrentInsightIndex)
-  const storeSetInsightsPaused = useAgentChatStore((state) => state.setInsightsPaused)
-  const storeIsInsightsPaused = useAgentChatStore((state) => state.insightsPaused)
-  const storeHideInsightsPanel = useAgentChatStore((state) => state.hideInsightsPanel)
-  const storeCanManageAgent = useAgentChatStore((state) => state.canManageAgent)
-  const storeStopProcessingBusy = useAgentChatStore((state) => state.stopProcessingBusy)
-  const storeStopProcessingRequested = useAgentChatStore((state) => state.stopProcessingRequested)
-  const storeEnabledIntegrationTabs = useAgentChatStore((state) => state.enabledIntegrationTabs)
+  const dispatch = useAppDispatch()
+  const storeAgentId = useAppSelector(selectActiveChatAgentId)
+  const activeSession = useAppSelector(selectActiveChatSession)
+  const storeAgentName = activeSession.identity.agentName
+  const storeAgentEmail = activeSession.identity.agentEmail
+  const storeAgentSms = activeSession.identity.agentSms
+  const storePlanningState = activeSession.identity.planningState
+  const storeSkipPlanningBusy = activeSession.processing.skipPlanningBusy
+  const storeProcessingTasks = activeSession.processing.processingWebTasks
+  const storeInsights = useMemo(
+    () => activeSession.insights.insightIds
+      .map((id) => activeSession.insights.insightsById[id])
+      .filter((insight): insight is InsightEvent => Boolean(insight)),
+    [activeSession.insights.insightIds, activeSession.insights.insightsById],
+  )
+  const storeDismissedInsightIds = useMemo(
+    () => new Set(Object.keys(activeSession.insights.dismissedInsightIds)),
+    [activeSession.insights.dismissedInsightIds],
+  )
+  const storeCurrentInsightIndex = activeSession.insights.currentInsightIndex
+  const storeDismissInsight = useCallback(
+    (insightId: string) => dispatch(chatActions.insightDismissed(insightId)),
+    [dispatch],
+  )
+  const storeSetCurrentInsightIndex = useCallback(
+    (index: number) => dispatch(chatActions.currentInsightIndexSet(index)),
+    [dispatch],
+  )
+  const storeSetInsightsPaused = useCallback(
+    (paused: boolean) => dispatch(chatActions.insightsPausedSet(paused)),
+    [dispatch],
+  )
+  const storeIsInsightsPaused = activeSession.insights.insightsPaused
+  const storeHideInsightsPanel = activeSession.identity.hideInsightsPanel
+  const storeCanManageAgent = activeSession.identity.canManageAgent
+  const storeStopProcessingBusy = activeSession.processing.stopProcessingBusy
+  const storeStopProcessingRequested = activeSession.processing.stopProcessingRequested
+  const storeEnabledIntegrationTabs = activeSession.identity.enabledIntegrationTabs
   const agentId = agentIdOverride !== undefined ? agentIdOverride : storeAgentId
   const agentName = agentNameOverride !== undefined ? agentNameOverride : storeAgentName
   const planningState = planningStateOverride ?? storePlanningState
@@ -654,7 +674,7 @@ export const AgentComposer = memo(function AgentComposer({
   const draftHumanInputResponsesRef = useRef<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
   const [pendingActionsForceExpanded, setPendingActionsForceExpanded] = useState(() => pendingActionRequests.length > 0)
-  const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
+  const { isProprietaryMode } = useAppSelector(selectSubscriptionState)
   const [appsModal, showAppsModal] = useModal()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const composedShellRef = useCallback((node: HTMLDivElement | null) => {
@@ -738,12 +758,12 @@ export const AgentComposer = memo(function AgentComposer({
   const showStopProcessing = Boolean(isProcessing && !isPlanningMode && !isStopping && agentId && canManageAgent && onStopProcessing)
   const requiresMessageBody = agentId === null
   const handleIntelligenceUpsell = useCallback(async () => {
-    const authenticated = await ensureAuthenticated()
+    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
     if (!authenticated) {
       return
     }
     if (isProprietaryMode) {
-      openUpgradeModal('intelligence_selector')
+      dispatch(subscriptionActions.openUpgradeModal({ source: 'intelligence_selector' }))
       return
     }
     if (intelligenceConfig?.upgradeUrl) {
@@ -753,15 +773,15 @@ export const AgentComposer = memo(function AgentComposer({
       })
       window.open(appendReturnTo(intelligenceConfig.upgradeUrl), '_top')
     }
-  }, [ensureAuthenticated, intelligenceConfig?.upgradeUrl, isProprietaryMode, openUpgradeModal])
+  }, [dispatch, intelligenceConfig?.upgradeUrl, isProprietaryMode])
 
   const handleSubmitErrorUpgrade = useCallback(async () => {
-    const authenticated = await ensureAuthenticated()
+    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
     if (!authenticated) {
       return
     }
-    openUpgradeModal('agent_limit_error')
-  }, [ensureAuthenticated, openUpgradeModal])
+    dispatch(subscriptionActions.openUpgradeModal({ source: 'agent_limit_error' }))
+  }, [dispatch])
 
   // Insight carousel logic
   const totalInsights = insights.length

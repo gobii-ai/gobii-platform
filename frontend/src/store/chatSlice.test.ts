@@ -7,7 +7,8 @@ import { createAppStore } from './appStore'
 import {
   chatActions,
   loadAgentSpawnIntent,
-  selectActiveChatStoreSnapshot,
+  selectActiveChatAgentId,
+  selectActiveChatSession,
   selectCreateAgentWorkflow,
   sendMessage,
   setAutoScrollPinned,
@@ -50,6 +51,19 @@ function makeInsight(insightId: string, title: string) {
   }
 }
 
+function selectActiveChatTestSnapshot(state: ReturnType<ReturnType<typeof createAppStore>['getState']>) {
+  const session = selectActiveChatSession(state)
+  return {
+    agentId: selectActiveChatAgentId(state),
+    awaitingResponse: session.processing.awaitingResponse,
+    pendingEvents: session.timelineUi.pendingEvents,
+    insights: session.insights.insightIds.map((id) => session.insights.insightsById[id]).filter(Boolean),
+    currentInsightIndex: session.insights.currentInsightIndex,
+    sendMessageError: session.workflow.sendMessageError,
+    pendingActions: session.workflow.pendingActions,
+  }
+}
+
 describe('chatSlice insights', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -63,7 +77,7 @@ describe('chatSlice insights', () => {
       insights: [makeInsight('insight-1', 'First insight')],
     }))
 
-    const state = selectActiveChatStoreSnapshot(store.getState())
+    const state = selectActiveChatTestSnapshot(store.getState())
     expect(state.insights).toEqual([makeInsight('insight-1', 'First insight')])
     expect(state.currentInsightIndex).toBe(0)
   })
@@ -77,14 +91,14 @@ describe('chatSlice insights', () => {
       insights: [makeInsight('stale-insight', 'Stale insight')],
     }))
 
-    expect(selectActiveChatStoreSnapshot(store.getState()).insights).toEqual([])
+    expect(selectActiveChatTestSnapshot(store.getState()).insights).toEqual([])
 
     store.dispatch(chatActions.insightsSetForAgent({
       agentId: 'agent-2',
       insights: [makeInsight('fresh-insight', 'Fresh insight')],
     }))
 
-    const state = selectActiveChatStoreSnapshot(store.getState())
+    const state = selectActiveChatTestSnapshot(store.getState())
     expect(state.insights).toEqual([makeInsight('fresh-insight', 'Fresh insight')])
     expect(state.agentId).toBe('agent-2')
   })
@@ -107,7 +121,7 @@ describe('chatSlice message sending', () => {
     const sendResult = store.dispatch(sendMessage({ body: 'hello backend' }))
 
     expect(sendAgentMessage).toHaveBeenCalledWith('agent-1', 'hello backend', [])
-    const pendingEvents = selectActiveChatStoreSnapshot(store.getState()).pendingEvents
+    const pendingEvents = selectActiveChatTestSnapshot(store.getState()).pendingEvents
     expect(pendingEvents).toHaveLength(1)
     expect(pendingEvents[0]).toMatchObject({
       kind: 'message',
@@ -116,7 +130,7 @@ describe('chatSlice message sending', () => {
         status: 'sending',
       },
     })
-    expect(selectActiveChatStoreSnapshot(store.getState()).awaitingResponse).toBe(true)
+    expect(selectActiveChatTestSnapshot(store.getState()).awaitingResponse).toBe(true)
 
     resolveSend({
       kind: 'message',
@@ -150,7 +164,7 @@ describe('chatSlice workflow state', () => {
       }],
     }))
 
-    expect(selectActiveChatStoreSnapshot(store.getState())).toMatchObject({
+    expect(selectActiveChatTestSnapshot(store.getState())).toMatchObject({
       sendMessageError: 'Unable to send.',
       pendingActions: [{
         id: 'action-1',
