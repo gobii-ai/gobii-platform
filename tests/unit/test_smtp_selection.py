@@ -87,7 +87,7 @@ class TestSmtpSelection(TestCase):
         AgentEmailAccount.objects.filter(endpoint=self.from_ep).update(is_outbound_enabled=True)
         PersistentAgentEmailEndpoint.objects.create(
             endpoint=self.from_ep,
-            display_name="Sel Agent",
+            display_name="Custom SMTP Name",
             verified=True,
         )
 
@@ -106,7 +106,7 @@ class TestSmtpSelection(TestCase):
         deliver_agent_email(msg)
 
         sent_message = client.send_message.call_args.args[0]
-        self.assertEqual(sent_message["From"], "Sel Agent <agent@example.com>")
+        self.assertEqual(sent_message["From"], "Custom SMTP Name <agent@example.com>")
         self.assertEqual(client.send_message.call_args.kwargs["from_addr"], "agent@example.com")
 
     @override_settings(GOBII_RELEASE_ENV="test")

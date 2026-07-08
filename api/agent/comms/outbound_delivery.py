@@ -311,8 +311,7 @@ def _build_from_header(
         except PersistentAgentEmailEndpoint.DoesNotExist:
             pass
     if not display_name:
-        owner_agent = getattr(message, "owner_agent", None)
-        display_name = (getattr(owner_agent, "name", "") or "").strip()
+        display_name = message.owner_agent.name.strip()
     display_name = display_name.replace("\r", "").replace("\n", "").strip()
     if display_name:
         return formataddr((display_name, from_address))
