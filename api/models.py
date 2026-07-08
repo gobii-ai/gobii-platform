@@ -93,6 +93,10 @@ from api.services.tool_settings import (
     DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS,
 )
 from constants.regex import E164_PHONE_REGEX
+from api.storage_backends import (
+    AliasedStorage,
+    PUBLIC_TEMPLATE_SOCIAL_IMAGE_STORAGE_ALIAS,
+)
 from observability import traced
 from email.utils import parseaddr
 
@@ -6522,6 +6526,7 @@ class PersistentAgentTemplate(models.Model):
     )
     social_image = models.ImageField(
         upload_to="public_template_social_images/%Y/%m/%d/",
+        storage=AliasedStorage(PUBLIC_TEMPLATE_SOCIAL_IMAGE_STORAGE_ALIAS),
         blank=True,
         null=True,
         max_length=512,
