@@ -2396,7 +2396,7 @@ class PublicTemplateDetailView(TemplateView):
         context["template"] = self.template
         public_profile_handle = self.template.public_profile.handle if self.template.public_profile_id else ""
         context["public_profile_handle"] = public_profile_handle
-        context["template_is_gobii_owned"] = self.template.is_official or not public_profile_handle
+        context["template_is_gobii_owned"] = self.template.is_official
         context["template_category_label"] = category_label
         context["template_category_url"] = category_url
         context["template_hire_url"] = public_template_hire_path(self.template)

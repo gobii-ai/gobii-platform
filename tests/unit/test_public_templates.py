@@ -215,6 +215,31 @@ class PublicTemplateRouteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Project Manager")
         self.assertContains(response, "Keep projects moving with a reusable project manager.")
+        self.assertNotContains(response, "Official template")
+
+    @tag("batch_public_templates")
+    def test_code_only_curated_template_detail_renders_official_badge_when_checked(self):
+        PersistentAgentTemplate.objects.update_or_create(
+            code="official-project-manager",
+            defaults={
+                "public_profile": None,
+                "slug": "",
+                "display_name": "Official Project Manager",
+                "tagline": "Keep projects moving with a reusable project manager.",
+                "description": "Tracks project updates and flags blockers.",
+                "charter": "Coordinate project updates and flag blockers.",
+                "base_schedule": "@daily",
+                "recommended_contact_channel": "email",
+                "category": "Team Ops",
+                "is_official": True,
+                "is_active": True,
+            },
+        )
+
+        response = self.client.get("/library/team-ops/official-project-manager/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Official Project Manager")
         self.assertContains(response, "Official template")
 
     @tag("batch_public_templates")
