@@ -2,6 +2,7 @@
 Gobii settings – dev profile
 """
 
+from copy import deepcopy
 from pathlib import Path
 from datetime import timedelta
 import environ
@@ -580,8 +581,6 @@ GS_BUCKET_NAME = env("GS_BUCKET_NAME", default=None)
 GS_PROJECT_ID = env("GS_PROJECT_ID", default=None)
 GS_DEFAULT_ACL = env("GS_DEFAULT_ACL", default="projectPrivate")
 GS_QUERYSTRING_AUTH = env.bool("GS_QUERYSTRING_AUTH", default=False)
-GS_PUBLIC_DEFAULT_ACL = env("GS_PUBLIC_DEFAULT_ACL", default="publicRead")
-GS_PUBLIC_QUERYSTRING_AUTH = env.bool("GS_PUBLIC_QUERYSTRING_AUTH", default=False)
 
 # S3 Variables
 AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default=None)
@@ -594,8 +593,6 @@ AWS_S3_OBJECT_PARAMETERS = {
 }
 AWS_DEFAULT_ACL = env("AWS_DEFAULT_ACL", default=None)
 AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH", default=False)
-AWS_PUBLIC_DEFAULT_ACL = env("AWS_PUBLIC_DEFAULT_ACL", default="public-read")
-AWS_PUBLIC_QUERYSTRING_AUTH = env.bool("AWS_PUBLIC_QUERYSTRING_AUTH", default=False)
 AWS_S3_ADDRESSING_STYLE = env(
     "AWS_S3_ADDRESSING_STYLE", default="auto"
 )  # Recommended for MinIO path style
@@ -615,16 +612,7 @@ if STORAGE_BACKEND_TYPE == "GCS":
             "querystring_auth": GS_QUERYSTRING_AUTH,
         },
     }
-    STORAGES["public_template_social_images"] = {
-        "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
-        "OPTIONS": {
-            "bucket_name": GS_BUCKET_NAME,
-            "project_id": GS_PROJECT_ID,
-            "location": "media",
-            "default_acl": GS_PUBLIC_DEFAULT_ACL,
-            "querystring_auth": GS_PUBLIC_QUERYSTRING_AUTH,
-        },
-    }
+    STORAGES["public_template_social_images"] = deepcopy(STORAGES["default"])
     # Static files continue to be served by WhiteNoise as configured above
 
 elif STORAGE_BACKEND_TYPE == "S3":
@@ -648,21 +636,7 @@ elif STORAGE_BACKEND_TYPE == "S3":
             "addressing_style": AWS_S3_ADDRESSING_STYLE,
         },
     }
-    STORAGES["public_template_social_images"] = {
-        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-        "OPTIONS": {
-            "access_key": AWS_ACCESS_KEY_ID,
-            "secret_key": AWS_SECRET_ACCESS_KEY,
-            "bucket_name": AWS_STORAGE_BUCKET_NAME,
-            "region_name": AWS_S3_REGION_NAME,
-            "endpoint_url": AWS_S3_ENDPOINT_URL,
-            "object_parameters": AWS_S3_OBJECT_PARAMETERS,
-            "default_acl": AWS_PUBLIC_DEFAULT_ACL,
-            "querystring_auth": AWS_PUBLIC_QUERYSTRING_AUTH,
-            "location": "media",
-            "addressing_style": AWS_S3_ADDRESSING_STYLE,
-        },
-    }
+    STORAGES["public_template_social_images"] = deepcopy(STORAGES["default"])
     STORAGES["staticfiles"] = { # S3 overrides WhiteNoise for static files if S3 is chosen
             "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
             "OPTIONS": {

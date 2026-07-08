@@ -3,6 +3,7 @@ import json
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -843,18 +844,55 @@ class PublicTemplateRouteTests(TestCase):
                 template.social_image.save("custom-og.png", ContentFile(TEST_SOCIAL_IMAGE_BYTES), save=True)
                 try:
                     response = self.client.get("/library/finance/uploaded-social-image-template/")
+                    image_url = response.context["template_social_image_url"]
+                    image_response = self.client.get(urlsplit(image_url).path)
                 finally:
                     template.social_image.delete(save=False)
 
         self.assertEqual(response.status_code, 200)
         structured_data = json.loads(response.context["template_structured_data_json"])
-        image_url = response.context["template_social_image_url"]
-
-        self.assertTrue(image_url.startswith("https://gobii.test/media/public_template_social_images/"))
+        self.assertTrue(image_url.startswith("https://gobii.test/library/social-images/public_template_social_images/"))
+        self.assertEqual(image_response.status_code, 200)
+        self.assertEqual(image_response.get("Content-Type"), "image/png")
+        self.assertEqual(b"".join(image_response.streaming_content), TEST_SOCIAL_IMAGE_BYTES)
         self.assertContains(response, f'<meta property="og:image" content="{image_url}">')
         self.assertContains(response, f'<meta name="twitter:image" content="{image_url}">')
         self.assertNotContains(response, "https://cdn.example.com/templates/fallback-social-image.png")
         self.assertEqual(structured_data["image"], image_url)
+
+    @tag("batch_public_templates")
+    def test_curated_public_template_detail_uses_uploaded_social_image(self):
+        template = PersistentAgentTemplate.objects.create(
+            code="curated-uploaded-social-image-template",
+            public_profile=None,
+            slug="",
+            display_name="Curated Uploaded Social Image Template",
+            tagline="Curated uploaded image tagline.",
+            description="Curated uploaded image description.",
+            charter="Curated uploaded image charter.",
+            category="Team Ops",
+            is_active=True,
+        )
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(
+                MEDIA_ROOT=media_root,
+                PUBLIC_SITE_URL="https://gobii.test",
+                STORAGES=_test_media_storages(media_root),
+            ):
+                template.social_image.save("curated-og.png", ContentFile(TEST_SOCIAL_IMAGE_BYTES), save=True)
+                try:
+                    response = self.client.get("/library/team-ops/curated-uploaded-social-image-template/")
+                    image_url = response.context["template_social_image_url"]
+                    image_response = self.client.get(urlsplit(image_url).path)
+                finally:
+                    template.social_image.delete(save=False)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(image_url.startswith("https://gobii.test/library/social-images/public_template_social_images/"))
+        self.assertEqual(image_response.status_code, 200)
+        self.assertEqual(image_response.get("Content-Type"), "image/png")
+        self.assertEqual(b"".join(image_response.streaming_content), TEST_SOCIAL_IMAGE_BYTES)
 
     @tag("batch_public_templates")
     def test_public_template_social_image_saves_to_public_storage_alias(self):

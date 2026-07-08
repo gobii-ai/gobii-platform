@@ -1,6 +1,7 @@
 from datetime import timezone, datetime
 from functools import lru_cache
 import json
+import mimetypes
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlencode, urlsplit
@@ -8,7 +9,7 @@ import uuid
 
 from django.http.response import JsonResponse
 from django.views.generic import TemplateView, RedirectView, View
-from django.http import HttpResponse, Http404
+from django.http import HttpResponse, Http404, FileResponse
 from django.core import signing
 from django.core.exceptions import PermissionDenied
 from django.core.mail import send_mail
@@ -2226,10 +2227,12 @@ def _optional_static_public_url(path: str) -> str:
 
 def _public_template_social_image_url(template: PersistentAgentTemplate) -> str:
     if template.social_image:
-        try:
-            return _public_site_absolute_url(template.social_image.url)
-        except ValueError:
-            return ""
+        return _public_site_absolute_url(
+            reverse(
+                "pages:public_template_social_image",
+                kwargs={"image_path": template.social_image.name},
+            )
+        )
 
     social_image_path = (
         template.hero_image_path.strip()
@@ -2237,6 +2240,32 @@ def _public_template_social_image_url(template: PersistentAgentTemplate) -> str:
         else "images/gobii_fish_social_1280x640.png"
     )
     return _optional_static_public_url(social_image_path)
+
+
+def public_template_social_image(request, image_path: str):
+    image_name = str(image_path or "").strip().lstrip("/")
+    if not image_name.startswith("public_template_social_images/"):
+        raise Http404
+
+    template = PersistentAgentTemplate.objects.filter(
+        organization__isnull=True,
+        is_active=True,
+        social_image=image_name,
+    ).first()
+    if not template:
+        raise Http404
+
+    try:
+        image_file = template.social_image.open("rb")
+    except (FileNotFoundError, ValueError) as exc:
+        raise Http404 from exc
+
+    response = FileResponse(
+        image_file,
+        content_type=mimetypes.guess_type(image_name)[0] or "application/octet-stream",
+    )
+    response["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 class PublicTemplateLegacyDetailRedirectView(View):
