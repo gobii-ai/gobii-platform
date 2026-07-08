@@ -4347,51 +4347,49 @@ class SolutionView(TemplateView):
                 {
                     'question': 'What does an AI sales agent do?',
                     'answer': (
-                        'An AI sales agent handles repeatable sales workflow tasks such as prospecting, '
-                        'lead qualification, account research, enrichment, outreach preparation, and pipeline '
-                        'handoff. In Gobii, the agent prepares source-linked work for a sales team to review.'
+                        'An AI sales agent handles repeatable sales tasks: prospecting, lead qualification, '
+                        'account research, enrichment, outreach prep, and pipeline handoff. In Gobii, the agent '
+                        'prepares source-linked work for a sales team to review.'
                     ),
                 },
                 {
                     'question': 'How much does an AI sales agent cost?',
                     'answer': (
-                        'AI sales agent cost depends on plan, usage volume, data sources, integrations, and the '
-                        'amount of human review in the workflow. Gobii publishes plan pricing on its pricing page, '
-                        'so teams can start with a focused workflow such as Lead Hunter and scale once the output '
-                        'quality is proven.'
+                        'AI sales agent cost depends on the plan, usage volume, data sources, integrations, and '
+                        'review needs. Gobii publishes plan pricing on its pricing page, so teams can start with '
+                        'Lead Hunter and scale once output quality is proven.'
                     ),
                     'answer_html': (
-                        'AI sales agent cost depends on plan, usage volume, data sources, integrations, and the '
-                        'amount of human review in the workflow. Gobii publishes '
+                        'AI sales agent cost depends on the plan, usage volume, data sources, integrations, and '
+                        'review needs. Gobii publishes '
                         '<a href="{pricing_url}" class="font-semibold text-indigo-700 underline decoration-indigo-200 '
                         'underline-offset-4 hover:text-indigo-900">plan pricing</a> on its pricing page, so teams can '
-                        'start with a focused workflow such as Lead Hunter and scale once the output quality is proven.'
+                        'start with Lead Hunter and scale once output quality is proven.'
                     ),
                 },
                 {
                     'question': 'Can an AI sales agent replace an SDR?',
                     'answer': (
-                        'An AI sales agent should not fully replace seller judgment, relationship-building, or '
-                        'compliance review. Gobii is best used as an AI sales employee for repetitive research '
-                        'and preparation work, while humans own targeting, messaging, and outreach decisions.'
+                        'An AI sales agent should not replace seller judgment, relationships, or compliance review. '
+                        'Use Gobii as an AI sales employee for repetitive research and prep while humans own '
+                        'targeting, messaging, and outreach decisions.'
                     ),
                 },
                 {
                     'question': 'What tools should an AI sales agent connect to?',
                     'answer': (
                         'Useful AI sales agent connections include approved web sources, CRM workflows, Google '
-                        'Sheets or CSV exports, inbound and outbound webhooks, documents, and sales engagement '
-                        'tools. The right setup depends on where the team stores ICP criteria, lead data, source '
-                        'links, review notes, and approved outreach steps.'
+                        'Sheets or CSV exports, webhooks, documents, and sales engagement tools. The right setup '
+                        'depends on where your team keeps ICP criteria, lead data, source links, review notes, '
+                        'and approved outreach steps.'
                     ),
                 },
                 {
                     'question': 'Can an AI sales agent make calls or use WhatsApp?',
                     'answer': (
-                        'This Gobii AI sales agent page is focused on research, enrichment, handoff, and outreach '
-                        'preparation rather than autonomous calling or WhatsApp outreach. Gobii can prepare call '
-                        'briefs, follow-up notes, and structured handoff data; calling or WhatsApp execution should '
-                        'run through approved downstream tools when a team needs those channels.'
+                        'This Gobii AI sales agent page focuses on research, enrichment, handoff, and outreach prep, '
+                        'not autonomous calling or WhatsApp outreach. Gobii can prepare call briefs, follow-up notes, '
+                        'and handoff data. Calling or WhatsApp execution should run through approved downstream tools.'
                     ),
                 },
             ],
