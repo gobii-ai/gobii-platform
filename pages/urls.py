@@ -37,6 +37,7 @@ from .views import (
     PublicTemplateDetailView,
     PublicTemplateHireView,
     PublicTemplateLaunchView,
+    public_template_social_image,
 )
 
 from djstripe import views as djstripe_views
@@ -85,6 +86,7 @@ urlpatterns = [
     path("library/<slug:category_slug>/<slug:template_slug>/", PublicTemplateDetailView.as_view(), name="public_template_detail"),
     path("library/<slug:category_slug>/<slug:template_slug>/hire/", PublicTemplateHireView.as_view(), name="public_template_hire"),
     path("library/<slug:category_slug>/<slug:template_slug>/spawn/", PublicTemplateLaunchView.as_view(), name="public_template_launch"),
+    path("library/social-images/<path:image_path>", public_template_social_image, name="public_template_social_image"),
     path("api/library/agents/", LibraryAgentsAPIView.as_view(), name="library_agents_api"),
     path("api/library/agents/like/", LibraryAgentLikeAPIView.as_view(), name="library_agent_like_api"),
     path("api/homepage/csrf-token/", HomepageCsrfTokenView.as_view(), name="homepage_csrf_token"),
