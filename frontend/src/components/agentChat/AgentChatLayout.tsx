@@ -17,7 +17,7 @@ import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorit
 import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
-import { getInitialAgentChatSidebarMode } from './sidebarMode'
+import type { AgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
@@ -50,10 +50,12 @@ import {
 } from './planSnapshotUtils'
 import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
 import { useAgentChatStore } from '../../stores/agentChatStore'
-import { useAppSelector } from '../../store/hooks'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import {
+  immersiveShellActions,
   selectImmersiveShellActiveAgentId,
   selectImmersiveShellViewer,
+  selectImmersiveSidebarMode,
 } from '../../store/immersiveShellSlice'
 
 type TaskQuotaInfo = {
@@ -66,14 +68,6 @@ type TaskQuotaInfo = {
 function normalizeAgentSettingsPathname(pathname: string): string {
   const trimmed = pathname.replace(/\/+$/, '')
   return trimmed || '/'
-}
-
-function deriveAgentFirstName(agentName?: string | null): string {
-  if (!agentName) {
-    return 'Agent'
-  }
-  const [first] = agentName.trim().split(/\s+/, 1)
-  return first || 'Agent'
 }
 
 function hasAgentResponse(events: SimplifiedTimelineItem[]): boolean {
@@ -298,7 +292,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
 }
 
 type PlanPanelMode = 'docked' | 'hidden'
-const EMPTY_REALTIME_CURSORS = new Set<string>()
 
 export function AgentChatLayout({
   events,
@@ -393,7 +386,18 @@ export function AgentChatLayout({
 }: AgentChatLayoutProps) {
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
-  const [sidebarMode, setSidebarMode] = useState(getInitialAgentChatSidebarMode)
+  const dispatch = useAppDispatch()
+  const sidebarMode = useAppSelector(selectImmersiveSidebarMode)
+  const sidebarModeRef = useRef(sidebarMode)
+  useEffect(() => {
+    sidebarModeRef.current = sidebarMode
+  }, [sidebarMode])
+  const setSidebarMode = useCallback((nextMode: AgentChatSidebarMode | ((mode: AgentChatSidebarMode) => AgentChatSidebarMode)) => {
+    const resolvedMode = typeof nextMode === 'function' ? nextMode(sidebarModeRef.current) : nextMode
+    if (resolvedMode !== sidebarModeRef.current) {
+      dispatch(immersiveShellActions.setSidebarMode(resolvedMode))
+    }
+  }, [dispatch])
   const preEmbeddedSidebarModeRef = useRef<'collapsed' | 'list' | 'gallery' | null>(null)
   const {
     currentPlan: subscriptionPlan,
@@ -454,7 +458,6 @@ export function AgentChatLayout({
   const shellViewer = useAppSelector(selectImmersiveShellViewer)
   const activeAgentId = shellActiveAgentId ?? agentId ?? null
   const runtimeAgentName = useAgentChatStore((state) => state.agentName)
-  const runtimeAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
   const runtimeAgentIsOrgOwned = useAgentChatStore((state) => state.agentIsOrgOwned)
   const runtimeCanManageAgent = useAgentChatStore((state) => state.canManageAgent)
   const runtimeIsCollaborator = useAgentChatStore((state) => state.isCollaborator)
@@ -469,8 +472,6 @@ export function AgentChatLayout({
   const runtimeHasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const runtimeSignupPreviewState = useAgentChatStore((state) => state.signupPreviewState)
   const runtimePlanningState = useAgentChatStore((state) => state.planningState)
-  const runtimeRealtimeEventCursors = useAgentChatStore((state) => state.realtimeEventCursors)
-  const consumeRealtimeEventCursor = useAgentChatStore((state) => state.consumeRealtimeEventCursor)
   const runtimeInsights = useAgentChatStore((state) => state.insights)
   const runtimeDismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
   const expectedRuntimeAgentId = activeAgentId ?? agentId ?? null
@@ -486,14 +487,10 @@ export function AgentChatLayout({
   const hasUnseenActivity = runtimeSynced ? runtimeHasUnseenActivity : false
   const planningState = runtimeSynced ? runtimePlanningState : 'skipped'
   const storeSignupPreviewState = runtimeSynced ? runtimeSignupPreviewState : 'none'
-  const realtimeEventCursors = runtimeSynced ? runtimeRealtimeEventCursors : EMPTY_REALTIME_CURSORS
   const agentName = runtimeSynced ? runtimeAgentName : null
-  const agentAvatarUrl = runtimeSynced ? runtimeAgentAvatarUrl : null
   const agentIsOrgOwned = runtimeSynced ? runtimeAgentIsOrgOwned : false
   const canManageAgent = runtimeSynced ? runtimeCanManageAgent : true
   const isCollaborator = runtimeSynced ? runtimeIsCollaborator : false
-  const agentFirstName = deriveAgentFirstName(agentName)
-  const viewerUserId = shellViewer.userId
   const viewerEmail = shellViewer.email
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineRenderEvents), [timelineRenderEvents])
   const signupPreviewState = useMemo<SignupPreviewState>(() => {
@@ -613,7 +610,7 @@ export function AgentChatLayout({
       return
     }
     setSidebarMode(mode)
-  }, [onBackFromEmbeddedSettings, onGalleryShellPageChange, showEmbeddedSettings, showGalleryShellPanel])
+  }, [onBackFromEmbeddedSettings, onGalleryShellPageChange, setSidebarMode, showEmbeddedSettings, showGalleryShellPanel])
 
   const handleSettingsOpen = useCallback(() => {
     setSettingsOpen(true)
@@ -704,7 +701,7 @@ export function AgentChatLayout({
       }
       return mode
     })
-  }, [showEmbeddedSettings, showGalleryShellPanel])
+  }, [setSidebarMode, showEmbeddedSettings, showGalleryShellPanel])
 
   useEffect(() => {
     if (!isUpgradeModalOpen) {
@@ -1492,10 +1489,6 @@ export function AgentChatLayout({
         >
           <div className="agent-chat-workspace-main">
           <AgentTimelinePane
-            agentAvatarUrl={agentAvatarUrl}
-            agentFirstName={agentFirstName}
-            animateCursors={realtimeEventCursors}
-            autoScrollPinned={autoScrollPinned}
             composerDisabled={composerDisabled}
             contactCapOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0 ? () => handleAddonsOpen('contacts') : undefined}
             contactCapShowUpgrade={contactPackShowUpgrade}
@@ -1504,17 +1497,14 @@ export function AgentChatLayout({
             hardLimitUpgradeUrl={hardLimitUpgradeUrl}
             hasMoreNewer={hasMoreNewer}
             hasStreamingContent={hasStreamingContent}
-            hasUnseenActivity={hasUnseenActivity}
             hideTypingIndicator={hideTypingIndicator}
             initialLoading={initialLoading}
             isStreaming={isStreaming}
             loadingNewer={loadingNewer}
             loadingOlder={loadingOlder}
-            nextScheduledAt={nextScheduledAt}
             onContactCapDismiss={handleContactCapDismiss}
             onHardLimitOpenSettings={handleSettingsOpen}
             onHardLimitQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
-            onIncomingAnimationConsumed={consumeRealtimeEventCursor}
             onJumpToLatest={onJumpToLatest}
             onMessageCopied={handleMessageCopied}
             onMessageLinkClick={handleMessageLinkClick}
@@ -1543,14 +1533,11 @@ export function AgentChatLayout({
             starterPromptsDisabled={composerDisabled}
             starterPromptsLoading={starterPromptsLoading}
             statusExpansionTargets={statusExpansionTargets}
-            streaming={streaming}
             suppressedThinkingCursor={suppressedThinkingCursor}
             taskCreditsWarningVariant={taskCreditsWarningVariant}
             timelineContentRef={timelineContentRef}
             timelineRef={timelineRef}
             typingStatusText={typingStatusText}
-            viewerEmail={viewerEmail}
-            viewerUserId={viewerUserId}
           />
 
           {/* Composer at bottom of flex layout */}
@@ -1611,7 +1598,6 @@ export function AgentChatLayout({
               externalShellRef={composerShellRef}
               isProcessing={showProcessingIndicator}
               autoFocus={autoFocusComposer}
-              focusKey={activeAgentId}
               insightsPanelExpandedPreference={insightsPanelExpandedPreference}
               onInsightsPanelExpandedPreferenceChange={onInsightsPanelExpandedPreferenceChange}
               insightsLoading={effectiveInsightsLoading}

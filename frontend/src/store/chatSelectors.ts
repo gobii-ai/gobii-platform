@@ -49,6 +49,11 @@ function createEmptySession(): AgentChatSession {
       dismissedInsightIds: {},
       insightsPaused: false,
     },
+    workflow: {
+      sendMessageError: null,
+      composerDisabledReason: null,
+      pendingActions: [],
+    },
   }
 }
 
@@ -111,5 +116,10 @@ export function selectActiveChatStoreSnapshot(state: RootState) {
     insightProcessingStartedAt: session.insights.insightProcessingStartedAt,
     dismissedInsightIds: new Set(Object.keys(session.insights.dismissedInsightIds)),
     insightsPaused: session.insights.insightsPaused,
+    sendMessageError: session.workflow.sendMessageError,
+    composerDisabledReason: session.workflow.composerDisabledReason,
+    pendingActions: session.workflow.pendingActions,
   }
 }
+
+export const selectCreateAgentWorkflow = (state: RootState) => state.chat.createAgent

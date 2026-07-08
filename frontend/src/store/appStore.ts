@@ -2,9 +2,16 @@ import { combineReducers, configureStore, createListenerMiddleware, type Unknown
 import type { ThunkDispatch } from 'redux-thunk'
 import type { QueryClient } from '@tanstack/react-query'
 
+import { agentResourceMirrorsReducer } from './agentResourceMirrorsSlice'
+import { agentRosterPreferencesReducer } from './agentRosterPreferencesSlice'
+import { agentSettingsReducer } from './agentSettingsSlice'
 import { auditReducer } from './auditSlice'
 import { chatReducer } from './chatSlice'
-import { immersiveShellReducer } from './immersiveShellSlice'
+import {
+  IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY,
+  immersiveShellActions,
+  immersiveShellReducer,
+} from './immersiveShellSlice'
 import { selectSubscriptionState, subscriptionActions, subscriptionReducer } from './subscriptionSlice'
 import { usageReducer } from './usageSlice'
 import { track } from '../util/analytics'
@@ -15,6 +22,9 @@ export type AppStoreExtra = {
 }
 
 const rootReducer = combineReducers({
+  agentResourceMirrors: agentResourceMirrorsReducer,
+  agentRosterPreferences: agentRosterPreferencesReducer,
+  agentSettings: agentSettingsReducer,
   audit: auditReducer,
   chat: chatReducer,
   immersiveShell: immersiveShellReducer,
@@ -43,6 +53,20 @@ function configureAppStore({ queryClient = null }: { queryClient?: QueryClient |
         source: action.payload?.source ?? 'unknown',
         isProprietaryMode: previousState.isProprietaryMode,
       })
+    },
+  })
+
+  listenerMiddleware.startListening({
+    actionCreator: immersiveShellActions.setSidebarMode,
+    effect: (action) => {
+      if (typeof window === 'undefined') {
+        return
+      }
+      try {
+        window.sessionStorage.setItem(IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY, action.payload)
+      } catch {
+        // Storage failures should not affect shell interaction.
+      }
     },
   })
 

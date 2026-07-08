@@ -6,6 +6,7 @@ import { createAppStore } from './appStore'
 import {
   chatActions,
   selectActiveChatStoreSnapshot,
+  selectCreateAgentWorkflow,
   sendMessage,
   setAutoScrollPinned,
 } from './chatSlice'
@@ -112,5 +113,64 @@ describe('chatSlice message sending', () => {
       },
     })
     await sendResult.unwrap()
+  })
+})
+
+describe('chatSlice workflow state', () => {
+  it('stores per-agent send errors and pending actions', () => {
+    const store = createAppStore()
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
+
+    store.dispatch(chatActions.sendMessageErrorSet({ agentId: 'agent-1', message: 'Unable to send.' }))
+    store.dispatch(chatActions.pendingActionsReplaced({
+      agentId: 'agent-1',
+      pendingActions: [{
+        id: 'action-1',
+        kind: 'human_input',
+        count: 0,
+        requests: [],
+      }],
+    }))
+
+    expect(selectActiveChatStoreSnapshot(store.getState())).toMatchObject({
+      sendMessageError: 'Unable to send.',
+      pendingActions: [{
+        id: 'action-1',
+        kind: 'human_input',
+      }],
+    })
+  })
+
+  it('stores serializable create-agent workflow state', () => {
+    const store = createAppStore()
+
+    store.dispatch(chatActions.spawnIntentRequestStarted())
+    store.dispatch(chatActions.spawnIntentSet({
+      charter: 'Build a weekly report',
+      charter_override: null,
+      preferred_llm_tier: 'advanced',
+      selected_pipedream_app_slugs: ['slack'],
+      onboarding_target: 'agent_ui',
+      requires_plan_selection: true,
+    }))
+    store.dispatch(chatActions.createAgentDraftMetadataSet({
+      body: 'Build a weekly report',
+      tier: 'advanced',
+      selectedPipedreamAppSlugs: ['slack'],
+    }))
+
+    expect(selectCreateAgentWorkflow(store.getState())).toMatchObject({
+      spawnIntentRequestId: 1,
+      spawnIntentStatus: 'loading',
+      spawnIntent: {
+        charter: 'Build a weekly report',
+        selected_pipedream_app_slugs: ['slack'],
+      },
+      draftMetadata: {
+        body: 'Build a weekly report',
+        tier: 'advanced',
+        selectedPipedreamAppSlugs: ['slack'],
+      },
+    })
   })
 })

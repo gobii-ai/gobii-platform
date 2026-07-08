@@ -12,6 +12,7 @@ import { timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import { mergeTimelineEvents, normalizeTimelineEvent } from '../stores/agentChatTimeline'
 import type {
   AgentMessage,
+  PendingActionRequest,
   ProcessingSnapshot,
   ProcessingWebTask,
   StreamEventPayload,
@@ -21,6 +22,7 @@ import type {
 } from '../types/agentChat'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BurnRateMetadata, InsightEvent } from '../types/insight'
+import type { AgentSpawnIntent } from '../api/agentSpawnIntent'
 import type { AppDispatch, RootState } from './appStore'
 
 const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [], nextScheduledAt: null }
@@ -84,18 +86,52 @@ export type AgentChatInsightsState = {
   insightsPaused: boolean
 }
 
+export type AgentChatWorkflowState = {
+  sendMessageError: string | null
+  composerDisabledReason: string | null
+  pendingActions: PendingActionRequest[]
+}
+
 export type AgentChatSession = {
   identity: AgentChatIdentityState
   processing: AgentChatProcessingState
   stream: AgentChatStreamState
   timelineUi: AgentChatTimelineUiState
   insights: AgentChatInsightsState
+  workflow: AgentChatWorkflowState
+}
+
+export type SpawnIntentStatus = 'idle' | 'loading' | 'ready' | 'done'
+export type TrialOnboardingTarget = Exclude<AgentSpawnIntent['onboarding_target'], null>
+
+export type CreateAgentErrorState = {
+  message: string
+  showUpgradeCta: boolean
+  requiresTrialPlanSelection: boolean
+  trialOnboardingTarget: TrialOnboardingTarget | null
+}
+
+export type CreateAgentDraftMetadata = {
+  body: string
+  tier: string
+  charterOverride?: string | null
+  selectedPipedreamAppSlugs?: string[]
+}
+
+export type CreateAgentWorkflowState = {
+  error: CreateAgentErrorState | null
+  trialOnboardingTarget: TrialOnboardingTarget | null
+  spawnIntent: AgentSpawnIntent | null
+  spawnIntentStatus: SpawnIntentStatus
+  spawnIntentRequestId: number
+  draftMetadata: CreateAgentDraftMetadata | null
 }
 
 export type ChatState = {
   activeAgentId: string | null
   sessionsByAgentId: Record<string, AgentChatSession>
   recentAgentIds: string[]
+  createAgent: CreateAgentWorkflowState
 }
 
 function createInitialSession(): AgentChatSession {
@@ -145,6 +181,11 @@ function createInitialSession(): AgentChatSession {
       dismissedInsightIds: {},
       insightsPaused: false,
     },
+    workflow: {
+      sendMessageError: null,
+      composerDisabledReason: null,
+      pendingActions: [],
+    },
   }
 }
 
@@ -152,6 +193,14 @@ export const initialChatState: ChatState = {
   activeAgentId: null,
   sessionsByAgentId: {},
   recentAgentIds: [],
+  createAgent: {
+    error: null,
+    trialOnboardingTarget: null,
+    spawnIntent: null,
+    spawnIntentStatus: 'idle',
+    spawnIntentRequestId: 0,
+    draftMetadata: null,
+  },
 }
 
 function ensureSession(state: ChatState, agentId: string): AgentChatSession {
@@ -737,6 +786,42 @@ const chatSlice = createSlice({
     skipPlanningBusySet(state, action: PayloadAction<{ agentId: string; busy: boolean }>) {
       ensureSession(state, action.payload.agentId).processing.skipPlanningBusy = action.payload.busy
     },
+    sendMessageErrorSet(state, action: PayloadAction<{ agentId?: string | null; message: string | null }>) {
+      const agentId = action.payload.agentId ?? state.activeAgentId
+      if (!agentId) return
+      ensureSession(state, agentId).workflow.sendMessageError = action.payload.message
+    },
+    composerDisabledReasonSet(state, action: PayloadAction<{ agentId?: string | null; reason: string | null }>) {
+      const agentId = action.payload.agentId ?? state.activeAgentId
+      if (!agentId) return
+      ensureSession(state, agentId).workflow.composerDisabledReason = action.payload.reason
+    },
+    pendingActionsReplaced(state, action: PayloadAction<{ agentId: string; pendingActions: PendingActionRequest[] }>) {
+      ensureSession(state, action.payload.agentId).workflow.pendingActions = action.payload.pendingActions
+    },
+    createAgentErrorSet(state, action: PayloadAction<CreateAgentErrorState | null>) {
+      state.createAgent.error = action.payload
+      state.createAgent.trialOnboardingTarget = action.payload?.trialOnboardingTarget ?? null
+    },
+    createAgentTrialOnboardingTargetSet(state, action: PayloadAction<TrialOnboardingTarget | null>) {
+      state.createAgent.trialOnboardingTarget = action.payload
+    },
+    spawnIntentSet(state, action: PayloadAction<AgentSpawnIntent | null>) {
+      state.createAgent.spawnIntent = action.payload
+    },
+    spawnIntentStatusSet(state, action: PayloadAction<SpawnIntentStatus>) {
+      state.createAgent.spawnIntentStatus = action.payload
+    },
+    spawnIntentRequestStarted(state) {
+      state.createAgent.spawnIntentRequestId += 1
+      state.createAgent.spawnIntentStatus = 'loading'
+    },
+    createAgentDraftMetadataSet(state, action: PayloadAction<CreateAgentDraftMetadata | null>) {
+      state.createAgent.draftMetadata = action.payload
+    },
+    createAgentWorkflowReset(state) {
+      state.createAgent = initialChatState.createAgent
+    },
     agentIdentityUpdated(
       state,
       action: PayloadAction<{
@@ -998,5 +1083,6 @@ export {
   selectActiveChatSession,
   selectActiveChatStoreSnapshot,
   selectChatState,
+  selectCreateAgentWorkflow,
   selectCurrentInsight,
 } from './chatSelectors'

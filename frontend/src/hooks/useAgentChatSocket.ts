@@ -103,6 +103,9 @@ export function useAgentChatSocket(
   const receiveStreamRef = useRef((payload: Parameters<typeof receiveStreamEvent>[0]) => {
     dispatch(receiveStreamEvent(payload))
   })
+  const replacePendingActionsRef = useRef((agentId: string, pendingActions: Parameters<typeof chatActions.pendingActionsReplaced>[0]['pendingActions']) => {
+    dispatch(chatActions.pendingActionsReplaced({ agentId, pendingActions }))
+  })
   const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
   const profileEventRef = useRef<typeof options.onAgentProfileEvent | null>(options.onAgentProfileEvent ?? null)
   const messageNotificationEventRef = useRef<typeof options.onMessageNotificationEvent | null>(
@@ -432,6 +435,7 @@ export function useAgentChatSocket(
             updateAgentIdentity: updateAgentIdentityRef.current,
             updateUsageInsight: updateUsageInsightRef.current,
             receiveStreamEvent: receiveStreamRef.current,
+            replacePendingActions: replacePendingActionsRef.current,
             onCreditEvent: creditEventRef.current,
             onAgentProfileEvent: profileEventRef.current,
             onMessageNotificationEvent: messageNotificationEventRef.current,

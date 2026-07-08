@@ -1220,7 +1220,7 @@ export const AgentComposer = memo(function AgentComposer({
     })
   }, [agentId, agentName, pendingHumanInputRequests])
 
-  // Auto-focus the textarea when autoFocus prop is true or when focusKey changes (agent switch)
+  // Auto-focus after agent switches, including callers that still pass an explicit focus key.
   useEffect(() => {
     if (!autoFocus) return
     // Use a small delay to ensure the DOM is ready after navigation
@@ -1229,7 +1229,7 @@ export const AgentComposer = memo(function AgentComposer({
       moveTextareaCursorToEnd()
     }, 100)
     return () => clearTimeout(timer)
-  }, [autoFocus, focusKey, moveTextareaCursorToEnd])
+  }, [agentId, autoFocus, focusKey, moveTextareaCursorToEnd])
 
   const activePendingActions = activePendingActionTab?.actions ?? []
   const activePendingAction =

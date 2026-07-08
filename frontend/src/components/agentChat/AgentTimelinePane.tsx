@@ -10,8 +10,11 @@ import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { StarterPromptSuggestions, type StarterPrompt } from './StarterPromptSuggestions'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
-import type { AgentMessage, StreamState } from '../../types/agentChat'
+import type { AgentMessage } from '../../types/agentChat'
 import type { StatusExpansionTargets } from './statusExpansion'
+import { useAgentChatStore } from '../../stores/agentChatStore'
+import { useAppSelector } from '../../store/hooks'
+import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
 
 function timelineEventKey(event: SimplifiedTimelineItem): string {
   if (event.kind === 'collapsed-group') {
@@ -23,11 +26,11 @@ function timelineEventKey(event: SimplifiedTimelineItem): string {
   return event.cursor
 }
 
+function deriveAgentFirstName(agentName?: string | null): string {
+  return agentName?.trim().split(/\s+/)[0] || 'Agent'
+}
+
 type AgentTimelinePaneProps = {
-  agentAvatarUrl?: string | null
-  agentFirstName: string
-  animateCursors?: Set<string>
-  autoScrollPinned: boolean
   composerDisabled?: boolean
   contactCapOpenPacks?: () => void
   contactCapShowUpgrade?: boolean
@@ -36,17 +39,14 @@ type AgentTimelinePaneProps = {
   hardLimitUpgradeUrl?: string | null
   hasMoreNewer?: boolean
   hasStreamingContent?: boolean
-  hasUnseenActivity?: boolean
   hideTypingIndicator?: boolean
   initialLoading?: boolean
   isStreaming?: boolean
   loadingNewer?: boolean
   loadingOlder?: boolean
-  nextScheduledAt?: string | null
   onContactCapDismiss?: () => void
   onHardLimitOpenSettings: () => void
   onHardLimitQuickIncrease?: () => void
-  onIncomingAnimationConsumed?: (cursor: string) => void
   onJumpToLatest?: () => void
   onMessageCopied?: (message: AgentMessage) => void | Promise<void>
   onMessageLinkClick?: (href: string) => boolean | void
@@ -75,21 +75,14 @@ type AgentTimelinePaneProps = {
   starterPromptsDisabled?: boolean
   starterPromptsLoading?: boolean
   statusExpansionTargets?: StatusExpansionTargets
-  streaming?: StreamState | null
   suppressedThinkingCursor?: string | null
   taskCreditsWarningVariant?: 'low' | 'out' | null
   timelineContentRef?: Ref<HTMLDivElement>
   timelineRef?: Ref<HTMLDivElement>
   typingStatusText: string
-  viewerEmail?: string | null
-  viewerUserId?: number | null
 }
 
 export function AgentTimelinePane({
-  agentAvatarUrl,
-  agentFirstName,
-  animateCursors,
-  autoScrollPinned,
   composerDisabled = false,
   contactCapOpenPacks,
   contactCapShowUpgrade = false,
@@ -98,17 +91,14 @@ export function AgentTimelinePane({
   hardLimitUpgradeUrl = null,
   hasMoreNewer = false,
   hasStreamingContent = false,
-  hasUnseenActivity = false,
   hideTypingIndicator = false,
   initialLoading = false,
   isStreaming = false,
   loadingNewer = false,
   loadingOlder = false,
-  nextScheduledAt = null,
   onContactCapDismiss,
   onHardLimitOpenSettings,
   onHardLimitQuickIncrease,
-  onIncomingAnimationConsumed,
   onJumpToLatest,
   onMessageCopied,
   onMessageLinkClick,
@@ -137,15 +127,25 @@ export function AgentTimelinePane({
   starterPromptsDisabled = false,
   starterPromptsLoading = false,
   statusExpansionTargets,
-  streaming,
   suppressedThinkingCursor = null,
   taskCreditsWarningVariant = null,
   timelineContentRef,
   timelineRef,
   typingStatusText,
-  viewerEmail,
-  viewerUserId,
 }: AgentTimelinePaneProps) {
+  const agentName = useAgentChatStore((state) => state.agentName)
+  const agentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
+  const animateCursors = useAgentChatStore((state) => state.realtimeEventCursors)
+  const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
+  const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
+  const nextScheduledAt = useAgentChatStore((state) => state.nextScheduledAt)
+  const onIncomingAnimationConsumed = useAgentChatStore((state) => state.consumeRealtimeEventCursor)
+  const streaming = useAgentChatStore((state) => state.streaming)
+  const viewer = useAppSelector(selectImmersiveShellViewer)
+  const agentFirstName = deriveAgentFirstName(agentName)
+  const viewerEmail = viewer.email
+  const viewerUserId = viewer.userId
+
   const lastRenderedIndex = useMemo(() => {
     for (let index = events.length - 1; index >= 0; index -= 1) {
       if (events[index].kind !== 'plan' && events[index].kind !== 'kanban') {

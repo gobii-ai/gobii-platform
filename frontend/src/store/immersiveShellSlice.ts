@@ -1,8 +1,14 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 
 import type { RootState } from './appStore'
+import type { AgentChatShellSubview } from '../util/agentChatShellRoutes'
+import type { AgentChatSidebarMode } from '../components/agentChat/sidebarMode'
+import type { SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
 
 export type ImmersiveConnectionStatus = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
+export type ImmersiveEmbeddedPanel = Exclude<AgentChatShellSubview, 'chat'> | null
+
+export const IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY = 'gobii:immersive:selection-sidebar-mode'
 
 export type ImmersiveShellViewerState = {
   userId: number | null
@@ -18,7 +24,10 @@ export type ImmersiveShellConnectionState = {
 export type ImmersiveShellState = {
   activeAgentId: string | null
   shellPathname: string
-  selectionSidebarMode: string | null
+  shellSubview: AgentChatShellSubview
+  embeddedPanel: ImmersiveEmbeddedPanel
+  sidebarMode: AgentChatSidebarMode
+  galleryPage: SelectionShellPage
   currentAppPanel: string | null
   viewer: ImmersiveShellViewerState
   connection: ImmersiveShellConnectionState
@@ -28,7 +37,10 @@ export type ImmersiveShellState = {
 const initialState: ImmersiveShellState = {
   activeAgentId: null,
   shellPathname: '',
-  selectionSidebarMode: null,
+  shellSubview: 'chat',
+  embeddedPanel: null,
+  sidebarMode: 'list',
+  galleryPage: 'agents',
   currentAppPanel: null,
   viewer: {
     userId: null,
@@ -52,8 +64,19 @@ const immersiveShellSlice = createSlice({
     setShellPathname(state, action: PayloadAction<string>) {
       state.shellPathname = action.payload
     },
-    setSelectionSidebarMode(state, action: PayloadAction<string | null>) {
-      state.selectionSidebarMode = action.payload
+    setShellSubview(state, action: PayloadAction<AgentChatShellSubview>) {
+      state.shellSubview = action.payload
+      state.embeddedPanel = action.payload === 'chat' ? null : action.payload
+    },
+    setEmbeddedPanel(state, action: PayloadAction<ImmersiveEmbeddedPanel>) {
+      state.embeddedPanel = action.payload
+      state.shellSubview = action.payload ?? 'chat'
+    },
+    setSidebarMode(state, action: PayloadAction<AgentChatSidebarMode>) {
+      state.sidebarMode = action.payload
+    },
+    setGalleryPage(state, action: PayloadAction<SelectionShellPage>) {
+      state.galleryPage = action.payload
     },
     setCurrentAppPanel(state, action: PayloadAction<string | null>) {
       state.currentAppPanel = action.payload
@@ -77,3 +100,7 @@ export const selectImmersiveShellState = (state: RootState): ImmersiveShellState
 export const selectImmersiveShellActiveAgentId = (state: RootState): string | null => state.immersiveShell.activeAgentId
 export const selectImmersiveShellViewer = (state: RootState): ImmersiveShellViewerState => state.immersiveShell.viewer
 export const selectImmersiveShellConnection = (state: RootState): ImmersiveShellConnectionState => state.immersiveShell.connection
+export const selectImmersiveSidebarMode = (state: RootState): AgentChatSidebarMode => state.immersiveShell.sidebarMode
+export const selectImmersiveShellSubview = (state: RootState): AgentChatShellSubview => state.immersiveShell.shellSubview
+export const selectImmersiveEmbeddedPanel = (state: RootState): ImmersiveEmbeddedPanel => state.immersiveShell.embeddedPanel
+export const selectImmersiveGalleryPage = (state: RootState): SelectionShellPage => state.immersiveShell.galleryPage

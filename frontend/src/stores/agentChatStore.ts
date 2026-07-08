@@ -20,6 +20,7 @@ import type {
   ProcessingWebTask,
   StreamEventPayload,
   StreamState,
+  PendingActionRequest,
   TimelineEvent,
 } from '../types/agentChat'
 import type { BurnRateMetadata, InsightEvent } from '../types/insight'
@@ -64,6 +65,9 @@ export type AgentChatState = {
   insightProcessingStartedAt: number | null
   dismissedInsightIds: Set<string>
   insightsPaused: boolean
+  sendMessageError: string | null
+  composerDisabledReason: string | null
+  pendingActions: PendingActionRequest[]
   setAgentId: (
     agentId: string | null,
     options?: {
@@ -156,6 +160,9 @@ function createActions(dispatch: AppDispatch, getState: () => RootState): Omit<
   | 'insightProcessingStartedAt'
   | 'dismissedInsightIds'
   | 'insightsPaused'
+  | 'sendMessageError'
+  | 'composerDisabledReason'
+  | 'pendingActions'
 > {
   return {
     setAgentId: (agentId, options) => dispatch(chatActions.agentSelected({ agentId, options })),
