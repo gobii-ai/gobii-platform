@@ -67,11 +67,9 @@ const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
 const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
 const DISCORD_NATIVE_TAB_KEY = 'discordNative'
 const META_ADS_TAB_KEY = 'metaAds'
-const READY_WAKE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  weekday: 'short',
-  hour: 'numeric',
-  minute: '2-digit',
-})
+const MINUTE_MS = 60 * 1000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
 
 function deriveAgentFirstName(agentName?: string | null): string {
   return agentName?.trim().split(/\s+/)[0] || 'Agent'
@@ -85,15 +83,20 @@ function formatReadyWakeTime(value?: string | null): string | null {
   if (Number.isNaN(date.getTime())) {
     return null
   }
-  const parts = READY_WAKE_TIME_FORMATTER.formatToParts(date)
-  const weekday = parts.find((part) => part.type === 'weekday')?.value
-  const hour = parts.find((part) => part.type === 'hour')?.value
-  const minute = parts.find((part) => part.type === 'minute')?.value
-  const dayPeriod = parts.find((part) => part.type === 'dayPeriod')?.value
-  if (!weekday || !hour || !minute) {
-    return READY_WAKE_TIME_FORMATTER.format(date).replace(',', '')
+  const diffMs = date.getTime() - Date.now()
+  if (diffMs <= 0) {
+    return 'soon'
   }
-  return `${weekday} ${hour}:${minute}${dayPeriod ? ` ${dayPeriod}` : ''}`
+  if (diffMs < HOUR_MS) {
+    const minutes = Math.max(1, Math.round(diffMs / MINUTE_MS))
+    return `in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`
+  }
+  if (diffMs < DAY_MS) {
+    const hours = Math.max(1, Math.round(diffMs / HOUR_MS))
+    return `in ${hours} ${hours === 1 ? 'hour' : 'hours'}`
+  }
+  const days = Math.max(1, Math.round(diffMs / DAY_MS))
+  return `in ${days} ${days === 1 ? 'day' : 'days'}`
 }
 
 function getAgentSetupPanel(insight: InsightEvent): AgentSetupPanel | null {
@@ -675,6 +678,8 @@ export const AgentComposer = memo(function AgentComposer({
   }, [baseInsights, storeAgentEmail, storeAgentSms])
   const nextScheduledAt = activeSession.processing.nextScheduledAt
   const readyWakeTime = formatReadyWakeTime(nextScheduledAt)
+  const readyWakeDuration = readyWakeTime?.startsWith('in ') ? readyWakeTime.slice(3) : readyWakeTime
+  const readyWakeLabel = readyWakeTime?.startsWith('in ') ? 'Next wake-up in' : 'Next wake-up'
   const [body, setBody] = useState(() => readAgentChatMessageDraft(agentId))
   const [attachments, setAttachments] = useState<File[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
@@ -2051,8 +2056,9 @@ export const AgentComposer = memo(function AgentComposer({
                   <span className="composer-ready-status__dot" aria-hidden="true" />
                   {readyWakeTime ? (
                     <>
-                      <span>Next wake-up:</span>
-                      <strong>{readyWakeTime}</strong>
+                      <span>
+                        {readyWakeLabel} <strong>{readyWakeDuration}</strong>
+                      </span>
                     </>
                   ) : (
                     <span>Ready</span>
