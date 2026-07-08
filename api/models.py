@@ -9,6 +9,7 @@ import uuid
 from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from functools import lru_cache
 from typing import Optional, Tuple
+from urllib.parse import urlparse
 
 import ulid
 from django.apps import apps
@@ -1088,6 +1089,96 @@ class UserPreference(models.Model):
             preference.save(update_fields=["preferences", "updated_at"])
 
         return cls.resolve_known_preferences(user)
+
+
+def validate_product_announcement_action_url(value: str) -> None:
+    """Allow same-site paths and normal web URLs while rejecting script-like targets."""
+    url = (value or "").strip()
+    if not url:
+        return
+    if url.startswith("/"):
+        if url.startswith("//") or "\\" in url:
+            raise ValidationError("Action URL must be a same-site path or an http(s) URL.")
+        return
+
+    parsed = urlparse(url)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return
+    raise ValidationError("Action URL must be a same-site path or an http(s) URL.")
+
+
+class ProductAnnouncement(models.Model):
+    """Product update shown to logged-in users in the app announcement bell."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=160)
+    body = models.TextField()
+    action_label = models.CharField(max_length=80, blank=True)
+    action_url = models.CharField(max_length=500, blank=True)
+    is_active = models.BooleanField(default=True)
+    published_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_product_announcements",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-published_at", "-created_at"]
+        indexes = [
+            models.Index(fields=["is_active", "published_at"], name="prod_ann_active_pub_idx"),
+            models.Index(fields=["expires_at"], name="prod_ann_expires_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        self.action_label = (self.action_label or "").strip()
+        self.action_url = (self.action_url or "").strip()
+        if self.action_url:
+            validate_product_announcement_action_url(self.action_url)
+        if bool(self.action_label) != bool(self.action_url):
+            raise ValidationError("Action label and action URL must be provided together.")
+        if self.expires_at and self.published_at and self.expires_at <= self.published_at:
+            raise ValidationError("Expiration must be after publication.")
+
+    def __str__(self):
+        return self.title
+
+
+class ProductAnnouncementRead(models.Model):
+    """Per-user read state for product announcements."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    announcement = models.ForeignKey(
+        ProductAnnouncement,
+        on_delete=models.CASCADE,
+        related_name="read_receipts",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="product_announcement_reads",
+    )
+    read_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["announcement", "user"],
+                name="uniq_product_announcement_read_user",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "announcement"], name="prod_ann_read_user_ann_idx"),
+        ]
+
+    def __str__(self):
+        return f"ANN_READ<{self.announcement_id}:{self.user_id}>"
 
 
 def _user_is_vip(self):

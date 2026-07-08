@@ -162,6 +162,10 @@ from api.services.agent_owner_custom_instructions import (
     normalize_custom_instructions,
     save_custom_instructions_for_user_id,
 )
+from api.services.product_announcements import (
+    build_product_announcements_payload,
+    mark_product_announcements_read,
+)
 from api.services.signup_preview import (
     resume_signup_preview_agent_if_eligible,
 )
@@ -552,6 +556,60 @@ class UserPreferencesAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest(str(exc))
 
         return JsonResponse({"preferences": resolved_preferences})
+
+
+class ProductAnnouncementListAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse(build_product_announcements_payload(request.user))
+
+
+class ProductAnnouncementReadAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        allowed_keys = {"all", "announcementIds"}
+        unknown_keys = sorted(key for key in payload if key not in allowed_keys)
+        if unknown_keys:
+            return HttpResponseBadRequest(
+                f"Unknown top-level fields: {', '.join(unknown_keys)}"
+            )
+
+        mark_all_requested = "all" in payload
+        ids_requested = "announcementIds" in payload
+        if mark_all_requested == ids_requested:
+            return HttpResponseBadRequest("Provide either 'all' or 'announcementIds'.")
+
+        if mark_all_requested:
+            if payload.get("all") is not True:
+                return HttpResponseBadRequest("'all' must be true.")
+            return JsonResponse(mark_product_announcements_read(request.user, mark_all=True))
+
+        raw_ids = payload.get("announcementIds")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return HttpResponseBadRequest("'announcementIds' must be a non-empty array.")
+
+        announcement_ids: list[uuid.UUID] = []
+        for raw_id in raw_ids:
+            if not isinstance(raw_id, str):
+                return HttpResponseBadRequest("'announcementIds' must contain UUID strings.")
+            try:
+                announcement_ids.append(uuid.UUID(raw_id))
+            except ValueError:
+                return HttpResponseBadRequest("'announcementIds' must contain UUID strings.")
+
+        return JsonResponse(
+            mark_product_announcements_read(
+                request.user,
+                announcement_ids=announcement_ids,
+            )
+        )
 
 
 def _serialize_user_profile_options(form: UserProfileForm) -> list[dict[str, str]]:

@@ -16,6 +16,7 @@ import {
   type SelectionShellPage,
 } from './SelectionShellPageSwitcher'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
+import { ProductAnnouncementBell } from './ProductAnnouncementBell'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
 import {
   TransferInviteDetails,
@@ -883,6 +884,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             {...settings}
             variant="sidebar"
             collapsed={collapsed}
+            bottomAccessory={<ProductAnnouncementBell variant="sidebar" />}
           />
         ) : null}
       </div>

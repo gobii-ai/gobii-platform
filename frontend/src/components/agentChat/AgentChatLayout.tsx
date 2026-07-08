@@ -13,6 +13,7 @@ import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
+import { ProductAnnouncementBell } from './ProductAnnouncementBell'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
 import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
@@ -578,7 +579,7 @@ export function AgentChatLayout({
       ? `Start ${maxTrialDays}-day Free Trial`
     : 'Upgrade your plan'
   const upgradeSubtitle = useTrialUpgradeCopy ? 'Choose your plan to continue' : 'Choose the plan that fits your needs'
-  const isMobileUpgrade = useIsMobile()
+  const isMobileViewport = useIsMobile()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addonsMode, setAddonsMode] = useState<'contacts' | 'tasks' | null>(null)
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
@@ -1538,6 +1539,7 @@ export function AgentChatLayout({
         scrollToAgentId={scrollToAgentId}
         onScrolledToAgent={onScrolledToAgent}
       />
+      {isMobileViewport ? <ProductAnnouncementBell variant="mobile" /> : null}
       {showBanner && (
         <AgentChatBanner
           agentId={agentId}
@@ -1860,7 +1862,7 @@ export function AgentChatLayout({
         busyLabel="Submitting..."
       />
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
-        isMobileUpgrade && upgradeModalDismissible ? (
+        isMobileViewport && upgradeModalDismissible ? (
           <ImmersiveDialog
             open={isUpgradeModalOpen}
             onClose={handleUpgradeModalDismiss}

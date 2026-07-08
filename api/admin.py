@@ -77,6 +77,8 @@ from .models import (
     EvalRunTask,
     AgentComputeSession,
     ComputeSnapshot,
+    ProductAnnouncement,
+    ProductAnnouncementRead,
     UserPreference,
     UserEmail,
     UserFlagChoiceGroup,
@@ -2160,6 +2162,48 @@ class UserPreferenceAdmin(admin.ModelAdmin):
         updated_preferences[UserPreference.KEY_USER_TIMEZONE] = timezone_value
         obj.preferences = updated_preferences
         super().save_model(request, obj, form, change)
+
+
+@admin.register(ProductAnnouncement)
+class ProductAnnouncementAdmin(admin.ModelAdmin):
+    list_display = ("title", "is_active", "published_at", "expires_at", "created_by", "updated_at")
+    list_filter = ("is_active", "published_at", "expires_at")
+    search_fields = ("title", "body", "created_by__email")
+    readonly_fields = ("created_by", "created_at", "updated_at")
+    fields = (
+        "title",
+        "body",
+        "action_label",
+        "action_url",
+        "is_active",
+        "published_at",
+        "expires_at",
+        "created_by",
+        "created_at",
+        "updated_at",
+    )
+    ordering = ("-published_at", "-created_at")
+
+    def save_model(self, request, obj, form, change):
+        if not change and request.user.is_authenticated:
+            obj.created_by = request.user
+        obj.full_clean()
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(ProductAnnouncementRead)
+class ProductAnnouncementReadAdmin(admin.ModelAdmin):
+    list_display = ("announcement", "user", "read_at")
+    search_fields = ("announcement__title", "user__email", "user__id")
+    raw_id_fields = ("announcement", "user")
+    readonly_fields = ("announcement", "user", "read_at")
+    ordering = ("-read_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(UserIdentitySignal)
