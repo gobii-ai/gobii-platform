@@ -63,9 +63,12 @@ type DraftState = {
   pollIntervalSec: string
 }
 
+type DraftStringField = {
+  [Key in keyof DraftState]: DraftState[Key] extends string ? Key : never
+}[keyof DraftState]
 type DraftUpdater = (updater: (current: DraftState) => DraftState) => void
 type DraftTextField = {
-  field: keyof DraftState
+  field: DraftStringField
   label: string
   type?: 'text' | 'number' | 'password'
   min?: number
@@ -74,7 +77,7 @@ type DraftTextField = {
   password?: boolean
 }
 type DraftSelectField = {
-  field: keyof DraftState
+  field: DraftStringField
   label: string
   options: Array<{ value: string; label: string }>
 }
