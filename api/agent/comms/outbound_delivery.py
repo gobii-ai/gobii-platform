@@ -292,12 +292,16 @@ def _should_suppress_display_name(from_endpoint) -> bool:
         return False
 
 
-def _build_from_header(message: PersistentAgentMessage) -> str:
+def _build_from_header(
+    message: PersistentAgentMessage,
+    *,
+    suppress_configured_account_name: bool = True,
+) -> str:
     from_endpoint = getattr(message, "from_endpoint", None)
     from_address = (getattr(from_endpoint, "address", None) or "").strip()
     if not from_address:
         return ""
-    if _should_suppress_display_name(from_endpoint):
+    if suppress_configured_account_name and _should_suppress_display_name(from_endpoint):
         return from_address
     display_name = ""
     if from_endpoint is not None:
@@ -306,6 +310,8 @@ def _build_from_header(message: PersistentAgentMessage) -> str:
             display_name = (getattr(email_meta, "display_name", "") or "").strip()
         except PersistentAgentEmailEndpoint.DoesNotExist:
             pass
+    if not display_name:
+        display_name = message.owner_agent.name.strip()
     display_name = display_name.replace("\r", "").replace("\n", "").strip()
     if display_name:
         return formataddr((display_name, from_address))
@@ -787,6 +793,10 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         try:
             from_address = message.from_endpoint.address
+            from_header = _build_from_header(
+                message,
+                suppress_configured_account_name=False,
+            )
             body_raw = message.body
 
             # content conversion
@@ -820,7 +830,8 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 smtp_span.set_attribute("recipient_total", len(recipient_list))
                 provider_id = SmtpTransport.send(
                     account=acct,
-                    from_addr=from_address,
+                    from_addr=from_header,
+                    envelope_from_addr=from_address,
                     to_addrs=recipient_list,
                     subject=subject,
                     plaintext_body=plaintext_body,

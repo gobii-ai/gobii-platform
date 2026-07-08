@@ -13,6 +13,7 @@ from api.models import (
     OutboundMessageAttempt,
     DeliveryStatus,
     AgentEmailAccount,
+    PersistentAgentEmailEndpoint,
 )
 from api.agent.comms.outbound_delivery import deliver_agent_email
 
@@ -77,6 +78,36 @@ class TestSmtpSelection(TestCase):
         attempts = list(OutboundMessageAttempt.objects.filter(message=msg))
         self.assertTrue(any(a.provider == "smtp" for a in attempts))
         self.assertEqual(msg.latest_status, DeliveryStatus.SENT)
+        sent_message = client.send_message.call_args.args[0]
+        self.assertEqual(sent_message["From"], "Sel Agent <agent@example.com>")
+
+    @patch("smtplib.SMTP")
+    def test_smtp_delivery_includes_agent_name_in_from_header(self, mock_smtp):
+        self._create_acct()
+        AgentEmailAccount.objects.filter(endpoint=self.from_ep).update(is_outbound_enabled=True)
+        PersistentAgentEmailEndpoint.objects.create(
+            endpoint=self.from_ep,
+            display_name="Custom SMTP Name",
+            verified=True,
+        )
+
+        client = MagicMock()
+        mock_smtp.return_value = client
+
+        msg = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_ep,
+            to_endpoint=self.to_ep,
+            is_outbound=True,
+            body="<p>Hello</p>",
+            raw_payload={"subject": "Test"},
+        )
+
+        deliver_agent_email(msg)
+
+        sent_message = client.send_message.call_args.args[0]
+        self.assertEqual(sent_message["From"], "Custom SMTP Name <agent@example.com>")
+        self.assertEqual(client.send_message.call_args.kwargs["from_addr"], "agent@example.com")
 
     @override_settings(GOBII_RELEASE_ENV="test")
     @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": ""}, clear=False)
