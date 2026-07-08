@@ -5408,8 +5408,10 @@
     --product-announcement-control-hover: rgba(255, 255, 255, 0.14);
     --product-announcement-item-border: rgba(221, 214, 254, 0.16);
     --product-announcement-item-bg: rgba(255, 255, 255, 0.07);
+    --product-announcement-item-hover-bg: rgba(255, 255, 255, 0.12);
     --product-announcement-unread-border: rgba(52, 211, 153, 0.36);
     --product-announcement-unread-bg: rgba(16, 185, 129, 0.1);
+    --product-announcement-unread-hover-bg: rgba(16, 185, 129, 0.15);
     --product-announcement-read-bg: rgba(16, 185, 129, 0.12);
     --product-announcement-read-color: #a7f3d0;
     --product-announcement-read-border: rgba(52, 211, 153, 0.34);
@@ -5432,8 +5434,10 @@
     --product-announcement-control-hover: rgba(79, 70, 229, 0.16);
     --product-announcement-item-border: rgba(79, 70, 229, 0.14);
     --product-announcement-item-bg: rgba(79, 70, 229, 0.08);
+    --product-announcement-item-hover-bg: rgba(79, 70, 229, 0.12);
     --product-announcement-unread-border: rgba(16, 185, 129, 0.32);
     --product-announcement-unread-bg: rgba(16, 185, 129, 0.09);
+    --product-announcement-unread-hover-bg: rgba(16, 185, 129, 0.13);
     --product-announcement-read-bg: rgba(16, 185, 129, 0.1);
     --product-announcement-read-color: #047857;
     --agent-chat-focus: rgba(79, 70, 229, 0.34);
@@ -5502,6 +5506,12 @@
     border-color: var(--product-announcement-unread-border);
     background: var(--product-announcement-unread-bg);
 }
+.product-announcement-panel__item:is(:hover, :focus-within) {
+    background: var(--product-announcement-item-hover-bg);
+}
+.product-announcement-panel__item[data-read='false']:is(:hover, :focus-within) {
+    background: var(--product-announcement-unread-hover-bg);
+}
 .product-announcement-panel__item-header {
     display: flex;
     align-items: baseline;
@@ -5513,6 +5523,9 @@
     min-width: 0;
     border-radius: 0;
     padding: 0.65rem;
+}
+.product-announcement-panel__item-main.agent-chat-menu-item:is(:hover, :focus-visible):not(:disabled):not([aria-disabled='true']) {
+    background: transparent;
 }
 .product-announcement-panel__item-copy {
     min-width: 0;
