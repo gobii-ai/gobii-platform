@@ -99,7 +99,7 @@ export const loadMoreAudit = createAsyncThunk<
   { state: RootState; rejectValue: string }
 >('audit/loadMore', async (_, { getState, rejectWithValue }) => {
   const state = getState().audit
-  if (!state.agentId || !state.hasMore || state.loading) {
+  if (!state.agentId) {
     return null
   }
   try {
@@ -111,6 +111,11 @@ export const loadMoreAudit = createAsyncThunk<
   } catch (error) {
     return rejectWithValue(error instanceof Error ? error.message : 'Failed to load more runs')
   }
+}, {
+  condition: (_, { getState }) => {
+    const state = getState().audit
+    return Boolean(state.agentId && state.hasMore && !state.loading)
+  },
 })
 
 export const loadAuditTimeline = createAsyncThunk(
