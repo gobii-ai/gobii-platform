@@ -16,7 +16,7 @@ from django.templatetags.static import static
 from django.urls import reverse
 from django.utils.html import strip_tags, escape
 from django.utils.translation import gettext_lazy as _
-from django.views.generic import TemplateView
+from django.views.generic import TemplateView, RedirectView
 from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
 from proprietary.forms import SupportForm, PrequalifyForm
@@ -180,6 +180,12 @@ class ProprietaryModeRequiredMixin:
 
 
 TEAM_START_URL = "/app/team"
+SHIRT_REDIRECT_URL = "/?utm_source=shirt&utm_medium=clothing"
+
+
+class ShirtRedirectView(ProprietaryModeRequiredMixin, RedirectView):
+    url = SHIRT_REDIRECT_URL
+    permanent = False
 
 
 def _coerce_plan_int(value, default=0):
