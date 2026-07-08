@@ -428,9 +428,9 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
                                 <BadgeCheck className="size-3.5" aria-hidden="true" />
                                 Official template
                               </span>
-                            ) : (
+                            ) : agent.publicProfileHandle ? (
                               <span className="text-slate-500">@{agent.publicProfileHandle}</span>
-                            )}
+                            ) : null}
                           </div>
 
                           <div className="space-y-1">
