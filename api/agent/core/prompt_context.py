@@ -1450,7 +1450,10 @@ def _render_prompt_context_once(
     if planning_mode_active:
         important_group.section_text(
             "schedule_note",
-            "Planning Mode is active; set the final schedule through end_planning(schedule=...) when planning ends.",
+            (
+                "Planning Mode is active; schedule changes are deferred until planning ends. "
+                "Set the final schedule through end_planning(schedule=...)."
+            ),
             weight=1,
             non_shrinkable=True
         )
