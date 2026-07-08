@@ -722,7 +722,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
     queryset = (
         PersistentAgent.objects.non_eval()
         .alive()
-        .select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint')
+        .select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint', 'credit_forecast')
     )
     serializer_class = PersistentAgentSerializer
     permission_classes = [IsAuthenticated]

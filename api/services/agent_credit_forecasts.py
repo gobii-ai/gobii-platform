@@ -74,7 +74,7 @@ def persist_agent_credit_forecast(agent: PersistentAgent) -> PersistentAgentCred
             "estimated_at": timezone.now(),
         },
     )
-    agent._state.fields_cache["credit_forecast"] = forecast
+    agent.credit_forecast = forecast
     return forecast
 
 
@@ -90,7 +90,12 @@ def estimate_agent_credit_forecast(agent: PersistentAgent) -> ForecastComputatio
             warning_level=warning_level,
         )
 
-    samples = find_similar_agent_samples(embedding.vector, embedding.dimension, limit=FORECAST_NEIGHBOR_LIMIT)
+    samples = find_similar_agent_samples(
+        embedding.vector,
+        embedding.dimension,
+        embedding_model=embedding.model,
+        limit=FORECAST_NEIGHBOR_LIMIT,
+    )
     if not samples:
         warning_level = _build_warning(agent, monthly=None)
         return ForecastComputation(
@@ -191,9 +196,11 @@ def set_historical_sample_embedding(
     sample.embedding_model = embedding.model
     sample.embedding_dimension = embedding.dimension
     sample.embedding_text_hash = hashlib.sha256((sample.embedding_text or "").encode("utf-8")).hexdigest()
+    sample.updated_at = timezone.now()
     if save:
-        sample.save(update_fields=["embedding_model", "embedding_dimension", "embedding_text_hash", "updated_at"])
-    _write_sample_vector(sample.id, embedding.vector)
+        _write_sample_embedding(sample, embedding)
+    else:
+        _write_sample_vector(sample.id, embedding.vector)
 
 
 def generate_embedding(text: str) -> EmbeddingResult | None:
@@ -204,9 +211,10 @@ def find_similar_agent_samples(
     vector: Sequence[float],
     dimension: int,
     *,
+    embedding_model: str,
     limit: int,
 ) -> list[SimilarAgentSample]:
-    if not vector or dimension <= 0:
+    if not vector or dimension <= 0 or not embedding_model:
         return []
     vector_literal = _pgvector_literal(vector)
     with connection.cursor() as cursor:
@@ -216,10 +224,11 @@ def find_similar_agent_samples(
             FROM api_historicalagentcostsample
             WHERE embedding_vector IS NOT NULL
               AND embedding_dimension = %s
+              AND embedding_model = %s
             ORDER BY embedding_vector <=> %s::vector
             LIMIT %s
             """,
-            [vector_literal, dimension, vector_literal, limit],
+            [vector_literal, dimension, embedding_model, vector_literal, limit],
         )
         rows = cursor.fetchall()
     ids = [row[0] for row in rows]
@@ -255,6 +264,29 @@ def _write_sample_vector(sample_id: Any, vector: Sequence[float]) -> None:
         cursor.execute(
             'UPDATE "api_historicalagentcostsample" SET "embedding_vector" = %s::vector WHERE "id" = %s',
             [_pgvector_literal(vector), sample_id],
+        )
+
+
+def _write_sample_embedding(sample: HistoricalAgentCostSample, embedding: EmbeddingResult) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE "api_historicalagentcostsample"
+            SET "embedding_vector" = %s::vector,
+                "embedding_model" = %s,
+                "embedding_dimension" = %s,
+                "embedding_text_hash" = %s,
+                "updated_at" = %s
+            WHERE "id" = %s
+            """,
+            [
+                _pgvector_literal(embedding.vector),
+                embedding.model,
+                embedding.dimension,
+                sample.embedding_text_hash,
+                sample.updated_at,
+                sample.id,
+            ],
         )
 
 

@@ -54,9 +54,18 @@ def generate_embeddings(inputs: Sequence[str], *, routing_profile: Any = None) -
         return None
 
     for endpoint in _iter_embedding_endpoints(routing_profile=routing_profile):
-        result = _generate_embeddings_for_endpoint(endpoint, clean_inputs)
+        request = _build_embedding_request(endpoint)
+        result = _generate_embeddings_for_endpoint(endpoint, request, clean_inputs)
         if result is not None:
             return result
+    return None
+
+
+def get_configured_embedding_model(*, routing_profile: Any = None) -> str | None:
+    for endpoint in _iter_embedding_endpoints(routing_profile=routing_profile):
+        request = _build_embedding_request(endpoint)
+        if request is not None:
+            return request[0]
     return None
 
 
@@ -88,7 +97,7 @@ def _iter_embedding_endpoints(*, routing_profile: Any = None) -> Iterable[Any]:
                 yield entry.endpoint
 
 
-def _generate_embeddings_for_endpoint(endpoint: Any, inputs: Sequence[str]) -> EmbeddingResult | None:
+def _build_embedding_request(endpoint: Any) -> tuple[str, dict[str, Any]] | None:
     if endpoint is None or not getattr(endpoint, "enabled", False):
         return None
     provider = getattr(endpoint, "provider", None)
@@ -111,12 +120,25 @@ def _generate_embeddings_for_endpoint(endpoint: Any, inputs: Sequence[str]) -> E
     _apply_provider_overrides(provider, params)
     if "api_key" not in params and not api_base:
         return None
+    return model_name, params
 
+
+def _generate_embeddings_for_endpoint(
+    endpoint: Any,
+    request: tuple[str, dict[str, Any]] | None,
+    inputs: Sequence[str],
+) -> EmbeddingResult | None:
+    if request is None:
+        return None
+    model_name, params = request
     try:
         response = litellm.embedding(model=model_name, input=list(inputs), **params)
         vectors = _extract_embeddings(response)
     except LITELLM_EMBEDDING_ERRORS as exc:
         logger.warning("Embedding endpoint %s failed: %s", getattr(endpoint, "key", model_name), exc)
+        return None
+    except OSError as exc:
+        logger.warning("Embedding endpoint %s failed with a network error: %s", getattr(endpoint, "key", model_name), exc)
         return None
     except (TypeError, ValueError) as exc:
         logger.warning("Embedding endpoint %s returned invalid data: %s", getattr(endpoint, "key", model_name), exc)

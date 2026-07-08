@@ -17,6 +17,7 @@ from api.models import (
 )
 from api.services.agent_credit_forecasts import (
     EmbeddingResult,
+    FORECAST_NEIGHBOR_LIMIT,
     SimilarAgentSample,
     estimate_agent_credit_forecast,
     estimate_schedule_runs_per_day,
@@ -72,6 +73,12 @@ class AgentCreditForecastEstimatorTests(TestCase):
 
         self.assertIsNone(forecast.per_run_credits)
         self.assertEqual(forecast.warning_level, PersistentAgentCreditForecast.WarningLevel.NONE)
+        mock_find.assert_called_once_with(
+            [0.1, 0.2],
+            2,
+            embedding_model="test-embedding",
+            limit=FORECAST_NEIGHBOR_LIMIT,
+        )
 
     @patch("api.services.agent_credit_forecasts.TaskCreditService.calculate_available_tasks_for_owner")
     @patch("api.services.agent_credit_forecasts.find_similar_agent_samples")
@@ -295,7 +302,8 @@ class AgentCreditForecastIntegrationTests(TestCase):
         self.assertEqual(sample.normalized_monthly_credits, Decimal("300"))
         mock_set_embedding.assert_called_once()
 
-    @patch("api.services.agent_credit_forecast_samples.sample_has_current_embedding", return_value=True)
+    @patch("api.services.agent_credit_forecast_samples.find_samples_with_current_embeddings")
+    @patch("api.services.agent_credit_forecast_samples.get_configured_embedding_model", return_value="test-embedding")
     @patch("api.services.agent_credit_forecast_samples.set_historical_sample_embedding")
     @patch("api.services.agent_credit_forecast_samples.generate_embedding")
     @patch("api.services.agent_credit_forecast_samples.fetch_source_rows")
@@ -304,8 +312,10 @@ class AgentCreditForecastIntegrationTests(TestCase):
         mock_fetch,
         mock_embedding,
         mock_set_embedding,
-        _mock_current,
+        _mock_configured_model,
+        mock_current_embeddings,
     ):
+        mock_current_embeddings.side_effect = lambda samples, *, embedding_model: {sample.id for sample in samples}
         mock_fetch.return_value = [
             {
                 "source_agent_id": self.agent.id,

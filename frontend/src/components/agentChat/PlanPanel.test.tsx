@@ -61,4 +61,25 @@ describe('PlanPanel', () => {
     expect(screen.getByText('250 credits')).toBeInTheDocument()
     expect(screen.getByText('/ month')).toBeInTheDocument()
   })
+
+  it('hides non-positive task credit estimates', () => {
+    render(
+      <PlanPanel
+        plan={plan}
+        isAgentWorking
+        creditForecast={{
+          perRunCredits: 5,
+          dailyCredits: 0,
+          monthlyCredits: 0,
+          warningLevel: 'none',
+          estimatedAt: '2026-07-07T18:00:00Z',
+        }}
+      />,
+    )
+
+    expect(screen.getByText('5 credits')).toBeInTheDocument()
+    expect(screen.queryByText('0 credits')).not.toBeInTheDocument()
+    expect(screen.queryByText('/ day')).not.toBeInTheDocument()
+    expect(screen.queryByText('/ month')).not.toBeInTheDocument()
+  })
 })

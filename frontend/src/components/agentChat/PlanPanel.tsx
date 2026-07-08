@@ -23,7 +23,7 @@ type ForecastRow = {
 }
 
 function formatCreditEstimate(value: number | null | undefined): string | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     return null
   }
   const formatted = Number.isInteger(value)

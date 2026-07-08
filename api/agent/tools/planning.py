@@ -1,5 +1,7 @@
 from typing import Any, Dict
 
+from django.core.exceptions import ValidationError
+
 from api.models import PersistentAgent
 from api.services.agent_planning import complete_agent_planning
 from api.services.agent_credit_forecasts import persist_agent_credit_forecast, serialize_credit_forecast
@@ -55,7 +57,7 @@ def execute_end_planning(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             schedule_provided=schedule_provided,
             schedule=schedule,
         )
-    except ValueError as exc:
+    except (ValueError, ValidationError) as exc:
         return {"status": "error", "message": str(exc)}
 
     forecast = persist_agent_credit_forecast(updated_agent)

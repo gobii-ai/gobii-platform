@@ -12,6 +12,7 @@ from api.services.agent_credit_forecasts import (
     generate_embedding,
     set_historical_sample_embedding,
 )
+from api.services.embeddings import get_configured_embedding_model
 
 
 DEFAULT_BATCH_SIZE = 100
@@ -125,6 +126,7 @@ def seed_agent_credit_forecast_samples(
     upserted = 0
     embedded = 0
     skipped_embeddings = 0
+    current_embedding_model = get_configured_embedding_model() if generate_embeddings and skip_existing_embeddings else None
 
     for rows in _batched(fetch_source_rows(normalized_limit, batch_size=normalized_batch_size), normalized_batch_size):
         with transaction.atomic():
@@ -134,8 +136,13 @@ def seed_agent_credit_forecast_samples(
         if not generate_embeddings:
             continue
 
+        current_embedding_sample_ids = (
+            find_samples_with_current_embeddings(samples, embedding_model=current_embedding_model)
+            if current_embedding_model
+            else set()
+        )
         for sample in samples:
-            if skip_existing_embeddings and sample_has_current_embedding(sample):
+            if sample.id in current_embedding_sample_ids:
                 skipped_embeddings += 1
                 continue
             embedding = generate_embedding(sample.embedding_text)
@@ -218,21 +225,38 @@ def upsert_sample(row: dict) -> HistoricalAgentCostSample:
     return sample
 
 
-def sample_has_current_embedding(sample: HistoricalAgentCostSample) -> bool:
-    expected_hash = hashlib.sha256((sample.embedding_text or "").encode("utf-8")).hexdigest()
-    if not sample.embedding_dimension or sample.embedding_text_hash != expected_hash:
-        return False
+def find_samples_with_current_embeddings(
+    samples: list[HistoricalAgentCostSample],
+    *,
+    embedding_model: str,
+) -> set:
+    current_sample_ids = set()
+    sample_ids = []
+    for sample in samples:
+        expected_hash = hashlib.sha256((sample.embedding_text or "").encode("utf-8")).hexdigest()
+        if (
+            sample.embedding_model != embedding_model
+            or not sample.embedding_dimension
+            or sample.embedding_text_hash != expected_hash
+        ):
+            continue
+        sample_ids.append(sample.id)
+
     with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT embedding_vector IS NOT NULL
-            FROM api_historicalagentcostsample
-            WHERE id = %s
-            """,
-            [sample.id],
-        )
-        row = cursor.fetchone()
-    return bool(row and row[0])
+        for chunk in _batched(sample_ids, 1000):
+            placeholders = ",".join(["%s"] * len(chunk))
+            cursor.execute(
+                f"""
+                SELECT id
+                FROM api_historicalagentcostsample
+                WHERE embedding_model = %s
+                  AND embedding_vector IS NOT NULL
+                  AND id IN ({placeholders})
+                """,
+                [embedding_model, *chunk],
+            )
+            current_sample_ids.update(row[0] for row in cursor.fetchall())
+    return current_sample_ids
 
 
 def _batched(rows, batch_size: int):
