@@ -1,5 +1,6 @@
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -24,7 +25,7 @@ from api.services.agent_credit_forecasts import (
     persist_agent_credit_forecast,
     serialize_agent_credit_forecast,
 )
-from api.services.agent_credit_forecast_samples import SOURCE_QUERY
+from api.services.agent_credit_forecast_samples import SOURCE_QUERY, fetch_source_rows
 
 
 @tag("agent_credit_forecast_batch")
@@ -157,6 +158,33 @@ class AgentCreditForecastIntegrationTests(TestCase):
     def test_sample_source_query_aliases_enabled_tools_table(self):
         self.assertIn("FROM api_persistentagentenabledtool enabled", SOURCE_QUERY)
         self.assertIn("recent.agent_id = enabled.agent_id", SOURCE_QUERY)
+
+    @patch("api.services.agent_credit_forecast_samples.connection")
+    def test_fetch_source_rows_uses_client_side_cursor_between_write_batches(self, mock_connection):
+        second_agent_id = uuid4()
+        cursor_context = MagicMock()
+        cursor = MagicMock()
+        cursor.description = [("source_agent_id",), ("agent_name",)]
+        cursor.fetchmany.side_effect = [
+            [(self.agent.id, "Agent One")],
+            [(second_agent_id, "Agent Two")],
+            [],
+        ]
+        cursor_context.__enter__.return_value = cursor
+        mock_connection.cursor.return_value = cursor_context
+
+        rows = list(fetch_source_rows(2, batch_size=1))
+
+        self.assertEqual(
+            rows,
+            [
+                {"source_agent_id": self.agent.id, "agent_name": "Agent One"},
+                {"source_agent_id": second_agent_id, "agent_name": "Agent Two"},
+            ],
+        )
+        cursor.execute.assert_called_once_with(SOURCE_QUERY, [2])
+        mock_connection.cursor.assert_called_once_with()
+        mock_connection.chunked_cursor.assert_not_called()
 
     @patch("console.agent_chat.signals.emit_agent_usage_update")
     @patch("console.agent_chat.signals.emit_agent_planning_state_update")

@@ -158,7 +158,9 @@ def seed_agent_credit_forecast_samples(
 
 
 def fetch_source_rows(limit: int, *, batch_size: int = DEFAULT_BATCH_SIZE):
-    with connection.chunked_cursor() as cursor:
+    # The seeding loop commits after each upsert batch on this same connection;
+    # a server-side cursor would be closed by that transaction boundary.
+    with connection.cursor() as cursor:
         cursor.execute(SOURCE_QUERY, [limit])
         columns = [column[0] for column in cursor.description]
         while True:
