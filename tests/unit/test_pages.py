@@ -2239,7 +2239,9 @@ class SitemapTests(TestCase):
         )
         self.assertIn("<loc>http://example.com/solutions/</loc>", content)
         self.assertIn("<loc>http://example.com/solutions/recruiting/</loc>", content)
+        self.assertIn("<loc>http://example.com/solutions/sales/ai-sales-agent/</loc>", content)
         self.assertIn("<loc>http://example.com/solutions/engineering/</loc>", content)
+        self.assertNotIn("<loc>http://example.com/solutions/sales/ai-sales-employee/</loc>", content)
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
@@ -2275,6 +2277,7 @@ class SitemapTests(TestCase):
             "/solutions/recruiting/",
             "/solutions/recruiting/candidate-sourcing/",
             "/solutions/sales/",
+            "/solutions/sales/ai-sales-agent/",
             "/solutions/operations/",
             "/recruiting/contact/",
         ):
@@ -2301,11 +2304,145 @@ class SitemapTests(TestCase):
             "/solutions/recruiting/",
             "/solutions/recruiting/candidate-sourcing/",
             "/solutions/sales/",
+            "/solutions/sales/ai-sales-agent/",
             "/solutions/engineering/",
         ):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        GOBII_RELEASE_ENV="prod",
+        PUBLIC_SITE_URL="https://gobii.ai",
+    )
+    @patch("pages.views.get_stripe_settings")
+    def test_sales_ai_agent_solution_renders_with_metadata_and_schema(self, mock_get_stripe_settings):
+        mock_get_stripe_settings.return_value = SimpleNamespace(startup_trial_days=7)
+        response = self.client.get(reverse("pages:solution_sales_ai_sales_agent"))
+
+        self.assertEqual(response.status_code, 200)
+        page_html = response.content.decode("utf-8")
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        self.assertEqual(
+            soup.title.string,
+            "AI Sales Agent: What It Can Do and When to Use One | Gobii",
+        )
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            "Evaluate an AI sales agent for supervised prospecting, account research, lead enrichment, outreach prep, and human-reviewed pipeline handoffs.",
+        )
+        expected_public_url = "https://gobii.ai/solutions/sales/ai-sales-agent/"
+        self.assertEqual(
+            soup.find("link", rel="canonical")["href"],
+            expected_public_url,
+        )
+        self.assertEqual(
+            soup.find("meta", property="og:url")["content"],
+            expected_public_url,
+        )
+        self.assertContains(response, "AI sales agent for supervised pipeline work")
+        self.assertContains(response, "AI sales employee")
+        self.assertContains(response, "Start with Lead Hunter")
+        self.assertContains(response, "Which type of AI sales agent should you buy?")
+        self.assertContains(response, "CRM-native agents")
+        self.assertContains(response, "Voice and calling agents")
+        self.assertContains(response, "Lead Hunter output example")
+        self.assertContains(response, "Google Sheets")
+        self.assertContains(response, "webhooks")
+        self.assertNotContains(response, "When not to use one")
+        self.assertNotContains(response, "Do not use an AI sales agent")
+        self.assertContains(response, "Real Gobii workspace screenshot")
+        self.assertContains(response, "Sample batch metric: 25 qualified prospects")
+        hero_image = soup.find("img", {"src": static("images/solutions/sales-hero-1280.jpg")})
+        self.assertIsNotNone(hero_image)
+        hero_webp_source = hero_image.find_parent("picture").find("source", {"type": "image/webp"})
+        self.assertIsNotNone(hero_webp_source)
+        self.assertIn("sales-hero-1280.webp", hero_webp_source.get("srcset"))
+        proof_image = soup.find(
+            "img",
+            {"alt": "Gobii agent workspace showing a completed agent update and always-on status"},
+        )
+        self.assertIsNotNone(proof_image)
+        self.assertIn(
+            "newsletter-2026-01-20-watch-your-agents-work-in-real-time-hero.png",
+            proof_image.get("src"),
+        )
+        proof_webp_source = proof_image.find_parent("picture").find("source", {"type": "image/webp"})
+        self.assertIsNotNone(proof_webp_source)
+        self.assertIn(
+            "newsletter-2026-01-20-watch-your-agents-work-in-real-time-hero.webp",
+            proof_webp_source.get("srcset"),
+        )
+        self.assertNotIn("localhost", page_html)
+        self.assertNotIn("http://testserver", page_html)
+        hero_source = soup.find("input", {"name": "source_page", "value": "sales_ai_agent_hero"})
+        self.assertIsNotNone(hero_source)
+        hero_form = hero_source.find_parent("form")
+        self.assertIsNotNone(hero_form)
+        trial_note = hero_form.find("p")
+        self.assertIsNotNone(trial_note)
+        self.assertEqual(trial_note.get_text(" ", strip=True), "7-day free trial.")
+        self.assertIn("text-xs", trial_note.get("class", []))
+        self.assertIn("text-center", trial_note.get("class", []))
+        final_source = soup.find("input", {"name": "source_page", "value": "sales_ai_agent_final"})
+        self.assertIsNotNone(final_source)
+        final_form = final_source.find_parent("form")
+        self.assertIsNotNone(final_form)
+        final_button = final_form.find("button")
+        self.assertIsNotNone(final_button)
+        self.assertIn("bg-white", final_button.get("class", []))
+        self.assertIn("text-slate-950", final_button.get("class", []))
+
+        json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
+        json_ld_by_type = {}
+        for script in json_ld_scripts:
+            schema = json.loads(script.string)
+            json_ld_by_type[schema["@type"]] = schema
+
+        structured_data = json_ld_by_type["WebPage"]
+        self.assertEqual(structured_data["url"], expected_public_url)
+        self.assertEqual(structured_data["mainEntity"]["@type"], "Service")
+        self.assertEqual(structured_data["mainEntity"]["name"], "Gobii AI Sales Agent")
+        self.assertEqual(structured_data["mainEntity"]["serviceType"], "AI sales agent")
+        self.assertEqual(structured_data["mainEntity"]["category"], "Sales workflow automation")
+        self.assertEqual(
+            structured_data["mainEntity"]["offers"],
+            {
+                "@type": "Offer",
+                "url": "https://gobii.ai/pricing/",
+            },
+        )
+        self.assertEqual(structured_data["dateModified"], "2026-07-08")
+        self.assertNotIn("FAQPage", json_ld_by_type)
+
+        pricing_links = soup.find_all("a", href=reverse("proprietary:pricing"))
+        self.assertTrue(
+            any("View Gobii pricing" in link.get_text(" ", strip=True) for link in pricing_links)
+        )
+        cost_faq = next(
+            detail
+            for detail in soup.find_all("details")
+            if "How much does an AI sales agent cost?" in detail.get_text(" ", strip=True)
+        )
+        cost_pricing_link = cost_faq.find("a", href=reverse("proprietary:pricing"))
+        self.assertIsNotNone(cost_pricing_link)
+        self.assertEqual(cost_pricing_link.get_text(" ", strip=True), "plan pricing")
+
+        breadcrumb_data = json_ld_by_type["BreadcrumbList"]
+        self.assertEqual(
+            [item["name"] for item in breadcrumb_data["itemListElement"]],
+            ["Home", "Solutions", "Sales", "AI Sales Agent"],
+        )
+        self.assertEqual(
+            breadcrumb_data["itemListElement"][2]["item"],
+            "https://gobii.ai/solutions/sales/",
+        )
+
+        mock_get_stripe_settings.return_value = SimpleNamespace(startup_trial_days=0)
+        no_trial_response = self.client.get(reverse("pages:solution_sales_ai_sales_agent"))
+        self.assertNotContains(no_trial_response, "day free trial.")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_proprietary_sitemap_excludes_redirects_and_checkout_start_urls(self):

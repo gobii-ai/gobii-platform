@@ -130,7 +130,7 @@ from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_
 from django.contrib import sitemaps
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
-from django.utils.html import escape, strip_tags
+from django.utils.html import escape, format_html, strip_tags
 from django.utils.safestring import mark_safe
 from opentelemetry import trace
 from marketing_events.api import capi
@@ -4244,6 +4244,7 @@ class SolutionView(TemplateView):
         'recruiting': 'solutions/recruiting.html',
         'recruiting/candidate-sourcing': 'solutions/recruiting_candidate_sourcing.html',
         'sales': 'solutions/sales.html',
+        'sales/ai-sales-agent': 'solutions/sales_ai_sales_agent.html',
         'health-care': 'solutions/health-care.html',
         'defense': 'solutions/defense.html',
         'engineering': 'solutions/engineering.html',
@@ -4314,6 +4315,86 @@ class SolutionView(TemplateView):
                 'route': 'pages:pretrained_worker_detail',
                 'kwargs': {'slug': 'lead-hunter'},
             },
+        },
+        'sales/ai-sales-agent': {
+            'title': 'AI Sales Agent',
+            'tagline': 'Supervised sales workflow automation.',
+            'description': 'Use a Gobii AI sales agent to qualify, research, enrich, and prepare pipeline work for human review.',
+            'seo_title': 'AI Sales Agent: What It Can Do and When to Use One | Gobii',
+            'seo_description': 'Evaluate an AI sales agent for supervised prospecting, account research, lead enrichment, outreach prep, and human-reviewed pipeline handoffs.',
+            'date_modified': '2026-07-08',
+            'social_image': 'images/solutions/sales-hero.jpg',
+            'social_image_alt': 'Gobii AI sales agent for supervised prospecting and account research',
+            'service_name': 'Gobii AI Sales Agent',
+            'service_type': 'AI sales agent',
+            'service_category': 'Sales workflow automation',
+            'service_offer_route': 'proprietary:pricing',
+            'url_name': 'pages:solution_sales_ai_sales_agent',
+            'url_kwargs': {},
+            'breadcrumb_parents': [
+                {
+                    'name': 'Sales',
+                    'solution_slug': 'sales',
+                },
+            ],
+            'related_link': {
+                'intro': 'Want to inspect the agent first?',
+                'label': 'View the Lead Hunter AI sales agent',
+                'route': 'pages:pretrained_worker_detail',
+                'kwargs': {'slug': 'lead-hunter'},
+            },
+            'faq_items': [
+                {
+                    'question': 'What does an AI sales agent do?',
+                    'answer': (
+                        'An AI sales agent handles repeatable sales workflow tasks such as prospecting, '
+                        'lead qualification, account research, enrichment, outreach preparation, and pipeline '
+                        'handoff. In Gobii, the agent prepares source-linked work for a sales team to review.'
+                    ),
+                },
+                {
+                    'question': 'How much does an AI sales agent cost?',
+                    'answer': (
+                        'AI sales agent cost depends on plan, usage volume, data sources, integrations, and the '
+                        'amount of human review in the workflow. Gobii publishes plan pricing on its pricing page, '
+                        'so teams can start with a focused workflow such as Lead Hunter and scale once the output '
+                        'quality is proven.'
+                    ),
+                    'answer_html': (
+                        'AI sales agent cost depends on plan, usage volume, data sources, integrations, and the '
+                        'amount of human review in the workflow. Gobii publishes '
+                        '<a href="{pricing_url}" class="font-semibold text-indigo-700 underline decoration-indigo-200 '
+                        'underline-offset-4 hover:text-indigo-900">plan pricing</a> on its pricing page, so teams can '
+                        'start with a focused workflow such as Lead Hunter and scale once the output quality is proven.'
+                    ),
+                },
+                {
+                    'question': 'Can an AI sales agent replace an SDR?',
+                    'answer': (
+                        'An AI sales agent should not fully replace seller judgment, relationship-building, or '
+                        'compliance review. Gobii is best used as an AI sales employee for repetitive research '
+                        'and preparation work, while humans own targeting, messaging, and outreach decisions.'
+                    ),
+                },
+                {
+                    'question': 'What tools should an AI sales agent connect to?',
+                    'answer': (
+                        'Useful AI sales agent connections include approved web sources, CRM workflows, Google '
+                        'Sheets or CSV exports, inbound and outbound webhooks, documents, and sales engagement '
+                        'tools. The right setup depends on where the team stores ICP criteria, lead data, source '
+                        'links, review notes, and approved outreach steps.'
+                    ),
+                },
+                {
+                    'question': 'Can an AI sales agent make calls or use WhatsApp?',
+                    'answer': (
+                        'This Gobii AI sales agent page is focused on research, enrichment, handoff, and outreach '
+                        'preparation rather than autonomous calling or WhatsApp outreach. Gobii can prepare call '
+                        'briefs, follow-up notes, and structured handoff data; calling or WhatsApp execution should '
+                        'run through approved downstream tools when a team needs those channels.'
+                    ),
+                },
+            ],
         },
         'health-care': {
             'title': 'Health Care',
@@ -4389,21 +4470,23 @@ class SolutionView(TemplateView):
         context = super().get_context_data(**kwargs)
         slug = self.kwargs['slug']
         data = self.SOLUTION_DATA[slug]
-        solution_url = self.request.build_absolute_uri(self.reverse_solution(slug))
-        solutions_url = self.request.build_absolute_uri(reverse('pages:solutions'))
-        home_url = self.request.build_absolute_uri(reverse('pages:home'))
-        social_image_url = self.request.build_absolute_uri(static(data['social_image']))
+        solution_url = _public_site_absolute_url(self.reverse_solution(slug))
+        solutions_url = _public_site_absolute_url(reverse('pages:solutions'))
+        home_url = _public_site_absolute_url(reverse('pages:home'))
+        social_image_url = _public_site_absolute_url(static(data['social_image']))
         organization_schema = {
             "@type": "Organization",
             "name": "Gobii",
             "url": home_url,
-            "logo": self.request.build_absolute_uri(static(self.ORGANIZATION_LOGO_PATH)),
+            "logo": _public_site_absolute_url(static(self.ORGANIZATION_LOGO_PATH)),
             "sameAs": list(self.ORGANIZATION_SAME_AS),
         }
 
         solution_spawn_requires_trial = False
         if self.request.user.is_authenticated:
             solution_spawn_requires_trial = not can_user_use_personal_agents_and_api(self.request.user)
+        stripe_settings = get_stripe_settings()
+        solution_trial_days = _normalize_trial_days(getattr(stripe_settings, "startup_trial_days", 0))
 
         related_link = data.get('related_link') or {}
         if related_link:
@@ -4411,6 +4494,22 @@ class SolutionView(TemplateView):
                 'intro': related_link['intro'],
                 'label': related_link['label'],
                 'url': reverse(related_link['route'], kwargs=related_link.get('kwargs', {})),
+            }
+
+        service_schema = {
+            "@type": "Service",
+            "name": data.get('service_name', f"Gobii {data['title']} AI agents"),
+            "description": data['seo_description'],
+            "url": solution_url,
+            "image": social_image_url,
+            "serviceType": data.get('service_type', "AI agent solution"),
+            "category": data.get('service_category', data['title']),
+            "provider": organization_schema,
+        }
+        if data.get('service_offer_route'):
+            service_schema["offers"] = {
+                "@type": "Offer",
+                "url": _public_site_absolute_url(reverse(data['service_offer_route'])),
             }
 
         structured_data = {
@@ -4426,19 +4525,17 @@ class SolutionView(TemplateView):
                 "name": "Gobii",
                 "url": home_url,
             },
-            "mainEntity": {
-                "@type": "Service",
-                "name": f"Gobii {data['title']} AI agents",
-                "description": data['seo_description'],
-                "url": solution_url,
-                "image": social_image_url,
-                "serviceType": "AI agent solution",
-                "category": data['title'],
-                "provider": organization_schema,
-            },
+            "mainEntity": service_schema,
         }
         if data.get('date_modified'):
             structured_data["dateModified"] = data['date_modified']
+        faq_items = [dict(item) for item in data.get('faq_items') or []]
+        for item in faq_items:
+            if item.get('answer_html'):
+                item['answer_html'] = format_html(
+                    item['answer_html'],
+                    pricing_url=reverse('proprietary:pricing'),
+                )
         breadcrumb_items = [
             {
                 "@type": "ListItem",
@@ -4454,7 +4551,7 @@ class SolutionView(TemplateView):
             },
         ]
         for parent in data.get('breadcrumb_parents') or []:
-            parent_url = self.request.build_absolute_uri(self.reverse_solution(parent['solution_slug']))
+            parent_url = _public_site_absolute_url(self.reverse_solution(parent['solution_slug']))
             breadcrumb_items.append({
                 "@type": "ListItem",
                 "position": len(breadcrumb_items) + 1,
@@ -4482,9 +4579,12 @@ class SolutionView(TemplateView):
             'solution_seo_description': data['seo_description'],
             'solution_social_image_alt': data['social_image_alt'],
             'solution_social_image_url': social_image_url,
+            'canonical_url': solution_url,
             'solution_structured_data_json': html_safe_json_dumps(structured_data),
             'solution_breadcrumb_json': html_safe_json_dumps(breadcrumb_data),
+            'solution_faq_items': faq_items,
             'solution_spawn_requires_trial': solution_spawn_requires_trial,
+            'solution_trial_days': solution_trial_days,
             'solution_related_link': related_link,
             'solution_crawlable_links_enabled': is_waffle_flag_active(
                 SOLUTION_CRAWLABLE_LINKS,
