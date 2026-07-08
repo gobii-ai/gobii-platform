@@ -4289,7 +4289,11 @@ export function AgentChatPage({
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}
         dailyCreditsStatus={dailyCreditsStatus}
-        creditForecast={initialPageResponse?.credit_forecast ?? null}
+        creditForecast={
+          initialPageResponse?.task_credit_estimation_ui_enabled
+            ? initialPageResponse?.credit_forecast ?? null
+            : null
+        }
         dailyCreditsLoading={canManageDailyCredits ? quickSettingsLoading : false}
         dailyCreditsError={canManageDailyCredits ? dailyCreditsErrorMessage : null}
         onRefreshDailyCredits={canManageDailyCredits ? refetchQuickSettings : undefined}

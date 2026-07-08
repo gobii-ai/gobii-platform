@@ -39,6 +39,7 @@ export type TimelineResponse = {
   pending_human_input_requests?: PendingHumanInputRequest[]
   pending_action_requests?: PendingActionRequest[]
   current_plan?: PlanSnapshot | null
+  task_credit_estimation_ui_enabled?: boolean
   credit_forecast?: CreditForecast | null
 }
 
@@ -679,6 +680,7 @@ export type ProcessingStatusResponse = {
   processing_snapshot?: ProcessingSnapshot
   signup_preview_state?: SignupPreviewState | null
   planning_state?: PlanningState | null
+  task_credit_estimation_ui_enabled?: boolean
   credit_forecast?: CreditForecast | null
 }
 

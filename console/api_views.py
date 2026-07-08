@@ -181,6 +181,7 @@ from api.services.web_sessions import (
 )
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
 
+from constants.feature_flags import TASK_CREDIT_ESTIMATION_UI
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import (
@@ -3676,6 +3677,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             direction=direction,
             limit=limit,
         )
+        task_credit_estimation_ui_enabled = flag_is_active(request, TASK_CREDIT_ESTIMATION_UI)
         payload = {
             "events": window.events,
             "has_more_older": window.has_more_older,
@@ -3687,7 +3689,12 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "agent_avatar_url": agent.get_avatar_thumbnail_url(),
             "signup_preview_state": agent.signup_preview_state,
             "planning_state": agent.planning_state,
-            "credit_forecast": serialize_agent_credit_forecast(agent),
+            "task_credit_estimation_ui_enabled": task_credit_estimation_ui_enabled,
+            "credit_forecast": (
+                serialize_agent_credit_forecast(agent)
+                if task_credit_estimation_ui_enabled
+                else None
+            ),
             **_pending_action_payload(agent, request.user),
         }
         return JsonResponse(payload)
@@ -7265,13 +7272,19 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
             allow_delinquent_personal_chat=True,
         )
         snapshot = build_processing_snapshot(agent)
+        task_credit_estimation_ui_enabled = flag_is_active(request, TASK_CREDIT_ESTIMATION_UI)
         return JsonResponse(
             {
                 "processing_active": snapshot.active,
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
                 "signup_preview_state": agent.signup_preview_state,
                 "planning_state": agent.planning_state,
-                "credit_forecast": serialize_agent_credit_forecast(agent),
+                "task_credit_estimation_ui_enabled": task_credit_estimation_ui_enabled,
+                "credit_forecast": (
+                    serialize_agent_credit_forecast(agent)
+                    if task_credit_estimation_ui_enabled
+                    else None
+                ),
             }
         )
 
