@@ -15,6 +15,7 @@ import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem } from './uiPrimiti
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 
 type AgentChatBannerProps = {
+  agentNameOverride?: string | null
   planSnapshot?: PlanSnapshot | null
   planPanelMode?: 'docked' | 'hidden'
   onPlanOpen?: () => void
@@ -39,6 +40,7 @@ type AgentChatBannerProps = {
 }
 
 export const AgentChatBanner = memo(function AgentChatBanner({
+  agentNameOverride = null,
   planSnapshot,
   planPanelMode = 'docked',
   onPlanOpen,
@@ -64,8 +66,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const dispatch = useAppDispatch()
   const activeSession = useAppSelector(selectActiveChatSession)
   const agentId = useAppSelector(selectActiveChatAgentId)
-  const agentName = activeSession.identity.agentName
+  const agentName = agentNameOverride ?? activeSession.identity.agentName
   const agentAvatarUrl = activeSession.identity.agentAvatarUrl
+  const agentMiniDescription = activeSession.identity.agentMiniDescription
   const auditUrl = activeSession.identity.auditUrl
   const isOrgOwned = activeSession.identity.agentIsOrgOwned
   const canManageAgent = activeSession.identity.canManageAgent
@@ -73,6 +76,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const processingActive = activeSession.processing.processingActive
   const signupPreviewState = activeSession.identity.signupPreviewState
   const trimmedName = agentName?.trim() || 'Agent'
+  const trimmedMiniDescription = agentMiniDescription?.trim() || ''
   const bannerRef = useRef<HTMLDivElement | null>(null)
   const [animate, setAnimate] = useState(false)
   const hasAnimatedRef = useRef(false)
@@ -220,6 +224,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 <span className={`banner-task-dot ${processingActive ? 'banner-task-dot--active' : ''}`} />
                 <span className="banner-task-title">{currentTask}</span>
               </div>
+            ) : trimmedMiniDescription ? (
+              <span className="banner-mini-description" title={trimmedMiniDescription}>
+                {trimmedMiniDescription}
+              </span>
             ) : null}
           </div>
         </div>

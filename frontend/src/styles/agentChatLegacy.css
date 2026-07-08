@@ -381,6 +381,10 @@
     .banner-shell[data-sidebar-mode='gallery'] .banner-name {
         font-size: 0.8125rem;
     }
+    .banner-shell[data-sidebar-mode='gallery'] .banner-mini-description {
+        max-width: 11rem;
+        font-size: 0.6875rem;
+    }
     .banner-shell[data-sidebar-mode='gallery'] .banner-task-title {
         max-width: 11rem;
     }
@@ -749,6 +753,17 @@
     color: #1e1145;
     line-height: 1.25;
 }
+.banner-mini-description {
+    display: block;
+    max-width: min(26rem, 100%);
+    overflow: hidden;
+    color: #64748b;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .banner-task {
     display: flex;
     align-items: center;
@@ -922,6 +937,10 @@
     }
     .banner-name {
         font-size: 0.8125rem;
+    }
+    .banner-mini-description {
+        max-width: 120px;
+        font-size: 0.6875rem;
     }
     .banner-task-title {
         max-width: 120px;

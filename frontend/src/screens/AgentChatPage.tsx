@@ -1095,6 +1095,13 @@ export function AgentChatPage({
     },
     [dispatch],
   )
+
+  useEffect(() => {
+    if (isNewAgent) {
+      setAgentId(null)
+    }
+  }, [isNewAgent, setAgentId])
+
   const sendMessage = useCallback(
     async (body: string, attachments: File[] = [], options?: { clientId?: string; retry?: boolean }) => {
       const clientId = options?.clientId ?? createOptimisticClientId()
@@ -1832,6 +1839,7 @@ export function AgentChatPage({
   const storeResolvedAvatarUrl = isStoreSynced ? storedAgentAvatarUrl : null
   const resolvedAgentName = storeAgentName ?? activeRosterMeta?.name ?? agentName ?? null
   const resolvedAvatarUrl = storeResolvedAvatarUrl ?? activeRosterMeta?.avatarUrl ?? agentAvatarUrl ?? null
+  const resolvedMiniDescription = activeRosterMeta?.miniDescription ?? null
   const pendingAgentEmail = activeAgentId ? pendingAgentEmails[activeAgentId] ?? null : null
   const resolvedAgentEmail = activeRosterMeta?.email ?? pendingAgentEmail ?? agentEmail ?? null
   const resolvedAgentSms = activeRosterMeta?.sms ?? agentSms ?? null
@@ -3949,6 +3957,7 @@ export function AgentChatPage({
       agentId: activeAgentId,
       agentName: isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent'),
       agentAvatarUrl: resolvedAvatarUrl,
+      agentMiniDescription: isNewAgent ? null : resolvedMiniDescription,
       agentEmail: resolvedAgentEmail,
       agentSms: resolvedAgentSms,
       auditUrl: activeAuditUrl,
@@ -3977,6 +3986,7 @@ export function AgentChatPage({
     isCollaboratorOnly,
     isNewAgent,
     metaAdsTabEnabled,
+    resolvedMiniDescription,
     resolvedAgentEmail,
     resolvedAgentName,
     resolvedAgentSms,
@@ -4097,6 +4107,7 @@ export function AgentChatPage({
       {createOrganizationModal}
       <AgentChatLayout
         agentId={activeAgentId}
+        bannerAgentName={isNewAgent ? 'New Agent' : null}
         planSnapshot={latestPlanSnapshot}
         sidebar={chatLayoutSidebar}
         onComposerFocus={handleComposerFocus}

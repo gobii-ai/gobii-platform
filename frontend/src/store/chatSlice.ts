@@ -39,6 +39,7 @@ type MessageSignature = {
 export type AgentChatIdentityState = {
   agentName: string | null
   agentAvatarUrl: string | null
+  agentMiniDescription: string | null
   agentEmail: string | null
   agentSms: string | null
   auditUrl: string | null
@@ -102,6 +103,7 @@ export type AgentChatSession = {
 type AgentIdentityUpdateInput = {
   agentName?: string | null
   agentAvatarUrl?: string | null
+  agentMiniDescription?: string | null
   agentEmail?: string | null
   agentSms?: string | null
   auditUrl?: string | null
@@ -151,6 +153,7 @@ export function createInitialSession(): AgentChatSession {
     identity: {
       agentName: null,
       agentAvatarUrl: null,
+      agentMiniDescription: null,
       agentEmail: null,
       agentSms: null,
       auditUrl: null,
@@ -229,6 +232,9 @@ function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpd
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentAvatarUrl')) {
     session.identity.agentAvatarUrl = update?.agentAvatarUrl ?? null
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentMiniDescription')) {
+    session.identity.agentMiniDescription = update?.agentMiniDescription ?? null
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentEmail')) {
     session.identity.agentEmail = update?.agentEmail ?? null
