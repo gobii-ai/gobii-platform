@@ -2,6 +2,7 @@
 Gobii settings – dev profile
 """
 
+from copy import deepcopy
 from pathlib import Path
 from datetime import timedelta
 import environ
@@ -611,7 +612,7 @@ if STORAGE_BACKEND_TYPE == "GCS":
             "querystring_auth": GS_QUERYSTRING_AUTH,
         },
     }
-    STORAGES["public_template_social_images"] = STORAGES["default"]
+    STORAGES["public_template_social_images"] = deepcopy(STORAGES["default"])
     # Static files continue to be served by WhiteNoise as configured above
 
 elif STORAGE_BACKEND_TYPE == "S3":
@@ -635,7 +636,7 @@ elif STORAGE_BACKEND_TYPE == "S3":
             "addressing_style": AWS_S3_ADDRESSING_STYLE,
         },
     }
-    STORAGES["public_template_social_images"] = STORAGES["default"]
+    STORAGES["public_template_social_images"] = deepcopy(STORAGES["default"])
     STORAGES["staticfiles"] = { # S3 overrides WhiteNoise for static files if S3 is chosen
             "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
             "OPTIONS": {

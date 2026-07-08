@@ -2247,7 +2247,11 @@ def public_template_social_image(request, image_path: str):
     if not image_name.startswith("public_template_social_images/"):
         raise Http404
 
-    template = _active_public_template_queryset().filter(social_image=image_name).first()
+    template = PersistentAgentTemplate.objects.filter(
+        organization__isnull=True,
+        is_active=True,
+        social_image=image_name,
+    ).first()
     if not template:
         raise Http404
 
