@@ -1,9 +1,7 @@
-from __future__ import annotations
-
 import smtplib
 from dataclasses import dataclass
 from email.message import EmailMessage, MIMEPart
-from email.utils import make_msgid
+from email.utils import make_msgid, parseaddr
 from typing import Any, Sequence
 from opentelemetry import trace
 import logging
@@ -117,6 +115,7 @@ class SmtpTransport:
         in_reply_to: str | None = None,
         references: str | None = None,
         attachments: Sequence[EmailAttachmentPayload] | None = None,
+        envelope_from_addr: str | None = None,
     ) -> str:
         """Send email using the provided account.
 
@@ -134,6 +133,7 @@ class SmtpTransport:
         span.set_attribute("cc_count", cc_count)
 
         recipient_list = list(to_addrs or [])
+        envelope_sender = envelope_from_addr or parseaddr(from_addr)[1] or from_addr
 
         # Build message
         msg = EmailMessage()
@@ -181,7 +181,7 @@ class SmtpTransport:
                 client.login(account.smtp_username or "", account.get_smtp_password() or "")
 
             # Envelope sender should match From/header address typically
-            client.send_message(msg, from_addr=from_addr, to_addrs=recipient_list)
+            client.send_message(msg, from_addr=envelope_sender, to_addrs=recipient_list)
             return ""
         finally:
             try:
