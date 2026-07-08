@@ -34,7 +34,7 @@ enabled_tools AS (
     SELECT
         enabled.agent_id,
         array_agg(enabled.tool_full_name ORDER BY enabled.tool_full_name) AS tools
-    FROM api_persistentagentenabledtool
+    FROM api_persistentagentenabledtool enabled
     JOIN recent_agents recent ON recent.agent_id = enabled.agent_id
     GROUP BY enabled.agent_id
 ),

@@ -23,6 +23,7 @@ from api.services.agent_credit_forecasts import (
     persist_agent_credit_forecast,
     serialize_agent_credit_forecast,
 )
+from api.services.agent_credit_forecast_samples import SOURCE_QUERY
 
 
 @tag("agent_credit_forecast_batch")
@@ -145,6 +146,10 @@ class AgentCreditForecastIntegrationTests(TestCase):
             charter="Plan first.",
             planning_state=PersistentAgent.PlanningState.PLANNING,
         )
+
+    def test_sample_source_query_aliases_enabled_tools_table(self):
+        self.assertIn("FROM api_persistentagentenabledtool enabled", SOURCE_QUERY)
+        self.assertIn("recent.agent_id = enabled.agent_id", SOURCE_QUERY)
 
     @patch("console.agent_chat.signals.emit_agent_usage_update")
     @patch("console.agent_chat.signals.emit_agent_planning_state_update")
