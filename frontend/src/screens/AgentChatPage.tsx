@@ -121,7 +121,7 @@ import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BillingStatusInfo } from '../types/agentAddons'
-import type { AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
+import type { AgentMessage, AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
 import type { InsightEvent } from '../types/insight'
@@ -143,6 +143,13 @@ const ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS = 4_000
 const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
+
+function createOptimisticClientId(): string {
+  const now = Date.now()
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? `local-${crypto.randomUUID()}`
+    : `local-${now}-${Math.random().toString(16).slice(2, 10)}`
+}
 const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
 const RESOLVED_NOISE_DARK_TEXTURE_URL = new URL(noiseDarkTextureUrl, import.meta.url).toString()
 const GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = 'google_sheets_native'
@@ -940,6 +947,7 @@ export function AgentChatPage({
   ))
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
+  const retryPayloadsRef = useRef<Map<string, { body: string; attachments: File[] }>>(new Map())
   const routeAgentId = typeof agentId === 'string' ? agentId : null
   const queryClient = useQueryClient()
   const dispatch = useAppDispatch()
@@ -1088,8 +1096,24 @@ export function AgentChatPage({
     [dispatch],
   )
   const sendMessage = useCallback(
-    async (body: string, attachments?: File[]) => {
-      await dispatch(sendMessageThunk({ body, attachments })).unwrap()
+    async (body: string, attachments: File[] = [], options?: { clientId?: string; retry?: boolean }) => {
+      const clientId = options?.clientId ?? createOptimisticClientId()
+      retryPayloadsRef.current.set(clientId, { body, attachments })
+      try {
+        const result = await dispatch(sendMessageThunk({
+          body,
+          attachments,
+          clientId,
+          retry: options?.retry,
+        })).unwrap()
+        if (result?.clientId) {
+          retryPayloadsRef.current.delete(result.clientId)
+        }
+        return result
+      } catch (error) {
+        retryPayloadsRef.current.set(clientId, { body, attachments })
+        throw error
+      }
     },
     [dispatch],
   )
@@ -3490,6 +3514,48 @@ export function AgentChatPage({
     shouldFetchUsageBurnRate,
   ])
 
+  const handleRetryMessage = useCallback(async (message: AgentMessage) => {
+    if (!activeAgentId || !message.clientId) {
+      return
+    }
+    if (sendMessageDisabledReason) {
+      dispatch(chatActions.sendMessageErrorSet({
+        agentId: activeAgentId,
+        message: sendMessageDisabledReason,
+      }))
+      return
+    }
+
+    const cachedPayload = retryPayloadsRef.current.get(message.clientId)
+    const hasAttachmentMetadata = (message.attachments?.length ?? 0) > 0
+    if (!cachedPayload && hasAttachmentMetadata) {
+      dispatch(chatActions.sendMessageErrorSet({
+        agentId: activeAgentId,
+        message: 'Unable to retry this message because its attachments are no longer available. Please send it again.',
+      }))
+      return
+    }
+
+    const body = cachedPayload?.body ?? message.bodyText?.trim() ?? ''
+    const attachments = cachedPayload?.attachments ?? []
+    if (!body.trim() && attachments.length === 0) {
+      return
+    }
+
+    dispatch(chatActions.sendMessageErrorSet({ agentId: activeAgentId, message: null }))
+    try {
+      await sendMessage(body, attachments, {
+        clientId: message.clientId,
+        retry: true,
+      })
+    } catch (error) {
+      dispatch(chatActions.sendMessageErrorSet({
+        agentId: activeAgentId,
+        message: safeErrorMessage(error),
+      }))
+    }
+  }, [activeAgentId, dispatch, sendMessage, sendMessageDisabledReason])
+
   const replacePendingActionState = useCallback((targetAgentId: string, nextPendingActions: PendingActionRequest[]) => {
     replacePendingActionRequestsInCache(queryClient, targetAgentId, nextPendingActions)
     dispatch(chatActions.pendingActionsReplaced({
@@ -4095,6 +4161,7 @@ export function AgentChatPage({
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
         newestCursor={timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : null}
         onSendMessage={handleSend}
+        onRetryMessage={handleRetryMessage}
         onRespondHumanInputRequest={handleRespondHumanInputRequest}
         onDismissHumanInputRequest={handleDismissHumanInputRequest}
         onResolveSpawnRequest={handleResolveSpawnRequest}

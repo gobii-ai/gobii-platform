@@ -4,7 +4,6 @@ import { TimelineEventItem } from './TimelineEventItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { StreamingThinkingCard } from './StreamingThinkingCard'
 import { TypingIndicator } from './TypingIndicator'
-import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
@@ -52,6 +51,7 @@ type AgentTimelinePaneProps = {
   onMessageLinkClick?: (href: string) => boolean | void
   onPurchaseSeats?: () => void
   onReportMessage?: (message: AgentMessage) => void
+  onRetryMessage?: (message: AgentMessage) => void | Promise<void>
   onStarterPromptSelect?: (prompt: StarterPrompt, position: number) => Promise<void>
   onTaskCreditsDismiss?: () => void
   onTaskCreditsOpenPacks?: () => void
@@ -104,6 +104,7 @@ export function AgentTimelinePane({
   onMessageLinkClick,
   onPurchaseSeats,
   onReportMessage,
+  onRetryMessage,
   onStarterPromptSelect,
   onTaskCreditsDismiss,
   onTaskCreditsOpenPacks,
@@ -114,7 +115,6 @@ export function AgentTimelinePane({
   showJumpButton = false,
   showNoSeatsCallout = false,
   showProcessingIndicator = false,
-  showScheduledResumeEvent = false,
   showStarterPrompts = false,
   showStreamingSlot = false,
   showStreamingThinking = false,
@@ -143,7 +143,6 @@ export function AgentTimelinePane({
   )
   const autoScrollPinned = activeSession.timelineUi.autoScrollPinned
   const hasUnseenActivity = activeSession.timelineUi.hasUnseenActivity
-  const nextScheduledAt = activeSession.processing.nextScheduledAt
   const onIncomingAnimationConsumed = useCallback(
     (cursor: string) => dispatch(chatActions.realtimeEventCursorConsumed(cursor)),
     [dispatch],
@@ -208,13 +207,11 @@ export function AgentTimelinePane({
                       onMessageLinkClick={onMessageLinkClick}
                       onMessageCopied={onMessageCopied}
                       onReportMessage={onReportMessage}
+                      onRetryMessage={onRetryMessage}
                     />
                   </div>
                 )
               })}
-              {showScheduledResumeEvent ? (
-                <ScheduledResumeCard nextScheduledAt={nextScheduledAt} />
-              ) : null}
               {showHardLimitCallout ? (
                 <HardLimitCalloutCard
                   onOpenSettings={onHardLimitOpenSettings}

@@ -404,6 +404,8 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   const shellTitle = SELECTION_SHELL_PAGE_LABELS[galleryShellPage] ?? 'Agents'
   const showHeaderPageSwitcher = !collapsed && showGalleryShellSwitcher && galleryMode
+  const showHeaderContextSwitcher = !collapsed && Boolean(contextSwitcher)
+  const showHeaderCenter = showHeaderPageSwitcher || showHeaderContextSwitcher
   const showOrganizationShellPage = settings?.context ? settings.context.type === 'organization' : true
   const contextMenuMuted = agentContextMenu ? mutedAgentIdSet.has(agentContextMenu.agent.id) : false
   const contextMenuRoot = typeof document !== 'undefined' ? document.body : null
@@ -764,7 +766,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         <div
           className="chat-sidebar-header"
           data-collapsed={collapsed ? 'true' : 'false'}
-          data-has-center={showHeaderPageSwitcher ? 'true' : 'false'}
+          data-has-center={showHeaderCenter ? 'true' : 'false'}
         >
           <div className="chat-sidebar-header-start">
             {!collapsed ? (
@@ -773,19 +775,21 @@ export const ChatSidebar = memo(function ChatSidebar({
               </a>
             ) : null}
           </div>
-          {showHeaderPageSwitcher ? (
+          {showHeaderCenter ? (
             <div className="chat-sidebar-header-center">
-              <SelectionShellPageSwitcher
-                currentPage={galleryShellPage}
-                onSelectPage={onGalleryShellPageChange!}
-                showOrganization={showOrganizationShellPage}
-              />
+              {contextSwitcher ? (
+                <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
+              ) : null}
+              {showHeaderPageSwitcher ? (
+                <SelectionShellPageSwitcher
+                  currentPage={galleryShellPage}
+                  onSelectPage={onGalleryShellPageChange!}
+                  showOrganization={showOrganizationShellPage}
+                />
+              ) : null}
             </div>
           ) : null}
           <div className="chat-sidebar-header-actions">
-            {contextSwitcher ? (
-              <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
-            ) : null}
             {!collapsed ? (
               <button
                 type="button"
@@ -888,7 +892,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             {...settings}
             variant="sidebar"
             collapsed={collapsed}
-            bottomAccessory={<ProductAnnouncementBell variant="sidebar" />}
+            bottomAccessory={settings.isProprietaryMode ? <ProductAnnouncementBell variant="sidebar" /> : null}
           />
         ) : null}
       </div>

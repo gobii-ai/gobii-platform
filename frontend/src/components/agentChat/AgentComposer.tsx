@@ -16,7 +16,7 @@ import { orderHumanInputRequests } from './humanInputOrdering'
 import { AgentPipedreamAppsModal } from '../mcp/AgentPipedreamAppsModal'
 import type { PendingActionMutationResult } from '../../api/agentChat'
 import type { PendingActionRequest, PendingHumanInputRequest } from '../../types/agentChat'
-import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
+import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata, AgentSetupPanel } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
 import { chatActions, selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
@@ -67,9 +67,40 @@ const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
 const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
 const DISCORD_NATIVE_TAB_KEY = 'discordNative'
 const META_ADS_TAB_KEY = 'metaAds'
+const READY_WAKE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  weekday: 'short',
+  hour: 'numeric',
+  minute: '2-digit',
+})
 
 function deriveAgentFirstName(agentName?: string | null): string {
   return agentName?.trim().split(/\s+/)[0] || 'Agent'
+}
+
+function formatReadyWakeTime(value?: string | null): string | null {
+  if (!value) {
+    return null
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+  const parts = READY_WAKE_TIME_FORMATTER.formatToParts(date)
+  const weekday = parts.find((part) => part.type === 'weekday')?.value
+  const hour = parts.find((part) => part.type === 'hour')?.value
+  const minute = parts.find((part) => part.type === 'minute')?.value
+  const dayPeriod = parts.find((part) => part.type === 'dayPeriod')?.value
+  if (!weekday || !hour || !minute) {
+    return READY_WAKE_TIME_FORMATTER.format(date).replace(',', '')
+  }
+  return `${weekday} ${hour}:${minute}${dayPeriod ? ` ${dayPeriod}` : ''}`
+}
+
+function getAgentSetupPanel(insight: InsightEvent): AgentSetupPanel | null {
+  if (insight.insightType !== 'agent_setup') {
+    return null
+  }
+  return ((insight.metadata as AgentSetupMetadata).panel ?? 'always_on') as AgentSetupPanel
 }
 
 function getInsightTabColor(insight: InsightEvent): string {
@@ -95,6 +126,8 @@ function getInsightTabLabel(insight: InsightEvent): string {
     switch (meta.panel) {
       case 'always_on':
         return '24/7'
+      case 'email':
+        return 'Email'
       case 'sms':
         return 'SMS'
       case 'upsell_pro':
@@ -122,6 +155,9 @@ function getInsightTabIcon(insight: InsightEvent) {
   }
   if (insight.insightType === 'agent_setup') {
     const meta = insight.metadata as AgentSetupMetadata
+    if (meta.panel === 'email') {
+      return <Mail size={11} strokeWidth={2.2} />
+    }
     if (meta.panel === 'sms') {
       return <MessageSquare size={11} strokeWidth={2.2} />
     }
@@ -580,10 +616,7 @@ export const AgentComposer = memo(function AgentComposer({
   const discordNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[DISCORD_NATIVE_TAB_KEY])
   const metaAdsTabEnabled = Boolean(storeEnabledIntegrationTabs[META_ADS_TAB_KEY])
   const insights = useMemo(() => {
-    if (!storeAgentEmail && !storeAgentSms) {
-      return baseInsights
-    }
-    return baseInsights.map((insight) => {
+    const hydratedInsights = baseInsights.map((insight) => {
       if (insight.insightType !== 'agent_setup') {
         return insight
       }
@@ -605,7 +638,43 @@ export const AgentComposer = memo(function AgentComposer({
         },
       }
     })
+    const hasEmailTab = hydratedInsights.some((insight) => getAgentSetupPanel(insight) === 'email')
+    const emailSetupSource = hydratedInsights.find((insight) => {
+      if (insight.insightType !== 'agent_setup') {
+        return false
+      }
+      const metadata = insight.metadata as AgentSetupMetadata
+      return Boolean(metadata.agentEmail)
+    })
+    if (hasEmailTab || !emailSetupSource) {
+      return hydratedInsights
+    }
+
+    const sourceMetadata = emailSetupSource.metadata as AgentSetupMetadata
+    const emailInsight: InsightEvent = {
+      ...emailSetupSource,
+      insightId: `agent_setup_email_${sourceMetadata.agentId}`,
+      title: 'Email chat',
+      body: 'Email this agent anytime.',
+      priority: Math.min(emailSetupSource.priority, 2),
+      metadata: {
+        ...sourceMetadata,
+        panel: 'email',
+      },
+      dismissible: false,
+    }
+    const smsIndex = hydratedInsights.findIndex((insight) => getAgentSetupPanel(insight) === 'sms')
+    if (smsIndex < 0) {
+      return [...hydratedInsights, emailInsight]
+    }
+    return [
+      ...hydratedInsights.slice(0, smsIndex),
+      emailInsight,
+      ...hydratedInsights.slice(smsIndex),
+    ]
   }, [baseInsights, storeAgentEmail, storeAgentSms])
+  const nextScheduledAt = activeSession.processing.nextScheduledAt
+  const readyWakeTime = formatReadyWakeTime(nextScheduledAt)
   const [body, setBody] = useState(() => readAgentChatMessageDraft(agentId))
   const [attachments, setAttachments] = useState<File[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
@@ -1786,6 +1855,8 @@ export const AgentComposer = memo(function AgentComposer({
   } : null
   const isSubmittingMainComposerHumanInput = activeHumanInputUsesMainComposer && Boolean(busyHumanInputRequestId)
   const sendButtonBusy = isSending || isSubmittingMainComposerHumanInput
+  const hasComposerSendContent = Boolean(body.trim()) || attachments.length > 0
+  const showStopProcessingButton = showStopProcessing && !hasComposerSendContent
   const sendDisabled = composerActionsDisabled
     || stopProcessingBusy
     || (activeHumanInputUsesMainComposer ? !body.trim() || Boolean(busyHumanInputRequestId) : requiresMessageBody ? !body.trim() : !body.trim() && attachments.length === 0)
@@ -1853,7 +1924,7 @@ export const AgentComposer = memo(function AgentComposer({
             error={intelligenceError}
           />
         ) : null}
-        {showStopProcessing ? (
+        {showStopProcessingButton ? (
           <button
             type="button"
             className={`composer-send-button composer-send-button--stop${stopProcessingBusy ? ' composer-send-button--stop-busy' : ''}`}
@@ -1976,8 +2047,16 @@ export const AgentComposer = memo(function AgentComposer({
                   ) : null}
                 </>
               ) : (
-                <span className="composer-working-status">
-                  <strong>Insights</strong>
+                <span className="composer-ready-status">
+                  <span className="composer-ready-status__dot" aria-hidden="true" />
+                  {readyWakeTime ? (
+                    <>
+                      <span>Next wake-up:</span>
+                      <strong>{readyWakeTime}</strong>
+                    </>
+                  ) : (
+                    <span>Ready</span>
+                  )}
                 </span>
               )}
 

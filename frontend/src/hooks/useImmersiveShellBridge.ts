@@ -98,10 +98,6 @@ export function useImmersiveShellBridge({
     const storedSelectionMode = readSelectionSidebarModePreference()
     if (storedSelectionMode && storedSelectionMode !== selectionSidebarMode) {
       dispatch(immersiveShellActions.setSidebarMode(storedSelectionMode))
-      return
-    }
-    if (selectionSidebarMode === 'list') {
-      dispatch(immersiveShellActions.setSidebarMode('gallery'))
     }
   }, [agentId, dispatch, selectionPage, selectionSidebarMode])
 

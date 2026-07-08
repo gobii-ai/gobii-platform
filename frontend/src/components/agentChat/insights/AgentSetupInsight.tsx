@@ -338,10 +338,8 @@ export function AgentSetupInsight({
   }, [metadata.agentId])
 
   const renderAlwaysOn = () => {
-    const hasContact = agentEmail || agentNumber
     return (
       <div className="collab-grid">
-        {/* Status panel */}
         <motion.div
           className="collab-row"
           variants={containerVariants}
@@ -362,39 +360,37 @@ export function AgentSetupInsight({
             </span>
           </motion.div>
         </motion.div>
-
-        {/* Contact panel */}
-        {hasContact ? (
-          <motion.div
-            className="collab-row"
-            variants={containerVariants}
-            initial="hidden"
-            animate="visible"
-          >
-            <motion.div className="collab-row__icon collab-row__icon--cyan" variants={visualVariants}>
-              {agentEmail ? <Mail size={18} strokeWidth={2} /> : <MessageSquare size={18} strokeWidth={2} />}
-            </motion.div>
-            <motion.div className="collab-row__main" variants={itemVariants}>
-              <span className="collab-row__title">Contact {agentDisplayName}</span>
-              <span className="collab-row__desc">Reach this agent anytime</span>
-            </motion.div>
-            <motion.div className="collab-row__actions" variants={badgeVariants}>
-              {agentEmail ? (
-                <a href={`mailto:${agentEmail}`} className="collab-row__btn collab-row__btn--cyan">
-                  <Mail size={14} />
-                  <span>Email</span>
-                </a>
-              ) : null}
-              {agentNumber ? (
-                <a href={`sms:${agentNumber}`} className="collab-row__btn collab-row__btn--cyan">
-                  <MessageSquare size={14} />
-                  <span>Text</span>
-                </a>
-              ) : null}
-            </motion.div>
-          </motion.div>
-        ) : null}
       </div>
+    )
+  }
+
+  const renderEmail = () => {
+    if (!agentEmail) {
+      return null
+    }
+    return (
+      <motion.div
+        className="collab-grid"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.div className="collab-row" variants={itemVariants}>
+          <motion.div className="collab-row__icon collab-row__icon--cyan" variants={visualVariants}>
+            <Mail size={18} strokeWidth={2} />
+          </motion.div>
+          <motion.div className="collab-row__main" variants={itemVariants}>
+            <span className="collab-row__title">Contact {agentDisplayName}</span>
+            <span className="collab-row__desc">Reach this agent anytime</span>
+          </motion.div>
+          <motion.div className="collab-row__actions" variants={badgeVariants}>
+            <a href={`mailto:${agentEmail}`} className="collab-row__btn collab-row__btn--cyan">
+              <Mail size={14} />
+              <span>Email</span>
+            </a>
+          </motion.div>
+        </motion.div>
+      </motion.div>
     )
   }
 
@@ -671,6 +667,7 @@ export function AgentSetupInsight({
       transition={{ duration: 0.35 }}
     >
       {panel === 'always_on' && renderAlwaysOn()}
+      {panel === 'email' && renderEmail()}
       {panel === 'sms' && renderSms()}
       {(panel === 'upsell_pro' || panel === 'upsell_scale') && renderUpsell()}
     </motion.div>

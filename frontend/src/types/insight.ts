@@ -35,7 +35,7 @@ export type UsageGaugeMetadata = {
   unlimited: boolean
 }
 
-export type AgentSetupPanel = 'always_on' | 'sms' | 'upsell_pro' | 'upsell_scale'
+export type AgentSetupPanel = 'always_on' | 'email' | 'sms' | 'upsell_pro' | 'upsell_scale'
 
 export type AgentSetupPhone = {
   number: string

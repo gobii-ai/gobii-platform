@@ -237,6 +237,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
     body: string,
     attachments?: File[],
   ) => void | Promise<void>
+  onRetryMessage?: (message: AgentMessage) => void | Promise<void>
   onComposerFocus?: () => void
   onComposerRequestScrollToBottom?: () => void
   isNearBottom?: boolean
@@ -343,6 +344,7 @@ export function AgentChatLayout({
   onBlockedSettingsClick,
   onBlockedCollaborate,
   onSendMessage,
+  onRetryMessage,
   onComposerFocus,
   onComposerRequestScrollToBottom,
   isNearBottom = true,
@@ -1419,7 +1421,7 @@ export function AgentChatLayout({
         onDesktopModeChange={handleSidebarModeChange}
         settings={sidebarSettings}
       />
-      {isMobileViewport ? <ProductAnnouncementBell variant="mobile" /> : null}
+      {isMobileViewport && isProprietaryMode ? <ProductAnnouncementBell variant="mobile" /> : null}
       {showBanner && (
         <AgentChatBanner
           planSnapshot={showPlanInterface ? displayPlanSnapshot : null}
@@ -1519,6 +1521,7 @@ export function AgentChatLayout({
             onMessageLinkClick={handleMessageLinkClick}
             onPurchaseSeats={handlePurchaseSeats}
             onReportMessage={handleReportMessage}
+            onRetryMessage={onRetryMessage}
             onStarterPromptSelect={handleStarterPromptSelect}
             onTaskCreditsDismiss={handleTaskCreditsDismiss}
             onTaskCreditsOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0 ? () => handleAddonsOpen('tasks') : undefined}

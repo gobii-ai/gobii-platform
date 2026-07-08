@@ -22,6 +22,7 @@ type TimelineEventItemProps = {
   onMessageLinkClick?: (href: string) => boolean | void
   onMessageCopied?: (message: AgentMessage) => void | Promise<void>
   onReportMessage?: (message: AgentMessage) => void
+  onRetryMessage?: (message: AgentMessage) => void | Promise<void>
 }
 
 export const TimelineEventItem = memo(function TimelineEventItem({
@@ -38,6 +39,7 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   onMessageLinkClick,
   onMessageCopied,
   onReportMessage,
+  onRetryMessage,
 }: TimelineEventItemProps) {
   const collapsedEntries = useMemo(() => {
     if (event.kind !== 'collapsed-group') {
@@ -64,6 +66,7 @@ export const TimelineEventItem = memo(function TimelineEventItem({
         onMessageLinkClick={onMessageLinkClick}
         onMessageCopied={onMessageCopied}
         onReportMessage={onReportMessage}
+        onRetryMessage={onRetryMessage}
       />
     )
   }
