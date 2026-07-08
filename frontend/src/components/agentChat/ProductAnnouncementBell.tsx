@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Bell, Check, ChevronLeft, Loader2 } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import type { ProductAnnouncement } from '../../api/productAnnouncements'
 import { useMarkProductAnnouncementsRead, useProductAnnouncements } from '../../hooks/useProductAnnouncements'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
+import { AgentChatButton, AgentChatIconButton, AgentChatMenuItem, joinClassNames } from './uiPrimitives'
 
 type ProductAnnouncementBellProps = {
   variant?: 'sidebar' | 'mobile'
@@ -69,15 +70,16 @@ function AnnouncementPanel({
     return (
       <div className="product-announcement-panel" data-variant={variant}>
         <div className="product-announcement-panel__detail-header">
-          <button
-            type="button"
+          <AgentChatButton
+            variant="soft"
+            size="sm"
             className="product-announcement-panel__back"
             onClick={onBackToList}
             aria-label="Back to updates"
           >
             <ChevronLeft className="product-announcement-panel__back-icon" aria-hidden="true" />
             <span>Updates</span>
-          </button>
+          </AgentChatButton>
           {selectedAnnouncement.publishedAt ? (
             <time className="product-announcement-panel__item-date" dateTime={selectedAnnouncement.publishedAt}>
               {formatPublishedAt(selectedAnnouncement.publishedAt)}
@@ -88,14 +90,14 @@ function AnnouncementPanel({
           <h2 className="product-announcement-panel__detail-title">{selectedAnnouncement.title}</h2>
           <p className="product-announcement-panel__detail-body">{selectedAnnouncement.body}</p>
           {selectedAnnouncement.actionLabel && selectedAnnouncement.actionUrl ? (
-            <button
-              type="button"
+            <AgentChatButton
+              size="sm"
               className="product-announcement-panel__action"
               onClick={() => onAction(selectedAnnouncement)}
               disabled={markBusy}
             >
               {selectedAnnouncement.actionLabel}
-            </button>
+            </AgentChatButton>
           ) : null}
         </div>
       </div>
@@ -112,15 +114,15 @@ function AnnouncementPanel({
           </p>
         </div>
         {unreadCount > 0 ? (
-          <button
-            type="button"
+          <AgentChatButton
+            size="sm"
             className="product-announcement-panel__mark-all"
             onClick={onMarkAllRead}
             disabled={markBusy}
           >
             {markBusy ? <Loader2 className="product-announcement-panel__spinner animate-spin" aria-hidden="true" /> : null}
             <span>Mark all read</span>
-          </button>
+          </AgentChatButton>
         ) : null}
       </div>
 
@@ -132,9 +134,9 @@ function AnnouncementPanel({
       ) : error ? (
         <div className="product-announcement-panel__state" role="status">
           <span>Updates could not load.</span>
-          <button type="button" className="product-announcement-panel__retry" onClick={onRetry}>
+          <AgentChatButton size="sm" className="product-announcement-panel__retry" onClick={onRetry}>
             Try again
-          </button>
+          </AgentChatButton>
         </div>
       ) : announcements.length === 0 ? (
         <div className="product-announcement-panel__state" role="status">
@@ -148,8 +150,7 @@ function AnnouncementPanel({
               className="product-announcement-panel__item"
               data-read={announcement.isRead ? 'true' : 'false'}
             >
-              <button
-                type="button"
+              <AgentChatMenuItem
                 className="product-announcement-panel__item-main"
                 onClick={() => onOpenAnnouncement(announcement)}
                 disabled={markBusy}
@@ -166,17 +167,18 @@ function AnnouncementPanel({
                   </div>
                   <p className="product-announcement-panel__preview">{announcement.body}</p>
                 </div>
-              </button>
+              </AgentChatMenuItem>
               {!announcement.isRead ? (
-                <button
-                  type="button"
+                <AgentChatIconButton
+                  tone="success"
+                  size="sm"
                   className="product-announcement-panel__read-button"
                   aria-label={`Mark "${announcement.title}" as read`}
                   onClick={() => onMarkRead(announcement.id)}
                   disabled={markBusy}
                 >
                   <Check className="product-announcement-panel__read-icon" aria-hidden="true" />
-                </button>
+                </AgentChatIconButton>
               ) : null}
             </article>
           ))}
@@ -188,7 +190,10 @@ function AnnouncementPanel({
 
 export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnouncementBellProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [desktopOpen, setDesktopOpen] = useState(false)
   const [selectedAnnouncementId, setSelectedAnnouncementId] = useState<string | null>(null)
+  const desktopTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const desktopPopoverRef = useRef<HTMLElement | null>(null)
   const announcementsQuery = useProductAnnouncements()
   const markReadMutation = useMarkProductAnnouncementsRead()
   const announcements = announcementsQuery.data?.announcements ?? []
@@ -200,6 +205,27 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
     () => announcements.find((announcement) => announcement.id === selectedAnnouncementId) ?? null,
     [announcements, selectedAnnouncementId],
   )
+  useEffect(() => {
+    if (!desktopOpen || typeof document === 'undefined') {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+      if (desktopTriggerRef.current?.contains(target) || desktopPopoverRef.current?.contains(target)) {
+        return
+      }
+      setDesktopOpen(false)
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true)
+    }
+  }, [desktopOpen])
 
   const handleMarkAllRead = useCallback(() => {
     if (unreadCount <= 0) {
@@ -234,6 +260,15 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
     window.open(actionUrl, '_blank', 'noopener,noreferrer')
   }, [markReadMutation])
 
+  const handleDesktopTriggerPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!desktopOpen) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    setDesktopOpen(false)
+  }, [desktopOpen])
+
   const panel = (
     <AnnouncementPanel
       announcements={announcements}
@@ -255,15 +290,16 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
   if (variant === 'mobile') {
     return (
       <>
-        <button
-          type="button"
-          className="product-announcement-mobile-trigger"
+        <AgentChatButton
+          variant="solid"
+          size="md"
+          className="agent-fab product-announcement-mobile-trigger"
           aria-label={label}
           onClick={() => setMobileOpen(true)}
         >
           <Bell className="product-announcement-mobile-trigger__icon" aria-hidden="true" />
           {hasUnread ? <span className="product-announcement-bell__dot" aria-hidden="true" /> : null}
-        </button>
+        </AgentChatButton>
         <AgentChatMobileSheet
           open={mobileOpen}
           onClose={() => setMobileOpen(false)}
@@ -280,18 +316,27 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
   }
 
   return (
-    <DialogTrigger>
+    <DialogTrigger isOpen={desktopOpen} onOpenChange={setDesktopOpen}>
       <Button
-        className="sidebar-settings__trigger product-announcement-bell__trigger product-announcement-bell__trigger--settings"
+        ref={desktopTriggerRef}
+        className={joinClassNames(
+          'sidebar-settings__trigger',
+          'product-announcement-bell__trigger',
+          'product-announcement-bell__trigger--settings',
+        )}
         aria-label={label}
+        onPointerDownCapture={handleDesktopTriggerPointerDownCapture}
       >
         <Bell className="h-4 w-4" aria-hidden="true" />
         {hasUnread ? <span className="product-announcement-bell__dot" aria-hidden="true" /> : null}
       </Button>
       <Popover
+        ref={desktopPopoverRef}
+        triggerRef={desktopTriggerRef}
         className="product-announcement-bell__popover sidebar-settings__popover"
         placement="top end"
         offset={10}
+        shouldCloseOnInteractOutside={() => true}
         isNonModal
       >
         <Dialog className="product-announcement-bell__menu sidebar-settings__menu" aria-label="Product updates">

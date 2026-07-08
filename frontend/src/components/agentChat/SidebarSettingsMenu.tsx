@@ -132,6 +132,7 @@ export function SidebarSettingsMenu({
   bottomAccessory = null,
 }: SidebarSettingsMenuProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const rowRef = useRef<HTMLDivElement | null>(null)
   const actionsRef = useRef<HTMLDivElement | null>(null)
   const popoverRef = useRef<HTMLElement | null>(null)
   const [open, setOpen] = useState(false)
@@ -205,7 +206,7 @@ export function SidebarSettingsMenu({
       data-collapsed={collapsed ? 'true' : 'false'}
       data-has-help={onOpenHelp ? 'true' : 'false'}
     >
-      <div className="sidebar-settings__row">
+      <div className="sidebar-settings__row" ref={rowRef}>
         <div className="sidebar-settings__actions" ref={actionsRef}>
           <Button
             ref={triggerRef}
@@ -235,7 +236,7 @@ export function SidebarSettingsMenu({
       </div>
       <Popover
         ref={popoverRef}
-        triggerRef={actionsRef}
+        triggerRef={rowRef}
         isOpen={open}
         onOpenChange={handleOpenChange}
         shouldCloseOnInteractOutside={() => true}
