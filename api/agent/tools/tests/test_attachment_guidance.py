@@ -36,15 +36,15 @@ class AttachmentGuidanceTests(SimpleTestCase):
                 return_value=(rows or [], columns, query_error),
             ) as run_sqlite_select_mock,
             patch(
-                "api.agent.tools.create_file.write_bytes_to_dir",
+                "api.agent.tools.file_export_helpers.filespace_service.write_bytes_to_dir",
                 return_value={"status": "ok", "path": write_path, "node_id": node_id},
             ) as write_bytes_to_dir_mock,
             patch(
-                "api.agent.tools.create_file.build_signed_filespace_download_url",
+                "api.agent.tools.file_export_helpers.attachment_helpers.build_signed_filespace_download_url",
                 return_value=signed_url,
             ) as build_signed_url_mock,
-            patch("api.agent.tools.create_file.get_max_file_size", return_value=None) as get_max_file_size_mock,
-            patch("api.agent.tools.create_file.set_agent_variable") as set_agent_variable_mock,
+            patch("api.agent.tools.file_export_helpers.get_max_file_size", return_value=None) as get_max_file_size_mock,
+            patch("api.agent.tools.file_export_helpers.set_agent_variable") as set_agent_variable_mock,
         ):
             result = execute_create_file(self.agent, params)
         return {
@@ -100,14 +100,14 @@ class AttachmentGuidanceTests(SimpleTestCase):
             ],
         )
 
-    @patch("api.agent.tools.create_file.set_agent_variable")
-    @patch("api.agent.tools.create_file.get_max_file_size", return_value=None)
+    @patch("api.agent.tools.file_export_helpers.set_agent_variable")
+    @patch("api.agent.tools.file_export_helpers.get_max_file_size", return_value=None)
     @patch(
-        "api.agent.tools.create_file.build_signed_filespace_download_url",
+        "api.agent.tools.file_export_helpers.attachment_helpers.build_signed_filespace_download_url",
         return_value="https://example.com/exports/report.txt",
     )
     @patch(
-        "api.agent.tools.create_file.write_bytes_to_dir",
+        "api.agent.tools.file_export_helpers.filespace_service.write_bytes_to_dir",
         return_value={"status": "ok", "path": "/exports/report.txt", "node_id": "node-file"},
     )
     def test_create_file_returns_attachment_followup_message(
@@ -142,14 +142,14 @@ class AttachmentGuidanceTests(SimpleTestCase):
             "https://example.com/exports/report.txt",
         )
 
-    @patch("api.agent.tools.create_csv.set_agent_variable")
-    @patch("api.agent.tools.create_csv.get_max_file_size", return_value=None)
+    @patch("api.agent.tools.file_export_helpers.set_agent_variable")
+    @patch("api.agent.tools.file_export_helpers.get_max_file_size", return_value=None)
     @patch(
-        "api.agent.tools.create_csv.build_signed_filespace_download_url",
+        "api.agent.tools.file_export_helpers.attachment_helpers.build_signed_filespace_download_url",
         return_value="https://example.com/exports/report.csv",
     )
     @patch(
-        "api.agent.tools.create_csv.write_bytes_to_dir",
+        "api.agent.tools.file_export_helpers.filespace_service.write_bytes_to_dir",
         return_value={"status": "ok", "path": "/exports/report.csv", "node_id": "node-csv"},
     )
     def test_create_csv_returns_attachment_followup_message(
