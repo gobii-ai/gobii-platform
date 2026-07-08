@@ -36,7 +36,7 @@ import type {
   PlanSnapshot,
   CreditForecast,
 } from '../../types/agentChat'
-import type { ForecastCapacityWarning, InsightEvent } from '../../types/insight'
+import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite } from '../../types/agentRoster'
 import type { PlanningState, SignupPreviewState } from '../../types/agentRoster'
 import type { ConsoleContext } from '../../api/context'
@@ -62,55 +62,6 @@ type TaskQuotaInfo = {
   total: number
   used: number
   used_pct: number
-}
-
-function positiveFiniteNumber(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
-}
-
-function finiteRemaining(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
-}
-
-function buildForecastCapacityWarning(
-  forecast: CreditForecast | null | undefined,
-  dailyCredits: DailyCreditsInfo | null | undefined,
-  taskQuota: TaskQuotaInfo | null | undefined,
-): ForecastCapacityWarning | null {
-  if (!forecast) {
-    return null
-  }
-
-  const perRunCredits = positiveFiniteNumber(forecast.perRunCredits)
-  const dailyEstimate = positiveFiniteNumber(forecast.dailyCredits) ?? perRunCredits
-  const monthlyEstimate = positiveFiniteNumber(forecast.monthlyCredits) ?? perRunCredits
-  const monthlyRemaining = taskQuota && taskQuota.total >= 0 && taskQuota.available >= 0
-    ? finiteRemaining(taskQuota.available)
-    : null
-
-  if (monthlyEstimate !== null && monthlyRemaining !== null && monthlyEstimate > monthlyRemaining) {
-    return {
-      scope: 'monthly',
-      estimateType: positiveFiniteNumber(forecast.monthlyCredits) !== null ? 'monthly' : 'per_run',
-      estimatedCredits: monthlyEstimate,
-      remainingCredits: monthlyRemaining,
-    }
-  }
-
-  const dailyRemaining = dailyCredits && !dailyCredits.unlimited
-    ? finiteRemaining(dailyCredits.remaining)
-    : null
-
-  if (dailyEstimate !== null && dailyRemaining !== null && dailyEstimate > dailyRemaining) {
-    return {
-      scope: 'daily',
-      estimateType: positiveFiniteNumber(forecast.dailyCredits) !== null ? 'daily' : 'per_run',
-      estimatedCredits: dailyEstimate,
-      remainingCredits: dailyRemaining,
-    }
-  }
-
-  return null
 }
 
 function normalizeAgentSettingsPathname(pathname: string): string {
@@ -1572,10 +1523,6 @@ export function AgentChatLayout({
     taskQuota,
     viewerEmail,
   ])
-  const forecastCapacityWarning = useMemo(
-    () => buildForecastCapacityWarning(creditForecast, dailyCredits, taskQuota),
-    [creditForecast, dailyCredits, taskQuota],
-  )
   const showHoverPlanPreview = planPanelMode === 'hidden' && (planHoverPreviewVisible || planHoverPreviewExiting)
   const renderedPlanSnapshot = planPanelMode === 'docked'
     ? displayPlanSnapshot
@@ -1870,7 +1817,6 @@ export function AgentChatLayout({
               isInsightsPaused={isInsightsPaused}
               onOpenUsage={onOpenUsage}
               onOpenQuickSettings={canOpenQuickSettings ? handleSettingsOpen : undefined}
-              forecastCapacityWarning={forecastCapacityWarning}
               usageUrl={sidebarUsageUrl}
               hideInsightsPanel={hideInsightsPanel}
               intelligenceConfig={llmIntelligence}

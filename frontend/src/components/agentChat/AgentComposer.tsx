@@ -16,7 +16,7 @@ import { orderHumanInputRequests } from './humanInputOrdering'
 import { AgentPipedreamAppsModal } from '../mcp/AgentPipedreamAppsModal'
 import type { PendingActionMutationResult } from '../../api/agentChat'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
-import type { ForecastCapacityWarning, InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
+import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { track, AnalyticsEvent } from '../../util/analytics'
@@ -475,7 +475,6 @@ type AgentComposerProps = {
   isInsightsPaused?: boolean
   onOpenUsage?: () => void
   onOpenQuickSettings?: () => void
-  forecastCapacityWarning?: ForecastCapacityWarning | null
   usageUrl?: string | null
   hideInsightsPanel?: boolean
   intelligenceConfig?: LlmIntelligenceConfig | null
@@ -539,7 +538,6 @@ export const AgentComposer = memo(function AgentComposer({
   isInsightsPaused = false,
   onOpenUsage,
   onOpenQuickSettings,
-  forecastCapacityWarning = null,
   usageUrl = '/app/usage',
   hideInsightsPanel = false,
   intelligenceConfig = null,
@@ -2100,8 +2098,6 @@ export const AgentComposer = memo(function AgentComposer({
                         onDismiss={handleDismissInsight}
                         onOpenUsage={onOpenUsage}
                         onOpenQuickSettings={onOpenQuickSettings}
-                        onOpenTaskPacks={onOpenTaskPacks}
-                        forecastCapacityWarning={forecastCapacityWarning}
                         usageUrl={usageUrl}
                       />
                     ) : (

@@ -15,11 +15,7 @@ vi.mock('./TypingIndicator', () => ({
 }))
 
 vi.mock('./AgentComposer', () => ({
-  AgentComposer: ({
-    forecastCapacityWarning,
-  }: {
-    forecastCapacityWarning?: { scope: 'daily' | 'monthly' } | null
-  }) => <div data-testid="agent-composer" data-forecast-warning={forecastCapacityWarning?.scope ?? ''} />,
+  AgentComposer: () => <div data-testid="agent-composer" />,
 }))
 
 vi.mock('./TimelineEventItem', () => ({
@@ -335,46 +331,6 @@ describe('AgentChatLayout upgrade modal gating', () => {
     await waitFor(() => {
       expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(false)
     })
-  })
-
-  it('passes a monthly forecast capacity warning into the working panel', () => {
-    renderAgentChatLayout({
-      creditForecast: {
-        perRunCredits: 4,
-        dailyCredits: 8,
-        monthlyCredits: 360,
-        warningLevel: 'high',
-        estimatedAt: '2026-06-30T12:00:00Z',
-      },
-      dailyCredits: {
-        limit: 100,
-        hardLimit: 100,
-        usage: 10,
-        remaining: 90,
-        softRemaining: 90,
-        unlimited: false,
-        percentUsed: 10,
-        softPercentUsed: 10,
-        nextResetIso: null,
-        nextResetLabel: null,
-        low: false,
-        sliderMin: 0,
-        sliderMax: 100,
-        sliderLimitMax: 100,
-        sliderStep: 1,
-        sliderValue: 100,
-        sliderEmptyValue: 100,
-        standardSliderLimit: 100,
-      },
-      taskQuota: {
-        available: 3,
-        total: 1000,
-        used: 997,
-        used_pct: 99.7,
-      },
-    })
-
-    expect(screen.getByTestId('agent-composer')).toHaveAttribute('data-forecast-warning', 'monthly')
   })
 
   it('renders the signup preview panel instead of the composer when requested', () => {

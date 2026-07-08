@@ -35,13 +35,6 @@ export type UsageGaugeMetadata = {
   unlimited: boolean
 }
 
-export type ForecastCapacityWarning = {
-  scope: 'daily' | 'monthly'
-  estimateType: 'per_run' | 'daily' | 'monthly'
-  estimatedCredits: number
-  remainingCredits: number
-}
-
 export type AgentSetupPanel = 'always_on' | 'sms' | 'upsell_pro' | 'upsell_scale'
 
 export type AgentSetupPhone = {

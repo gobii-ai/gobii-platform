@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
-import { AlertTriangle, CalendarDays, Gauge } from 'lucide-react'
-import type { BurnRateMetadata, ForecastCapacityWarning, InsightEvent, UsageGaugeMetadata } from '../../../types/insight'
+import { CalendarDays, Gauge } from 'lucide-react'
+import type { BurnRateMetadata, InsightEvent, UsageGaugeMetadata } from '../../../types/insight'
 import { InsightGauge } from '../../common/InsightGauge'
 
 type BurnRateInsightProps = {
@@ -8,15 +8,7 @@ type BurnRateInsightProps = {
   onDismiss?: (insightId: string) => void
   onOpenUsage?: () => void
   onOpenQuickSettings?: () => void
-  onOpenTaskPacks?: () => void
-  forecastCapacityWarning?: ForecastCapacityWarning | null
   usageUrl?: string | null
-}
-
-type CapacitySummary = {
-  scope: 'daily' | 'monthly'
-  title: string
-  body: string
 }
 
 function clampPercent(value: number | null | undefined): number {
@@ -29,48 +21,12 @@ function formatCredits(value: number): string {
   return value.toFixed(2).replace(/\.?0+$/, '')
 }
 
-function formatCreditCount(value: number): string {
-  const label = value === 1 ? 'credit' : 'credits'
-  return `${formatCredits(value)} ${label}`
-}
-
-function forecastEstimateLabel(warning: ForecastCapacityWarning): string {
-  if (warning.estimateType === 'monthly') return 'This month'
-  if (warning.estimateType === 'daily') return 'Today'
-  return 'Next run'
-}
-
-function buildForecastCapacitySummary(warning: ForecastCapacityWarning): CapacitySummary {
-  return {
-    scope: warning.scope,
-    title: warning.scope === 'monthly' ? 'Not enough monthly credits' : 'Daily limit too low',
-    body: `${forecastEstimateLabel(warning)} needs ${formatCreditCount(warning.estimatedCredits)}.`,
-  }
-}
-
-function buildDailyLimitSummary(usage: UsageGaugeMetadata): CapacitySummary | null {
-  if (usage.unlimited || usage.limit === null) {
-    return null
-  }
-  const limitReached = usage.used >= usage.limit || (usage.percentUsed ?? 0) >= 100
-  if (!limitReached) {
-    return null
-  }
-  return {
-    scope: 'daily',
-    title: 'Daily limit reached',
-    body: 'Increase the limit to let this agent keep running today.',
-  }
-}
-
 function UsageGauge({
   title,
   usage,
   icon,
   onAdjust,
   onDetails,
-  onOpenTaskPacks,
-  capacitySummary,
   detailsUrl,
 }: {
   title: string
@@ -78,8 +34,6 @@ function UsageGauge({
   icon: 'today' | 'month'
   onAdjust?: () => void
   onDetails?: () => void
-  onOpenTaskPacks?: () => void
-  capacitySummary?: CapacitySummary | null
   detailsUrl?: string
 }) {
   const displayValue = clampPercent(usage.percentUsed)
@@ -104,51 +58,9 @@ function UsageGauge({
     </a>
   ) : null
 
-  const className = [
-    'usage-gauge-card',
-    `usage-gauge-card--${icon}`,
-    usage.unlimited ? 'usage-gauge-card--unlimited' : null,
-    capacitySummary ? 'usage-gauge-card--forecast-warning' : null,
-  ].filter(Boolean).join(' ')
-  const forecastNotice = capacitySummary ? (
-    <div className="usage-forecast-summary" data-scope={capacitySummary.scope}>
-      <span className="usage-forecast-summary__icon" aria-hidden="true">
-        <AlertTriangle size={14} strokeWidth={2.2} />
-      </span>
-      <div className="usage-forecast-summary__copy">
-        <span className="usage-forecast-summary__label">{capacitySummary.title}</span>
-        <span className="usage-forecast-summary__body">{capacitySummary.body}</span>
-      </div>
-      {capacitySummary.scope === 'daily' && onAdjust ? (
-        <button type="button" className="usage-forecast-summary__action" onClick={onAdjust}>Adjust limit</button>
-      ) : onOpenTaskPacks ? (
-        <button type="button" className="usage-forecast-summary__action" onClick={onOpenTaskPacks}>Add credits</button>
-      ) : onDetails ? (
-        <button type="button" className="usage-forecast-summary__action" onClick={onDetails}>Details</button>
-      ) : detailsUrl ? (
-        <a className="usage-forecast-summary__action" href={detailsUrl}>Details</a>
-      ) : null}
-    </div>
-  ) : null
-
-  if (capacitySummary) {
-    return (
-      <div className={className}>
-        <div className="usage-gauge-card__copy usage-gauge-card__copy--forecast">
-          <span className="usage-gauge-card__icon" aria-hidden="true">
-            {iconNode}
-          </span>
-          <span className="usage-gauge-card__title">{title}</span>
-          <span className="usage-gauge-card__label">{label}</span>
-          {forecastNotice}
-        </div>
-      </div>
-    )
-  }
-
   if (usage.unlimited) {
     return (
-      <div className={className}>
+      <div className="usage-gauge-card usage-gauge-card--unlimited">
         <div className="usage-gauge-card__unlimited-stat">
           <span className="usage-gauge-card__value">{formatCredits(usage.used)}</span>
           <span className="usage-gauge-card__unit">credits</span>
@@ -161,14 +73,13 @@ function UsageGauge({
           <span className="usage-gauge-card__label">{label}</span>
           <span className="usage-gauge-card__status">Unlimited</span>
           {action}
-          {forecastNotice}
         </div>
       </div>
     )
   }
 
   return (
-    <div className={className}>
+    <div className="usage-gauge-card">
       <div className="usage-gauge-card__chart">
         <InsightGauge
           value={displayValue}
@@ -192,7 +103,6 @@ function UsageGauge({
         <span className="usage-gauge-card__title">{title}</span>
         <span className="usage-gauge-card__label">{label}</span>
         {action}
-        {forecastNotice}
       </div>
     </div>
   )
@@ -203,20 +113,10 @@ export function BurnRateInsight({
   onDismiss,
   onOpenUsage,
   onOpenQuickSettings,
-  onOpenTaskPacks,
-  forecastCapacityWarning,
   usageUrl,
 }: BurnRateInsightProps) {
   const metadata = insight.metadata as BurnRateMetadata
   const detailsUrl = metadata.usageUrl || usageUrl || '/app/usage'
-  const todayForecastWarning = forecastCapacityWarning?.scope === 'daily' ? forecastCapacityWarning : null
-  const monthForecastWarning = forecastCapacityWarning?.scope === 'monthly' ? forecastCapacityWarning : null
-  const todayCapacitySummary = todayForecastWarning
-    ? buildForecastCapacitySummary(todayForecastWarning)
-    : buildDailyLimitSummary(metadata.todayUsage)
-  const monthCapacitySummary = monthForecastWarning
-    ? buildForecastCapacitySummary(monthForecastWarning)
-    : null
 
   return (
     <motion.div
@@ -232,20 +132,12 @@ export function BurnRateInsight({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.08 }}
       >
-        <UsageGauge
-          title="Today"
-          usage={metadata.todayUsage}
-          icon="today"
-          onAdjust={onOpenQuickSettings}
-          capacitySummary={todayCapacitySummary}
-        />
+        <UsageGauge title="Today" usage={metadata.todayUsage} icon="today" onAdjust={onOpenQuickSettings} />
         <UsageGauge
           title="This month"
           usage={metadata.monthUsage}
           icon="month"
           onDetails={onOpenUsage}
-          onOpenTaskPacks={onOpenTaskPacks}
-          capacitySummary={monthCapacitySummary}
           detailsUrl={onOpenUsage ? undefined : detailsUrl}
         />
       </motion.div>
