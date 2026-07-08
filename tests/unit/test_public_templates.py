@@ -1,6 +1,7 @@
 import base64
 import json
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -33,11 +34,16 @@ TEST_SOCIAL_IMAGE_BYTES = base64.b64decode(
 )
 
 
-def _test_media_storages(media_root: str) -> dict:
+def _test_media_storages(media_root: str, public_media_root: str | None = None) -> dict:
+    public_media_root = public_media_root or media_root
     return {
         "default": {
             "BACKEND": "django.core.files.storage.FileSystemStorage",
             "OPTIONS": {"location": media_root, "base_url": "/media/"},
+        },
+        "public_template_social_images": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {"location": public_media_root, "base_url": "/media/"},
         },
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
@@ -849,6 +855,27 @@ class PublicTemplateRouteTests(TestCase):
         self.assertContains(response, f'<meta name="twitter:image" content="{image_url}">')
         self.assertNotContains(response, "https://cdn.example.com/templates/fallback-social-image.png")
         self.assertEqual(structured_data["image"], image_url)
+
+    @tag("batch_public_templates")
+    def test_public_template_social_image_saves_to_public_storage_alias(self):
+        template = self.create_public_template(
+            code="public-storage-social-image-template",
+            display_name="Public Storage Social Image Template",
+            handle="public-storage-image-team",
+        )
+
+        with tempfile.TemporaryDirectory() as default_media_root:
+            with tempfile.TemporaryDirectory() as public_media_root:
+                with override_settings(
+                    STORAGES=_test_media_storages(default_media_root, public_media_root),
+                ):
+                    template.social_image.save("custom-og.png", ContentFile(TEST_SOCIAL_IMAGE_BYTES), save=True)
+                    try:
+                        saved_name = template.social_image.name
+                        self.assertTrue(Path(public_media_root, saved_name).exists())
+                        self.assertFalse(Path(default_media_root, saved_name).exists())
+                    finally:
+                        template.social_image.delete(save=False)
 
     @tag("batch_public_templates")
     def test_public_template_detail_redirects_mismatched_category_to_canonical_path(self):
