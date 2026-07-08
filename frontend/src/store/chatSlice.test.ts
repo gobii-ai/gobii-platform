@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { sendAgentMessage } from '../api/agentChat'
+import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import type { TimelineEvent } from '../types/agentChat'
 import { createAppStore } from './appStore'
 import {
   chatActions,
+  loadAgentSpawnIntent,
   selectActiveChatStoreSnapshot,
   selectCreateAgentWorkflow,
   sendMessage,
@@ -15,6 +17,22 @@ vi.mock('../api/agentChat', () => ({
   sendAgentMessage: vi.fn(),
   fetchProcessingStatus: vi.fn(),
 }))
+
+vi.mock('../api/agentSpawnIntent', () => ({
+  fetchAgentSpawnIntent: vi.fn(),
+}))
+
+function makeSpawnIntent(overrides: Partial<AgentSpawnIntent> = {}): AgentSpawnIntent {
+  return {
+    charter: 'Build a weekly report',
+    charter_override: null,
+    preferred_llm_tier: 'advanced',
+    selected_pipedream_app_slugs: ['slack'],
+    onboarding_target: 'agent_ui',
+    requires_plan_selection: true,
+    ...overrides,
+  }
+}
 
 function makeInsight(insightId: string, title: string) {
   return {
@@ -141,18 +159,15 @@ describe('chatSlice workflow state', () => {
     })
   })
 
-  it('stores serializable create-agent workflow state', () => {
+  it('loads spawn intent through the thunk and keeps create-agent workflow state serializable', async () => {
     const store = createAppStore()
+    vi.mocked(fetchAgentSpawnIntent).mockResolvedValue(makeSpawnIntent())
 
-    store.dispatch(chatActions.spawnIntentRequestStarted())
-    store.dispatch(chatActions.spawnIntentSet({
-      charter: 'Build a weekly report',
-      charter_override: null,
-      preferred_llm_tier: 'advanced',
-      selected_pipedream_app_slugs: ['slack'],
-      onboarding_target: 'agent_ui',
-      requires_plan_selection: true,
-    }))
+    const request = store.dispatch(loadAgentSpawnIntent())
+    const loadingWorkflow = selectCreateAgentWorkflow(store.getState())
+    expect(loadingWorkflow.spawnIntentRequestId).toEqual(expect.any(String))
+    expect(loadingWorkflow.spawnIntentStatus).toBe('loading')
+    await request.unwrap()
     store.dispatch(chatActions.createAgentDraftMetadataSet({
       body: 'Build a weekly report',
       tier: 'advanced',
@@ -160,8 +175,7 @@ describe('chatSlice workflow state', () => {
     }))
 
     expect(selectCreateAgentWorkflow(store.getState())).toMatchObject({
-      spawnIntentRequestId: 1,
-      spawnIntentStatus: 'loading',
+      spawnIntentStatus: 'ready',
       spawnIntent: {
         charter: 'Build a weekly report',
         selected_pipedream_app_slugs: ['slack'],
@@ -172,5 +186,39 @@ describe('chatSlice workflow state', () => {
         selectedPipedreamAppSlugs: ['slack'],
       },
     })
+  })
+
+  it('marks spawn intent done when the request fails', async () => {
+    const store = createAppStore()
+    vi.mocked(fetchAgentSpawnIntent).mockRejectedValue(new Error('No intent'))
+
+    await expect(store.dispatch(loadAgentSpawnIntent()).unwrap()).rejects.toThrow('No intent')
+
+    expect(selectCreateAgentWorkflow(store.getState())).toMatchObject({
+      spawnIntentStatus: 'done',
+      spawnIntent: null,
+    })
+  })
+
+  it('ignores stale spawn intent results', async () => {
+    const store = createAppStore()
+    let resolveFirst: (intent: AgentSpawnIntent) => void = () => {}
+    let resolveSecond: (intent: AgentSpawnIntent) => void = () => {}
+    vi.mocked(fetchAgentSpawnIntent)
+      .mockReturnValueOnce(new Promise<AgentSpawnIntent>((resolve) => {
+        resolveFirst = resolve
+      }))
+      .mockReturnValueOnce(new Promise<AgentSpawnIntent>((resolve) => {
+        resolveSecond = resolve
+      }))
+
+    const firstRequest = store.dispatch(loadAgentSpawnIntent())
+    const secondRequest = store.dispatch(loadAgentSpawnIntent())
+    resolveSecond(makeSpawnIntent({ charter: 'Second intent' }))
+    await secondRequest.unwrap()
+    resolveFirst(makeSpawnIntent({ charter: 'First intent' }))
+    await firstRequest.unwrap()
+
+    expect(selectCreateAgentWorkflow(store.getState()).spawnIntent?.charter).toBe('Second intent')
   })
 })

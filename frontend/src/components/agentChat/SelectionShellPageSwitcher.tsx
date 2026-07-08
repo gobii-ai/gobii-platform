@@ -11,7 +11,9 @@ import {
   type Selection,
 } from 'react-aria-components'
 
-export type SelectionShellPage = 'agents' | 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'
+import type { SelectionShellPage } from '../../types/immersiveShell'
+
+export type { SelectionShellPage }
 
 export const SELECTION_SHELL_PAGE_LABELS: Record<SelectionShellPage, string> = {
   agents: 'My Agents',

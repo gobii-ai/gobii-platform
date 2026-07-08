@@ -66,7 +66,6 @@ export type AgentChatState = {
   dismissedInsightIds: Set<string>
   insightsPaused: boolean
   sendMessageError: string | null
-  composerDisabledReason: string | null
   pendingActions: PendingActionRequest[]
   setAgentId: (
     agentId: string | null,
@@ -161,7 +160,6 @@ function createActions(dispatch: AppDispatch, getState: () => RootState): Omit<
   | 'dismissedInsightIds'
   | 'insightsPaused'
   | 'sendMessageError'
-  | 'composerDisabledReason'
   | 'pendingActions'
 > {
   return {

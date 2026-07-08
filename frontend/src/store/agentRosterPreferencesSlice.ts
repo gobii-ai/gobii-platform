@@ -52,7 +52,47 @@ type AgentRosterQueryData = {
   agentChatNotificationsEnabled?: boolean
 }
 
+type AgentRosterPreferenceConfig = {
+  preferenceKey: string
+  rosterQueryField: keyof AgentRosterQueryData
+  hydrateOnce: boolean
+  normalize: (value: unknown) => unknown
+}
+
 const AGENT_ROSTER_QUERY_KEY = ['agent-roster'] as const
+
+const preferenceConfig = {
+  sortMode: {
+    preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
+    rosterQueryField: 'agentRosterSortMode',
+    hydrateOnce: true,
+    normalize: parseAgentRosterSortMode,
+  },
+  favoriteAgentIds: {
+    preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
+    rosterQueryField: 'favoriteAgentIds',
+    hydrateOnce: false,
+    normalize: parseFavoriteAgentIdsPreference,
+  },
+  mutedAgentIds: {
+    preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS,
+    rosterQueryField: 'mutedAgentIds',
+    hydrateOnce: false,
+    normalize: parseFavoriteAgentIdsPreference,
+  },
+  insightsPanelExpanded: {
+    preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
+    rosterQueryField: 'insightsPanelExpanded',
+    hydrateOnce: true,
+    normalize: parseNullableBooleanPreference,
+  },
+  agentChatNotificationsEnabled: {
+    preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
+    rosterQueryField: 'agentChatNotificationsEnabled',
+    hydrateOnce: true,
+    normalize: parseBooleanPreference,
+  },
+} satisfies Record<AgentRosterPreferenceField, AgentRosterPreferenceConfig>
 
 const initialState: AgentRosterPreferencesState = {
   sortMode: createPreferenceField('recent' as AgentRosterSortMode),
@@ -87,41 +127,15 @@ function normalizeFieldValue<K extends AgentRosterPreferenceField>(
   field: K,
   value: unknown,
 ): AgentRosterPreferencesState[K]['value'] {
-  switch (field) {
-    case 'sortMode':
-      return parseAgentRosterSortMode(value) as AgentRosterPreferencesState[K]['value']
-    case 'favoriteAgentIds':
-    case 'mutedAgentIds':
-      return parseFavoriteAgentIdsPreference(value) as AgentRosterPreferencesState[K]['value']
-    case 'insightsPanelExpanded':
-      return parseNullableBooleanPreference(value) as AgentRosterPreferencesState[K]['value']
-    case 'agentChatNotificationsEnabled':
-      return parseBooleanPreference(value) as AgentRosterPreferencesState[K]['value']
-  }
+  return preferenceConfig[field].normalize(value) as AgentRosterPreferencesState[K]['value']
 }
 
 function preferenceKeyForField(field: AgentRosterPreferenceField): string {
-  switch (field) {
-    case 'sortMode':
-      return USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE
-    case 'favoriteAgentIds':
-      return USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS
-    case 'mutedAgentIds':
-      return USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS
-    case 'insightsPanelExpanded':
-      return USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED
-    case 'agentChatNotificationsEnabled':
-      return USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED
-  }
+  return preferenceConfig[field].preferenceKey
 }
 
 function rosterQueryFieldForPreference(field: AgentRosterPreferenceField): keyof AgentRosterQueryData {
-  switch (field) {
-    case 'sortMode':
-      return 'agentRosterSortMode'
-    default:
-      return field
-  }
+  return preferenceConfig[field].rosterQueryField
 }
 
 function updateRosterPreferenceInCache<K extends AgentRosterPreferenceField>(
@@ -194,20 +208,11 @@ const agentRosterPreferencesSlice = createSlice({
   reducers: {
     hydratedFromRoster(state, action: PayloadAction<AgentRosterPreferencesHydrationPayload>) {
       const payload = action.payload
-      if (payload.sortMode !== undefined && !state.sortMode.hydrated) {
-        assignPreferenceValue(state, 'sortMode', normalizeFieldValue('sortMode', payload.sortMode), { persisted: true })
-      }
-      if (payload.favoriteAgentIds !== undefined) {
-        assignPreferenceValue(state, 'favoriteAgentIds', normalizeFieldValue('favoriteAgentIds', payload.favoriteAgentIds), { persisted: true })
-      }
-      if (payload.mutedAgentIds !== undefined) {
-        assignPreferenceValue(state, 'mutedAgentIds', normalizeFieldValue('mutedAgentIds', payload.mutedAgentIds), { persisted: true })
-      }
-      if (payload.insightsPanelExpanded !== undefined && !state.insightsPanelExpanded.hydrated) {
-        assignPreferenceValue(state, 'insightsPanelExpanded', normalizeFieldValue('insightsPanelExpanded', payload.insightsPanelExpanded), { persisted: true })
-      }
-      if (payload.agentChatNotificationsEnabled !== undefined && !state.agentChatNotificationsEnabled.hydrated) {
-        assignPreferenceValue(state, 'agentChatNotificationsEnabled', normalizeFieldValue('agentChatNotificationsEnabled', payload.agentChatNotificationsEnabled), { persisted: true })
+      for (const field of Object.keys(preferenceConfig) as AgentRosterPreferenceField[]) {
+        if (payload[field] === undefined || (preferenceConfig[field].hydrateOnce && state[field].hydrated)) {
+          continue
+        }
+        assignPreferenceValue(state, field, normalizeFieldValue(field, payload[field]), { persisted: true })
       }
     },
     preferenceOptimisticallySet<K extends AgentRosterPreferenceField>(

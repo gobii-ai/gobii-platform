@@ -34,7 +34,7 @@ import {
   normalizeAgentMessageReadState,
   type AgentMessageReadState,
 } from '../api/agentChat'
-import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
+import type { AgentSpawnIntent } from '../api/agentSpawnIntent'
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout, type AgentChatLayoutSidebarConfig } from '../components/agentChat/AgentChatLayout'
@@ -52,7 +52,6 @@ import { HelpSupportDialog } from '../components/common/HelpSupportDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
 import { type SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
-import { getInitialAgentChatSidebarMode } from '../components/agentChat/sidebarMode'
 import { findLatestStatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import { parseToolSearchResult } from '../components/agentChat/tooling/searchUtils'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
@@ -67,14 +66,16 @@ import { useAgentChatNotifications } from '../hooks/useAgentChatNotifications'
 import { useRecentAgentSubscriptions } from '../hooks/useRecentAgentSubscriptions'
 import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
+import { useAgentResourceStatusBridge } from '../hooks/useAgentResourceStatusBridge'
+import { useCreateAgentWorkflow } from '../hooks/useCreateAgentWorkflow'
+import { useImmersiveShellBridge } from '../hooks/useImmersiveShellBridge'
+import { usePendingActionsBridge } from '../hooks/usePendingActionsBridge'
+import { useRosterPreferencesBridge } from '../hooks/useRosterPreferencesBridge'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { chatActions, normalizeProcessingUpdate, selectCreateAgentWorkflow } from '../store/chatSlice'
+import { chatActions } from '../store/chatSlice'
 import {
-  IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY,
   immersiveShellActions,
-  selectImmersiveShellSubview,
-  selectImmersiveSidebarMode,
 } from '../store/immersiveShellSlice'
 import {
   agentRosterPreferencesActions,
@@ -95,11 +96,9 @@ import {
   updateAgentIntelligenceTier,
 } from '../store/agentSettingsSlice'
 import {
-  agentResourceMirrorsActions,
-  selectAddonsMirror,
-  selectAgentChatUsageSummaryMirror,
-  selectQuickSettingsMirror,
-} from '../store/agentResourceMirrorsSlice'
+  selectAddonsResourceStatus,
+  selectQuickSettingsResourceStatus,
+} from '../store/agentResourceStatusSlice'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
@@ -124,8 +123,6 @@ import {
   type AgentChatShellSubview,
   buildAgentChatShellPath,
   buildAgentChatShellSelectionPath,
-  extractAgentChatShellAgentId,
-  getAgentChatShellSubview,
 } from '../util/agentChatShellRoutes'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 import { navigateWithinApp } from '../util/appNavigation'
@@ -337,21 +334,6 @@ function resolveEffectiveBillingStatus(
     return selectedAgentBillingStatus
   }
   return currentContextBillingStatus ?? selectedAgentBillingStatus
-}
-
-function readSelectionSidebarModePreference(): 'collapsed' | 'list' | 'gallery' | null {
-  if (typeof window === 'undefined') {
-    return null
-  }
-  try {
-    const stored = window.sessionStorage.getItem(IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY)
-    if (stored === 'collapsed' || stored === 'list' || stored === 'gallery') {
-      return stored
-    }
-  } catch {
-    return null
-  }
-  return null
 }
 
 const AGENT_LIMIT_ERROR_PATTERN = /agent limit reached|do not have any persistent agents available/i
@@ -943,18 +925,15 @@ export function AgentChatPage({
   onOpenIntegrations,
   appLocationSearch,
 }: AgentChatPageProps) {
+  const pendingReadMarkerByAgentRef = useRef<Record<string, string>>({})
   const [shellPathname, setShellPathname] = useState(() => (
     typeof window === 'undefined' ? '' : window.location.pathname
   ))
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
-  const sidebarModeHydratedRef = useRef(false)
-  const pendingReadMarkerByAgentRef = useRef<Record<string, string>>({})
   const routeAgentId = typeof agentId === 'string' ? agentId : null
   const queryClient = useQueryClient()
   const dispatch = useAppDispatch()
-  const selectionSidebarMode = useAppSelector(selectImmersiveSidebarMode)
-  const shellSubview = useAppSelector(selectImmersiveShellSubview)
   const {
     currentPlan,
     isProprietaryMode,
@@ -1031,6 +1010,20 @@ export function AgentChatPage({
   })
 
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
+  const {
+    selectionSidebarMode,
+    shellSubview,
+  } = useImmersiveShellBridge({
+    activeAgentId,
+    activeAgentIdRef,
+    agentId,
+    resetManualContextForExternalAgent,
+    selectionPage,
+    setActiveAgentId,
+    setShellPathname,
+    setSwitchingAgentId,
+    shellPathname,
+  })
   const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
   const [createOrganizationName, setCreateOrganizationName] = useState('')
   const [createOrganizationBusy, setCreateOrganizationBusy] = useState(false)
@@ -1050,79 +1043,11 @@ export function AgentChatPage({
   const liveAgentId = !agentContextReady ? null : activeAgentId
 
   useEffect(() => {
-    resetManualContextForExternalAgent(agentId ?? null)
-    setShellPathname(typeof window === 'undefined' ? '' : window.location.pathname)
-    setActiveAgentId(agentId ?? null)
-  }, [agentId, resetManualContextForExternalAgent])
-
-  useEffect(() => {
-    activeAgentIdRef.current = activeAgentId
-  }, [activeAgentId])
-
-  useEffect(() => {
-    dispatch(immersiveShellActions.setActiveAgentId(activeAgentId))
-  }, [activeAgentId, dispatch])
-
-  useEffect(() => {
-    dispatch(immersiveShellActions.setShellPathname(shellPathname))
-    dispatch(immersiveShellActions.setShellSubview(getAgentChatShellSubview(shellPathname)))
-  }, [dispatch, shellPathname])
-
-  useEffect(() => {
     dispatch(immersiveShellActions.setViewer({
       userId: viewerUserId ?? null,
       email: viewerEmail ?? null,
     }))
   }, [dispatch, viewerEmail, viewerUserId])
-
-  useEffect(() => {
-    if (!sidebarModeHydratedRef.current) {
-      sidebarModeHydratedRef.current = true
-      dispatch(immersiveShellActions.setSidebarMode(
-        agentId === undefined
-          ? (selectionPage === 'agents' ? (readSelectionSidebarModePreference() ?? 'gallery') : 'gallery')
-          : getInitialAgentChatSidebarMode(),
-      ))
-      return
-    }
-    if (agentId !== undefined) {
-      return
-    }
-    if (selectionPage !== 'agents') {
-      if (selectionSidebarMode !== 'gallery') {
-        dispatch(immersiveShellActions.setSidebarMode('gallery'))
-      }
-      return
-    }
-    const storedSelectionMode = readSelectionSidebarModePreference()
-    if (storedSelectionMode && storedSelectionMode !== selectionSidebarMode) {
-      dispatch(immersiveShellActions.setSidebarMode(storedSelectionMode))
-      return
-    }
-    if (selectionSidebarMode === 'list') {
-      dispatch(immersiveShellActions.setSidebarMode('gallery'))
-    }
-  }, [agentId, dispatch, selectionPage, selectionSidebarMode])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const handleShellLocationChange = () => {
-      const nextPathname = window.location.pathname
-      setShellPathname(nextPathname)
-      const nextAgentId = extractAgentChatShellAgentId(nextPathname)
-      if (nextAgentId !== activeAgentIdRef.current) {
-        resetManualContextForExternalAgent(nextAgentId)
-        setSwitchingAgentId(null)
-        setActiveAgentId(nextAgentId)
-      }
-    }
-
-    window.addEventListener('popstate', handleShellLocationChange)
-    return () => window.removeEventListener('popstate', handleShellLocationChange)
-  }, [resetManualContextForExternalAgent])
 
   // React-query timeline data
   const timelineQuery = useAgentTimeline(activeAgentId, { enabled: agentContextReady && !isNewAgent })
@@ -1132,38 +1057,7 @@ export function AgentChatPage({
     () => initialPageResponse?.pending_action_requests ?? [],
     [initialPageResponse],
   )
-
-  // Extract agent metadata from timeline response
-  useEffect(() => {
-    if (!initialPageResponse || !activeAgentId) return
-    // Update processing state from timeline response
-    const snapshot = initialPageResponse.processing_snapshot
-    const processingActive = snapshot?.active ?? initialPageResponse.processing_active
-    if (processingActive !== undefined) {
-      dispatch(chatActions.processingUpdated({
-        agentId: activeAgentId,
-        snapshot: normalizeProcessingUpdate(snapshot ?? { active: processingActive, webTasks: [] }),
-      }))
-    }
-    // Update agent identity from timeline response
-    const name = initialPageResponse.agent_name ?? null
-    const avatar = initialPageResponse.agent_avatar_url ?? null
-    const signupPreviewState = normalizeSignupPreviewState(initialPageResponse.signup_preview_state)
-    const planningState = normalizePlanningState(initialPageResponse.planning_state)
-    if (name || avatar || signupPreviewState !== 'none' || planningState !== 'skipped') {
-      dispatch(chatActions.agentIdentityUpdated({
-        agentId: activeAgentId,
-        ...(name ? { agentName: name } : {}),
-        ...(avatar ? { agentAvatarUrl: avatar } : {}),
-        signupPreviewState,
-        planningState,
-      }))
-    }
-    dispatch(chatActions.pendingActionsReplaced({
-      agentId: activeAgentId,
-      pendingActions: initialPageResponse.pending_action_requests ?? [],
-    }))
-  }, [dispatch, initialPageResponse, activeAgentId])
+  usePendingActionsBridge(activeAgentId, initialPageResponse)
 
   // Chat runtime store subscriptions (slimmed down — no more events/cursors/loading)
   const setAgentId = useAgentChatStore((state) => state.setAgentId)
@@ -1490,19 +1384,7 @@ export function AgentChatPage({
   const insightsPanelExpandedPreference = useAppSelector(selectInsightsPanelExpandedPreference)
   const agentChatNotificationsEnabled = useAppSelector(selectAgentChatNotificationsEnabled)
   const notificationPermissionPromptAttemptedRef = useRef(false)
-
-  useEffect(() => {
-    if (!rosterQuery.data) {
-      return
-    }
-    dispatch(agentRosterPreferencesActions.hydratedFromRoster({
-      sortMode: rosterQuery.data.agentRosterSortMode,
-      favoriteAgentIds: rosterQuery.data.favoriteAgentIds,
-      mutedAgentIds: rosterQuery.data.mutedAgentIds,
-      insightsPanelExpanded: rosterQuery.data.insightsPanelExpanded,
-      agentChatNotificationsEnabled: rosterQuery.data.agentChatNotificationsEnabled,
-    }))
-  }, [dispatch, rosterQuery.data])
+  useRosterPreferencesBridge(rosterQuery.data)
 
   const handleAgentRosterSortModeChange = useCallback(
     (nextSortMode: AgentRosterSortMode) => {
@@ -1984,18 +1866,23 @@ export function AgentChatPage({
   const intelligenceOverrides = useAppSelector(selectAgentTierOverrides)
   const intelligenceSavingById = useAppSelector(selectAgentTierSavingById)
   const intelligenceErrorById = useAppSelector(selectAgentTierErrorById)
-  const createAgentWorkflow = useAppSelector(selectCreateAgentWorkflow)
-  const createAgentError = createAgentWorkflow.error
-  const createAgentTrialOnboarding = createAgentWorkflow.trialOnboardingTarget
+  const {
+    createAgentError,
+    onboardingTarget,
+    requiresTrialPlanSelection,
+    spawnFlow,
+    spawnIntent,
+    spawnIntentAutoSubmittedRef,
+    spawnIntentStatus,
+  } = useCreateAgentWorkflow({
+    appLocationSearch,
+    isNewAgent,
+  })
   const [teamTemplateLaunchBusyId, setTeamTemplateLaunchBusyId] = useState<string | null>(null)
   const [teamTemplateLaunchError, setTeamTemplateLaunchError] = useState<string | null>(null)
   const sendMessageError = useAgentChatStore((state) => state.sendMessageError)
-  const spawnIntent = createAgentWorkflow.spawnIntent
-  const spawnIntentStatus = createAgentWorkflow.spawnIntentStatus
   const [idleInsightsAgentId, setIdleInsightsAgentId] = useState<string | null>(null)
   const [idleInsightsPending, setIdleInsightsPending] = useState(false)
-  const spawnIntentAutoSubmittedRef = useRef(false)
-  const spawnIntentRequestIdRef = useRef(0)
   const latestPlanSnapshot = useMemo(
     () => getLatestPlanSnapshot(timelineEvents, initialPageResponse?.current_plan ?? null),
     [timelineEvents, initialPageResponse?.current_plan],
@@ -2030,66 +1917,14 @@ export function AgentChatPage({
     updateAddons,
     updating: queryAddonsUpdating,
   } = useAgentAddons(activeAgentId, { enabled: allowDeferredAgentPanelRequests })
-  const quickSettingsMirror = useAppSelector(selectQuickSettingsMirror(activeAgentId))
-  const addonsMirror = useAppSelector(selectAddonsMirror(activeAgentId))
-  const quickSettingsPayload = quickSettingsMirror?.data ?? queryQuickSettingsPayload
-  const addonsPayload = addonsMirror?.data ?? queryAddonsPayload
-  const quickSettingsLoading = quickSettingsMirror?.status === 'loading' || queryQuickSettingsLoading
-  const quickSettingsError = quickSettingsMirror?.errorMessage ?? queryQuickSettingsError
-  const quickSettingsUpdating = quickSettingsMirror?.updating ?? queryQuickSettingsUpdating
-  const addonsUpdating = addonsMirror?.updating ?? queryAddonsUpdating
-  useEffect(() => {
-    if (!activeAgentId) {
-      return
-    }
-    if (queryQuickSettingsLoading) {
-      dispatch(agentResourceMirrorsActions.quickSettingsLoading(activeAgentId))
-    } else if (queryQuickSettingsError) {
-      dispatch(agentResourceMirrorsActions.quickSettingsFailed({
-        agentId: activeAgentId,
-        message: safeErrorMessage(queryQuickSettingsError, 'Unable to load daily credits.'),
-      }))
-    } else if (queryQuickSettingsPayload !== undefined) {
-      dispatch(agentResourceMirrorsActions.quickSettingsLoaded({
-        agentId: activeAgentId,
-        data: queryQuickSettingsPayload ?? null,
-      }))
-    }
-  }, [activeAgentId, dispatch, queryQuickSettingsError, queryQuickSettingsLoading, queryQuickSettingsPayload])
-  useEffect(() => {
-    if (activeAgentId) {
-      dispatch(agentResourceMirrorsActions.quickSettingsUpdatingSet({
-        agentId: activeAgentId,
-        updating: queryQuickSettingsUpdating,
-      }))
-    }
-  }, [activeAgentId, dispatch, queryQuickSettingsUpdating])
-  useEffect(() => {
-    if (!activeAgentId) {
-      return
-    }
-    if (queryAddonsLoading) {
-      dispatch(agentResourceMirrorsActions.addonsLoading(activeAgentId))
-    } else if (queryAddonsError) {
-      dispatch(agentResourceMirrorsActions.addonsFailed({
-        agentId: activeAgentId,
-        message: safeErrorMessage(queryAddonsError, 'Unable to load add-ons.'),
-      }))
-    } else if (queryAddonsPayload !== undefined) {
-      dispatch(agentResourceMirrorsActions.addonsLoaded({
-        agentId: activeAgentId,
-        data: queryAddonsPayload ?? null,
-      }))
-    }
-  }, [activeAgentId, dispatch, queryAddonsError, queryAddonsLoading, queryAddonsPayload])
-  useEffect(() => {
-    if (activeAgentId) {
-      dispatch(agentResourceMirrorsActions.addonsUpdatingSet({
-        agentId: activeAgentId,
-        updating: queryAddonsUpdating,
-      }))
-    }
-  }, [activeAgentId, dispatch, queryAddonsUpdating])
+  const quickSettingsResourceStatus = useAppSelector(selectQuickSettingsResourceStatus(activeAgentId))
+  const addonsResourceStatus = useAppSelector(selectAddonsResourceStatus(activeAgentId))
+  const quickSettingsPayload = queryQuickSettingsPayload
+  const addonsPayload = queryAddonsPayload
+  const quickSettingsLoading = quickSettingsResourceStatus?.status === 'loading' || queryQuickSettingsLoading
+  const quickSettingsError = quickSettingsResourceStatus?.errorMessage ?? queryQuickSettingsError
+  const quickSettingsUpdating = quickSettingsResourceStatus?.updating ?? queryQuickSettingsUpdating
+  const addonsUpdating = addonsResourceStatus?.updating ?? queryAddonsUpdating
   const contextSwitcher = useMemo(() => {
     if (!showContextSwitcher) {
       return null
@@ -2203,61 +2038,6 @@ export function AgentChatPage({
       dispatch(agentSettingsActions.draftTierSet(resolvedTier))
     }
   }, [dispatch, draftIntelligenceTier, isNewAgent, llmIntelligence?.options, llmIntelligence?.systemDefaultTier])
-
-  const currentLocationSearch = appLocationSearch ?? (typeof window === 'undefined' ? '' : window.location.search)
-  const spawnFlow = useMemo(() => {
-    if (!isNewAgent || typeof window === 'undefined') {
-      return false
-    }
-    const params = new URLSearchParams(currentLocationSearch)
-    const flag = (params.get('spawn') || '').toLowerCase()
-    return flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on'
-  }, [currentLocationSearch, isNewAgent])
-  const onboardingTarget = createAgentTrialOnboarding ?? spawnIntent?.onboarding_target ?? null
-  const requiresTrialPlanSelection = Boolean(
-    createAgentTrialOnboarding || spawnIntent?.requires_plan_selection,
-  )
-
-  useEffect(() => {
-    if (!isNewAgent || !spawnFlow) {
-      spawnIntentAutoSubmittedRef.current = false
-      spawnIntentRequestIdRef.current = 0
-      dispatch(chatActions.spawnIntentSet(null))
-      dispatch(chatActions.spawnIntentStatusSet('idle'))
-      return
-    }
-    dispatch(chatActions.spawnIntentRequestStarted())
-    spawnIntentRequestIdRef.current += 1
-    const requestId = spawnIntentRequestIdRef.current
-    const controller = new AbortController()
-    const loadSpawnIntent = async () => {
-      try {
-        const intent = await fetchAgentSpawnIntent(controller.signal)
-        if (spawnIntentRequestIdRef.current !== requestId) {
-          return
-        }
-        dispatch(chatActions.spawnIntentSet(intent))
-        const charter = intent?.charter?.trim()
-        if (intent?.requires_plan_selection || charter) {
-          dispatch(chatActions.spawnIntentStatusSet('ready'))
-          return
-        }
-        if (!charter) {
-          dispatch(chatActions.spawnIntentStatusSet('done'))
-          return
-        }
-      } catch (err) {
-        if (controller.signal.aborted || spawnIntentRequestIdRef.current !== requestId) {
-          return
-        }
-        dispatch(chatActions.spawnIntentStatusSet('done'))
-      }
-    }
-    void loadSpawnIntent()
-    return () => {
-      controller.abort()
-    }
-  }, [currentLocationSearch, dispatch, isNewAgent, spawnFlow])
 
   const resolvedIntelligenceTier = useMemo(() => {
     if (isNewAgent) {
@@ -3162,22 +2942,28 @@ export function AgentChatPage({
     refetchOnWindowFocus: false,
     enabled: shouldFetchUsageSummary,
   })
-  const usageSummaryMirror = useAppSelector(selectAgentChatUsageSummaryMirror)
-  const usageSummary = usageSummaryMirror.data ?? queryUsageSummary
-  useEffect(() => {
-    if (!shouldFetchUsageSummary) {
-      return
-    }
-    if (queryUsageSummaryLoading) {
-      dispatch(agentResourceMirrorsActions.agentChatUsageSummaryLoading())
-    } else if (queryUsageSummaryError) {
-      dispatch(agentResourceMirrorsActions.agentChatUsageSummaryFailed(
-        safeErrorMessage(queryUsageSummaryError, 'Unable to load usage summary.'),
-      ))
-    } else if (queryUsageSummary !== undefined) {
-      dispatch(agentResourceMirrorsActions.agentChatUsageSummaryLoaded(queryUsageSummary ?? null))
-    }
-  }, [dispatch, queryUsageSummary, queryUsageSummaryError, queryUsageSummaryLoading, shouldFetchUsageSummary])
+  const usageSummary = queryUsageSummary
+  useAgentResourceStatusBridge({
+    activeAgentId,
+    quickSettings: {
+      data: queryQuickSettingsPayload,
+      error: queryQuickSettingsError,
+      isLoading: queryQuickSettingsLoading,
+      updating: queryQuickSettingsUpdating,
+    },
+    addons: {
+      data: queryAddonsPayload,
+      error: queryAddonsError,
+      isLoading: queryAddonsLoading,
+      updating: queryAddonsUpdating,
+    },
+    usageSummary: {
+      data: queryUsageSummary,
+      enabled: shouldFetchUsageSummary,
+      error: queryUsageSummaryError,
+      isLoading: queryUsageSummaryLoading,
+    },
+  })
   const burnRateTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
   const {
     data: burnRateSummary,

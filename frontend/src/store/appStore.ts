@@ -2,27 +2,23 @@ import { combineReducers, configureStore, createListenerMiddleware, type Unknown
 import type { ThunkDispatch } from 'redux-thunk'
 import type { QueryClient } from '@tanstack/react-query'
 
-import { agentResourceMirrorsReducer } from './agentResourceMirrorsSlice'
+import { agentResourceStatusReducer } from './agentResourceStatusSlice'
 import { agentRosterPreferencesReducer } from './agentRosterPreferencesSlice'
 import { agentSettingsReducer } from './agentSettingsSlice'
 import { auditReducer } from './auditSlice'
 import { chatReducer } from './chatSlice'
-import {
-  IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY,
-  immersiveShellActions,
-  immersiveShellReducer,
-} from './immersiveShellSlice'
-import { selectSubscriptionState, subscriptionActions, subscriptionReducer } from './subscriptionSlice'
+import { immersiveShellReducer } from './immersiveShellSlice'
+import { registerImmersiveShellListeners } from './listeners/immersiveShellListeners'
+import { registerSubscriptionListeners } from './listeners/subscriptionListeners'
+import { subscriptionReducer } from './subscriptionSlice'
 import { usageReducer } from './usageSlice'
-import { track } from '../util/analytics'
-import { AnalyticsEvent } from '../constants/analyticsEvents'
 
 export type AppStoreExtra = {
   queryClient: QueryClient | null
 }
 
 const rootReducer = combineReducers({
-  agentResourceMirrors: agentResourceMirrorsReducer,
+  agentResourceStatus: agentResourceStatusReducer,
   agentRosterPreferences: agentRosterPreferencesReducer,
   agentSettings: agentSettingsReducer,
   audit: auditReducer,
@@ -41,34 +37,8 @@ function configureAppStore({ queryClient = null }: { queryClient?: QueryClient |
     extra: { queryClient },
   })
 
-  listenerMiddleware.startListening({
-    actionCreator: subscriptionActions.openUpgradeModal,
-    effect: (action, listenerApi) => {
-      const previousState = selectSubscriptionState(listenerApi.getOriginalState())
-      if (previousState.isUpgradeModalOpen || typeof window === 'undefined') {
-        return
-      }
-      track(AnalyticsEvent.UPGRADE_MODAL_OPENED, {
-        currentPlan: previousState.currentPlan,
-        source: action.payload?.source ?? 'unknown',
-        isProprietaryMode: previousState.isProprietaryMode,
-      })
-    },
-  })
-
-  listenerMiddleware.startListening({
-    actionCreator: immersiveShellActions.setSidebarMode,
-    effect: (action) => {
-      if (typeof window === 'undefined') {
-        return
-      }
-      try {
-        window.sessionStorage.setItem(IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY, action.payload)
-      } catch {
-        // Storage failures should not affect shell interaction.
-      }
-    },
-  })
+  registerSubscriptionListeners(listenerMiddleware)
+  registerImmersiveShellListeners(listenerMiddleware)
 
   return configureStore({
     reducer: rootReducer,

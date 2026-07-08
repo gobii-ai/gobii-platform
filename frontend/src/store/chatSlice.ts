@@ -22,7 +22,7 @@ import type {
 } from '../types/agentChat'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BurnRateMetadata, InsightEvent } from '../types/insight'
-import type { AgentSpawnIntent } from '../api/agentSpawnIntent'
+import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import type { AppDispatch, RootState } from './appStore'
 
 const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [], nextScheduledAt: null }
@@ -88,7 +88,6 @@ export type AgentChatInsightsState = {
 
 export type AgentChatWorkflowState = {
   sendMessageError: string | null
-  composerDisabledReason: string | null
   pendingActions: PendingActionRequest[]
 }
 
@@ -123,7 +122,7 @@ export type CreateAgentWorkflowState = {
   trialOnboardingTarget: TrialOnboardingTarget | null
   spawnIntent: AgentSpawnIntent | null
   spawnIntentStatus: SpawnIntentStatus
-  spawnIntentRequestId: number
+  spawnIntentRequestId: string | null
   draftMetadata: CreateAgentDraftMetadata | null
 }
 
@@ -183,7 +182,6 @@ function createInitialSession(): AgentChatSession {
     },
     workflow: {
       sendMessageError: null,
-      composerDisabledReason: null,
       pendingActions: [],
     },
   }
@@ -198,7 +196,7 @@ export const initialChatState: ChatState = {
     trialOnboardingTarget: null,
     spawnIntent: null,
     spawnIntentStatus: 'idle',
-    spawnIntentRequestId: 0,
+    spawnIntentRequestId: null,
     draftMetadata: null,
   },
 }
@@ -569,6 +567,11 @@ export const persistPendingEventsToCache = () => (
   dispatch(chatActions.pendingEventsPersisted({ agentId }))
 }
 
+export const loadAgentSpawnIntent = createAsyncThunk<AgentSpawnIntent, void, { state: RootState }>(
+  'chat/loadAgentSpawnIntent',
+  async (_, { signal }) => fetchAgentSpawnIntent(signal),
+)
+
 export const sendMessage = createAsyncThunk<
   void,
   { body: string; attachments?: File[] },
@@ -791,11 +794,6 @@ const chatSlice = createSlice({
       if (!agentId) return
       ensureSession(state, agentId).workflow.sendMessageError = action.payload.message
     },
-    composerDisabledReasonSet(state, action: PayloadAction<{ agentId?: string | null; reason: string | null }>) {
-      const agentId = action.payload.agentId ?? state.activeAgentId
-      if (!agentId) return
-      ensureSession(state, agentId).workflow.composerDisabledReason = action.payload.reason
-    },
     pendingActionsReplaced(state, action: PayloadAction<{ agentId: string; pendingActions: PendingActionRequest[] }>) {
       ensureSession(state, action.payload.agentId).workflow.pendingActions = action.payload.pendingActions
     },
@@ -811,10 +809,6 @@ const chatSlice = createSlice({
     },
     spawnIntentStatusSet(state, action: PayloadAction<SpawnIntentStatus>) {
       state.createAgent.spawnIntentStatus = action.payload
-    },
-    spawnIntentRequestStarted(state) {
-      state.createAgent.spawnIntentRequestId += 1
-      state.createAgent.spawnIntentStatus = 'loading'
     },
     createAgentDraftMetadataSet(state, action: PayloadAction<CreateAgentDraftMetadata | null>) {
       state.createAgent.draftMetadata = action.payload
@@ -1072,6 +1066,30 @@ const chatSlice = createSlice({
       if (availableCount === 0) return
       session.insights.currentInsightIndex = Math.max(0, Math.min(action.payload, availableCount - 1))
     },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(loadAgentSpawnIntent.pending, (state, action) => {
+        state.createAgent.spawnIntentRequestId = action.meta.requestId
+        state.createAgent.spawnIntentStatus = 'loading'
+        state.createAgent.spawnIntent = null
+      })
+      .addCase(loadAgentSpawnIntent.fulfilled, (state, action) => {
+        if (state.createAgent.spawnIntentRequestId !== action.meta.requestId) {
+          return
+        }
+        const intent = action.payload
+        state.createAgent.spawnIntent = intent
+        state.createAgent.spawnIntentStatus = intent.requires_plan_selection || Boolean(intent.charter?.trim())
+          ? 'ready'
+          : 'done'
+      })
+      .addCase(loadAgentSpawnIntent.rejected, (state, action) => {
+        if (state.createAgent.spawnIntentRequestId !== action.meta.requestId) {
+          return
+        }
+        state.createAgent.spawnIntentStatus = 'done'
+      })
   },
 })
 
