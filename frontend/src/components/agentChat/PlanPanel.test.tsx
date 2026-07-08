@@ -33,5 +33,53 @@ describe('PlanPanel', () => {
     expect(row).toHaveAttribute('data-work-state', 'active')
     expect(container.querySelector('.lucide-loader-circle')).toBeInTheDocument()
     expect(container.querySelector('.lucide-circle-pause')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Est\./i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/credits/i)).not.toBeInTheDocument()
+  })
+
+  it('shows task credit estimates when a forecast is available', () => {
+    render(
+      <PlanPanel
+        plan={plan}
+        isAgentWorking
+        creditForecast={{
+          perRunCredits: 5,
+          dailyCredits: 12.5,
+          monthlyCredits: 250,
+          warningLevel: 'medium',
+          estimatedAt: '2026-07-07T18:00:00Z',
+        }}
+      />,
+    )
+
+    expect(screen.getByLabelText('Estimated task credits')).toBeInTheDocument()
+    expect(screen.getByText('Estimated Usage')).toBeInTheDocument()
+    expect(screen.getByText('5 credits')).toBeInTheDocument()
+    expect(screen.getByText('/ current plan')).toBeInTheDocument()
+    expect(screen.getByText('12.5 credits')).toBeInTheDocument()
+    expect(screen.getByText('/ day')).toBeInTheDocument()
+    expect(screen.getByText('250 credits')).toBeInTheDocument()
+    expect(screen.getByText('/ month')).toBeInTheDocument()
+  })
+
+  it('hides non-positive task credit estimates', () => {
+    render(
+      <PlanPanel
+        plan={plan}
+        isAgentWorking
+        creditForecast={{
+          perRunCredits: 5,
+          dailyCredits: 0,
+          monthlyCredits: 0,
+          warningLevel: 'none',
+          estimatedAt: '2026-07-07T18:00:00Z',
+        }}
+      />,
+    )
+
+    expect(screen.getByText('5 credits')).toBeInTheDocument()
+    expect(screen.queryByText('0 credits')).not.toBeInTheDocument()
+    expect(screen.queryByText('/ day')).not.toBeInTheDocument()
+    expect(screen.queryByText('/ month')).not.toBeInTheDocument()
   })
 })

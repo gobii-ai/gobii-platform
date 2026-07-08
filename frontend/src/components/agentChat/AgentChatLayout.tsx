@@ -34,6 +34,7 @@ import type {
   ProcessingWebTask,
   StreamState,
   PlanSnapshot,
+  CreditForecast,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite } from '../../types/agentRoster'
@@ -240,6 +241,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onScrolledToAgent?: (agentId: string) => void
   dailyCredits?: DailyCreditsInfo | null
   dailyCreditsStatus?: DailyCreditsStatus | null
+  creditForecast?: CreditForecast | null
   dailyCreditsLoading?: boolean
   dailyCreditsError?: string | null
   onRefreshDailyCredits?: () => void
@@ -442,6 +444,7 @@ export function AgentChatLayout({
   onBackFromEmbeddedSettings,
   dailyCredits,
   dailyCreditsStatus,
+  creditForecast = null,
   dailyCreditsLoading = false,
   dailyCreditsError = null,
   onRefreshDailyCredits,
@@ -602,6 +605,7 @@ export function AgentChatLayout({
     : defaultPlanPanelMode !== 'hidden'
   const showGalleryShellPanel = galleryShellPage !== 'agents'
   const showPlanInterface = sidebarMode !== 'gallery'
+  const previousPlanningStateRef = useRef<{ agentId: string | null; state: PlanningState } | null>(null)
   const previousPlanStateRef = useRef<{ total: number; active: boolean } | null>(null)
   const previousPlanSnapshotRef = useRef<PlanSnapshot | null>(null)
   const planPreviewTimeoutRef = useRef<number | null>(null)
@@ -1358,6 +1362,45 @@ export function AgentChatLayout({
   }, [displayPlanSnapshot, hasStoredPlanPanelMode, planPanelMode, resetPlanPreviewState, setCurrentPlanPanelMode, showPlanInterface])
 
   useEffect(() => {
+    const previous = previousPlanningStateRef.current
+    const currentAgentId = agentId ?? null
+    previousPlanningStateRef.current = { agentId: currentAgentId, state: planningState }
+
+    if (
+      !previous
+      || previous.agentId !== currentAgentId
+      || previous.state !== 'planning'
+      || planningState !== 'completed'
+      || !showPlanInterface
+    ) {
+      return
+    }
+
+    setPlanPreviewSnapshot(null)
+    setPlanPreviewExiting(false)
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(false)
+    if (planPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewTimeoutRef.current)
+      planPreviewTimeoutRef.current = null
+    }
+    if (planPreviewExitTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewExitTimeoutRef.current)
+      planPreviewExitTimeoutRef.current = null
+    }
+    if (planHoverExitTimeoutRef.current !== null) {
+      window.clearTimeout(planHoverExitTimeoutRef.current)
+      planHoverExitTimeoutRef.current = null
+    }
+    suppressPlanHoverPreviewRef.current = false
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setPlanSheetOpen(true)
+      return
+    }
+    setCurrentPlanPanelMode(() => 'docked')
+  }, [agentId, planningState, setCurrentPlanPanelMode, showPlanInterface])
+
+  useEffect(() => {
     return () => {
       clearPlanPreviewTimers()
       suppressPlanHoverPreviewRef.current = false
@@ -1772,6 +1815,7 @@ export function AgentChatLayout({
                   plan={renderedPlanSnapshot}
                   onMessageClick={handlePlanMessageClick}
                   isAgentWorking={isWorkingNow}
+                  creditForecast={creditForecast}
                 />
               ) : null}
             </div>
@@ -1793,6 +1837,7 @@ export function AgentChatLayout({
           onMessageClick={handlePlanMessageClick}
           compact
           isAgentWorking={isWorkingNow}
+          creditForecast={creditForecast}
         />
       </ImmersiveDialog>
       <TextareaSubmitDialog

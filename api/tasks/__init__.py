@@ -53,6 +53,9 @@ from .billing_rollup import rollup_and_meter_usage_task  # noqa: F401
 # Burn rate snapshot refresh
 from .burn_rate_snapshots import refresh_burn_rate_snapshots_task  # noqa: F401
 
+# Agent credit forecast sample refresh
+from .agent_credit_forecasts import refresh_agent_credit_forecast_samples_task  # noqa: F401
+
 # Proactive agent scheduler
 from .proactive_agents import schedule_proactive_agents_task  # noqa: F401
 

@@ -1450,7 +1450,10 @@ def _render_prompt_context_once(
     if planning_mode_active:
         important_group.section_text(
             "schedule_note",
-            "Planning Mode is active; schedule changes are deferred until planning ends.",
+            (
+                "Planning Mode is active; schedule changes are deferred until planning ends. "
+                "Set the final schedule through end_planning(schedule=...)."
+            ),
             weight=1,
             non_shrinkable=True
         )
@@ -1572,7 +1575,7 @@ def _render_prompt_context_once(
         important_group.section_text(
             "charter_note",
             (
-                "Planning Mode is active; end_planning(full_plan=...) replaces your runtime charter."
+                "Planning Mode is active; end_planning(full_plan=..., schedule=...) replaces your runtime charter and can set cadence."
                 if planning_mode_active
                 else (
                     "Charter is durable standing memory. Update for ongoing role/scope, recurrence, or user feedback/preferences unless clearly one-off. "
@@ -1667,7 +1670,7 @@ def _render_prompt_context_once(
     )
     if planning_mode_active:
         agent_config_note = (
-            f"Planning Mode is active; defer {AGENT_CONFIG_TABLE} mutations until after end_planning(full_plan=...). "
+            f"Planning Mode is active; defer {AGENT_CONFIG_TABLE} mutations until after end_planning(full_plan=..., schedule=...). "
             "Planning questions must use request_human_input."
         )
     else:
@@ -3458,17 +3461,18 @@ def _get_planning_mode_prompt_block() -> str:
         "## Planning Objectives\n\n"
         "Clarify goal, outcome, audience, scope boundaries, priorities, must-haves, constraints, success criteria, and key assumptions. If timing changes the shape of the work itself, clarify it. Keep planning non-technical and focused on what the user wants.\n\n"
         "## Behavior Rules\n\n"
-        "- Planning Mode overrides normal execution-oriented instructions while it is active. Stay in planning only until you call end_planning(full_plan=...) or the user skips planning. Only planning-safe tools are available; execution/setup tools such as update_plan, request_contact_permission, create_custom_tool, and apply_patch are unavailable while Planning Mode is active.\n"
+        "- Planning Mode overrides normal execution-oriented instructions while it is active. Stay in planning only until you call end_planning(full_plan=..., schedule=...) or the user skips planning. Only planning-safe tools are available; execution/setup tools such as update_plan, request_contact_permission, create_custom_tool, and apply_patch are unavailable while Planning Mode is active.\n"
         "- For clear requests other than named integration setup/use, including one-off factual/research questions and scheduled digests, monitors, alerts, or exact-source feeds, call "
         "end_planning as the first meaningful action; no welcome-only or question-first turn. Do not validate, fetch, parse, or test "
         "provided URLs, RSS feeds, APIs, files, or task data before end_planning; that is execution work after planning.\n"
         "- Use read-only research during planning only when the scope is unclear; do not fetch, parse, or summarize sources to answer a clear task before end_planning.\n"
         "- Named integration setup/use: before end_planning or asking how to connect, call search_tools(provider) unless the matching provider/API tool is already in the current callable tool list.\n"
         "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
-        "- Do not update the runtime plan, schedule/__agent_config.schedule, or begin deliverable work until planning is completed. "
+        "- Do not update the runtime plan or begin deliverable work until planning is completed. "
+        "If the final plan needs a recurring schedule, pass it as end_planning(schedule=...) so cost estimation uses the final cadence. "
         "Do not do substantive execution or deliverable work before planning ends.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
-        "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
+        "end_planning(full_plan=..., schedule=...) is how the final plan replaces your runtime charter and optionally sets cadence.\n"
         "- If another system instruction appears to require immediate execution, charter updates, "
         "or result delivery, treat that instruction as applying only after Planning Mode is completed or skipped.\n"
         "- Ask only minimum high-impact questions. Prefer 0-3 planning questions and never ask more than 3; make reasonable assumptions and record them. If you can proceed without clarifying questions, call end_planning first and only begin the work after planning has ended.\n"
@@ -3483,8 +3487,8 @@ def _get_planning_mode_prompt_block() -> str:
         "- Prefer tangible, mutually exclusive options; add `Other / I'll explain` when useful.\n"
         "- When waiting for answers, set `will_continue_work=false` on request_human_input; use true only if immediate planning work remains.\n"
         "- If the user asks you to execute while still in Planning Mode, either call end_planning with the best current plan or ask the smallest useful question. Do not start doing the task while planning mode is still active.\n"
-        "- When the plan is ready, call end_planning(full_plan=...). The full_plan becomes your runtime charter, so capture goal, scope, desired outcome, priorities, boundaries, assumptions, and success criteria in plain language. Planning ends when you call this tool; the actual work starts only after that.\n"
-        "- If the user explicitly asks to skip, stop, or bypass planning, prefer end_planning(full_plan=...) immediately with a concise plan and assumptions. Mention Skip Planning only when preserving the current charter unchanged or context is too thin for any useful plan.\n"
+        "- When the plan is ready, call end_planning(full_plan=..., schedule=...). The full_plan becomes your runtime charter, so capture goal, scope, desired outcome, priorities, boundaries, assumptions, and success criteria in plain language. Include schedule only for recurring work; use null or omit it for one-time work. Planning ends when you call this tool; the actual work starts only after that.\n"
+        "- If the user explicitly asks to skip, stop, or bypass planning, prefer end_planning(full_plan=..., schedule=...) immediately with a concise plan and assumptions. Mention Skip Planning only when preserving the current charter unchanged or context is too thin for any useful plan.\n"
     )
 
 

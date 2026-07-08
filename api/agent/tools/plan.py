@@ -15,6 +15,7 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentPlanDeliverable,
 )
+from api.services.agent_credit_forecasts import persist_agent_credit_forecast, serialize_credit_forecast
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +339,7 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
 
     snapshot = build_plan_snapshot(agent)
     _broadcast_plan_changes(agent, changes, snapshot)
+    forecast = _refresh_credit_forecast(agent)
     result = {
         "status": "ok",
         "message": "Plan updated.",
@@ -345,6 +347,7 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
         "todo_count": snapshot.todo_count,
         "doing_count": snapshot.doing_count,
         "done_count": snapshot.done_count,
+        "credit_forecast": serialize_credit_forecast(forecast),
     }
     will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
     if will_continue_work is not None:
@@ -638,3 +641,19 @@ def _broadcast_plan_changes(agent, changes: Sequence[PlanStepChange], snapshot: 
         broadcast_plan_changes(agent, changes, snapshot)
     except (ImportError, RuntimeError):
         logger.warning("Failed to import plan broadcast helper for agent %s", getattr(agent, "id", None), exc_info=True)
+
+
+def _refresh_credit_forecast(agent):
+    forecast = persist_agent_credit_forecast(agent)
+    try:
+        from console.agent_chat.signals import emit_agent_profile_update, emit_agent_usage_update
+
+        emit_agent_profile_update(agent)
+        emit_agent_usage_update(agent)
+    except (ImportError, RuntimeError):
+        logger.warning(
+            "Failed to import forecast broadcast helpers for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+    return forecast

@@ -1286,6 +1286,55 @@
     font-weight: 700;
     color: rgba(255, 255, 255, 0.48);
 }
+.plan-panel-estimate-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.24rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.plan-panel-estimate-footer {
+    position: relative;
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.52rem;
+    padding: 0.78rem 1rem 1rem;
+}
+.plan-panel-estimate-footer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 1rem;
+    right: 1rem;
+    height: 1px;
+    background: rgba(221, 214, 254, 0.14);
+}
+.plan-panel-estimate-footer h3 {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+.plan-panel-estimate-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.28rem;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 0.73rem;
+    font-weight: 720;
+    line-height: 1.28;
+}
+.plan-panel-estimate-value {
+    min-width: 0;
+}
+.plan-panel-estimate-suffix {
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.46);
+    font-weight: 650;
+    white-space: nowrap;
+}
 .plan-panel-task-list {
     display: flex;
     flex-direction: column;
@@ -1351,7 +1400,7 @@
     margin: 0;
     padding: 0 1rem 0.9rem;
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.46);
 }
 .plan-panel-deliverables {
     display: flex;
@@ -2860,6 +2909,52 @@
     opacity: 0.75;
     transform: none;
 }
+.task-credits-callout {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.9rem 1rem;
+    padding-right: 3rem;
+}
+.task-credits-callout .hard-limit-callout-dismiss {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    width: 2rem;
+    height: 2rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--callout-text);
+    cursor: pointer;
+}
+.task-credits-callout .hard-limit-callout-dismiss:hover {
+    background: rgba(146, 64, 14, 0.08);
+}
+.task-credits-callout .hard-limit-callout-header {
+    min-width: 0;
+}
+.task-credits-callout .hard-limit-callout-header > div {
+    min-width: 0;
+}
+.task-credits-callout .hard-limit-callout-subtitle {
+    max-width: 62rem;
+}
+.task-credits-callout-actions {
+    justify-content: flex-end;
+    min-width: max-content;
+}
+.task-credits-callout .banner-upgrade {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 0;
+    min-height: 2.2rem;
+    border: 0;
+    cursor: pointer;
+}
+.task-credits-callout .banner-upgrade span {
+    display: inline;
+}
 .hard-limit-callout-upsell {
     flex-wrap: wrap;
     gap: 0.5rem;
@@ -2881,6 +2976,14 @@
     }
     .hard-limit-callout[data-billing-issue='no_org_seats'] .hard-limit-callout-actions {
         justify-content: flex-start;
+    }
+    .task-credits-callout {
+        grid-template-columns: 1fr;
+        padding-right: 2.8rem;
+    }
+    .task-credits-callout-actions {
+        justify-content: flex-start;
+        min-width: 0;
     }
 }
 .scheduled-resume-card {

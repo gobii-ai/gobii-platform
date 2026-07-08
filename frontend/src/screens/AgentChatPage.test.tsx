@@ -187,6 +187,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       discordNativeTabEnabled,
       metaAdsTabEnabled,
       events,
+      creditForecast,
     }: {
       spawnIntentLoading?: boolean
       signupPreviewState?: string
@@ -204,6 +205,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       hubspotNativeTabEnabled?: boolean
       discordNativeTabEnabled?: boolean
       metaAdsTabEnabled?: boolean
+      creditForecast?: unknown
       events?: Array<{
         kind: string
         message?: {
@@ -231,6 +233,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="hubspot-native-tab-enabled">{String(Boolean(hubspotNativeTabEnabled))}</div>
           <div data-testid="discord-native-tab-enabled">{String(Boolean(discordNativeTabEnabled))}</div>
           <div data-testid="meta-ads-tab-enabled">{String(Boolean(metaAdsTabEnabled))}</div>
+          <div data-testid="credit-forecast">{creditForecast ? JSON.stringify(creditForecast) : 'none'}</div>
           <div data-testid="timeline-event-count">{events?.length ?? 0}</div>
           {events?.map((event, index) => (
             event.kind === 'message' ? (
@@ -712,6 +715,56 @@ describe('AgentChatPage trial onboarding', () => {
     })
     const pendingMessage = screen.getByText('Pending hello')
     expect(pendingMessage).toHaveAttribute('data-status', 'sending')
+  })
+
+  it('hides task credit estimates unless the UI flag is enabled', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Test Agent')]
+    agentChatStoreState.agentId = 'agent-1'
+    timelineState.initialPageResponse = {
+      events: [],
+      has_more_older: false,
+      has_more_newer: false,
+      processing_active: false,
+      task_credit_estimation_ui_enabled: false,
+      credit_forecast: {
+        perRunCredits: 2,
+        dailyCredits: 6,
+        monthlyCredits: 180,
+        warningLevel: 'none',
+      },
+    }
+
+    window.history.pushState({}, '', '/app/agents/agent-1')
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('credit-forecast')).toHaveTextContent('none')
+    })
+  })
+
+  it('passes task credit estimates through when the UI flag is enabled', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Test Agent')]
+    agentChatStoreState.agentId = 'agent-1'
+    timelineState.initialPageResponse = {
+      events: [],
+      has_more_older: false,
+      has_more_newer: false,
+      processing_active: false,
+      task_credit_estimation_ui_enabled: true,
+      credit_forecast: {
+        perRunCredits: 2,
+        dailyCredits: 6,
+        monthlyCredits: 180,
+        warningLevel: 'none',
+      },
+    }
+
+    window.history.pushState({}, '', '/app/agents/agent-1')
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('credit-forecast')).toHaveTextContent('"dailyCredits":6')
+    })
   })
 
   it('hydrates and persists the notifications preference from roster data', async () => {

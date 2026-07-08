@@ -6,6 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.agent.avatar import maybe_schedule_agent_avatar
+from api.agent.tools.schedule_updater import normalize_schedule_value, validate_schedule_for_agent
 from api.agent.short_description import (
     maybe_schedule_mini_description,
     maybe_schedule_short_description,
@@ -84,29 +85,42 @@ def schedule_planning_timeout_processing(agent: PersistentAgent) -> None:
     )
 
 
-def complete_agent_planning(agent: PersistentAgent, full_plan: str) -> PersistentAgent:
+def complete_agent_planning(
+    agent: PersistentAgent,
+    full_plan: str,
+    *,
+    schedule_provided: bool = False,
+    schedule: str | None = None,
+) -> PersistentAgent:
     """Finalize planning mode and promote the accepted plan into the charter."""
     normalized_plan = (full_plan or "").strip()
     if not normalized_plan:
         raise ValueError("full_plan is required")
+    normalized_schedule = normalize_schedule_value(schedule) if schedule_provided else None
 
     with transaction.atomic():
         locked = PersistentAgent.objects.select_for_update().get(pk=agent.pk)
         if locked.planning_state != PersistentAgent.PlanningState.PLANNING:
             raise ValueError("Agent is not in planning mode")
+        if schedule_provided:
+            validate_schedule_for_agent(locked, normalized_schedule)
 
         locked.planning_state = PersistentAgent.PlanningState.COMPLETED
         locked.planning_plan = normalized_plan
         locked.charter = normalized_plan
         locked.planning_completed_at = timezone.now()
+        update_fields = [
+            "planning_state",
+            "planning_plan",
+            "planning_completed_at",
+            "charter",
+            "updated_at",
+        ]
+        if schedule_provided:
+            locked.schedule = normalized_schedule
+            update_fields.append("schedule")
         locked.save(
-            update_fields=[
-                "planning_state",
-                "planning_plan",
-                "planning_completed_at",
-                "charter",
-                "updated_at",
-            ]
+            update_fields=update_fields,
         )
 
     agent.refresh_from_db()

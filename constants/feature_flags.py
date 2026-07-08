@@ -149,3 +149,6 @@ OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED = (
 # iMessage-style simplified chat UI — collapses non-message events into compact pills
 SIMPLIFIED_CHAT_UI = "simplified_chat_ui"
 SIMPLIFIED_CHAT_DEFAULT_CONVERSATIONAL = "simplified_chat_default_conversational"
+
+# Controls whether agent chat shows task credit forecast estimates.
+TASK_CREDIT_ESTIMATION_UI = "task_credit_estimation_ui"

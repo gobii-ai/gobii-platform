@@ -146,14 +146,16 @@ export function AgentTimelinePane({
   viewerEmail,
   viewerUserId,
 }: AgentTimelinePaneProps) {
+  const timelineEvents = useMemo(() => events, [events])
+
   const lastRenderedIndex = useMemo(() => {
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      if (events[index].kind !== 'plan' && events[index].kind !== 'kanban') {
+    for (let index = timelineEvents.length - 1; index >= 0; index -= 1) {
+      if (timelineEvents[index].kind !== 'plan' && timelineEvents[index].kind !== 'kanban') {
         return index
       }
     }
     return -1
-  }, [events])
+  }, [timelineEvents])
 
   return (
     <>
@@ -180,7 +182,7 @@ export function AgentTimelinePane({
                     </div>
                   </div>
                 </div>
-              ) : events.map((event, index) => {
+              ) : timelineEvents.map((event, index) => {
                 if (event.kind === 'plan' || event.kind === 'kanban') {
                   return null
                 }

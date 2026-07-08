@@ -35,7 +35,7 @@ services:
     restart: "no"
 
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully

@@ -180,4 +180,5 @@ describe('collapseDetailedStatusRuns', () => {
 
     expect(result).toEqual([])
   })
+
 })

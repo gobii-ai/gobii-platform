@@ -13,8 +13,8 @@
       },
       "planning_first_run": {
         "fitted_tokens": 3379,
-        "system_bytes": 30850,
-        "tools_bytes": 11760,
+        "system_bytes": 32000,
+        "tools_bytes": 12000,
         "total_bytes": 57450,
         "user_bytes": 15600
       },
@@ -149,6 +149,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 246850
+    "limit": 248000
   }
 }

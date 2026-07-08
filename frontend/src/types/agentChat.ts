@@ -106,6 +106,14 @@ export type ProcessingSnapshot = {
   nextScheduledAt?: string | null
 }
 
+export type CreditForecast = {
+  perRunCredits: number | null
+  dailyCredits: number | null
+  monthlyCredits: number | null
+  warningLevel: 'none' | 'medium' | 'high'
+  estimatedAt?: string | null
+}
+
 export type AgentMessageNotificationWorkspace = {
   type: 'personal' | 'organization'
   id: string
@@ -283,7 +291,12 @@ export type HistoricalPlanCompatEvent = Omit<PlanEvent, 'kind'> & {
   changes: Array<Omit<PlanStepChange, 'stepId'> & { cardId: string; stepId?: string }>
 }
 
-export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent | PlanEvent | HistoricalPlanCompatEvent
+export type TimelineEvent =
+  | MessageEvent
+  | ToolClusterEvent
+  | ThinkingEvent
+  | PlanEvent
+  | HistoricalPlanCompatEvent
 
 export type AgentTimelineSnapshot = {
   events: TimelineEvent[]

@@ -31,11 +31,39 @@ def _too_frequent_message(min_interval_minutes: int) -> str:
     return f"Schedule is too frequent. Minimum interval is {min_minutes} minutes."
 
 
-def _normalize_schedule(value: str | None) -> str | None:
+def normalize_schedule_value(value: str | None) -> str | None:
     if value is None:
         return None
     trimmed = value.strip()
     return trimmed or None
+
+
+def _normalize_schedule(value: str | None) -> str | None:
+    return normalize_schedule_value(value)
+
+
+def validate_schedule_for_agent(agent, new_schedule: str | None) -> None:
+    if new_schedule:
+        schedule_obj = ScheduleParser.parse(new_schedule)
+        min_interval_minutes = _min_interval_minutes_for_agent(agent)
+        min_interval_seconds = (min_interval_minutes or 0) * 60
+
+        if min_interval_minutes:
+            if isinstance(schedule_obj, celery_schedule):
+                interval = schedule_obj.run_every.total_seconds() if hasattr(schedule_obj.run_every, 'total_seconds') else float(schedule_obj.run_every)
+                if interval < min_interval_seconds:
+                    raise ValueError(_too_frequent_message(min_interval_minutes))
+
+            elif isinstance(schedule_obj, crontab):
+                if not _cron_satisfies_min_interval(schedule_obj, min_interval_seconds):
+                    raise ValueError(_too_frequent_message(min_interval_minutes))
+
+    original_schedule = agent.schedule
+    agent.schedule = new_schedule
+    try:
+        agent.clean()
+    finally:
+        agent.schedule = original_schedule
 
 
 def _planning_mode_schedule_message() -> str:
@@ -105,25 +133,8 @@ def execute_update_schedule(agent, params: dict) -> dict:
         return {"status": "error", "message": _planning_mode_schedule_message()}
 
     try:
-        if new_schedule_str:
-            schedule_obj = ScheduleParser.parse(new_schedule_str)
-            min_interval_minutes = _min_interval_minutes_for_agent(agent)
-            min_interval_seconds = (min_interval_minutes or 0) * 60
-
-            # Validate schedule frequency
-            if min_interval_minutes:
-                if isinstance(schedule_obj, celery_schedule):
-                    interval = schedule_obj.run_every.total_seconds() if hasattr(schedule_obj.run_every, 'total_seconds') else float(schedule_obj.run_every)
-                    if interval < min_interval_seconds:
-                        raise ValueError(_too_frequent_message(min_interval_minutes))
-
-                elif isinstance(schedule_obj, crontab):
-                    if not _cron_satisfies_min_interval(schedule_obj, min_interval_seconds):
-                        raise ValueError(_too_frequent_message(min_interval_minutes))
-
+        validate_schedule_for_agent(agent, new_schedule_str)
         agent.schedule = new_schedule_str
-        # Only validate the schedule field using the model's custom clean method
-        agent.clean()  # This only validates the schedule field
         agent.save(update_fields=['schedule'])
         if new_schedule_str:
             return {

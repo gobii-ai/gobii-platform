@@ -19,7 +19,16 @@ vi.mock('./AgentComposer', () => ({
 }))
 
 vi.mock('./TimelineEventItem', () => ({
-  TimelineEventItem: ({ event, onMessageLinkClick }: { event?: { messageLinkHref?: string | null }, onMessageLinkClick?: (href: string) => boolean | void }) => {
+  TimelineEventItem: ({
+    event,
+    onMessageLinkClick,
+  }: {
+    event?: {
+      kind?: string
+      messageLinkHref?: string | null
+    }
+    onMessageLinkClick?: (href: string) => boolean | void
+  }) => {
     const href = event?.messageLinkHref
     if (!href) {
       return null
@@ -742,6 +751,71 @@ describe('AgentChatLayout upgrade modal gating', () => {
     expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
     expect(screen.getByText('Deliver report')).toBeInTheDocument()
     expect(screen.getByText('Research sources')).toBeInTheDocument()
+  })
+
+  it('opens the desktop plan panel when planning completes', () => {
+    const { rerender } = renderAgentChatLayout({
+      agentId: 'agent-1',
+      planningState: 'planning',
+      planSnapshot: initialPlan,
+      creditForecast: {
+        perRunCredits: 5,
+        dailyCredits: 0,
+        monthlyCredits: 0,
+        warningLevel: 'none',
+        estimatedAt: '2026-07-07T18:00:00Z',
+      },
+    })
+
+    fireEvent.click(screen.getByTestId('banner-plan-button'))
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'hidden')
+
+    rerender(
+      <AgentChatLayout
+        agentId="agent-1"
+        agentFirstName="Agent"
+        agentName="Agent"
+        events={[]}
+        planningState="completed"
+        planSnapshot={initialPlan}
+        creditForecast={{
+          perRunCredits: 5,
+          dailyCredits: 0,
+          monthlyCredits: 0,
+          warningLevel: 'none',
+          estimatedAt: '2026-07-07T18:00:00Z',
+        }}
+      />,
+    )
+
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
+    expect(screen.getByLabelText('Estimated task credits')).toBeInTheDocument()
+    expect(screen.getByText('5 credits')).toBeInTheDocument()
+    expect(screen.getByText('/ current plan')).toBeInTheDocument()
+  })
+
+  it('opens the mobile plan sheet when planning completes', () => {
+    window.innerWidth = 500
+    const { rerender } = renderAgentChatLayout({
+      agentId: 'agent-1',
+      planningState: 'planning',
+      planSnapshot: initialPlan,
+    })
+
+    expect(screen.queryByTestId('mobile-sheet-Plan')).not.toBeInTheDocument()
+
+    rerender(
+      <AgentChatLayout
+        agentId="agent-1"
+        agentFirstName="Agent"
+        agentName="Agent"
+        events={[]}
+        planningState="completed"
+        planSnapshot={initialPlan}
+      />,
+    )
+
+    expect(screen.getByTestId('mobile-sheet-Plan')).toBeInTheDocument()
   })
 
   it('clears the hidden plan preview when switching agents', () => {
