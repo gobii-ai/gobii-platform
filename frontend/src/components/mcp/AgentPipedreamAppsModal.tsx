@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, FolderOpen, Loader2, Plug, Settings, Unplug } from 'lucide-react'
+import { CheckCircle2, Loader2, Plug, Settings } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
@@ -41,14 +41,12 @@ import {
 } from './PipedreamAppsShared'
 import {
   confirmNativeIntegrationDisconnect,
-  NativeIntegrationFilesDisclosure,
-  NativeProviderIconTile,
+  NativeIntegrationGridRow,
   nativeIntegrationFilesQueryKey,
   nativeOAuthContextPayload,
   openGoogleDrivePicker,
   openNativeOAuthPopup,
   storePendingNativeOAuth,
-  supportsNativeIntegrationPicker,
   usesManualNativeIntegrationCredentials,
   useNativeIntegrationRefreshEffects,
 } from './NativeIntegrationShared'
@@ -407,92 +405,16 @@ function AgentNativeAppRowItem({
 }) {
   const isPending = pendingNativeAction?.providerKey === provider.providerKey
   const pendingKind = isPending ? pendingNativeAction?.kind : null
-  const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
 
   return (
-    <div className="px-4 py-3">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] sm:items-start">
-        <NativeIntegrationSummaryCell provider={provider} />
-        <div>
-          {provider.connected ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-              Connected
-            </span>
-          ) : (
-            <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-              Workspace
-            </span>
-          )}
-        </div>
-        <div className="flex justify-start md:justify-end">
-          {pickerEnabled ? (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-              onClick={onPicker}
-              disabled={disabled}
-            >
-              {pendingKind === 'picker' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <FolderOpen className="h-4 w-4" aria-hidden="true" />
-              )}
-              Select Files
-            </button>
-          ) : null}
-        </div>
-        <div className="flex justify-start md:justify-end">
-          {provider.connected ? (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-              onClick={onDisconnect}
-              disabled={disabled}
-            >
-              {pendingKind === 'disconnect' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Unplug className="h-4 w-4" aria-hidden="true" />
-              )}
-              Disconnect
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-              onClick={onConnect}
-              disabled={disabled}
-            >
-              {pendingKind === 'connect' ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Plug className="h-4 w-4" aria-hidden="true" />
-              )}
-              Connect
-            </button>
-          )}
-        </div>
-      </div>
-      <NativeIntegrationFilesDisclosure provider={provider} />
-    </div>
-  )
-}
-
-function NativeIntegrationSummaryCell({ provider }: { provider: NativeIntegrationProvider }) {
-  return (
-    <div className="flex min-w-0 items-center gap-3">
-      <NativeProviderIconTile provider={provider} />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-semibold text-slate-900">{provider.displayName}</p>
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-            Native
-          </span>
-        </div>
-        {provider.description ? <p className="mt-1 line-clamp-2 text-sm text-slate-600">{provider.description}</p> : null}
-      </div>
-    </div>
+    <NativeIntegrationGridRow
+      provider={provider}
+      pendingKind={pendingKind}
+      disabled={disabled}
+      onConnect={onConnect}
+      onDisconnect={onDisconnect}
+      onPicker={onPicker}
+    />
   )
 }
 

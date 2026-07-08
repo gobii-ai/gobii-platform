@@ -63,6 +63,131 @@ type DraftState = {
   pollIntervalSec: string
 }
 
+type DraftUpdater = (updater: (current: DraftState) => DraftState) => void
+type DraftTextField = {
+  field: keyof DraftState
+  label: string
+  type?: 'text' | 'number' | 'password'
+  min?: number
+  placeholder?: string
+  helpText?: string | false
+  password?: boolean
+}
+type DraftSelectField = {
+  field: keyof DraftState
+  label: string
+  options: Array<{ value: string; label: string }>
+}
+
+const embeddedInputClassName = 'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm'
+const securityOptions = [
+  { value: 'starttls', label: 'STARTTLS' },
+  { value: 'ssl', label: 'SSL' },
+  { value: 'none', label: 'None' },
+]
+const smtpAuthOptions = [
+  { value: 'login', label: 'LOGIN' },
+  { value: 'plain', label: 'PLAIN' },
+  { value: 'oauth2', label: 'OAuth 2.0' },
+  { value: 'none', label: 'None' },
+]
+const imapAuthOptions = [
+  { value: 'login', label: 'LOGIN' },
+  { value: 'oauth2', label: 'OAuth 2.0' },
+  { value: 'none', label: 'None' },
+]
+
+function MailTextField({
+  draft,
+  updateDraft,
+  field,
+  label,
+  type = 'text',
+  min,
+  placeholder,
+  helpText,
+  password = false,
+}: DraftTextField & {
+  draft: DraftState
+  updateDraft: DraftUpdater
+}) {
+  return (
+    <div>
+      <label className="text-sm font-semibold text-slate-700">{label}</label>
+      <input
+        type={type}
+        min={min}
+        value={String(draft[field])}
+        onChange={(event) => {
+          const value = event.currentTarget.value
+          updateDraft((current) => ({ ...current, [field]: value }))
+        }}
+        autoComplete={password ? 'new-password' : undefined}
+        autoCorrect={password ? 'off' : undefined}
+        autoCapitalize={password ? 'none' : undefined}
+        spellCheck={password ? false : undefined}
+        className={embeddedInputClassName}
+        placeholder={placeholder}
+      />
+      {helpText ? <p className="mt-1 text-xs text-slate-600">{helpText}</p> : null}
+    </div>
+  )
+}
+
+function MailSelectField({
+  draft,
+  updateDraft,
+  field,
+  label,
+  options,
+}: DraftSelectField & {
+  draft: DraftState
+  updateDraft: DraftUpdater
+}) {
+  return (
+    <div>
+      <label className="text-sm font-semibold text-slate-700">{label}</label>
+      <select
+        value={String(draft[field])}
+        onChange={(event) => {
+          const value = event.currentTarget.value
+          updateDraft((current) => ({ ...current, [field]: value }))
+        }}
+        className={embeddedInputClassName}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function MailManualSection({
+  title,
+  textFields,
+  selectFields,
+  draft,
+  updateDraft,
+}: {
+  title: string
+  textFields: DraftTextField[]
+  selectFields: DraftSelectField[]
+  draft: DraftState
+  updateDraft: DraftUpdater
+}) {
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+      <div className="mt-2 grid gap-4 sm:grid-cols-2">
+        {textFields.slice(0, 2).map((field) => <MailTextField key={String(field.field)} {...field} draft={draft} updateDraft={updateDraft} />)}
+        {selectFields.map((field) => <MailSelectField key={String(field.field)} {...field} draft={draft} updateDraft={updateDraft} />)}
+        {textFields.slice(2).map((field) => <MailTextField key={String(field.field)} {...field} draft={draft} updateDraft={updateDraft} />)}
+      </div>
+    </div>
+  )
+}
+
 function randomString(length: number): string {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~'
   const values = new Uint8Array(length)
@@ -644,6 +769,41 @@ export function AgentEmailSettingsScreen({
     )
   }
 
+  const smtpPasswordPlaceholder = hasSavedSmtpPassword && !draft.smtpPassword
+    ? 'Saved password on file. Enter new value to replace.'
+    : 'App password or account password'
+  const imapPasswordPlaceholder = hasSavedImapPassword && !draft.imapPassword
+    ? 'Saved password on file. Enter new value to replace.'
+    : 'App password or account password'
+  const smtpTextFields: DraftTextField[] = [
+    { field: 'smtpHost', label: 'SMTP Host' },
+    { field: 'smtpPort', label: 'SMTP Port', type: 'number' },
+    { field: 'smtpUsername', label: 'SMTP Username' },
+    {
+      field: 'smtpPassword',
+      label: 'SMTP Password',
+      type: 'password',
+      password: true,
+      placeholder: smtpPasswordPlaceholder,
+      helpText: hasSavedSmtpPassword && 'Password is already stored. Leave blank to keep it.',
+    },
+  ]
+  const imapTextFields: DraftTextField[] = [
+    { field: 'imapHost', label: 'IMAP Host' },
+    { field: 'imapPort', label: 'IMAP Port', type: 'number' },
+    { field: 'imapUsername', label: 'IMAP Username' },
+    {
+      field: 'imapPassword',
+      label: 'IMAP Password',
+      type: 'password',
+      password: true,
+      placeholder: imapPasswordPlaceholder,
+      helpText: hasSavedImapPassword && 'Password is already stored. Leave blank to keep it.',
+    },
+    { field: 'imapFolder', label: 'IMAP Folder' },
+    { field: 'pollIntervalSec', label: 'Poll Interval (sec)', type: 'number', min: 30 },
+  ]
+
   return (
     <div className="space-y-5">
       <SettingsBanner
@@ -899,223 +1059,31 @@ export function AgentEmailSettingsScreen({
             {hasMailDirection && hasProvider && draft.connectionType === 'manual' && (
               <div className="space-y-4">
                 {draft.isOutboundEnabled && (
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-900">Outbound SMTP</h3>
-                    <div className="mt-2 grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">SMTP Host</label>
-                        <input
-                          type="text"
-                          value={draft.smtpHost}
-                          onChange={(event) => {
-                            const smtpHost = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, smtpHost }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">SMTP Port</label>
-                        <input
-                          type="number"
-                          value={draft.smtpPort}
-                          onChange={(event) => {
-                            const smtpPort = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, smtpPort }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">SMTP Security</label>
-                        <select
-                          value={draft.smtpSecurity}
-                          onChange={(event) => {
-                            const smtpSecurity = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, smtpSecurity }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        >
-                          <option value="starttls">STARTTLS</option>
-                          <option value="ssl">SSL</option>
-                          <option value="none">None</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">SMTP Auth Mode</label>
-                        <select
-                          value={draft.smtpAuth}
-                          onChange={(event) => {
-                            const smtpAuth = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, smtpAuth }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        >
-                          <option value="login">LOGIN</option>
-                          <option value="plain">PLAIN</option>
-                          <option value="oauth2">OAuth 2.0</option>
-                          <option value="none">None</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">SMTP Username</label>
-                        <input
-                          type="text"
-                          value={draft.smtpUsername}
-                          onChange={(event) => {
-                            const smtpUsername = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, smtpUsername }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">SMTP Password</label>
-                        <input
-                          type="password"
-                          value={draft.smtpPassword}
-                          onChange={(event) => {
-                            const smtpPassword = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, smtpPassword }))
-                          }}
-                          autoComplete="new-password"
-                          autoCorrect="off"
-                          autoCapitalize="none"
-                          spellCheck={false}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                          placeholder={
-                            hasSavedSmtpPassword && !draft.smtpPassword
-                              ? 'Saved password on file. Enter new value to replace.'
-                              : 'App password or account password'
-                          }
-                        />
-                        {hasSavedSmtpPassword && (
-                          <p className="mt-1 text-xs text-slate-600">Password is already stored. Leave blank to keep it.</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <MailManualSection
+                    title="Outbound SMTP"
+                    textFields={smtpTextFields}
+                    selectFields={[
+                      { field: 'smtpSecurity', label: 'SMTP Security', options: securityOptions },
+                      { field: 'smtpAuth', label: 'SMTP Auth Mode', options: smtpAuthOptions },
+                    ]}
+                    draft={draft}
+                    updateDraft={updateDraft}
+                  />
                 )}
 
                 {draft.isInboundEnabled && (
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-900">Inbound IMAP</h3>
-                    <div className="mt-2 grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">IMAP Host</label>
-                        <input
-                          type="text"
-                          value={draft.imapHost}
-                          onChange={(event) => {
-                            const imapHost = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, imapHost }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">IMAP Port</label>
-                        <input
-                          type="number"
-                          value={draft.imapPort}
-                          onChange={(event) => {
-                            const imapPort = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, imapPort }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">IMAP Security</label>
-                        <select
-                          value={draft.imapSecurity}
-                          onChange={(event) => {
-                            const imapSecurity = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, imapSecurity }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        >
-                          <option value="ssl">SSL</option>
-                          <option value="starttls">STARTTLS</option>
-                          <option value="none">None</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">IMAP Auth Mode</label>
-                        <select
-                          value={draft.imapAuth}
-                          onChange={(event) => {
-                            const imapAuth = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, imapAuth }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        >
-                          <option value="login">LOGIN</option>
-                          <option value="oauth2">OAuth 2.0</option>
-                          <option value="none">None</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">IMAP Username</label>
-                        <input
-                          type="text"
-                          value={draft.imapUsername}
-                          onChange={(event) => {
-                            const imapUsername = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, imapUsername }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">IMAP Password</label>
-                        <input
-                          type="password"
-                          value={draft.imapPassword}
-                          onChange={(event) => {
-                            const imapPassword = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, imapPassword }))
-                          }}
-                          autoComplete="new-password"
-                          autoCorrect="off"
-                          autoCapitalize="none"
-                          spellCheck={false}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                          placeholder={
-                            hasSavedImapPassword && !draft.imapPassword
-                              ? 'Saved password on file. Enter new value to replace.'
-                              : 'App password or account password'
-                          }
-                        />
-                        {hasSavedImapPassword && (
-                          <p className="mt-1 text-xs text-slate-600">Password is already stored. Leave blank to keep it.</p>
-                        )}
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">IMAP Folder</label>
-                        <input
-                          type="text"
-                          value={draft.imapFolder}
-                          onChange={(event) => {
-                            const imapFolder = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, imapFolder }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm font-semibold text-slate-700">Poll Interval (sec)</label>
-                        <input
-                          type="number"
-                          min={30}
-                          value={draft.pollIntervalSec}
-                          onChange={(event) => {
-                            const pollIntervalSec = event.currentTarget.value
-                            updateDraft((current) => ({ ...current, pollIntervalSec }))
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
+                    <MailManualSection
+                      title="Inbound IMAP"
+                      textFields={imapTextFields}
+                      selectFields={[
+                        { field: 'imapSecurity', label: 'IMAP Security', options: securityOptions },
+                        { field: 'imapAuth', label: 'IMAP Auth Mode', options: imapAuthOptions },
+                      ]}
+                      draft={draft}
+                      updateDraft={updateDraft}
+                    />
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
                       <label className="sm:col-span-2 rounded-lg border border-blue-300/30 bg-blue-950/20 px-3 py-2 text-sm text-slate-100">
                         <input
                           type="checkbox"

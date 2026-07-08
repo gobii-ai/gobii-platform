@@ -27,6 +27,7 @@ import {
   type OrganizationTemplateEditorPayload,
 } from '../api/organization'
 import { HttpError } from '../api/http'
+import { apiErrorMessages } from '../api/safeErrorMessage'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
@@ -62,24 +63,6 @@ function formatDate(value: string | null): string {
   if (!value) return '-'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : dateFormatter.format(date)
-}
-
-function formatErrors(error: unknown, fallback: string): string[] {
-  if (error instanceof HttpError && typeof error.body === 'object' && error.body) {
-    const body = error.body as Record<string, unknown>
-    if (body.errors && typeof body.errors === 'object') {
-      return Object.values(body.errors as Record<string, unknown>).flatMap((messages) => (
-        Array.isArray(messages) ? messages.map(String) : [String(messages)]
-      ))
-    }
-    if (body.error) {
-      return [String(body.error)]
-    }
-  }
-  if (error instanceof Error) {
-    return [error.message]
-  }
-  return [fallback]
 }
 
 function resolveTemplateDefaultTier(config?: LlmIntelligenceConfig | null): IntelligenceTierKey {
@@ -156,7 +139,7 @@ function ConfirmOrganizationActionModal({ action, onClose, onConfirm }: ConfirmO
       await onConfirm(action)
       onClose()
     } catch (err) {
-      setError(formatErrors(err, 'Unable to update team membership.')[0] ?? 'Unable to update team membership.')
+      setError(apiErrorMessages(err, 'Unable to update team membership.')[0] ?? 'Unable to update team membership.')
     } finally {
       setBusy(false)
     }
@@ -576,7 +559,7 @@ export function OrganizationScreen() {
       updateCachedData(nextData)
       setNameMessage('Team updated.')
     } catch (err) {
-      setNameErrors(formatErrors(err, 'Unable to update team.'))
+      setNameErrors(apiErrorMessages(err, 'Unable to update team.'))
     } finally {
       setSavingName(false)
     }
@@ -597,7 +580,7 @@ export function OrganizationScreen() {
       updateCachedData(nextData)
       setAgentCreationMessage('Agent creation setting updated.')
     } catch (err) {
-      setAgentCreationErrors(formatErrors(err, 'Unable to update agent creation setting.'))
+      setAgentCreationErrors(apiErrorMessages(err, 'Unable to update agent creation setting.'))
     } finally {
       setSavingAgentCreation(false)
     }
@@ -614,7 +597,7 @@ export function OrganizationScreen() {
       setInviteEmail('')
       setAddMemberOpen(false)
     } catch (err) {
-      setInviteErrors(formatErrors(err, 'Unable to send invite.'))
+      setInviteErrors(apiErrorMessages(err, 'Unable to send invite.'))
     } finally {
       setInviting(false)
     }
@@ -629,7 +612,7 @@ export function OrganizationScreen() {
       updateCachedData(nextData)
       setInviteMessage(`Invitation resent to ${invite.email}.`)
     } catch (err) {
-      setMemberError(formatErrors(err, 'Unable to resend invite.')[0] ?? 'Unable to resend invite.')
+      setMemberError(apiErrorMessages(err, 'Unable to resend invite.')[0] ?? 'Unable to resend invite.')
     } finally {
       setInviteBusyToken(null)
     }
@@ -642,7 +625,7 @@ export function OrganizationScreen() {
       const nextData = await updateOrganizationMemberRole(member.userId, role)
       updateCachedData(nextData)
     } catch (err) {
-      setMemberError(formatErrors(err, 'Unable to update member role.')[0] ?? 'Unable to update member role.')
+      setMemberError(apiErrorMessages(err, 'Unable to update member role.')[0] ?? 'Unable to update member role.')
     } finally {
       setMemberBusyId(null)
     }
@@ -679,7 +662,7 @@ export function OrganizationScreen() {
       setCreateTemplateOpen(false)
       setTemplateMessage(nextData.created ? 'Template created.' : 'Template already exists for that agent.')
     } catch (err) {
-      setTemplateErrors(formatErrors(err, 'Unable to create template.'))
+      setTemplateErrors(apiErrorMessages(err, 'Unable to create template.'))
     } finally {
       setTemplateBusy(false)
     }
@@ -742,7 +725,7 @@ export function OrganizationScreen() {
       setTemplateEditorDraft(buildBlankTemplateDraft(templateData?.llmIntelligence ?? null))
       setTemplateMessage(templateEditorMode === 'edit' ? 'Template saved.' : 'Template created.')
     } catch (err) {
-      setTemplateErrors(formatErrors(err, 'Unable to save template.'))
+      setTemplateErrors(apiErrorMessages(err, 'Unable to save template.'))
     } finally {
       setTemplateBusy(false)
     }
@@ -764,7 +747,7 @@ export function OrganizationScreen() {
       setCreateOrganizationName('')
       refreshOrganizationQueries()
     } catch (err) {
-      setCreateOrganizationErrors(formatErrors(err, 'Unable to create team.'))
+      setCreateOrganizationErrors(apiErrorMessages(err, 'Unable to create team.'))
     } finally {
       setCreatingOrganization(false)
     }
@@ -780,7 +763,7 @@ export function OrganizationScreen() {
         window.location.assign(payload.redirectUrl)
       }
     } catch (err) {
-      setTemplateErrors(formatErrors(err, 'Unable to use template.'))
+      setTemplateErrors(apiErrorMessages(err, 'Unable to use template.'))
     } finally {
       setTemplateLaunchBusyId(null)
     }
@@ -848,7 +831,7 @@ export function OrganizationScreen() {
       <SettingsBanner
         variant="embedded"
         title="Team Unavailable"
-        subtitle={formatErrors(error, 'Switch to a team context to manage team settings.')[0]}
+        subtitle={apiErrorMessages(error, 'Switch to a team context to manage team settings.')[0]}
       />
     )
   }
@@ -866,7 +849,7 @@ export function OrganizationScreen() {
   const sourceAgents = templateData?.sourceAgents ?? []
   const canManageTemplates = Boolean(templateData?.viewer.canManageTemplates)
   const templateQueryErrorMessage = templateQueryError
-    ? formatErrors(templateQueryError, 'Unable to load team templates.')[0]
+    ? apiErrorMessages(templateQueryError, 'Unable to load team templates.')[0]
     : null
 
   return (
@@ -1217,7 +1200,7 @@ export function OrganizationScreen() {
         placeholder="Follow the team's tone, policies, and operating preferences."
         successMessage="Custom instructions updated."
         onSave={handleCustomInstructionsSave}
-        formatErrorMessages={(err) => formatErrors(err, 'Unable to update custom instructions.')}
+        formatErrorMessages={(err) => apiErrorMessages(err, 'Unable to update custom instructions.')}
       />
 
       {confirmAction ? (
