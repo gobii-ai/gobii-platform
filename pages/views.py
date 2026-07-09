@@ -124,7 +124,7 @@ from .public_template_urls import (
 )
 from .comparisons import COMPARISON_CATALOG, COMPARISON_STATUS_PUBLISHED, get_comparison, get_published_comparisons
 from .forms import MarketingContactForm
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY
+from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY, stage_agent_template_session
 from console.views import build_llm_intelligence_props
 from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
@@ -1654,28 +1654,13 @@ def _get_pretrained_worker_template_or_404(code: str | None):
     return template
 
 
-def _template_preferred_llm_tier_key(template) -> str | None:
-    preferred_llm_tier = getattr(template, "preferred_llm_tier", None)
-    tier_key = getattr(preferred_llm_tier, "key", preferred_llm_tier)
-    tier_key = str(tier_key or "").strip().lower()
-    return tier_key or None
-
-
-def _seed_template_preferred_llm_tier(request, template) -> None:
-    tier_key = _template_preferred_llm_tier_key(template)
-    if tier_key:
-        request.session[PREFERRED_LLM_TIER_SESSION_KEY] = tier_key
-    else:
-        request.session.pop(PREFERRED_LLM_TIER_SESSION_KEY, None)
-
-
 def _seed_pretrained_worker_session(request, template) -> None:
-    request.session["agent_charter"] = template.charter
-    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER
-    request.session["agent_charter_source"] = "template"
-    _seed_template_preferred_llm_tier(request, template)
-    request.session.modified = True
+    stage_agent_template_session(
+        request,
+        template,
+        template_source=AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+        include_charter=True,
+    )
 
 
 def _template_launch_analytics_properties(request, template, *, default_source_page: str) -> dict:
@@ -2069,11 +2054,12 @@ def _resolve_public_template_for_route(
 
 
 def _seed_public_template_session(request, template: PersistentAgentTemplate) -> str | None:
-    request.session["agent_charter"] = template.charter
-    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE
-    request.session["agent_charter_source"] = "template"
-    _seed_template_preferred_llm_tier(request, template)
+    stage_agent_template_session(
+        request,
+        template,
+        template_source=AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE,
+        include_charter=True,
+    )
 
     # Template launches are referral attribution, so choosing one supersedes
     # any direct referral code already staged for signup.

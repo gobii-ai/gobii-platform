@@ -279,7 +279,7 @@ class NewAgentTemplateRecommendationTests(TestCase):
 
         self.assertEqual(payload["source"], "fallback")
         self.assertEqual(
-            [template["templateSlug"] for template in payload["templates"]],
+            [template["templateCode"] for template in payload["templates"]],
             ["talent-scout", "candidate-researcher", "lead-hunter"],
         )
         mock_get_configs.assert_not_called()
@@ -303,7 +303,7 @@ class NewAgentTemplateRecommendationTests(TestCase):
         self.assertEqual(payload["category"], "People")
         self.assertEqual(payload["categories"], ["People"])
         self.assertEqual(
-            [template["templateSlug"] for template in payload["templates"]],
+            [template["templateCode"] for template in payload["templates"]],
             ["people-mid", "people-high", "people-low"],
         )
         state = AgentOwnerTemplateRecommendationState.objects.get(user=self.user)
@@ -326,7 +326,7 @@ class NewAgentTemplateRecommendationTests(TestCase):
 
         self.assertEqual(payload["categories"], ["People", "Revenue", "Operations"])
         self.assertEqual(
-            [template["templateSlug"] for template in payload["templates"]],
+            [template["templateCode"] for template in payload["templates"]],
             ["people-first", "revenue-first", "operations-first"],
         )
 
@@ -439,7 +439,7 @@ class NewAgentTemplateRecommendationTests(TestCase):
 
         payload = build_new_agent_template_recommendations(self.user, self._personal_context())
 
-        self.assertEqual([template["templateSlug"] for template in payload["templates"]], ["people-active"])
+        self.assertEqual([template["templateCode"] for template in payload["templates"]], ["people-active"])
 
     @tag("batch_public_templates")
     @patch("console.api_views.build_new_agent_template_recommendations")
@@ -455,12 +455,9 @@ class NewAgentTemplateRecommendationTests(TestCase):
                     "tagline": "Find candidates.",
                     "description": "Find candidates.",
                     "category": "People",
-                    "categorySlug": "people",
                     "templateId": "template-1",
                     "templateCode": "talent-scout",
-                    "templateSlug": "talent-scout",
                     "templateSource": "public",
-                    "templateUrl": "/library/people/talent-scout/",
                     "likeCount": 3,
                     "isOfficial": True,
                 }

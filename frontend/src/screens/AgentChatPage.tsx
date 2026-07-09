@@ -2698,7 +2698,7 @@ export function AgentChatPage({
         [],
         [],
         {
-          templateCode: template.templateCode || template.templateSlug,
+          templateCode: template.templateCode,
           templateId: template.templateId || template.id,
           templateSource: template.templateSource || 'public',
         },

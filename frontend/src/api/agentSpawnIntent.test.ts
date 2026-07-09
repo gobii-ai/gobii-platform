@@ -32,12 +32,9 @@ describe('fetchAgentSpawnIntent', () => {
                 tagline: 'Find candidates.',
                 description: 'Find candidates.',
                 category: 'People',
-                categorySlug: 'people',
                 templateCode: 'talent-scout',
                 templateId: 'template-1',
-                templateSlug: 'talent-scout',
                 templateSource: 'public',
-                templateUrl: '/library/people/talent-scout/',
                 likeCount: 3,
                 isOfficial: true,
               },
@@ -58,6 +55,5 @@ describe('fetchAgentSpawnIntent', () => {
     expect(payload.template_recommendations?.categories).toEqual(['People', 'Revenue'])
     expect(payload.template_recommendations?.templates[0]?.templateCode).toBe('talent-scout')
     expect(payload.template_recommendations?.templates[0]?.templateSource).toBe('public')
-    expect(payload.template_recommendations?.templates[0]?.templateUrl).toBe('/library/people/talent-scout/')
   })
 })

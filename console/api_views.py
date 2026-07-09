@@ -222,6 +222,7 @@ from console.agent_creation import (
     AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE,
     AGENT_TEMPLATE_SOURCE_SESSION_KEY,
     enable_agent_sms_contact,
+    stage_agent_template_session,
 )
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
@@ -886,25 +887,6 @@ def _resolve_quick_create_template(
         template, error = _resolve_quick_create_organization_template(request, template_id=template_id)
         return template, normalized_source, error
     return None, normalized_source, JsonResponse({"error": "Invalid template source."}, status=400)
-
-
-def _stage_quick_create_public_template(request: HttpRequest, template: PersistentAgentTemplate) -> None:
-    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE
-    request.session["agent_charter_source"] = "template"
-    request.session.pop(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, None)
-    request.session.modified = True
-
-
-def _stage_quick_create_organization_template(request: HttpRequest, template: PersistentAgentTemplate) -> None:
-    request.session["context_type"] = "organization"
-    request.session["context_id"] = str(template.organization_id)
-    request.session["context_name"] = template.organization.name
-    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
-    request.session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(template.organization_id)
-    request.session["agent_charter_source"] = "template"
-    request.session.modified = True
 
 
 def _path_meta(path: str | None) -> tuple[str | None, str | None]:
@@ -3367,9 +3349,18 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             preferred_contact_method = "web"
 
         if template is not None and resolved_template_source == AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE:
-            _stage_quick_create_public_template(request, template)
+            stage_agent_template_session(
+                request,
+                template,
+                template_source=AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE,
+            )
         elif template is not None and resolved_template_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE:
-            _stage_quick_create_organization_template(request, template)
+            stage_agent_template_session(
+                request,
+                template,
+                template_source=AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
+                organization=template.organization,
+            )
 
         try:
             result = create_persistent_agent_from_charter(

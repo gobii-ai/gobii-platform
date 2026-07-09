@@ -6,12 +6,9 @@ export type TemplateRecommendation = {
   tagline: string
   description: string
   category: string
-  categorySlug: string
   templateCode: string
   templateId: string
-  templateSlug: string
   templateSource: 'organization' | 'public'
-  templateUrl: string
   likeCount: number
   isOfficial: boolean
 }

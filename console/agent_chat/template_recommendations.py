@@ -8,17 +8,11 @@ from django.core.cache import cache
 from django.db.models import Case, CharField, Count, F, Max, Q, Value, When
 from django.db.models.functions import Lower
 from django.utils import timezone
-from django.utils.text import slugify
 
 from api.agent.core.llm_config import LLMNotConfiguredError, get_summarization_llm_configs
 from api.agent.core.llm_utils import LiteLLMResponseError, run_completion
 from api.models import AgentOwnerTemplateRecommendationState, PersistentAgent, PersistentAgentTemplate
 from console.context_helpers import ConsoleContextInfo
-from pages.public_template_urls import (
-    public_template_category_slug,
-    public_template_detail_path,
-    public_template_route_slug,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -187,16 +181,7 @@ def _serialize_template(template: PersistentAgentTemplate) -> dict[str, Any]:
         if getattr(template, "organization_id", None)
         else TEMPLATE_SOURCE_PUBLIC
     )
-    if template_source == TEMPLATE_SOURCE_PUBLIC:
-        category_slug = public_template_category_slug(template)
-        template_slug = public_template_route_slug(template)
-        template_url = public_template_detail_path(template)
-        like_count = int(getattr(template, "like_count", 0) or 0)
-    else:
-        category_slug = slugify(normalized_category) or "uncategorized"
-        template_slug = template.code or str(template.id)
-        template_url = ""
-        like_count = 0
+    like_count = int(getattr(template, "like_count", 0) or 0) if template_source == TEMPLATE_SOURCE_PUBLIC else 0
 
     return {
         "id": str(template.id),
@@ -204,12 +189,9 @@ def _serialize_template(template: PersistentAgentTemplate) -> dict[str, Any]:
         "tagline": template.tagline,
         "description": template.description,
         "category": normalized_category,
-        "categorySlug": category_slug,
         "templateCode": template.code,
         "templateId": str(template.id),
-        "templateSlug": template_slug,
         "templateSource": template_source,
-        "templateUrl": template_url,
         "likeCount": like_count,
         "isOfficial": bool(template.is_official),
     }
@@ -222,37 +204,20 @@ def _annotated_template_queryset():
     )
 
 
-def _annotated_organization_template_queryset(context_info: ConsoleContextInfo):
-    return _active_organization_template_queryset(context_info).annotate(
-        normalized_category=_normalized_category_expression(),
-        like_count=Value(0),
-    )
-
-
 def _serialize_templates(queryset, *, limit: int = RECOMMENDATION_LIMIT) -> list[dict[str, Any]]:
-    templates = list(queryset[:limit])
-    return [_serialize_template(template) for template in templates]
-
-
-def _public_queryset_for_category(category: str):
-    normalized_category = str(category or "").strip()
-    if not normalized_category:
-        return _annotated_template_queryset().none()
-    return (
-        _annotated_template_queryset()
-        .filter(normalized_category__iexact=normalized_category)
-        .order_by("-is_official", "-like_count", "priority", Lower("display_name"), "id")
-    )
-
-
-def _template_identity(card: dict[str, Any]) -> tuple[str, str]:
-    return (str(card.get("templateSource") or TEMPLATE_SOURCE_PUBLIC), str(card.get("id") or ""))
+    return [_serialize_template(template) for template in list(queryset[:limit])]
 
 
 def _append_unique_templates(cards: list[dict[str, Any]], candidates: list[dict[str, Any]]) -> None:
-    existing_ids = {_template_identity(card) for card in cards}
+    existing_ids = {
+        (str(card.get("templateSource") or TEMPLATE_SOURCE_PUBLIC), str(card.get("id") or ""))
+        for card in cards
+    }
     for candidate in candidates:
-        identity = _template_identity(candidate)
+        identity = (
+            str(candidate.get("templateSource") or TEMPLATE_SOURCE_PUBLIC),
+            str(candidate.get("id") or ""),
+        )
         if identity in existing_ids:
             continue
         cards.append(candidate)
@@ -262,10 +227,16 @@ def _append_unique_templates(cards: list[dict[str, Any]], candidates: list[dict[
 
 
 def _templates_for_categories(categories: list[str]) -> list[dict[str, Any]]:
-    buckets = [
-        _serialize_templates(_public_queryset_for_category(category))
-        for category in _dedupe_categories(categories)
-    ]
+    queryset = _annotated_template_queryset().order_by(
+        "-is_official",
+        "-like_count",
+        "priority",
+        Lower("display_name"),
+        "id",
+    )
+    buckets = []
+    for category in _dedupe_categories(categories):
+        buckets.append(_serialize_templates(queryset.filter(normalized_category__iexact=category)))
     cards: list[dict[str, Any]] = []
     for index in range(RECOMMENDATION_LIMIT):
         for bucket in buckets:
@@ -277,12 +248,11 @@ def _templates_for_categories(categories: list[str]) -> list[dict[str, Any]]:
 
 
 def _organization_recommendations(context_info: ConsoleContextInfo) -> list[dict[str, Any]]:
-    queryset = _annotated_organization_template_queryset(context_info).order_by(
-        "priority",
-        Lower("display_name"),
-        "id",
+    return _serialize_templates(
+        _active_organization_template_queryset(context_info)
+        .annotate(normalized_category=_normalized_category_expression())
+        .order_by("priority", Lower("display_name"), "id")
     )
-    return _serialize_templates(queryset)
 
 
 def _fallback_recommendations() -> list[dict[str, Any]]:
@@ -373,21 +343,7 @@ def _extract_categories_from_response(response: Any) -> list[str]:
             return _dedupe_categories(categories)
         return _dedupe_categories([payload.get("category")])
 
-    content = getattr(message, "content", "") if message is not None else ""
-    if isinstance(message, dict):
-        content = message.get("content", "")
-    try:
-        payload = json.loads(content or "{}")
-    except (TypeError, json.JSONDecodeError):
-        return _dedupe_categories([content])
-    if isinstance(payload, dict):
-        categories = payload.get("categories")
-        if isinstance(categories, list):
-            return _dedupe_categories(categories)
-        return _dedupe_categories([payload.get("category")])
-    if isinstance(payload, list):
-        return _dedupe_categories(payload)
-    return _dedupe_categories([content])
+    return []
 
 
 def _classify_categories(charters: list[str], categories: list[str]) -> list[str]:
