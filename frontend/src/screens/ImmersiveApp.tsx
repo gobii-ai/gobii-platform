@@ -589,6 +589,19 @@ function CommandCenter({ hasAgents, isLoading, onCreateAgent }: CommandCenterPro
   )
 }
 
+function CommandCenterShell({ onCreateAgent }: { onCreateAgent: () => void }) {
+  const rosterQuery = useAgentRoster()
+  const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
+
+  return (
+    <CommandCenter
+      hasAgents={hasAgents}
+      isLoading={rosterQuery.isLoading}
+      onCreateAgent={onCreateAgent}
+    />
+  )
+}
+
 function NotFound() {
   return (
     <section className="immersive-command">
@@ -685,15 +698,12 @@ export function ImmersiveApp({
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
   const [selectionRefreshKey, setSelectionRefreshKey] = useState(0)
   const hasSkippedInitialSegmentPage = useRef(false)
-  const rosterQuery = useAgentRoster()
   const dispatch = useAppDispatch()
   const {
     isUpgradeModalOpen,
     upgradeModalSource,
     isProprietaryMode,
   } = useAppSelector(selectSubscriptionState)
-  const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
-
   useEffect(() => {
     setReturnTo(resolveReturnTo(location.search))
   }, [location.search])
@@ -955,11 +965,7 @@ export function ImmersiveApp({
           />
         ) : null}
         {route.kind === 'command-center' ? (
-          <CommandCenter
-            hasAgents={hasAgents}
-            isLoading={rosterQuery.isLoading}
-            onCreateAgent={handleNavigateToNewAgent}
-          />
+          <CommandCenterShell onCreateAgent={handleNavigateToNewAgent} />
         ) : null}
         {route.kind === 'not-found' ? <NotFound /> : null}
       </div>

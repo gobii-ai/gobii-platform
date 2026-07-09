@@ -35,13 +35,19 @@ export type UsageGaugeMetadata = {
   unlimited: boolean
 }
 
-export type AgentSetupPanel = 'always_on' | 'sms' | 'upsell_pro' | 'upsell_scale'
+export type AgentSetupPanel = 'always_on' | 'email' | 'sms' | 'upsell_pro' | 'upsell_scale'
 
 export type AgentSetupPhone = {
   number: string
   isVerified: boolean
   verifiedAt: string | null
   cooldownRemaining: number
+}
+
+export type AgentSetupPhoneRegion = {
+  region: string
+  name: string
+  dialCode: string
 }
 
 export type AgentSetupUpsellItem = {
@@ -69,7 +75,9 @@ export type AgentSetupMetadata = {
     enabled: boolean
     agentNumber?: string | null
     userPhone?: AgentSetupPhone | null
+    pendingUserPhone?: AgentSetupPhone | null
     emailVerified?: boolean
+    supportedPhoneRegions?: AgentSetupPhoneRegion[]
   }
   organization: {
     currentOrg?: { id: string; name: string } | null

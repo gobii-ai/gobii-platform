@@ -351,7 +351,7 @@ export function updateOptimisticEventInCache(
   agentId: string,
   clientId: string,
   status: 'sending' | 'failed',
-  error?: string,
+  error?: string | null,
 ): boolean {
   const key = timelineQueryKey(agentId)
   let found = false
@@ -383,7 +383,7 @@ export function updateOptimisticEventInCache(
         message: {
           ...target.message,
           status,
-          error: error ?? target.message.error ?? null,
+          error: error === undefined ? target.message.error ?? null : error,
         },
       }
       pages[pageIdx] = { ...page, events: nextEvents }

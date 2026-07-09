@@ -39,6 +39,7 @@ type MessageSignature = {
 export type AgentChatIdentityState = {
   agentName: string | null
   agentAvatarUrl: string | null
+  agentMiniDescription: string | null
   agentEmail: string | null
   agentSms: string | null
   auditUrl: string | null
@@ -102,6 +103,7 @@ export type AgentChatSession = {
 type AgentIdentityUpdateInput = {
   agentName?: string | null
   agentAvatarUrl?: string | null
+  agentMiniDescription?: string | null
   agentEmail?: string | null
   agentSms?: string | null
   auditUrl?: string | null
@@ -151,6 +153,7 @@ export function createInitialSession(): AgentChatSession {
     identity: {
       agentName: null,
       agentAvatarUrl: null,
+      agentMiniDescription: null,
       agentEmail: null,
       agentSms: null,
       auditUrl: null,
@@ -229,6 +232,9 @@ function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpd
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentAvatarUrl')) {
     session.identity.agentAvatarUrl = update?.agentAvatarUrl ?? null
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentMiniDescription')) {
+    session.identity.agentMiniDescription = update?.agentMiniDescription ?? null
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentEmail')) {
     session.identity.agentEmail = update?.agentEmail ?? null
@@ -411,7 +417,7 @@ function updateOptimisticStatus(
   events: TimelineEvent[],
   clientId: string,
   status: 'sending' | 'failed',
-  error?: string,
+  error?: string | null,
 ): TimelineEvent[] {
   const index = events.findIndex((event) => event.kind === 'message' && event.message.clientId === clientId)
   if (index < 0 || events[index].kind !== 'message') {
@@ -427,17 +433,22 @@ function updateOptimisticStatus(
     message: {
       ...target.message,
       status,
-      error: error ?? target.message.error ?? null,
+      error: error === undefined ? target.message.error ?? null : error,
     },
   }
   return next
 }
 
-function buildOptimisticMessageEvent(body: string, attachments: File[]): { event: TimelineEvent; clientId: string } {
+function createOptimisticClientId(): string {
   const now = Date.now()
-  const clientId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? `local-${crypto.randomUUID()}`
     : `local-${now}-${Math.random().toString(16).slice(2, 10)}`
+}
+
+function buildOptimisticMessageEvent(body: string, attachments: File[], requestedClientId?: string): { event: TimelineEvent; clientId: string } {
+  const now = Date.now()
+  const clientId = requestedClientId || createOptimisticClientId()
   const cursor = `${now * 1000}:message:${clientId}`
   const attachmentPayload = attachments.map((file, index) => ({
     id: `${clientId}-file-${index}`,
@@ -620,25 +631,33 @@ export const loadAgentSpawnIntent = createAsyncThunk<AgentSpawnIntent, void, { s
 )
 
 export const sendMessage = createAsyncThunk<
-  void,
-  { body: string; attachments?: File[] },
+  { clientId: string } | null,
+  { body: string; attachments?: File[]; clientId?: string; retry?: boolean },
   { state: RootState; extra: { queryClient: QueryClient | null } }
->('chat/sendMessage', async ({ body, attachments = [] }, { dispatch, getState, extra }) => {
+>('chat/sendMessage', async ({ body, attachments = [], clientId: requestedClientId, retry = false }, { dispatch, getState, extra }) => {
   const agentId = getState().chat.activeAgentId
   if (!agentId) {
     throw new Error('Agent not initialized')
   }
   const trimmed = body.trim()
   if (!trimmed && attachments.length === 0) {
-    return
+    return null
   }
 
-  const { event, clientId } = buildOptimisticMessageEvent(trimmed, attachments)
+  const { event, clientId } = buildOptimisticMessageEvent(trimmed, attachments, requestedClientId)
   dispatch(chatActions.messageSendStarted({ agentId }))
-  dispatch(receiveRealtimeEvent(event, agentId))
+  if (retry) {
+    if (extra.queryClient) {
+      updateOptimisticEventInCache(extra.queryClient, agentId, clientId, 'sending', null)
+    }
+    dispatch(chatActions.optimisticMessageRetryStarted({ agentId, clientId }))
+  } else {
+    dispatch(receiveRealtimeEvent(event, agentId))
+  }
   try {
     const serverEvent = await sendAgentMessage(agentId, trimmed, attachments)
     dispatch(receiveRealtimeEvent(serverEvent, agentId))
+    return { clientId }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to send message'
     if (extra.queryClient) {
@@ -841,6 +860,17 @@ const chatSlice = createSlice({
       )
       session.processing.awaitingResponse = false
       session.processing.processingStartedAt = null
+    },
+    optimisticMessageRetryStarted(state, action: PayloadAction<{ agentId: string; clientId: string }>) {
+      const session = ensureSession(state, action.payload.agentId)
+      session.timelineUi.pendingEvents = updateOptimisticStatus(
+        session.timelineUi.pendingEvents,
+        action.payload.clientId,
+        'sending',
+        null,
+      )
+      session.processing.awaitingResponse = true
+      session.processing.processingStartedAt = Date.now()
     },
     realtimeEventReceived(state, action: PayloadAction<{ agentId: string; event: TimelineEvent }>) {
       const session = ensureSession(state, action.payload.agentId)

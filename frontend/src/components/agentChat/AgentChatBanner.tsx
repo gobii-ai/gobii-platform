@@ -1,11 +1,10 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, CreditCard, EllipsisVertical, ListTodo, Mail, MessageSquare, Settings, Share2, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
+import { CreditCard, EllipsisVertical, ListTodo, Settings, Share2, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
 import { selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
-import { selectImmersiveShellConnection } from '../../store/immersiveShellSlice'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { PlanSnapshot } from '../../types/agentChat'
@@ -16,6 +15,7 @@ import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem } from './uiPrimiti
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 
 type AgentChatBannerProps = {
+  agentNameOverride?: string | null
   planSnapshot?: PlanSnapshot | null
   planPanelMode?: 'docked' | 'hidden'
   onPlanOpen?: () => void
@@ -39,20 +39,8 @@ type AgentChatBannerProps = {
   children?: ReactNode
 }
 
-function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; label: string }) {
-  const isConnected = status === 'connected'
-  const isReconnecting = status === 'reconnecting' || status === 'connecting'
-
-  return (
-    <div className="banner-connection" data-status={status}>
-      <span className="banner-connection-dot" data-pulse={isReconnecting ? 'true' : 'false'} />
-      <span className="banner-connection-label">{label}</span>
-      {isConnected && <Check size={10} className="banner-connection-check" strokeWidth={3} />}
-    </div>
-  )
-}
-
 export const AgentChatBanner = memo(function AgentChatBanner({
+  agentNameOverride = null,
   planSnapshot,
   planPanelMode = 'docked',
   onPlanOpen,
@@ -78,20 +66,17 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const dispatch = useAppDispatch()
   const activeSession = useAppSelector(selectActiveChatSession)
   const agentId = useAppSelector(selectActiveChatAgentId)
-  const agentName = activeSession.identity.agentName
+  const agentName = agentNameOverride ?? activeSession.identity.agentName
   const agentAvatarUrl = activeSession.identity.agentAvatarUrl
-  const agentEmail = activeSession.identity.agentEmail
-  const agentSms = activeSession.identity.agentSms
+  const agentMiniDescription = activeSession.identity.agentMiniDescription
   const auditUrl = activeSession.identity.auditUrl
   const isOrgOwned = activeSession.identity.agentIsOrgOwned
   const canManageAgent = activeSession.identity.canManageAgent
   const isCollaborator = activeSession.identity.isCollaborator
   const processingActive = activeSession.processing.processingActive
   const signupPreviewState = activeSession.identity.signupPreviewState
-  const connection = useAppSelector(selectImmersiveShellConnection)
-  const connectionStatus = connection.status
-  const connectionLabel = connection.label
   const trimmedName = agentName?.trim() || 'Agent'
+  const trimmedMiniDescription = agentMiniDescription?.trim() || ''
   const bannerRef = useRef<HTMLDivElement | null>(null)
   const [animate, setAnimate] = useState(false)
   const hasAnimatedRef = useRef(false)
@@ -207,18 +192,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     onSettingsOpen?.()
   }, [onBlockedSettingsClick, onSettingsOpen, settingsDisabled])
 
-  const handlePreviewContactClick = useCallback((channel: 'email' | 'sms') => {
-    if (!previewAnalyticsEnabled) {
-      return
-    }
-    track(AnalyticsEvent.SIGNUP_PREVIEW_CONTACT_CLICKED, {
-      agentId: agentId ?? undefined,
-      signupPreviewState,
-      channel,
-      source: 'banner_contact_link',
-    })
-  }, [agentId, previewAnalyticsEnabled, signupPreviewState])
-
   const handleCloseClick = useCallback(() => {
     if (previewAnalyticsEnabled) {
       track(AnalyticsEvent.SIGNUP_PREVIEW_CLOSED, {
@@ -245,39 +218,16 @@ export const AgentChatBanner = memo(function AgentChatBanner({
           <div className="banner-info">
             <div className="banner-top-row">
               <span className="banner-name">{trimmedName}</span>
-              {(agentEmail || agentSms) ? (
-                <span className="banner-contact-icons">
-                  {agentEmail ? (
-                    <a
-                      href={`mailto:${agentEmail}`}
-                      className="banner-contact-link"
-                      title={agentEmail}
-                      onClick={() => handlePreviewContactClick('email')}
-                    >
-                      <Mail size={12} strokeWidth={2} />
-                      <span className="banner-contact-text">{agentEmail}</span>
-                    </a>
-                  ) : null}
-                  {agentSms ? (
-                    <a
-                      href={`sms:${agentSms}`}
-                      className="banner-contact-link"
-                      title={agentSms}
-                      onClick={() => handlePreviewContactClick('sms')}
-                    >
-                      <MessageSquare size={12} strokeWidth={2} />
-                      <span className="banner-contact-text">{agentSms}</span>
-                    </a>
-                  ) : null}
-                </span>
-              ) : null}
-              <ConnectionBadge status={connectionStatus} label={connectionLabel} />
             </div>
             {hasPlan && currentTask ? (
               <div className={`banner-task ${animate ? 'banner-task--animate' : ''}`}>
                 <span className={`banner-task-dot ${processingActive ? 'banner-task-dot--active' : ''}`} />
                 <span className="banner-task-title">{currentTask}</span>
               </div>
+            ) : trimmedMiniDescription ? (
+              <span className="banner-mini-description" title={trimmedMiniDescription}>
+                {trimmedMiniDescription}
+              </span>
             ) : null}
           </div>
         </div>

@@ -12,7 +12,6 @@ import { AgentChatBanner } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
-import { ProductAnnouncementBell } from './ProductAnnouncementBell'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
 import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
@@ -191,6 +190,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   displayEvents?: SimplifiedTimelineItem[]
   statusExpansionTargets?: StatusExpansionTargets
   agentId?: string | null
+  bannerAgentName?: string | null
   sidebar?: AgentChatLayoutSidebarConfig
   autoFocusComposer?: boolean
   planSnapshot?: PlanSnapshot | null
@@ -237,6 +237,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
     body: string,
     attachments?: File[],
   ) => void | Promise<void>
+  onRetryMessage?: (message: AgentMessage) => void | Promise<void>
   onComposerFocus?: () => void
   onComposerRequestScrollToBottom?: () => void
   isNearBottom?: boolean
@@ -299,6 +300,7 @@ export function AgentChatLayout({
   displayEvents,
   statusExpansionTargets,
   agentId,
+  bannerAgentName = null,
   sidebar,
   autoFocusComposer = false,
   planSnapshot,
@@ -343,6 +345,7 @@ export function AgentChatLayout({
   onBlockedSettingsClick,
   onBlockedCollaborate,
   onSendMessage,
+  onRetryMessage,
   onComposerFocus,
   onComposerRequestScrollToBottom,
   isNearBottom = true,
@@ -457,7 +460,7 @@ export function AgentChatLayout({
   const runtimeSession = useAppSelector(selectActiveChatSession)
   const shellActiveAgentId = useAppSelector(selectImmersiveShellActiveAgentId)
   const shellViewer = useAppSelector(selectImmersiveShellViewer)
-  const activeAgentId = shellActiveAgentId ?? agentId ?? null
+  const activeAgentId = agentId === null ? null : (shellActiveAgentId ?? agentId ?? null)
   const runtimeAgentName = runtimeSession.identity.agentName
   const runtimeAgentIsOrgOwned = runtimeSession.identity.agentIsOrgOwned
   const runtimeCanManageAgent = runtimeSession.identity.canManageAgent
@@ -496,7 +499,7 @@ export function AgentChatLayout({
   const hasUnseenActivity = runtimeSynced ? runtimeHasUnseenActivity : false
   const planningState = runtimeSynced ? runtimePlanningState : 'skipped'
   const storeSignupPreviewState = runtimeSynced ? runtimeSignupPreviewState : 'none'
-  const agentName = runtimeSynced ? runtimeAgentName : null
+  const agentName = runtimeSynced ? (runtimeAgentName ?? bannerAgentName) : bannerAgentName
   const agentIsOrgOwned = runtimeSynced ? runtimeAgentIsOrgOwned : false
   const canManageAgent = runtimeSynced ? runtimeCanManageAgent : true
   const isCollaborator = runtimeSynced ? runtimeIsCollaborator : false
@@ -1419,9 +1422,9 @@ export function AgentChatLayout({
         onDesktopModeChange={handleSidebarModeChange}
         settings={sidebarSettings}
       />
-      {isMobileViewport ? <ProductAnnouncementBell variant="mobile" /> : null}
       {showBanner && (
         <AgentChatBanner
+          agentNameOverride={bannerAgentName}
           planSnapshot={showPlanInterface ? displayPlanSnapshot : null}
           planPanelMode={planPanelMode}
           onPlanOpen={showPlanInterface ? handleOpenPlan : undefined}
@@ -1519,6 +1522,7 @@ export function AgentChatLayout({
             onMessageLinkClick={handleMessageLinkClick}
             onPurchaseSeats={handlePurchaseSeats}
             onReportMessage={handleReportMessage}
+            onRetryMessage={onRetryMessage}
             onStarterPromptSelect={handleStarterPromptSelect}
             onTaskCreditsDismiss={handleTaskCreditsDismiss}
             onTaskCreditsOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0 ? () => handleAddonsOpen('tasks') : undefined}

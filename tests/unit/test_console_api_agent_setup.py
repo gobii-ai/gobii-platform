@@ -11,14 +11,19 @@ from django.utils import timezone
 
 from api.models import (
     BrowserUseAgent,
+    CommsChannel,
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     PersistentAgentTemplate,
     PublicProfile,
     TaskCredit,
     UserPhoneNumber,
 )
+from console.phone_utils import PhoneVerificationSendError
+from constants.phone_countries import serialize_supported_phone_regions
+from console.insight_views import _build_agent_setup_metadata
 from constants.plans import PlanNames
 
 
@@ -57,8 +62,9 @@ class AgentSetupApiTests(TestCase):
         )
         self.assertEqual(add_response.status_code, 200)
         payload = add_response.json()
-        self.assertIsNotNone(payload.get("phone"))
-        self.assertFalse(payload["phone"]["isVerified"])
+        self.assertIsNone(payload.get("phone"))
+        self.assertIsNotNone(payload.get("pendingPhone"))
+        self.assertFalse(payload["pendingPhone"]["isVerified"])
 
         phone = UserPhoneNumber.objects.get(user=self.user, is_primary=True)
         phone.last_verification_attempt = timezone.now() - timedelta(seconds=120)
@@ -83,6 +89,207 @@ class AgentSetupApiTests(TestCase):
 
         phone.refresh_from_db()
         self.assertTrue(phone.is_verified)
+
+    @patch("console.api_views.send_phone_verification", side_effect=PhoneVerificationSendError("raw provider text"))
+    def test_phone_add_send_failure_returns_safe_error_and_removes_pending_phone(self, mock_send_verification):
+        response = self.client.post(
+            reverse("console_user_phone"),
+            data=json.dumps({"phone_number": "+16502530000"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Unable to send verification code. Please try again.")
+        self.assertNotIn("raw provider text", response.content.decode())
+        self.assertFalse(UserPhoneNumber.objects.filter(user=self.user, phone_number="+16502530000").exists())
+        mock_send_verification.assert_called_once()
+
+    @patch("console.api_views.send_phone_verification", side_effect=PhoneVerificationSendError("raw provider text"))
+    def test_phone_add_replacement_send_failure_preserves_existing_pending_phone(self, mock_send_verification):
+        current_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+        existing_pending = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530002",
+            is_verified=False,
+            is_primary=False,
+            last_verification_attempt=timezone.now() - timedelta(seconds=120),
+            verification_sid="old-sid",
+        )
+
+        response = self.client.post(
+            reverse("console_user_phone"),
+            data=json.dumps({"phone_number": "+16502530003"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Unable to send verification code. Please try again.")
+        self.assertTrue(UserPhoneNumber.objects.filter(pk=current_phone.pk).exists())
+        existing_pending.refresh_from_db()
+        self.assertEqual(existing_pending.phone_number, "+16502530002")
+        self.assertEqual(existing_pending.verification_sid, "old-sid")
+        self.assertFalse(UserPhoneNumber.objects.filter(user=self.user, phone_number="+16502530003").exists())
+        mock_send_verification.assert_called_once()
+
+    @patch("console.api_views.send_phone_verification", side_effect=PhoneVerificationSendError("raw provider text"))
+    def test_phone_resend_send_failure_returns_safe_error_without_updating_attempt(self, mock_send_verification):
+        last_attempt = timezone.now() - timedelta(seconds=120)
+        phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=False,
+            is_primary=True,
+            last_verification_attempt=last_attempt,
+            verification_sid="old-sid",
+        )
+
+        response = self.client.post(
+            reverse("console_user_phone_resend"),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Unable to send verification code. Please try again.")
+        self.assertNotIn("raw provider text", response.content.decode())
+        phone.refresh_from_db()
+        self.assertEqual(phone.last_verification_attempt, last_attempt)
+        self.assertEqual(phone.verification_sid, "old-sid")
+        mock_send_verification.assert_called_once_with(phone)
+
+    @patch("util.sms.start_verification", return_value="sid-replacement")
+    def test_phone_add_replacement_keeps_verified_primary(self, mock_start_verification):
+        current_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            "/console/api/user/phone/",
+            data=json.dumps({"phone_number": "+16502530002"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["phone"]["number"], current_phone.phone_number)
+        self.assertEqual(payload["pendingPhone"]["number"], "+16502530002")
+        self.assertFalse(payload["pendingPhone"]["isVerified"])
+        self.assertTrue(UserPhoneNumber.objects.get(pk=current_phone.pk).is_primary)
+        self.assertFalse(UserPhoneNumber.objects.get(phone_number="+16502530002").is_primary)
+        mock_start_verification.assert_called_once_with(phone_number="+16502530002")
+
+    def test_phone_cancel_rejects_pending_phone_during_cooldown(self):
+        current_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+        pending_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530002",
+            is_verified=False,
+            is_primary=False,
+            last_verification_attempt=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse("console_user_phone_cancel"),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(UserPhoneNumber.objects.filter(pk=current_phone.pk).exists())
+        self.assertTrue(UserPhoneNumber.objects.filter(pk=pending_phone.pk).exists())
+
+    def test_phone_cancel_removes_only_pending_phone_after_cooldown(self):
+        current_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+        pending_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530002",
+            is_verified=False,
+            is_primary=False,
+            last_verification_attempt=timezone.now() - timedelta(seconds=120),
+        )
+
+        response = self.client.post(
+            reverse("console_user_phone_cancel"),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["phone"]["number"], current_phone.phone_number)
+        self.assertIsNone(payload["pendingPhone"])
+        self.assertTrue(UserPhoneNumber.objects.filter(pk=current_phone.pk).exists())
+        self.assertFalse(UserPhoneNumber.objects.filter(pk=pending_phone.pk).exists())
+
+    @patch("util.sms.check_verification", return_value=True)
+    def test_phone_verify_replacement_promotes_and_updates_preferred_sms_endpoint(self, _mock_check_verification):
+        current_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+        pending_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530002",
+            is_verified=False,
+            is_primary=False,
+            last_verification_attempt=timezone.now() - timedelta(seconds=120),
+        )
+        old_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address=current_phone.phone_number,
+            owner_agent=None,
+        )
+        browser = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Console Tester",
+            charter="Do useful things",
+            browser_use_agent=browser,
+            preferred_contact_endpoint=old_endpoint,
+        )
+
+        response = self.client.post(
+            "/console/api/user/phone/verify/",
+            data=json.dumps({"verification_code": "123456"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["phone"]["number"], pending_phone.phone_number)
+        self.assertIsNone(payload["pendingPhone"])
+        self.assertFalse(UserPhoneNumber.objects.filter(pk=current_phone.pk).exists())
+        promoted_phone = UserPhoneNumber.objects.get(pk=pending_phone.pk)
+        self.assertTrue(promoted_phone.is_primary)
+        self.assertTrue(promoted_phone.is_verified)
+        agent.refresh_from_db()
+        self.assertEqual(agent.preferred_contact_endpoint.channel, CommsChannel.SMS)
+        self.assertEqual(agent.preferred_contact_endpoint.address, pending_phone.phone_number)
 
     @patch("console.agent_creation.process_agent_events_task.delay")
     @patch("console.agent_creation.sms.send_sms")
@@ -117,6 +324,99 @@ class AgentSetupApiTests(TestCase):
         self.assertEqual(payload["agentSms"]["number"], "+16502530001")
         self.assertEqual(payload["preferredContactMethod"], "sms")
         self.assertEqual(payload["userPhone"]["number"], phone.phone_number)
+
+    def test_agent_sms_disable_clears_preferred_endpoint_without_deleting_numbers(self):
+        phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+        browser = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Console Tester",
+            charter="Do useful things",
+            browser_use_agent=browser,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.SMS,
+            address="+16502530001",
+            is_primary=True,
+        )
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.SMS,
+            address=phone.phone_number,
+            is_primary=False,
+        )
+        agent.preferred_contact_endpoint = user_endpoint
+        agent.save(update_fields=["preferred_contact_endpoint"])
+
+        response = self.client.post(
+            reverse("console_agent_sms_disable", kwargs={"agent_id": agent.id}),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agentSms"]["number"], "+16502530001")
+        self.assertEqual(payload["userPhone"]["number"], phone.phone_number)
+        self.assertIsNone(payload["preferredContactMethod"])
+        self.assertTrue(UserPhoneNumber.objects.filter(pk=phone.pk).exists())
+        self.assertTrue(PersistentAgentCommsEndpoint.objects.filter(owner_agent=agent, channel=CommsChannel.SMS).exists())
+        agent.refresh_from_db()
+        self.assertIsNone(agent.preferred_contact_endpoint_id)
+
+    def test_insights_sms_enabled_requires_preferred_user_sms_endpoint(self):
+        phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+        browser = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Console Tester",
+            charter="Do useful things",
+            browser_use_agent=browser,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.SMS,
+            address="+16502530001",
+            is_primary=True,
+        )
+
+        request = self.client.get(reverse("console_agent_insights", kwargs={"agent_id": agent.id})).wsgi_request
+
+        metadata = _build_agent_setup_metadata(request, agent, None)
+
+        self.assertFalse(metadata["sms"]["enabled"])
+        self.assertEqual(metadata["sms"]["userPhone"]["number"], phone.phone_number)
+
+    def test_profile_and_agent_setup_metadata_include_supported_phone_regions(self):
+        expected_countries = serialize_supported_phone_regions()
+        browser = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Console Tester",
+            charter="Do useful things",
+            browser_use_agent=browser,
+        )
+
+        profile_response = self.client.get(reverse("console_user_profile"))
+        request = self.client.get(reverse("console_agent_insights", kwargs={"agent_id": agent.id})).wsgi_request
+        metadata = _build_agent_setup_metadata(request, agent, None)
+
+        self.assertEqual(profile_response.status_code, 200)
+        self.assertEqual(profile_response.json()["supportedPhoneRegions"], expected_countries)
+        self.assertEqual(metadata["sms"]["supportedPhoneRegions"], expected_countries)
 
     @patch("console.agent_creation.find_unused_number")
     def test_agent_sms_enable_rejects_admin_disabled_agent(self, mock_find_unused_number):
