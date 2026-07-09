@@ -1,6 +1,18 @@
 import { Globe, KeyRound, Pencil, Trash2, ArrowUpFromLine, Terminal } from 'lucide-react'
 
 import type { SecretDTO } from '../../api/secrets'
+import {
+  EmbeddedTableActionButton,
+  embeddedCompactDestructiveButtonClassName,
+  embeddedDarkTableHeadClassName,
+  embeddedDividedTableBodyClassName,
+  embeddedPromoteActionButtonClassName,
+  embeddedSecondaryActionButtonClassName,
+  embeddedTableCellClassName,
+  embeddedTableClassName,
+  embeddedTableHeaderCellClassName,
+  embeddedTableRowClassName,
+} from '../agentSettings/embeddedTablePrimitives'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 
 type SecretTableProps = {
@@ -30,16 +42,9 @@ export function SecretTable({
   const containerClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none' })
   const headerClassName = 'border-b border-slate-200/15 px-6 py-4'
   const emptyIconClassName = 'flex h-12 w-12 items-center justify-center rounded-full border border-slate-300/70 bg-slate-900/40'
-  const tableClassName = 'min-w-full divide-y divide-slate-200/15'
-  const tableHeadClassName = 'bg-slate-900/40'
-  const tableBodyClassName = 'divide-y divide-slate-200/15 bg-transparent'
-  const rowClassName = 'hover:bg-slate-900/30'
   const codeClassName = 'rounded bg-slate-900/60 px-1.5 py-0.5 text-xs text-slate-200'
   const envBadgeClassName = 'inline-flex items-center gap-1 rounded-full border border-fuchsia-300/30 bg-fuchsia-950/30 px-2 py-0.5 text-xs font-medium text-fuchsia-100'
   const credentialBadgeClassName = 'inline-flex items-center gap-1 rounded-full border border-blue-300/30 bg-blue-950/30 px-2 py-0.5 text-xs font-medium text-blue-100'
-  const secondaryActionClassName = 'inline-flex items-center gap-1 rounded border border-slate-300/70 bg-transparent px-2 py-1 text-xs font-medium text-slate-100 transition-colors hover:border-slate-200 hover:text-white'
-  const promoteActionClassName = 'inline-flex items-center gap-1 rounded border border-blue-300/40 bg-blue-950/20 px-2 py-1 text-xs font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30'
-  const destructiveActionClassName = 'inline-flex items-center gap-1 rounded border border-rose-300/40 bg-rose-950/20 px-2 py-1 text-xs font-medium text-rose-100 transition-colors hover:border-rose-200 hover:bg-rose-900/30'
 
   return (
     <div className={containerClassName}>
@@ -59,32 +64,32 @@ export function SecretTable({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className={tableClassName}>
-            <thead className={tableHeadClassName}>
+          <table className={embeddedTableClassName}>
+            <thead className={embeddedDarkTableHeadClassName}>
               <tr>
-                <th scope="col" className="px-6 py-3 text-start text-xs font-semibold uppercase text-slate-300">
+                <th scope="col" className={embeddedTableHeaderCellClassName}>
                   Name
                 </th>
-                <th scope="col" className="px-6 py-3 text-start text-xs font-semibold uppercase text-slate-300">
+                <th scope="col" className={embeddedTableHeaderCellClassName}>
                   Key
                 </th>
-                <th scope="col" className="px-6 py-3 text-start text-xs font-semibold uppercase text-slate-300">
+                <th scope="col" className={embeddedTableHeaderCellClassName}>
                   Type
                 </th>
-                <th scope="col" className="px-6 py-3 text-start text-xs font-semibold uppercase text-slate-300">
+                <th scope="col" className={embeddedTableHeaderCellClassName}>
                   Scope
                 </th>
                 {!readOnly && (
-                  <th scope="col" className="px-6 py-3 text-end text-xs font-semibold uppercase text-slate-300">
+                  <th scope="col" className={`${embeddedTableHeaderCellClassName} text-end`}>
                     Actions
                   </th>
                 )}
               </tr>
             </thead>
-            <tbody className={tableBodyClassName}>
+            <tbody className={embeddedDividedTableBodyClassName}>
               {secrets.map((secret) => (
-                <tr key={secret.id} className={rowClassName}>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                <tr key={secret.id} className={embeddedTableRowClassName}>
+                  <td className={`${embeddedTableCellClassName} whitespace-nowrap`}>
                     <div className="flex items-center gap-2">
                       {secret.source === 'global' ? (
                         <Globe className="h-4 w-4 shrink-0 text-blue-300" />
@@ -115,7 +120,7 @@ export function SecretTable({
                       </span>
                     )}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                  <td className={`${embeddedTableCellClassName} whitespace-nowrap`}>
                     {secret.secret_type === 'env_var'
                       ? 'Sandbox'
                       : secret.domain_pattern}
@@ -124,35 +129,32 @@ export function SecretTable({
                     <td className="px-6 py-4 whitespace-nowrap text-end">
                       <div className="flex items-center justify-end gap-1.5">
                         {onEdit && (
-                          <button
-                            type="button"
+                          <EmbeddedTableActionButton
+                            icon={Pencil}
                             onClick={() => onEdit(secret)}
-                            className={secondaryActionClassName}
+                            className={embeddedSecondaryActionButtonClassName}
                           >
-                            <Pencil className="w-3 h-3" />
                             Edit
-                          </button>
+                          </EmbeddedTableActionButton>
                         )}
                         {onPromote && secret.source === 'agent' && (
-                          <button
-                            type="button"
+                          <EmbeddedTableActionButton
+                            icon={ArrowUpFromLine}
                             onClick={() => onPromote(secret)}
-                            className={promoteActionClassName}
+                            className={embeddedPromoteActionButtonClassName}
                             title="Promote to global secret"
                           >
-                            <ArrowUpFromLine className="w-3 h-3" />
                             Make Global
-                          </button>
+                          </EmbeddedTableActionButton>
                         )}
                         {onDelete && (
-                          <button
-                            type="button"
+                          <EmbeddedTableActionButton
+                            icon={Trash2}
                             onClick={() => onDelete(secret)}
-                            className={destructiveActionClassName}
+                            className={embeddedCompactDestructiveButtonClassName}
                           >
-                            <Trash2 className="w-3 h-3" />
                             Delete
-                          </button>
+                          </EmbeddedTableActionButton>
                         )}
                       </div>
                     </td>

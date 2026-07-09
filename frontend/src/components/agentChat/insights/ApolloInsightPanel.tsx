@@ -1,4 +1,4 @@
-import { NativeIntegrationConnectButton, NativeIntegrationInsightPanelFrame, useNativeIntegrationPanelState } from './NativeIntegrationInsightPanel'
+import { ConfiguredNativeIntegrationInsightPanel } from './NativeIntegrationInsightPanel'
 
 const APOLLO_PROVIDER_KEY = 'apollo'
 
@@ -15,37 +15,20 @@ const APOLLO_FALLBACK_ICON = (
 )
 
 export function ApolloInsightPanel({ agentId = null, nativeIntegrationsUrl = null }: ApolloInsightPanelProps) {
-  const panel = useNativeIntegrationPanelState({
-    agentId,
-    nativeIntegrationsUrl,
-    providerKey: APOLLO_PROVIDER_KEY,
-    providerDisplayName: 'Apollo',
-  })
-  const busy = panel.connectPending || panel.pendingAction !== null
-
   return (
-    <NativeIntegrationInsightPanelFrame
-      ariaLabel="Apollo"
+    <ConfiguredNativeIntegrationInsightPanel
+      agentId={agentId}
+      nativeIntegrationsUrl={nativeIntegrationsUrl}
+      providerKey={APOLLO_PROVIDER_KEY}
       providerLabel="Apollo"
-      provider={panel.provider}
-      connected={Boolean(panel.provider?.connected)}
       fallbackIcon={APOLLO_FALLBACK_ICON}
-      unavailableMessage={!nativeIntegrationsUrl ? 'Apollo setup is unavailable in this workspace.' : null}
-      loadingMessage={panel.isLoading ? 'Loading Apollo...' : null}
-      errorMessage={panel.errorMessage}
+      unavailableMessage="Apollo setup is unavailable in this workspace."
+      loadingMessage="Loading Apollo..."
       notConfiguredMessage="Apollo is not configured."
-      title={panel.provider?.connected ? 'Apollo connected' : 'Connect Apollo'}
-      text={panel.provider?.connected
-        ? 'This agent can use Apollo REST APIs for lead sourcing, enrichment, sequencing, analytics, and sales intelligence.'
-        : 'Connect Apollo so this agent can use Apollo REST APIs for prospecting and enrichment.'}
-      actions={!panel.provider?.connected && panel.provider ? (
-        <NativeIntegrationConnectButton
-          busy={busy}
-          pendingAction={panel.pendingAction}
-          onClick={() => panel.startConnect(panel.provider!)}
-        />
-      ) : null}
-      statusMessage={panel.statusMessage}
+      connectedTitle="Apollo connected"
+      disconnectedTitle="Connect Apollo"
+      connectedText="This agent can use Apollo REST APIs for lead sourcing, enrichment, sequencing, analytics, and sales intelligence."
+      disconnectedText="Connect Apollo so this agent can use Apollo REST APIs for prospecting and enrichment."
     />
   )
 }

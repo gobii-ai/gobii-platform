@@ -29,7 +29,7 @@ import {
 import { HttpError } from '../api/http'
 import { apiErrorMessages } from '../api/safeErrorMessage'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
-import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
+import { AsyncActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { FormField, SelectInput, TextareaInput, TextInput } from '../components/common/FormControls'
 import { ModalForm } from '../components/common/ModalForm'
@@ -120,8 +120,6 @@ function buildBillingPathForCurrentAppRoute(): string {
 type ConfirmOrganizationActionModalProps = { action: ConfirmAction; onClose: () => void; onConfirm: (action: ConfirmAction) => Promise<void> }
 
 function ConfirmOrganizationActionModal({ action, onClose, onConfirm }: ConfirmOrganizationActionModalProps) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const isRemove = action.kind === 'remove-member'
   const isTemplateDeactivate = action.kind === 'deactivate-template'
   const title = isTemplateDeactivate ? 'Deactivate Template' : isRemove ? 'Remove Member' : 'Revoke Invite'
@@ -132,31 +130,17 @@ function ConfirmOrganizationActionModal({ action, onClose, onConfirm }: ConfirmO
       ? `${subject} will lose access to this team.`
       : `${subject} will no longer be able to accept this invitation.`
 
-  const handleConfirm = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await onConfirm(action)
-      onClose()
-    } catch (err) {
-      setError(apiErrorMessages(err, 'Unable to update team membership.')[0] ?? 'Unable to update team membership.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
-    <ActionConfirmDialog
+    <AsyncActionConfirmDialog
       open
       title={title}
       description={subtitle}
       onClose={onClose}
       icon={isTemplateDeactivate ? Bot : isRemove ? UserMinus : ShieldAlert}
       confirmLabel={isTemplateDeactivate ? 'Deactivate Template' : isRemove ? 'Remove Member' : 'Revoke Invite'}
-      busy={busy}
       danger
-      onConfirm={handleConfirm}
-      localError={error}
+      onConfirm={() => onConfirm(action)}
+      getErrorMessage={(err) => apiErrorMessages(err, 'Unable to update team membership.')[0] ?? 'Unable to update team membership.'}
     />
   )
 }

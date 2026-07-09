@@ -15,8 +15,7 @@ import {
   type PipedreamAppSettings,
   type PipedreamAppSummary,
 } from '../../api/mcp'
-import { fetchNativeIntegrationPickerToken, fetchNativeIntegrations, revokeNativeIntegration, startNativeIntegrationConnect, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
-import { safeErrorMessage } from '../../api/safeErrorMessage'
+import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import { DISCORD_NATIVE_PROVIDER_KEY, withDiscordNativeProvider } from './DiscordNativeShared'
 import {
   AgentConnectionAvatar,
@@ -41,12 +40,11 @@ import {
   confirmNativeIntegrationDisconnect,
   NativeIntegrationGridRow,
   NativeIntegrationSummaryCell,
-  nativeIntegrationFilesQueryKey,
-  nativeOAuthContextPayload,
-  openGoogleDrivePicker,
   openNativeOAuthPopup,
-  storePendingNativeOAuth,
   usesManualNativeIntegrationCredentials,
+  useNativeIntegrationConnectMutation,
+  useNativeIntegrationDisconnectMutation,
+  useNativeIntegrationPickerMutation,
   useNativeIntegrationRefreshEffects,
 } from './NativeIntegrationShared'
 import { useManualNativeIntegrationConnect } from './useManualNativeIntegrationConnect'
@@ -118,6 +116,9 @@ export function PipedreamAppsModal({
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction>(null)
   const [initialNativeConnectHandled, setInitialNativeConnectHandled] = useState(false)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
+  const setNativeStatusMessage = useCallback((message: string | null) => {
+    setStatusMessage(message ? { text: message, tone: 'error' } : null)
+  }, [])
   const nativeQueryKey = useMemo(
     () => ['native-integrations', nativeIntegrationsUrl] as const,
     [nativeIntegrationsUrl],
@@ -319,37 +320,10 @@ export function PipedreamAppsModal({
     onSettled: () => setPendingAgentAction(null),
   })
 
-  const nativeConnectMutation = useMutation({
-    mutationFn: ({ provider }: { provider: NativeIntegrationProvider; popup: Window | null }) =>
-      startNativeIntegrationConnect(provider.connectUrl),
-    onMutate: ({ provider }) => {
-      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
-      setStatusMessage(null)
-    },
-    onSuccess: (payload, { provider, popup }) => {
-      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(provider, payload.state, popup))
-      if (popup && !popup.closed) {
-        popup.location.href = payload.authorizationUrl
-        popup.focus()
-        return
-      }
-      if (popup?.closed) {
-        const message = 'Connection window was closed before Google opened.'
-        setStatusMessage({ text: message, tone: 'error' })
-        onError(message)
-        return
-      }
-      window.location.href = payload.authorizationUrl
-    },
-    onError: (error, { popup }) => {
-      if (popup && !popup.closed) {
-        popup.close()
-      }
-      const message = safeErrorMessage(error)
-      setStatusMessage({ text: message, tone: 'error' })
-      onError(message)
-    },
-    onSettled: () => setPendingNativeAction(null),
+  const nativeConnectMutation = useNativeIntegrationConnectMutation({
+    setPendingAction: setPendingNativeAction,
+    setStatusMessage: setNativeStatusMessage,
+    onError,
   })
 
   const {
@@ -377,21 +351,11 @@ export function PipedreamAppsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
-  const nativeRevokeMutation = useMutation({
-    mutationFn: (provider: NativeIntegrationProvider) => revokeNativeIntegration(provider.revokeUrl).then(() => provider),
-    onMutate: (provider) => {
-      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'disconnect' })
-      setStatusMessage(null)
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: nativeQueryKey })
-    },
-    onError: (error) => {
-      const message = safeErrorMessage(error)
-      setStatusMessage({ text: message, tone: 'error' })
-      onError(message)
-    },
-    onSettled: () => setPendingNativeAction(null),
+  const nativeRevokeMutation = useNativeIntegrationDisconnectMutation({
+    nativeQueryKey,
+    setPendingAction: setPendingNativeAction,
+    setStatusMessage: setNativeStatusMessage,
+    onError,
   })
 
   const discordDisconnectMutation = useDiscordNativeDisconnect({
@@ -409,25 +373,10 @@ export function PipedreamAppsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
-  const nativePickerMutation = useMutation({
-    mutationFn: async (provider: NativeIntegrationProvider) => {
-      const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-      const selectedFiles = await openGoogleDrivePicker(token)
-      return { provider, selectedCount: selectedFiles.length }
-    },
-    onMutate: (provider) => {
-      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'picker' })
-      setStatusMessage(null)
-    },
-    onSuccess: ({ provider }) => {
-      void queryClient.invalidateQueries({ queryKey: nativeIntegrationFilesQueryKey(provider) })
-    },
-    onError: (error) => {
-      const message = safeErrorMessage(error)
-      setStatusMessage({ text: message, tone: 'error' })
-      onError(message)
-    },
-    onSettled: () => setPendingNativeAction(null),
+  const nativePickerMutation = useNativeIntegrationPickerMutation({
+    setPendingAction: setPendingNativeAction,
+    setStatusMessage: setNativeStatusMessage,
+    onError,
   })
 
   const isBusy = removeMutation.isPending

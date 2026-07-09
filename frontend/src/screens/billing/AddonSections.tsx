@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
-import { BadgeCheck, GlobeLock, Layers3, Minus, Plus, Users } from 'lucide-react'
+import { BadgeCheck, GlobeLock, Layers3, Users } from 'lucide-react'
 
 import type { BillingAddonKindKey, BillingInitialData, DedicatedIpProxy } from './types'
 import type { BillingDraftAction, BillingDraftState } from './draft'
 import { buildAddonOptionLabel, formatCents, normalizeCurrency } from './utils'
 import { ToggleSwitch } from './ToggleSwitch'
 import { DedicatedIpSection } from './DedicatedIpSection'
+import { QuantityStepper } from './QuantityStepper'
 
 type AddonSectionsProps = {
   initialData: BillingInitialData
@@ -176,28 +177,16 @@ export function AddonSections({
                               <div className="mt-1 text-xs font-semibold text-slate-500">{priceLabel}</div>
                             ) : null}
                           </div>
-                          <div className="flex flex-none items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => dispatch({ type: 'addon.adjust', priceId: opt.priceId, delta: -1 })}
-                              disabled={!addonsInteractable || saving || qty <= 0}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
-                              aria-label={`Decrease ${label}`}
-                            >
-                              <Minus className="h-4 w-4" strokeWidth={3} />
-                            </button>
-                            <div className="min-w-[3.25rem] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-center text-sm font-bold text-slate-900 tabular-nums">
-                              {qty}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => dispatch({ type: 'addon.adjust', priceId: opt.priceId, delta: 1 })}
-                              disabled={!addonsInteractable || saving || qty >= 999}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-                              aria-label={`Increase ${label}`}
-                            >
-                              <Plus className="h-4 w-4" strokeWidth={3} />
-                            </button>
+                          <div className="flex flex-none items-center justify-end">
+                            <QuantityStepper
+                              value={qty}
+                              onDecrease={() => dispatch({ type: 'addon.adjust', priceId: opt.priceId, delta: -1 })}
+                              onIncrease={() => dispatch({ type: 'addon.adjust', priceId: opt.priceId, delta: 1 })}
+                              decreaseDisabled={!addonsInteractable || saving || qty <= 0}
+                              increaseDisabled={!addonsInteractable || saving || qty >= 999}
+                              decreaseLabel={`Decrease ${label}`}
+                              increaseLabel={`Increase ${label}`}
+                            />
                           </div>
                         </div>
                       )
