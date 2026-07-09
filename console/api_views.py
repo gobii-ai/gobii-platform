@@ -360,6 +360,14 @@ def _pending_action_payload(agent: PersistentAgent, viewer_user) -> dict[str, An
     }
 
 
+def _user_action_event_payload(action_event, viewer_user) -> dict[str, Any]:
+    return (
+        {"event": serialize_user_action_event(action_event, viewer_user=viewer_user)}
+        if action_event
+        else {}
+    )
+
+
 def _emit_pending_action_requests_update_on_commit(agent: PersistentAgent) -> None:
     from console.agent_chat.signals import emit_pending_action_requests_update
 
@@ -3793,7 +3801,7 @@ class AgentHumanInputRequestResponseAPIView(LoginRequiredMixin, View):
 
         return JsonResponse(
             {
-                "event": serialize_user_action_event(action_event, viewer_user=request.user),
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             },
             status=201,
@@ -3848,18 +3856,12 @@ class AgentHumanInputRequestDismissAPIView(LoginRequiredMixin, View):
             request_id=str(human_input_request.id),
         )
         payload = _pending_action_payload(agent, request.user)
-        if message is None:
-            return JsonResponse(
-                {"event": serialize_user_action_event(action_event, viewer_user=request.user), **payload},
-                status=200,
-            )
-
         return JsonResponse(
             {
-                "event": serialize_user_action_event(action_event, viewer_user=request.user),
+                **_user_action_event_payload(action_event, request.user),
                 **payload,
             },
-            status=201,
+            status=201 if message else 200,
         )
 
 
@@ -3930,7 +3932,7 @@ class AgentHumanInputRequestBatchResponseAPIView(LoginRequiredMixin, View):
 
         return JsonResponse(
             {
-                "event": serialize_user_action_event(action_event, viewer_user=request.user),
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             },
             status=201,
@@ -4135,11 +4137,7 @@ class AgentRequestedSecretsFulfillAPIView(ApiLoginRequiredMixin, View):
             {
                 "message": f"Saved {len(requested_secrets)} requested secret value(s).",
                 "saved_count": len(requested_secrets),
-                **(
-                    {"event": serialize_user_action_event(action_event, viewer_user=request.user)}
-                    if action_event
-                    else {}
-                ),
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             }
         )
@@ -4190,11 +4188,7 @@ class AgentRequestedSecretsRemoveAPIView(ApiLoginRequiredMixin, View):
             {
                 "message": f"Removed {removed_count} requested secret(s).",
                 "removed_count": removed_count,
-                **(
-                    {"event": serialize_user_action_event(action_event, viewer_user=request.user)}
-                    if action_event
-                    else {}
-                ),
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             }
         )
@@ -4581,11 +4575,7 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                 "approved_count": approved_count,
                 "rejected_count": rejected_count,
                 "skipped_count": skipped_count,
-                **(
-                    {"event": serialize_user_action_event(action_event, viewer_user=request.user)}
-                    if action_event
-                    else {}
-                ),
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             }
         )

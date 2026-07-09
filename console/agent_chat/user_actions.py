@@ -39,7 +39,7 @@ def create_user_action_event(
     )
 
 
-def _clean_labels(labels: Iterable[str]) -> list[str]:
+def _label_list(labels: Iterable[str]) -> list[str]:
     return [label for label in labels if label]
 
 
@@ -77,6 +77,23 @@ def record_human_input_dismissed(
     )
 
 
+def _record_requested_secrets_action(
+    agent: PersistentAgent,
+    actor_user,
+    action_type: str,
+    secret_labels: Iterable[str],
+    **metadata,
+) -> PersistentAgentUserActionEvent:
+    labels = _label_list(secret_labels)
+    return create_user_action_event(
+        agent=agent,
+        actor_user=actor_user,
+        action_type=action_type,
+        count=max(len(labels), 1),
+        metadata={"secret_names": labels, **metadata},
+    )
+
+
 def record_requested_secrets_saved(
     *,
     agent: PersistentAgent,
@@ -84,13 +101,12 @@ def record_requested_secrets_saved(
     secret_labels: Iterable[str],
     make_global: bool,
 ) -> PersistentAgentUserActionEvent:
-    labels = _clean_labels(secret_labels)
-    return create_user_action_event(
-        agent=agent,
-        actor_user=actor_user,
-        action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED,
-        count=max(len(labels), 1),
-        metadata={"secret_names": labels, "scope": "global" if make_global else "agent"},
+    return _record_requested_secrets_action(
+        agent,
+        actor_user,
+        PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED,
+        secret_labels,
+        scope="global" if make_global else "agent",
     )
 
 
@@ -100,13 +116,11 @@ def record_requested_secrets_removed(
     actor_user,
     secret_labels: Iterable[str],
 ) -> PersistentAgentUserActionEvent:
-    labels = _clean_labels(secret_labels)
-    return create_user_action_event(
-        agent=agent,
-        actor_user=actor_user,
-        action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_REMOVED,
-        count=max(len(labels), 1),
-        metadata={"secret_names": labels},
+    return _record_requested_secrets_action(
+        agent,
+        actor_user,
+        PersistentAgentUserActionEvent.ActionType.SECRETS_REMOVED,
+        secret_labels,
     )
 
 
@@ -123,7 +137,6 @@ def record_contact_requests_resolved(
     if total <= 0:
         return None
 
-    labels = _clean_labels(contact_labels)
     if approved_count and declined_count:
         action_type = PersistentAgentUserActionEvent.ActionType.CONTACTS_RESOLVED
     elif approved_count:
@@ -140,6 +153,6 @@ def record_contact_requests_resolved(
             "approved_count": approved_count,
             "declined_count": declined_count,
             "skipped_count": skipped_count,
-            "contact_labels": labels,
+            "contact_labels": _label_list(contact_labels),
         },
     )

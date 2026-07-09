@@ -836,7 +836,7 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["events"][0]["kind"], "user_action")
-        self.assertEqual(payload["events"][0]["cursor"], f"{payload['events'][0]['cursor'].split(':', 2)[0]}:user_action:{action_event.cursor_identifier}")
+        self.assertEqual(payload["events"][0]["cursor"], f"{payload['events'][0]['cursor'].split(':', 2)[0]}:user_action:{action_event.id}")
         action = payload["events"][0]["action"]
         self.assertEqual(action["actionType"], "secrets_saved")
         self.assertNotIn("summary", action)

@@ -245,14 +245,6 @@ export type UserActionType =
   | 'contacts_declined'
   | 'contacts_resolved'
 
-export type HumanInputActionResponse = {
-  requestId: string
-  question: string
-  answer: string
-  answerType?: 'selected_option' | 'free_text' | string
-  selectedOptionKey?: string | null
-}
-
 export type UserAction = {
   id: string
   actionType: UserActionType | string

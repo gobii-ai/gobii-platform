@@ -37,8 +37,6 @@ class Migration(migrations.Migration):
                 ("count", models.PositiveIntegerField(default=1)),
                 ("metadata", models.JSONField(blank=True, default=dict)),
                 ("occurred_at", models.DateTimeField(default=django.utils.timezone.now)),
-                ("cursor_identifier", models.UUIDField(default=uuid.uuid4, editable=False, unique=True)),
-                ("created_at", models.DateTimeField(auto_now_add=True)),
                 (
                     "actor_user",
                     models.ForeignKey(
@@ -59,7 +57,7 @@ class Migration(migrations.Migration):
                 ),
             ],
             options={
-                "ordering": ["-occurred_at", "-cursor_identifier"],
+                "ordering": ["-occurred_at", "-id"],
                 "indexes": [
                     models.Index(fields=["agent", "-occurred_at"], name="pa_action_agent_recent_idx"),
                     models.Index(fields=["agent", "action_type", "-occurred_at"], name="pa_action_agent_type_idx"),

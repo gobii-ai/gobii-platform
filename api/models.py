@@ -7863,11 +7863,9 @@ class PersistentAgentUserActionEvent(models.Model):
     count = models.PositiveIntegerField(default=1)
     metadata = models.JSONField(default=dict, blank=True)
     occurred_at = models.DateTimeField(default=timezone.now)
-    cursor_identifier = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["-occurred_at", "-cursor_identifier"]
+        ordering = ["-occurred_at", "-id"]
         indexes = [
             models.Index(fields=["agent", "-occurred_at"], name="pa_action_agent_recent_idx"),
             models.Index(fields=["agent", "action_type", "-occurred_at"], name="pa_action_agent_type_idx"),

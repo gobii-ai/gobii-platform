@@ -1,11 +1,17 @@
 import { memo } from 'react'
 import { KeyRound, MessageSquareQuote, UserCheck, Users } from 'lucide-react'
-import type { HumanInputActionResponse, UserActionEvent } from '../../types/agentChat'
+import type { UserActionEvent } from '../../types/agentChat'
 import { useRelativeTimestamp } from '../../hooks/useRelativeTimestamp'
 
 type UserActionEventCardProps = {
   event: UserActionEvent
   viewerUserId?: number | null
+}
+
+type HumanInputActionResponse = {
+  requestId: string
+  question: string
+  answer: string
 }
 
 function actionIcon(actionType: string) {
@@ -36,10 +42,9 @@ function countPhrase(count: number, singular: string, plural = `${singular}s`): 
 
 function metadataStringArray(event: UserActionEvent, key: string): string[] {
   const value = event.action.metadata?.[key]
-  if (!Array.isArray(value)) {
-    return []
-  }
-  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : []
 }
 
 function metadataNumber(event: UserActionEvent, key: string): number {
@@ -49,12 +54,8 @@ function metadataNumber(event: UserActionEvent, key: string): number {
 
 function compactLabelList(labels: string[], maxVisible = 2): string {
   const cleanLabels = labels.map((label) => label.trim()).filter(Boolean)
-  if (!cleanLabels.length) {
-    return ''
-  }
-  if (cleanLabels.length <= maxVisible) {
-    return cleanLabels.join(cleanLabels.length === 2 ? ' and ' : ', ')
-  }
+  if (!cleanLabels.length) return ''
+  if (cleanLabels.length <= maxVisible) return cleanLabels.join(cleanLabels.length === 2 ? ' and ' : ', ')
   const visibleLabels = cleanLabels.slice(0, maxVisible).join(', ')
   return `${visibleLabels}, and ${cleanLabels.length - maxVisible} more`
 }
@@ -87,20 +88,21 @@ function buildActionDetail(event: UserActionEvent): string {
   const secretName = metadataStringArray(event, 'secret_names')[0]?.trim()
   const contactLabels = compactLabelList(metadataStringArray(event, 'contact_labels'))
   const skippedCount = metadataNumber(event, 'skipped_count')
+  const actionType = event.action.actionType
   let detail = ''
 
-  if (event.action.actionType === 'human_input_answered') {
+  if (actionType === 'human_input_answered') {
     detail = count === 1 ? 'A response was submitted.' : `${count} responses were submitted.`
-  } else if (event.action.actionType === 'human_input_dismissed') {
+  } else if (actionType === 'human_input_dismissed') {
     detail = 'Question dismissed.'
-  } else if (event.action.actionType === 'secrets_saved') {
+  } else if (actionType === 'secrets_saved') {
     detail = count === 1 ? `${secretName || 'Secret'} saved.` : `${count} secrets saved.`
-  } else if (event.action.actionType === 'secrets_removed') {
+  } else if (actionType === 'secrets_removed') {
     detail = count === 1 ? `${secretName || 'Secret'} request removed.` : `${count} secret requests were removed.`
-  } else if (event.action.actionType === 'contacts_approved' || event.action.actionType === 'contacts_declined') {
-    const decision = event.action.actionType === 'contacts_approved' ? 'approved' : 'declined'
+  } else if (actionType === 'contacts_approved' || actionType === 'contacts_declined') {
+    const decision = actionType === 'contacts_approved' ? 'approved' : 'declined'
     detail = contactLabels ? `${contactLabels}.` : count === 1 ? `Contact was ${decision}.` : `${count} contacts were ${decision}.`
-  } else if (event.action.actionType === 'contacts_resolved') {
+  } else if (actionType === 'contacts_resolved') {
     const approvedCount = metadataNumber(event, 'approved_count')
     const declinedCount = metadataNumber(event, 'declined_count')
     const approvedPhrase = `${approvedCount} ${pluralize(approvedCount, 'contact')} ${pluralize(approvedCount, 'was', 'were')} approved`
@@ -137,8 +139,6 @@ function readHumanInputResponses(event: UserActionEvent): HumanInputActionRespon
       requestId,
       question,
       answer,
-      answerType: typeof response.answer_type === 'string' ? response.answer_type : undefined,
-      selectedOptionKey: typeof response.selected_option_key === 'string' ? response.selected_option_key : null,
     }]
   })
 }

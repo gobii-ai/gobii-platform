@@ -869,7 +869,7 @@ def _user_action_event_queryset(
     qs = (
         PersistentAgentUserActionEvent.objects.filter(agent=agent)
         .select_related("actor_user", "agent")
-        .order_by("-occurred_at", "-cursor_identifier")
+        .order_by("-occurred_at", "-id")
     )
     if direction == "older" and cursor is not None:
         dt = _dt_from_cursor(cursor)
@@ -878,7 +878,7 @@ def _user_action_event_queryset(
                 cursor_uuid = uuid.UUID(cursor.identifier)
                 qs = qs.filter(
                     Q(occurred_at__lt=dt)
-                    | Q(occurred_at=dt, cursor_identifier__lt=cursor_uuid)
+                    | Q(occurred_at=dt, id__lt=cursor_uuid)
                 )
             except (TypeError, ValueError):
                 qs = qs.filter(occurred_at__lte=dt)
@@ -891,7 +891,7 @@ def _user_action_event_queryset(
                 cursor_uuid = uuid.UUID(cursor.identifier)
                 qs = qs.filter(
                     Q(occurred_at__gt=dt)
-                    | Q(occurred_at=dt, cursor_identifier__gt=cursor_uuid)
+                    | Q(occurred_at=dt, id__gt=cursor_uuid)
                 )
             except (TypeError, ValueError):
                 qs = qs.filter(occurred_at__gt=dt)
@@ -985,11 +985,11 @@ def _envelop_user_action_events(events: Iterable[PersistentAgentUserActionEvent]
         cursor = CursorPayload(
             value=sort_value,
             kind="user_action",
-            identifier=str(event.cursor_identifier),
+            identifier=str(event.id),
         )
         envelopes.append(
             UserActionEnvelope(
-                sort_key=(sort_value, "user_action", str(event.cursor_identifier)),
+                sort_key=(sort_value, "user_action", str(event.id)),
                 cursor=cursor,
                 event=event,
             )
@@ -1108,7 +1108,7 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
             user_action_exists = user_action_exists or PersistentAgentUserActionEvent.objects.filter(
                 agent=agent,
                 occurred_at=dt,
-                cursor_identifier__lt=cursor_uuid,
+                id__lt=cursor_uuid,
             ).exists()
         except (TypeError, ValueError):
             pass
@@ -1195,7 +1195,7 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
             user_action_exists = user_action_exists or PersistentAgentUserActionEvent.objects.filter(
                 agent=agent,
                 occurred_at=dt,
-                cursor_identifier__gt=cursor_uuid,
+                id__gt=cursor_uuid,
             ).exists()
         except (TypeError, ValueError):
             pass

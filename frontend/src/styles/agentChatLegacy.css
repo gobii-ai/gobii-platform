@@ -3172,7 +3172,8 @@
     background: #eef2ff;
     color: #6366f1;
 }
-.user-action-card__body {
+.user-action-card__body,
+.user-action-card__title {
     min-width: 0;
 }
 .user-action-card__header {
@@ -3182,7 +3183,6 @@
     min-width: 0;
 }
 .user-action-card__title {
-    min-width: 0;
     overflow-wrap: anywhere;
     color: #6366f1;
     font-size: 0.875rem;
@@ -3243,14 +3243,7 @@
 }
 @media (max-width: 640px) {
     .user-action-card {
-        grid-template-columns: 2.5rem minmax(0, 1fr);
         width: 94%;
-        gap: 0.75rem;
-    }
-    .user-action-card__icon {
-        width: 2.5rem;
-        height: 2.5rem;
-        border-radius: 0.75rem;
     }
     .user-action-card__header {
         flex-wrap: wrap;
