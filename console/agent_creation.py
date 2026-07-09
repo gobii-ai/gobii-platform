@@ -36,7 +36,6 @@ from api.services.signup_preview import get_signup_preview_creation_state
 from api.services.signup_preview import user_has_existing_personal_agent_for_signup_preview
 from api.pipedream_app_utils import normalize_app_slugs
 from api.services.pipedream_apps import get_owner_selected_app_slugs, set_owner_selected_app_slugs
-from console.agent_chat.template_recommendations import invalidate_template_recommendation_cache
 from console.context_helpers import build_console_context
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from util import sms
@@ -593,8 +592,6 @@ def create_persistent_agent_from_charter(
                 request=request,
             )
         )
-        transaction.on_commit(lambda: invalidate_template_recommendation_cache(request.user, resolved_context))
-
         return AgentCreationResult(
             agent=persistent_agent,
             organization=organization,

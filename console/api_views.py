@@ -149,7 +149,7 @@ from api.services.agent_owner_custom_instructions import (
     save_custom_instructions_for_user_id,
 )
 from api.services.product_announcements import build_product_announcements_payload, mark_product_announcements_read
-from api.services.signup_preview import resume_signup_preview_agent_if_eligible
+from api.services.signup_preview import resume_signup_preview_agent_if_eligible, user_has_existing_personal_agent_for_signup_preview
 from api.services.agent_planning import skip_agent_planning
 from api.services.referral_service import ReferralService
 from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, end_web_session, heartbeat_web_session, start_web_session, touch_web_session
@@ -721,6 +721,20 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
         if restored_cookie:
             response.delete_cookie(OAUTH_CHARTER_COOKIE)
         return response
+
+
+def _personal_signup_preview_create_available(request: HttpRequest, context_info) -> bool:
+    if context_info.current_context.type != "personal":
+        return False
+    preview_config = resolve_personal_signup_preview(
+        request.user,
+        request=request,
+        current_context_type=context_info.current_context.type,
+    )
+    return bool(
+        preview_config.processing_limit_enabled
+        and not user_has_existing_personal_agent_for_signup_preview(request.user)
+    )
 
 
 def _persist_quick_create_draft(
@@ -3262,6 +3276,10 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "id": context_info.current_context.id,
                     "name": context_info.current_context.name,
                     "canCreateAgents": context_info.can_create_org_agents,
+                    "personalSignupPreviewCreateAvailable": _personal_signup_preview_create_available(
+                        request,
+                        context_info,
+                    ),
                 },
                 "requested_agent_status": requested_agent_status,
                 "agent_roster_sort_mode": agent_roster_sort_mode,

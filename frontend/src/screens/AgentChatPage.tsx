@@ -570,6 +570,11 @@ type AppShellOpenHandler = (() => void) | undefined
 type AppShellDestinationKey = 'billing' | 'usage' | 'apiKeys' | 'profile' | 'organization' | 'secrets' | 'integrations'
 type AppShellDestinations = Record<AppShellDestinationKey, string | null>
 type AppShellOpenHandlers = Record<AppShellDestinationKey, () => void>
+type CreateAgentTemplatePayload = {
+  templateCode?: string | null
+  templateId?: string | null
+  templateSource?: 'organization' | 'public' | null
+}
 
 const EMBEDDED_SETTINGS_TITLES: Record<Exclude<AgentChatShellSubview, 'chat'>, string> = {
   settings: 'Agent Settings',
@@ -936,6 +941,7 @@ export function AgentChatPage({
     tier: IntelligenceTierKey
     charterOverride?: string | null
     selectedPipedreamAppSlugs?: string[]
+    template?: CreateAgentTemplatePayload | null
   } | null>(null)
   const googleSheetsRosterRefreshAgentsRef = useRef<Set<string>>(new Set())
   const previewEnteredAgentIdsRef = useRef<Set<string>>(new Set())
@@ -2306,6 +2312,9 @@ export function AgentChatPage({
     ?? effectiveContext?.canCreateAgents
     ?? true
   )
+  const personalSignupPreviewCreateAvailable = Boolean(
+    rosterQuery.data?.context.personalSignupPreviewCreateAvailable,
+  )
   const sendMessageDisabledReason = !isNewAgent && selectedAgentAccountPause?.paused
     ? resolveSendMessagePausedMessage(selectedAgentAccountPause.resumeAt)
     : (!isNewAgent && effectiveBillingStatus?.delinquent
@@ -2314,6 +2323,7 @@ export function AgentChatPage({
   const previewCreateAgentBlocked = !currentContextBillingStatus?.delinquent
     && !currentContextAccountPause?.paused
     && personalSignupPreviewAvailable
+    && !personalSignupPreviewCreateAvailable
   const createAgentDisabledReason = !currentContextCanCreateAgents
     ? 'You do not have permission to create agents in this team.'
     : currentContextAccountPause?.paused
@@ -2581,11 +2591,7 @@ export function AgentChatPage({
       charterOverride?: string | null,
       selectedPipedreamAppSlugs?: string[],
       attachments: File[] = [],
-      template?: {
-        templateCode?: string | null
-        templateId?: string | null
-        templateSource?: 'organization' | 'public' | null
-      } | null,
+      template?: CreateAgentTemplatePayload | null,
     ) => {
       setTransientBannerAgentName('New Agent')
       dispatch(chatActions.createAgentErrorSet(null))
@@ -2684,29 +2690,6 @@ export function AgentChatPage({
   )
 
   const [templateRecommendationSubmittingId, setTemplateRecommendationSubmittingId] = useState<string | null>(null)
-
-  const handleTemplateRecommendationCreate = useCallback(async (template: TemplateRecommendation) => {
-    if (templateRecommendationSubmittingId) {
-      return
-    }
-    setTemplateRecommendationSubmittingId(template.id)
-    try {
-      await createNewAgent(
-        template.name,
-        draftIntelligenceTier as IntelligenceTierKey,
-        null,
-        [],
-        [],
-        {
-          templateCode: template.templateCode,
-          templateId: template.templateId || template.id,
-          templateSource: template.templateSource || 'public',
-        },
-      )
-    } finally {
-      setTemplateRecommendationSubmittingId(null)
-    }
-  }, [createNewAgent, draftIntelligenceTier, templateRecommendationSubmittingId])
 
   const handleIntelligenceChange = useCallback(
     async (tier: string): Promise<boolean> => {
@@ -3395,6 +3378,7 @@ export function AgentChatPage({
       pending.charterOverride,
       pending.selectedPipedreamAppSlugs,
       pending.attachments,
+      pending.template,
     )
   }, [buildGateAnalytics, closeGate, createNewAgent, dispatch, intelligenceGate])
 
@@ -3403,6 +3387,7 @@ export function AgentChatPage({
     attachments: File[] = [],
     charterOverride?: string | null,
     selectedPipedreamAppSlugs?: string[],
+    template?: CreateAgentTemplatePayload | null,
   ) => {
     if (!activeAgentId && !isNewAgent) {
       return
@@ -3468,6 +3453,7 @@ export function AgentChatPage({
           tier: selectedTier,
           charterOverride,
           selectedPipedreamAppSlugs,
+          template,
         }
         dispatch(chatActions.createAgentDraftMetadataSet({
           body,
@@ -3491,6 +3477,7 @@ export function AgentChatPage({
         charterOverride,
         selectedPipedreamAppSlugs,
         attachments,
+        template,
       )
       return
     }
@@ -3533,6 +3520,28 @@ export function AgentChatPage({
     sendMessageDisabledReason,
     shouldFetchUsageBurnRate,
   ])
+
+  const handleTemplateRecommendationCreate = useCallback(async (template: TemplateRecommendation) => {
+    if (templateRecommendationSubmittingId) {
+      return
+    }
+    setTemplateRecommendationSubmittingId(template.id)
+    try {
+      await handleSend(
+        template.name,
+        [],
+        null,
+        [],
+        {
+          templateCode: template.templateCode,
+          templateId: template.templateId || template.id,
+          templateSource: template.templateSource || 'public',
+        },
+      )
+    } finally {
+      setTemplateRecommendationSubmittingId(null)
+    }
+  }, [handleSend, templateRecommendationSubmittingId])
 
   const handleRetryMessage = useCallback(async (message: AgentMessage) => {
     if (!activeAgentId || !message.clientId) {

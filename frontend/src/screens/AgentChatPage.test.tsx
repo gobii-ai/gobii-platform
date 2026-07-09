@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 
 import { AgentChatPage } from './AgentChatPage'
 import type { AppStore } from '../store/appStore'
@@ -30,6 +31,7 @@ const {
   llmIntelligence,
   agentChatStoreState,
   timelineState,
+  usageBurnRateState,
 } = vi.hoisted(() => ({
   createAgentMock: vi.fn(),
   updateAgentMock: vi.fn(),
@@ -44,6 +46,7 @@ const {
     agents: [] as unknown[],
     agentChatNotificationsEnabled: true,
     mutedAgentIds: [] as string[],
+    personalSignupPreviewCreateAvailable: false,
   },
   llmIntelligence: {
     systemDefaultTier: 'standard',
@@ -98,6 +101,12 @@ const {
     isLoading: false,
     error: null as unknown,
   },
+  usageBurnRateState: {
+    quota: { unlimited: true },
+    extra_tasks: { enabled: false },
+    projection: { projected_days_remaining: null as number | null },
+    snapshot: { burn_rate_per_day: null as number | null },
+  },
 }))
 
 vi.mock('../api/agents', () => ({
@@ -145,20 +154,7 @@ vi.mock('../components/usage/api', () => ({
       enabled: false,
     },
   })),
-  fetchUsageBurnRate: vi.fn(async () => ({
-    quota: {
-      unlimited: true,
-    },
-    extra_tasks: {
-      enabled: false,
-    },
-    projection: {
-      projected_days_remaining: null,
-    },
-    snapshot: {
-      burn_rate_per_day: null,
-    },
-  })),
+  fetchUsageBurnRate: vi.fn(async () => usageBurnRateState),
 }))
 
 vi.mock('../components/agentChat/AgentChatLayout', async () => {
@@ -174,6 +170,8 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       sidebar,
       onOpenFullSettings,
       events,
+      templateRecommendations,
+      onTemplateRecommendationCreate,
     }: {
       spawnIntentLoading?: boolean
       agentId?: string | null
@@ -196,6 +194,20 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           status?: string
         }
       }>
+      templateRecommendations?: Array<{
+        id: string
+        name: string
+        templateCode: string
+        templateId: string
+        templateSource: 'organization' | 'public'
+      }>
+      onTemplateRecommendationCreate?: (template: {
+        id: string
+        name: string
+        templateCode: string
+        templateId: string
+        templateSource: 'organization' | 'public'
+      }, position: number) => void | Promise<void>
     }) => {
       const {
         isUpgradeModalOpen,
@@ -229,6 +241,18 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="discord-native-tab-enabled">{String(Boolean(enabledIntegrationTabs.discordNative))}</div>
           <div data-testid="meta-ads-tab-enabled">{String(Boolean(enabledIntegrationTabs.metaAds))}</div>
           <div data-testid="timeline-event-count">{events?.length ?? 0}</div>
+          {templateRecommendations?.map((template, index) => (
+            <button
+              key={template.id}
+              type="button"
+              data-testid={`template-recommendation-${template.id}`}
+              onClick={() => {
+                void onTemplateRecommendationCreate?.(template, index)
+              }}
+            >
+              {template.name}
+            </button>
+          ))}
           {events?.map((event, index) => (
             event.kind === 'message' ? (
               <div
@@ -277,7 +301,19 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
 })
 
 vi.mock('../components/agentChat/AgentIntelligenceGateModal', () => ({
-  AgentIntelligenceGateModal: () => null,
+  AgentIntelligenceGateModal: ({
+    open,
+    onContinue,
+  }: {
+    open?: boolean
+    onContinue?: () => void
+  }) => (
+    open ? (
+      <button type="button" data-testid="intelligence-gate-continue" onClick={() => onContinue?.()}>
+        Continue
+      </button>
+    ) : null
+  ),
 }))
 
 vi.mock('../components/agentChat/EmbeddedAgentSettingsPanel', () => ({
@@ -311,7 +347,10 @@ vi.mock('../hooks/useAgentWebSession', () => ({
 vi.mock('../hooks/useAgentRoster', () => ({
   useAgentRoster: vi.fn(() => ({
     data: {
-      context: rosterContext,
+      context: {
+        ...rosterContext,
+        personalSignupPreviewCreateAvailable: rosterState.personalSignupPreviewCreateAvailable,
+      },
       agents: rosterState.agents,
       agentRosterSortMode: 'recent',
       favoriteAgentIds: [],
@@ -423,20 +462,23 @@ function createTestQueryClient() {
   })
 }
 
-function renderAgentChatPage({ agentId = null }: { agentId?: string | null } = {}) {
+function renderAgentChatPage(options: { agentId?: string | null } = { agentId: null }) {
   if (!appStore) {
     queryClient = createTestQueryClient()
     appStore = createTestAppStore({ queryClient })
+  }
+  const props: ComponentProps<typeof AgentChatPage> = {
+    viewerUserId: 1,
+    viewerEmail: 'user@example.com',
+  }
+  if ('agentId' in options) {
+    props.agentId = options.agentId
   }
 
   return render(
     <StoreProvider store={appStore}>
       <QueryClientProvider client={queryClient}>
-        <AgentChatPage
-          agentId={agentId}
-          viewerUserId={1}
-          viewerEmail="user@example.com"
-        />
+        <AgentChatPage {...props} />
       </QueryClientProvider>
     </StoreProvider>,
   )
@@ -506,6 +548,10 @@ describe('AgentChatPage trial onboarding', () => {
     timelineState.initialPageResponse = null
     timelineState.isLoading = false
     timelineState.error = null
+    usageBurnRateState.quota.unlimited = true
+    usageBurnRateState.extra_tasks.enabled = false
+    usageBurnRateState.projection.projected_days_remaining = null
+    usageBurnRateState.snapshot.burn_rate_per_day = null
     agentChatStoreState.agentId = null
     agentChatStoreState.pendingEvents = []
     agentChatStoreState.hasUnseenActivity = false
@@ -513,6 +559,7 @@ describe('AgentChatPage trial onboarding', () => {
     rosterState.agents = []
     rosterState.agentChatNotificationsEnabled = true
     rosterState.mutedAgentIds = []
+    rosterState.personalSignupPreviewCreateAvailable = false
     agentChatStoreState.signupPreviewState = 'none'
     agentChatStoreState.processingActive = false
     FakeNotification.permission = 'granted'
@@ -566,6 +613,7 @@ describe('AgentChatPage trial onboarding', () => {
         ['slack'],
         'email',
         [],
+        undefined,
       )
     })
     expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument()
@@ -596,9 +644,99 @@ describe('AgentChatPage trial onboarding', () => {
         [],
         'email',
         [],
+        undefined,
       )
     })
     expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument()
+  })
+
+  it('routes template recommendations through the new-agent credit gate', async () => {
+    window.history.pushState({}, '', '/app/agents/new')
+    usageBurnRateState.quota.unlimited = false
+    usageBurnRateState.projection.projected_days_remaining = 1
+    usageBurnRateState.snapshot.burn_rate_per_day = 5
+    fetchAgentSpawnIntentMock.mockResolvedValue({
+      charter: '',
+      charter_override: null,
+      preferred_llm_tier: null,
+      selected_pipedream_app_slugs: [],
+      onboarding_target: null,
+      requires_plan_selection: false,
+      template_recommendations: {
+        category: 'People',
+        categories: ['People'],
+        source: 'category',
+        templates: [
+          {
+            id: 'template-1',
+            name: 'Talent Scout',
+            tagline: 'Find candidates.',
+            description: 'Find candidates.',
+            category: 'People',
+            templateCode: 'talent-scout',
+            templateId: 'template-1',
+            templateSource: 'public',
+            likeCount: 4,
+            isOfficial: true,
+          },
+        ],
+      },
+    })
+
+    renderAgentChatPage()
+
+    fireEvent.click(await screen.findByTestId('template-recommendation-template-1'))
+
+    expect(createAgentMock).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId('intelligence-gate-continue'))
+
+    await waitFor(() => {
+      expect(createAgentMock).toHaveBeenCalledWith(
+        'Talent Scout',
+        'standard',
+        null,
+        [],
+        'web',
+        [],
+        {
+          templateCode: 'talent-scout',
+          templateId: 'template-1',
+          templateSource: 'public',
+        },
+      )
+    })
+  })
+
+  it('allows empty-state preview creation when the roster says preview creation is available', async () => {
+    window.history.pushState({}, '', '/app/agents')
+    seedSubscriptionState(appStore, {
+      ...buildInitialSubscriptionState(),
+      personalSignupPreviewAvailable: true,
+      personalSignupPreviewProcessingAvailable: true,
+    })
+    rosterState.personalSignupPreviewCreateAvailable = true
+
+    renderAgentChatPage({ agentId: undefined })
+
+    const createButton = await screen.findByRole('button', { name: /create your first agent/i })
+    expect(createButton).not.toHaveAttribute('aria-disabled')
+    expect(screen.queryByText(/finish signup to create another agent/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps empty-state preview creation blocked when an active preview already exists', async () => {
+    window.history.pushState({}, '', '/app/agents')
+    seedSubscriptionState(appStore, {
+      ...buildInitialSubscriptionState(),
+      personalSignupPreviewAvailable: true,
+      personalSignupPreviewProcessingAvailable: true,
+    })
+    rosterState.personalSignupPreviewCreateAvailable = false
+
+    renderAgentChatPage({ agentId: undefined })
+
+    const createButton = await screen.findByRole('button', { name: /create your first agent/i })
+    expect(createButton).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByText(/finish signup to create another agent/i)).toBeInTheDocument()
   })
 
   it('treats signup preview as paused once processing is idle after refresh', async () => {

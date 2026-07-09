@@ -97,8 +97,14 @@ def _recommendation_source_state(user, context_info: ConsoleContextInfo) -> dict
     }
 
 
-def _recommendation_cache_key(user, context_info: ConsoleContextInfo) -> str:
-    source_state = _recommendation_source_state(user, context_info)
+def _recommendation_cache_key(
+    user,
+    context_info: ConsoleContextInfo,
+    *,
+    source_state: dict[str, Any] | None = None,
+) -> str:
+    if source_state is None:
+        source_state = _recommendation_source_state(user, context_info)
     fingerprint = hashlib.sha256(
         "|".join(
             [
@@ -108,10 +114,6 @@ def _recommendation_cache_key(user, context_info: ConsoleContextInfo) -> str:
         ).encode("utf-8")
     ).hexdigest()[:24]
     return ":".join(["agent-chat", "template-recommendations", CACHE_VERSION, fingerprint])
-
-
-def invalidate_template_recommendation_cache(user, context_info: ConsoleContextInfo) -> None:
-    cache.delete(_recommendation_cache_key(user, context_info))
 
 
 def _owner_state_kwargs(user, context_info: ConsoleContextInfo) -> dict[str, Any]:
@@ -434,12 +436,12 @@ def _classify_categories(charters: list[str], categories: list[str]) -> list[str
 
 
 def build_new_agent_template_recommendations(user, context_info: ConsoleContextInfo) -> dict[str, Any]:
-    cache_key = _recommendation_cache_key(user, context_info)
+    source_state = _recommendation_source_state(user, context_info)
+    cache_key = _recommendation_cache_key(user, context_info, source_state=source_state)
     cached = cache.get(cache_key)
     if isinstance(cached, dict) and isinstance(cached.get("templates"), list):
         return cached
 
-    source_state = _recommendation_source_state(user, context_info)
     source_fingerprint = source_state["fingerprint"]
     source_agent_count = source_state["agent_count"]
 
