@@ -279,7 +279,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
 
 
 @tag("batch_marketing_events")
-class StartTrialEligibilityEnforcementTaskTests(SimpleTestCase):
+class StartTrialLegacyEligibilitySnapshotTaskTests(SimpleTestCase):
     def setUp(self):
         self.payload = {
             "event_name": "StartTrial",
@@ -312,7 +312,7 @@ class StartTrialEligibilityEnforcementTaskTests(SimpleTestCase):
     @patch("marketing_events.tasks._dispatch_marketing_event")
     @patch("marketing_events.tasks.Analytics.track")
     @patch("marketing_events.tasks._should_send_subscription_guarded_event", return_value=(True, None))
-    def test_snapshot_disallow_skips_start_trial(
+    def test_legacy_disallowed_snapshot_does_not_suppress_start_trial(
         self,
         _mock_subscription_guard,
         mock_track,
@@ -324,48 +324,6 @@ class StartTrialEligibilityEnforcementTaskTests(SimpleTestCase):
                 "manual_action": "inherit",
                 "reason_codes": ["fpjs_history_match"],
                 "send_allowed": False,
-                "decision_source": "stored_trial_eligibility_snapshot",
-            }
-        }
-
-        enqueue_start_trial_marketing_event(payload)
-
-        mock_dispatch.assert_not_called()
-        mock_track.assert_called_once()
-        track_kwargs = mock_track.call_args.kwargs
-        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
-        self.assertEqual(track_kwargs["properties"]["reason"], "trial_eligibility_disallowed")
-        self.assertEqual(
-            track_kwargs["properties"]["decision_source"],
-            "stored_trial_eligibility_snapshot",
-        )
-        self.assertEqual(
-            track_kwargs["properties"]["trial_eligibility_decision"],
-            UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
-        )
-        self.assertEqual(
-            track_kwargs["properties"]["trial_eligibility_reason_codes"],
-            ["fpjs_history_match"],
-        )
-        self.assertFalse(track_kwargs["properties"]["trial_eligibility_policy_send_allowed"])
-        self.assertEqual(track_kwargs["properties"]["value"], 375.0)
-
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @patch("marketing_events.tasks._dispatch_marketing_event")
-    @patch("marketing_events.tasks.Analytics.track")
-    @patch("marketing_events.tasks._should_send_subscription_guarded_event", return_value=(True, None))
-    def test_snapshot_allow_review_dispatches_start_trial(
-        self,
-        _mock_subscription_guard,
-        mock_track,
-        mock_dispatch,
-    ):
-        payload = self.payload | {
-            "start_trial_eligibility": {
-                "decision": UserTrialEligibilityAutoStatusChoices.REVIEW,
-                "manual_action": "inherit",
-                "reason_codes": ["multi_signal_history_match"],
-                "send_allowed": True,
                 "decision_source": "stored_trial_eligibility_snapshot",
             }
         }
