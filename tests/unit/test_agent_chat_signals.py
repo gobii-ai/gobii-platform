@@ -34,6 +34,7 @@ from api.models import (
     PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    PersistentAgentUserActionEvent,
     UserPhoneNumber,
     build_web_agent_address,
     build_web_user_address,
@@ -230,6 +231,27 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(processing.get("agent_id"), str(self.agent.id))
         processing_payload = processing.get("payload", {})
         self.assertIn("active", processing_payload)
+
+    @tag("batch_agent_chat")
+    def test_user_action_creation_emits_timeline_event(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentUserActionEvent.objects.create(
+                agent=self.agent,
+                actor_user=self.user,
+                action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED,
+                count=1,
+                metadata={"secret_names": ["GitHub token"]},
+            )
+
+        timeline = self._receive_with_timeout()
+        self.assertEqual(timeline.get("type"), "timeline_event")
+        self.assertEqual(timeline.get("agent_id"), str(self.agent.id))
+        payload = timeline.get("payload", {})
+        self.assertEqual(payload.get("kind"), "user_action")
+        self.assertEqual(payload.get("action", {}).get("actionType"), "secrets_saved")
+        self.assertNotIn("summary", payload.get("action", {}))
+        self.assertNotIn("detail", payload.get("action", {}))
+        self.assertEqual(payload.get("action", {}).get("actorUserId"), self.user.id)
 
     @tag("batch_agent_chat")
     def test_create_image_tool_call_emits_preview_url(self):

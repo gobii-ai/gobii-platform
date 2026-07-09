@@ -26,6 +26,7 @@ from api.models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentSystemMessage,
+    PersistentAgentUserActionEvent,
 )
 from api.services.signup_preview import transition_agent_to_signup_preview_waiting
 from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
@@ -47,6 +48,7 @@ from .timeline import (
     serialize_agent_schedule,
     serialize_processing_snapshot,
     serialize_thinking_event,
+    serialize_user_action_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -457,6 +459,28 @@ def broadcast_contact_requests_updated(sender, instance: CommsAllowlistRequest, 
 @receiver(post_delete, sender=CommsAllowlistRequest)
 def broadcast_contact_requests_deleted(sender, instance: CommsAllowlistRequest, **kwargs):
     _broadcast_pending_action_requests_for_agent(instance.agent_id)
+
+
+@receiver(post_save, sender=PersistentAgentUserActionEvent)
+def broadcast_user_action_event(sender, instance: PersistentAgentUserActionEvent, created: bool, **kwargs):
+    if not created or not instance.agent_id:
+        return
+    event_id = instance.id
+    agent_id = instance.agent_id
+
+    def _on_commit():
+        try:
+            event = (
+                PersistentAgentUserActionEvent.objects
+                .select_related("actor_user")
+                .get(id=event_id)
+            )
+        except PersistentAgentUserActionEvent.DoesNotExist:
+            return
+        payload = serialize_user_action_event(event)
+        _send(_group_name(agent_id), "timeline_event", payload, agent_id=str(agent_id))
+
+    transaction.on_commit(_on_commit)
 
 
 @receiver(post_save, sender=PersistentAgentStep)

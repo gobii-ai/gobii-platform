@@ -604,6 +604,7 @@ export type SpawnRequestDecisionPayload = {
 }
 
 export type PendingActionMutationResult = {
+  event?: TimelineEvent
   message?: string
   pendingHumanInputRequests: PendingHumanInputRequest[]
   pendingActionRequests: PendingActionRequest[]
@@ -614,6 +615,7 @@ async function postPendingActionMutation(
   payload: unknown,
 ): Promise<PendingActionMutationResult> {
   const response = await jsonRequest<{
+    event?: TimelineEvent
     message?: string
     pending_human_input_requests?: unknown[]
     pending_action_requests?: unknown[]
@@ -623,6 +625,7 @@ async function postPendingActionMutation(
     json: payload,
   })
   return {
+    event: response.event,
     message: asNonEmptyString(response.message) ?? undefined,
     pendingHumanInputRequests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
     pendingActionRequests: normalizePendingActionRequests(response.pending_action_requests),

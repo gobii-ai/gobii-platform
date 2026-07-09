@@ -210,7 +210,7 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
 
   for (const event of events) {
     // Messages always pass through
-    if (event.kind === 'message') {
+    if (event.kind === 'message' || event.kind === 'user_action') {
       flush()
       result.push(event)
       continue
@@ -298,7 +298,7 @@ export function collapseDetailedStatusRuns(
 
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index]
-    if (event.kind === 'message') {
+    if (event.kind === 'message' || event.kind === 'user_action') {
       flush()
       result.push(event)
       continue

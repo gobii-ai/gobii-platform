@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react'
 import { MessageEventCard } from './MessageEventCard'
+import { UserActionEventCard } from './UserActionEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { InlineScheduleCard } from './InlineStatusCard'
@@ -67,6 +68,14 @@ export const TimelineEventItem = memo(function TimelineEventItem({
         onMessageCopied={onMessageCopied}
         onReportMessage={onReportMessage}
         onRetryMessage={onRetryMessage}
+      />
+    )
+  }
+  if (event.kind === 'user_action') {
+    return (
+      <UserActionEventCard
+        event={event}
+        viewerUserId={viewerUserId ?? null}
       />
     )
   }
