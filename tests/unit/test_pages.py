@@ -2354,7 +2354,7 @@ class SitemapTests(TestCase):
         self.assertNotContains(response, "When not to use one")
         self.assertNotContains(response, "Do not use an AI sales agent")
         self.assertContains(response, "Fully anonymized Leroy output")
-        self.assertContains(response, "Sample batch metric: 10 role-matched prospects")
+        self.assertContains(response, "Anonymized example shown here: 10 role-matched prospects")
         self.assertContains(response, "Will asked for 10 marketing decision makers")
         self.assertContains(response, "in a recent run for Will, Leroy")
         self.assertContains(response, "verify email addresses")
