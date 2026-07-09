@@ -236,11 +236,11 @@ export function SidebarSettingsMenu({
       </div>
       <Popover
         ref={popoverRef}
-        triggerRef={rowRef}
+        triggerRef={triggerRef}
         isOpen={open}
         onOpenChange={handleOpenChange}
         shouldCloseOnInteractOutside={() => true}
-        placement="top"
+        placement="top start"
         containerPadding={0}
         isNonModal
         className="sidebar-settings__popover"

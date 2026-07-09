@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import type { AppStore } from '../../store/appStore'
+import { createTestAppStore, seedSubscriptionState, StoreProvider } from '../../test/storeTestUtils'
 
 vi.mock('../../util/analytics', () => ({
   track: vi.fn(),
@@ -32,19 +34,27 @@ function buildInitialSubscriptionState() {
 }
 
 describe('AgentSignupPreviewPanel', () => {
+  let appStore: AppStore
+
   beforeEach(() => {
-    useSubscriptionStore.setState(buildInitialSubscriptionState())
+    appStore = createTestAppStore()
+    seedSubscriptionState(appStore, buildInitialSubscriptionState())
   })
 
-  it('renders the unlock copy with the agent name and scoped trial CTA copy', () => {
-    render(
-      <AgentSignupPreviewPanel
-        status="awaiting_signup_completion"
-        agentName="Bob Smith"
-        currentPlan="free"
-        onUpgrade={vi.fn()}
-      />,
+  function renderSignupPreviewPanel(props: ComponentProps<typeof AgentSignupPreviewPanel>) {
+    return render(
+      <StoreProvider store={appStore}>
+        <AgentSignupPreviewPanel {...props} />
+      </StoreProvider>,
     )
+  }
+
+  it('renders the unlock copy with the agent name and scoped trial CTA copy', () => {
+    renderSignupPreviewPanel({
+      status: 'awaiting_signup_completion',
+      agentName: 'Bob Smith',
+      onUpgrade: vi.fn(),
+    })
 
     expect(screen.getByRole('heading', { name: 'Bob Smith is ready.' })).toBeInTheDocument()
     expect(screen.getByText('Unlock your agent now.')).toBeInTheDocument()
@@ -53,14 +63,11 @@ describe('AgentSignupPreviewPanel', () => {
   })
 
   it('falls back to a generic agent label when no agent name is available', () => {
-    render(
-      <AgentSignupPreviewPanel
-        status="awaiting_first_reply_pause"
-        agentName=""
-        currentPlan="free"
-        onUpgrade={vi.fn()}
-      />,
-    )
+    renderSignupPreviewPanel({
+      status: 'awaiting_first_reply_pause',
+      agentName: '',
+      onUpgrade: vi.fn(),
+    })
 
     expect(screen.getByRole('heading', { name: 'Your agent is ready.' })).toBeInTheDocument()
   })

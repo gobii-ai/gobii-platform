@@ -1,7 +1,8 @@
 import { useCallback } from 'react'
 import { AlertTriangle, Users, X, Zap } from 'lucide-react'
 
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import { ensureAuthenticated, subscriptionActions } from '../../store/subscriptionSlice'
+import { useAppDispatch } from '../../store/hooks'
 import { AgentChatSectionCard } from './uiPrimitives'
 
 type ContactCapCalloutCardProps = {
@@ -15,16 +16,16 @@ export function ContactCapCalloutCard({
   showUpgrade = false,
   onDismiss,
 }: ContactCapCalloutCardProps) {
-  const { openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
+  const dispatch = useAppDispatch()
   const canShowUpgrade = Boolean(showUpgrade)
   const showActions = Boolean(onOpenPacks || canShowUpgrade)
   const handleUpgradeClick = useCallback(async () => {
-    const authenticated = await ensureAuthenticated()
+    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
     if (!authenticated) {
       return
     }
-    openUpgradeModal('contact_cap_callout')
-  }, [ensureAuthenticated, openUpgradeModal])
+    dispatch(subscriptionActions.openUpgradeModal({ source: 'contact_cap_callout' }))
+  }, [dispatch])
 
   return (
     <AgentChatSectionCard className="timeline-event hard-limit-callout" tone="warning">

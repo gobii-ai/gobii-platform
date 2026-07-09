@@ -1,4 +1,6 @@
-export type AgentChatShellSubview = 'chat' | 'settings' | 'secrets' | 'secret-requests' | 'email' | 'files' | 'contact-requests'
+import type { AgentChatShellSubview } from '../types/immersiveShell'
+
+export type { AgentChatShellSubview }
 
 const CONSOLE_SHELL_SUBVIEW_PATTERN = '(settings|secrets|email|files|contact-requests)'
 

@@ -4,10 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { ToolClusterLivePreview } from './ToolClusterLivePreview'
 import { transformToolCluster } from './tooling/toolRegistry'
 import type { ToolClusterEvent } from '../../types/agentChat'
-
-vi.mock('../../stores/agentChatStore', () => ({
-  useAgentChatStore: (selector: (state: { processingActive: boolean }) => unknown) => selector({ processingActive: true }),
-}))
+import { chatActions } from '../../store/chatSlice'
+import { createTestAppStore, StoreProvider } from '../../test/storeTestUtils'
 
 function clusterForRequest(url: string, method = 'GET'): ToolClusterEvent {
   return {
@@ -71,13 +69,17 @@ function clusterForApplyPatch(): ToolClusterEvent {
 }
 
 function renderPreview(cluster: ToolClusterEvent) {
+  const store = createTestAppStore()
+  store.dispatch(chatActions.agentSelected({ agentId: 'agent-1', options: { processingActive: true } }))
   return render(
-    <ToolClusterLivePreview
-      cluster={transformToolCluster(cluster)}
-      isLatestEvent
-      onOpenTimeline={vi.fn()}
-      onSelectEntry={vi.fn()}
-    />,
+    <StoreProvider store={store}>
+      <ToolClusterLivePreview
+        cluster={transformToolCluster(cluster)}
+        isLatestEvent
+        onOpenTimeline={vi.fn()}
+        onSelectEntry={vi.fn()}
+      />
+    </StoreProvider>,
   )
 }
 

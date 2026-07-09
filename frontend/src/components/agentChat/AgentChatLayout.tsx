@@ -7,43 +7,37 @@ import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
 import { AgentTimelinePane } from './AgentTimelinePane'
-import { ChatSidebar } from './ChatSidebar'
-import type { TeamTemplateCreateMenu } from './AgentCreateSplitButton'
-import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
+import { ChatSidebar, type ChatSidebarProps } from './ChatSidebar'
+import { AgentChatBanner } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
-import { ProductAnnouncementBell } from './ProductAnnouncementBell'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
 import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
-import { getInitialAgentChatSidebarMode } from './sidebarMode'
+import type { AgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import { TextareaSubmitDialog } from '../common/TextareaSubmitDialog'
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { SelectionShellPage } from './SelectionShellPageSwitcher'
+import type { SidebarSettingsInfo } from './SidebarSettingsMenu'
 import type { AgentTimelineProps } from './types'
 import type {
   PendingActionRequest,
   AgentMessage,
-  ProcessingWebTask,
-  StreamState,
   PlanSnapshot,
 } from '../../types/agentChat'
-import type { InsightEvent } from '../../types/insight'
-import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite } from '../../types/agentRoster'
-import type { PlanningState, SignupPreviewState } from '../../types/agentRoster'
-import type { ConsoleContext } from '../../api/context'
+import type { SignupPreviewState } from '../../types/agentRoster'
 import {
   isContinuationUpgradeModalSource,
-  useSubscriptionStore,
+  selectSubscriptionState,
+  subscriptionActions,
   type PlanTier,
-} from '../../stores/subscriptionStore'
+} from '../../store/subscriptionSlice'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
@@ -55,6 +49,14 @@ import {
   hasCompletedPlanDeliverables,
 } from './planSnapshotUtils'
 import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import { selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
+import {
+  immersiveShellActions,
+  selectImmersiveShellActiveAgentId,
+  selectImmersiveShellViewer,
+  selectImmersiveSidebarMode,
+} from '../../store/immersiveShellSlice'
 
 type TaskQuotaInfo = {
   available: number
@@ -66,6 +68,13 @@ type TaskQuotaInfo = {
 function normalizeAgentSettingsPathname(pathname: string): string {
   const trimmed = pathname.replace(/\/+$/, '')
   return trimmed || '/'
+}
+
+function hasAgentResponse(events: SimplifiedTimelineItem[]): boolean {
+  return events.some((event) => (
+    event.kind === 'message'
+    && Boolean((event as { message?: { isOutbound?: boolean } }).message?.isOutbound)
+  ))
 }
 
 type AgentChatMessageLinkSubview = Exclude<AgentChatShellSubview, 'chat'>
@@ -163,81 +172,29 @@ function getAppMessageLinkShellPage(href: string): AppMessageLinkShellPage | nul
   }
 }
 
+type AgentChatLayoutSidebarSettings = Omit<SidebarSettingsInfo, 'isProprietaryMode' | 'taskCredits' | 'viewerEmail'> & {
+  todayCreditsUsed?: number | null
+  creditsResetOn?: string | null
+}
+
+export type AgentChatLayoutSidebarConfig = Omit<
+  ChatSidebarProps,
+  'activeAgentId' | 'desktopMode' | 'onDesktopModeChange' | 'settings'
+> & {
+  settings?: AgentChatLayoutSidebarSettings
+  insightsPanelExpandedPreference?: boolean | null
+  onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
+}
+
 type AgentChatLayoutProps = AgentTimelineProps & {
   displayEvents?: SimplifiedTimelineItem[]
   statusExpansionTargets?: StatusExpansionTargets
-  realtimeEventCursors?: Set<string>
-  onRealtimeEventAnimationConsumed?: (cursor: string) => void
   agentId?: string | null
-  agentAvatarUrl?: string | null
-  agentEmail?: string | null
-  agentSms?: string | null
-  agentName?: string | null
-  auditUrl?: string | null
-  agentIsOrgOwned?: boolean
-  canManageAgent?: boolean
-  isCollaborator?: boolean
-  hideInsightsPanel?: boolean
-  viewerUserId?: number | null
-  viewerEmail?: string | null
-  connectionStatus?: ConnectionStatusTone
-  connectionLabel?: string
-  connectionDetail?: string | null
-  agentRoster?: AgentRosterEntry[]
-  transferInvites?: AgentTransferInvite[]
-  favoriteAgentIds?: string[]
-  mutedAgentIds?: string[]
-  activeAgentId?: string | null
-  insightsPanelExpandedPreference?: boolean | null
-  switchingAgentId?: string | null
-  rosterLoading?: boolean
-  rosterError?: string | null
-  onSelectAgent?: (agent: AgentRosterEntry) => void
-  onRespondTransferInvite?: (invite: AgentTransferInvite, action: 'accept' | 'decline') => Promise<void>
-  onConfigureAgent?: (agent: AgentRosterEntry) => void
-  onToggleAgentFavorite?: (agentId: string) => void
-  onToggleAgentMute?: (agentId: string) => void
-  onCreateAgent?: () => void
-  createAgentDisabledReason?: string | null
-  onBlockedCreateAgent?: (location: 'sidebar') => void
-  teamTemplateMenu?: TeamTemplateCreateMenu | null
-  agentRosterSortMode?: AgentRosterSortMode
-  onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
-  onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
-  contextSwitcher?: AgentChatContextSwitcherData
-  currentContext?: ConsoleContext | null
-  sidebarBillingUrl?: string | null
-  onOpenBilling?: () => void
-  sidebarUsageUrl?: string | null
-  onOpenUsage?: () => void
-  sidebarApiKeysUrl?: string | null
-  onOpenApiKeys?: () => void
-  sidebarProfileUrl?: string | null
-  onOpenProfile?: () => void
-  sidebarOrganizationUrl?: string | null
-  onOpenOrganization?: () => void
-  sidebarSecretsUrl?: string | null
-  onOpenSecrets?: () => void
-  sidebarIntegrationsUrl?: string | null
-  onOpenIntegrations?: () => void
-  onOpenHelp?: () => void
-  sidebarTodayCreditsUsed?: number | null
-  sidebarCreditsResetOn?: string | null
-  sidebarNotificationsEnabled?: boolean
-  sidebarNotificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
-  onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
+  bannerAgentName?: string | null
+  sidebar?: AgentChatLayoutSidebarConfig
   autoFocusComposer?: boolean
   planSnapshot?: PlanSnapshot | null
   footer?: ReactNode
-  galleryShellPage?: SelectionShellPage
-  galleryShellPanel?: ReactNode
-  onGalleryShellPageChange?: (page: SelectionShellPage) => void
-  showEmbeddedSettings?: boolean
-  embeddedSettingsPanel?: ReactNode
-  embeddedSettingsTitle?: string
-  onBackFromEmbeddedSettings?: () => void
-  scrollToAgentId?: string | null
-  onScrolledToAgent?: (agentId: string) => void
   dailyCredits?: DailyCreditsInfo | null
   dailyCreditsStatus?: DailyCreditsStatus | null
   dailyCreditsLoading?: boolean
@@ -262,8 +219,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   taskPackUpdating?: boolean
   onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
   onStopProcessing?: () => void | Promise<void>
-  stopProcessingBusy?: boolean
-  stopProcessingRequested?: boolean
   addonsTrial?: TrialInfo | null
   taskQuota?: TaskQuotaInfo | null
   showPurchaseSeatsPrompt?: boolean
@@ -272,7 +227,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
   highPriorityBanner?: HighPriorityBannerConfig | null
-  onLoadNewer?: () => void
   onJumpToLatest?: () => void
   onClose?: () => void
   onShare?: () => void
@@ -283,29 +237,17 @@ type AgentChatLayoutProps = AgentTimelineProps & {
     body: string,
     attachments?: File[],
   ) => void | Promise<void>
+  onRetryMessage?: (message: AgentMessage) => void | Promise<void>
   onComposerFocus?: () => void
   onComposerRequestScrollToBottom?: () => void
-  autoScrollPinned?: boolean
   isNearBottom?: boolean
-  hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>
   timelineContentRef?: Ref<HTMLDivElement>
   composerShellRef?: Ref<HTMLDivElement>
   loadingOlder?: boolean
   loadingNewer?: boolean
   initialLoading?: boolean
-  processingWebTasks?: ProcessingWebTask[]
-  nextScheduledAt?: string | null
-  processingStartedAt?: number | null
-  awaitingResponse?: boolean
-  streaming?: StreamState | null
-  insights?: InsightEvent[]
   insightsLoading?: boolean
-  currentInsightIndex?: number
-  onDismissInsight?: (insightId: string) => void
-  onInsightIndexChange?: (index: number) => void
-  onPauseChange?: (paused: boolean) => void
-  isInsightsPaused?: boolean
   onUpgrade?: (plan: PlanTier, source?: string) => void
   llmIntelligence?: LlmIntelligenceConfig | null
   currentLlmTier?: string | null
@@ -315,26 +257,16 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   llmTierError?: string | null
   onOpenTaskPacks?: () => void
   spawnIntentLoading?: boolean
-  starterPromptsDisabled?: boolean
   composerDisabled?: boolean
   composerDisabledReason?: string | null
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
-  showSignupPreviewPanel?: boolean
   showSubscriptionExpiredPanel?: boolean
-  signupPreviewState?: SignupPreviewState
-  planningState?: PlanningState
   onSkipPlanning?: () => void | Promise<void>
-  skipPlanningBusy?: boolean
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
-  googleSheetsDriveTabEnabled?: boolean
-  apolloNativeTabEnabled?: boolean
-  hubspotNativeTabEnabled?: boolean
-  discordNativeTabEnabled?: boolean
-  metaAdsTabEnabled?: boolean
   pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInputRequest?: (
     response:
@@ -364,82 +296,15 @@ type AgentChatLayoutProps = AgentTimelineProps & {
 type PlanPanelMode = 'docked' | 'hidden'
 
 export function AgentChatLayout({
-  agentFirstName,
   events,
   displayEvents,
   statusExpansionTargets,
-  realtimeEventCursors,
-  onRealtimeEventAnimationConsumed,
   agentId,
-  agentAvatarUrl,
-  agentEmail,
-  agentSms,
-  agentName,
-  auditUrl,
-  agentIsOrgOwned = false,
-  canManageAgent = true,
-  isCollaborator = false,
-  hideInsightsPanel = false,
-  viewerUserId,
-  viewerEmail,
-  connectionStatus,
-  connectionLabel,
-  connectionDetail,
-  agentRoster,
-  transferInvites,
-  favoriteAgentIds,
-  mutedAgentIds,
-  activeAgentId,
-  insightsPanelExpandedPreference = null,
-  switchingAgentId,
-  scrollToAgentId,
-  onScrolledToAgent,
-  rosterLoading,
-  rosterError,
-  onSelectAgent,
-  onRespondTransferInvite,
-  onConfigureAgent,
-  onToggleAgentFavorite,
-  onToggleAgentMute,
-  onCreateAgent,
-  createAgentDisabledReason = null,
-  onBlockedCreateAgent,
-  teamTemplateMenu = null,
-  agentRosterSortMode = 'recent',
-  onAgentRosterSortModeChange,
-  onInsightsPanelExpandedPreferenceChange,
-  contextSwitcher,
-  currentContext = null,
-  sidebarBillingUrl = null,
-  onOpenBilling,
-  sidebarUsageUrl = '/app/usage',
-  onOpenUsage,
-  sidebarApiKeysUrl = '/app/api-keys',
-  onOpenApiKeys,
-  sidebarProfileUrl = '/app/profile',
-  onOpenProfile,
-  sidebarOrganizationUrl = null,
-  onOpenOrganization,
-  sidebarSecretsUrl = '/app/secrets',
-  onOpenSecrets,
-  sidebarIntegrationsUrl = '/app/integrations',
-  onOpenIntegrations,
-  onOpenHelp,
-  sidebarTodayCreditsUsed = null,
-  sidebarCreditsResetOn = null,
-  sidebarNotificationsEnabled = true,
-  sidebarNotificationStatus = 'off',
-  onSidebarNotificationsEnabledChange,
+  bannerAgentName = null,
+  sidebar,
   autoFocusComposer = false,
   planSnapshot,
   footer,
-  galleryShellPage = 'agents',
-  galleryShellPanel = null,
-  onGalleryShellPageChange,
-  showEmbeddedSettings = false,
-  embeddedSettingsPanel,
-  embeddedSettingsTitle = 'Agent Settings',
-  onBackFromEmbeddedSettings,
   dailyCredits,
   dailyCreditsStatus,
   dailyCreditsLoading = false,
@@ -464,8 +329,6 @@ export function AgentChatLayout({
   taskPackUpdating = false,
   onUpdateTaskPacks,
   onStopProcessing,
-  stopProcessingBusy = false,
-  stopProcessingRequested = false,
   addonsTrial = null,
   taskQuota = null,
   showPurchaseSeatsPrompt = false,
@@ -475,11 +338,6 @@ export function AgentChatLayout({
   taskCreditsDismissKey = null,
   highPriorityBanner = null,
   hasMoreNewer,
-  processingActive,
-  awaitingResponse = false,
-  processingWebTasks = [],
-  nextScheduledAt = null,
-  streaming,
   onJumpToLatest,
   onClose,
   onShare,
@@ -487,24 +345,17 @@ export function AgentChatLayout({
   onBlockedSettingsClick,
   onBlockedCollaborate,
   onSendMessage,
+  onRetryMessage,
   onComposerFocus,
   onComposerRequestScrollToBottom,
-  autoScrollPinned = true,
   isNearBottom = true,
-  hasUnseenActivity = false,
   timelineRef,
   timelineContentRef,
   composerShellRef,
   loadingOlder = false,
   loadingNewer = false,
   initialLoading = false,
-  insights,
   insightsLoading = false,
-  currentInsightIndex,
-  onDismissInsight,
-  onInsightIndexChange,
-  onPauseChange,
-  isInsightsPaused,
   onUpgrade,
   llmIntelligence = null,
   currentLlmTier = null,
@@ -514,26 +365,16 @@ export function AgentChatLayout({
   llmTierError = null,
   onOpenTaskPacks,
   spawnIntentLoading = false,
-  starterPromptsDisabled = false,
   composerDisabled = false,
   composerDisabledReason = null,
   composerError = null,
   composerErrorShowUpgrade = false,
-  showSignupPreviewPanel = false,
   showSubscriptionExpiredPanel = false,
-  signupPreviewState = 'none',
-  planningState = 'skipped',
   onSkipPlanning,
-  skipPlanningBusy = false,
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
-  googleSheetsDriveTabEnabled = false,
-  apolloNativeTabEnabled = false,
-  hubspotNativeTabEnabled = false,
-  discordNativeTabEnabled = false,
-  metaAdsTabEnabled = false,
   pendingActionRequests = [],
   onRespondHumanInputRequest,
   onDismissHumanInputRequest,
@@ -549,26 +390,139 @@ export function AgentChatLayout({
 }: AgentChatLayoutProps) {
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
-  const [sidebarMode, setSidebarMode] = useState(getInitialAgentChatSidebarMode)
+  const dispatch = useAppDispatch()
+  const sidebarMode = useAppSelector(selectImmersiveSidebarMode)
+  const sidebarModeRef = useRef(sidebarMode)
+  useEffect(() => {
+    sidebarModeRef.current = sidebarMode
+  }, [sidebarMode])
+  const setSidebarMode = useCallback((nextMode: AgentChatSidebarMode | ((mode: AgentChatSidebarMode) => AgentChatSidebarMode)) => {
+    const resolvedMode = typeof nextMode === 'function' ? nextMode(sidebarModeRef.current) : nextMode
+    if (resolvedMode !== sidebarModeRef.current) {
+      dispatch(immersiveShellActions.setSidebarMode(resolvedMode))
+    }
+  }, [dispatch])
   const preEmbeddedSidebarModeRef = useRef<'collapsed' | 'list' | 'gallery' | null>(null)
   const {
     currentPlan: subscriptionPlan,
     isLoading: subscriptionLoading,
     isUpgradeModalOpen,
-    closeUpgradeModal,
     upgradeModalSource,
     upgradeModalDismissible,
     isProprietaryMode,
     ctaPickAPlan,
+    personalSignupPreviewAvailable,
     trialDaysByPlan,
     trialEligible,
-  } = useSubscriptionStore()
+  } = useAppSelector(selectSubscriptionState)
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
   const useTrialUpgradeCopy = (
     trialEligible
     && maxTrialDays > 0
     && (upgradeModalSource === 'trial_onboarding' || subscriptionPlan === 'free')
   )
+  const sidebarConfig = sidebar ?? {}
+  const {
+    settings: sidebarSettingsConfig,
+    insightsPanelExpandedPreference = null,
+    onInsightsPanelExpandedPreferenceChange,
+    ...chatSidebarProps
+  } = sidebarConfig
+  const {
+    galleryShellPage = 'agents',
+    showEmbeddedSettings = false,
+    onGalleryShellPageChange,
+    onBackFromEmbeddedSettings,
+  } = chatSidebarProps
+  const effectiveGalleryShellPage = galleryShellPage ?? 'agents'
+  const currentContext = sidebarSettingsConfig?.context ?? null
+  const sidebarBillingUrl = sidebarSettingsConfig?.billingUrl ?? null
+  const onOpenBilling = sidebarSettingsConfig?.onOpenBilling ?? undefined
+  const sidebarUsageUrl = sidebarSettingsConfig?.usageUrl ?? '/app/usage'
+  const onOpenUsage = sidebarSettingsConfig?.onOpenUsage ?? undefined
+  const sidebarApiKeysUrl = sidebarSettingsConfig?.apiKeysUrl ?? '/app/api-keys'
+  const onOpenApiKeys = sidebarSettingsConfig?.onOpenApiKeys ?? undefined
+  const sidebarProfileUrl = sidebarSettingsConfig?.profileUrl ?? '/app/profile'
+  const onOpenProfile = sidebarSettingsConfig?.onOpenProfile ?? undefined
+  const sidebarOrganizationUrl = sidebarSettingsConfig?.organizationUrl ?? null
+  const onOpenOrganization = sidebarSettingsConfig?.onOpenOrganization ?? undefined
+  const sidebarSecretsUrl = sidebarSettingsConfig?.secretsUrl ?? '/app/secrets'
+  const onOpenSecrets = sidebarSettingsConfig?.onOpenSecrets ?? undefined
+  const sidebarIntegrationsUrl = sidebarSettingsConfig?.integrationsUrl ?? '/app/integrations'
+  const onOpenIntegrations = sidebarSettingsConfig?.onOpenIntegrations ?? undefined
+  const onOpenHelp = sidebarSettingsConfig?.onOpenHelp ?? undefined
+  const sidebarTodayCreditsUsed = sidebarSettingsConfig?.todayCreditsUsed ?? null
+  const sidebarCreditsResetOn = sidebarSettingsConfig?.creditsResetOn ?? null
+  const sidebarNotificationsEnabled = sidebarSettingsConfig?.notificationsEnabled ?? true
+  const sidebarNotificationStatus = sidebarSettingsConfig?.notificationStatus ?? 'off'
+  const onSidebarNotificationsEnabledChange = sidebarSettingsConfig?.onNotificationsEnabledChange
+  const runtimeAgentId = useAppSelector(selectActiveChatAgentId)
+  const runtimeSession = useAppSelector(selectActiveChatSession)
+  const shellActiveAgentId = useAppSelector(selectImmersiveShellActiveAgentId)
+  const shellViewer = useAppSelector(selectImmersiveShellViewer)
+  const activeAgentId = agentId === null ? null : (shellActiveAgentId ?? agentId ?? null)
+  const runtimeAgentName = runtimeSession.identity.agentName
+  const runtimeAgentIsOrgOwned = runtimeSession.identity.agentIsOrgOwned
+  const runtimeCanManageAgent = runtimeSession.identity.canManageAgent
+  const runtimeIsCollaborator = runtimeSession.identity.isCollaborator
+  const runtimeProcessingActive = runtimeSession.processing.processingActive
+  const runtimeAwaitingResponse = runtimeSession.processing.awaitingResponse
+  const runtimeProcessingWebTasks = runtimeSession.processing.processingWebTasks
+  const runtimeNextScheduledAt = runtimeSession.processing.nextScheduledAt
+  const runtimeStopProcessingRequested = runtimeSession.processing.stopProcessingRequested
+  const runtimeSkipPlanningBusy = runtimeSession.processing.skipPlanningBusy
+  const runtimeStreaming = runtimeSession.stream.streaming
+  const runtimeAutoScrollPinned = runtimeSession.timelineUi.autoScrollPinned
+  const runtimeHasUnseenActivity = runtimeSession.timelineUi.hasUnseenActivity
+  const runtimeSignupPreviewState = runtimeSession.identity.signupPreviewState
+  const runtimePlanningState = runtimeSession.identity.planningState
+  const runtimeInsights = useMemo(
+    () => runtimeSession.insights.insightIds
+      .map((id) => runtimeSession.insights.insightsById[id])
+      .filter(Boolean),
+    [runtimeSession.insights.insightIds, runtimeSession.insights.insightsById],
+  )
+  const runtimeDismissedInsightIds = useMemo(
+    () => new Set(Object.keys(runtimeSession.insights.dismissedInsightIds)),
+    [runtimeSession.insights.dismissedInsightIds],
+  )
+  const expectedRuntimeAgentId = activeAgentId ?? agentId ?? null
+  const runtimeSynced = runtimeAgentId === expectedRuntimeAgentId
+  const processingActive = runtimeSynced ? runtimeProcessingActive : false
+  const awaitingResponse = runtimeSynced ? runtimeAwaitingResponse : false
+  const processingWebTasks = runtimeSynced ? runtimeProcessingWebTasks : []
+  const nextScheduledAt = runtimeSynced ? runtimeNextScheduledAt : null
+  const stopProcessingRequested = runtimeSynced ? runtimeStopProcessingRequested : false
+  const skipPlanningBusy = runtimeSynced ? runtimeSkipPlanningBusy : false
+  const streaming = runtimeSynced ? runtimeStreaming : null
+  const autoScrollPinned = runtimeSynced ? runtimeAutoScrollPinned : true
+  const hasUnseenActivity = runtimeSynced ? runtimeHasUnseenActivity : false
+  const planningState = runtimeSynced ? runtimePlanningState : 'skipped'
+  const storeSignupPreviewState = runtimeSynced ? runtimeSignupPreviewState : 'none'
+  const agentName = runtimeSynced ? (runtimeAgentName ?? bannerAgentName) : bannerAgentName
+  const agentIsOrgOwned = runtimeSynced ? runtimeAgentIsOrgOwned : false
+  const canManageAgent = runtimeSynced ? runtimeCanManageAgent : true
+  const isCollaborator = runtimeSynced ? runtimeIsCollaborator : false
+  const viewerEmail = shellViewer.email
+  const hasAgentReply = useMemo(() => hasAgentResponse(timelineRenderEvents), [timelineRenderEvents])
+  const signupPreviewState = useMemo<SignupPreviewState>(() => {
+    if (
+      storeSignupPreviewState === 'awaiting_first_reply_pause'
+      && !initialLoading
+      && !processingActive
+      && (!awaitingResponse || hasAgentReply)
+    ) {
+      return 'awaiting_signup_completion'
+    }
+    return storeSignupPreviewState
+  }, [awaitingResponse, hasAgentReply, initialLoading, processingActive, storeSignupPreviewState])
+  const availableInsights = useMemo(() => {
+    if (!runtimeSynced) {
+      return []
+    }
+    return runtimeInsights.filter((insight) => !runtimeDismissedInsightIds.has(insight.insightId))
+  }, [runtimeDismissedInsightIds, runtimeInsights, runtimeSynced])
+  const effectiveInsightsLoading = insightsLoading && availableInsights.length === 0
   const useContinuationUpgradeTitle = (
     ctaPickAPlan
     && isContinuationUpgradeModalSource(upgradeModalSource)
@@ -600,7 +554,7 @@ export function AgentChatLayout({
   const hasStoredPlanPanelMode = agentId
     ? Object.prototype.hasOwnProperty.call(agentPlanPanelModes, agentId)
     : defaultPlanPanelMode !== 'hidden'
-  const showGalleryShellPanel = galleryShellPage !== 'agents'
+  const showGalleryShellPanel = effectiveGalleryShellPage !== 'agents'
   const showPlanInterface = sidebarMode !== 'gallery'
   const previousPlanStateRef = useRef<{ total: number; active: boolean } | null>(null)
   const previousPlanSnapshotRef = useRef<PlanSnapshot | null>(null)
@@ -668,7 +622,7 @@ export function AgentChatLayout({
       return
     }
     setSidebarMode(mode)
-  }, [onBackFromEmbeddedSettings, onGalleryShellPageChange, showEmbeddedSettings, showGalleryShellPanel])
+  }, [onBackFromEmbeddedSettings, onGalleryShellPageChange, setSidebarMode, showEmbeddedSettings, showGalleryShellPanel])
 
   const handleSettingsOpen = useCallback(() => {
     setSettingsOpen(true)
@@ -759,23 +713,23 @@ export function AgentChatLayout({
       }
       return mode
     })
-  }, [showEmbeddedSettings, showGalleryShellPanel])
+  }, [setSidebarMode, showEmbeddedSettings, showGalleryShellPanel])
 
   useEffect(() => {
     if (!isUpgradeModalOpen) {
       return
     }
     if (isCollaborator) {
-      closeUpgradeModal()
+      dispatch(subscriptionActions.closeUpgradeModal())
       return
     }
     if (subscriptionLoading) {
       return
     }
     if (!isProprietaryMode) {
-      closeUpgradeModal()
+      dispatch(subscriptionActions.closeUpgradeModal())
     }
-  }, [closeUpgradeModal, isCollaborator, isProprietaryMode, isUpgradeModalOpen, subscriptionLoading])
+  }, [dispatch, isCollaborator, isProprietaryMode, isUpgradeModalOpen, subscriptionLoading])
 
   const handleUpgradeModalDismiss = useCallback(() => {
     if (!upgradeModalDismissible) {
@@ -785,13 +739,13 @@ export function AgentChatLayout({
       currentPlan: subscriptionPlan,
       source: upgradeModalSource ?? 'unknown',
     })
-    closeUpgradeModal()
-  }, [closeUpgradeModal, subscriptionPlan, upgradeModalDismissible, upgradeModalSource])
+    dispatch(subscriptionActions.closeUpgradeModal())
+  }, [dispatch, subscriptionPlan, upgradeModalDismissible, upgradeModalSource])
 
   const handleUpgradeSelection = useCallback((plan: PlanTier) => {
     onUpgrade?.(plan)
-    closeUpgradeModal()
-  }, [closeUpgradeModal, onUpgrade])
+    dispatch(subscriptionActions.closeUpgradeModal())
+  }, [dispatch, onUpgrade])
 
   const resolvedOpenTaskPacks = useMemo(
     () =>
@@ -1069,7 +1023,13 @@ export function AgentChatLayout({
   const previewActionsDisabledReason = previewActionsDisabled
     ? 'Finish signup to manage settings and collaborate.'
     : null
-  const effectiveShowSignupPreviewPanel = showSignupPreviewPanel && planningState !== 'planning'
+  const effectiveShowSignupPreviewPanel = (
+    Boolean(activeAgentId)
+    && !agentIsOrgOwned
+    && personalSignupPreviewAvailable
+    && signupPreviewState !== 'none'
+    && planningState !== 'planning'
+  )
   const effectiveShowSubscriptionExpiredPanel = showSubscriptionExpiredPanel && planningState !== 'planning'
   const composerUnavailable = spawnIntentLoading || effectiveShowSignupPreviewPanel || effectiveShowSubscriptionExpiredPanel
   const showComposerUnavailableSkipPlanning = composerUnavailable && planningState === 'planning'
@@ -1457,59 +1417,18 @@ export function AgentChatLayout({
   return (
     <>
       <ChatSidebar
+        {...chatSidebarProps}
         desktopMode={sidebarMode}
         onDesktopModeChange={handleSidebarModeChange}
-        agents={agentRoster}
-        transferInvites={transferInvites}
-        favoriteAgentIds={favoriteAgentIds}
-        mutedAgentIds={mutedAgentIds}
-        activeAgentId={activeAgentId}
-        switchingAgentId={switchingAgentId}
-        loading={rosterLoading}
-        errorMessage={rosterError}
-        onSelectAgent={onSelectAgent}
-        onRespondTransferInvite={onRespondTransferInvite}
-        onConfigureAgent={onConfigureAgent}
-        onToggleAgentFavorite={onToggleAgentFavorite}
-        onToggleAgentMute={onToggleAgentMute}
-        onCreateAgent={onCreateAgent}
-        createAgentDisabledReason={createAgentDisabledReason}
-        onBlockedCreateAgent={onBlockedCreateAgent}
-        teamTemplateMenu={teamTemplateMenu}
-        rosterSortMode={agentRosterSortMode}
-        onRosterSortModeChange={onAgentRosterSortModeChange}
-        contextSwitcher={contextSwitcher}
         settings={sidebarSettings}
-        galleryShellPage={galleryShellPage}
-        galleryShellPanel={galleryShellPanel}
-        onGalleryShellPageChange={onGalleryShellPageChange}
-        showEmbeddedSettings={showEmbeddedSettings}
-        embeddedSettingsPanel={embeddedSettingsPanel}
-        embeddedSettingsTitle={embeddedSettingsTitle}
-        onBackFromEmbeddedSettings={onBackFromEmbeddedSettings}
-        scrollToAgentId={scrollToAgentId}
-        onScrolledToAgent={onScrolledToAgent}
       />
-      {isMobileViewport ? <ProductAnnouncementBell variant="mobile" /> : null}
       {showBanner && (
         <AgentChatBanner
-          agentId={agentId}
-          agentName={agentName || 'Agent'}
-          agentAvatarUrl={agentAvatarUrl}
-          agentEmail={agentEmail}
-          agentSms={agentSms}
-          auditUrl={auditUrl}
-          isOrgOwned={agentIsOrgOwned}
-          canManageAgent={canManageAgent}
-          isCollaborator={isCollaborator}
-          connectionStatus={connectionStatus}
-          connectionLabel={connectionLabel}
-          connectionDetail={connectionDetail}
+          agentNameOverride={bannerAgentName}
           planSnapshot={showPlanInterface ? displayPlanSnapshot : null}
           planPanelMode={planPanelMode}
           onPlanOpen={showPlanInterface ? handleOpenPlan : undefined}
           onPlanHoverChange={showPlanInterface ? handlePlanHoverChange : undefined}
-          processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           showPurchaseSeatsButton={showPurchaseSeatsPrompt}
           onPurchaseSeats={handlePurchaseSeats}
@@ -1525,7 +1444,6 @@ export function AgentChatLayout({
           onPublicShare={onPublicShare}
           publicShareDisabled={previewActionsDisabled}
           publicShareDisabledReason={previewActionsDisabledReason}
-          signupPreviewState={signupPreviewState}
           sidebarMode={sidebarMode}
         >
           {showHighPriorityBanner && highPriorityBanner ? (
@@ -1583,10 +1501,6 @@ export function AgentChatLayout({
         >
           <div className="agent-chat-workspace-main">
           <AgentTimelinePane
-            agentAvatarUrl={agentAvatarUrl}
-            agentFirstName={agentFirstName}
-            animateCursors={realtimeEventCursors}
-            autoScrollPinned={autoScrollPinned}
             composerDisabled={composerDisabled}
             contactCapOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0 ? () => handleAddonsOpen('contacts') : undefined}
             contactCapShowUpgrade={contactPackShowUpgrade}
@@ -1595,22 +1509,20 @@ export function AgentChatLayout({
             hardLimitUpgradeUrl={hardLimitUpgradeUrl}
             hasMoreNewer={hasMoreNewer}
             hasStreamingContent={hasStreamingContent}
-            hasUnseenActivity={hasUnseenActivity}
             hideTypingIndicator={hideTypingIndicator}
             initialLoading={initialLoading}
             isStreaming={isStreaming}
             loadingNewer={loadingNewer}
             loadingOlder={loadingOlder}
-            nextScheduledAt={nextScheduledAt}
             onContactCapDismiss={handleContactCapDismiss}
             onHardLimitOpenSettings={handleSettingsOpen}
             onHardLimitQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
-            onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
             onJumpToLatest={onJumpToLatest}
             onMessageCopied={handleMessageCopied}
             onMessageLinkClick={handleMessageLinkClick}
             onPurchaseSeats={handlePurchaseSeats}
             onReportMessage={handleReportMessage}
+            onRetryMessage={onRetryMessage}
             onStarterPromptSelect={handleStarterPromptSelect}
             onTaskCreditsDismiss={handleTaskCreditsDismiss}
             onTaskCreditsOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0 ? () => handleAddonsOpen('tasks') : undefined}
@@ -1631,17 +1543,14 @@ export function AgentChatLayout({
             starterPromptCount={starterPromptCount}
             starterPromptSubmitting={starterPromptSubmitting}
             starterPrompts={starterPrompts}
-            starterPromptsDisabled={starterPromptsDisabled}
+            starterPromptsDisabled={composerDisabled}
             starterPromptsLoading={starterPromptsLoading}
             statusExpansionTargets={statusExpansionTargets}
-            streaming={streaming}
             suppressedThinkingCursor={suppressedThinkingCursor}
             taskCreditsWarningVariant={taskCreditsWarningVariant}
             timelineContentRef={timelineContentRef}
             timelineRef={timelineRef}
             typingStatusText={typingStatusText}
-            viewerEmail={viewerEmail}
-            viewerUserId={viewerUserId}
           />
 
           {/* Composer at bottom of flex layout */}
@@ -1673,10 +1582,6 @@ export function AgentChatLayout({
           ) : effectiveShowSignupPreviewPanel ? (
             <div ref={composerShellRef}>
               <AgentSignupPreviewPanel
-                status={signupPreviewState}
-                agentId={agentId}
-                agentName={agentName}
-                currentPlan={subscriptionPlan}
                 onUpgrade={onUpgrade}
               />
             </div>
@@ -1685,20 +1590,15 @@ export function AgentChatLayout({
               <AgentUpgradePlansPanel
                 title="Choose a plan to continue"
                 body="Your agents are still here. Start a plan to resume messaging and create new agents."
-                currentPlan={subscriptionPlan}
                 onUpgrade={onUpgrade}
                 source="subscription_expired_panel"
               />
             </div>
           ) : (
             <AgentComposer
-              agentId={activeAgentId ?? agentId ?? null}
-              agentName={agentName ?? null}
               onSubmit={onSendMessage}
               pendingActionRequests={pendingActionRequests}
-              planningState={planningState}
               onSkipPlanning={onSkipPlanning}
-              skipPlanningBusy={skipPlanningBusy}
               onRespondHumanInput={onRespondHumanInputRequest}
               onDismissHumanInput={onDismissHumanInputRequest}
               onResolveSpawnRequest={onResolveSpawnRequest}
@@ -1709,24 +1609,14 @@ export function AgentChatLayout({
               onFocus={onComposerFocus}
               onRequestScrollToBottom={onComposerRequestScrollToBottom}
               externalShellRef={composerShellRef}
-              agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}
-              processingTasks={processingWebTasks}
               autoFocus={autoFocusComposer}
-              focusKey={activeAgentId}
               insightsPanelExpandedPreference={insightsPanelExpandedPreference}
               onInsightsPanelExpandedPreferenceChange={onInsightsPanelExpandedPreferenceChange}
-              insights={insights}
-              insightsLoading={insightsLoading}
-              currentInsightIndex={currentInsightIndex}
-              onDismissInsight={onDismissInsight}
-              onInsightIndexChange={onInsightIndexChange}
-              onPauseChange={onPauseChange}
-              isInsightsPaused={isInsightsPaused}
+              insightsLoading={effectiveInsightsLoading}
               onOpenUsage={onOpenUsage}
               onOpenQuickSettings={canOpenQuickSettings ? handleSettingsOpen : undefined}
               usageUrl={sidebarUsageUrl}
-              hideInsightsPanel={hideInsightsPanel}
               intelligenceConfig={llmIntelligence}
               intelligenceTier={currentLlmTier}
               onIntelligenceChange={onLlmTierChange}
@@ -1734,10 +1624,7 @@ export function AgentChatLayout({
               intelligenceBusy={llmTierSaving}
               intelligenceError={llmTierError}
               onOpenTaskPacks={resolvedOpenTaskPacks}
-              canManageAgent={canManageAgent}
               onStopProcessing={onStopProcessing}
-              stopProcessingBusy={stopProcessingBusy}
-              stopProcessingRequested={stopProcessingRequested}
               disabled={composerDisabled}
               disabledReason={composerDisabledReason}
               submitError={composerError}
@@ -1746,11 +1633,6 @@ export function AgentChatLayout({
               pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
               pipedreamAppSearchUrl={pipedreamAppSearchUrl}
               nativeIntegrationsUrl={nativeIntegrationsUrl}
-              googleSheetsDriveTabEnabled={googleSheetsDriveTabEnabled}
-              apolloNativeTabEnabled={apolloNativeTabEnabled}
-              hubspotNativeTabEnabled={hubspotNativeTabEnabled}
-              discordNativeTabEnabled={discordNativeTabEnabled}
-              metaAdsTabEnabled={metaAdsTabEnabled}
               compact={sidebarMode === 'gallery'}
             />
           )}
@@ -1825,18 +1707,13 @@ export function AgentChatLayout({
             forceMode="sheet"
           >
             <SubscriptionUpgradePlans
-              currentPlan={subscriptionPlan}
               onUpgrade={handleUpgradeSelection}
               source={upgradeModalSource ?? undefined}
             />
           </ImmersiveDialog>
         ) : (
           <SubscriptionUpgradeModal
-            currentPlan={subscriptionPlan}
-            onClose={handleUpgradeModalDismiss}
             onUpgrade={handleUpgradeSelection}
-            source={upgradeModalSource ?? undefined}
-            dismissible={upgradeModalDismissible}
           />
         )
       ) : null}

@@ -290,16 +290,19 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
   if (variant === 'mobile') {
     return (
       <>
-        <AgentChatButton
-          variant="solid"
-          size="md"
-          className="agent-fab product-announcement-mobile-trigger"
+        <button
+          type="button"
+          className={joinClassNames(
+            'sidebar-settings__trigger',
+            'product-announcement-bell__trigger',
+            'product-announcement-bell__trigger--settings',
+          )}
           aria-label={label}
           onClick={() => setMobileOpen(true)}
         >
-          <Bell className="product-announcement-mobile-trigger__icon" aria-hidden="true" />
+          <Bell className="h-4 w-4" aria-hidden="true" />
           {hasUnread ? <span className="product-announcement-bell__dot" aria-hidden="true" /> : null}
-        </AgentChatButton>
+        </button>
         <AgentChatMobileSheet
           open={mobileOpen}
           onClose={() => setMobileOpen(false)}

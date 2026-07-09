@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 
 import { SubscriptionUpgradePlans } from './SubscriptionUpgradePlans'
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import type { AppStore } from '../../store/appStore'
+import { createTestAppStore, seedSubscriptionState, StoreProvider } from '../../test/storeTestUtils'
 
 vi.mock('../../util/analytics', () => ({
   track: vi.fn(),
@@ -30,17 +32,28 @@ function buildInitialSubscriptionState() {
 }
 
 describe('SubscriptionUpgradePlans mobile layout', () => {
+  let appStore: AppStore
+
   beforeEach(() => {
-    useSubscriptionStore.setState(buildInitialSubscriptionState())
+    appStore = createTestAppStore()
+    seedSubscriptionState(appStore, buildInitialSubscriptionState())
   })
 
+  function renderPlans(props: ComponentProps<typeof SubscriptionUpgradePlans>) {
+    return render(
+      <StoreProvider store={appStore}>
+        <SubscriptionUpgradePlans {...props} />
+      </StoreProvider>,
+    )
+  }
+
   it('does not force full-height stacked plan cards in the expanded modal layout', () => {
-    render(
-      <SubscriptionUpgradePlans
-        currentPlan="free"
-        onUpgrade={vi.fn()}
-        source="trial_onboarding"
-      />,
+    renderPlans(
+      {
+        currentPlan: 'free',
+        onUpgrade: vi.fn(),
+        source: 'trial_onboarding',
+      },
     )
 
     const grid = screen.getByTestId('subscription-plans-grid')
@@ -58,12 +71,12 @@ describe('SubscriptionUpgradePlans mobile layout', () => {
   })
 
   it('keeps the default trial copy when no unlock variant is requested', () => {
-    render(
-      <SubscriptionUpgradePlans
-        currentPlan="free"
-        onUpgrade={vi.fn()}
-        source="trial_onboarding"
-      />,
+    renderPlans(
+      {
+        currentPlan: 'free',
+        onUpgrade: vi.fn(),
+        source: 'trial_onboarding',
+      },
     )
 
     expect(screen.getAllByRole('button', { name: /start free trial/i })).toHaveLength(2)
@@ -71,13 +84,13 @@ describe('SubscriptionUpgradePlans mobile layout', () => {
   })
 
   it('uses the unlock copy only when the unlock variant is requested', () => {
-    render(
-      <SubscriptionUpgradePlans
-        currentPlan="free"
-        onUpgrade={vi.fn()}
-        source="signup_preview_panel"
-        trialCopyVariant="unlock_agent"
-      />,
+    renderPlans(
+      {
+        currentPlan: 'free',
+        onUpgrade: vi.fn(),
+        source: 'signup_preview_panel',
+        trialCopyVariant: 'unlock_agent',
+      },
     )
 
     expect(screen.getAllByRole('button', { name: /start for free/i })).toHaveLength(2)

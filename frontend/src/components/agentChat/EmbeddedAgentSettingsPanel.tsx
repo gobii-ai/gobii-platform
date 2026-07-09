@@ -4,7 +4,8 @@ import { AlertTriangle, Loader2 } from 'lucide-react'
 
 import { useAgentSettings } from '../../hooks/useAgentSettings'
 import { AgentSettingsWorkspace, type AgentSettingsWorkspaceSavePayload } from '../../screens/AgentDetailScreen'
-import { useAgentChatStore } from '../../stores/agentChatStore'
+import { chatActions } from '../../store/chatSlice'
+import { useAppDispatch } from '../../store/hooks'
 import type { AgentOrganization } from '../../types/agentSettings'
 import { EmbeddedAgentShellPanel } from './EmbeddedAgentShellPanel'
 
@@ -83,14 +84,15 @@ export function EmbeddedAgentSettingsPanel({
   onOpenContactRequests,
 }: EmbeddedAgentSettingsPanelProps) {
   const queryClient = useQueryClient()
+  const dispatch = useAppDispatch()
   const { data, isLoading, error, refetch } = useAgentSettings(agentId, { enabled: Boolean(agentId) })
 
   const handleSaved = useCallback((payload: AgentSettingsWorkspaceSavePayload) => {
-    useAgentChatStore.getState().updateAgentIdentity({
+    dispatch(chatActions.agentIdentityUpdated({
       agentId: payload.agentId,
       agentName: payload.agentName,
       agentAvatarUrl: payload.agentAvatarUrl,
-    })
+    }))
     queryClient.setQueriesData<RosterQueryData>(
       { queryKey: ['agent-roster'] },
       (current) => updateRosterIdentity(current, payload),
@@ -101,7 +103,7 @@ export function EmbeddedAgentSettingsPanel({
       queryClient.invalidateQueries({ queryKey: ['agent-quick-settings', payload.agentId], exact: true }),
       queryClient.invalidateQueries({ queryKey: ['agent-addons', payload.agentId], exact: true }),
     ])
-  }, [queryClient, refetch])
+  }, [dispatch, queryClient, refetch])
 
   if (isLoading) {
     return (

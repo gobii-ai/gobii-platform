@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentComposer } from './AgentComposer'
 import type { PendingActionRequest } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
+import type { PlanningState } from '../../types/agentRoster'
+import { chatActions } from '../../store/chatSlice'
+import type { AppStore } from '../../store/appStore'
+import { createTestAppStore, seedSubscriptionState, StoreProvider } from '../../test/storeTestUtils'
 
 vi.mock('../../util/analytics', () => ({
   AnalyticsEvent: {
@@ -15,14 +19,6 @@ vi.mock('../../util/analytics', () => ({
     UPGRADE_CHECKOUT_REDIRECTED: 'Upgrade Checkout Redirected',
   },
   track: vi.fn(),
-}))
-
-vi.mock('../../stores/subscriptionStore', () => ({
-  useSubscriptionStore: () => ({
-    isProprietaryMode: true,
-    openUpgradeModal: vi.fn(),
-    ensureAuthenticated: vi.fn(async () => true),
-  }),
 }))
 
 vi.mock('./insights', () => ({
@@ -203,22 +199,78 @@ function makeInsight(): InsightEvent {
   }
 }
 
-function renderAgentComposer(props: Partial<React.ComponentProps<typeof AgentComposer>> = {}) {
-  return render(
+type AgentComposerTestOptions = Partial<React.ComponentProps<typeof AgentComposer>> & {
+  agentName?: string | null
+  planningState?: PlanningState
+  insights?: InsightEvent[]
+  currentInsightIndex?: number
+  googleSheetsDriveTabEnabled?: boolean
+  apolloNativeTabEnabled?: boolean
+  hubspotNativeTabEnabled?: boolean
+  discordNativeTabEnabled?: boolean
+  metaAdsTabEnabled?: boolean
+}
+
+function seedAgentComposerState(store: AppStore, options: AgentComposerTestOptions = {}) {
+  const enabledIntegrationTabs: Record<string, true> = {}
+  if (options.googleSheetsDriveTabEnabled) enabledIntegrationTabs.googleSheetsDrive = true
+  if (options.apolloNativeTabEnabled) enabledIntegrationTabs.apolloNative = true
+  if (options.hubspotNativeTabEnabled) enabledIntegrationTabs.hubspotNative = true
+  if (options.discordNativeTabEnabled) enabledIntegrationTabs.discordNative = true
+  if (options.metaAdsTabEnabled) enabledIntegrationTabs.metaAds = true
+
+  store.dispatch(chatActions.agentSelected({
+    agentId: 'agent-1',
+    options: {
+      agentName: options.agentName ?? 'Test Agent',
+      planningState: options.planningState ?? 'skipped',
+      enabledIntegrationTabs,
+    },
+  }))
+  store.dispatch(chatActions.insightsSetForAgent({
+    agentId: 'agent-1',
+    insights: options.insights ?? [],
+  }))
+  if (options.currentInsightIndex !== undefined) {
+    store.dispatch(chatActions.currentInsightIndexSet(options.currentInsightIndex))
+  }
+}
+
+function renderAgentComposer(props: AgentComposerTestOptions = {}) {
+  const store = createTestAppStore()
+  seedSubscriptionState(store, {
+    currentPlan: 'free',
+    isProprietaryMode: true,
+  })
+  seedAgentComposerState(store, props)
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
+    <StoreProvider store={store}>{children}</StoreProvider>
+  )
+
+  const {
+    agentName: _agentName,
+    planningState: _planningState,
+    insights: _insights,
+    currentInsightIndex: _currentInsightIndex,
+    googleSheetsDriveTabEnabled: _googleSheetsDriveTabEnabled,
+    apolloNativeTabEnabled: _apolloNativeTabEnabled,
+    hubspotNativeTabEnabled: _hubspotNativeTabEnabled,
+    discordNativeTabEnabled: _discordNativeTabEnabled,
+    metaAdsTabEnabled: _metaAdsTabEnabled,
+    ...componentProps
+  } = props
+
+  const result = render(
     <AgentComposer
-      agentId="agent-1"
-      agentName="Test Agent"
-      agentFirstName="Test"
       onSubmit={vi.fn(async () => undefined)}
-      currentInsightIndex={0}
       pendingActionRequests={[]}
-      insights={[]}
       insightsLoading={false}
       isProcessing={false}
-      processingTasks={[]}
-      {...props}
+      {...componentProps}
     />,
+    { wrapper: Wrapper },
   )
+  return { ...result, store }
 }
 
 describe('AgentComposer pending action insights panel', () => {
@@ -253,16 +305,10 @@ describe('AgentComposer pending action insights panel', () => {
 
     rerender(
       <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
         onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
         pendingActionRequests={[makeRequestedSecretsAction()]}
-        insights={[]}
         insightsLoading={false}
         isProcessing={false}
-        processingTasks={[]}
         insightsPanelExpandedPreference={false}
       />,
     )
@@ -493,16 +539,10 @@ describe('AgentComposer pending action insights panel', () => {
 
     rerender(
       <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
         onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
         pendingActionRequests={[makeContactRequestsAction()]}
-        insights={[makeInsight()]}
         insightsLoading={false}
         isProcessing={false}
-        processingTasks={[]}
       />,
     )
 
@@ -555,16 +595,10 @@ describe('AgentComposer pending action insights panel', () => {
 
     rerender(
       <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
         onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
         pendingActionRequests={nextActions}
-        insights={[]}
         insightsLoading={false}
         isProcessing={false}
-        processingTasks={[]}
       />,
     )
 
@@ -620,7 +654,7 @@ describe('AgentComposer pending action insights panel', () => {
   })
 
   it.each(nativeTabCases)('auto-selects $name once when it becomes enabled', async ({ disabledProps, enabledProps, panelTestId }) => {
-    const { rerender } = renderAgentComposer({
+    const { rerender, store } = renderAgentComposer({
       insights: [makeInsight()],
       ...disabledProps,
     })
@@ -628,19 +662,13 @@ describe('AgentComposer pending action insights panel', () => {
     expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
     expect(screen.queryByTestId(panelTestId)).not.toBeInTheDocument()
 
+    seedAgentComposerState(store, { insights: [makeInsight()], ...enabledProps })
     rerender(
       <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
         onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
         pendingActionRequests={[]}
-        insights={[makeInsight()]}
         insightsLoading={false}
         isProcessing={false}
-        processingTasks={[]}
-        {...enabledProps}
       />,
     )
 
@@ -650,26 +678,23 @@ describe('AgentComposer pending action insights panel', () => {
   })
 
   it('auto-selects the first native tab when multiple tabs become enabled together', async () => {
-    const { rerender } = renderAgentComposer({
+    const { rerender, store } = renderAgentComposer({
       insights: [makeInsight()],
       googleSheetsDriveTabEnabled: false,
       apolloNativeTabEnabled: false,
     })
 
+    seedAgentComposerState(store, {
+      insights: [makeInsight()],
+      googleSheetsDriveTabEnabled: true,
+      apolloNativeTabEnabled: true,
+    })
     rerender(
       <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
         onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
         pendingActionRequests={[]}
-        insights={[makeInsight()]}
         insightsLoading={false}
         isProcessing={false}
-        processingTasks={[]}
-        googleSheetsDriveTabEnabled
-        apolloNativeTabEnabled
       />,
     )
 
@@ -680,24 +705,18 @@ describe('AgentComposer pending action insights panel', () => {
   })
 
   it.each(nativeTabCases)('does not override a manual tab choice after $name auto-selects', async ({ disabledProps, enabledProps, panelTestId }) => {
-    const { rerender } = renderAgentComposer({
+    const { rerender, store } = renderAgentComposer({
       insights: [makeInsight()],
       ...disabledProps,
     })
 
+    seedAgentComposerState(store, { insights: [makeInsight()], ...enabledProps })
     rerender(
       <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
         onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
         pendingActionRequests={[]}
-        insights={[makeInsight()]}
         insightsLoading={false}
         isProcessing={false}
-        processingTasks={[]}
-        {...enabledProps}
       />,
     )
 
@@ -711,17 +730,10 @@ describe('AgentComposer pending action insights panel', () => {
 
     rerender(
       <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
         onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
         pendingActionRequests={[]}
-        insights={[makeInsight()]}
         insightsLoading={false}
         isProcessing={false}
-        processingTasks={[]}
-        {...enabledProps}
       />,
     )
 

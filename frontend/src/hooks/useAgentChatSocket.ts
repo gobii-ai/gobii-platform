@@ -2,8 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { scheduleLoginRedirect } from '../api/http'
-import { useAgentChatStore } from '../stores/agentChatStore'
 import type { AgentMessageNotification } from '../types/agentChat'
+import { useAppDispatch } from '../store/hooks'
+import {
+  chatActions,
+  receiveRealtimeEvent,
+  receiveStreamEvent,
+  updateActiveProcessing,
+} from '../store/chatSlice'
 import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { TIMELINE_STALE_TIME_MS, timelineQueryKey } from './useAgentTimeline'
@@ -77,30 +83,52 @@ export function useAgentChatSocket(
   } = {},
 ): AgentChatSocketSnapshot {
   const queryClient = useQueryClient()
+  const dispatch = useAppDispatch()
   const desiredSubscriptions = useMemo(
     () => normalizeAgentChatSocketSubscriptions(desiredSubscriptionsInput),
     [desiredSubscriptionsInput],
   )
-  const receiveEventRef = useRef(useAgentChatStore.getState().receiveRealtimeEvent)
-  const updateProcessingRef = useRef(useAgentChatStore.getState().updateProcessing)
-  const updateAgentIdentityRef = useRef(useAgentChatStore.getState().updateAgentIdentity)
-  const updateUsageInsightRef = useRef(useAgentChatStore.getState().updateUsageInsight)
-  const receiveStreamRef = useRef(useAgentChatStore.getState().receiveStreamEvent)
+  const receiveEventRef = useRef((event: Parameters<typeof receiveRealtimeEvent>[0]) => {
+    dispatch(receiveRealtimeEvent(event))
+  })
+  const updateProcessingRef = useRef((snapshot: Parameters<typeof updateActiveProcessing>[0]) => {
+    dispatch(updateActiveProcessing(snapshot))
+  })
+  const updateAgentIdentityRef = useRef((update: Parameters<typeof chatActions.agentIdentityUpdated>[0]) => {
+    dispatch(chatActions.agentIdentityUpdated(update))
+  })
+  const updateUsageInsightRef = useRef((agentId: string, metadata: Parameters<typeof chatActions.usageInsightUpdated>[0]['metadata']) => {
+    dispatch(chatActions.usageInsightUpdated({ agentId, metadata }))
+  })
+  const receiveStreamRef = useRef((payload: Parameters<typeof receiveStreamEvent>[0]) => {
+    dispatch(receiveStreamEvent(payload))
+  })
+  const replacePendingActionsRef = useRef((agentId: string, pendingActions: Parameters<typeof chatActions.pendingActionsReplaced>[0]['pendingActions']) => {
+    dispatch(chatActions.pendingActionsReplaced({ agentId, pendingActions }))
+  })
   const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
   const profileEventRef = useRef<typeof options.onAgentProfileEvent | null>(options.onAgentProfileEvent ?? null)
   const messageNotificationEventRef = useRef<typeof options.onMessageNotificationEvent | null>(
     options.onMessageNotificationEvent ?? null,
   )
 
-  useEffect(() =>
-    useAgentChatStore.subscribe((state) => {
-      receiveEventRef.current = state.receiveRealtimeEvent
-      updateProcessingRef.current = state.updateProcessing
-      updateAgentIdentityRef.current = state.updateAgentIdentity
-      updateUsageInsightRef.current = state.updateUsageInsight
-      receiveStreamRef.current = state.receiveStreamEvent
-    }),
-  [])
+  useEffect(() => {
+    receiveEventRef.current = (event) => {
+      dispatch(receiveRealtimeEvent(event))
+    }
+    updateProcessingRef.current = (snapshot) => {
+      dispatch(updateActiveProcessing(snapshot))
+    }
+    updateAgentIdentityRef.current = (update) => {
+      dispatch(chatActions.agentIdentityUpdated(update))
+    }
+    updateUsageInsightRef.current = (agentId, metadata) => {
+      dispatch(chatActions.usageInsightUpdated({ agentId, metadata }))
+    }
+    receiveStreamRef.current = (payload) => {
+      dispatch(receiveStreamEvent(payload))
+    }
+  }, [dispatch])
 
   useEffect(() => {
     creditEventRef.current = options.onCreditEvent ?? null
@@ -407,6 +435,7 @@ export function useAgentChatSocket(
             updateAgentIdentity: updateAgentIdentityRef.current,
             updateUsageInsight: updateUsageInsightRef.current,
             receiveStreamEvent: receiveStreamRef.current,
+            replacePendingActions: replacePendingActionsRef.current,
             onCreditEvent: creditEventRef.current,
             onAgentProfileEvent: profileEventRef.current,
             onMessageNotificationEvent: messageNotificationEventRef.current,

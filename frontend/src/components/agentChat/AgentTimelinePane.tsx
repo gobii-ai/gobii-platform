@@ -1,17 +1,19 @@
-import { useMemo, type Ref } from 'react'
+import { useCallback, useMemo, type Ref } from 'react'
 import { Loader2 } from 'lucide-react'
 import { TimelineEventItem } from './TimelineEventItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { StreamingThinkingCard } from './StreamingThinkingCard'
 import { TypingIndicator } from './TypingIndicator'
-import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { StarterPromptSuggestions, type StarterPrompt } from './StarterPromptSuggestions'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
-import type { AgentMessage, StreamState } from '../../types/agentChat'
+import type { AgentMessage } from '../../types/agentChat'
 import type { StatusExpansionTargets } from './statusExpansion'
+import { chatActions, selectActiveChatSession } from '../../store/chatSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
 
 function timelineEventKey(event: SimplifiedTimelineItem): string {
   if (event.kind === 'collapsed-group') {
@@ -23,11 +25,11 @@ function timelineEventKey(event: SimplifiedTimelineItem): string {
   return event.cursor
 }
 
+function deriveAgentFirstName(agentName?: string | null): string {
+  return agentName?.trim().split(/\s+/)[0] || 'Agent'
+}
+
 type AgentTimelinePaneProps = {
-  agentAvatarUrl?: string | null
-  agentFirstName: string
-  animateCursors?: Set<string>
-  autoScrollPinned: boolean
   composerDisabled?: boolean
   contactCapOpenPacks?: () => void
   contactCapShowUpgrade?: boolean
@@ -36,22 +38,20 @@ type AgentTimelinePaneProps = {
   hardLimitUpgradeUrl?: string | null
   hasMoreNewer?: boolean
   hasStreamingContent?: boolean
-  hasUnseenActivity?: boolean
   hideTypingIndicator?: boolean
   initialLoading?: boolean
   isStreaming?: boolean
   loadingNewer?: boolean
   loadingOlder?: boolean
-  nextScheduledAt?: string | null
   onContactCapDismiss?: () => void
   onHardLimitOpenSettings: () => void
   onHardLimitQuickIncrease?: () => void
-  onIncomingAnimationConsumed?: (cursor: string) => void
   onJumpToLatest?: () => void
   onMessageCopied?: (message: AgentMessage) => void | Promise<void>
   onMessageLinkClick?: (href: string) => boolean | void
   onPurchaseSeats?: () => void
   onReportMessage?: (message: AgentMessage) => void
+  onRetryMessage?: (message: AgentMessage) => void | Promise<void>
   onStarterPromptSelect?: (prompt: StarterPrompt, position: number) => Promise<void>
   onTaskCreditsDismiss?: () => void
   onTaskCreditsOpenPacks?: () => void
@@ -75,21 +75,14 @@ type AgentTimelinePaneProps = {
   starterPromptsDisabled?: boolean
   starterPromptsLoading?: boolean
   statusExpansionTargets?: StatusExpansionTargets
-  streaming?: StreamState | null
   suppressedThinkingCursor?: string | null
   taskCreditsWarningVariant?: 'low' | 'out' | null
   timelineContentRef?: Ref<HTMLDivElement>
   timelineRef?: Ref<HTMLDivElement>
   typingStatusText: string
-  viewerEmail?: string | null
-  viewerUserId?: number | null
 }
 
 export function AgentTimelinePane({
-  agentAvatarUrl,
-  agentFirstName,
-  animateCursors,
-  autoScrollPinned,
   composerDisabled = false,
   contactCapOpenPacks,
   contactCapShowUpgrade = false,
@@ -98,22 +91,20 @@ export function AgentTimelinePane({
   hardLimitUpgradeUrl = null,
   hasMoreNewer = false,
   hasStreamingContent = false,
-  hasUnseenActivity = false,
   hideTypingIndicator = false,
   initialLoading = false,
   isStreaming = false,
   loadingNewer = false,
   loadingOlder = false,
-  nextScheduledAt = null,
   onContactCapDismiss,
   onHardLimitOpenSettings,
   onHardLimitQuickIncrease,
-  onIncomingAnimationConsumed,
   onJumpToLatest,
   onMessageCopied,
   onMessageLinkClick,
   onPurchaseSeats,
   onReportMessage,
+  onRetryMessage,
   onStarterPromptSelect,
   onTaskCreditsDismiss,
   onTaskCreditsOpenPacks,
@@ -124,7 +115,6 @@ export function AgentTimelinePane({
   showJumpButton = false,
   showNoSeatsCallout = false,
   showProcessingIndicator = false,
-  showScheduledResumeEvent = false,
   showStarterPrompts = false,
   showStreamingSlot = false,
   showStreamingThinking = false,
@@ -137,15 +127,32 @@ export function AgentTimelinePane({
   starterPromptsDisabled = false,
   starterPromptsLoading = false,
   statusExpansionTargets,
-  streaming,
   suppressedThinkingCursor = null,
   taskCreditsWarningVariant = null,
   timelineContentRef,
   timelineRef,
   typingStatusText,
-  viewerEmail,
-  viewerUserId,
 }: AgentTimelinePaneProps) {
+  const dispatch = useAppDispatch()
+  const activeSession = useAppSelector(selectActiveChatSession)
+  const agentName = activeSession.identity.agentName
+  const agentAvatarUrl = activeSession.identity.agentAvatarUrl
+  const animateCursors = useMemo(
+    () => new Set(Object.keys(activeSession.timelineUi.realtimeEventCursorIds)),
+    [activeSession.timelineUi.realtimeEventCursorIds],
+  )
+  const autoScrollPinned = activeSession.timelineUi.autoScrollPinned
+  const hasUnseenActivity = activeSession.timelineUi.hasUnseenActivity
+  const onIncomingAnimationConsumed = useCallback(
+    (cursor: string) => dispatch(chatActions.realtimeEventCursorConsumed(cursor)),
+    [dispatch],
+  )
+  const streaming = activeSession.stream.streaming
+  const viewer = useAppSelector(selectImmersiveShellViewer)
+  const agentFirstName = deriveAgentFirstName(agentName)
+  const viewerEmail = viewer.email
+  const viewerUserId = viewer.userId
+
   const lastRenderedIndex = useMemo(() => {
     for (let index = events.length - 1; index >= 0; index -= 1) {
       if (events[index].kind !== 'plan' && events[index].kind !== 'kanban') {
@@ -200,13 +207,11 @@ export function AgentTimelinePane({
                       onMessageLinkClick={onMessageLinkClick}
                       onMessageCopied={onMessageCopied}
                       onReportMessage={onReportMessage}
+                      onRetryMessage={onRetryMessage}
                     />
                   </div>
                 )
               })}
-              {showScheduledResumeEvent ? (
-                <ScheduledResumeCard nextScheduledAt={nextScheduledAt} />
-              ) : null}
               {showHardLimitCallout ? (
                 <HardLimitCalloutCard
                   onOpenSettings={onHardLimitOpenSettings}

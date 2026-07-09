@@ -1,21 +1,24 @@
 import { useMemo } from 'react'
 import { Button } from 'react-aria-components'
-import type { AuditTimelineBucket } from '../../types/agentAudit'
+import { selectAuditState } from '../../store/auditSlice'
+import { useAppSelector } from '../../store/hooks'
 
 type AuditTimelineProps = {
-  buckets: AuditTimelineBucket[]
-  loading: boolean
-  error: string | null
-  selectedDay: string | null
   onSelect: (day: string) => void
-  processingActive: boolean
 }
 
 function formatLabel(date: Date): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-export function AuditTimeline({ buckets, loading, error, selectedDay, onSelect, processingActive }: AuditTimelineProps) {
+export function AuditTimeline({ onSelect }: AuditTimelineProps) {
+  const {
+    timeline: buckets,
+    timelineLoading: loading,
+    timelineError: error,
+    selectedTimestamp: selectedDay,
+    processingActive,
+  } = useAppSelector(selectAuditState)
   const orderedBuckets = useMemo(
     () =>
       [...buckets].sort(

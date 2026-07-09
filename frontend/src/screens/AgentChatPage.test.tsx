@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { AgentChatPage } from './AgentChatPage'
-import { useSubscriptionStore } from '../stores/subscriptionStore'
+import type { AppStore } from '../store/appStore'
+import { chatActions } from '../store/chatSlice'
+import { createTestAppStore, seedSubscriptionState, StoreProvider } from '../test/storeTestUtils'
 
 class FakeNotification {
   static permission: NotificationPermission = 'granted'
@@ -23,7 +25,6 @@ const {
   updateAgentMock,
   fetchAgentSpawnIntentMock,
   updateUserPreferencesMock,
-  ensureAuthenticatedMock,
   rosterContext,
   rosterState,
   llmIntelligence,
@@ -34,7 +35,6 @@ const {
   updateAgentMock: vi.fn(),
   fetchAgentSpawnIntentMock: vi.fn(),
   updateUserPreferencesMock: vi.fn(),
-  ensureAuthenticatedMock: vi.fn(async () => true),
   rosterContext: {
     type: 'personal',
     id: 'user-1',
@@ -82,8 +82,6 @@ const {
     refreshProcessing: vi.fn(),
     persistPendingEventsToCache: vi.fn(),
     setInsightsForAgent: vi.fn(),
-    startInsightRotation: vi.fn(),
-    stopInsightRotation: vi.fn(),
     dismissInsight: vi.fn(),
     setInsightsPaused: vi.fn(),
     setCurrentInsightIndex: vi.fn(),
@@ -164,46 +162,33 @@ vi.mock('../components/usage/api', () => ({
 }))
 
 vi.mock('../components/agentChat/AgentChatLayout', async () => {
-  const { useSubscriptionStore: mockedUseSubscriptionStore } = await vi.importActual<
-    typeof import('../stores/subscriptionStore')
-  >('../stores/subscriptionStore')
+  const { useAppSelector: mockedUseAppSelector } = await vi.importActual<
+    typeof import('../store/hooks')
+  >('../store/hooks')
+  const emptyEnabledIntegrationTabs: Record<string, true> = {}
 
   return {
     AgentChatLayout: ({
       spawnIntentLoading,
-      signupPreviewState,
-      activeAgentId,
-      showEmbeddedSettings,
-      agentRoster,
-      onConfigureAgent,
-      onBackFromEmbeddedSettings,
+      agentId,
+      sidebar,
       onOpenFullSettings,
-      sidebarNotificationsEnabled,
-      sidebarNotificationStatus,
-      onSidebarNotificationsEnabledChange,
-      googleSheetsDriveTabEnabled,
-      apolloNativeTabEnabled,
-      hubspotNativeTabEnabled,
-      discordNativeTabEnabled,
-      metaAdsTabEnabled,
       events,
     }: {
       spawnIntentLoading?: boolean
-      signupPreviewState?: string
-      activeAgentId?: string | null
-      showEmbeddedSettings?: boolean
-      agentRoster?: Array<{ id: string }>
-      onConfigureAgent?: (agent: { id: string }) => void
-      onBackFromEmbeddedSettings?: () => void
+      agentId?: string | null
+      sidebar?: {
+        agents?: Array<{ id: string }>
+        showEmbeddedSettings?: boolean
+        onConfigureAgent?: (agent: { id: string }) => void
+        onBackFromEmbeddedSettings?: () => void
+        settings?: {
+          notificationsEnabled?: boolean
+          notificationStatus?: string
+          onNotificationsEnabledChange?: (enabled: boolean) => void
+        }
+      }
       onOpenFullSettings?: () => void
-      sidebarNotificationsEnabled?: boolean
-      sidebarNotificationStatus?: string
-      onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
-      googleSheetsDriveTabEnabled?: boolean
-      apolloNativeTabEnabled?: boolean
-      hubspotNativeTabEnabled?: boolean
-      discordNativeTabEnabled?: boolean
-      metaAdsTabEnabled?: boolean
       events?: Array<{
         kind: string
         message?: {
@@ -216,21 +201,33 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
         isUpgradeModalOpen,
         upgradeModalSource,
         upgradeModalDismissible,
-      } = mockedUseSubscriptionStore()
-      const configureTarget = agentRoster?.find((agent) => agent.id !== activeAgentId) ?? agentRoster?.[0] ?? null
+      } = mockedUseAppSelector((state) => state.subscription)
+      const enabledIntegrationTabs = mockedUseAppSelector((state) => (
+        agentId ? state.chat.sessionsByAgentId[agentId]?.identity.enabledIntegrationTabs ?? emptyEnabledIntegrationTabs : emptyEnabledIntegrationTabs
+      ))
+      const configureTarget = sidebar?.agents?.find((agent) => agent.id !== agentId) ?? sidebar?.agents?.[0] ?? null
+      const sidebarNotificationsEnabled = sidebar?.settings?.notificationsEnabled
+      const hasAgentReply = events?.some((event) => event.kind === 'message' && event.message?.status !== 'sending') ?? false
+      const signupPreviewState = (
+        agentChatStoreState.signupPreviewState === 'awaiting_first_reply_pause'
+        && !agentChatStoreState.processingActive
+        && (!agentChatStoreState.awaitingResponse || hasAgentReply)
+      )
+        ? 'awaiting_signup_completion'
+        : agentChatStoreState.signupPreviewState
       return (
         <div>
           <div data-testid="spawn-intent-loading">{String(Boolean(spawnIntentLoading))}</div>
           <div data-testid="signup-preview-state">{signupPreviewState ?? ''}</div>
-          <div data-testid="active-agent-id">{activeAgentId ?? ''}</div>
-          <div data-testid="embedded-settings-open">{String(Boolean(showEmbeddedSettings))}</div>
+          <div data-testid="active-agent-id">{agentId ?? ''}</div>
+          <div data-testid="embedded-settings-open">{String(Boolean(sidebar?.showEmbeddedSettings))}</div>
           <div data-testid="notifications-enabled">{String(Boolean(sidebarNotificationsEnabled))}</div>
-          <div data-testid="notification-status">{sidebarNotificationStatus ?? ''}</div>
-          <div data-testid="google-sheets-drive-tab-enabled">{String(Boolean(googleSheetsDriveTabEnabled))}</div>
-          <div data-testid="apollo-native-tab-enabled">{String(Boolean(apolloNativeTabEnabled))}</div>
-          <div data-testid="hubspot-native-tab-enabled">{String(Boolean(hubspotNativeTabEnabled))}</div>
-          <div data-testid="discord-native-tab-enabled">{String(Boolean(discordNativeTabEnabled))}</div>
-          <div data-testid="meta-ads-tab-enabled">{String(Boolean(metaAdsTabEnabled))}</div>
+          <div data-testid="notification-status">{sidebar?.settings?.notificationStatus ?? ''}</div>
+          <div data-testid="google-sheets-drive-tab-enabled">{String(Boolean(enabledIntegrationTabs.googleSheetsDrive))}</div>
+          <div data-testid="apollo-native-tab-enabled">{String(Boolean(enabledIntegrationTabs.apolloNative))}</div>
+          <div data-testid="hubspot-native-tab-enabled">{String(Boolean(enabledIntegrationTabs.hubspotNative))}</div>
+          <div data-testid="discord-native-tab-enabled">{String(Boolean(enabledIntegrationTabs.discordNative))}</div>
+          <div data-testid="meta-ads-tab-enabled">{String(Boolean(enabledIntegrationTabs.metaAds))}</div>
           <div data-testid="timeline-event-count">{events?.length ?? 0}</div>
           {events?.map((event, index) => (
             event.kind === 'message' ? (
@@ -248,13 +245,13 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
             data-testid="configure-agent"
             onClick={() => {
               if (configureTarget) {
-                onConfigureAgent?.(configureTarget)
+                sidebar?.onConfigureAgent?.(configureTarget)
               }
             }}
           >
             Configure
           </button>
-          <button type="button" data-testid="back-from-settings" onClick={() => onBackFromEmbeddedSettings?.()}>
+          <button type="button" data-testid="back-from-settings" onClick={() => sidebar?.onBackFromEmbeddedSettings?.()}>
             Back
           </button>
           <button type="button" data-testid="open-full-settings" onClick={() => onOpenFullSettings?.()}>
@@ -262,7 +259,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           </button>
           <button
             type="button"
-            onClick={() => onSidebarNotificationsEnabledChange?.(!Boolean(sidebarNotificationsEnabled))}
+            onClick={() => sidebar?.settings?.onNotificationsEnabledChange?.(!Boolean(sidebarNotificationsEnabled))}
           >
             Toggle notifications
           </button>
@@ -383,20 +380,6 @@ vi.mock('../hooks/useConsoleContextSwitcher', () => ({
   })),
 }))
 
-vi.mock('../stores/agentChatStore', () => {
-  const useAgentChatStore = Object.assign(
-    (selector: (state: typeof agentChatStoreState) => unknown) => selector(agentChatStoreState),
-    {
-      getState: () => agentChatStoreState,
-    },
-  )
-
-  return {
-    useAgentChatStore,
-    setTimelineQueryClient: vi.fn(),
-  }
-})
-
 vi.mock('../hooks/useAgentTimeline', () => ({
   useAgentTimeline: vi.fn(() => ({
     data: timelineState.data,
@@ -427,23 +410,35 @@ vi.mock('../hooks/usePageLifecycle', () => ({
   usePageLifecycle: vi.fn(),
 }))
 
-function renderAgentChatPage({ agentId = null }: { agentId?: string | null } = {}) {
-  const queryClient = new QueryClient({
+let appStore: AppStore
+let queryClient: QueryClient
+
+function createTestQueryClient() {
+  return new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
       },
     },
   })
+}
+
+function renderAgentChatPage({ agentId = null }: { agentId?: string | null } = {}) {
+  if (!appStore) {
+    queryClient = createTestQueryClient()
+    appStore = createTestAppStore({ queryClient })
+  }
 
   return render(
-    <QueryClientProvider client={queryClient}>
-      <AgentChatPage
-        agentId={agentId}
-        viewerUserId={1}
-        viewerEmail="user@example.com"
-      />
-    </QueryClientProvider>,
+    <StoreProvider store={appStore}>
+      <QueryClientProvider client={queryClient}>
+        <AgentChatPage
+          agentId={agentId}
+          viewerUserId={1}
+          viewerEmail="user@example.com"
+        />
+      </QueryClientProvider>
+    </StoreProvider>,
   )
 }
 
@@ -466,7 +461,6 @@ function buildInitialSubscriptionState() {
     personalSignupPreviewProcessingAvailable: false,
     trialDaysByPlan: { startup: 14, scale: 14 },
     trialEligible: true,
-    ensureAuthenticated: ensureAuthenticatedMock,
   }
 }
 
@@ -504,8 +498,9 @@ describe('AgentChatPage trial onboarding', () => {
     fetchAgentSpawnIntentMock.mockReset()
     updateUserPreferencesMock.mockReset()
     updateUserPreferencesMock.mockResolvedValue({ preferences: {} })
-    ensureAuthenticatedMock.mockClear()
-    useSubscriptionStore.setState(buildInitialSubscriptionState())
+    queryClient = createTestQueryClient()
+    appStore = createTestAppStore({ queryClient })
+    seedSubscriptionState(appStore, buildInitialSubscriptionState())
     timelineState.data = undefined
     timelineState.flatEvents = []
     timelineState.initialPageResponse = null
@@ -577,7 +572,7 @@ describe('AgentChatPage trial onboarding', () => {
   })
 
   it('keeps the pricing modal closed during signup preview auto-submit', async () => {
-    useSubscriptionStore.setState({
+    seedSubscriptionState(appStore, {
       ...buildInitialSubscriptionState(),
       personalSignupPreviewAvailable: true,
       personalSignupPreviewProcessingAvailable: true,
@@ -607,7 +602,7 @@ describe('AgentChatPage trial onboarding', () => {
   })
 
   it('treats signup preview as paused once processing is idle after refresh', async () => {
-    useSubscriptionStore.setState({
+    seedSubscriptionState(appStore, {
       ...buildInitialSubscriptionState(),
       personalSignupPreviewAvailable: true,
     })
@@ -672,7 +667,6 @@ describe('AgentChatPage trial onboarding', () => {
         planningState: 'skipped',
       },
     ]
-    agentChatStoreState.agentId = 'agent-1'
     timelineState.flatEvents = [
       {
         kind: 'message',
@@ -687,25 +681,28 @@ describe('AgentChatPage trial onboarding', () => {
         },
       },
     ]
-    agentChatStoreState.pendingEvents = [
-      {
-        kind: 'message',
-        cursor: '2000:message:local-1',
-        message: {
-          id: 'local-1',
-          bodyText: 'Pending hello',
-          isOutbound: false,
-          channel: 'web',
-          timestamp: sentAt,
-          relativeTimestamp: null,
-          clientId: 'local-1',
-          status: 'sending',
-        },
+    const pendingEvent = {
+      kind: 'message' as const,
+      cursor: '2000:message:local-1',
+      message: {
+        id: 'local-1',
+        bodyText: 'Pending hello',
+        isOutbound: false,
+        channel: 'web',
+        timestamp: sentAt,
+        relativeTimestamp: null,
+        clientId: 'local-1',
+        status: 'sending' as const,
       },
-    ]
+    }
 
     window.history.pushState({}, '', '/app/agents/agent-1')
     renderAgentChatPage({ agentId: 'agent-1' })
+    appStore.dispatch(chatActions.autoScrollPinnedSet({ agentId: 'agent-1', pinned: false }))
+    appStore.dispatch(chatActions.realtimeEventReceived({
+      agentId: 'agent-1',
+      event: pendingEvent,
+    }))
 
     await waitFor(() => {
       expect(screen.getByTestId('timeline-event-count')).toHaveTextContent('2')

@@ -27,9 +27,10 @@ from api.agent.core.prompt_context import get_agent_daily_credit_state
 from billing.services import BillingService
 from console.agent_chat.access import resolve_agent_for_request
 from console.context_helpers import build_console_context
-from console.phone_utils import get_primary_phone, serialize_phone
+from console.phone_utils import get_pending_phone, get_primary_phone, serialize_phone
 from config import settings
 from config.stripe_config import get_stripe_settings
+from constants.phone_countries import serialize_supported_phone_regions
 from constants.plans import PlanNamesChoices
 from djstripe.models import Price
 from tasks.services import TaskCreditService
@@ -140,12 +141,23 @@ def _build_agent_setup_metadata(
     organization: Optional[Any],
 ) -> dict:
     phone = get_primary_phone(request.user)
+    pending_phone = get_pending_phone(request.user)
     # Check agent owner's verification status (not viewer's) since outbound
     # communications are gated by require_verified_email(agent.user)
     email_verified = has_verified_email(agent.user)
-    phone_payload = serialize_phone(phone)
+    verified_phone = phone if phone and phone.is_verified else None
+    phone_payload = serialize_phone(verified_phone)
     agent_sms = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
     agent_email = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).first()
+    preferred_endpoint = agent.preferred_contact_endpoint
+    sms_enabled = bool(
+        agent_sms
+        and phone
+        and phone.is_verified
+        and preferred_endpoint
+        and preferred_endpoint.channel == CommsChannel.SMS
+        and preferred_endpoint.address.lower() == phone.phone_number.lower()
+    )
 
     current_org = None
     if agent.organization_id:
@@ -219,10 +231,12 @@ def _build_agent_setup_metadata(
         "agentName": agent.name or "",
         "agentEmail": agent_email.address if agent_email else None,
         "sms": {
-            "enabled": bool(agent_sms),
+            "enabled": sms_enabled,
             "agentNumber": agent_sms.address if agent_sms else None,
             "userPhone": phone_payload,
+            "pendingUserPhone": serialize_phone(pending_phone),
             "emailVerified": email_verified,
+            "supportedPhoneRegions": serialize_supported_phone_regions(),
         },
         "organization": {
             "currentOrg": current_org,

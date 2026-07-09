@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   createOrganization,
@@ -28,6 +29,12 @@ type UseConsoleContextSwitcherResult = {
   refresh: () => Promise<void>
 }
 
+const CONSOLE_CONTEXT_QUERY_KEY = ['console-context'] as const
+
+export function consoleContextQueryKey(forAgentId?: string) {
+  return [...CONSOLE_CONTEXT_QUERY_KEY, forAgentId ?? null] as const
+}
+
 function notifyConsoleContextUpdated(context: ConsoleContext): void {
   if (typeof window === 'undefined') {
     return
@@ -41,14 +48,22 @@ export function useConsoleContextSwitcher({
   onSwitched,
   persistSession = true,
 }: UseConsoleContextSwitcherOptions): UseConsoleContextSwitcherResult {
-  const [data, setData] = useState<ConsoleContextData | null>(null)
-  const [resolvedForAgentId, setResolvedForAgentId] = useState<string | undefined>(undefined)
-  const [isLoading, setIsLoading] = useState(false)
   const [isSwitching, setIsSwitching] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [mutationError, setMutationError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const mountedRef = useRef(true)
-  const requestIdRef = useRef(0)
-  const dataRef = useRef<ConsoleContextData | null>(null)
+  const queryKey = useMemo(() => consoleContextQueryKey(forAgentId), [forAgentId])
+  const contextQuery = useQuery({
+    queryKey,
+    queryFn: () => fetchConsoleContext({ forAgentId }),
+    enabled,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  })
+  const { data: queryData, error: queryError, isLoading, refetch } = contextQuery
+  const data = queryData ?? null
+  const resolvedForAgentId = data ? forAgentId : undefined
+  const loadError = queryError ? 'Unable to load workspace contexts.' : null
 
   useEffect(() => {
     mountedRef.current = true
@@ -58,7 +73,25 @@ export function useConsoleContextSwitcher({
   }, [])
 
   useEffect(() => {
-    dataRef.current = data
+    if (!queryError) {
+      return
+    }
+    console.error('Failed to load context switcher data:', queryError)
+  }, [queryError])
+
+  useEffect(() => {
+    if (!data) {
+      return
+    }
+    const stored = readStoredConsoleContext()
+    if (
+      !stored
+      || stored.type !== data.context.type
+      || stored.id !== data.context.id
+      || (stored.name ?? null) !== (data.context.name ?? null)
+    ) {
+      storeConsoleContext(data.context)
+    }
   }, [data])
 
   useEffect(() => {
@@ -70,70 +103,35 @@ export function useConsoleContextSwitcher({
       if (!detail || !detail.type || !detail.id) {
         return
       }
-      setData((prev) => (
-        prev
-          ? {
-              ...prev,
-              context: detail,
-              organizations: detail.type === 'organization'
-                ? prev.organizations.map((org) => (org.id === detail.id ? { ...org, name: detail.name } : org))
-                : prev.organizations,
-            }
-          : prev
-      ))
+      queryClient.setQueriesData<ConsoleContextData>(
+        { queryKey: CONSOLE_CONTEXT_QUERY_KEY },
+        (prev) => (
+          prev
+            ? {
+                ...prev,
+                context: detail,
+                organizations: detail.type === 'organization'
+                  ? prev.organizations.map((org) => (org.id === detail.id ? { ...org, name: detail.name } : org))
+                  : prev.organizations,
+              }
+            : prev
+        ),
+      )
       storeConsoleContext(detail)
     }
     window.addEventListener('gobii:console-context-updated', handleContextUpdated)
     return () => {
       window.removeEventListener('gobii:console-context-updated', handleContextUpdated)
     }
-  }, [])
+  }, [queryClient])
 
   const refresh = useCallback(async () => {
     if (!enabled) {
       return
     }
-    if (!forAgentId && dataRef.current) {
-      setResolvedForAgentId(undefined)
-      setIsLoading(false)
-      setError(null)
-      return
-    }
-    const requestId = ++requestIdRef.current
-    const requestForAgentId = forAgentId
-    setIsLoading(true)
-    setError(null)
-    try {
-      const payload = await fetchConsoleContext({ forAgentId: requestForAgentId })
-      if (!mountedRef.current || requestId !== requestIdRef.current) {
-        return
-      }
-      setData(payload)
-      setResolvedForAgentId(requestForAgentId)
-      setIsLoading(false)
-      const stored = readStoredConsoleContext()
-      if (
-        !stored
-        || stored.type !== payload.context.type
-        || stored.id !== payload.context.id
-        || (stored.name ?? null) !== (payload.context.name ?? null)
-      ) {
-        storeConsoleContext(payload.context)
-      }
-    } catch (err) {
-      if (!mountedRef.current || requestId !== requestIdRef.current) {
-        return
-      }
-      console.error('Failed to load context switcher data:', err)
-      setError('Unable to load workspace contexts.')
-      setResolvedForAgentId(undefined)
-      setIsLoading(false)
-    }
-  }, [enabled, forAgentId])
-
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
+    setMutationError(null)
+    await refetch()
+  }, [enabled, refetch])
 
   const switchContext = useCallback(
     async (context: ConsoleContext) => {
@@ -141,39 +139,40 @@ export function useConsoleContextSwitcher({
         return
       }
       const previousContext = data.context
-      const previousResolvedForAgentId = resolvedForAgentId
-      const requestId = ++requestIdRef.current
       setIsSwitching(true)
-      setError(null)
-      setData({ ...data, context })
-      setResolvedForAgentId(undefined)
+      setMutationError(null)
+      queryClient.setQueryData<ConsoleContextData>(queryKey, { ...data, context })
       storeConsoleContext(context)
       try {
         const updated = await switchConsoleContext(context, { persistSession })
-        if (!mountedRef.current || requestId !== requestIdRef.current) {
+        if (!mountedRef.current) {
           return
         }
-        setData((prev) => (prev ? { ...prev, context: updated } : prev))
-        setResolvedForAgentId(undefined)
+        queryClient.setQueryData<ConsoleContextData>(
+          queryKey,
+          (prev) => (prev ? { ...prev, context: updated } : prev),
+        )
         storeConsoleContext(updated)
         notifyConsoleContextUpdated(updated)
         onSwitched?.(updated)
       } catch (err) {
-        if (!mountedRef.current || requestId !== requestIdRef.current) {
+        if (!mountedRef.current) {
           return
         }
         console.error('Failed to switch context:', err)
-        setData((prev) => (prev ? { ...prev, context: previousContext } : prev))
-        setResolvedForAgentId(previousResolvedForAgentId)
+        queryClient.setQueryData<ConsoleContextData>(
+          queryKey,
+          (prev) => (prev ? { ...prev, context: previousContext } : prev),
+        )
         storeConsoleContext(previousContext)
-        setError('Unable to switch context.')
+        setMutationError('Unable to switch context.')
       } finally {
-        if (mountedRef.current && requestId === requestIdRef.current) {
+        if (mountedRef.current) {
           setIsSwitching(false)
         }
       }
     },
-    [data, isSwitching, onSwitched, persistSession, resolvedForAgentId],
+    [data, isSwitching, onSwitched, persistSession, queryClient, queryKey],
   )
 
   const createOrganizationContext = useCallback(
@@ -181,16 +180,15 @@ export function useConsoleContextSwitcher({
       if (isSwitching) {
         throw new Error('Context switch already in progress.')
       }
-      const requestId = ++requestIdRef.current
       setIsSwitching(true)
-      setError(null)
+      setMutationError(null)
       try {
         const created = await createOrganization(name)
-        if (!mountedRef.current || requestId !== requestIdRef.current) {
+        if (!mountedRef.current) {
           return created.context
         }
         const nextOrganization: ConsoleContextOption = created.organization
-        setData((prev) => {
+        queryClient.setQueryData<ConsoleContextData>(queryKey, (prev) => {
           if (!prev) {
             return prev
           }
@@ -205,24 +203,23 @@ export function useConsoleContextSwitcher({
             organizationsEnabled: true,
           }
         })
-        setResolvedForAgentId(undefined)
         storeConsoleContext(created.context)
         notifyConsoleContextUpdated(created.context)
         onSwitched?.(created.context)
         return created.context
       } catch (err) {
-        if (mountedRef.current && requestId === requestIdRef.current) {
+        if (mountedRef.current) {
           console.error('Failed to create organization:', err)
-          setError('Unable to create organization.')
+          setMutationError('Unable to create organization.')
         }
         throw err
       } finally {
-        if (mountedRef.current && requestId === requestIdRef.current) {
+        if (mountedRef.current) {
           setIsSwitching(false)
         }
       }
     },
-    [isSwitching, onSwitched],
+    [isSwitching, onSwitched, queryClient, queryKey],
   )
 
   return {
@@ -230,7 +227,7 @@ export function useConsoleContextSwitcher({
     resolvedForAgentId,
     isLoading,
     isSwitching,
-    error,
+    error: mutationError ?? loadError,
     switchContext,
     createOrganizationContext,
     refresh,

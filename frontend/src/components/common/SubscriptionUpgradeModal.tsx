@@ -4,39 +4,48 @@ import { X } from 'lucide-react'
 
 import {
   isContinuationUpgradeModalSource,
-  useSubscriptionStore,
   type PlanTier,
-} from '../../stores/subscriptionStore'
+  selectSubscriptionState,
+  subscriptionActions,
+} from '../../store/subscriptionSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import { track } from '../../util/analytics'
+import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { SubscriptionUpgradePlans } from './SubscriptionUpgradePlans'
 
 type SubscriptionUpgradeModalProps = {
-  currentPlan: PlanTier | null
-  onClose: () => void
   onUpgrade: (plan: PlanTier) => void
-  source?: string
-  dismissible?: boolean
   allowDowngrade?: boolean
 }
 
 export function SubscriptionUpgradeModal({
-  currentPlan,
-  onClose,
   onUpgrade,
-  source,
-  dismissible = true,
   allowDowngrade = false,
 }: SubscriptionUpgradeModalProps) {
+  const dispatch = useAppDispatch()
   const {
+    currentPlan,
+    isProprietaryMode,
+    upgradeModalSource,
+    upgradeModalDismissible,
     trialDaysByPlan,
     trialEligible,
     pricingModalAlmostFullScreen,
     ctaPickAPlan,
-  } = useSubscriptionStore()
+  } = useAppSelector(selectSubscriptionState)
+  const source = upgradeModalSource ?? undefined
+  const dismissible = upgradeModalDismissible
   const handleClose = useCallback(() => {
-    if (dismissible) {
-      onClose()
+    if (!dismissible) {
+      return
     }
-  }, [dismissible, onClose])
+    track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {
+      currentPlan,
+      source: upgradeModalSource ?? 'unknown',
+      isProprietaryMode,
+    })
+    dispatch(subscriptionActions.closeUpgradeModal())
+  }, [currentPlan, dismissible, dispatch, isProprietaryMode, upgradeModalSource])
 
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
   const useTrialCopy = (
@@ -58,7 +67,7 @@ export function SubscriptionUpgradeModal({
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && dismissible) {
-        onClose()
+        handleClose()
       }
     }
     document.addEventListener('keydown', handleKey)
@@ -68,7 +77,7 @@ export function SubscriptionUpgradeModal({
       document.removeEventListener('keydown', handleKey)
       document.body.style.overflow = originalOverflow
     }
-  }, [dismissible, onClose])
+  }, [dismissible, handleClose])
 
   if (typeof document === 'undefined') {
     return null
@@ -118,7 +127,7 @@ export function SubscriptionUpgradeModal({
                 <button
                   type="button"
                   className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-500"
-                  onClick={onClose}
+                  onClick={handleClose}
                   aria-label="Close dialog"
                 >
                   <X className="h-5 w-5" strokeWidth={2} />
@@ -129,7 +138,6 @@ export function SubscriptionUpgradeModal({
 
           <div className={pricingModalAlmostFullScreen ? 'min-h-0 flex-1' : ''}>
             <SubscriptionUpgradePlans
-              currentPlan={currentPlan}
               onUpgrade={onUpgrade}
               source={source}
               allowDowngrade={allowDowngrade}

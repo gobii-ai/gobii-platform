@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { AlertTriangle, CreditCard, PlusSquare, X, Zap } from 'lucide-react'
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import { ensureAuthenticated, subscriptionActions } from '../../store/subscriptionSlice'
+import { useAppDispatch } from '../../store/hooks'
 import { AgentChatSectionCard } from './uiPrimitives'
 
 type TaskCreditsCalloutCardProps = {
@@ -20,15 +21,15 @@ export function TaskCreditsCalloutCard({
   onDismiss,
   variant = 'low',
 }: TaskCreditsCalloutCardProps) {
-  const { openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
+  const dispatch = useAppDispatch()
   const isOutOfCredits = variant === 'out'
   const handleUpgradeClick = useCallback(async () => {
-    const authenticated = await ensureAuthenticated()
+    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
     if (!authenticated) {
       return
     }
-    openUpgradeModal('task_credits_callout')
-  }, [ensureAuthenticated, openUpgradeModal])
+    dispatch(subscriptionActions.openUpgradeModal({ source: 'task_credits_callout' }))
+  }, [dispatch])
   const isNoOrgSeats = billingIssue === 'no_org_seats'
 
   return (

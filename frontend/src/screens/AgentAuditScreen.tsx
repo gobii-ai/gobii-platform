@@ -12,8 +12,16 @@ import {
   Settings,
   Stethoscope,
 } from 'lucide-react'
-import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
+import {
+  auditActions,
+  initializeAudit,
+  jumpAuditToTime,
+  loadAuditTimeline,
+  loadMoreAudit,
+  selectAuditState,
+} from '../store/auditSlice'
+import { useAppDispatch, useAppSelector } from '../store/hooks'
 import type { AuditToolCallEvent, AuditErrorEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
 import {
   createSystemMessage,
@@ -141,23 +149,46 @@ function formatJudgeSuggestionType(value?: string | null): string {
 }
 
 export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAuditScreenProps) {
+  const dispatch = useAppDispatch()
   const {
-    initialize,
     events,
     loading,
     error,
-    loadMore,
     hasMore,
-    loadTimeline,
-    timeline,
-    timelineLoading,
-    timelineError,
-    jumpToTime,
-    selectedTimestamp: selectedDay,
     processingActive,
-    setSelectedDay,
-    setProcessingActive,
-  } = useAgentAuditStore((state) => state)
+  } = useAppSelector(selectAuditState)
+  const initialize = useCallback(
+    async (targetAgentId: string) => {
+      await dispatch(initializeAudit(targetAgentId)).unwrap()
+    },
+    [dispatch],
+  )
+  const loadMore = useCallback(
+    async () => {
+      await dispatch(loadMoreAudit()).unwrap()
+    },
+    [dispatch],
+  )
+  const loadTimeline = useCallback(
+    async (targetAgentId: string) => {
+      await dispatch(loadAuditTimeline(targetAgentId)).unwrap()
+    },
+    [dispatch],
+  )
+  const jumpToTime = useCallback(
+    async (day: string) => {
+      await dispatch(jumpAuditToTime(day)).unwrap()
+    },
+    [dispatch],
+  )
+  const setSelectedDay = useCallback(
+    (day: string | null) => dispatch(auditActions.setSelectedDay(day)),
+    [dispatch],
+  )
+  const setProcessingActive = useCallback(
+    (active: boolean) => dispatch(auditActions.setProcessingActive(active)),
+    [dispatch],
+  )
   const [promptState, setPromptState] = useState<Record<string, PromptState>>({})
   const eventsRef = useRef<HTMLDivElement | null>(null)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
@@ -188,6 +219,11 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [agentSearchResults, setAgentSearchResults] = useState<StaffAgentSearchResult[]>([])
   const [agentSearchLoading, setAgentSearchLoading] = useState(false)
   const [agentSearchError, setAgentSearchError] = useState<string | null>(null)
+  const latestEventsRef = useRef<AuditEvent[]>(events)
+
+  useEffect(() => {
+    latestEventsRef.current = events
+  }, [events])
   const pendingMessageScrollId = useRef<string | null>(null)
   useAgentAuditSocket(agentId)
   const auditExportUrl = useMemo(
@@ -427,7 +463,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
         editingMessage != null
           ? await updateSystemMessage(agentId, editingMessage.id, { body: messageBody })
           : await createSystemMessage(agentId, { body: messageBody })
-      useAgentAuditStore.getState().receiveRealtimeEvent(payload)
+      dispatch(auditActions.receiveRealtimeEvent(payload))
       resetMessageForm()
     } catch (err) {
       setMessageError(err instanceof Error ? err.message : 'Failed to save system message')
@@ -500,7 +536,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
       let targetId = getTargetMessageId(messageEvents, direction, activeMessageId)
       if (!targetId && direction === 'next' && hasMore && !loadingRef.current) {
         await loadMore()
-        const latestEvents = useAgentAuditStore.getState().events
+        const latestEvents = latestEventsRef.current
         const nextMessages = filterEvents(latestEvents).filter((event) => event.kind === 'message') as AuditMessageEvent[]
         targetId = getTargetMessageId(nextMessages, direction, activeMessageId)
       }
@@ -913,7 +949,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
             className="hidden lg:block lg:sticky lg:top-[112px] lg:min-h-[520px] lg:pt-4"
             style={timelineMaxHeight ? { maxHeight: `${timelineMaxHeight}px` } : undefined}
           >
-            <AuditTimeline buckets={timeline} loading={timelineLoading} error={timelineError} selectedDay={selectedDay} onSelect={handleJumpToTimestamp} processingActive={processingActive} />
+            <AuditTimeline onSelect={handleJumpToTimestamp} />
           </div>
         </div>
       </div>

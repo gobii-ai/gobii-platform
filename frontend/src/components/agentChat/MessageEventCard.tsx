@@ -1,6 +1,6 @@
 import ReactJsonView from '@microlink/react-json-view'
 import { memo, useCallback, useMemo, useState } from 'react'
-import { Check, Copy, Flag } from 'lucide-react'
+import { Check, Copy, Flag, RotateCcw } from 'lucide-react'
 import type { AgentMessage } from './types'
 import { MessageContent } from './MessageContent'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -32,6 +32,7 @@ type MessageEventCardProps = {
   onMessageLinkClick?: (href: string) => boolean | void
   onMessageCopied?: (message: AgentMessage) => void | Promise<void>
   onReportMessage?: (message: AgentMessage) => void
+  onRetryMessage?: (message: AgentMessage) => void | Promise<void>
 }
 
 // Only animate messages that arrived recently (within last 3 seconds)
@@ -79,8 +80,10 @@ export const MessageEventCard = memo(function MessageEventCard({
   onMessageLinkClick,
   onMessageCopied,
   onReportMessage,
+  onRetryMessage,
 }: MessageEventCardProps) {
   const [copied, setCopied] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const isAgent = Boolean(message.isOutbound)
   const shouldAnimate = isAgent && isRecentMessage(message.timestamp)
   const channel = (message.channel || 'web').toLowerCase()
@@ -181,6 +184,7 @@ export const MessageEventCard = memo(function MessageEventCard({
       : `${channelTagBaseClass} user-channel-badge`
 
   const showMessageActions = isAgent && !isPeer
+  const showRetryAction = status === 'failed' && isViewerSender && Boolean(message.clientId) && Boolean(onRetryMessage)
   const clipboardHtml = useMemo(() => (
     message.bodyHtml?.trim() ? sanitizeHtml(message.bodyHtml) : ''
   ), [message.bodyHtml])
@@ -206,6 +210,18 @@ export const MessageEventCard = memo(function MessageEventCard({
   const handleReportMessage = useCallback(() => {
     onReportMessage?.(message)
   }, [message, onReportMessage])
+
+  const handleRetryMessage = useCallback(async () => {
+    if (!onRetryMessage || retrying) {
+      return
+    }
+    setRetrying(true)
+    try {
+      await onRetryMessage(message)
+    } finally {
+      setRetrying(false)
+    }
+  }, [message, onRetryMessage, retrying])
 
   return (
     <article
@@ -326,6 +342,19 @@ export const MessageEventCard = memo(function MessageEventCard({
           </div>
         ) : null}
       </div>
+      {showRetryAction ? (
+        <div className="chat-message-retry">
+          <button
+            type="button"
+            className="chat-message-retry__button"
+            onClick={handleRetryMessage}
+            disabled={retrying}
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{retrying ? 'Retrying...' : 'Retry'}</span>
+          </button>
+        </div>
+      ) : null}
     </article>
   )
 })

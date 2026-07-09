@@ -1,6 +1,6 @@
-export type AgentChatSidebarMode = 'collapsed' | 'list' | 'gallery'
+import type { AgentChatSidebarMode, AgentDrawerViewMode } from '../../types/immersiveShell'
 
-export type AgentDrawerViewMode = 'list' | 'gallery'
+export type { AgentChatSidebarMode, AgentDrawerViewMode }
 
 export const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
 

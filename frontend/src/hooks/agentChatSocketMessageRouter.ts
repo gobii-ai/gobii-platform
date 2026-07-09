@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import { normalizePendingActionRequests, normalizePendingHumanInputRequests } from '../api/agentChat'
-import type { AgentMessageNotification, ProcessingSnapshot, StreamEventPayload, TimelineEvent } from '../types/agentChat'
+import type { AgentMessageNotification, PendingActionRequest, ProcessingSnapshot, StreamEventPayload, TimelineEvent } from '../types/agentChat'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BurnRateMetadata, UsageInsightUpdatePayload } from '../types/insight'
 import {
@@ -74,6 +74,7 @@ export function routeAgentChatSocketMessage({
   updateAgentIdentity,
   updateUsageInsight,
   receiveStreamEvent,
+  replacePendingActions,
   onCreditEvent,
   onAgentProfileEvent,
   onMessageNotificationEvent,
@@ -86,6 +87,7 @@ export function routeAgentChatSocketMessage({
   updateAgentIdentity: (update: AgentIdentityUpdate) => void
   updateUsageInsight: (agentId: string, metadata: BurnRateMetadata) => void
   receiveStreamEvent: (payload: StreamEventPayload) => void
+  replacePendingActions?: ((agentId: string, pendingActions: PendingActionRequest[]) => void) | null
   onCreditEvent?: ((payload: Record<string, unknown>) => void) | null
   onAgentProfileEvent?: ((payload: Record<string, unknown>) => void) | null
   onMessageNotificationEvent?: ((payload: AgentMessageNotification) => void) | null
@@ -178,13 +180,15 @@ export function routeAgentChatSocketMessage({
   ) {
     const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
     if (payloadAgentId) {
+      const pendingActions = normalizePendingActionRequests(
+        (message.payload as Record<string, unknown>).pending_action_requests,
+      )
       replacePendingActionRequestsInCache(
         queryClient,
         payloadAgentId,
-        normalizePendingActionRequests(
-          (message.payload as Record<string, unknown>).pending_action_requests,
-        ),
+        pendingActions,
       )
+      replacePendingActions?.(payloadAgentId, pendingActions)
     }
     return { type: 'handled' }
   }

@@ -15,10 +15,12 @@ import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
 import { AgentPipedreamAppsModal } from '../mcp/AgentPipedreamAppsModal'
 import type { PendingActionMutationResult } from '../../api/agentChat'
-import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
-import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
+import type { PendingActionRequest, PendingHumanInputRequest } from '../../types/agentChat'
+import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata, AgentSetupPanel } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import { ensureAuthenticated, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
+import { chatActions, selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { track, AnalyticsEvent } from '../../util/analytics'
 import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
@@ -29,7 +31,6 @@ import {
   writeAgentChatMessageDraft,
 } from '../../util/agentChatDraftStorage'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
-import type { PlanningState } from '../../types/agentRoster'
 import { useModal } from '../../hooks/useModal'
 import { AgentChatMenuItem } from './uiPrimitives'
 
@@ -61,6 +62,49 @@ function getBurnRateUsageLevel(metadata: BurnRateMetadata): 'normal' | 'warning'
 
 const DEFAULT_INSIGHT_TAB_COLOR = '#AA74CE'
 const INLINE_HTML_TAG_PATTERN = /<\/?[a-z][\s\S]*>/i
+const GOOGLE_SHEETS_DRIVE_TAB_KEY = 'googleSheetsDrive'
+const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
+const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
+const DISCORD_NATIVE_TAB_KEY = 'discordNative'
+const META_ADS_TAB_KEY = 'metaAds'
+const MINUTE_MS = 60 * 1000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+
+function deriveAgentFirstName(agentName?: string | null): string {
+  return agentName?.trim().split(/\s+/)[0] || 'Agent'
+}
+
+function formatReadyWakeTime(value?: string | null): string | null {
+  if (!value) {
+    return null
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+  const diffMs = date.getTime() - Date.now()
+  if (diffMs <= 0) {
+    return 'soon'
+  }
+  if (diffMs < HOUR_MS) {
+    const minutes = Math.max(1, Math.round(diffMs / MINUTE_MS))
+    return `in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`
+  }
+  if (diffMs < DAY_MS) {
+    const hours = Math.max(1, Math.round(diffMs / HOUR_MS))
+    return `in ${hours} ${hours === 1 ? 'hour' : 'hours'}`
+  }
+  const days = Math.max(1, Math.round(diffMs / DAY_MS))
+  return `in ${days} ${days === 1 ? 'day' : 'days'}`
+}
+
+function getAgentSetupPanel(insight: InsightEvent): AgentSetupPanel | null {
+  if (insight.insightType !== 'agent_setup') {
+    return null
+  }
+  return ((insight.metadata as AgentSetupMetadata).panel ?? 'always_on') as AgentSetupPanel
+}
 
 function getInsightTabColor(insight: InsightEvent): string {
   if (insight.insightType === 'burn_rate') {
@@ -85,6 +129,8 @@ function getInsightTabLabel(insight: InsightEvent): string {
     switch (meta.panel) {
       case 'always_on':
         return '24/7'
+      case 'email':
+        return 'Email'
       case 'sms':
         return 'SMS'
       case 'upsell_pro':
@@ -112,6 +158,9 @@ function getInsightTabIcon(insight: InsightEvent) {
   }
   if (insight.insightType === 'agent_setup') {
     const meta = insight.metadata as AgentSetupMetadata
+    if (meta.panel === 'email') {
+      return <Mail size={11} strokeWidth={2.2} />
+    }
     if (meta.panel === 'sms') {
       return <MessageSquare size={11} strokeWidth={2.2} />
     }
@@ -181,6 +230,10 @@ function getPendingWorkingTabAriaLabel(tab: PendingWorkingPanelTab): string {
 
 function isPendingWorkingTabId(tabId: string | null): boolean {
   return Boolean(tabId?.startsWith('pending:'))
+}
+
+function isInsightWorkingTabId(tabId: string | null): boolean {
+  return Boolean(tabId?.startsWith('insight:'))
 }
 
 type PendingActionNavigationItem =
@@ -431,13 +484,9 @@ function ComposerActionMenu({
 }
 
 type AgentComposerProps = {
-  agentId?: string | null
-  agentName?: string | null
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   pendingActionRequests?: PendingActionRequest[]
-  planningState?: PlanningState
   onSkipPlanning?: () => void | Promise<void>
-  skipPlanningBusy?: boolean
   onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
   onDismissHumanInput?: (requestId: string) => Promise<void>
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
@@ -460,23 +509,13 @@ type AgentComposerProps = {
   focusKey?: string | null
   onFocus?: () => void
   onRequestScrollToBottom?: () => void
-  // Working panel props
   insightsPanelExpandedPreference?: boolean | null
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
-  agentFirstName?: string
   isProcessing?: boolean
-  processingTasks?: ProcessingWebTask[]
-  insights?: InsightEvent[]
   insightsLoading?: boolean
-  currentInsightIndex?: number
-  onDismissInsight?: (insightId: string) => void
-  onInsightIndexChange?: (index: number) => void
-  onPauseChange?: (paused: boolean) => void
-  isInsightsPaused?: boolean
   onOpenUsage?: () => void
   onOpenQuickSettings?: () => void
   usageUrl?: string | null
-  hideInsightsPanel?: boolean
   intelligenceConfig?: LlmIntelligenceConfig | null
   intelligenceTier?: string | null
   onIntelligenceChange?: (tier: string) => Promise<boolean>
@@ -484,33 +523,21 @@ type AgentComposerProps = {
   intelligenceBusy?: boolean
   intelligenceError?: string | null
   onOpenTaskPacks?: () => void
-  canManageAgent?: boolean
   onStopProcessing?: () => void | Promise<void>
-  stopProcessingBusy?: boolean
-  stopProcessingRequested?: boolean
   submitError?: string | null
   showSubmitErrorUpgrade?: boolean
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
-  googleSheetsDriveTabEnabled?: boolean
-  apolloNativeTabEnabled?: boolean
-  hubspotNativeTabEnabled?: boolean
-  discordNativeTabEnabled?: boolean
-  metaAdsTabEnabled?: boolean
   compact?: boolean
   externalShellRef?: Ref<HTMLDivElement>
 }
 
 export const AgentComposer = memo(function AgentComposer({
-  agentId = null,
-  agentName = null,
   onSubmit,
   pendingActionRequests = [],
-  planningState = 'skipped',
   onSkipPlanning,
-  skipPlanningBusy = false,
   onRespondHumanInput,
   onDismissHumanInput,
   onResolveSpawnRequest,
@@ -526,20 +553,11 @@ export const AgentComposer = memo(function AgentComposer({
   onRequestScrollToBottom,
   insightsPanelExpandedPreference = null,
   onInsightsPanelExpandedPreferenceChange,
-  agentFirstName = 'Agent',
   isProcessing = false,
-  processingTasks = [],
-  insights = [],
   insightsLoading = false,
-  currentInsightIndex = 0,
-  onDismissInsight,
-  onInsightIndexChange,
-  onPauseChange,
-  isInsightsPaused = false,
   onOpenUsage,
   onOpenQuickSettings,
   usageUrl = '/app/usage',
-  hideInsightsPanel = false,
   intelligenceConfig = null,
   intelligenceTier = null,
   onIntelligenceChange,
@@ -547,24 +565,125 @@ export const AgentComposer = memo(function AgentComposer({
   intelligenceBusy = false,
   intelligenceError = null,
   onOpenTaskPacks,
-  canManageAgent = true,
   onStopProcessing,
-  stopProcessingBusy = false,
-  stopProcessingRequested = false,
   submitError = null,
   showSubmitErrorUpgrade = false,
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
-  googleSheetsDriveTabEnabled = false,
-  apolloNativeTabEnabled = false,
-  hubspotNativeTabEnabled = false,
-  discordNativeTabEnabled = false,
-  metaAdsTabEnabled = false,
   compact = false,
   externalShellRef,
 }: AgentComposerProps) {
+  const dispatch = useAppDispatch()
+  const storeAgentId = useAppSelector(selectActiveChatAgentId)
+  const activeSession = useAppSelector(selectActiveChatSession)
+  const storeAgentName = activeSession.identity.agentName
+  const storeAgentEmail = activeSession.identity.agentEmail
+  const storeAgentSms = activeSession.identity.agentSms
+  const storeInsights = useMemo(
+    () => activeSession.insights.insightIds
+      .map((id) => activeSession.insights.insightsById[id])
+      .filter((insight): insight is InsightEvent => Boolean(insight)),
+    [activeSession.insights.insightIds, activeSession.insights.insightsById],
+  )
+  const storeDismissedInsightIds = useMemo(
+    () => new Set(Object.keys(activeSession.insights.dismissedInsightIds)),
+    [activeSession.insights.dismissedInsightIds],
+  )
+  const onDismissInsight = useCallback(
+    (insightId: string) => dispatch(chatActions.insightDismissed(insightId)),
+    [dispatch],
+  )
+  const onInsightIndexChange = useCallback(
+    (index: number) => dispatch(chatActions.currentInsightIndexSet(index)),
+    [dispatch],
+  )
+  const onPauseChange = useCallback(
+    (paused: boolean) => dispatch(chatActions.insightsPausedSet(paused)),
+    [dispatch],
+  )
+  const storeEnabledIntegrationTabs = activeSession.identity.enabledIntegrationTabs
+  const agentId = storeAgentId
+  const agentName = storeAgentName
+  const planningState = activeSession.identity.planningState
+  const skipPlanningBusy = activeSession.processing.skipPlanningBusy
+  const agentFirstName = deriveAgentFirstName(agentName)
+  const processingTasks = activeSession.processing.processingWebTasks
+  const baseInsights = storeInsights.filter((insight) => !storeDismissedInsightIds.has(insight.insightId))
+  const currentInsightIndex = activeSession.insights.currentInsightIndex
+  const isInsightsPaused = activeSession.insights.insightsPaused
+  const hideInsightsPanel = activeSession.identity.hideInsightsPanel
+  const canManageAgent = activeSession.identity.canManageAgent
+  const stopProcessingBusy = activeSession.processing.stopProcessingBusy
+  const stopProcessingRequested = activeSession.processing.stopProcessingRequested
+  const googleSheetsDriveTabEnabled = Boolean(storeEnabledIntegrationTabs[GOOGLE_SHEETS_DRIVE_TAB_KEY])
+  const apolloNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[APOLLO_NATIVE_TAB_KEY])
+  const hubspotNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[HUBSPOT_NATIVE_TAB_KEY])
+  const discordNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[DISCORD_NATIVE_TAB_KEY])
+  const metaAdsTabEnabled = Boolean(storeEnabledIntegrationTabs[META_ADS_TAB_KEY])
+  const insights = useMemo(() => {
+    const hydratedInsights = baseInsights.map((insight) => {
+      if (insight.insightType !== 'agent_setup') {
+        return insight
+      }
+      const metadata = insight.metadata as AgentSetupMetadata
+      const nextEmail = storeAgentEmail ?? metadata.agentEmail ?? null
+      const nextSms = storeAgentSms ?? metadata.sms?.agentNumber ?? null
+      if (nextEmail === metadata.agentEmail && nextSms === metadata.sms?.agentNumber) {
+        return insight
+      }
+      return {
+        ...insight,
+        metadata: {
+          ...metadata,
+          agentEmail: nextEmail,
+          sms: {
+            ...(metadata.sms ?? {}),
+            agentNumber: nextSms,
+          },
+        },
+      }
+    })
+    const hasEmailTab = hydratedInsights.some((insight) => getAgentSetupPanel(insight) === 'email')
+    const emailSetupSource = hydratedInsights.find((insight) => {
+      if (insight.insightType !== 'agent_setup') {
+        return false
+      }
+      const metadata = insight.metadata as AgentSetupMetadata
+      return Boolean(metadata.agentEmail)
+    })
+    if (hasEmailTab || !emailSetupSource) {
+      return hydratedInsights
+    }
+
+    const sourceMetadata = emailSetupSource.metadata as AgentSetupMetadata
+    const emailInsight: InsightEvent = {
+      ...emailSetupSource,
+      insightId: `agent_setup_email_${sourceMetadata.agentId}`,
+      title: 'Email chat',
+      body: 'Email this agent anytime.',
+      priority: Math.min(emailSetupSource.priority, 2),
+      metadata: {
+        ...sourceMetadata,
+        panel: 'email',
+      },
+      dismissible: false,
+    }
+    const smsIndex = hydratedInsights.findIndex((insight) => getAgentSetupPanel(insight) === 'sms')
+    if (smsIndex < 0) {
+      return [...hydratedInsights, emailInsight]
+    }
+    return [
+      ...hydratedInsights.slice(0, smsIndex),
+      emailInsight,
+      ...hydratedInsights.slice(smsIndex),
+    ]
+  }, [baseInsights, storeAgentEmail, storeAgentSms])
+  const nextScheduledAt = activeSession.processing.nextScheduledAt
+  const readyWakeTime = formatReadyWakeTime(nextScheduledAt)
+  const readyWakeDuration = readyWakeTime?.startsWith('in ') ? readyWakeTime.slice(3) : readyWakeTime
+  const readyWakeLabel = readyWakeTime?.startsWith('in ') ? 'Next wake-up in' : 'Next wake-up'
   const [body, setBody] = useState(() => readAgentChatMessageDraft(agentId))
   const [attachments, setAttachments] = useState<File[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
@@ -577,7 +696,7 @@ export const AgentComposer = memo(function AgentComposer({
   const draftHumanInputResponsesRef = useRef<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
   const [pendingActionsForceExpanded, setPendingActionsForceExpanded] = useState(() => pendingActionRequests.length > 0)
-  const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
+  const { isProprietaryMode } = useAppSelector(selectSubscriptionState)
   const [appsModal, showAppsModal] = useModal()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const composedShellRef = useCallback((node: HTMLDivElement | null) => {
@@ -661,12 +780,12 @@ export const AgentComposer = memo(function AgentComposer({
   const showStopProcessing = Boolean(isProcessing && !isPlanningMode && !isStopping && agentId && canManageAgent && onStopProcessing)
   const requiresMessageBody = agentId === null
   const handleIntelligenceUpsell = useCallback(async () => {
-    const authenticated = await ensureAuthenticated()
+    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
     if (!authenticated) {
       return
     }
     if (isProprietaryMode) {
-      openUpgradeModal('intelligence_selector')
+      dispatch(subscriptionActions.openUpgradeModal({ source: 'intelligence_selector' }))
       return
     }
     if (intelligenceConfig?.upgradeUrl) {
@@ -676,15 +795,15 @@ export const AgentComposer = memo(function AgentComposer({
       })
       window.open(appendReturnTo(intelligenceConfig.upgradeUrl), '_top')
     }
-  }, [ensureAuthenticated, intelligenceConfig?.upgradeUrl, isProprietaryMode, openUpgradeModal])
+  }, [dispatch, intelligenceConfig?.upgradeUrl, isProprietaryMode])
 
   const handleSubmitErrorUpgrade = useCallback(async () => {
-    const authenticated = await ensureAuthenticated()
+    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
     if (!authenticated) {
       return
     }
-    openUpgradeModal('agent_limit_error')
-  }, [ensureAuthenticated, openUpgradeModal])
+    dispatch(subscriptionActions.openUpgradeModal({ source: 'agent_limit_error' }))
+  }, [dispatch])
 
   // Insight carousel logic
   const totalInsights = insights.length
@@ -987,6 +1106,32 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [hasMultipleInsights, isInsightsPaused, isProcessing])
 
+  useEffect(() => {
+    if (!hasMultipleInsights || isInsightsPaused || !isProcessing) {
+      return undefined
+    }
+
+    const interval = window.setInterval(() => {
+      const nextIndex = (currentInsightIndex + 1) % totalInsights
+      const nextInsight = insights[nextIndex]
+      onInsightIndexChange?.(nextIndex)
+      if (nextInsight && (!activeWorkingTabId || isInsightWorkingTabId(activeWorkingTabId))) {
+        setActiveWorkingTabId(`insight:${nextInsight.insightId}`)
+      }
+    }, INSIGHT_TIMING.rotationIntervalMs)
+
+    return () => window.clearInterval(interval)
+  }, [
+    activeWorkingTabId,
+    currentInsightIndex,
+    hasMultipleInsights,
+    insights,
+    isInsightsPaused,
+    isProcessing,
+    onInsightIndexChange,
+    totalInsights,
+  ])
+
   // Reset countdown when insight changes
   useEffect(() => {
     lastRotationTimeRef.current = Date.now()
@@ -1143,7 +1288,7 @@ export const AgentComposer = memo(function AgentComposer({
     })
   }, [agentId, agentName, pendingHumanInputRequests])
 
-  // Auto-focus the textarea when autoFocus prop is true or when focusKey changes (agent switch)
+  // Auto-focus after agent switches, including callers that still pass an explicit focus key.
   useEffect(() => {
     if (!autoFocus) return
     // Use a small delay to ensure the DOM is ready after navigation
@@ -1152,7 +1297,7 @@ export const AgentComposer = memo(function AgentComposer({
       moveTextareaCursorToEnd()
     }, 100)
     return () => clearTimeout(timer)
-  }, [autoFocus, focusKey, moveTextareaCursorToEnd])
+  }, [agentId, autoFocus, focusKey, moveTextareaCursorToEnd])
 
   const activePendingActions = activePendingActionTab?.actions ?? []
   const activePendingAction =
@@ -1745,6 +1890,8 @@ export const AgentComposer = memo(function AgentComposer({
   } : null
   const isSubmittingMainComposerHumanInput = activeHumanInputUsesMainComposer && Boolean(busyHumanInputRequestId)
   const sendButtonBusy = isSending || isSubmittingMainComposerHumanInput
+  const hasComposerSendContent = Boolean(body.trim()) || attachments.length > 0
+  const showStopProcessingButton = showStopProcessing && !hasComposerSendContent
   const sendDisabled = composerActionsDisabled
     || stopProcessingBusy
     || (activeHumanInputUsesMainComposer ? !body.trim() || Boolean(busyHumanInputRequestId) : requiresMessageBody ? !body.trim() : !body.trim() && attachments.length === 0)
@@ -1812,7 +1959,7 @@ export const AgentComposer = memo(function AgentComposer({
             error={intelligenceError}
           />
         ) : null}
-        {showStopProcessing ? (
+        {showStopProcessingButton ? (
           <button
             type="button"
             className={`composer-send-button composer-send-button--stop${stopProcessingBusy ? ' composer-send-button--stop-busy' : ''}`}
@@ -1935,8 +2082,17 @@ export const AgentComposer = memo(function AgentComposer({
                   ) : null}
                 </>
               ) : (
-                <span className="composer-working-status">
-                  <strong>Insights</strong>
+                <span className="composer-ready-status">
+                  <span className="composer-ready-status__dot" aria-hidden="true" />
+                  {readyWakeTime ? (
+                    <>
+                      <span>
+                        {readyWakeLabel} <strong>{readyWakeDuration}</strong>
+                      </span>
+                    </>
+                  ) : (
+                    <span>Ready</span>
+                  )}
                 </span>
               )}
 

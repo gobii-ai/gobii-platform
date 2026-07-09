@@ -1,24 +1,31 @@
 import type { SignupPreviewState } from '../../types/agentRoster'
-import type { PlanTier } from '../../stores/subscriptionStore'
-import { useSubscriptionStore } from '../../stores/subscriptionStore'
+import type { PlanTier } from '../../store/subscriptionSlice'
+import { selectSubscriptionState } from '../../store/subscriptionSlice'
+import { selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
+import { useAppSelector } from '../../store/hooks'
 import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
 
 type AgentSignupPreviewPanelProps = {
-  status: SignupPreviewState
+  status?: SignupPreviewState
   agentId?: string | null
   agentName?: string | null
-  currentPlan: PlanTier | null
   onUpgrade?: (plan: PlanTier, source?: string) => void
 }
 
 export function AgentSignupPreviewPanel({
-  status,
-  agentId,
-  agentName,
-  currentPlan,
+  status: statusOverride,
+  agentId: agentIdOverride,
+  agentName: agentNameOverride,
   onUpgrade,
 }: AgentSignupPreviewPanelProps) {
-  const ctaUnlockAgentCopy = useSubscriptionStore((state) => state.ctaUnlockAgentCopy)
+  const activeSession = useAppSelector(selectActiveChatSession)
+  const storeAgentId = useAppSelector(selectActiveChatAgentId)
+  const storeStatus = activeSession.identity.signupPreviewState
+  const storeAgentName = activeSession.identity.agentName
+  const status = statusOverride ?? storeStatus
+  const agentId = agentIdOverride ?? storeAgentId
+  const agentName = agentNameOverride ?? storeAgentName
+  const ctaUnlockAgentCopy = useAppSelector((state) => selectSubscriptionState(state).ctaUnlockAgentCopy)
   const isPaused = status === 'awaiting_signup_completion'
   const resolvedAgentName = agentName?.trim() || 'Your agent'
   const title = ctaUnlockAgentCopy
@@ -36,7 +43,6 @@ export function AgentSignupPreviewPanel({
     <AgentUpgradePlansPanel
       title={title}
       body={body}
-      currentPlan={currentPlan}
       onUpgrade={onUpgrade}
       source="signup_preview_panel"
       trialCopyVariant={ctaUnlockAgentCopy ? 'unlock_agent' : 'default'}

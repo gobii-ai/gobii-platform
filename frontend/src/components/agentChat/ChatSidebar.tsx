@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Settings, X } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
+import { useAppSelector } from '../../store/hooks'
+import { selectImmersiveShellActiveAgentId } from '../../store/immersiveShellSlice'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
 import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
@@ -57,7 +59,7 @@ function clampContextMenuPosition(x: number, y: number): ContextMenuPosition {
   }
 }
 
-type ChatSidebarProps = {
+export type ChatSidebarProps = {
   agents?: AgentRosterEntry[]
   transferInvites?: AgentTransferInvite[]
   favoriteAgentIds?: string[]
@@ -97,7 +99,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   transferInvites = [],
   favoriteAgentIds = [],
   mutedAgentIds = [],
-  activeAgentId,
+  activeAgentId: activeAgentIdOverride,
   switchingAgentId,
   loading = false,
   errorMessage,
@@ -126,6 +128,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   scrollToAgentId = null,
   onScrolledToAgent,
 }: ChatSidebarProps) {
+  const shellActiveAgentId = useAppSelector(selectImmersiveShellActiveAgentId)
+  const activeAgentId = activeAgentIdOverride !== undefined ? activeAgentIdOverride : shellActiveAgentId
   const sidebarRootRef = useRef<HTMLElement | null>(null)
   const setSidebarRootRef = useCallback((node: HTMLElement | null) => {
     sidebarRootRef.current = node
@@ -400,6 +404,8 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   const shellTitle = SELECTION_SHELL_PAGE_LABELS[galleryShellPage] ?? 'Agents'
   const showHeaderPageSwitcher = !collapsed && showGalleryShellSwitcher && galleryMode
+  const showHeaderContextSwitcher = !collapsed && Boolean(contextSwitcher)
+  const showHeaderCenter = showHeaderPageSwitcher || showHeaderContextSwitcher
   const showOrganizationShellPage = settings?.context ? settings.context.type === 'organization' : true
   const contextMenuMuted = agentContextMenu ? mutedAgentIdSet.has(agentContextMenu.agent.id) : false
   const contextMenuRoot = typeof document !== 'undefined' ? document.body : null
@@ -739,7 +745,13 @@ export const ChatSidebar = memo(function ChatSidebar({
               {renderListContent('drawer', false)}
             </div>
           ) : null}
-          {!showSettingsView && settings ? <SidebarSettingsMenu {...settings} variant="drawer" /> : null}
+          {!showSettingsView && settings ? (
+            <SidebarSettingsMenu
+              {...settings}
+              variant="drawer"
+              bottomAccessory={settings.isProprietaryMode ? <ProductAnnouncementBell variant="mobile" /> : null}
+            />
+          ) : null}
         </AgentChatMobileSheet>
       </div>
       {agentContextMenuElement}
@@ -760,7 +772,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         <div
           className="chat-sidebar-header"
           data-collapsed={collapsed ? 'true' : 'false'}
-          data-has-center={showHeaderPageSwitcher ? 'true' : 'false'}
+          data-has-center={showHeaderCenter ? 'true' : 'false'}
         >
           <div className="chat-sidebar-header-start">
             {!collapsed ? (
@@ -769,19 +781,21 @@ export const ChatSidebar = memo(function ChatSidebar({
               </a>
             ) : null}
           </div>
-          {showHeaderPageSwitcher ? (
+          {showHeaderCenter ? (
             <div className="chat-sidebar-header-center">
-              <SelectionShellPageSwitcher
-                currentPage={galleryShellPage}
-                onSelectPage={onGalleryShellPageChange!}
-                showOrganization={showOrganizationShellPage}
-              />
+              {contextSwitcher ? (
+                <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
+              ) : null}
+              {showHeaderPageSwitcher ? (
+                <SelectionShellPageSwitcher
+                  currentPage={galleryShellPage}
+                  onSelectPage={onGalleryShellPageChange!}
+                  showOrganization={showOrganizationShellPage}
+                />
+              ) : null}
             </div>
           ) : null}
           <div className="chat-sidebar-header-actions">
-            {contextSwitcher ? (
-              <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
-            ) : null}
             {!collapsed ? (
               <button
                 type="button"
@@ -884,7 +898,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             {...settings}
             variant="sidebar"
             collapsed={collapsed}
-            bottomAccessory={<ProductAnnouncementBell variant="sidebar" />}
+            bottomAccessory={settings.isProprietaryMode ? <ProductAnnouncementBell variant="sidebar" /> : null}
           />
         ) : null}
       </div>

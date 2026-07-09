@@ -3,6 +3,8 @@ import type { EChartsOption } from 'echarts'
 
 export type DateRangeValue = { start: DateValue; end: DateValue }
 
+export type UsageStatus = 'idle' | 'loading' | 'success' | 'error'
+
 export type UsageSummaryQueryInput = { from?: string; to?: string; agents?: string[] }
 export type UsageSummaryQueryKey = ['usage-summary', UsageSummaryQueryInput]
 

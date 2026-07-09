@@ -5,8 +5,9 @@ import { parseDate } from '@internationalized/date'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { InsightGauge } from '../common/InsightGauge'
 import { fetchUsageSummary } from './api'
-import { useUsageStore } from './store'
 import type {
+  UsageAgent,
+  UsageStatus,
   UsageSummaryQueryInput,
   UsageSummaryResponse,
 } from './types'
@@ -25,17 +26,22 @@ type MetricCard = {
 type UsageMetricsGridProps = {
   queryInput: UsageSummaryQueryInput
   agentIds: string[]
+  agents: UsageAgent[]
+  agentsStatus: UsageStatus
+  agentsErrorMessage: string | null
+  onSummaryLoaded?: (summary: UsageSummaryResponse) => void
+  onSummaryStatusChange?: (status: UsageStatus, message?: string | null) => void
 }
 
-export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps) {
-  const setSummaryLoading = useUsageStore((state) => state.setSummaryLoading)
-  const setSummaryData = useUsageStore((state) => state.setSummaryData)
-  const setSummaryError = useUsageStore((state) => state.setSummaryError)
-  const summary = useUsageStore((state) => state.summary)
-  const agents = useUsageStore((state) => state.agents)
-  const agentsStatus = useUsageStore((state) => state.agentsStatus)
-  const agentsErrorMessage = useUsageStore((state) => state.agentsErrorMessage)
-
+export function UsageMetricsGrid({
+  queryInput,
+  agentIds,
+  agents,
+  agentsStatus,
+  agentsErrorMessage,
+  onSummaryLoaded,
+  onSummaryStatusChange,
+}: UsageMetricsGridProps) {
   const agentKey = agentIds.length ? agentIds.slice().sort().join(',') : 'all'
 
   const {
@@ -52,29 +58,31 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
 
   useEffect(() => {
     if (isPending) {
-      setSummaryLoading()
+      onSummaryStatusChange?.('loading')
     }
-  }, [isPending, setSummaryLoading])
+  }, [isPending, onSummaryStatusChange])
 
   useEffect(() => {
     if (data) {
-      setSummaryData(data)
+      onSummaryLoaded?.(data)
     }
-  }, [data, setSummaryData])
+  }, [data, onSummaryLoaded])
 
   useEffect(() => {
     if (isError) {
-      const message = error instanceof Error ? error.message : 'Unable to load usage metrics right now.'
-      setSummaryError(message)
+      onSummaryStatusChange?.(
+        'error',
+        error instanceof Error ? error.message : 'Unable to load usage metrics right now.',
+      )
     }
-  }, [error, isError, setSummaryError])
+  }, [error, isError, onSummaryStatusChange])
 
   const creditFormatter = useMemo(
     () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
     [],
   )
 
-  const resolvedSummary = data ?? summary
+  const resolvedSummary = data
   const activeAgentCount = useMemo(
     () => agents.filter((agent) => agent.id !== API_AGENT_ID && !agent.is_deleted).length,
     [agents],
