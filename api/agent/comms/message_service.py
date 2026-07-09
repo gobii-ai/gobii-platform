@@ -43,36 +43,22 @@ from ...models import (
     parse_web_user_address,
 )
 from api.services.system_settings import get_max_file_size
-from api.services.billing_pause_notifications import (
-    is_billing_execution_pause_reason,
-    send_billing_pause_auto_reply,
-)
-from api.services.owner_execution_pause import (
-    get_owner_execution_pause_state,
-    resolve_agent_owner,
-)
+from api.services.billing_pause_notifications import is_billing_execution_pause_reason, send_billing_pause_auto_reply
+from api.services.owner_execution_pause import get_owner_execution_pause_state, resolve_agent_owner
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
 from .rejected_attachments import build_rejected_attachment_metadata
 from .email_endpoint_routing import get_agent_primary_endpoint
-from .message_reads import (
-    READ_SOURCE_INBOUND_REPLY,
-    mark_latest_visible_outbound_message_read_before,
-    resolve_inbound_read_user,
-)
+from .message_reads import READ_SOURCE_INBOUND_REPLY, mark_latest_visible_outbound_message_read_before, resolve_inbound_read_user
 from observability import traced
 from opentelemetry import baggage
 from config import settings
 from util.constants.task_constants import TASKS_UNLIMITED
 from opentelemetry import trace
 from util.subscription_helper import get_owner_plan
-from util.urls import (
-    append_context_query,
-    build_agent_detail_url,
-    build_site_url,
-)
+from util.urls import append_context_query, build_agent_detail_url, build_site_url
 
 tracer = trace.get_tracer("gobii.utils")
 
@@ -782,10 +768,7 @@ def ingest_inbound_message(
                     inbound_generation = bump_human_inbound_generation(owner_id)
                 if should_skip_processing:
                     return
-                from api.agent.tasks import (
-                    enqueue_interactive_process_agent_events,
-                    process_agent_events_task,
-                )
+                from api.agent.tasks import enqueue_interactive_process_agent_events, process_agent_events_task
                 # Top-level trigger: no budget context provided
                 if is_interrupting_human_input:
                     enqueue_interactive_process_agent_events(

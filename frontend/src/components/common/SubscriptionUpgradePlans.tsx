@@ -1,12 +1,7 @@
 import { useCallback, useState } from 'react'
 import { Check, ChevronRight, Rocket, Sparkles } from 'lucide-react'
 
-import {
-  isContinuationUpgradeModalSource,
-  type PlanTaskCreditsByPlan,
-  type PlanTier,
-  selectSubscriptionState,
-} from '../../store/subscriptionSlice'
+import { isContinuationUpgradeModalSource, type PlanTaskCreditsByPlan, type PlanTier, selectSubscriptionState } from '../../store/subscriptionSlice'
 import { useAppSelector } from '../../store/hooks'
 import type { SignupPreviewState } from '../../types/agentRoster'
 import { appendReturnTo } from '../../util/returnTo'

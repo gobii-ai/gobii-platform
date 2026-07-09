@@ -1,11 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Check, Copy, Globe, Loader2, Share2 } from 'lucide-react'
 
-import {
-  cloneAgentTemplate,
-  fetchAgentTemplateShareInfo,
-  type TemplateShareInfoResponse,
-} from '../../api/agentTemplates'
+import { cloneAgentTemplate, fetchAgentTemplateShareInfo, type TemplateShareInfoResponse } from '../../api/agentTemplates'
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
 
 type PublicAgentShareDialogProps = {

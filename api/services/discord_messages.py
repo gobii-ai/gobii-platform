@@ -12,15 +12,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from config.redis_client import get_redis_client
-from api.models import (
-    CommsChannel,
-    DeliveryStatus,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentConversation,
-    PersistentAgentConversationParticipant,
-    PersistentAgentMessage,
-)
+from api.models import CommsChannel, DeliveryStatus, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversation, PersistentAgentConversationParticipant, PersistentAgentMessage
 
 logger = logging.getLogger(__name__)
 

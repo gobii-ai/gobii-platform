@@ -11,10 +11,7 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.sites.models import Site
 from api.models import PersistentAgent, PersistentAgentMessage, CommsChannel
-from api.agent.comms.email_endpoint_routing import (
-    get_agent_primary_endpoint,
-    resolve_agent_email_sender_endpoint_for_message,
-)
+from api.agent.comms.email_endpoint_routing import get_agent_primary_endpoint, resolve_agent_email_sender_endpoint_for_message
 
 from constants.feature_flags import AGENT_SOFT_EXPIRATION
 from constants.plans import PlanNames

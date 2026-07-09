@@ -1,29 +1,11 @@
 import { ChevronDown, Copy, KeyRound, Loader2, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import {
-  Button as AriaButton,
-  Dialog,
-  DialogTrigger,
-  ListBox,
-  ListBoxItem,
-  Popover,
-  type Key,
-  type Selection,
-} from 'react-aria-components'
+import { Button as AriaButton, Dialog, DialogTrigger, ListBox, ListBoxItem, Popover, type Key, type Selection } from 'react-aria-components'
 
 import * as llmApi from '../../api/llmConfig'
 import { CheckboxField, FormField, SelectInput, TextInput } from '../common/FormControls'
-import {
-  actionKey,
-  addEndpointOptions,
-  button,
-  type EndpointFormValues,
-  type EndpointTestStatus,
-  type ProviderCardData,
-  type ProviderEndpointCard,
-  reasoningEffortOptions,
-} from './shared'
+import { actionKey, addEndpointOptions, button, type EndpointFormValues, type EndpointTestStatus, type ProviderCardData, type ProviderEndpointCard, reasoningEffortOptions } from './shared'
 
 export type ProviderCardHandlers = {
   onRotateKey: (provider: ProviderCardData) => Promise<void>

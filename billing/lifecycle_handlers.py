@@ -2,10 +2,7 @@ import logging
 
 from waffle import switch_is_active
 
-from constants.feature_flags import (
-    OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY,
-    OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED,
-)
+from constants.feature_flags import OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY, OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
     EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,

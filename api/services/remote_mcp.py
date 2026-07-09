@@ -27,22 +27,9 @@ from api.agent.core.llm_config import (
     resolve_preferred_tier_for_owner,
 )
 from api.agent.comms.message_service import inject_internal_web_message
-from api.agent.files.attachment_helpers import (
-    AttachmentResolutionError,
-    create_message_attachments,
-    resolve_filespace_attachments,
-)
+from api.agent.files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
-from api.models import (
-    AgentFsNode,
-    AgentPeerLink,
-    ApiKey,
-    CommsChannel,
-    Organization,
-    OrganizationMembership,
-    PersistentAgent,
-    build_web_user_address,
-)
+from api.models import AgentFsNode, AgentPeerLink, ApiKey, CommsChannel, Organization, OrganizationMembership, PersistentAgent, build_web_user_address
 from api.serializers import PersistentAgentSerializer
 from api.services.agent_settings_resume import queue_settings_change_resume
 from api.services.agent_debug_trace import (

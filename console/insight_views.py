@@ -18,10 +18,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views import View
 
-from api.models import (
-    CommsChannel,
-    PersistentAgent,
-)
+from api.models import CommsChannel, PersistentAgent
 from util.urls import IMMERSIVE_APP_BASE_PATH
 from api.agent.core.prompt_context import get_agent_daily_credit_state
 from billing.services import BillingService

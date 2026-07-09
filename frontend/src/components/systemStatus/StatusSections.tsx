@@ -8,15 +8,7 @@ import type {
   SystemStatusPayload,
   WebSessionStatusSection,
 } from '../../types/systemStatus'
-import {
-  BooleanPill,
-  DataTable,
-  EmptyRows,
-  SectionCard,
-  UnavailableSection,
-  formatDateTime,
-  formatStatusLabel,
-} from './common'
+import { BooleanPill, DataTable, EmptyRows, SectionCard, UnavailableSection, formatDateTime, formatStatusLabel } from './common'
 
 function CelerySection({ section }: { section: CeleryStatusSection }) {
   return (

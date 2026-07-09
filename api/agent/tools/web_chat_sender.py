@@ -9,11 +9,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from ..comms.message_service import _get_or_create_conversation, _ensure_participant
-from ..files.attachment_helpers import (
-    AttachmentResolutionError,
-    create_message_attachments,
-    resolve_filespace_attachments,
-)
+from ..files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from ..files.filespace_service import broadcast_message_attachment_update
 from util.text_sanitizer import normalize_llm_output
 from .agent_variables import substitute_variables_with_filespace

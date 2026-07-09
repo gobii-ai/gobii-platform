@@ -3,13 +3,7 @@ import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, Loader2, ServerCog } from 'lucide-react'
 
-import {
-  createMcpServer,
-  fetchMcpServerDetail,
-  updateMcpServer,
-  type McpServerDetail,
-  type McpServerPayload,
-} from '../../api/mcp'
+import { createMcpServer, fetchMcpServerDetail, updateMcpServer, type McpServerDetail, type McpServerPayload } from '../../api/mcp'
 import { HttpError } from '../../api/http'
 import { fieldErrorMessages, safeErrorMessage } from '../../api/safeErrorMessage'
 import { useMcpOAuth } from '../../hooks/useMcpOAuth'

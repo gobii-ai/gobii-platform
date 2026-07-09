@@ -14,17 +14,7 @@ from django.db import models, transaction
 from observability import traced, dict_to_attributes
 from util.constants.task_constants import TASKS_UNLIMITED
 from .agent.tools.sms_sender import ensure_scheme
-from .models import (
-    ApiKey,
-    BrowserUseAgent,
-    BrowserUseAgentTask,
-    BrowserUseAgentTaskStep,
-    LinkShortener,
-    OrganizationMembership,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    CommsChannel,
-)
+from .models import ApiKey, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, LinkShortener, OrganizationMembership, PersistentAgent, PersistentAgentCommsEndpoint, CommsChannel
 from .serializers import (
     BrowserUseAgentSerializer,
     BrowserUseAgentListSerializer,
@@ -45,10 +35,7 @@ import logging
 
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from util.trial_enforcement import (
-    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-    can_user_use_personal_agents_and_api,
-)
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, can_user_use_personal_agents_and_api
 from util.integrations import pipedream_status
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE,

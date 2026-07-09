@@ -5,14 +5,8 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.utils import timezone
 
-from pages.account_info_cache import (
-    account_info_cache_key,
-    account_info_cache_lock_key,
-)
-from pages.context_processors import (
-    ACCOUNT_INFO_CACHE_STALE_SECONDS,
-    _build_account_info,
-)
+from pages.account_info_cache import account_info_cache_key, account_info_cache_lock_key
+from pages.context_processors import ACCOUNT_INFO_CACHE_STALE_SECONDS, _build_account_info
 from pages.homepage_cache import (
     HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
     HOMEPAGE_PRETRAINED_CACHE_STALE_SECONDS,

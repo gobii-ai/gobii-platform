@@ -1,11 +1,7 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
-import {
-  saveNativeIntegrationCredentials,
-  type NativeIntegrationManualConnectResponse,
-  type NativeIntegrationProvider,
-} from '../../api/nativeIntegrations'
+import { saveNativeIntegrationCredentials, type NativeIntegrationManualConnectResponse, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { NativeIntegrationCredentialFormModal } from './NativeIntegrationCredentialFormModal'
 

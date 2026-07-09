@@ -13,26 +13,12 @@ from agents.services import PretrainedWorkerTemplateService, AgentService
 
 from api.agent.core.llm_config import resolve_intelligence_tier_for_owner
 from api.agent.avatar import maybe_schedule_agent_avatar
-from api.agent.short_description import (
-    maybe_schedule_mini_description,
-    maybe_schedule_short_description,
-)
+from api.agent.short_description import maybe_schedule_mini_description, maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
-from api.models import (
-    BrowserUseAgent,
-    CommsChannel,
-    IntelligenceTier,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentEmailEndpoint,
-)
+from api.models import BrowserUseAgent, CommsChannel, IntelligenceTier, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentEmailEndpoint
 from api.services.agent_email_aliases import get_default_agent_email_endpoint
 from api.services.agent_planning import schedule_planning_timeout_processing
-from api.services.daily_credit_limits import (
-    calculate_default_daily_credit_limit,
-    calculate_daily_credit_slider_bounds,
-    get_tier_credit_multiplier,
-)
+from api.services.daily_credit_limits import calculate_default_daily_credit_limit, calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 
 

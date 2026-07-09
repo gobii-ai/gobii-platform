@@ -13,20 +13,8 @@ from django.core.files.storage import default_storage
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from api.models import (
-    PersistentAgent,
-    PersistentAgentCompletion,
-    PersistentAgentError,
-    PersistentAgentMessage,
-    PersistentAgentStep,
-)
-from console.agent_audit.serializers import (
-    serialize_completion,
-    serialize_error,
-    serialize_message,
-    serialize_prompt_meta,
-    serialize_tool_call,
-)
+from api.models import PersistentAgent, PersistentAgentCompletion, PersistentAgentError, PersistentAgentMessage, PersistentAgentStep
+from console.agent_audit.serializers import serialize_completion, serialize_error, serialize_message, serialize_prompt_meta, serialize_tool_call
 
 
 logger = logging.getLogger(__name__)

@@ -20,10 +20,7 @@ from api.agent.core.llm_utils import run_completion
 from api.llm.utils import normalize_model_name
 from api.openrouter import get_attribution_headers
 
-from api.agent.core.llm_config import (
-    invalidate_llm_bootstrap_cache,
-    get_required_temperature_for_model,
-)
+from api.agent.core.llm_config import invalidate_llm_bootstrap_cache, get_required_temperature_for_model
 from api.encryption import SecretsEncryption
 from api.models import (
     LLMProvider,

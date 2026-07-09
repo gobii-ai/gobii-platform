@@ -5,11 +5,7 @@ from django.conf import settings
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
-from api.meta_ads_setup import (
-    META_ADS_SETUP_INSTRUCTIONS,
-    META_ADS_SETUP_STEPS,
-    META_ADS_TROUBLESHOOTING_TIPS,
-)
+from api.meta_ads_setup import META_ADS_SETUP_INSTRUCTIONS, META_ADS_SETUP_STEPS, META_ADS_TROUBLESHOOTING_TIPS
 
 from .native_api_cookbooks import render_native_api_cookbook
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField

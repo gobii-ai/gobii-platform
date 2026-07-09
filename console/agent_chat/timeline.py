@@ -20,12 +20,7 @@ from django.urls import reverse
 
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
 from api.agent.core.schedule_parser import ScheduleParser
-from api.agent.comms.chat_email_display_cache import (
-    get_cached_chat_body_html,
-    normalize_explicit_email_html,
-    render_chat_email_body_html,
-    sanitize_chat_email_html,
-)
+from api.agent.comms.chat_email_display_cache import get_cached_chat_body_html, normalize_explicit_email_html, render_chat_email_body_html, sanitize_chat_email_html
 from api.agent.comms.human_input_requests import serialize_human_input_tool_result
 from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE

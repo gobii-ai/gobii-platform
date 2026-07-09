@@ -11,10 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from billing.addons import AddonEntitlementService
-from billing.checkout_metadata import (
-    STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
-    build_checkout_flow_metadata,
-)
+from billing.checkout_metadata import STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE, build_checkout_flow_metadata
 from billing.checkout_sessions import create_stripe_checkout_session
 from billing.services import BillingService
 from config.stripe_config import get_stripe_settings
@@ -35,10 +32,7 @@ from util.subscription_helper import (
 )
 
 from api.models import BrowserUseAgent, UserBilling
-from api.services.dedicated_proxy_service import (
-    DedicatedProxyService,
-    DedicatedProxyUnavailableError,
-)
+from api.services.dedicated_proxy_service import DedicatedProxyService, DedicatedProxyUnavailableError
 try:
     import stripe
 except Exception:  # pragma: no cover - optional dependency

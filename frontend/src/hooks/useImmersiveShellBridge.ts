@@ -1,18 +1,10 @@
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
 import { getInitialAgentChatSidebarMode } from '../components/agentChat/sidebarMode'
-import {
-  IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY,
-  immersiveShellActions,
-  selectImmersiveShellSubview,
-  selectImmersiveSidebarMode,
-} from '../store/immersiveShellSlice'
+import { IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY, immersiveShellActions, selectImmersiveShellSubview, selectImmersiveSidebarMode } from '../store/immersiveShellSlice'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import type { AgentChatSidebarMode, SelectionShellPage } from '../types/immersiveShell'
-import {
-  extractAgentChatShellAgentId,
-  getAgentChatShellSubview,
-} from '../util/agentChatShellRoutes'
+import { extractAgentChatShellAgentId, getAgentChatShellSubview } from '../util/agentChatShellRoutes'
 
 type UseImmersiveShellBridgeOptions = {
   activeAgentId: string | null

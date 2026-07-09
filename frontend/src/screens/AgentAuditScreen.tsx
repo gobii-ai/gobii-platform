@@ -1,26 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import {
-  Brain,
-  ChevronDown,
-  ChevronUp,
-  Download,
-  ListChevronsDownUp,
-  ListChevronsUpDown,
-  Megaphone,
-  RefreshCcw,
-  Search,
-  Settings,
-  Stethoscope,
-} from 'lucide-react'
+import { Brain, ChevronDown, ChevronUp, Download, ListChevronsDownUp, ListChevronsUpDown, Megaphone, RefreshCcw, Search, Settings, Stethoscope } from 'lucide-react'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
-import {
-  auditActions,
-  initializeAudit,
-  jumpAuditToTime,
-  loadAuditTimeline,
-  loadMoreAudit,
-  selectAuditState,
-} from '../store/auditSlice'
+import { auditActions, initializeAudit, jumpAuditToTime, loadAuditTimeline, loadMoreAudit, selectAuditState } from '../store/auditSlice'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import type { AuditToolCallEvent, AuditErrorEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
 import {

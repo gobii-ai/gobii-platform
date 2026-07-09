@@ -22,12 +22,7 @@ import json5
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 
-from .csv_utils import (
-    build_csv_sample,
-    detect_csv_dialect,
-    normalize_csv_text,
-    read_csv_rows,
-)
+from .csv_utils import build_csv_sample, detect_csv_dialect, normalize_csv_text, read_csv_rows
 from ..tools.json_digest import JsonDigest, digest as digest_json
 from ..tools.text_digest import TextDigest, digest as digest_text
 

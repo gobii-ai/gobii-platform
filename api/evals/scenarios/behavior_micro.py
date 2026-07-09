@@ -5,11 +5,7 @@ import json
 from api.agent.comms.human_input_requests import MAX_OPTION_COUNT, dismiss_human_input_request
 from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.files.filespace_service import write_bytes_to_dir
-from api.agent.tools.eval_synthetic_tools import (
-    EVAL_SYNTHETIC_TOOL_DEFINITIONS,
-    EVAL_SYNTHETIC_TOOL_SERVER,
-    is_eval_synthetic_tool_name,
-)
+from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS, EVAL_SYNTHETIC_TOOL_SERVER, is_eval_synthetic_tool_name
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools

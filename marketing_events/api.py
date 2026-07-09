@@ -13,11 +13,7 @@ from util.trial_eligibility import (
 )
 
 from .context import extract_click_context
-from .tasks import (
-    enqueue_delayed_subscription_guarded_marketing_event,
-    enqueue_marketing_event,
-    enqueue_start_trial_marketing_event,
-)
+from .tasks import enqueue_delayed_subscription_guarded_marketing_event, enqueue_marketing_event, enqueue_start_trial_marketing_event
 
 
 logger = logging.getLogger(__name__)

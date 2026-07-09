@@ -4,10 +4,7 @@ from typing import Any, Dict, Optional
 from django.db.models import Prefetch
 
 from api.agent.core.endpoint_config_utils import resolve_endpoint_model_and_params
-from api.agent.core.llm_config import (
-    _get_failover_configs_from_profile,
-    _resolve_active_routing_profile,
-)
+from api.agent.core.llm_config import _get_failover_configs_from_profile, _resolve_active_routing_profile
 from api.models import FileHandlerLLMTier, FileHandlerTierEndpoint
 
 _ROUTING_HINT_PARAM_KEYS = {

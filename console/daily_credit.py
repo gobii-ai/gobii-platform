@@ -7,10 +7,7 @@ from django.utils import timezone
 from django.utils.formats import date_format
 
 from api.models import PersistentAgentSystemStep
-from api.services.daily_credit_limits import (
-    calculate_daily_credit_slider_bounds,
-    get_agent_credit_multiplier,
-)
+from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_agent_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 
 

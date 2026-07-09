@@ -13,19 +13,8 @@ from api.agent.core.llm_config import get_llm_config_with_failover, get_required
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.schedule_parser import ScheduleParser
 from api.agent.core.token_usage import log_agent_completion
-from api.models import (
-    CommsChannel,
-    PersistentAgent,
-    PersistentAgentCompletion,
-    PersistentAgentEnabledTool,
-    PersistentAgentTemplate,
-    PublicProfile,
-)
-from api.public_profiles import (
-    generate_handle_suggestion,
-    validate_public_handle,
-    with_handle_suffix,
-)
+from api.models import CommsChannel, PersistentAgent, PersistentAgentCompletion, PersistentAgentEnabledTool, PersistentAgentTemplate, PublicProfile
+from api.public_profiles import generate_handle_suggestion, validate_public_handle, with_handle_suffix
 from util.text_sanitizer import normalize_llm_output
 
 logger = logging.getLogger(__name__)

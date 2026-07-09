@@ -1,14 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 
-import {
-  type ColumnDef,
-  type OnChangeFn,
-  type RowSelectionState,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from '@tanstack/react-table'
+import { type ColumnDef, type OnChangeFn, type RowSelectionState, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { ArrowDownToLine, ArrowUp, ChevronRight, FileText, Folder, Trash2, UploadCloud } from 'lucide-react'
 
 import type { FileDragAndDropHandlers } from './useFileDragAndDrop'

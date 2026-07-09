@@ -8,13 +8,7 @@ from typing import Any, Mapping, Sequence
 from django.db import DatabaseError
 
 from api.agent.files.filespace_service import get_or_create_default_filespace
-from api.models import (
-    AgentFileSpaceAccess,
-    AgentFsNode,
-    PersistentAgent,
-    PersistentAgentCompletion,
-    PersistentAgentToolCall,
-)
+from api.models import AgentFileSpaceAccess, AgentFsNode, PersistentAgent, PersistentAgentCompletion, PersistentAgentToolCall
 from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)

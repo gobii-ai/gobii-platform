@@ -4,15 +4,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 
 from api.agent.comms.message_reads import latest_visible_outbound_message_queryset
-from api.models import (
-    CommsChannel,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentMessage,
-    PersistentAgentMessageRead,
-    UserPhoneNumber,
-    parse_web_user_address,
-)
+from api.models import CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageRead, UserPhoneNumber, parse_web_user_address
 from api.services.email_verification import has_verified_email
 
 

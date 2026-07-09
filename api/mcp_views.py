@@ -11,14 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.auth import MCPAPIKeyAuthentication
-from api.services.remote_mcp import (
-    MCPToolError,
-    MCP_PROTOCOL_VERSION,
-    SERVER_INFO,
-    call_tool,
-    list_tools,
-    make_tool_result,
-)
+from api.services.remote_mcp import MCPToolError, MCP_PROTOCOL_VERSION, SERVER_INFO, call_tool, list_tools, make_tool_result
 
 
 JSON_RPC_PARSE_ERROR = -32700

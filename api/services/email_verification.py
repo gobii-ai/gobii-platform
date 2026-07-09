@@ -68,9 +68,7 @@ def has_verified_email_address(user, email: str | None) -> bool:
 
 
 def get_email_address_for_verification(user) -> EmailAddress | None:
-    from allauth.account.internal.flows.email_verification import (
-        get_address_for_user,
-    )
+    from allauth.account.internal.flows.email_verification import get_address_for_user
 
     return get_address_for_user(user)
 
@@ -103,9 +101,7 @@ def send_email_verification(
     *,
     redirect_url: str | None = None,
 ) -> bool:
-    from allauth.account.internal.flows.email_verification import (
-        send_verification_email_to_address,
-    )
+    from allauth.account.internal.flows.email_verification import send_verification_email_to_address
 
     if redirect_url:
         request.session[EMAIL_VERIFICATION_REDIRECT_URL_SESSION_KEY] = redirect_url

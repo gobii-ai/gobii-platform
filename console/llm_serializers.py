@@ -37,10 +37,7 @@ from api.models import (
     VideoGenerationTierEndpoint,
     VideoGenerationModelEndpoint,
 )
-from console.llm_tier_usage import (
-    build_browser_endpoint_tier_usage_map,
-    build_persistent_endpoint_tier_usage_map,
-)
+from console.llm_tier_usage import build_browser_endpoint_tier_usage_map, build_persistent_endpoint_tier_usage_map
 
 
 def _provider_key_status(provider: LLMProvider) -> str:

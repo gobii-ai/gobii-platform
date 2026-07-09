@@ -4,15 +4,7 @@ from typing import Any, Iterable
 
 from django.db.models import Q
 
-from api.models import (
-    BrowserModelEndpoint,
-    BrowserTierEndpoint,
-    LLMRoutingProfile,
-    PersistentModelEndpoint,
-    PersistentTierEndpoint,
-    ProfileBrowserTierEndpoint,
-    ProfilePersistentTierEndpoint,
-)
+from api.models import BrowserModelEndpoint, BrowserTierEndpoint, LLMRoutingProfile, PersistentModelEndpoint, PersistentTierEndpoint, ProfileBrowserTierEndpoint, ProfilePersistentTierEndpoint
 
 
 def _empty_usage_map(endpoint_ids: Iterable[Any]) -> dict[Any, list[dict[str, Any]]]:

@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import {
-  heartbeatAgentWebSession,
-  startAgentWebSession,
-  endAgentWebSession,
-  type AgentWebSessionSnapshot,
-} from '../api/agentChat'
+import { heartbeatAgentWebSession, startAgentWebSession, endAgentWebSession, type AgentWebSessionSnapshot } from '../api/agentChat'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import { usePageLifecycle, type PageLifecycleSuspendReason } from './usePageLifecycle'

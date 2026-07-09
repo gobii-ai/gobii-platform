@@ -1,19 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import {
-  BarChart3,
-  Bell,
-  Building2,
-  ChevronDown,
-  CircleHelp,
-  ClipboardList,
-  CreditCard,
-  KeyRound,
-  LockKeyhole,
-  ServerCog,
-  Settings,
-  User,
-  UserRound,
-} from 'lucide-react'
+import { BarChart3, Bell, Building2, ChevronDown, CircleHelp, ClipboardList, CreditCard, KeyRound, LockKeyhole, ServerCog, Settings, User, UserRound } from 'lucide-react'
 import { Button, Dialog, Popover } from 'react-aria-components'
 
 import type { ConsoleContext } from '../../api/context'

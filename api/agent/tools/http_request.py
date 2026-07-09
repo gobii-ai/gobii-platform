@@ -20,12 +20,7 @@ from django.conf import settings
 
 from ...models import GlobalSecret, PersistentAgent, PersistentAgentSecret
 from ...proxy_selection import select_proxy_for_persistent_agent
-from ...services.native_integrations import (
-    NativeIntegrationAuthError,
-    NativeIntegrationConfigurationError,
-    apply_native_integration_auth,
-    find_provider_for_url,
-)
+from ...services.native_integrations import NativeIntegrationAuthError, NativeIntegrationConfigurationError, apply_native_integration_auth, find_provider_for_url
 from ...services.persistent_agent_secrets import global_secrets_queryset_for_agent
 from ..files.attachment_helpers import build_signed_filespace_download_url
 from ..files.filespace_service import DOWNLOADS_DIR_NAME, write_bytes_to_dir

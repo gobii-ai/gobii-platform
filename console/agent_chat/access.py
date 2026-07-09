@@ -6,11 +6,7 @@ from api.services.signup_preview import user_can_access_signup_preview_agent
 from console.context_helpers import ConsoleContext, resolve_console_context
 from console.context_overrides import get_context_override
 from console.role_constants import MEMBER_MANAGE_ROLES
-from util.trial_enforcement import (
-    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-    can_user_access_personal_agent_chat,
-    can_user_use_personal_agents_and_api,
-)
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, can_user_access_personal_agent_chat, can_user_use_personal_agents_and_api
 
 
 def _can_access_personal_agent(user, *, allow_delinquent_personal_chat: bool = False) -> bool:

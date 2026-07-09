@@ -2,12 +2,7 @@ from django.urls import path
 from rest_framework.routers import SimpleRouter
 
 # Import the viewsets
-from .views import (
-    ping,
-    BrowserUseAgentViewSet,
-    BrowserUseAgentTaskViewSet,
-    PersistentAgentViewSet,
-)
+from .views import ping, BrowserUseAgentViewSet, BrowserUseAgentTaskViewSet, PersistentAgentViewSet
 from .mcp_views import GobiiMCPView
 from .custom_tool_bridge import custom_tool_bridge_execute
 from .webhooks import (

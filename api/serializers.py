@@ -5,31 +5,14 @@ from urllib.parse import urlparse
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
-from api.agent.core.llm_config import (
-    resolve_intelligence_tier_for_owner,
-)
+from api.agent.core.llm_config import resolve_intelligence_tier_for_owner
 from api.agent.short_description import build_listing_description, build_mini_description
-from api.services.daily_credit_limits import (
-    calculate_daily_credit_slider_bounds,
-    get_tier_credit_multiplier,
-    scale_daily_credit_limit_for_tier_change,
-)
+from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier, scale_daily_credit_limit_for_tier_change
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
-from .models import (
-    ApiKey,
-    BrowserUseAgent,
-    BrowserUseAgentTask,
-    CommsChannel,
-    IntelligenceTier,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-)
+from .models import ApiKey, BrowserUseAgent, BrowserUseAgentTask, CommsChannel, IntelligenceTier, PersistentAgent, PersistentAgentCommsEndpoint
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
 from util.analytics import AnalyticsSource
-from util.trial_enforcement import (
-    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-    can_user_use_personal_agents_and_api,
-)
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, can_user_use_personal_agents_and_api
 
 # Serializer for Listing Agents (id, name, created_at)
 class BrowserUseAgentListSerializer(serializers.ModelSerializer):
@@ -572,11 +555,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         raise serializers.ValidationError({'preferred_contact_endpoint': ['Unsupported contact channel.']})
 
     def create(self, validated_data):
-        from api.services.persistent_agents import (
-            ensure_default_agent_email_endpoint,
-            PersistentAgentProvisioningError,
-            PersistentAgentProvisioningService,
-        )
+        from api.services.persistent_agents import ensure_default_agent_email_endpoint, PersistentAgentProvisioningError, PersistentAgentProvisioningService
 
         request = self.context['request']
         organization = self.context.get('organization')

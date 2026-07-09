@@ -7,12 +7,7 @@ from marketing_events.api import capi_delay_subscription_guarded
 from marketing_events.constants import AD_CAPI_PROVIDER_TARGETS
 from marketing_events.context import build_marketing_context_from_user
 from util.subscription_helper import get_active_subscription, get_owner_plan
-from util.user_behavior import (
-    count_messages_sent_to_gobii,
-    get_custom_capi_event_delay_seconds,
-    is_fast_cancel_owner,
-    is_owner_currently_in_trial,
-)
+from util.user_behavior import count_messages_sent_to_gobii, get_custom_capi_event_delay_seconds, is_fast_cancel_owner, is_owner_currently_in_trial
 
 
 class ConfiguredCustomEvent(StrEnum):

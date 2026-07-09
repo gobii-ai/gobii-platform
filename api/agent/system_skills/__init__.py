@@ -1,12 +1,6 @@
 """Code-defined system skill registry helpers."""
 
-from .registry import (
-    SystemSkillDocLink,
-    SystemSkillDefinition,
-    SystemSkillField,
-    get_system_skill_definition,
-    shortlist_system_skills,
-)
+from .registry import SystemSkillDocLink, SystemSkillDefinition, SystemSkillField, get_system_skill_definition, shortlist_system_skills
 
 __all__ = [
     "SystemSkillDocLink",

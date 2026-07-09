@@ -2,21 +2,9 @@
 "use no memo"
 import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  type Column,
-  type ColumnDef,
-  type SortingState,
-  flexRender,
-  getCoreRowModel,
-  getSortedRowModel,
-  useReactTable,
-} from '@tanstack/react-table'
+import { type Column, type ColumnDef, type SortingState, flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from '@tanstack/react-table'
 
-import type {
-  DateRangeValue,
-  UsageAgentLeaderboardQueryInput,
-  UsageAgentLeaderboardResponse,
-} from './types'
+import type { DateRangeValue, UsageAgentLeaderboardQueryInput, UsageAgentLeaderboardResponse } from './types'
 import { fetchUsageAgentLeaderboard } from './api'
 import { handleAppAnchorClick } from '../../util/appNavigation'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'

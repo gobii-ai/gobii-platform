@@ -9,18 +9,9 @@ import logging
 from django.utils import timezone
 from datetime import timedelta
 
-from ...models import (
-    PersistentAgent, 
-    CommsAllowlistEntry, 
-    CommsAllowlistRequest,
-    CommsChannel,
-    SmsContactPurpose,
-)
+from ...models import PersistentAgent, CommsAllowlistEntry, CommsAllowlistRequest, CommsChannel, SmsContactPurpose
 from api.services.sms_contact_purpose import sms_contact_purpose_required
-from util.urls import (
-    build_immersive_contact_requests_path,
-    build_immersive_contact_requests_site_url,
-)
+from util.urls import build_immersive_contact_requests_path, build_immersive_contact_requests_site_url
 
 logger = logging.getLogger(__name__)
 

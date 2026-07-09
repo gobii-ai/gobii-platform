@@ -22,11 +22,7 @@ from api.agent.core.llm_config import (
     resolve_intelligence_tier_for_owner,
     resolve_preferred_tier_for_owner,
 )
-from api.agent.files.attachment_helpers import (
-    AttachmentResolutionError,
-    create_message_attachments,
-    resolve_filespace_attachments,
-)
+from api.agent.files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.models import (
     AgentFsNode,
@@ -40,17 +36,9 @@ from api.models import (
     UserPhoneNumber,
     build_web_user_address,
 )
-from api.services.daily_credit_limits import (
-    calculate_daily_credit_slider_bounds,
-    get_tier_credit_multiplier,
-    scale_daily_credit_limit_for_tier_change,
-)
+from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier, scale_daily_credit_limit_for_tier_change
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
-from api.services.persistent_agents import (
-    ensure_default_agent_email_endpoint,
-    PersistentAgentProvisioningError,
-    PersistentAgentProvisioningService,
-)
+from api.services.persistent_agents import ensure_default_agent_email_endpoint, PersistentAgentProvisioningError, PersistentAgentProvisioningService
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE,

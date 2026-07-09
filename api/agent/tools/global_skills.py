@@ -8,17 +8,8 @@ from django.db.models import Q
 from django.utils.text import get_valid_filename
 
 from api.agent.files.filespace_service import write_bytes_to_dir
-from api.models import (
-    GlobalAgentSkill,
-    GlobalAgentSkillCustomTool,
-    PersistentAgent,
-    PersistentAgentCustomTool,
-    PersistentAgentSkill,
-)
-from api.services.skill_analytics import (
-    SKILL_ORIGIN_GLOBAL_IMPORT,
-    track_agent_skill_event,
-)
+from api.models import GlobalAgentSkill, GlobalAgentSkillCustomTool, PersistentAgent, PersistentAgentCustomTool, PersistentAgentSkill
+from api.services.skill_analytics import SKILL_ORIGIN_GLOBAL_IMPORT, track_agent_skill_event
 from util.analytics import AnalyticsEvent
 from .custom_tools import (
     is_custom_tools_available_for_agent,

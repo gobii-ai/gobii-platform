@@ -37,11 +37,7 @@ from api.services.native_integrations import (
     trigger_agents_for_native_integration_change,
     upsert_manual_native_integration_credentials,
 )
-from api.services.native_integration_events import (
-    normalize_native_integration_event_files,
-    record_native_integration_agent_event,
-    resolve_native_integration_event_agent,
-)
+from api.services.native_integration_events import normalize_native_integration_event_files, record_native_integration_agent_event, resolve_native_integration_event_agent
 from console.context_helpers import build_console_context
 
 NATIVE_INTEGRATION_STATE_SALT = "gobii.native_integrations.oauth_state"

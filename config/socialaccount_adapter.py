@@ -15,11 +15,7 @@ from django.urls import reverse
 from agents.services import PretrainedWorkerTemplateService
 from api.services.system_settings import get_account_allow_social_signup
 from config.redis_client import get_redis_client
-from util.onboarding import (
-    TRIAL_ONBOARDING_PENDING_SESSION_KEY,
-    TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
-    TRIAL_ONBOARDING_TARGET_SESSION_KEY,
-)
+from util.onboarding import TRIAL_ONBOARDING_PENDING_SESSION_KEY, TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, TRIAL_ONBOARDING_TARGET_SESSION_KEY
 from util.attribution_referrers import ATTRIBUTION_REFERRER_SESSION_KEYS
 
 

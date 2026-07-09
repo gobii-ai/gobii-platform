@@ -773,10 +773,7 @@ def attach_originating_step_from_result(step, result: dict[str, Any] | None) -> 
 def _emit_pending_human_input_updates(agent_id) -> None:
     if not agent_id:
         return
-    from console.agent_chat.signals import (
-        emit_pending_action_requests_update,
-        emit_pending_human_input_requests_update,
-    )
+    from console.agent_chat.signals import emit_pending_action_requests_update, emit_pending_human_input_requests_update
 
     try:
         agent = PersistentAgent.objects.get(id=agent_id)

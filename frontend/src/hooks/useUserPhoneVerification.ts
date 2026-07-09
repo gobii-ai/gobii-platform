@@ -1,22 +1,8 @@
 import { useEffect, useState } from 'react'
 
-import {
-  addUserPhone,
-  cancelUserPhoneVerification,
-  deleteUserPhone,
-  resendUserPhone,
-  verifyUserPhone,
-  type PhoneResponse,
-  type PhoneState,
-} from '../api/agentSetup'
+import { addUserPhone, cancelUserPhoneVerification, deleteUserPhone, resendUserPhone, verifyUserPhone, type PhoneResponse, type PhoneState } from '../api/agentSetup'
 import { safeErrorMessage } from '../api/safeErrorMessage'
-import {
-  DEFAULT_PHONE_REGION,
-  formatPhoneE164,
-  formatPhoneNational,
-  normalizePhoneRegion,
-  type SupportedPhoneRegion,
-} from '../components/common/PhoneNumberInput'
+import { DEFAULT_PHONE_REGION, formatPhoneE164, formatPhoneNational, normalizePhoneRegion, type SupportedPhoneRegion } from '../components/common/PhoneNumberInput'
 
 export type UserPhoneVerificationAction = 'add' | 'verify' | 'resend' | 'cancel' | 'delete'
 

@@ -4,12 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { scheduleLoginRedirect } from '../api/http'
 import type { AgentMessageNotification } from '../types/agentChat'
 import { useAppDispatch } from '../store/hooks'
-import {
-  chatActions,
-  receiveRealtimeEvent,
-  receiveStreamEvent,
-  updateActiveProcessing,
-} from '../store/chatSlice'
+import { chatActions, receiveRealtimeEvent, receiveStreamEvent, updateActiveProcessing } from '../store/chatSlice'
 import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { TIMELINE_STALE_TIME_MS, timelineQueryKey } from './useAgentTimeline'

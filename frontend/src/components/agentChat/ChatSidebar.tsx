@@ -12,27 +12,12 @@ import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCrea
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { ChatSidebarGallery } from './ChatSidebarGallery'
-import {
-  SelectionShellPageSwitcher,
-  SELECTION_SHELL_PAGE_LABELS,
-  type SelectionShellPage,
-} from './SelectionShellPageSwitcher'
+import { SelectionShellPageSwitcher, SELECTION_SHELL_PAGE_LABELS, type SelectionShellPage } from './SelectionShellPageSwitcher'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 import { ProductAnnouncementBell } from './ProductAnnouncementBell'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
-import {
-  TransferInviteDetails,
-  TransferInviteSidebarItem,
-  type TransferInviteAction,
-  type TransferInviteDialogState,
-} from './TransferInviteSidebarItem'
-import {
-  getNextAgentChatSidebarMode,
-  getPreviousAgentChatSidebarMode,
-  type AgentChatSidebarMode,
-  SIDEBAR_MOBILE_BREAKPOINT_PX,
-  type AgentDrawerViewMode,
-} from './sidebarMode'
+import { TransferInviteDetails, TransferInviteSidebarItem, type TransferInviteAction, type TransferInviteDialogState } from './TransferInviteSidebarItem'
+import { getNextAgentChatSidebarMode, getPreviousAgentChatSidebarMode, type AgentChatSidebarMode, SIDEBAR_MOBILE_BREAKPOINT_PX, type AgentDrawerViewMode } from './sidebarMode'
 import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
 
 const SEARCH_THRESHOLD = 6

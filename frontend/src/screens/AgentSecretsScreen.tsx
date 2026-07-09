@@ -1,15 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import { ExternalLink, Plus } from 'lucide-react'
 
-import {
-  fetchAgentSecrets,
-  createAgentSecret,
-  updateAgentSecret,
-  deleteAgentSecret,
-  promoteAgentSecret,
-  type AgentSecretListResponse,
-  type SecretDTO,
-} from '../api/secrets'
+import { fetchAgentSecrets, createAgentSecret, updateAgentSecret, deleteAgentSecret, promoteAgentSecret, type AgentSecretListResponse, type SecretDTO } from '../api/secrets'
 import { SecretTable } from '../components/secrets/SecretTable'
 import { SecretSecurityNotice } from '../components/secrets/SecretSecurityNotice'
 import { useSecretCrud } from '../components/secrets/useSecretCrud'

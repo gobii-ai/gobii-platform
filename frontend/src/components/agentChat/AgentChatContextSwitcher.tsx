@@ -1,17 +1,6 @@
 import { useCallback, useMemo, useState, type MouseEvent, type PointerEvent } from 'react'
 import { Check, ChevronDown, Plus, UserRound, Users } from 'lucide-react'
-import {
-  Button,
-  Dialog,
-  DialogTrigger,
-  Header,
-  ListBox,
-  ListBoxItem,
-  ListBoxSection,
-  Popover,
-  type Key,
-  type Selection,
-} from 'react-aria-components'
+import { Button, Dialog, DialogTrigger, Header, ListBox, ListBoxItem, ListBoxSection, Popover, type Key, type Selection } from 'react-aria-components'
 
 import type { ConsoleContext, ConsoleContextOption } from '../../api/context'
 

@@ -13,17 +13,8 @@ from django.conf import settings
 
 from api.models import AgentComputeSession
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
-from api.services.sandbox_compute import (
-    SandboxComputeBackend,
-    SandboxComputeUnavailable,
-    SandboxSessionUpdate,
-    _SANDBOX_PROXY_CLEARED_ATTR,
-    _requires_agent_pod_discovery,
-)
-from api.services.system_settings import (
-    get_sandbox_compute_pod_image,
-    get_sandbox_egress_proxy_pod_image,
-)
+from api.services.sandbox_compute import SandboxComputeBackend, SandboxComputeUnavailable, SandboxSessionUpdate, _SANDBOX_PROXY_CLEARED_ATTR, _requires_agent_pod_discovery
+from api.services.system_settings import get_sandbox_compute_pod_image, get_sandbox_egress_proxy_pod_image
 
 logger = logging.getLogger(__name__)
 

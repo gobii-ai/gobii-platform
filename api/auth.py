@@ -2,10 +2,7 @@ from django.utils import timezone
 
 from observability import traced
 from util.analytics import Analytics
-from util.trial_enforcement import (
-    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-    can_user_use_personal_agents_and_api,
-)
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, can_user_use_personal_agents_and_api
 from rest_framework import authentication, exceptions
 from .models import ApiKey, OrganizationMembership
 

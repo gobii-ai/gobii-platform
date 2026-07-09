@@ -3,25 +3,10 @@ import { resolveDetailComponent } from '../toolDetails'
 import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
 import { compareTimelineCursors } from '../../../util/timelineCursor'
 import type { ThinkingEvent, ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
-import type {
-  ToolClusterTransform,
-  ToolDescriptor,
-  ToolEntryDisplay,
-} from './types'
-import {
-  CHAT_SKIP_TOOL_NAMES,
-  buildToolDescriptorMap,
-  coerceString,
-  getFriendlyToolInfo,
-  truncate,
-} from '../../tooling/toolMetadata'
+import type { ToolClusterTransform, ToolDescriptor, ToolEntryDisplay } from './types'
+import { CHAT_SKIP_TOOL_NAMES, buildToolDescriptorMap, coerceString, getFriendlyToolInfo, truncate } from '../../tooling/toolMetadata'
 import { classifySqliteStatements } from '../../tooling/agentConfigSql'
-import {
-  extractSqlStatementsFromParameters,
-  extractSqliteStatementResult,
-  extractSqliteGroupedResult,
-  getSqliteInternalTableDisplay,
-} from '../../tooling/sqliteDisplay'
+import { extractSqlStatementsFromParameters, extractSqliteStatementResult, extractSqliteGroupedResult, getSqliteInternalTableDisplay } from '../../tooling/sqliteDisplay'
 import { ThinkingDetail } from '../toolDetails/details/common'
 import { buildAgentConfigEntry, buildSqliteSyntheticId } from './sqliteEntries'
 

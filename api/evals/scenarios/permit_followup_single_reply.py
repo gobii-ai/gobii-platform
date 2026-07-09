@@ -19,11 +19,7 @@ from api.models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
-from api.agent.comms.message_service import (
-    _ensure_participant,
-    _get_or_create_conversation,
-    _get_or_create_endpoint,
-)
+from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation, _get_or_create_endpoint
 from api.agent.core.event_processing import process_agent_events
 
 

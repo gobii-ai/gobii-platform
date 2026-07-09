@@ -4,10 +4,7 @@ import time
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
-from api.agent.comms.human_input_requests import (
-    attach_originating_step_from_result,
-    track_human_input_request_created,
-)
+from api.agent.comms.human_input_requests import attach_originating_step_from_result, track_human_input_request_created
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
 
 from .runtime_execution_context import tool_execution_context

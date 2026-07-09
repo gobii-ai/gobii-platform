@@ -2,24 +2,10 @@ import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/tool
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 
 import { sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
-import {
-  flushPendingEventsToCache,
-  injectRealtimeEventIntoCache,
-  refreshTimelineLatestInCache,
-  updateOptimisticEventInCache,
-} from '../hooks/useTimelineCacheInjector'
+import { flushPendingEventsToCache, injectRealtimeEventIntoCache, refreshTimelineLatestInCache, updateOptimisticEventInCache } from '../hooks/useTimelineCacheInjector'
 import { timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import { mergeTimelineEvents, normalizeTimelineEvent } from '../stores/agentChatTimeline'
-import type {
-  AgentMessage,
-  PendingActionRequest,
-  ProcessingSnapshot,
-  ProcessingWebTask,
-  StreamEventPayload,
-  StreamState,
-  ThinkingEvent,
-  TimelineEvent,
-} from '../types/agentChat'
+import type { AgentMessage, PendingActionRequest, ProcessingSnapshot, ProcessingWebTask, StreamEventPayload, StreamState, ThinkingEvent, TimelineEvent } from '../types/agentChat'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BurnRateMetadata, InsightEvent } from '../types/insight'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'

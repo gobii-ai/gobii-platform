@@ -1,11 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import {
-  fetchProductAnnouncements,
-  markProductAnnouncementsRead,
-  type ProductAnnouncementReadPayload,
-  type ProductAnnouncementsPayload,
-} from '../api/productAnnouncements'
+import { fetchProductAnnouncements, markProductAnnouncementsRead, type ProductAnnouncementReadPayload, type ProductAnnouncementsPayload } from '../api/productAnnouncements'
 
 export const productAnnouncementsQueryKey = ['product-announcements'] as const
 

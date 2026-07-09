@@ -1,25 +1,10 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentProps,
-  type CSSProperties,
-  type FormEvent,
-  type ReactNode,
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { createAgent, respondToAgentTransferInvite } from '../api/agents'
-import {
-  currentOrganizationTemplatesQueryKey,
-  fetchCurrentOrganizationTemplates,
-  launchOrganizationTemplate,
-  type OrganizationTemplate,
-} from '../api/organization'
+import { currentOrganizationTemplatesQueryKey, fetchCurrentOrganizationTemplates, launchOrganizationTemplate, type OrganizationTemplate } from '../api/organization'
 import {
   stopAgentProcessing,
   fulfillRequestedSecrets,
@@ -81,9 +66,7 @@ import {
   sendMessage as sendMessageThunk,
   setAutoScrollPinned as setAutoScrollPinnedThunk,
 } from '../store/chatSlice'
-import {
-  immersiveShellActions,
-} from '../store/immersiveShellSlice'
+import { immersiveShellActions } from '../store/immersiveShellSlice'
 import {
   agentRosterPreferencesActions,
   persistAgentRosterPreference,
@@ -103,18 +86,9 @@ import {
   updateAgentIntelligenceTier,
 } from '../store/agentSettingsSlice'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
-import {
-  ensureAuthenticated,
-  selectSubscriptionState,
-  subscriptionActions,
-  type PlanTier,
-} from '../store/subscriptionSlice'
+import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
-import {
-  refreshTimelineLatestInCache,
-  replacePendingActionRequestsInCache,
-  DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES,
-} from '../hooks/useTimelineCacheInjector'
+import { refreshTimelineLatestInCache, replacePendingActionRequestsInCache, DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES } from '../hooks/useTimelineCacheInjector'
 import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { HttpError } from '../api/http'
@@ -128,11 +102,7 @@ import type { InsightEvent } from '../types/insight'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { track, AnalyticsEvent } from '../util/analytics'
 import { sortRosterEntries } from '../util/agentRosterSort'
-import {
-  type AgentChatShellSubview,
-  buildAgentChatShellPath,
-  buildAgentChatShellSelectionPath,
-} from '../util/agentChatShellRoutes'
+import { type AgentChatShellSubview, buildAgentChatShellPath, buildAgentChatShellSelectionPath } from '../util/agentChatShellRoutes'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 import { navigateWithinApp } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'

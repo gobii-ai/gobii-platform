@@ -30,11 +30,7 @@ from api.models import (
     build_web_agent_address,
     build_web_user_address,
 )
-from api.services.persistent_agents import (
-    PersistentAgentProvisioningError,
-    PersistentAgentProvisioningService,
-    ensure_default_agent_email_endpoint,
-)
+from api.services.persistent_agents import PersistentAgentProvisioningError, PersistentAgentProvisioningService, ensure_default_agent_email_endpoint
 from api.services.owner_execution_pause import get_owner_account_pause_state
 from api.services.signup_preview import get_signup_preview_creation_state
 from api.services.signup_preview import user_has_existing_personal_agent_for_signup_preview
@@ -45,16 +41,9 @@ from marketing_events.custom_events import ConfiguredCustomEvent, emit_configure
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import clear_trial_onboarding_intent
-from util.personal_signup_preview import (
-    resolve_personal_signup_preview,
-    SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE,
-)
+from util.personal_signup_preview import resolve_personal_signup_preview, SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE
 from util.sms import find_unused_number, get_user_primary_sms_number
-from util.trial_enforcement import (
-    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-    TrialRequiredValidationError,
-    can_user_use_personal_agents_and_api,
-)
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, TrialRequiredValidationError, can_user_use_personal_agents_and_api
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
 
 logger = logging.getLogger(__name__)

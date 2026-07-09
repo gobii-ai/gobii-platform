@@ -4,11 +4,7 @@ from django.urls import NoReverseMatch, reverse
 from constants.plans import PlanNamesChoices
 from util.subscription_helper import get_organization_plan, reconcile_user_plan_from_stripe
 
-from console.daily_credit import (
-    build_agent_daily_credit_context,
-    build_daily_credit_status,
-    serialize_daily_credit_payload,
-)
+from console.daily_credit import build_agent_daily_credit_context, build_daily_credit_status, serialize_daily_credit_payload
 
 
 def build_agent_quick_settings_payload(agent, owner=None) -> dict:

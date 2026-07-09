@@ -3,11 +3,7 @@ import traceback
 
 from django.utils import timezone
 
-from api.models import (
-    EvalRun,
-    EvalRunTask,
-    EvalSuiteRun,
-)
+from api.models import EvalRun, EvalRunTask, EvalSuiteRun
 from api.evals.registry import ScenarioRegistry
 from api.evals.realtime import broadcast_run_update, broadcast_suite_update, broadcast_task_update
 from api.evals.metrics import aggregate_run_metrics

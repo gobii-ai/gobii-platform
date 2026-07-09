@@ -34,16 +34,8 @@ from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 
 from observability import mark_span_failed_with_exception
-from .budget import (
-    AgentBudgetManager,
-    BudgetContext,
-    get_current_context as get_budget_context,
-    set_current_context as set_budget_context,
-)
-from .burn_control import (
-    BurnRateAction,
-    handle_burn_rate_limit,
-)
+from .budget import AgentBudgetManager, BudgetContext, get_current_context as get_budget_context, set_current_context as set_budget_context
+from .burn_control import BurnRateAction, handle_burn_rate_limit
 from .processing_flags import (
     clear_processing_lock_active,
     claim_pending_drain_slot,
@@ -64,43 +56,17 @@ from .processing_flags import (
     remove_pending_agent,
     set_processing_heartbeat,
 )
-from .llm_utils import (
-    EmptyLiteLLMResponseError,
-    raise_if_empty_litellm_response,
-    raise_if_invalid_litellm_response,
-    run_completion,
-)
-from .multimodal_context import (
-    collect_fresh_read_file_image_attachments,
-    prepare_multimodal_read_file_request,
-)
+from .llm_utils import EmptyLiteLLMResponseError, raise_if_empty_litellm_response, raise_if_invalid_litellm_response, run_completion
+from .multimodal_context import collect_fresh_read_file_image_attachments, prepare_multimodal_read_file_request
 from .llm_streaming import StreamAccumulator
-from .token_usage import (
-    completion_kwargs_from_usage,
-    extract_reasoning_content,
-    extract_token_usage,
-    set_usage_span_attributes,
-)
-from ..short_description import (
-    maybe_schedule_mini_description,
-    maybe_schedule_short_description,
-)
+from .token_usage import completion_kwargs_from_usage, extract_reasoning_content, extract_token_usage, set_usage_span_attributes
+from ..short_description import maybe_schedule_mini_description, maybe_schedule_short_description
 from ..avatar import maybe_schedule_agent_avatar
 from ..tags import maybe_schedule_agent_tags
 from tasks.services import TaskCreditService
-from util.tool_costs import (
-    get_tool_credit_cost,
-    get_default_task_credit_cost,
-    should_refund_tool_credit_on_error,
-)
+from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost, should_refund_tool_credit_on_error
 from util.constants.task_constants import TASKS_UNLIMITED
-from .llm_config import (
-    apply_tier_credit_multiplier,
-    clear_runtime_tier_override,
-    get_llm_config_with_failover,
-    LLMNotConfiguredError,
-    is_llm_bootstrap_required,
-)
+from .llm_config import apply_tier_credit_multiplier, clear_runtime_tier_override, get_llm_config_with_failover, LLMNotConfiguredError, is_llm_bootstrap_required
 from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
@@ -112,18 +78,9 @@ from .daily_limit_mode import (
     is_daily_limit_allowed_tool,
     is_daily_hard_limit_message_only_mode,
 )
-from .period_events import (
-    DAILY_HARD_LIMIT_BLOCKED_EVENT,
-    DAILY_HARD_LIMIT_EXCEEDED_EVENT,
-    DAILY_SOFT_LIMIT_EXCEEDED_EVENT,
-    should_emit_daily_agent_event,
-)
+from .period_events import DAILY_HARD_LIMIT_BLOCKED_EVENT, DAILY_HARD_LIMIT_EXCEEDED_EVENT, DAILY_SOFT_LIMIT_EXCEEDED_EVENT, should_emit_daily_agent_event
 from .agent_judge import maybe_run_agent_judge
-from .prompt_context import (
-    build_prompt_context,
-    get_agent_daily_credit_state,
-    get_agent_tools,
-)
+from .prompt_context import build_prompt_context, get_agent_daily_credit_state, get_agent_tools
 
 from ..tools.apply_patch import execute_apply_patch
 from ..tools.charter_updater import execute_update_charter
@@ -131,10 +88,7 @@ from ..tools.email_sender import execute_send_email
 from ..tools.sms_sender import execute_send_sms
 from ..tools.spawn_web_task import execute_spawn_web_task
 from ..tools.schedule_updater import execute_update_schedule
-from ..tools.sqlite_agent_config import (
-    apply_sqlite_agent_config_updates,
-    seed_sqlite_agent_config,
-)
+from ..tools.sqlite_agent_config import apply_sqlite_agent_config_updates, seed_sqlite_agent_config
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
@@ -147,28 +101,15 @@ from ..tools.request_contact_permission import execute_request_contact_permissio
 from ..tools.request_human_input import execute_request_human_input
 from ..tools.search_tools import execute_search_tools
 from ..tools.static_tools import planning_mode_disallows_tool
-from ..tools.tool_manager import (
-    execute_enabled_tool,
-    auto_enable_heuristic_tools,
-    get_parallel_safe_tool_rejection_reason,
-    resolve_tool_entry,
-    should_skip_auto_substitution,
-)
+from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 from ..tools.web_chat_sender import execute_send_chat_message
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
-from ..tools.agent_variables import (
-    clear_variables,
-    get_all_variables,
-    replace_all_variables,
-    substitute_variables,
-)
+from ..tools.agent_variables import clear_variables, get_all_variables, replace_all_variables, substitute_variables
 from ..tools.file_export_helpers import resolve_export_target
 from ..files.filespace_service import _normalize_write_path
-from ..comms.human_input_requests import (
-    attach_originating_step_from_result,
-)
+from ..comms.human_input_requests import attach_originating_step_from_result
 from ...models import (
     CommsChannel,
     PersistentAgent,
@@ -184,27 +125,11 @@ from ...models import (
 from api.services.sandbox_warmup import recent_sandbox_tool_history_warm_reason
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
-from api.services.agent_error_logging import (
-    log_agent_error,
-    log_credit_failure,
-    log_prompt_construction_error,
-    log_tool_persistence_error,
-)
+from api.services.agent_error_logging import log_agent_error, log_credit_failure, log_prompt_construction_error, log_tool_persistence_error
 from api.services.billing_snapshot import get_billing_snapshot_for_owner
-from api.services.owner_execution_pause import (
-    EXECUTION_PAUSE_MESSAGE,
-    EXECUTION_PAUSE_NOTE,
-    get_owner_execution_pause_state,
-    resolve_agent_owner,
-)
-from api.services.signup_preview import (
-    can_bypass_task_credit_for_signup_preview,
-    is_signup_preview_processing_paused,
-)
-from api.services.web_sessions import (
-    get_deliverable_web_sessions,
-    has_deliverable_web_session,
-)
+from api.services.owner_execution_pause import EXECUTION_PAUSE_MESSAGE, EXECUTION_PAUSE_NOTE, get_owner_execution_pause_state, resolve_agent_owner
+from api.services.signup_preview import can_bypass_task_credit_for_signup_preview, is_signup_preview_processing_paused
+from api.services.web_sessions import get_deliverable_web_sessions, has_deliverable_web_session
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
