@@ -353,7 +353,7 @@ export function BrightDataSearchDetail({ entry }: ToolDetailProps) {
   const resultCount = extractBrightDataResultCount(entry.result) ?? (serpItems.length ? serpItems.length : null)
   const displayItems = serpItems
   const infoItems = [
-    query ? { label: 'Query', value: <span className="tool-search-query-inline">“{query}”</span> } : null,
+    query ? { label: 'Query', value: <span className="font-normal text-[#334155]">“{query}”</span> } : null,
     resultCount !== null ? { label: 'Results', value: String(resultCount) } : null,
   ]
   const hasDetails = infoItems.some(Boolean)

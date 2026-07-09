@@ -46,6 +46,35 @@ function determineCalloutVariant(status: string | null, toolCount: number | null
   return 'success'
 }
 
+const queryInlineClassName = 'font-normal text-[#334155]'
+const calloutBaseClassName = 'flex items-center gap-[0.85rem] rounded-2xl border px-[1.1rem] py-4'
+const calloutVariantClassNames = {
+  success: 'border-[rgba(34,197,94,0.3)] bg-[rgba(220,252,231,0.85)]',
+  info: 'border-[rgba(59,130,246,0.28)] bg-[rgba(219,234,254,0.85)]',
+  error: 'border-[rgba(239,68,68,0.4)] bg-[rgba(254,226,226,0.9)]',
+}
+const calloutIconBaseClassName = 'grid h-[2.1rem] w-[2.1rem] shrink-0 place-items-center rounded-full'
+const calloutIconVariantClassNames = {
+  success: 'bg-[rgba(22,163,74,0.18)] text-[#047857]',
+  info: 'bg-[rgba(59,130,246,0.18)] text-[#1d4ed8]',
+  error: 'bg-[rgba(239,68,68,0.15)] text-[#b91c1c]',
+}
+const calloutContentClassName = 'flex min-w-0 flex-col gap-1'
+const calloutBodyClassName = 'grid gap-[0.3rem] leading-[1.45] text-[#334155]'
+const calloutListClassName = 'mt-[0.2rem] flex flex-col gap-[0.4rem]'
+const calloutListGroupClassName = 'flex flex-wrap gap-[0.35rem] text-[0.78rem] text-[#1f2937]'
+const calloutListLabelClassName = 'font-semibold text-[#1f2937]'
+const calloutListItemsClassName = 'text-[#334155]'
+const suggestionListClassName = 'm-0 grid list-none gap-[0.9rem] p-0'
+const suggestionCardClassName = 'rounded-[0.85rem] border border-[rgba(203,213,225,0.5)] bg-[rgba(255,255,255,0.9)] px-4 py-[0.9rem]'
+const suggestionHeaderClassName = 'mb-[0.35rem] flex items-center justify-between gap-2'
+const suggestionNameClassName = 'font-semibold text-[#0f172a]'
+const suggestionSourceClassName = 'rounded-full bg-[rgba(59,130,246,0.12)] px-[0.45rem] py-[0.1rem] text-[0.65rem] font-semibold uppercase tracking-[0.02em] text-[#1e3a8a]'
+const suggestionDescriptionClassName = 'text-[0.78rem] leading-[1.45] text-[#475569]'
+const suggestionNoteClassName = 'mt-[0.35rem] text-[0.72rem] text-[#64748b]'
+const summaryListClassName = 'm-0 flex list-none flex-col gap-[0.35rem] p-0'
+const summaryListItemClassName = "relative pl-[1.1rem] text-[0.78rem] text-[#475569] before:absolute before:left-0 before:top-[0.45rem] before:h-[0.35rem] before:w-[0.35rem] before:rounded-full before:bg-[rgba(99,102,241,0.4)] before:content-['']"
+
 export function SearchToolDetail({ entry }: ToolDetailProps) {
   const params =
     entry.parameters && typeof entry.parameters === 'object'
@@ -62,7 +91,7 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
   const calloutVariant = determineCalloutVariant(outcome.status, outcome.toolCount)
 
   const infoItems = [
-    query ? { label: 'Query', value: <span className="tool-search-query-inline">“{query}”</span> } : null,
+    query ? { label: 'Query', value: <span className={queryInlineClassName}>“{query}”</span> } : null,
     site ? { label: 'Site', value: site } : null,
     language ? { label: 'Language', value: language } : null,
     statusLabel ? { label: 'Status', value: statusLabel } : null,
@@ -128,8 +157,8 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
       <KeyValueList items={infoItems} />
 
       {calloutLines.length || calloutLists.length ? (
-        <div className="tool-search-callout" data-variant={calloutVariant}>
-          <span className="tool-search-callout-icon" aria-hidden="true">
+        <div className={`${calloutBaseClassName} ${calloutVariantClassNames[calloutVariant]}`} data-variant={calloutVariant}>
+          <span className={`${calloutIconBaseClassName} ${calloutIconVariantClassNames[calloutVariant]}`} aria-hidden="true">
             {calloutVariant === 'error' ? (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01" />
@@ -148,20 +177,20 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
               </svg>
             )}
           </span>
-          <div className="tool-search-callout-content">
+          <div className={calloutContentClassName}>
             {calloutLines.length ? (
-              <div className="tool-search-callout-body">
+              <div className={calloutBodyClassName}>
                 {calloutLines.map((line, idx) => (
-                  <p key={idx}>{line}</p>
+                  <p key={idx} className="m-0">{line}</p>
                 ))}
               </div>
             ) : null}
             {calloutLists.length ? (
-              <div className="tool-search-callout-list">
+              <div className={calloutListClassName}>
                 {calloutLists.map((group) => (
-                  <div key={group.label} className="tool-search-callout-list-group">
-                    <span className="tool-search-callout-list-label">{group.label}</span>
-                    <span className="tool-search-callout-list-items">{group.items.map(toFriendlyToolName).join(', ')}</span>
+                  <div key={group.label} className={calloutListGroupClassName}>
+                    <span className={calloutListLabelClassName}>{group.label}</span>
+                    <span className={calloutListItemsClassName}>{group.items.map(toFriendlyToolName).join(', ')}</span>
                   </div>
                 ))}
               </div>
@@ -172,15 +201,15 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
 
       {toolSuggestions.length ? (
         <Section title="Suggested tools">
-          <ul className="tool-search-suggestion-list">
+          <ul className={suggestionListClassName}>
             {toolSuggestions.map((tool, idx) => (
-              <li key={`${tool.name}-${idx}`} className="tool-search-suggestion-card">
-                <div className="tool-search-suggestion-header">
-                  <span className="tool-search-suggestion-name">{toFriendlyToolName(tool.name)}</span>
-                  {tool.source ? <span className="tool-search-suggestion-source">{tool.source}</span> : null}
+              <li key={`${tool.name}-${idx}`} className={suggestionCardClassName}>
+                <div className={suggestionHeaderClassName}>
+                  <span className={suggestionNameClassName}>{toFriendlyToolName(tool.name)}</span>
+                  {tool.source ? <span className={suggestionSourceClassName}>{tool.source}</span> : null}
                 </div>
-                {tool.description ? <p className="tool-search-suggestion-description">{tool.description}</p> : null}
-                {tool.note ? <p className="tool-search-suggestion-note">{tool.note}</p> : null}
+                {tool.description ? <p className={suggestionDescriptionClassName}>{tool.description}</p> : null}
+                {tool.note ? <p className={suggestionNoteClassName}>{tool.note}</p> : null}
               </li>
             ))}
           </ul>
@@ -234,9 +263,9 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
 
       {summaryGroups.map((group) => (
         <Section key={group.title} title={group.title}>
-          <ul className="tool-search-list">
+          <ul className={summaryListClassName}>
             {group.items.map((item, idx) => (
-              <li key={`${group.title}-${item}-${idx}`}>{toFriendlyToolName(item)}</li>
+              <li key={`${group.title}-${item}-${idx}`} className={summaryListItemClassName}>{toFriendlyToolName(item)}</li>
             ))}
           </ul>
         </Section>
