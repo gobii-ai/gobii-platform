@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0416_merge_20260708_1356"),
+        ("api", "0417_persistentagentuseractionevent"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
