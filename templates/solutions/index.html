@@ -65,6 +65,12 @@
         "position": 5,
         "name": "AI agent API for developers",
         "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:solution' slug='engineering' %}"
+      },
+      {
+        "@type": "ListItem",
+        "position": 6,
+        "name": "AI sales agent",
+        "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:solution_sales_ai_sales_agent' %}"
       }
     ]
   }
@@ -201,6 +207,13 @@
         <span class="mt-5 inline-flex text-sm font-semibold text-indigo-700 group-hover:text-indigo-900">Explore sales automation</span>
       </a>
 
+      <a href="{% url 'pages:solution_sales_ai_sales_agent' %}" class="group rounded-lg border border-indigo-100 bg-white p-5 transition hover:border-indigo-300 hover:bg-indigo-50/70">
+        <span class="inline-flex rounded-md bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">Sales</span>
+        <h3 class="mt-5 text-xl font-semibold text-slate-950">AI sales agent</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Qualify leads, research accounts, enrich records, and prepare seller-reviewed pipeline handoffs.</p>
+        <span class="mt-5 inline-flex text-sm font-semibold text-indigo-700 group-hover:text-indigo-900">Read the AI sales agent guide</span>
+      </a>
+
       <a href="{% url 'pages:solution' slug='health-care' %}" class="group rounded-lg border border-indigo-100 bg-white p-5 transition hover:border-indigo-300 hover:bg-indigo-50/70">
         <span class="inline-flex rounded-md bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">Healthcare</span>
         <h3 class="mt-5 text-xl font-semibold text-slate-950">Healthcare AI agents</h3>
@@ -215,7 +228,7 @@
         <span class="mt-5 inline-flex text-sm font-semibold text-indigo-700 group-hover:text-indigo-900">Explore defense deployments</span>
       </a>
 
-      <a href="{% url 'pages:solution' slug='engineering' %}" class="group rounded-lg border border-indigo-100 bg-white p-5 transition hover:border-indigo-300 hover:bg-indigo-50/70 xl:col-span-2">
+      <a href="{% url 'pages:solution' slug='engineering' %}" class="group rounded-lg border border-indigo-100 bg-white p-5 transition hover:border-indigo-300 hover:bg-indigo-50/70">
         <span class="inline-flex rounded-md bg-cyan-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-800">Developers</span>
         <h3 class="mt-5 text-xl font-semibold text-slate-950">AI agent API for browser automation</h3>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-700">Build always-on browser agents with API access, cloud browsers, webhooks, persistent sessions, MCP servers, and self-hosting options.</p>
