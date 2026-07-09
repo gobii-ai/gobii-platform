@@ -8,7 +8,9 @@ import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { StarterPromptSuggestions, type StarterPrompt } from './StarterPromptSuggestions'
+import { TemplateRecommendationCards } from './TemplateRecommendationCards'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
+import type { TemplateRecommendation } from '../../api/agentSpawnIntent'
 import type { AgentMessage } from '../../types/agentChat'
 import type { StatusExpansionTargets } from './statusExpansion'
 import { chatActions, selectActiveChatSession } from '../../store/chatSlice'
@@ -55,6 +57,7 @@ type AgentTimelinePaneProps = {
   onStarterPromptSelect?: (prompt: StarterPrompt, position: number) => Promise<void>
   onTaskCreditsDismiss?: () => void
   onTaskCreditsOpenPacks?: () => void
+  onTemplateRecommendationCreate?: (template: TemplateRecommendation, position: number) => void | Promise<void>
   quickIncreaseBusy?: boolean
   quickIncreaseLabel?: string
   showContactCapCallout?: boolean
@@ -66,6 +69,7 @@ type AgentTimelinePaneProps = {
   showStarterPrompts?: boolean
   showStreamingSlot?: boolean
   showStreamingThinking?: boolean
+  showTemplateRecommendations?: boolean
   showTaskCreditsCallout?: boolean
   showTaskCreditsUpgrade?: boolean
   showTypingIndicator?: boolean
@@ -76,6 +80,8 @@ type AgentTimelinePaneProps = {
   starterPromptsLoading?: boolean
   statusExpansionTargets?: StatusExpansionTargets
   suppressedThinkingCursor?: string | null
+  templateRecommendations?: TemplateRecommendation[]
+  templateRecommendationSubmittingId?: string | null
   taskCreditsWarningVariant?: 'low' | 'out' | null
   timelineContentRef?: Ref<HTMLDivElement>
   timelineRef?: Ref<HTMLDivElement>
@@ -108,6 +114,7 @@ export function AgentTimelinePane({
   onStarterPromptSelect,
   onTaskCreditsDismiss,
   onTaskCreditsOpenPacks,
+  onTemplateRecommendationCreate,
   quickIncreaseBusy = false,
   quickIncreaseLabel,
   showContactCapCallout = false,
@@ -118,6 +125,7 @@ export function AgentTimelinePane({
   showStarterPrompts = false,
   showStreamingSlot = false,
   showStreamingThinking = false,
+  showTemplateRecommendations = false,
   showTaskCreditsCallout = false,
   showTaskCreditsUpgrade = false,
   showTypingIndicator = false,
@@ -128,6 +136,8 @@ export function AgentTimelinePane({
   starterPromptsLoading = false,
   statusExpansionTargets,
   suppressedThinkingCursor = null,
+  templateRecommendations = [],
+  templateRecommendationSubmittingId = null,
   taskCreditsWarningVariant = null,
   timelineContentRef,
   timelineRef,
@@ -250,6 +260,13 @@ export function AgentTimelinePane({
                   loadingCount={starterPromptCount}
                   disabled={starterPromptSubmitting || starterPromptsDisabled || composerDisabled}
                   onSelect={onStarterPromptSelect}
+                />
+              ) : null}
+              {showTemplateRecommendations ? (
+                <TemplateRecommendationCards
+                  recommendations={templateRecommendations}
+                  onCreate={onTemplateRecommendationCreate}
+                  submittingTemplateId={templateRecommendationSubmittingId}
                 />
               ) : null}
 

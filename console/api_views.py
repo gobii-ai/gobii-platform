@@ -198,6 +198,7 @@ from console.agent_chat.user_actions import (
     record_requested_secrets_saved,
 )
 from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_timeline_suggestions
+from console.agent_chat.template_recommendations import build_new_agent_template_recommendations
 from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
 from console.context_helpers import build_console_context, resolve_console_context
 from console.context_overrides import get_context_override
@@ -218,6 +219,7 @@ from console.agent_creation import (
     AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
     AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY,
     AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
+    AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE,
     AGENT_TEMPLATE_SOURCE_SESSION_KEY,
     enable_agent_sms_contact,
 )
@@ -709,6 +711,10 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             "requires_plan_selection": bool(
                 onboarding_state.pending and onboarding_state.requires_plan_selection
             ),
+            "template_recommendations": build_new_agent_template_recommendations(
+                request.user,
+                resolved_context,
+            ),
         }
         response = JsonResponse(payload)
         if restored_cookie:
@@ -767,6 +773,137 @@ def _persist_quick_create_draft(
         request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
         request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
         request.session.pop(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, None)
+    request.session.modified = True
+
+
+def _template_charter_error(template: PersistentAgentTemplate) -> JsonResponse | None:
+    if not (template.charter or "").strip():
+        return JsonResponse({"error": "This template is missing a charter."}, status=400)
+    return None
+
+
+def _resolve_quick_create_public_template(
+    *,
+    template_code: str,
+    template_id: str,
+) -> tuple[PersistentAgentTemplate | None, JsonResponse | None]:
+    normalized_code = str(template_code or "").strip()
+    normalized_id = str(template_id or "").strip()
+    if not normalized_code and not normalized_id:
+        return None, None
+
+    public_filter = Q()
+    if normalized_code:
+        public_filter |= Q(code__iexact=normalized_code) | Q(slug__iexact=normalized_code)
+    if normalized_id:
+        try:
+            public_filter |= Q(id=uuid.UUID(normalized_id))
+        except (TypeError, ValueError, AttributeError):
+            return None, JsonResponse({"error": "template_id must be a valid UUID."}, status=400)
+
+    template = (
+        PersistentAgentTemplate.objects
+        .select_related("preferred_llm_tier", "organization")
+        .filter(organization__isnull=True, is_active=True)
+        .filter(public_filter)
+        .filter(Q(code__gt="") | Q(slug__gt=""))
+        .order_by("priority", "display_name", "id")
+        .first()
+    )
+    if template is None:
+        return None, JsonResponse({"error": "This template is no longer available."}, status=404)
+    charter_error = _template_charter_error(template)
+    if charter_error is not None:
+        return None, charter_error
+    return template, None
+
+
+def _resolve_quick_create_organization_template(
+    request: HttpRequest,
+    *,
+    template_id: str,
+) -> tuple[PersistentAgentTemplate | None, JsonResponse | None]:
+    normalized_id = str(template_id or "").strip()
+    if not normalized_id:
+        return None, JsonResponse({"error": "template_id is required for organization templates."}, status=400)
+    try:
+        template_uuid = uuid.UUID(normalized_id)
+    except (TypeError, ValueError, AttributeError):
+        return None, JsonResponse({"error": "template_id must be a valid UUID."}, status=400)
+
+    try:
+        resolved_context = build_console_context(request)
+    except PermissionDenied:
+        return None, JsonResponse({"error": "Invalid context override."}, status=403)
+    if resolved_context.current_context.type != "organization" or resolved_context.current_membership is None:
+        return None, JsonResponse({"error": "Switch to the organization context to use this template."}, status=400)
+    if not resolved_context.can_create_org_agents:
+        return None, JsonResponse({"error": "You do not have permission to create agents for this organization."}, status=403)
+
+    template = (
+        PersistentAgentTemplate.objects
+        .select_related("preferred_llm_tier", "organization")
+        .filter(
+            id=template_uuid,
+            organization_id=resolved_context.current_context.id,
+            public_profile__isnull=True,
+            is_active=True,
+        )
+        .first()
+    )
+    if template is None:
+        return None, JsonResponse({"error": "This template is no longer available."}, status=404)
+    charter_error = _template_charter_error(template)
+    if charter_error is not None:
+        return None, charter_error
+    return template, None
+
+
+def _resolve_quick_create_template(
+    request: HttpRequest,
+    *,
+    template_source: str,
+    template_id: str,
+    template_code: str,
+) -> tuple[PersistentAgentTemplate | None, str, JsonResponse | None]:
+    normalized_source = str(template_source or "").strip().lower()
+    if not normalized_source:
+        normalized_source = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE if (template_code or template_id) else ""
+    if not normalized_source:
+        return None, "", None
+    if normalized_source == "public":
+        normalized_source = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE
+    if normalized_source == "organization":
+        normalized_source = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
+
+    if normalized_source == AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE:
+        template, error = _resolve_quick_create_public_template(
+            template_code=template_code,
+            template_id=template_id,
+        )
+        return template, normalized_source, error
+    if normalized_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE:
+        template, error = _resolve_quick_create_organization_template(request, template_id=template_id)
+        return template, normalized_source, error
+    return None, normalized_source, JsonResponse({"error": "Invalid template source."}, status=400)
+
+
+def _stage_quick_create_public_template(request: HttpRequest, template: PersistentAgentTemplate) -> None:
+    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE
+    request.session["agent_charter_source"] = "template"
+    request.session.pop(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, None)
+    request.session.modified = True
+
+
+def _stage_quick_create_organization_template(request: HttpRequest, template: PersistentAgentTemplate) -> None:
+    request.session["context_type"] = "organization"
+    request.session["context_id"] = str(template.organization_id)
+    request.session["context_name"] = template.organization.name
+    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
+    request.session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(template.organization_id)
+    request.session["agent_charter_source"] = "template"
     request.session.modified = True
 
 
@@ -3190,7 +3327,21 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
                 return HttpResponseBadRequest("Invalid JSON body")
             selected_pipedream_app_slugs_raw = body.get("selected_pipedream_app_slugs")
 
+        template_code = (body.get("template_code") or body.get("templateCode") or "").strip()
+        template_id = (body.get("template_id") or body.get("templateId") or "").strip()
+        template_source = (body.get("template_source") or body.get("templateSource") or "").strip()
+        template, resolved_template_source, template_error = _resolve_quick_create_template(
+            request,
+            template_source=template_source,
+            template_id=template_id,
+            template_code=template_code,
+        )
+        if template_error is not None:
+            return template_error
+
         initial_message = (body.get("message") or "").strip()
+        if template is not None:
+            initial_message = (template.charter or "").strip()
         if not initial_message:
             return JsonResponse({"error": "Message is required"}, status=400)
         preferred_llm_tier_key = (body.get("preferred_llm_tier") or "").strip() or None
@@ -3214,6 +3365,11 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
         contact_email = (request.user.email or "").strip()
         if preferred_contact_method == "email" and not contact_email:
             preferred_contact_method = "web"
+
+        if template is not None and resolved_template_source == AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE:
+            _stage_quick_create_public_template(request, template)
+        elif template is not None and resolved_template_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE:
+            _stage_quick_create_organization_template(request, template)
 
         try:
             result = create_persistent_agent_from_charter(

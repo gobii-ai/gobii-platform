@@ -28,6 +28,7 @@ import type { SidebarSettingsInfo } from './SidebarSettingsMenu'
 import type { AgentTimelineProps } from './types'
 import type { PendingActionRequest, AgentMessage, PlanSnapshot } from '../../types/agentChat'
 import type { SignupPreviewState } from '../../types/agentRoster'
+import type { TemplateRecommendation } from '../../api/agentSpawnIntent'
 import { isContinuationUpgradeModalSource, selectSubscriptionState, subscriptionActions, type PlanTier } from '../../store/subscriptionSlice'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
@@ -239,6 +240,9 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   llmTierError?: string | null
   onOpenTaskPacks?: () => void
   spawnIntentLoading?: boolean
+  templateRecommendations?: TemplateRecommendation[]
+  templateRecommendationSubmittingId?: string | null
+  onTemplateRecommendationCreate?: (template: TemplateRecommendation, position: number) => void | Promise<void>
   composerDisabled?: boolean
   composerDisabledReason?: string | null
   composerError?: string | null
@@ -347,6 +351,9 @@ export function AgentChatLayout({
   llmTierError = null,
   onOpenTaskPacks,
   spawnIntentLoading = false,
+  templateRecommendations = [],
+  templateRecommendationSubmittingId = null,
+  onTemplateRecommendationCreate,
   composerDisabled = false,
   composerDisabledReason = null,
   composerError = null,
@@ -884,6 +891,13 @@ export function AgentChatLayout({
     && !isStreaming
     && !hasMoreNewer
     && nextScheduledAt,
+  )
+  const showTemplateRecommendations = Boolean(
+    !activeAgentId
+    && timelineRenderEvents.length === 0
+    && !initialLoading
+    && !spawnIntentLoading
+    && templateRecommendations.length > 0
   )
   const starterPromptCount = typeof window !== 'undefined' && window.innerWidth < 768 ? 2 : 3
   const {
@@ -1509,6 +1523,7 @@ export function AgentChatLayout({
             onStarterPromptSelect={handleStarterPromptSelect}
             onTaskCreditsDismiss={handleTaskCreditsDismiss}
             onTaskCreditsOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0 ? () => handleAddonsOpen('tasks') : undefined}
+            onTemplateRecommendationCreate={onTemplateRecommendationCreate}
             quickIncreaseBusy={quickIncreaseBusy}
             quickIncreaseLabel={quickIncreaseLabel ?? undefined}
             showContactCapCallout={showContactCapCallout}
@@ -1520,6 +1535,7 @@ export function AgentChatLayout({
             showStarterPrompts={pendingActionRequests.length === 0 && signupPreviewState === 'none' && (starterPromptsLoading || starterPrompts.length > 0)}
             showStreamingSlot={showStreamingSlot}
             showStreamingThinking={showStreamingThinking}
+            showTemplateRecommendations={showTemplateRecommendations}
             showTaskCreditsCallout={showTaskCreditsCallout}
             showTaskCreditsUpgrade={showTaskCreditsUpgrade}
             showTypingIndicator={showTypingIndicator}
@@ -1530,6 +1546,8 @@ export function AgentChatLayout({
             starterPromptsLoading={starterPromptsLoading}
             statusExpansionTargets={statusExpansionTargets}
             suppressedThinkingCursor={suppressedThinkingCursor}
+            templateRecommendations={templateRecommendations}
+            templateRecommendationSubmittingId={templateRecommendationSubmittingId}
             taskCreditsWarningVariant={taskCreditsWarningVariant}
             timelineContentRef={timelineContentRef}
             timelineRef={timelineRef}

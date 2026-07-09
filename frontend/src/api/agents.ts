@@ -14,6 +14,15 @@ type CreateAgentPayload = {
   charter_override?: string
   selected_pipedream_app_slugs?: string[]
   preferred_contact_method?: 'email' | 'web'
+  template_code?: string
+  template_id?: string
+  template_source?: 'organization' | 'public'
+}
+
+export type CreateAgentTemplateOptions = {
+  templateCode?: string | null
+  templateId?: string | null
+  templateSource?: 'organization' | 'public' | null
 }
 
 export type CreateAgentResponse = {
@@ -197,6 +206,7 @@ export async function createAgent(
   selectedPipedreamAppSlugs?: string[],
   preferredContactMethod?: 'email' | 'web',
   attachments: File[] = [],
+  template?: CreateAgentTemplateOptions | null,
 ): Promise<CreateAgentResponse> {
   const payload: CreateAgentPayload = { message, preferred_llm_tier: preferredLlmTier }
   if (charterOverride) {
@@ -207,6 +217,15 @@ export async function createAgent(
   }
   if (preferredContactMethod) {
     payload.preferred_contact_method = preferredContactMethod
+  }
+  if (template?.templateCode) {
+    payload.template_code = template.templateCode
+  }
+  if (template?.templateId) {
+    payload.template_id = template.templateId
+  }
+  if (template?.templateSource) {
+    payload.template_source = template.templateSource
   }
   if (attachments.length > 0) {
     const formData = new FormData()
@@ -222,6 +241,15 @@ export async function createAgent(
     })
     if (preferredContactMethod) {
       formData.append('preferred_contact_method', preferredContactMethod)
+    }
+    if (template?.templateCode) {
+      formData.append('template_code', template.templateCode)
+    }
+    if (template?.templateId) {
+      formData.append('template_id', template.templateId)
+    }
+    if (template?.templateSource) {
+      formData.append('template_source', template.templateSource)
     }
     attachments.forEach((file) => {
       formData.append('attachments', file)

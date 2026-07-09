@@ -16,7 +16,11 @@ from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
 from api.models import (
+    AgentOwnerTemplateRecommendationState,
+    BrowserUseAgent,
     Organization,
+    OrganizationMembership,
+    PersistentAgent,
     PersistentAgentTemplate,
     PersistentAgentTemplateLike,
     PersistentAgentTemplateRelatedTemplate,
@@ -25,6 +29,8 @@ from api.models import (
 )
 from api.public_profiles import validate_public_handle
 from api.services.template_clone import TemplateCloneService
+from console.agent_chat.template_recommendations import build_new_agent_template_recommendations
+from console.context_helpers import ConsoleContext, ConsoleContextInfo
 from pages.library_views import LIBRARY_CACHE_KEY, LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY, LIBRARY_OFFICIAL_CACHE_KEY
 from pages.public_template_urls import public_template_route_slug
 from tests.utils.llm_seed import get_intelligence_tier
@@ -147,6 +153,427 @@ class TemplateServiceDbTests(TestCase):
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.display_name, template.display_name)
         self.assertEqual(resolved.preferred_llm_tier, "premium")
+
+
+class NewAgentTemplateRecommendationTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user(
+            username="recommendation-owner",
+            email="recommendation-owner@example.com",
+            password="pw",
+        )
+        cls.other_user = get_user_model().objects.create_user(
+            username="recommendation-other",
+            email="recommendation-other@example.com",
+            password="pw",
+        )
+        cls.org = Organization.objects.create(
+            name="Recommendation Org",
+            slug="recommendation-org",
+            created_by=cls.user,
+        )
+        cls.org.billing.purchased_seats = 3
+        cls.org.billing.save(update_fields=["purchased_seats"])
+        cls.membership = OrganizationMembership.objects.create(
+            org=cls.org,
+            user=cls.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+    def setUp(self):
+        cache.clear()
+
+    def _personal_context(self):
+        return ConsoleContextInfo(
+            current_context=ConsoleContext(type="personal", id=str(self.user.id), name="Personal"),
+            current_membership=None,
+            can_manage_org_agents=True,
+            can_create_org_agents=True,
+        )
+
+    def _org_context(self):
+        return ConsoleContextInfo(
+            current_context=ConsoleContext(type="organization", id=str(self.org.id), name=self.org.name),
+            current_membership=self.membership,
+            can_manage_org_agents=True,
+            can_create_org_agents=True,
+        )
+
+    def _create_template(
+        self,
+        code,
+        *,
+        category,
+        likes=0,
+        is_active=True,
+        organization=None,
+        slug="",
+        is_official=False,
+        priority=100,
+    ):
+        template = PersistentAgentTemplate.objects.create(
+            code=code,
+            slug=slug,
+            organization=organization,
+            display_name=code.replace("-", " ").title(),
+            tagline=f"{code} tagline",
+            description=f"{code} description",
+            charter=f"{code} charter",
+            category=category,
+            is_active=is_active,
+            is_official=is_official,
+            priority=priority,
+        )
+        for index in range(likes):
+            like_user = get_user_model().objects.create_user(
+                username=f"{code}-like-{index}",
+                email=f"{code}-like-{index}@example.com",
+                password="pw",
+            )
+            PersistentAgentTemplateLike.objects.create(template=template, user=like_user)
+        return template
+
+    def _create_agent(self, *, user=None, organization=None, charter="Find candidates"):
+        owner = user or self.user
+        browser = BrowserUseAgent.objects.create(user=owner, name=f"Browser {PersistentAgent.objects.count()}")
+        return PersistentAgent.objects.create(
+            user=owner,
+            organization=organization,
+            name=f"Agent {PersistentAgent.objects.count()}",
+            charter=charter,
+            browser_use_agent=browser,
+        )
+
+    def _tool_response(self, *categories):
+        if len(categories) == 1:
+            payload = {"category": categories[0], "categories": [categories[0]]}
+        else:
+            payload = {"categories": list(categories)}
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        tool_calls=[
+                            SimpleNamespace(
+                                function=SimpleNamespace(
+                                    name="select_template_category",
+                                    arguments=json.dumps(payload),
+                                )
+                            )
+                        ]
+                    )
+                )
+            ]
+        )
+
+    @tag("batch_public_templates")
+    @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
+    def test_no_existing_charters_returns_default_templates_without_llm(self, mock_get_configs):
+        self._create_template("talent-scout", category="People", likes=2)
+        self._create_template("candidate-researcher", category="People", likes=1)
+        self._create_template("lead-hunter", category="Revenue", likes=3)
+
+        payload = build_new_agent_template_recommendations(self.user, self._personal_context())
+
+        self.assertEqual(payload["source"], "fallback")
+        self.assertEqual(
+            [template["templateSlug"] for template in payload["templates"]],
+            ["talent-scout", "candidate-researcher", "lead-hunter"],
+        )
+        mock_get_configs.assert_not_called()
+
+    @tag("batch_public_templates")
+    @patch("console.agent_chat.template_recommendations.run_completion")
+    @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
+    def test_llm_category_returns_top_liked_templates_in_category(self, mock_get_configs, mock_run_completion):
+        self._create_agent(charter="Find and enrich engineering candidates.")
+        self._create_template("people-low", category="People", likes=1)
+        self._create_template("people-high", category="People", likes=5)
+        self._create_template("people-mid", category="People", likes=3, is_official=True)
+        self._create_template("people-fourth", category="People", likes=0)
+        self._create_template("revenue-high", category="Revenue", likes=10)
+        mock_get_configs.return_value = [("provider", "model", {})]
+        mock_run_completion.return_value = self._tool_response("People")
+
+        payload = build_new_agent_template_recommendations(self.user, self._personal_context())
+
+        self.assertEqual(payload["source"], "category")
+        self.assertEqual(payload["category"], "People")
+        self.assertEqual(payload["categories"], ["People"])
+        self.assertEqual(
+            [template["templateSlug"] for template in payload["templates"]],
+            ["people-mid", "people-high", "people-low"],
+        )
+        state = AgentOwnerTemplateRecommendationState.objects.get(user=self.user)
+        self.assertEqual(state.categories, ["People"])
+        self.assertEqual(state.source_agent_count, 1)
+
+    @tag("batch_public_templates")
+    @patch("console.agent_chat.template_recommendations.run_completion")
+    @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
+    def test_llm_multi_category_round_robins_top_template_per_category(self, mock_get_configs, mock_run_completion):
+        self._create_agent(charter="Find candidates and build revenue pipeline reports.")
+        self._create_template("people-first", category="People", likes=2)
+        self._create_template("people-second", category="People", likes=1)
+        self._create_template("revenue-first", category="Revenue", likes=2)
+        self._create_template("operations-first", category="Operations", likes=2)
+        mock_get_configs.return_value = [("provider", "model", {})]
+        mock_run_completion.return_value = self._tool_response("People", "Revenue", "Operations")
+
+        payload = build_new_agent_template_recommendations(self.user, self._personal_context())
+
+        self.assertEqual(payload["categories"], ["People", "Revenue", "Operations"])
+        self.assertEqual(
+            [template["templateSlug"] for template in payload["templates"]],
+            ["people-first", "revenue-first", "operations-first"],
+        )
+
+    @tag("batch_public_templates")
+    @patch("console.agent_chat.template_recommendations.run_completion")
+    @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
+    def test_org_templates_precede_public_recommendations(self, mock_get_configs, mock_run_completion):
+        self._create_agent(organization=self.org, charter="Find and enrich engineering candidates.")
+        org_second = self._create_template("org-second", category="Custom", organization=self.org, priority=20)
+        org_first = self._create_template("org-first", category="Custom", organization=self.org, priority=10)
+        self._create_template("people-public", category="People", likes=9)
+        mock_get_configs.return_value = [("provider", "model", {})]
+        mock_run_completion.return_value = self._tool_response("People")
+
+        payload = build_new_agent_template_recommendations(self.user, self._org_context())
+
+        self.assertEqual(
+            [template["id"] for template in payload["templates"]],
+            [str(org_first.id), str(org_second.id), str(PersistentAgentTemplate.objects.get(code="people-public").id)],
+        )
+        self.assertEqual(
+            [template["templateSource"] for template in payload["templates"]],
+            ["organization", "organization", "public"],
+        )
+
+    @tag("batch_public_templates")
+    @patch("console.agent_chat.template_recommendations.run_completion")
+    @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
+    def test_uses_persisted_category_after_cache_expires(self, mock_get_configs, mock_run_completion):
+        self._create_agent(charter="Find and enrich engineering candidates.")
+        self._create_template("people-low", category="People", likes=1)
+        self._create_template("people-high", category="People", likes=5)
+        mock_get_configs.return_value = [("provider", "model", {})]
+        mock_run_completion.return_value = self._tool_response("People")
+
+        first = build_new_agent_template_recommendations(self.user, self._personal_context())
+        cache.clear()
+        mock_get_configs.reset_mock()
+        mock_run_completion.reset_mock()
+        second = build_new_agent_template_recommendations(self.user, self._personal_context())
+
+        self.assertEqual(first["templates"], second["templates"])
+        mock_get_configs.assert_not_called()
+        mock_run_completion.assert_not_called()
+
+    @tag("batch_public_templates")
+    @patch("console.agent_chat.template_recommendations.run_completion")
+    @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
+    def test_invalid_llm_category_falls_back_without_error(self, mock_get_configs, mock_run_completion):
+        self._create_agent(charter="Find and enrich engineering candidates.")
+        self._create_template("talent-scout", category="People")
+        self._create_template("candidate-researcher", category="People")
+        self._create_template("lead-hunter", category="Revenue")
+        mock_get_configs.return_value = [("provider", "model", {})]
+        mock_run_completion.return_value = self._tool_response("Not A Category")
+
+        payload = build_new_agent_template_recommendations(self.user, self._personal_context())
+
+        self.assertEqual(payload["source"], "fallback")
+        self.assertEqual(len(payload["templates"]), 3)
+
+    @tag("batch_public_templates")
+    @patch("console.agent_chat.template_recommendations.run_completion")
+    @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
+    def test_invalid_llm_category_fallback_includes_org_templates_first(self, mock_get_configs, mock_run_completion):
+        self._create_agent(organization=self.org, charter="Mixed org workflows.")
+        org_template = self._create_template("org-template", category="Custom", organization=self.org)
+        self._create_template("talent-scout", category="People")
+        self._create_template("candidate-researcher", category="People")
+        self._create_template("lead-hunter", category="Revenue")
+        mock_get_configs.return_value = [("provider", "model", {})]
+        mock_run_completion.return_value = self._tool_response("Not A Category")
+
+        payload = build_new_agent_template_recommendations(self.user, self._org_context())
+
+        self.assertEqual(payload["source"], "fallback")
+        self.assertEqual(payload["templates"][0]["id"], str(org_template.id))
+        self.assertEqual(payload["templates"][0]["templateSource"], "organization")
+        self.assertEqual(len(payload["templates"]), 3)
+
+    @tag("batch_public_templates")
+    @patch("console.agent_chat.template_recommendations.run_completion")
+    @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
+    def test_current_context_scopes_charters_to_organization(self, mock_get_configs, mock_run_completion):
+        self._create_agent(charter="Personal recruiting agent.")
+        self._create_agent(organization=self.org, charter="Org revenue pipeline agent.")
+        self._create_template("people-template", category="People")
+        self._create_template("revenue-template", category="Revenue")
+        mock_get_configs.return_value = [("provider", "model", {})]
+        mock_run_completion.return_value = self._tool_response("Revenue")
+
+        build_new_agent_template_recommendations(self.user, self._org_context())
+
+        messages = mock_run_completion.call_args.kwargs["messages"]
+        combined_prompt = "\n".join(str(message.get("content") or "") for message in messages)
+        self.assertIn("Org revenue pipeline agent.", combined_prompt)
+        self.assertNotIn("Personal recruiting agent.", combined_prompt)
+
+    @tag("batch_public_templates")
+    @patch("console.agent_chat.template_recommendations.run_completion")
+    @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
+    def test_excludes_inactive_org_scoped_and_unrouteable_templates(self, mock_get_configs, mock_run_completion):
+        self._create_agent(charter="Find and enrich engineering candidates.")
+        self._create_template("people-active", category="People", likes=1)
+        self._create_template("people-inactive", category="People", likes=8, is_active=False)
+        self._create_template("people-org", category="People", likes=7, organization=self.org)
+        self._create_template("", category="People", likes=9)
+        mock_get_configs.return_value = [("provider", "model", {})]
+        mock_run_completion.return_value = self._tool_response("People")
+
+        payload = build_new_agent_template_recommendations(self.user, self._personal_context())
+
+        self.assertEqual([template["templateSlug"] for template in payload["templates"]], ["people-active"])
+
+    @tag("batch_public_templates")
+    @patch("console.api_views.build_new_agent_template_recommendations")
+    def test_spawn_intent_includes_template_recommendations(self, mock_recommendations):
+        mock_recommendations.return_value = {
+            "category": "People",
+            "categories": ["People"],
+            "source": "category",
+            "templates": [
+                {
+                    "id": "template-1",
+                    "name": "Talent Scout",
+                    "tagline": "Find candidates.",
+                    "description": "Find candidates.",
+                    "category": "People",
+                    "categorySlug": "people",
+                    "templateId": "template-1",
+                    "templateCode": "talent-scout",
+                    "templateSlug": "talent-scout",
+                    "templateSource": "public",
+                    "templateUrl": "/library/people/talent-scout/",
+                    "likeCount": 3,
+                    "isOfficial": True,
+                }
+            ],
+        }
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("console_agent_spawn_intent"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["template_recommendations"]["templates"][0]["name"],
+            "Talent Scout",
+        )
+        mock_recommendations.assert_called_once()
+
+    @tag("batch_public_templates")
+    @patch("console.agent_creation.create_persistent_agent_from_charter")
+    def test_quick_create_from_template_code_uses_template_charter(self, mock_create):
+        class EmptyEndpointQuery:
+            def filter(self, **kwargs):
+                return self
+
+            def order_by(self, *args):
+                return self
+
+            def first(self):
+                return None
+
+        template = PersistentAgentTemplate.objects.create(
+            code="talent-scout",
+            slug="talent-scout",
+            display_name="Talent Scout",
+            tagline="Find candidates.",
+            description="Find candidates.",
+            category="People",
+            charter="Find and qualify engineering candidates.",
+            is_active=True,
+        )
+        mock_create.return_value = SimpleNamespace(
+            agent=SimpleNamespace(
+                id="agent-1",
+                name="Talent Scout",
+                planning_state="planning",
+                comms_endpoints=EmptyEndpointQuery(),
+            )
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("console_agent_quick_create"),
+            data=json.dumps({"template_code": template.code}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["agent_id"], "agent-1")
+        create_kwargs = mock_create.call_args.kwargs
+        self.assertEqual(create_kwargs["initial_message"], template.charter)
+        self.assertEqual(
+            self.client.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertEqual(self.client.session.get("agent_template_source"), "public_template")
+
+    @tag("batch_public_templates")
+    @patch("console.agent_creation.create_persistent_agent_from_charter")
+    def test_quick_create_from_org_template_id_uses_template_charter(self, mock_create):
+        class EmptyEndpointQuery:
+            def filter(self, **kwargs):
+                return self
+
+            def order_by(self, *args):
+                return self
+
+            def first(self):
+                return None
+
+        template = self._create_template(
+            "org-template",
+            category="Custom",
+            organization=self.org,
+        )
+        mock_create.return_value = SimpleNamespace(
+            agent=SimpleNamespace(
+                id="agent-2",
+                name="Org Template",
+                planning_state="planning",
+                comms_endpoints=EmptyEndpointQuery(),
+            )
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("console_agent_quick_create"),
+            data=json.dumps({"template_source": "organization", "template_id": str(template.id)}),
+            content_type="application/json",
+            headers={
+                "X-Gobii-Context-Type": "organization",
+                "X-Gobii-Context-Id": str(self.org.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["agent_id"], "agent-2")
+        create_kwargs = mock_create.call_args.kwargs
+        self.assertEqual(create_kwargs["initial_message"], template.charter)
+        self.assertEqual(
+            self.client.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertEqual(self.client.session.get("agent_template_source"), "organization_template")
+        self.assertEqual(self.client.session.get("agent_template_organization_id"), str(self.org.id))
 
 
 class PublicTemplateUrlHelperTests(TestCase):

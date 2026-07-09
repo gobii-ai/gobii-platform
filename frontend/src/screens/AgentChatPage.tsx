@@ -19,7 +19,7 @@ import {
   normalizeAgentMessageReadState,
   type AgentMessageReadState,
 } from '../api/agentChat'
-import type { AgentSpawnIntent } from '../api/agentSpawnIntent'
+import type { AgentSpawnIntent, TemplateRecommendation } from '../api/agentSpawnIntent'
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout, type AgentChatLayoutSidebarConfig } from '../components/agentChat/AgentChatLayout'
@@ -2581,6 +2581,11 @@ export function AgentChatPage({
       charterOverride?: string | null,
       selectedPipedreamAppSlugs?: string[],
       attachments: File[] = [],
+      template?: {
+        templateCode?: string | null
+        templateId?: string | null
+        templateSource?: 'organization' | 'public' | null
+      } | null,
     ) => {
       setTransientBannerAgentName('New Agent')
       dispatch(chatActions.createAgentErrorSet(null))
@@ -2593,6 +2598,7 @@ export function AgentChatPage({
           selectedPipedreamAppSlugs,
           preferredContactMethod,
           attachments,
+          template,
         )
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         setTransientBannerAgentName(createdAgentName)
@@ -2676,6 +2682,31 @@ export function AgentChatPage({
       trackPendingAvatarRefresh,
     ],
   )
+
+  const [templateRecommendationSubmittingId, setTemplateRecommendationSubmittingId] = useState<string | null>(null)
+
+  const handleTemplateRecommendationCreate = useCallback(async (template: TemplateRecommendation) => {
+    if (templateRecommendationSubmittingId) {
+      return
+    }
+    setTemplateRecommendationSubmittingId(template.id)
+    try {
+      await createNewAgent(
+        template.name,
+        draftIntelligenceTier as IntelligenceTierKey,
+        null,
+        [],
+        [],
+        {
+          templateCode: template.templateCode || template.templateSlug,
+          templateId: template.templateId || template.id,
+          templateSource: template.templateSource || 'public',
+        },
+      )
+    } finally {
+      setTemplateRecommendationSubmittingId(null)
+    }
+  }, [createNewAgent, draftIntelligenceTier, templateRecommendationSubmittingId])
 
   const handleIntelligenceChange = useCallback(
     async (tier: string): Promise<boolean> => {
@@ -4192,6 +4223,9 @@ export function AgentChatPage({
         llmTierError={intelligenceError}
         onStopProcessing={handleStopProcessing}
         spawnIntentLoading={showSpawnIntentLoader}
+        templateRecommendations={spawnIntent?.template_recommendations?.templates ?? []}
+        templateRecommendationSubmittingId={templateRecommendationSubmittingId}
+        onTemplateRecommendationCreate={handleTemplateRecommendationCreate}
       />
     </div>
   )

@@ -1,5 +1,28 @@
 import { jsonFetch } from './http'
 
+export type TemplateRecommendation = {
+  id: string
+  name: string
+  tagline: string
+  description: string
+  category: string
+  categorySlug: string
+  templateCode: string
+  templateId: string
+  templateSlug: string
+  templateSource: 'organization' | 'public'
+  templateUrl: string
+  likeCount: number
+  isOfficial: boolean
+}
+
+export type TemplateRecommendationsPayload = {
+  category: string
+  categories?: string[]
+  source: string
+  templates: TemplateRecommendation[]
+}
+
 export type AgentSpawnIntent = {
   charter: string | null
   charter_override: string | null
@@ -7,6 +30,7 @@ export type AgentSpawnIntent = {
   selected_pipedream_app_slugs: string[]
   onboarding_target: 'agent_ui' | 'api_keys' | null
   requires_plan_selection: boolean
+  template_recommendations?: TemplateRecommendationsPayload | null
 }
 
 export async function fetchAgentSpawnIntent(signal?: AbortSignal): Promise<AgentSpawnIntent> {

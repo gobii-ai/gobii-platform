@@ -13071,6 +13071,56 @@ class AgentOwnerCustomInstructions(models.Model):
         return f"Custom instructions for {owner}"
 
 
+class AgentOwnerTemplateRecommendationState(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="template_recommendation_states",
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="template_recommendation_states",
+    )
+    categories = models.JSONField(default=list, blank=True)
+    source_fingerprint = models.CharField(max_length=64, blank=True)
+    source_agent_count = models.PositiveIntegerField(default=0)
+    last_classified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(user__isnull=False, organization__isnull=True)
+                    | models.Q(user__isnull=True, organization__isnull=False)
+                ),
+                name="agent_owner_template_rec_exactly_one_owner",
+            ),
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(user__isnull=False),
+                name="unique_template_rec_state_user",
+            ),
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=models.Q(organization__isnull=False),
+                name="unique_template_rec_state_org",
+            ),
+        ]
+        verbose_name = "agent owner template recommendation state"
+        verbose_name_plural = "agent owner template recommendation states"
+
+    def __str__(self) -> str:
+        owner = self.organization or self.user
+        return f"Template recommendation state for {owner}"
+
+
 @receiver(post_save, sender=Organization)
 def initialize_organization_billing(sender, instance, created, **kwargs):
     if created:
