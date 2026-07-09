@@ -4322,7 +4322,7 @@ class SolutionView(TemplateView):
             'description': 'Use a Gobii AI sales agent to qualify, research, enrich, and prepare pipeline work for human review.',
             'seo_title': 'AI Sales Agent: What It Can Do and When to Use One | Gobii',
             'seo_description': 'Evaluate an AI sales agent for supervised prospecting, account research, lead enrichment, outreach prep, and human-reviewed pipeline handoffs.',
-            'date_modified': '2026-07-08',
+            'date_modified': '2026-07-09',
             'social_image': 'images/solutions/sales-hero.jpg',
             'social_image_alt': 'Gobii AI sales agent for supervised prospecting and account research',
             'service_name': 'Gobii AI Sales Agent',
