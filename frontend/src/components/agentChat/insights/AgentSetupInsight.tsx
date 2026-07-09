@@ -2,24 +2,20 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, Brain, Check, CheckCircle2, Copy, Mail, MessageSquare, Pencil, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
-import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
+import type { AgentSetupMetadata, AgentSetupPanel, InsightEvent } from '../../../types/insight'
 import {
-  addUserPhone,
-  cancelUserPhoneVerification,
   disableAgentSms,
   enableAgentSms,
   resendEmailVerification,
-  verifyUserPhone,
 } from '../../../api/agentSetup'
 import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
 import { getReturnToPath } from '../../../util/returnTo'
 import {
-  DEFAULT_PHONE_REGION,
   PhoneNumberInput,
-  formatPhoneE164,
   formatPhoneNational,
 } from '../../common/PhoneNumberInput'
+import { useUserPhoneVerification } from '../../../hooks/useUserPhoneVerification'
 import '../../../styles/insights.css'
 
 // Staggered animation variants for insight panels
@@ -90,51 +86,37 @@ export function AgentSetupInsight({
   const metadata = insight.metadata as AgentSetupMetadata
   const panel = (metadata.panel ?? 'always_on') as AgentSetupPanel
 
-  const [verifiedPhone, setVerifiedPhone] = useState<AgentSetupPhone | null>(metadata.sms.userPhone ?? null)
-  const [pendingPhone, setPendingPhone] = useState<AgentSetupPhone | null>(metadata.sms.pendingUserPhone ?? null)
   const [smsEnabled, setSmsEnabled] = useState(metadata.sms.enabled)
   const [agentNumber, setAgentNumber] = useState<string | null>(metadata.sms.agentNumber ?? null)
-  const [replacingPhone, setReplacingPhone] = useState(false)
-  const [phoneRegion, setPhoneRegion] = useState(DEFAULT_PHONE_REGION)
-  const [phoneInput, setPhoneInput] = useState('')
-  const [codeInput, setCodeInput] = useState('')
-  const [smsAction, setSmsAction] = useState<string | null>(null)
+  const [smsAction, setSmsAction] = useState<'enable' | 'disable' | null>(null)
   const [smsError, setSmsError] = useState<string | null>(null)
-  const [cooldown, setCooldown] = useState(pendingPhone?.cooldownRemaining ?? 0)
   const [copied, setCopied] = useState(false)
   const [emailResendState, setEmailResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [emailResendError, setEmailResendError] = useState<string | null>(null)
+  const supportedPhoneRegions = metadata.sms.supportedPhoneRegions ?? []
+  const phoneVerification = useUserPhoneVerification({
+    phone: metadata.sms.userPhone ?? null,
+    pendingPhone: metadata.sms.pendingUserPhone ?? null,
+    supportedRegions: supportedPhoneRegions,
+    describeError,
+    onAddSuccess: () => track(AnalyticsEvent.AGENT_SETUP_SMS_CODE_SENT, { agentId: metadata.agentId }),
+    onVerifySuccess: () => track(AnalyticsEvent.AGENT_SETUP_SMS_VERIFIED, { agentId: metadata.agentId }),
+  })
+  const { applyPhoneResponse } = phoneVerification
 
   useEffect(() => {
-    setVerifiedPhone(metadata.sms.userPhone ?? null)
-    setPendingPhone(metadata.sms.pendingUserPhone ?? null)
     setSmsEnabled(metadata.sms.enabled)
     setAgentNumber(metadata.sms.agentNumber ?? null)
-    setReplacingPhone(false)
-  }, [metadata.sms.userPhone, metadata.sms.pendingUserPhone, metadata.sms.enabled, metadata.sms.agentNumber])
+  }, [metadata.sms.enabled, metadata.sms.agentNumber])
 
-  useEffect(() => {
-    setCooldown(pendingPhone?.cooldownRemaining ?? 0)
-  }, [pendingPhone?.cooldownRemaining])
-
-  useEffect(() => {
-    if (cooldown <= 0) {
-      return undefined
-    }
-    const timer = window.setTimeout(() => {
-      setCooldown((prev) => Math.max(prev - 1, 0))
-    }, 1000)
-    return () => window.clearTimeout(timer)
-  }, [cooldown])
-
-  const phoneDisplay = verifiedPhone?.number ? formatPhoneNational(verifiedPhone.number, phoneRegion) : ''
-  const agentNumberDisplay = agentNumber ? formatPhoneNational(agentNumber, phoneRegion) : ''
+  const agentNumberDisplay = agentNumber
+    ? formatPhoneNational(agentNumber, phoneVerification.phoneRegion, supportedPhoneRegions)
+    : ''
   const agentDisplayName = metadata.agentName?.trim() || 'Agent'
   const agentEmail = metadata.agentEmail ?? null
-  const phoneVerified = Boolean(verifiedPhone)
-  const hasPendingPhone = Boolean(pendingPhone)
-  const showPhoneEntry = !hasPendingPhone && (!phoneVerified || replacingPhone)
-  const smsBusy = smsAction !== null
+  const phoneVerified = Boolean(phoneVerification.verifiedPhone)
+  const hasPendingPhone = Boolean(phoneVerification.pendingPhone)
+  const smsBusy = smsAction !== null || phoneVerification.busyAction !== null
 
   const upsellItems = metadata.upsell?.items ?? []
   const upsellPlan = panel === 'upsell_pro' ? 'pro' : panel === 'upsell_scale' ? 'scale' : null
@@ -205,51 +187,6 @@ export function AgentSetupInsight({
     }
   }, [agentEmail])
 
-  const handleAddPhone = useCallback(async () => {
-    const trimmed = phoneInput.trim()
-    if (!trimmed) {
-      setSmsError('Phone number is required.')
-      return
-    }
-    setSmsError(null)
-    setSmsAction('add')
-    try {
-      const formatted = formatPhoneE164(trimmed, phoneRegion)
-      const response = await addUserPhone(formatted)
-      setVerifiedPhone(response.phone ?? null)
-      setPendingPhone(response.pendingPhone ?? null)
-      setReplacingPhone(false)
-      setPhoneInput('')
-      track(AnalyticsEvent.AGENT_SETUP_SMS_CODE_SENT, { agentId: metadata.agentId })
-    } catch (error) {
-      setSmsError(describeError(error))
-    } finally {
-      setSmsAction(null)
-    }
-  }, [phoneInput, phoneRegion, metadata.agentId])
-
-  const handleVerify = useCallback(async () => {
-    const trimmed = codeInput.trim()
-    if (!trimmed) {
-      setSmsError('Verification code is required.')
-      return
-    }
-    setSmsError(null)
-    setSmsAction('verify')
-    try {
-      const response = await verifyUserPhone(trimmed)
-      setVerifiedPhone(response.phone ?? null)
-      setPendingPhone(response.pendingPhone ?? null)
-      setReplacingPhone(false)
-      setCodeInput('')
-      track(AnalyticsEvent.AGENT_SETUP_SMS_VERIFIED, { agentId: metadata.agentId })
-    } catch (error) {
-      setSmsError(describeError(error))
-    } finally {
-      setSmsAction(null)
-    }
-  }, [codeInput, metadata.agentId])
-
   const handleResendEmailVerification = useCallback(async () => {
     setEmailResendState('sending')
     setEmailResendError(null)
@@ -262,25 +199,6 @@ export function AgentSetupInsight({
     }
   }, [])
 
-  const handleCancelPhoneVerification = useCallback(async () => {
-    if (cooldown > 0) {
-      return
-    }
-    setSmsError(null)
-    setSmsAction('cancel')
-    try {
-      const response = await cancelUserPhoneVerification()
-      setVerifiedPhone(response.phone ?? null)
-      setPendingPhone(response.pendingPhone ?? null)
-      setCodeInput('')
-      setReplacingPhone(false)
-    } catch (error) {
-      setSmsError(describeError(error))
-    } finally {
-      setSmsAction(null)
-    }
-  }, [cooldown])
-
   const handleEnableSms = useCallback(async () => {
     setSmsError(null)
     setSmsAction('enable')
@@ -288,15 +206,17 @@ export function AgentSetupInsight({
       const response = await enableAgentSms(metadata.agentId)
       setSmsEnabled(true)
       setAgentNumber(response.agentSms?.number ?? null)
-      setVerifiedPhone(response.userPhone ?? null)
-      setPendingPhone(response.pendingPhone ?? null)
+      applyPhoneResponse({
+        phone: response.userPhone,
+        pendingPhone: response.pendingPhone ?? null,
+      })
       track(AnalyticsEvent.AGENT_SETUP_SMS_ENABLED, { agentId: metadata.agentId })
     } catch (error) {
       setSmsError(describeError(error))
     } finally {
       setSmsAction(null)
     }
-  }, [metadata.agentId])
+  }, [applyPhoneResponse, metadata.agentId])
 
   const handleDisableSms = useCallback(async () => {
     setSmsError(null)
@@ -305,14 +225,16 @@ export function AgentSetupInsight({
       const response = await disableAgentSms(metadata.agentId)
       setSmsEnabled(false)
       setAgentNumber(response.agentSms?.number ?? agentNumber)
-      setVerifiedPhone(response.userPhone ?? null)
-      setPendingPhone(response.pendingPhone ?? null)
+      applyPhoneResponse({
+        phone: response.userPhone,
+        pendingPhone: response.pendingPhone ?? null,
+      })
     } catch (error) {
       setSmsError(describeError(error))
     } finally {
       setSmsAction(null)
     }
-  }, [agentNumber, metadata.agentId])
+  }, [agentNumber, applyPhoneResponse, metadata.agentId])
 
   const renderAlwaysOn = () => {
     return (
@@ -385,17 +307,17 @@ export function AgentSetupInsight({
       if (!emailVerified) return 'Email Verification Required'
       if (hasPendingPhone) return 'Verify Your Phone'
       if (isComplete) return 'SMS Connected'
-      if (replacingPhone) return 'Update SMS Number'
+      if (phoneVerification.replacingPhone) return 'Update SMS Number'
       if (phoneVerified) return 'Enable SMS'
       return 'Connect via SMS'
     }
 
     const getSubtitle = () => {
-      if (smsError) return smsError
+      if (smsError || phoneVerification.error) return smsError ?? phoneVerification.error
       if (!emailVerified) return 'Please verify your email address to enable SMS messaging.'
       if (hasPendingPhone) return 'Enter the verification code we sent to your phone.'
       if (isComplete) return 'Text this number anytime to chat with your agent.'
-      if (replacingPhone) return 'Your current number stays connected until the new number is verified.'
+      if (phoneVerification.replacingPhone) return 'Your current number stays connected until the new number is verified.'
       if (phoneVerified) return 'Your phone is verified. Enable SMS to start chatting.'
       return 'Get updates and chat with your agent via text message.'
     }
@@ -419,7 +341,7 @@ export function AgentSetupInsight({
         {/* Center content */}
         <motion.div className="sms-hero__content" variants={itemVariants}>
           <h3 className="sms-hero__title">{getTitle()}</h3>
-          <p className={`sms-hero__body${smsError ? ' sms-hero__body--error' : ''}`}>{getSubtitle()}</p>
+          <p className={`sms-hero__body${smsError || phoneVerification.error ? ' sms-hero__body--error' : ''}`}>{getSubtitle()}</p>
 
           {!emailVerified ? (
             <div className="sms-hero__form">
@@ -446,12 +368,12 @@ export function AgentSetupInsight({
                 <span style={{ color: '#dc2626', fontSize: '12px' }}>{emailResendError}</span>
               )}
             </div>
-          ) : showPhoneEntry ? (
+          ) : phoneVerification.showAddForm ? (
             <form
               className="sms-hero__form sms-hero__form--phone"
               onSubmit={(event) => {
                 event.preventDefault()
-                void handleAddPhone()
+                phoneVerification.addPhone()
               }}
             >
               <div className="sms-hero__phone-submit-group">
@@ -459,10 +381,11 @@ export function AgentSetupInsight({
                   className="sms-hero__phone-input"
                   inputClassName="sms-hero__input"
                   selectClassName="sms-hero__country-select"
-                  value={phoneInput}
-                  region={phoneRegion}
-                  onValueChange={setPhoneInput}
-                  onRegionChange={setPhoneRegion}
+                  value={phoneVerification.phoneInput}
+                  region={phoneVerification.phoneRegion}
+                  supportedRegions={supportedPhoneRegions}
+                  onValueChange={phoneVerification.setPhoneInput}
+                  onRegionChange={phoneVerification.setPhoneRegion}
                   disabled={smsBusy}
                 />
                 <button
@@ -470,7 +393,7 @@ export function AgentSetupInsight({
                   className="sms-hero__button sms-hero__button--input-action"
                   disabled={smsBusy}
                 >
-                  {smsAction === 'add' ? 'Verifying...' : 'Verify'}
+                  {phoneVerification.busyAction === 'add' ? 'Verifying...' : 'Verify'}
                 </button>
               </div>
             </form>
@@ -479,7 +402,7 @@ export function AgentSetupInsight({
               className="sms-hero__form sms-hero__form--phone"
               onSubmit={(event) => {
                 event.preventDefault()
-                void handleVerify()
+                phoneVerification.verifyPhone()
               }}
             >
               <div className="sms-hero__phone-submit-group sms-hero__phone-submit-group--code">
@@ -489,23 +412,23 @@ export function AgentSetupInsight({
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   placeholder="Enter code"
-                  value={codeInput}
-                  onChange={(event) => setCodeInput(event.target.value)}
+                  value={phoneVerification.verificationCode}
+                  onChange={(event) => phoneVerification.setVerificationCode(event.target.value)}
                 />
                 <button
                   type="submit"
                   className="sms-hero__button sms-hero__button--input-action sms-hero__button--input-middle"
                   disabled={smsBusy}
                 >
-                  {smsAction === 'verify' ? 'Verifying...' : 'Verify'}
+                  {phoneVerification.busyAction === 'verify' ? 'Verifying...' : 'Verify'}
                 </button>
                 <button
                   type="button"
                   className="sms-hero__button sms-hero__button--input-action sms-hero__button--input-cancel"
-                  onClick={handleCancelPhoneVerification}
-                  disabled={smsBusy || cooldown > 0}
+                  onClick={phoneVerification.cancelPhoneVerification}
+                  disabled={smsBusy || phoneVerification.pendingCooldown > 0}
                 >
-                  {cooldown > 0 ? `Cancel in ${cooldown}s` : 'Cancel'}
+                  {phoneVerification.pendingCooldown > 0 ? `Cancel in ${phoneVerification.pendingCooldown}s` : 'Cancel'}
                 </button>
               </div>
             </form>
@@ -513,14 +436,13 @@ export function AgentSetupInsight({
             <div className="sms-hero__form">
               <div className="sms-hero__verified">
                 <CheckCircle2 size={16} strokeWidth={2.2} />
-                <span>{phoneDisplay}</span>
+                <span>{phoneVerification.phoneDisplay}</span>
                 <button
                   type="button"
                   className="sms-hero__edit-number"
                   onClick={() => {
-                    setReplacingPhone(true)
-                    setPhoneInput('')
                     setSmsError(null)
+                    phoneVerification.startReplacingPhone()
                   }}
                   disabled={smsBusy}
                   aria-label="Change number"

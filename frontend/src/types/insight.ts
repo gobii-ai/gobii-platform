@@ -44,6 +44,12 @@ export type AgentSetupPhone = {
   cooldownRemaining: number
 }
 
+export type AgentSetupPhoneRegion = {
+  region: string
+  name: string
+  dialCode: string
+}
+
 export type AgentSetupUpsellItem = {
   plan: 'pro' | 'scale'
   title: string
@@ -71,6 +77,7 @@ export type AgentSetupMetadata = {
     userPhone?: AgentSetupPhone | null
     pendingUserPhone?: AgentSetupPhone | null
     emailVerified?: boolean
+    supportedPhoneRegions?: AgentSetupPhoneRegion[]
   }
   organization: {
     currentOrg?: { id: string; name: string } | null

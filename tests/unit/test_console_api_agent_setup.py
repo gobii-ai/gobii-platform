@@ -21,6 +21,8 @@ from api.models import (
     TaskCredit,
     UserPhoneNumber,
 )
+from console.phone_utils import PhoneVerificationSendError
+from constants.phone_countries import serialize_supported_phone_regions
 from console.insight_views import _build_agent_setup_metadata
 from constants.plans import PlanNames
 
@@ -87,6 +89,46 @@ class AgentSetupApiTests(TestCase):
 
         phone.refresh_from_db()
         self.assertTrue(phone.is_verified)
+
+    @patch("console.api_views.send_phone_verification", side_effect=PhoneVerificationSendError("raw provider text"))
+    def test_phone_add_send_failure_returns_safe_error_and_removes_pending_phone(self, mock_send_verification):
+        response = self.client.post(
+            reverse("console_user_phone"),
+            data=json.dumps({"phone_number": "+16502530000"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Unable to send verification code. Please try again.")
+        self.assertNotIn("raw provider text", response.content.decode())
+        self.assertFalse(UserPhoneNumber.objects.filter(user=self.user, phone_number="+16502530000").exists())
+        mock_send_verification.assert_called_once()
+
+    @patch("console.api_views.send_phone_verification", side_effect=PhoneVerificationSendError("raw provider text"))
+    def test_phone_resend_send_failure_returns_safe_error_without_updating_attempt(self, mock_send_verification):
+        last_attempt = timezone.now() - timedelta(seconds=120)
+        phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=False,
+            is_primary=True,
+            last_verification_attempt=last_attempt,
+            verification_sid="old-sid",
+        )
+
+        response = self.client.post(
+            reverse("console_user_phone_resend"),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Unable to send verification code. Please try again.")
+        self.assertNotIn("raw provider text", response.content.decode())
+        phone.refresh_from_db()
+        self.assertEqual(phone.last_verification_attempt, last_attempt)
+        self.assertEqual(phone.verification_sid, "old-sid")
+        mock_send_verification.assert_called_once_with(phone)
 
     @patch("util.sms.start_verification", return_value="sid-replacement")
     def test_phone_add_replacement_keeps_verified_primary(self, mock_start_verification):
@@ -324,6 +366,24 @@ class AgentSetupApiTests(TestCase):
 
         self.assertFalse(metadata["sms"]["enabled"])
         self.assertEqual(metadata["sms"]["userPhone"]["number"], phone.phone_number)
+
+    def test_profile_and_agent_setup_metadata_include_supported_phone_regions(self):
+        expected_countries = serialize_supported_phone_regions()
+        browser = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Console Tester",
+            charter="Do useful things",
+            browser_use_agent=browser,
+        )
+
+        profile_response = self.client.get(reverse("console_user_profile"))
+        request = self.client.get(reverse("console_agent_insights", kwargs={"agent_id": agent.id})).wsgi_request
+        metadata = _build_agent_setup_metadata(request, agent, None)
+
+        self.assertEqual(profile_response.status_code, 200)
+        self.assertEqual(profile_response.json()["supportedPhoneRegions"], expected_countries)
+        self.assertEqual(metadata["sms"]["supportedPhoneRegions"], expected_countries)
 
     @patch("console.agent_creation.find_unused_number")
     def test_agent_sms_enable_rejects_admin_disabled_agent(self, mock_find_unused_number):

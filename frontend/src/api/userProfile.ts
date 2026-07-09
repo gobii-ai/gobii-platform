@@ -1,4 +1,5 @@
 import type { PhoneState } from './agentSetup'
+import type { SupportedPhoneRegion } from '../components/common/PhoneNumberInput'
 import { jsonFetch, jsonRequest } from './http'
 
 export type UserProfileFormState = {
@@ -26,6 +27,7 @@ export type UserProfilePayload = {
   emailVerification: EmailVerificationState
   phone: PhoneState | null
   pendingPhone?: PhoneState | null
+  supportedPhoneRegions: SupportedPhoneRegion[]
 }
 
 export type UserProfileErrorPayload = {

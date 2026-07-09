@@ -186,7 +186,6 @@ from api.services.web_sessions import (
 )
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
 
-from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
@@ -240,12 +239,15 @@ from console.agent_context import resolve_context_override_for_agent
 from console.billing_initial_data import build_billing_initial_data
 from console.forms import MCPServerConfigForm, PhoneVerifyForm, UserProfileForm
 from console.phone_utils import (
+    PhoneVerificationSendError,
     get_pending_phone,
     get_phone_cooldown_remaining,
     get_primary_phone,
+    send_phone_verification,
     serialize_phone,
     serialize_phone_state,
 )
+from constants.phone_countries import serialize_supported_phone_regions
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
 from console.support_requests import (
@@ -654,6 +656,7 @@ def _serialize_user_profile_payload(request: HttpRequest) -> dict[str, Any]:
         "emailVerification": _serialize_email_verification(user),
         "phone": serialize_phone(verified_phone),
         "pendingPhone": serialize_phone(pending_phone),
+        "supportedPhoneRegions": serialize_supported_phone_regions(),
     }
 
 
@@ -3388,17 +3391,16 @@ class UserPhoneAPIView(ApiLoginRequiredMixin, View):
                 is_primary=primary_phone is None,
                 verified_at=None,
             )
-            sid = sms.start_verification(phone_number=phone_formatted)
-            phone.last_verification_attempt = timezone.now()
-            phone.verification_sid = sid
-            phone.save(update_fields=["last_verification_attempt", "verification_sid", "updated_at"])
+            send_phone_verification(phone)
         except IntegrityError:
             return JsonResponse({"error": "This phone number is already in use."}, status=400)
         except ValidationError as exc:
             message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to add phone number."
             return JsonResponse({"error": message_text}, status=400)
-        except Exception as exc:
-            return JsonResponse({"error": f"Error sending verification: {exc}"}, status=400)
+        except PhoneVerificationSendError:
+            if "phone" in locals():
+                phone.delete()
+            return JsonResponse({"error": "Unable to send verification code. Please try again."}, status=400)
 
         return JsonResponse(serialize_phone_state(request.user))
 
@@ -3514,12 +3516,9 @@ class UserPhoneResendAPIView(ApiLoginRequiredMixin, View):
         remaining = get_phone_cooldown_remaining(phone)
         if remaining == 0:
             try:
-                sid = sms.start_verification(phone_number=phone.phone_number)
-            except Exception as exc:
-                return JsonResponse({"error": f"Failed to resend verification: {exc}"}, status=400)
-            phone.last_verification_attempt = timezone.now()
-            phone.verification_sid = sid
-            phone.save(update_fields=["last_verification_attempt", "verification_sid", "updated_at"])
+                send_phone_verification(phone)
+            except PhoneVerificationSendError:
+                return JsonResponse({"error": "Unable to send verification code. Please try again."}, status=400)
 
         return JsonResponse(serialize_phone_state(request.user))
 

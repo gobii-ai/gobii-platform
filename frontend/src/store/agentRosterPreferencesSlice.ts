@@ -16,14 +16,10 @@ import type { AgentRosterSortMode } from '../types/agentRoster'
 import { parseAgentRosterSortMode } from '../util/agentRosterSort'
 import type { AppDispatch, RootState } from './appStore'
 
-type PreferenceStatus = 'idle' | 'saving' | 'error'
-
 type PreferenceFieldState<T> = {
   value: T
   persistedValue: T
   hydrated: boolean
-  status: PreferenceStatus
-  errorMessage: string | null
 }
 
 export type AgentRosterPreferencesState = {
@@ -107,8 +103,6 @@ function createPreferenceField<T>(value: T): PreferenceFieldState<T> {
     value,
     persistedValue: value,
     hydrated: false,
-    status: 'idle',
-    errorMessage: null,
   }
 }
 
@@ -116,26 +110,11 @@ function sameStringList(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
-function samePreferenceValue(left: unknown, right: unknown): boolean {
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return sameStringList(left, right)
-  }
-  return Object.is(left, right)
-}
-
 function normalizeFieldValue<K extends AgentRosterPreferenceField>(
   field: K,
   value: unknown,
 ): AgentRosterPreferencesState[K]['value'] {
   return preferenceConfig[field].normalize(value) as AgentRosterPreferencesState[K]['value']
-}
-
-function preferenceKeyForField(field: AgentRosterPreferenceField): string {
-  return preferenceConfig[field].preferenceKey
-}
-
-function rosterQueryFieldForPreference(field: AgentRosterPreferenceField): keyof AgentRosterQueryData {
-  return preferenceConfig[field].rosterQueryField
 }
 
 function updateRosterPreferenceInCache<K extends AgentRosterPreferenceField>(
@@ -146,7 +125,7 @@ function updateRosterPreferenceInCache<K extends AgentRosterPreferenceField>(
   if (!queryClient) {
     return
   }
-  const queryField = rosterQueryFieldForPreference(field)
+  const queryField = preferenceConfig[field].rosterQueryField
   queryClient.setQueriesData<AgentRosterQueryData>(
     { queryKey: AGENT_ROSTER_QUERY_KEY },
     (current) => {
@@ -172,33 +151,13 @@ function assignPreferenceValue<K extends AgentRosterPreferenceField>(
   state: AgentRosterPreferencesState,
   field: K,
   value: AgentRosterPreferencesState[K]['value'],
-  options: { persisted?: boolean; status?: PreferenceStatus; errorMessage?: string | null } = {},
+  options: { persisted?: boolean } = {},
 ): void {
   const target = state[field] as PreferenceFieldState<AgentRosterPreferencesState[K]['value']>
-  const persistedValue = options.persisted ? value : target.persistedValue
-  const nextStatus = options.status ?? target.status
-  const nextErrorMessage = Object.prototype.hasOwnProperty.call(options, 'errorMessage')
-    ? options.errorMessage ?? null
-    : target.errorMessage
-  if (
-    target.hydrated
-    && samePreferenceValue(target.value, value)
-    && samePreferenceValue(target.persistedValue, persistedValue)
-    && target.status === nextStatus
-    && target.errorMessage === nextErrorMessage
-  ) {
-    return
-  }
   target.value = value
   target.hydrated = true
   if (options.persisted) {
     target.persistedValue = value
-  }
-  if (options.status) {
-    target.status = options.status
-  }
-  if (Object.prototype.hasOwnProperty.call(options, 'errorMessage')) {
-    target.errorMessage = options.errorMessage ?? null
   }
 }
 
@@ -219,10 +178,7 @@ const agentRosterPreferencesSlice = createSlice({
       state: AgentRosterPreferencesState,
       action: PayloadAction<{ field: K; value: AgentRosterPreferencesState[K]['value'] }>,
     ) {
-      assignPreferenceValue(state, action.payload.field, action.payload.value, {
-        status: 'saving',
-        errorMessage: null,
-      })
+      assignPreferenceValue(state, action.payload.field, action.payload.value)
     },
     preferencePersisted<K extends AgentRosterPreferenceField>(
       state: AgentRosterPreferencesState,
@@ -230,18 +186,14 @@ const agentRosterPreferencesSlice = createSlice({
     ) {
       assignPreferenceValue(state, action.payload.field, action.payload.value, {
         persisted: true,
-        status: 'idle',
-        errorMessage: null,
       })
     },
     preferenceRolledBack<K extends AgentRosterPreferenceField>(
       state: AgentRosterPreferencesState,
-      action: PayloadAction<{ field: K; message: string }>,
+      action: PayloadAction<{ field: K }>,
     ) {
       const target = state[action.payload.field] as PreferenceFieldState<AgentRosterPreferencesState[K]['value']>
       target.value = target.persistedValue
-      target.status = 'error'
-      target.errorMessage = action.payload.message
     },
   },
 })
@@ -258,7 +210,7 @@ export function persistAgentRosterPreference<K extends AgentRosterPreferenceFiel
     dispatch(agentRosterPreferencesActions.preferenceOptimisticallySet({ field, value: normalizedValue }))
     updateRosterPreferenceInCache(extra?.queryClient, field, normalizedValue)
     const previousValue = getState().agentRosterPreferences[field].persistedValue
-    const preferenceKey = preferenceKeyForField(field)
+    const preferenceKey = preferenceConfig[field].preferenceKey
     try {
       const response = await updateUserPreferences({
         preferences: {
@@ -271,7 +223,6 @@ export function persistAgentRosterPreference<K extends AgentRosterPreferenceFiel
     } catch {
       dispatch(agentRosterPreferencesActions.preferenceRolledBack({
         field,
-        message: 'Unable to save preference.',
       }))
       updateRosterPreferenceInCache(extra?.queryClient, field, previousValue)
     }

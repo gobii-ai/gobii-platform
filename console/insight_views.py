@@ -30,6 +30,7 @@ from console.context_helpers import build_console_context
 from console.phone_utils import get_pending_phone, get_primary_phone, serialize_phone
 from config import settings
 from config.stripe_config import get_stripe_settings
+from constants.phone_countries import serialize_supported_phone_regions
 from constants.plans import PlanNamesChoices
 from djstripe.models import Price
 from tasks.services import TaskCreditService
@@ -235,6 +236,7 @@ def _build_agent_setup_metadata(
             "userPhone": phone_payload,
             "pendingUserPhone": serialize_phone(pending_phone),
             "emailVerified": email_verified,
+            "supportedPhoneRegions": serialize_supported_phone_regions(),
         },
         "organization": {
             "currentOrg": current_org,

@@ -61,8 +61,6 @@ describe('agentRosterPreferencesSlice', () => {
     expect(selectAgentRosterPreferencesState(store.getState()).favoriteAgentIds).toMatchObject({
       value: ['agent-1'],
       persistedValue: ['agent-1'],
-      status: 'idle',
-      errorMessage: null,
     })
     expect(queryClient.getQueryData<{ favoriteAgentIds: string[] }>(['agent-roster'])?.favoriteAgentIds).toEqual(['agent-1'])
   })
@@ -82,7 +80,6 @@ describe('agentRosterPreferencesSlice', () => {
     expect(selectAgentRosterPreferencesState(store.getState()).sortMode).toMatchObject({
       value: 'recent',
       persistedValue: 'recent',
-      status: 'error',
     })
     expect(queryClient.getQueryData<{ agentRosterSortMode: string }>(['agent-roster'])?.agentRosterSortMode).toBe('recent')
   })

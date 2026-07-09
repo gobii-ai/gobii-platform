@@ -13,25 +13,16 @@ import {
 } from 'lucide-react'
 
 import {
-  addUserPhone,
-  cancelUserPhoneVerification,
-  deleteUserPhone,
   resendEmailVerification,
-  resendUserPhone,
-  verifyUserPhone,
 } from '../../api/agentSetup'
 import type { PhoneState } from '../../api/agentSetup'
 import { HttpError } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { updateUserCustomInstructions, updateUserProfile } from '../../api/userProfile'
 import type { UserProfileFormState, UserProfilePayload } from '../../api/userProfile'
-import {
-  DEFAULT_PHONE_REGION,
-  PhoneNumberInput,
-  formatPhoneE164,
-  formatPhoneNational,
-} from '../../components/common/PhoneNumberInput'
+import { PhoneNumberInput, type SupportedPhoneRegion } from '../../components/common/PhoneNumberInput'
 import { CustomInstructionsSection } from '../../components/settings/CustomInstructionsSection'
+import { useUserPhoneVerification } from '../../hooks/useUserPhoneVerification'
 
 type ProfileScreenProps = {
   initialData: UserProfilePayload
@@ -157,69 +148,21 @@ function EmailVerificationSection({
 function PhoneSection({
   phone,
   pendingPhone,
+  supportedRegions,
   onPhoneChange,
 }: {
   phone: PhoneState | null
   pendingPhone: PhoneState | null
+  supportedRegions: SupportedPhoneRegion[]
   onPhoneChange: (phone: PhoneState | null, pendingPhone: PhoneState | null) => void
 }) {
-  const [phoneNumber, setPhoneNumber] = useState('')
-  const [phoneRegion, setPhoneRegion] = useState(DEFAULT_PHONE_REGION)
-  const [replacingPhone, setReplacingPhone] = useState(false)
-  const [verificationCode, setVerificationCode] = useState('')
-  const [busyAction, setBusyAction] = useState<'add' | 'verify' | 'resend' | 'cancel' | 'delete' | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [pendingCooldown, setPendingCooldown] = useState(pendingPhone?.cooldownRemaining ?? 0)
+  const phoneVerification = useUserPhoneVerification({
+    phone,
+    pendingPhone,
+    supportedRegions,
+    onPhoneChange,
+  })
   const verifiedAt = formatDateTime(phone?.verifiedAt ?? null)
-  const phoneDisplay = phone?.number ? formatPhoneNational(phone.number, phoneRegion) : ''
-  const pendingDisplay = pendingPhone?.number ? formatPhoneNational(pendingPhone.number, phoneRegion) : ''
-  const resendDisabled = pendingCooldown > 0
-  const showAddForm = !pendingPhone && (!phone || replacingPhone)
-
-  useEffect(() => {
-    setPendingCooldown(pendingPhone?.cooldownRemaining ?? 0)
-  }, [pendingPhone?.cooldownRemaining])
-
-  useEffect(() => {
-    if (pendingCooldown <= 0) {
-      return undefined
-    }
-    const timer = window.setTimeout(() => {
-      setPendingCooldown((current) => Math.max(current - 1, 0))
-    }, 1000)
-    return () => window.clearTimeout(timer)
-  }, [pendingCooldown])
-
-  const runPhoneAction = useCallback(async (
-    action: 'add' | 'verify' | 'resend' | 'cancel' | 'delete',
-    fn: () => Promise<{ phone: PhoneState | null; pendingPhone?: PhoneState | null }>,
-    successMessage: string,
-  ) => {
-    setBusyAction(action)
-    setMessage(null)
-    setError(null)
-    try {
-      const result = await fn()
-      onPhoneChange(result.phone, result.pendingPhone ?? null)
-      setMessage(successMessage)
-      if (action === 'add') {
-        setPhoneNumber('')
-        setReplacingPhone(false)
-      }
-      if (action === 'verify') {
-        setVerificationCode('')
-      }
-      if (action === 'cancel') {
-        setVerificationCode('')
-        setReplacingPhone(false)
-      }
-    } catch (err) {
-      setError(safeErrorMessage(err))
-    } finally {
-      setBusyAction(null)
-    }
-  }, [onPhoneChange])
 
   return (
     <section className="profile-screen__section">
@@ -233,18 +176,12 @@ function PhoneSection({
         </div>
       </div>
 
-      {showAddForm ? (
+      {phoneVerification.showAddForm ? (
         <form
           className="profile-screen__inline-form"
           onSubmit={(event) => {
             event.preventDefault()
-            const trimmed = phoneNumber.trim()
-            if (!trimmed) {
-              setError('Phone number is required.')
-              return
-            }
-            const normalized = formatPhoneE164(trimmed, phoneRegion)
-            void runPhoneAction('add', () => addUserPhone(normalized), 'Verification code sent.')
+            phoneVerification.addPhone()
           }}
         >
           <div className="profile-screen__field profile-screen__field--phone">
@@ -254,26 +191,27 @@ function PhoneSection({
               className="profile-screen__phone-input"
               inputClassName="profile-screen__phone-tel"
               selectClassName="profile-screen__phone-country"
-              value={phoneNumber}
-              region={phoneRegion}
-              onValueChange={setPhoneNumber}
-              onRegionChange={setPhoneRegion}
-              disabled={busyAction === 'add'}
+              value={phoneVerification.phoneInput}
+              region={phoneVerification.phoneRegion}
+              supportedRegions={supportedRegions}
+              onValueChange={phoneVerification.setPhoneInput}
+              onRegionChange={phoneVerification.setPhoneRegion}
+              disabled={phoneVerification.busyAction === 'add'}
             />
           </div>
           <button
             type="submit"
             className="profile-screen__button profile-screen__button--primary"
-            disabled={busyAction === 'add'}
+            disabled={phoneVerification.busyAction === 'add'}
           >
             <Phone className="h-4 w-4" aria-hidden="true" />
-            {busyAction === 'add' ? 'Sending...' : 'Add Phone'}
+            {phoneVerification.busyAction === 'add' ? 'Sending...' : 'Add Phone'}
           </button>
         </form>
       ) : phone ? (
         <div className="profile-screen__phone-current">
           <div>
-            <p className="profile-screen__phone-number">{phoneDisplay}</p>
+            <p className="profile-screen__phone-number">{phoneVerification.phoneDisplay}</p>
             {phone.isVerified ? (
               <p className="profile-screen__muted">Verified{verifiedAt ? ` ${verifiedAt}` : ''}</p>
             ) : (
@@ -283,21 +221,16 @@ function PhoneSection({
           <button
             type="button"
             className="profile-screen__button profile-screen__button--secondary"
-            onClick={() => {
-              setReplacingPhone(true)
-              setPhoneNumber('')
-              setError(null)
-              setMessage(null)
-            }}
-            disabled={busyAction !== null || Boolean(pendingPhone)}
+            onClick={phoneVerification.startReplacingPhone}
+            disabled={phoneVerification.busyAction !== null || Boolean(pendingPhone)}
           >
             Replace
           </button>
           <button
             type="button"
             className="profile-screen__icon-button profile-screen__icon-button--danger"
-            onClick={() => void runPhoneAction('delete', deleteUserPhone, 'Phone number removed.')}
-            disabled={busyAction === 'delete'}
+            onClick={phoneVerification.deletePhone}
+            disabled={phoneVerification.busyAction === 'delete'}
             aria-label="Remove phone number"
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -310,20 +243,17 @@ function PhoneSection({
           className="profile-screen__verify-form"
           onSubmit={(event) => {
             event.preventDefault()
-            const code = verificationCode.trim()
-            if (!code) {
-              setError('Verification code is required.')
-              return
-            }
-            void runPhoneAction('verify', () => verifyUserPhone(code), 'Phone number verified.')
+            phoneVerification.verifyPhone()
           }}
         >
-          {pendingDisplay ? <p className="profile-screen__muted">Verifying {pendingDisplay}</p> : null}
+          {phoneVerification.pendingPhoneDisplay ? (
+            <p className="profile-screen__muted">Verifying {phoneVerification.pendingPhoneDisplay}</p>
+          ) : null}
           <label className="profile-screen__field">
             <span>Verification Code</span>
             <input
-              value={verificationCode}
-              onChange={(event) => setVerificationCode(event.target.value)}
+              value={phoneVerification.verificationCode}
+              onChange={(event) => phoneVerification.setVerificationCode(event.target.value)}
               placeholder="123456"
               inputMode="numeric"
               autoComplete="one-time-code"
@@ -333,34 +263,38 @@ function PhoneSection({
             <button
               type="submit"
               className="profile-screen__button profile-screen__button--primary"
-              disabled={busyAction === 'verify'}
+              disabled={phoneVerification.busyAction === 'verify'}
             >
               <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-              {busyAction === 'verify' ? 'Verifying...' : 'Verify'}
+              {phoneVerification.busyAction === 'verify' ? 'Verifying...' : 'Verify'}
             </button>
             <button
               type="button"
               className="profile-screen__button profile-screen__button--secondary"
-              onClick={() => void runPhoneAction('resend', resendUserPhone, 'Verification code resent.')}
-              disabled={busyAction === 'resend' || resendDisabled}
+              onClick={phoneVerification.resendPhone}
+              disabled={phoneVerification.busyAction === 'resend' || phoneVerification.resendDisabled}
             >
               <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-              {resendDisabled ? `Resend in ${pendingCooldown}s` : 'Resend'}
+              {phoneVerification.resendDisabled ? `Resend in ${phoneVerification.pendingCooldown}s` : 'Resend'}
             </button>
             <button
               type="button"
               className="profile-screen__button profile-screen__button--secondary"
-              onClick={() => void runPhoneAction('cancel', cancelUserPhoneVerification, 'Phone verification canceled.')}
-              disabled={busyAction === 'cancel' || pendingCooldown > 0}
+              onClick={phoneVerification.cancelPhoneVerification}
+              disabled={phoneVerification.busyAction === 'cancel' || phoneVerification.pendingCooldown > 0}
             >
-              {pendingCooldown > 0 ? `Cancel in ${pendingCooldown}s` : 'Cancel'}
+              {phoneVerification.pendingCooldown > 0 ? `Cancel in ${phoneVerification.pendingCooldown}s` : 'Cancel'}
             </button>
           </div>
         </form>
       ) : null}
 
-      {message ? <p className="profile-screen__feedback profile-screen__feedback--success">{message}</p> : null}
-      {error ? <p className="profile-screen__feedback profile-screen__feedback--error">{error}</p> : null}
+      {phoneVerification.message ? (
+        <p className="profile-screen__feedback profile-screen__feedback--success">{phoneVerification.message}</p>
+      ) : null}
+      {phoneVerification.error ? (
+        <p className="profile-screen__feedback profile-screen__feedback--error">{phoneVerification.error}</p>
+      ) : null}
     </section>
   )
 }
@@ -556,6 +490,7 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
       <PhoneSection
         phone={data.phone}
         pendingPhone={data.pendingPhone ?? null}
+        supportedRegions={data.supportedPhoneRegions}
         onPhoneChange={(phone, pendingPhone) => setData((current) => ({ ...current, phone, pendingPhone }))}
       />
     </div>

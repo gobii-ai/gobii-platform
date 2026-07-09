@@ -947,6 +947,7 @@ export function AgentChatPage({
   ))
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
+  const [transientBannerAgentName, setTransientBannerAgentName] = useState<string | null>(null)
   const retryPayloadsRef = useRef<Map<string, { body: string; attachments: File[] }>>(new Map())
   const routeAgentId = typeof agentId === 'string' ? agentId : null
   const queryClient = useQueryClient()
@@ -1848,6 +1849,13 @@ export function AgentChatPage({
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
   const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
+
+  useEffect(() => {
+    if (!isNewAgent && activeAgentId && transientBannerAgentName && resolvedAgentName) {
+      setTransientBannerAgentName(null)
+    }
+  }, [activeAgentId, isNewAgent, resolvedAgentName, transientBannerAgentName])
+
   const effectiveSignupPreviewState = useMemo<SignupPreviewState>(() => {
     if (
       signupPreviewState === 'awaiting_first_reply_pause'
@@ -2604,6 +2612,7 @@ export function AgentChatPage({
       selectedPipedreamAppSlugs?: string[],
       attachments: File[] = [],
     ) => {
+      setTransientBannerAgentName('New Agent')
       dispatch(chatActions.createAgentErrorSet(null))
       try {
         const preferredContactMethod = spawnFlow ? 'email' : 'web'
@@ -2616,6 +2625,7 @@ export function AgentChatPage({
           attachments,
         )
         const createdAgentName = result.agent_name?.trim() || 'Agent'
+        setTransientBannerAgentName(createdAgentName)
         const createdAgentEmail = result.agent_email?.trim() || null
         const createdPlanningState = normalizePlanningState(result.planning_state)
         const createdAgentEntry: AgentRosterEntry = {
@@ -2671,6 +2681,7 @@ export function AgentChatPage({
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
         onAgentCreated?.(result.agent_id)
       } catch (err) {
+        setTransientBannerAgentName(null)
         const errorState = buildCreateAgentError(err, isProprietaryMode)
         if (errorState.requiresTrialPlanSelection) {
           dispatch(chatActions.createAgentTrialOnboardingTargetSet(errorState.trialOnboardingTarget ?? 'agent_ui'))
@@ -4107,7 +4118,7 @@ export function AgentChatPage({
       {createOrganizationModal}
       <AgentChatLayout
         agentId={activeAgentId}
-        bannerAgentName={isNewAgent ? 'New Agent' : null}
+        bannerAgentName={isNewAgent ? 'New Agent' : transientBannerAgentName}
         planSnapshot={latestPlanSnapshot}
         sidebar={chatLayoutSidebar}
         onComposerFocus={handleComposerFocus}
