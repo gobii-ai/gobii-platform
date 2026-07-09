@@ -3381,24 +3381,28 @@ class UserPhoneAPIView(ApiLoginRequiredMixin, View):
         if existing_pending and existing_pending.phone_number == phone_formatted:
             return JsonResponse(serialize_phone_state(request.user))
 
+        phone = None
         try:
-            if existing_pending:
-                existing_pending.delete()
             phone = UserPhoneNumber.objects.create(
                 user=request.user,
                 phone_number=phone_formatted,
                 is_verified=False,
-                is_primary=primary_phone is None,
+                is_primary=primary_phone is None and existing_pending is None,
                 verified_at=None,
             )
             send_phone_verification(phone)
+            if existing_pending:
+                existing_pending.delete()
+                if primary_phone is None:
+                    phone.is_primary = True
+                    phone.save(update_fields=["is_primary", "updated_at"])
         except IntegrityError:
             return JsonResponse({"error": "This phone number is already in use."}, status=400)
         except ValidationError as exc:
             message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to add phone number."
             return JsonResponse({"error": message_text}, status=400)
         except PhoneVerificationSendError:
-            if "phone" in locals():
+            if phone is not None:
                 phone.delete()
             return JsonResponse({"error": "Unable to send verification code. Please try again."}, status=400)
 
@@ -3466,10 +3470,10 @@ class UserPhoneVerifyAPIView(ApiLoginRequiredMixin, View):
             return JsonResponse({"error": error_msg}, status=400)
 
         try:
-            verified_phone = form.save()
-            if not verified_phone.is_primary:
-                old_primary_phone = get_primary_phone(request.user)
-                with transaction.atomic():
+            with transaction.atomic():
+                verified_phone = form.save()
+                if not verified_phone.is_primary:
+                    old_primary_phone = get_primary_phone(request.user)
                     old_sms_endpoint = None
                     if old_primary_phone:
                         old_sms_endpoint = PersistentAgentCommsEndpoint.objects.filter(

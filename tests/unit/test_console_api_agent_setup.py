@@ -105,6 +105,39 @@ class AgentSetupApiTests(TestCase):
         mock_send_verification.assert_called_once()
 
     @patch("console.api_views.send_phone_verification", side_effect=PhoneVerificationSendError("raw provider text"))
+    def test_phone_add_replacement_send_failure_preserves_existing_pending_phone(self, mock_send_verification):
+        current_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+        existing_pending = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530002",
+            is_verified=False,
+            is_primary=False,
+            last_verification_attempt=timezone.now() - timedelta(seconds=120),
+            verification_sid="old-sid",
+        )
+
+        response = self.client.post(
+            reverse("console_user_phone"),
+            data=json.dumps({"phone_number": "+16502530003"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Unable to send verification code. Please try again.")
+        self.assertTrue(UserPhoneNumber.objects.filter(pk=current_phone.pk).exists())
+        existing_pending.refresh_from_db()
+        self.assertEqual(existing_pending.phone_number, "+16502530002")
+        self.assertEqual(existing_pending.verification_sid, "old-sid")
+        self.assertFalse(UserPhoneNumber.objects.filter(user=self.user, phone_number="+16502530003").exists())
+        mock_send_verification.assert_called_once()
+
+    @patch("console.api_views.send_phone_verification", side_effect=PhoneVerificationSendError("raw provider text"))
     def test_phone_resend_send_failure_returns_safe_error_without_updating_attempt(self, mock_send_verification):
         last_attempt = timezone.now() - timedelta(seconds=120)
         phone = UserPhoneNumber.objects.create(

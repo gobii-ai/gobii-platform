@@ -110,6 +110,13 @@ function sameStringList(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
+function samePreferenceValue(left: unknown, right: unknown): boolean {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return sameStringList(left, right)
+  }
+  return Object.is(left, right)
+}
+
 function normalizeFieldValue<K extends AgentRosterPreferenceField>(
   field: K,
   value: unknown,
@@ -154,6 +161,14 @@ function assignPreferenceValue<K extends AgentRosterPreferenceField>(
   options: { persisted?: boolean } = {},
 ): void {
   const target = state[field] as PreferenceFieldState<AgentRosterPreferencesState[K]['value']>
+  const persistedValue = options.persisted ? value : target.persistedValue
+  if (
+    target.hydrated
+    && samePreferenceValue(target.value, value)
+    && samePreferenceValue(target.persistedValue, persistedValue)
+  ) {
+    return
+  }
   target.value = value
   target.hydrated = true
   if (options.persisted) {
