@@ -1162,10 +1162,11 @@ def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
     heartbeat_active = False
     try:
         redis_client = get_redis_client()
-        lock_active = any(
-            bool(redis_client.exists(key))
-            for key in processing_lock_storage_keys(agent.id)
-        )
+        lock_keys = processing_lock_storage_keys(agent.id)
+        try:
+            lock_active = bool(redis_client.exists(*lock_keys))
+        except TypeError:
+            lock_active = any(bool(redis_client.exists(key)) for key in lock_keys)
         queued_flag = is_processing_queued(agent.id, client=redis_client)
         heartbeat_active = bool(get_processing_heartbeat(agent.id, client=redis_client))
     except Exception:

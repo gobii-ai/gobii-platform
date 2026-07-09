@@ -58,6 +58,7 @@ from .timeline import (
     is_chat_hidden_message,
     serialize_plan_event,
     serialize_message_event,
+    serialize_agent_schedule,
     serialize_processing_snapshot,
     serialize_thinking_event,
 )
@@ -106,6 +107,7 @@ def emit_agent_profile_update(
         "signup_preview_state": agent.signup_preview_state,
         "planning_state": agent.planning_state,
         "timestamp": timezone.now().isoformat(),
+        **serialize_agent_schedule(agent),
     }
     if processing_active is not None:
         normalized_processing_active = bool(processing_active)
@@ -554,6 +556,7 @@ def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: b
         "avatar",
         "mini_description",
         "short_description",
+        "schedule",
     }
     update_fields = kwargs.get("update_fields")
     if not created and update_fields is not None:
@@ -565,7 +568,16 @@ def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: b
         refreshed = (
             PersistentAgent.objects
             .filter(id=instance.id)
-            .only("id", "name", "avatar", "mini_description", "short_description")
+            .only(
+                "id",
+                "name",
+                "avatar",
+                "mini_description",
+                "short_description",
+                "schedule",
+                "is_active",
+                "life_state",
+            )
             .first()
         )
         if refreshed is None:
@@ -657,7 +669,10 @@ def broadcast_processing_state(sender, instance: BrowserUseAgentTask, **kwargs):
 
 def _broadcast_processing(agent):
     snapshot = build_processing_snapshot(agent)
-    payload = serialize_processing_snapshot(snapshot)
+    payload = {
+        **serialize_processing_snapshot(snapshot),
+        **serialize_agent_schedule(agent),
+    }
     _send(_group_name(agent.id), "processing_event", payload, agent_id=str(agent.id))
     emit_agent_usage_update(agent)
     _emit_processing_profile_update_if_changed(agent, snapshot.active)

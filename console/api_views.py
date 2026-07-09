@@ -6814,6 +6814,7 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
                 "signup_preview_state": agent.signup_preview_state,
                 "planning_state": agent.planning_state,
+                **serialize_agent_schedule(agent),
             }
         )
 
@@ -6872,6 +6873,7 @@ class AgentStopAPIView(ApiLoginRequiredMixin, View):
                 "cancelledWebTaskCount": cancelled_web_task_count,
                 "processing_active": snapshot.active,
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
+                **serialize_agent_schedule(agent),
             }
         )
 

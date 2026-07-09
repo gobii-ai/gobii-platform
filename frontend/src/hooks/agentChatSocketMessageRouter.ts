@@ -17,6 +17,7 @@ type AgentIdentityUpdate = {
   agentId?: string | null
   agentName?: string | null
   agentAvatarUrl?: string | null
+  agentNextScheduledAt?: string | null
   signupPreviewState?: SignupPreviewState | null
   planningState?: PlanningState | null
 }
@@ -60,6 +61,11 @@ function buildAgentIdentityUpdate(payload: Record<string, unknown>): AgentIdenti
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'planning_state')) {
     nextIdentity.planningState = normalizePlanningState(payload.planning_state)
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'agent_next_scheduled_at')) {
+    nextIdentity.agentNextScheduledAt = typeof payload.agent_next_scheduled_at === 'string'
+      ? payload.agent_next_scheduled_at
+      : null
   }
 
   return nextIdentity
@@ -123,12 +129,21 @@ export function routeAgentChatSocketMessage({
 
   if (messageType === 'processing' && message.payload) {
     const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
+    const processingRecord = message.payload as Record<string, unknown>
     const processingPayload = message.payload as ProcessingSnapshot
     if (payloadAgentId) {
       replaceProcessingSnapshotInCache(queryClient, payloadAgentId, processingPayload)
     }
     if (payloadAgentId === activeAgentId) {
       updateProcessing(processingPayload)
+      if (Object.prototype.hasOwnProperty.call(processingRecord, 'agent_next_scheduled_at')) {
+        updateAgentIdentity({
+          agentId: payloadAgentId,
+          agentNextScheduledAt: typeof processingRecord.agent_next_scheduled_at === 'string'
+            ? processingRecord.agent_next_scheduled_at
+            : null,
+        })
+      }
     }
     return { type: 'handled' }
   }

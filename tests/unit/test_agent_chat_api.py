@@ -2585,6 +2585,7 @@ class AgentChatAPITests(TestCase):
         snapshot = payload.get("processing_snapshot") or {}
 
         self.assertIsInstance(snapshot.get("nextScheduledAt"), str)
+        self.assertIsInstance(payload.get("agent_next_scheduled_at"), str)
 
     @tag("batch_agent_chat")
     def test_processing_status_reports_active_when_only_queued(self):
