@@ -3786,7 +3786,6 @@ class AgentHumanInputRequestResponseAPIView(LoginRequiredMixin, View):
         action_event = record_human_input_answered(
             agent=agent,
             actor_user=request.user,
-            count=1,
             request_ids=[str(human_input_request.id)],
             responses=[human_input_request],
         )
@@ -3917,7 +3916,6 @@ class AgentHumanInputRequestBatchResponseAPIView(LoginRequiredMixin, View):
         action_event = record_human_input_answered(
             agent=agent,
             actor_user=request.user,
-            count=len(normalized_responses),
             request_ids=request_ids,
             responses=[
                 answered_requests_by_id[request_id]

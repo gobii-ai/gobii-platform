@@ -3154,9 +3154,6 @@
     color: #1e293b;
     border-color: rgba(199, 210, 254, 0.5);
 }
-.user-action-event {
-    align-items: flex-end;
-}
 .user-action-card {
     display: grid;
     grid-template-columns: 2.5rem minmax(0, 1fr);
@@ -3164,14 +3161,6 @@
     gap: 0.75rem;
     width: min(85%, 54rem);
     min-width: 0;
-    border: 1px solid rgba(199, 210, 254, 0.5);
-    border-radius: 1rem;
-    background: rgba(245, 247, 255, 0.9);
-    color: #1e293b;
-    padding: 0.9rem 1rem;
-    font-size: 0.9375rem;
-    line-height: 1.65;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03), 0 4px 12px rgba(15, 23, 42, 0.03);
 }
 .user-action-card__icon {
     display: grid;
@@ -3257,7 +3246,6 @@
         grid-template-columns: 2.5rem minmax(0, 1fr);
         width: 94%;
         gap: 0.75rem;
-        padding: 0.9rem;
     }
     .user-action-card__icon {
         width: 2.5rem;

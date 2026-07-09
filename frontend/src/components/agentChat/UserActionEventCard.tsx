@@ -59,26 +59,22 @@ function compactLabelList(labels: string[], maxVisible = 2): string {
   return `${visibleLabels}, and ${cleanLabels.length - maxVisible} more`
 }
 
+const SUMMARY_COPY: Record<string, [verb: string, singular: string, plural?: string]> = {
+  human_input_answered: ['answered', 'question'],
+  secrets_saved: ['saved', 'secret'],
+  secrets_removed: ['removed', 'secret request'],
+  contacts_approved: ['approved', 'contact'],
+  contacts_declined: ['declined', 'contact'],
+  contacts_resolved: ['resolved', 'contact request'],
+}
+
 function buildActionSummary(event: UserActionEvent): string {
   const count = Math.max(event.action.count || 1, 1)
-  switch (event.action.actionType) {
-    case 'human_input_answered':
-      return `answered ${countPhrase(count, 'question')}`
-    case 'human_input_dismissed':
-      return 'dismissed a question'
-    case 'secrets_saved':
-      return `saved ${countPhrase(count, 'secret')}`
-    case 'secrets_removed':
-      return `removed ${countPhrase(count, 'secret request')}`
-    case 'contacts_approved':
-      return `approved ${countPhrase(count, 'contact')}`
-    case 'contacts_declined':
-      return `declined ${countPhrase(count, 'contact')}`
-    case 'contacts_resolved':
-      return `resolved ${countPhrase(count, 'contact request')}`
-    default:
-      return 'took an action'
+  if (event.action.actionType === 'human_input_dismissed') {
+    return 'dismissed a question'
   }
+  const copy = SUMMARY_COPY[event.action.actionType]
+  return copy ? `${copy[0]} ${countPhrase(count, copy[1], copy[2])}` : 'took an action'
 }
 
 function buildTitle(event: UserActionEvent, viewerUserId?: number | null): string {
@@ -88,54 +84,32 @@ function buildTitle(event: UserActionEvent, viewerUserId?: number | null): strin
 
 function buildActionDetail(event: UserActionEvent): string {
   const count = Math.max(event.action.count || 1, 1)
-  const secretNames = metadataStringArray(event, 'secret_names')
-  const contactLabels = metadataStringArray(event, 'contact_labels')
-  const compactContactLabels = compactLabelList(contactLabels)
+  const secretName = metadataStringArray(event, 'secret_names')[0]?.trim()
+  const contactLabels = compactLabelList(metadataStringArray(event, 'contact_labels'))
   const skippedCount = metadataNumber(event, 'skipped_count')
-
   let detail = ''
-  switch (event.action.actionType) {
-    case 'human_input_answered':
-      detail = count === 1 ? 'A response was submitted.' : `${count} responses were submitted.`
-      break
-    case 'human_input_dismissed':
-      detail = 'Question dismissed.'
-      break
-    case 'secrets_saved':
-      detail = count === 1
-        ? `${secretNames[0]?.trim() || 'Secret'} saved.`
-        : `${count} secrets saved.`
-      break
-    case 'secrets_removed':
-      detail = count === 1
-        ? `${secretNames[0]?.trim() || 'Secret'} request removed.`
-        : `${count} secret requests were removed.`
-      break
-    case 'contacts_approved':
-      detail = compactContactLabels
-        ? `${compactContactLabels}.`
-        : count === 1 ? 'Contact was approved.' : `${count} contacts were approved.`
-      break
-    case 'contacts_declined':
-      detail = compactContactLabels
-        ? `${compactContactLabels}.`
-        : count === 1 ? 'Contact was declined.' : `${count} contacts were declined.`
-      break
-    case 'contacts_resolved': {
-      const approvedCount = metadataNumber(event, 'approved_count')
-      const declinedCount = metadataNumber(event, 'declined_count')
-      const approvedPhrase = `${approvedCount} ${pluralize(approvedCount, 'contact')} ${pluralize(approvedCount, 'was', 'were')} approved`
-      const declinedPhrase = `${declinedCount} ${pluralize(declinedCount, 'contact')} ${pluralize(declinedCount, 'was', 'were')} declined`
-      detail = compactContactLabels ? `${compactContactLabels}.` : `${approvedPhrase} and ${declinedPhrase}.`
-      break
-    }
-    default:
-      detail = ''
-      break
+
+  if (event.action.actionType === 'human_input_answered') {
+    detail = count === 1 ? 'A response was submitted.' : `${count} responses were submitted.`
+  } else if (event.action.actionType === 'human_input_dismissed') {
+    detail = 'Question dismissed.'
+  } else if (event.action.actionType === 'secrets_saved') {
+    detail = count === 1 ? `${secretName || 'Secret'} saved.` : `${count} secrets saved.`
+  } else if (event.action.actionType === 'secrets_removed') {
+    detail = count === 1 ? `${secretName || 'Secret'} request removed.` : `${count} secret requests were removed.`
+  } else if (event.action.actionType === 'contacts_approved' || event.action.actionType === 'contacts_declined') {
+    const decision = event.action.actionType === 'contacts_approved' ? 'approved' : 'declined'
+    detail = contactLabels ? `${contactLabels}.` : count === 1 ? `Contact was ${decision}.` : `${count} contacts were ${decision}.`
+  } else if (event.action.actionType === 'contacts_resolved') {
+    const approvedCount = metadataNumber(event, 'approved_count')
+    const declinedCount = metadataNumber(event, 'declined_count')
+    const approvedPhrase = `${approvedCount} ${pluralize(approvedCount, 'contact')} ${pluralize(approvedCount, 'was', 'were')} approved`
+    const declinedPhrase = `${declinedCount} ${pluralize(declinedCount, 'contact')} ${pluralize(declinedCount, 'was', 'were')} declined`
+    detail = contactLabels ? `${contactLabels}.` : `${approvedPhrase} and ${declinedPhrase}.`
   }
 
   if (skippedCount > 0 && detail) {
-    detail = `${detail.replace(/\.$/, '')}. ${skippedCount} left pending due to the contact limit.`
+    return `${detail.replace(/\.$/, '')}. ${skippedCount} left pending due to the contact limit.`
   }
   return detail
 }
@@ -207,7 +181,7 @@ export const UserActionEventCard = memo(function UserActionEventCard({
       data-user-action-id={event.action.id}
       data-action-type={event.action.actionType}
     >
-      <div className="user-action-card">
+      <div className="chat-bubble chat-bubble--user user-action-card">
         <div className="user-action-card__icon" aria-hidden="true">
           <Icon size={20} strokeWidth={2.2} />
         </div>

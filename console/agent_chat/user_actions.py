@@ -1,7 +1,5 @@
 from typing import Any, Iterable
 
-from django.contrib.auth import get_user_model
-
 from api.models import PersistentAgent, PersistentAgentHumanInputRequest, PersistentAgentUserActionEvent
 
 
@@ -9,17 +7,6 @@ def _clean_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     if not metadata:
         return {}
     return {str(key): value for key, value in metadata.items() if value is not None}
-
-
-def _actor_user(actor_user):
-    if actor_user is None:
-        return None
-    if getattr(actor_user, "is_authenticated", False):
-        return actor_user
-    user_id = getattr(actor_user, "id", None)
-    if user_id is None:
-        return None
-    return get_user_model().objects.filter(id=user_id).first()
 
 
 def _human_input_response_metadata(
@@ -45,32 +32,33 @@ def create_user_action_event(
 ) -> PersistentAgentUserActionEvent:
     return PersistentAgentUserActionEvent.objects.create(
         agent=agent,
-        actor_user=_actor_user(actor_user),
+        actor_user=actor_user if getattr(actor_user, "is_authenticated", False) else None,
         action_type=action_type,
         count=max(int(count or 1), 1),
         metadata=_clean_metadata(metadata),
     )
 
 
+def _clean_labels(labels: Iterable[str]) -> list[str]:
+    return [label for label in labels if label]
+
+
 def record_human_input_answered(
     *,
     agent: PersistentAgent,
     actor_user,
-    count: int,
     request_ids: Iterable[str],
     responses: Iterable[PersistentAgentHumanInputRequest] | None = None,
 ) -> PersistentAgentUserActionEvent:
-    metadata: dict[str, Any] = {"request_ids": list(request_ids)}
+    request_id_list = list(request_ids)
+    metadata: dict[str, Any] = {"request_ids": request_id_list}
     if responses is not None:
-        metadata["responses"] = [
-            _human_input_response_metadata(request_obj)
-            for request_obj in responses
-        ]
+        metadata["responses"] = [_human_input_response_metadata(request_obj) for request_obj in responses]
     return create_user_action_event(
         agent=agent,
         actor_user=actor_user,
         action_type=PersistentAgentUserActionEvent.ActionType.HUMAN_INPUT_ANSWERED,
-        count=count,
+        count=max(len(request_id_list), 1),
         metadata=metadata,
     )
 
@@ -96,13 +84,12 @@ def record_requested_secrets_saved(
     secret_labels: Iterable[str],
     make_global: bool,
 ) -> PersistentAgentUserActionEvent:
-    labels = [label for label in secret_labels if label]
-    count = max(len(labels), 1)
+    labels = _clean_labels(secret_labels)
     return create_user_action_event(
         agent=agent,
         actor_user=actor_user,
         action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED,
-        count=count,
+        count=max(len(labels), 1),
         metadata={"secret_names": labels, "scope": "global" if make_global else "agent"},
     )
 
@@ -113,13 +100,12 @@ def record_requested_secrets_removed(
     actor_user,
     secret_labels: Iterable[str],
 ) -> PersistentAgentUserActionEvent:
-    labels = [label for label in secret_labels if label]
-    count = max(len(labels), 1)
+    labels = _clean_labels(secret_labels)
     return create_user_action_event(
         agent=agent,
         actor_user=actor_user,
         action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_REMOVED,
-        count=count,
+        count=max(len(labels), 1),
         metadata={"secret_names": labels},
     )
 
@@ -137,7 +123,7 @@ def record_contact_requests_resolved(
     if total <= 0:
         return None
 
-    labels = [label for label in contact_labels if label]
+    labels = _clean_labels(contact_labels)
     if approved_count and declined_count:
         action_type = PersistentAgentUserActionEvent.ActionType.CONTACTS_RESOLVED
     elif approved_count:
