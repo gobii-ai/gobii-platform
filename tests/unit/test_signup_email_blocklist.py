@@ -298,7 +298,7 @@ class TrialOnboardingAdapterTests(TestCase):
     @tag("batch_email_blocklist")
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False)
-    def test_signup_redirect_uses_agent_preview_when_enabled_without_next(
+    def test_signup_redirect_opens_template_picker_when_preview_enabled_without_next(
         self,
         _mock_can_user_use_personal_agents_and_api,
     ) -> None:
@@ -317,7 +317,7 @@ class TrialOnboardingAdapterTests(TestCase):
 
         parsed = urlparse(redirect_url)
         self.assertEqual(parsed.path, f"{IMMERSIVE_APP_BASE_PATH}/agents/new")
-        self.assertEqual(parse_qs(parsed.query).get("spawn"), ["1"])
+        self.assertNotIn("spawn", parse_qs(parsed.query))
 
     @tag("batch_email_blocklist")
     @override_settings(GOBII_PROPRIETARY_MODE=True)

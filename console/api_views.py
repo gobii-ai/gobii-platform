@@ -157,7 +157,7 @@ from api.services.sms_contact_purpose import sms_contact_purpose_required, track
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import TRIAL_ONBOARDING_TARGET_AGENT_UI, set_trial_onboarding_intent, set_trial_onboarding_requires_plan_selection
-from util.personal_signup_preview import build_personal_signup_starter_charter, resolve_personal_signup_preview, resolve_personal_signup_preview_onboarding_state
+from util.personal_signup_preview import resolve_personal_signup_preview, resolve_personal_signup_preview_onboarding_state
 from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, TrialRequiredValidationError, can_user_send_personal_agent_chat_message
 from util.subscription_helper import get_user_max_contacts_per_agent
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
@@ -689,11 +689,6 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             request,
             preview_config=preview_config,
         )
-        if preview_config.should_synthesize_starter_charter(
-            saved_charter=saved_charter,
-            pending_onboarding=onboarding_state.pending,
-        ):
-            saved_charter = build_personal_signup_starter_charter()
         preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
         preferred_llm_tier = None
         if preferred_llm_tier_raw:

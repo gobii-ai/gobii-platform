@@ -77,9 +77,6 @@ from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_API_KEYS,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
-from util.personal_signup_preview import (
-    GENERIC_STARTER_CHARTER,
-)
 from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
@@ -1299,6 +1296,49 @@ class HomePageTests(TestCase):
         )
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    def test_authenticated_home_spawn_blank_charter_opens_template_picker(self):
+        user = get_user_model().objects.create_user(
+            username="home_spawn_blank@example.com",
+            email="home_spawn_blank@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+        session = self.client.session
+        session["agent_charter"] = "Stale charter"
+        session["agent_charter_override"] = "Stale override"
+        session["agent_charter_source"] = "user"
+        session.save()
+
+        response = self.client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": "   ",
+                "preferred_llm_tier": "premium",
+                "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
+                "return_to": "/",
+                "embed": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        params = parse_qs(parsed.query)
+        self.assertNotIn("spawn", params)
+        self.assertEqual(params.get("return_to"), ["/"])
+        self.assertEqual(params.get("embed"), ["1"])
+
+        session = self.client.session
+        self.assertNotIn("agent_charter", session)
+        self.assertNotIn("agent_charter_override", session)
+        self.assertNotIn("agent_charter_source", session)
+        self.assertEqual(session.get(page_views.PREFERRED_LLM_TIER_SESSION_KEY), "premium")
+        self.assertEqual(
+            session.get(page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
+            ["slack", "trello"],
+        )
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_authenticated_home_spawn_respects_posted_personal_context(self):
         user = get_user_model().objects.create_user(
             username="home_spawn_context@example.com",
@@ -1510,6 +1550,40 @@ class HomePageTests(TestCase):
         self.assertEqual(spawn_intent_payload.get("preferred_llm_tier"), "premium")
         self.assertEqual(spawn_intent_payload.get("selected_pipedream_app_slugs"), ["slack", "trello"])
         self.assertEqual(spawn_intent_payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
+
+    def test_blank_home_spawn_redirect_stashes_no_fake_oauth_charter(self):
+        response = self.client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": " ",
+                "preferred_llm_tier": "premium",
+                "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+        next_parts = urlparse(parse_qs(parsed.query)["next"][0])
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        self.assertNotIn("spawn", parse_qs(next_parts.query))
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+
+        charter_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
+        stash_token = charter_payload.get(OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY)
+        self.assertIsInstance(stash_token, str)
+        cached_charter_payload = signing.loads(
+            get_redis_client().get(build_oauth_charter_stash_cache_key(stash_token))
+        )
+        self.assertNotIn("agent_charter", cached_charter_payload)
+        self.assertNotIn("agent_charter_source", cached_charter_payload)
+        self.assertEqual(cached_charter_payload.get("agent_preferred_llm_tier"), "premium")
+        self.assertEqual(
+            cached_charter_payload.get(page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
+            ["slack", "trello"],
+        )
+        self.assertTrue(cached_charter_payload.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
 
     def test_home_spawn_modal_prep_returns_modal_signup_url_and_preserves_state(self):
         session = self.client.session
@@ -3516,7 +3590,7 @@ class AgentSpawnIntentApiTests(TestCase):
         self.assertEqual(payload.get("selected_pipedream_app_slugs"), ["slack", "trello"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_spawn_intent_uses_starter_charter_for_proprietary_personal_preview(self):
+    def test_spawn_intent_leaves_charter_empty_for_proprietary_personal_preview(self):
         user = get_user_model().objects.create_user(
             email="spawn-intent-preview@test.com",
             password="pw",
@@ -3532,10 +3606,7 @@ class AgentSpawnIntentApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(
-            payload.get("charter"),
-            GENERIC_STARTER_CHARTER,
-        )
+        self.assertIsNone(payload.get("charter"))
         self.assertFalse(payload.get("requires_plan_selection"))
         self.assertIsNone(payload.get("onboarding_target"))
 
