@@ -124,7 +124,7 @@ from .public_template_urls import (
 )
 from .comparisons import COMPARISON_CATALOG, COMPARISON_STATUS_PUBLISHED, get_comparison, get_published_comparisons
 from .forms import MarketingContactForm
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY
+from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY, stage_agent_template_session
 from console.views import build_llm_intelligence_props
 from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
@@ -505,10 +505,11 @@ def _build_oauth_charter_cookie_payload(
     template_code: str | None = None,
     charter_override: str | None = None,
 ) -> dict[str, str | bool | list[str]]:
-    payload: dict[str, str | bool | list[str]] = {
-        "agent_charter": charter,
-        "agent_charter_source": charter_source,
-    }
+    payload: dict[str, str | bool | list[str]] = {}
+    normalized_charter = (charter or "").strip()
+    if normalized_charter:
+        payload["agent_charter"] = charter
+        payload["agent_charter_source"] = charter_source
     if template_code:
         payload[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template_code
     if charter_override:
@@ -555,9 +556,13 @@ def _set_oauth_stash_cookies(
         "samesite": "Lax",
         "secure": request.is_secure(),
     }
-    charter_cookie_value = serialize_oauth_charter_cookie_payload(
-        charter_data,
-        server_side=server_side_charter,
+    charter_cookie_value = (
+        serialize_oauth_charter_cookie_payload(
+            charter_data,
+            server_side=server_side_charter,
+        )
+        if charter_data
+        else None
     )
     if charter_cookie_value:
         response.set_cookie(
@@ -1343,15 +1348,14 @@ class HomeAgentSpawnView(TemplateView):
             # Clear any previously selected pretrained worker so we treat this as a fresh custom charter
             request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
             request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
-            # Store charter in session for later use
             user_charter = form.cleaned_data['charter']
             if user_charter:
                 request.session['agent_charter'] = user_charter
+                request.session['agent_charter_source'] = 'user'
             else:
-                # Empty input — use a general-purpose charter and a simple greeting
-                request.session['agent_charter'] = "Hello"
-                request.session['agent_charter_override'] = PersistentAgentCharterForm.DEFAULT_CHARTER
-            request.session['agent_charter_source'] = 'user'
+                request.session.pop("agent_charter", None)
+                request.session.pop("agent_charter_override", None)
+                request.session.pop("agent_charter_source", None)
             preferred_llm_tier_raw = (request.POST.get("preferred_llm_tier") or "").strip()
             if preferred_llm_tier_raw:
                 # Never plan-clamp session preference here; clamping happens at persistence/runtime.
@@ -1366,7 +1370,7 @@ class HomeAgentSpawnView(TemplateView):
                     event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
                     source=AnalyticsSource.WEB,
                     properties={
-                        'charter': request.session['agent_charter'],
+                        'charter': user_charter,
                         'source_page': 'home',
                     }
                 )
@@ -1395,7 +1399,9 @@ class HomeAgentSpawnView(TemplateView):
                         target=trial_onboarding_target,
                     )
                     set_trial_onboarding_requires_plan_selection(request, required=True)
-                app_redirect_params = {**redirect_params, "spawn": "1"}
+                app_redirect_params = {**redirect_params}
+                if user_charter:
+                    app_redirect_params["spawn"] = "1"
                 app_next_url = append_query_params(
                     f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
                     app_redirect_params,
@@ -1414,7 +1420,9 @@ class HomeAgentSpawnView(TemplateView):
                     target=trial_onboarding_target,
                 )
             # User needs to log in first, then continue to agent creation in the app
-            app_redirect_params = {**redirect_params, "spawn": "1"}
+            app_redirect_params = {**redirect_params}
+            if user_charter:
+                app_redirect_params["spawn"] = "1"
             app_next_url = append_query_params(
                 f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
                 app_redirect_params,
@@ -1654,28 +1662,13 @@ def _get_pretrained_worker_template_or_404(code: str | None):
     return template
 
 
-def _template_preferred_llm_tier_key(template) -> str | None:
-    preferred_llm_tier = getattr(template, "preferred_llm_tier", None)
-    tier_key = getattr(preferred_llm_tier, "key", preferred_llm_tier)
-    tier_key = str(tier_key or "").strip().lower()
-    return tier_key or None
-
-
-def _seed_template_preferred_llm_tier(request, template) -> None:
-    tier_key = _template_preferred_llm_tier_key(template)
-    if tier_key:
-        request.session[PREFERRED_LLM_TIER_SESSION_KEY] = tier_key
-    else:
-        request.session.pop(PREFERRED_LLM_TIER_SESSION_KEY, None)
-
-
 def _seed_pretrained_worker_session(request, template) -> None:
-    request.session["agent_charter"] = template.charter
-    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER
-    request.session["agent_charter_source"] = "template"
-    _seed_template_preferred_llm_tier(request, template)
-    request.session.modified = True
+    stage_agent_template_session(
+        request,
+        template,
+        template_source=AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+        include_charter=True,
+    )
 
 
 def _template_launch_analytics_properties(request, template, *, default_source_page: str) -> dict:
@@ -2069,11 +2062,12 @@ def _resolve_public_template_for_route(
 
 
 def _seed_public_template_session(request, template: PersistentAgentTemplate) -> str | None:
-    request.session["agent_charter"] = template.charter
-    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE
-    request.session["agent_charter_source"] = "template"
-    _seed_template_preferred_llm_tier(request, template)
+    stage_agent_template_session(
+        request,
+        template,
+        template_source=AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE,
+        include_charter=True,
+    )
 
     # Template launches are referral attribution, so choosing one supersedes
     # any direct referral code already staged for signup.

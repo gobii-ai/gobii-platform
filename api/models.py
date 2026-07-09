@@ -13071,6 +13071,54 @@ class AgentOwnerCustomInstructions(models.Model):
         return f"Custom instructions for {owner}"
 
 
+class AgentOwnerCategoryProfile(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="agent_category_profiles",
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="agent_category_profiles",
+    )
+    categories = models.JSONField(default=list, blank=True)
+    source_fingerprint = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(user__isnull=False, organization__isnull=True)
+                    | models.Q(user__isnull=True, organization__isnull=False)
+                ),
+                name="agent_owner_category_profile_exactly_one_owner",
+            ),
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(user__isnull=False),
+                name="unique_agent_owner_category_profile_user",
+            ),
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=models.Q(organization__isnull=False),
+                name="unique_agent_owner_category_profile_org",
+            ),
+        ]
+        verbose_name = "agent owner category profile"
+        verbose_name_plural = "agent owner category profiles"
+
+    def __str__(self) -> str:
+        owner = self.organization or self.user
+        return f"Agent owner category profile for {owner}"
+
+
 @receiver(post_save, sender=Organization)
 def initialize_organization_billing(sender, instance, created, **kwargs):
     if created:

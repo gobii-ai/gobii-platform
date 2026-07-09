@@ -7,6 +7,7 @@ export type ConsoleContext = {
   id: string
   name: string
   canCreateAgents?: boolean
+  personalSignupPreviewCreateAvailable?: boolean
 }
 
 export type ConsoleContextOption = ConsoleContext & {
@@ -18,6 +19,7 @@ type ConsoleContextPayload = {
   id: string
   name: string
   canCreateAgents?: boolean
+  personalSignupPreviewCreateAvailable?: boolean
 }
 
 type ConsoleContextResponsePayload = {

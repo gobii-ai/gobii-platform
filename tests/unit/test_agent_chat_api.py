@@ -578,6 +578,61 @@ class AgentChatAPITests(TestCase):
         PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True,
     )
     @tag("batch_agent_chat")
+    @patch("console.agent_creation.Analytics.track_event")
+    def test_quick_create_allows_signup_preview_after_deleted_preview_agent(
+        self,
+        _mock_track_event,
+    ):
+        fresh_user = get_user_model().objects.create_user(
+            username="preview-deleted-user",
+            email="preview-deleted@example.com",
+            password="password123",
+        )
+        deleted_browser_agent = BrowserUseAgent.objects.create(user=fresh_user, name="Deleted Preview Browser")
+        PersistentAgent.objects.create(
+            user=fresh_user,
+            name="Deleted Preview Agent",
+            charter="Deleted preview charter",
+            browser_use_agent=deleted_browser_agent,
+            is_active=False,
+            is_deleted=True,
+            signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE,
+        )
+        preview_client = Client()
+        preview_client.force_login(fresh_user)
+        with (
+            override_flag("personal_agent_signup_preview_processing_limit", active=True),
+            patch("console.agent_creation.can_user_use_personal_agents_and_api", return_value=False),
+            patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
+            patch("console.agent_creation.process_agent_events_task.delay"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = preview_client.post(
+                    "/console/api/agents/create/",
+                    data=json.dumps({"message": "Create replacement preview"}),
+                    content_type="application/json",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        created_agent = PersistentAgent.objects.get(id=response.json()["agent_id"])
+        self.assertEqual(
+            created_agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE,
+        )
+        self.assertEqual(
+            PersistentAgent.objects.filter(
+                user=fresh_user,
+                organization__isnull=True,
+                is_deleted=False,
+            ).count(),
+            1,
+        )
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True,
+    )
+    @tag("batch_agent_chat")
     def test_quick_create_blocks_second_signup_preview_agent_without_plan(self):
         fresh_user = get_user_model().objects.create_user(
             username="preview-repeat-user",
@@ -613,6 +668,112 @@ class AgentChatAPITests(TestCase):
             ).count(),
             1,
         )
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True,
+    )
+    @tag("batch_agent_chat")
+    def test_roster_allows_signup_preview_create_after_deleted_preview_agent(self):
+        fresh_user = get_user_model().objects.create_user(
+            username="preview-roster-deleted-user",
+            email="preview-roster-deleted@example.com",
+            password="password123",
+        )
+        deleted_browser_agent = BrowserUseAgent.objects.create(user=fresh_user, name="Roster Deleted Browser")
+        PersistentAgent.objects.create(
+            user=fresh_user,
+            name="Roster Deleted Preview",
+            charter="Deleted preview charter",
+            browser_use_agent=deleted_browser_agent,
+            is_active=False,
+            is_deleted=True,
+            signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
+        preview_client = Client()
+        preview_client.force_login(fresh_user)
+
+        with (
+            override_flag("personal_agent_signup_preview_processing_limit", active=True),
+            patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
+        ):
+            response = preview_client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["context"]["personalSignupPreviewCreateAvailable"])
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True,
+    )
+    @tag("batch_agent_chat")
+    def test_roster_blocks_signup_preview_create_when_active_preview_exists(self):
+        fresh_user = get_user_model().objects.create_user(
+            username="preview-roster-active-user",
+            email="preview-roster-active@example.com",
+            password="password123",
+        )
+        browser_agent = BrowserUseAgent.objects.create(user=fresh_user, name="Roster Active Browser")
+        PersistentAgent.objects.create(
+            user=fresh_user,
+            name="Roster Active Preview",
+            charter="Active preview charter",
+            browser_use_agent=browser_agent,
+            signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
+        preview_client = Client()
+        preview_client.force_login(fresh_user)
+
+        with (
+            override_flag("personal_agent_signup_preview_processing_limit", active=True),
+            patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
+        ):
+            response = preview_client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["context"]["personalSignupPreviewCreateAvailable"])
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True,
+    )
+    @tag("batch_agent_chat")
+    def test_roster_signup_preview_create_unavailable_in_org_context(self):
+        fresh_user = get_user_model().objects.create_user(
+            username="preview-roster-org-user",
+            email="preview-roster-org@example.com",
+            password="password123",
+        )
+        organization = Organization.objects.create(
+            name="Preview Org",
+            slug="preview-org",
+            created_by=fresh_user,
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=fresh_user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        preview_client = Client()
+        preview_client.force_login(fresh_user)
+        session = preview_client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
+        with (
+            override_flag("personal_agent_signup_preview_processing_limit", active=True),
+            patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
+        ):
+            response = preview_client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["context"]["personalSignupPreviewCreateAvailable"])
 
     @tag("batch_agent_chat")
     @patch("api.services.signup_preview.Analytics.track_event")

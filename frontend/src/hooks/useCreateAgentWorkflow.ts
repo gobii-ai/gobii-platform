@@ -32,7 +32,7 @@ export function useCreateAgentWorkflow({
   )
 
   useEffect(() => {
-    if (!isNewAgent || !spawnFlow) {
+    if (!isNewAgent) {
       spawnIntentAutoSubmittedRef.current = false
       dispatch(chatActions.spawnIntentSet(null))
       dispatch(chatActions.spawnIntentStatusSet('idle'))
@@ -42,7 +42,7 @@ export function useCreateAgentWorkflow({
     return () => {
       request.abort()
     }
-  }, [currentLocationSearch, dispatch, isNewAgent, spawnFlow])
+  }, [currentLocationSearch, dispatch, isNewAgent])
 
   return {
     createAgentError: createAgentWorkflow.error,

@@ -406,6 +406,68 @@ describe('AgentChatLayout upgrade modal gating', () => {
     expect(handleSkipPlanning).toHaveBeenCalledTimes(1)
   })
 
+  it('renders template recommendations in the empty new-agent timeline', () => {
+    const handleCreate = vi.fn()
+    renderWithStore(
+      <AgentChatLayout
+        agentId={null}
+        events={[]}
+        onTemplateRecommendationCreate={handleCreate}
+        templateRecommendations={[
+          {
+            id: 'template-1',
+            name: 'Talent Scout',
+            tagline: 'Find and qualify candidates.',
+            description: 'Find and qualify candidates.',
+            category: 'People',
+            templateCode: 'talent-scout',
+            templateId: 'template-1',
+            templateSource: 'public',
+            likeCount: 4,
+            isOfficial: true,
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('Start with a template')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent from template: Talent Scout' }))
+    expect(handleCreate).toHaveBeenCalledTimes(1)
+    expect(handleCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        templateCode: 'talent-scout',
+        templateId: 'template-1',
+        templateSource: 'public',
+      }),
+      0,
+    )
+  })
+
+  it('hides template recommendations once the timeline has events', () => {
+    renderWithStore(
+      <AgentChatLayout
+        agentId={null}
+        events={[{ cursor: 'message-1', kind: 'message', message: { isOutbound: false } } as any]}
+        templateRecommendations={[
+          {
+            id: 'template-1',
+            name: 'Talent Scout',
+            tagline: 'Find and qualify candidates.',
+            description: 'Find and qualify candidates.',
+            category: 'People',
+            templateCode: 'talent-scout',
+            templateId: 'template-1',
+            templateSource: 'public',
+            likeCount: 4,
+            isOfficial: true,
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.queryByText('Start with a template')).not.toBeInTheDocument()
+  })
+
   it('opens the settings panel when a chat message links to the current agent settings page', () => {
     renderWithStore(
       <AgentChatLayout

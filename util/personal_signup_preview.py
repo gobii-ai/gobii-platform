@@ -6,7 +6,7 @@ from django.http import HttpRequest
 from constants.feature_flags import PERSONAL_AGENT_SIGNUP_PREVIEW_PROCESSING_LIMIT, PERSONAL_AGENT_SIGNUP_PREVIEW_UI
 from util.onboarding import clear_trial_onboarding_intent, get_trial_onboarding_state
 from util.trial_enforcement import can_user_use_personal_agents_and_api
-from util.urls import IMMERSIVE_APP_BASE_PATH, append_query_params
+from util.urls import IMMERSIVE_APP_BASE_PATH
 from util.waffle_flags import is_waffle_flag_active
 
 
@@ -44,7 +44,7 @@ class PersonalSignupPreviewConfig:
     def suppresses_legacy_plan_modal(self) -> bool:
         return self.ui_enabled and self.processing_limit_enabled
 
-    def should_synthesize_starter_charter(
+    def should_route_empty_signup_to_template_picker(
         self,
         *,
         saved_charter: str | None,
@@ -112,10 +112,6 @@ def resolve_personal_signup_preview(
     )
 
 
-def build_personal_signup_starter_charter() -> str:
-    return GENERIC_STARTER_CHARTER
-
-
 def resolve_personal_signup_preview_onboarding_state(
     request: HttpRequest,
     *,
@@ -151,12 +147,9 @@ def get_personal_signup_preview_signup_redirect_url(
         preview_config=preview_config,
     )
     saved_charter = request.session.get("agent_charter")
-    if not preview_config.should_synthesize_starter_charter(
+    if not preview_config.should_route_empty_signup_to_template_picker(
         saved_charter=saved_charter,
         pending_onboarding=onboarding_state.pending,
     ):
         return None
-    return append_query_params(
-        f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
-        {"spawn": "1"},
-    )
+    return f"{IMMERSIVE_APP_BASE_PATH}/agents/new"

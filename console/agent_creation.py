@@ -53,6 +53,47 @@ AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY = "agent_template_organization_id"
 AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER = "pretrained_worker"
 AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE = "public_template"
 AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE = "organization_template"
+PREFERRED_LLM_TIER_SESSION_KEY = "agent_preferred_llm_tier"
+
+
+def _template_preferred_llm_tier_key(template) -> str | None:
+    preferred_tier = getattr(template, "preferred_llm_tier", None)
+    tier_key = getattr(preferred_tier, "key", preferred_tier)
+    tier_key = str(tier_key or "").strip().lower()
+    return tier_key or None
+
+
+def stage_agent_template_session(
+    request: HttpRequest,
+    template,
+    *,
+    template_source: str,
+    organization=None,
+    include_charter: bool = False,
+) -> None:
+    if include_charter:
+        request.session["agent_charter"] = template.charter
+    request.session["agent_charter_source"] = "template"
+    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = template_source
+
+    if template_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE:
+        org = organization or getattr(template, "organization", None)
+        organization_id = getattr(template, "organization_id", None) or getattr(org, "id", None)
+        request.session[AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY] = str(organization_id)
+        if org is not None:
+            request.session["context_type"] = "organization"
+            request.session["context_id"] = str(org.id)
+            request.session["context_name"] = org.name
+    else:
+        request.session.pop(AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, None)
+
+    tier_key = _template_preferred_llm_tier_key(template)
+    if tier_key:
+        request.session[PREFERRED_LLM_TIER_SESSION_KEY] = tier_key
+    else:
+        request.session.pop(PREFERRED_LLM_TIER_SESSION_KEY, None)
+    request.session.modified = True
 
 
 def _customer_account_pause_creation_message(owner) -> str:
@@ -551,7 +592,6 @@ def create_persistent_agent_from_charter(
                 request=request,
             )
         )
-
         return AgentCreationResult(
             agent=persistent_agent,
             organization=organization,
