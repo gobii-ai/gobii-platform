@@ -66,6 +66,7 @@ from api.agent.core.internal_reasoning import (
     build_internal_reasoning_description,
 )
 from api.agent.core.prompt_context import (
+    _format_current_datetime_for_prompt,
     build_prompt_context_preview,
     get_agent_tools,
     get_prompt_token_budget,
@@ -1239,6 +1240,18 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("UTC: 2026-03-10T16:00:00+00:00", content)
         self.assertNotIn("User local time", content)
         self.assertIn("Note user's TZ may be different", content)
+
+    def test_current_datetime_helper_handles_agent_without_user(self):
+        frozen_now = datetime(2026, 3, 10, 16, 0, 0, tzinfo=dt_timezone.utc)
+
+        content, note = _format_current_datetime_for_prompt(
+            SimpleNamespace(user=None, user_id=None),
+            frozen_now,
+        )
+
+        self.assertIn("UTC: 2026-03-10T16:00:00+00:00", content)
+        self.assertNotIn("User local time", content)
+        self.assertIn("Note user's TZ may be different", note)
 
     def test_unified_history_message_headers_omit_recent_age_suffix(self):
         message = PersistentAgentMessage.objects.create(

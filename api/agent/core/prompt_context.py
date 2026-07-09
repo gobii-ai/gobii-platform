@@ -222,6 +222,29 @@ def _get_prompt_now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _format_current_datetime_for_prompt(agent: PersistentAgent, now_utc: datetime) -> tuple[str, str]:
+    current_datetime_lines = [f"UTC: {now_utc.isoformat()}"]
+    agent_user = agent.user if getattr(agent, "user_id", None) else None
+    saved_user_timezone = resolve_user_timezone(agent_user, fallback_to_utc=False) if agent_user else ""
+    if saved_user_timezone:
+        user_local_now, resolved_user_timezone = resolve_user_local_time(agent_user, now_utc)
+        current_datetime_lines.append(
+            f"User local time ({resolved_user_timezone}): {user_local_now.isoformat()}"
+        )
+        current_datetime_note = (
+            f"User local time is based on the saved user timezone ({resolved_user_timezone}). "
+            "All times before this are the past. All times after this are the future. "
+            "Do not assume that because something is in your training data or in a web search result that it is still true."
+        )
+    else:
+        current_datetime_note = (
+            "(Note user's TZ may be different! Confirm with them if there is any doubt.) "
+            "All times before this are the past. All times after this are the future. "
+            "Do not assume that because something is in your training data or in a web search result that it is still true."
+        )
+    return "\n".join(current_datetime_lines), current_datetime_note
+
+
 def tool_call_history_limit(agent: PersistentAgent) -> int:
     """Return the configured tool call history limit for the agent's LLM tier."""
 
@@ -1701,27 +1724,10 @@ def _render_prompt_context_once(
 
     # Current datetime - small but critical for time-aware decisions
     now_utc = _get_prompt_now_utc()
-    current_datetime_lines = [f"UTC: {now_utc.isoformat()}"]
-    saved_user_timezone = resolve_user_timezone(agent.user, fallback_to_utc=False)
-    if saved_user_timezone:
-        user_local_now, resolved_user_timezone = resolve_user_local_time(agent.user, now_utc)
-        current_datetime_lines.append(
-            f"User local time ({resolved_user_timezone}): {user_local_now.isoformat()}"
-        )
-        current_datetime_note = (
-            f"User local time is based on the saved user timezone ({resolved_user_timezone}). "
-            "All times before this are the past. All times after this are the future. "
-            "Do not assume that because something is in your training data or in a web search result that it is still true."
-        )
-    else:
-        current_datetime_note = (
-            "(Note user's TZ may be different! Confirm with them if there is any doubt.) "
-            "All times before this are the past. All times after this are the future. "
-            "Do not assume that because something is in your training data or in a web search result that it is still true."
-        )
+    current_datetime_text, current_datetime_note = _format_current_datetime_for_prompt(agent, now_utc)
     critical_group.section_text(
         "current_datetime",
-        "\n".join(current_datetime_lines),
+        current_datetime_text,
         weight=3,
         non_shrinkable=True
     )
