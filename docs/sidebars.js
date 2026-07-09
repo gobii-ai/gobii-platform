@@ -98,6 +98,7 @@ const sidebars = {
       },
       collapsed: false,
       items: [
+        'developers/developer-basics',
         'developers/developer-agents',
         'developers/mcp-server',
         'developers/webhooks',
