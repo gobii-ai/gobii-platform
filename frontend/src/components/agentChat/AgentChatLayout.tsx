@@ -12,7 +12,6 @@ import { AgentChatBanner } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
-import { ProductAnnouncementBell } from './ProductAnnouncementBell'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
 import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
@@ -1423,7 +1422,6 @@ export function AgentChatLayout({
         onDesktopModeChange={handleSidebarModeChange}
         settings={sidebarSettings}
       />
-      {isMobileViewport && isProprietaryMode ? <ProductAnnouncementBell variant="mobile" /> : null}
       {showBanner && (
         <AgentChatBanner
           agentNameOverride={bannerAgentName}

@@ -6806,12 +6806,15 @@
     min-width: 0;
 }
 .chat-sidebar[data-sidebar-mode='gallery'] .sidebar-settings__actions {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
 }
 .chat-sidebar[data-sidebar-mode='gallery'] .sidebar-settings__actions .sidebar-settings__trigger:not(.sidebar-settings__trigger--help) {
-    flex: 0 0 calc(var(--agent-chat-sidebar-width, 18rem) - 2rem);
-    width: calc(var(--agent-chat-sidebar-width, 18rem) - 2rem);
-    max-width: calc(100vw - 5rem);
+    flex: 0 0 auto;
+    width: auto;
+    max-width: min(14rem, calc(100vw - 8rem));
+}
+.chat-sidebar[data-sidebar-mode='gallery'] .sidebar-settings__trigger--help {
+    margin-left: auto;
 }
 .sidebar-settings__actions .sidebar-settings__trigger--help {
     flex: 0 0 2.5rem;
@@ -6890,6 +6893,10 @@
     font-size: 0.9375rem;
 }
 .sidebar-settings[data-variant='drawer'] .sidebar-settings__trigger--help {
+    flex-basis: 3rem;
+    width: 3rem;
+}
+.sidebar-settings[data-variant='drawer'] .sidebar-settings__accessory .product-announcement-bell__trigger--settings {
     flex-basis: 3rem;
     width: 3rem;
 }
@@ -7503,15 +7510,6 @@
 .agent-fab-switch-badge svg {
     width: 0.5625rem;
     height: 0.5625rem;
-}
-.product-announcement-mobile-trigger {
-    --_accent: #24114f;
-    right: 5.15rem;
-    animation-delay: 0.68s;
-}
-.product-announcement-mobile-trigger__icon {
-    width: 1.1rem;
-    height: 1.1rem;
 }
 .agent-drawer-view-toggle {
     display: grid;

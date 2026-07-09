@@ -745,7 +745,13 @@ export const ChatSidebar = memo(function ChatSidebar({
               {renderListContent('drawer', false)}
             </div>
           ) : null}
-          {!showSettingsView && settings ? <SidebarSettingsMenu {...settings} variant="drawer" /> : null}
+          {!showSettingsView && settings ? (
+            <SidebarSettingsMenu
+              {...settings}
+              variant="drawer"
+              bottomAccessory={settings.isProprietaryMode ? <ProductAnnouncementBell variant="mobile" /> : null}
+            />
+          ) : null}
         </AgentChatMobileSheet>
       </div>
       {agentContextMenuElement}
