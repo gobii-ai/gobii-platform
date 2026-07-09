@@ -179,6 +179,7 @@ def build_ai_employees_structured_data(
     organization_logo_url,
     organization_same_as,
     live_cluster_links,
+    starting_price,
 ):
     organization_id = f"{home_url.rstrip('/')}#organization"
     website_id = f"{home_url.rstrip('/')}#website"
@@ -222,6 +223,8 @@ def build_ai_employees_structured_data(
         "offers": {
             "@type": "Offer",
             "url": pricing_url,
+            "price": starting_price,
+            "priceCurrency": "USD",
         },
     }
     faq_schema = {

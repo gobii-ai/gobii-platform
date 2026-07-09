@@ -77,6 +77,15 @@
         </a>
       </div>
 
+      <nav class="mt-8 flex max-w-3xl flex-wrap gap-x-6 gap-y-3 text-sm" aria-label="AI employees page sections">
+        <a href="#definition" class="font-medium text-indigo-100 hover:text-white">Definition</a>
+        <a href="#workflow-examples" class="font-medium text-indigo-100 hover:text-white">Workflows</a>
+        <a href="#product-proof" class="font-medium text-indigo-100 hover:text-white">Product proof</a>
+        <a href="#deployment" class="font-medium text-indigo-100 hover:text-white">Deployment</a>
+        <a href="#pricing" class="font-medium text-indigo-100 hover:text-white">Pricing</a>
+        <a href="#faq" class="font-medium text-indigo-100 hover:text-white">FAQ</a>
+      </nav>
+
       <dl class="mt-12 grid max-w-4xl gap-3 sm:grid-cols-3">
         <div class="rounded-lg border border-white/15 bg-white/10 p-4 backdrop-blur">
           <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-200">Deploy</dt>
@@ -95,7 +104,7 @@
   </div>
 </section>
 
-<section class="bg-white py-16">
+<section id="definition" class="bg-white py-16 scroll-mt-20">
   <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.86fr_1.14fr] lg:gap-16 lg:px-12">
     <div>
       <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Definition</p>
@@ -246,6 +255,8 @@
   </div>
 </section>
 
+{% include "ai_employees/_comparison_matrix.html" %}
+
 <section class="bg-white py-16">
   <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16 lg:px-12">
     <div>
@@ -302,7 +313,7 @@
   </div>
 </section>
 
-<section class="bg-slate-950 py-16 text-white">
+<section id="deployment" class="bg-slate-950 py-16 text-white scroll-mt-20">
   <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16 lg:px-12">
     <div>
       <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Deployment</p>
@@ -333,6 +344,66 @@
         <h3 class="mt-4 text-lg font-semibold">4. Handoff cleanly</h3>
         <p class="mt-3 text-sm leading-6 text-indigo-100">Move approved work into the team's system of record with links, fields, reviewer notes, and a next action.</p>
       </article>
+    </div>
+  </div>
+</section>
+
+<section id="governance" class="bg-white py-16 scroll-mt-20">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Governance in Gobii</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Access stays scoped, visible, and reversible</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        Supervision is part of the product workflow. Gobii keeps credentials out of chat, shows the work record, and gives teams explicit places to narrow access or stop an action before it proceeds.
+      </p>
+      <div class="mt-6 flex flex-col items-start gap-3 text-sm font-semibold sm:flex-row sm:gap-6">
+        <a href="https://docs.gobii.ai/using-gobii/secrets-and-credentials" class="inline-flex items-center gap-2 text-indigo-700 hover:text-indigo-900">
+          Secrets and credentials
+          <i data-lucide="external-link" class="h-4 w-4"></i>
+        </a>
+        <a href="https://docs.gobii.ai/using-gobii/approvals-and-requests" class="inline-flex items-center gap-2 text-indigo-700 hover:text-indigo-900">
+          Approvals and requests
+          <i data-lucide="external-link" class="h-4 w-4"></i>
+        </a>
+      </div>
+    </div>
+
+    <div class="grid gap-x-12 gap-y-10 sm:grid-cols-2">
+      <div class="flex items-start gap-4">
+        <i data-lucide="key-round" class="mt-0.5 h-5 w-5 flex-none text-indigo-700"></i>
+        <div class="min-w-0">
+          <h3 class="text-sm font-semibold text-slate-950">Credentials outside chat</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">Secret values are encrypted before storage and can stay scoped to one Gobii, a user, or an organization.</p>
+        </div>
+      </div>
+      <div class="flex items-start gap-4">
+        <i data-lucide="scan-eye" class="mt-0.5 h-5 w-5 flex-none text-emerald-700"></i>
+        <div class="min-w-0">
+          <h3 class="text-sm font-semibold text-slate-950">Permission scope</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">Native app capabilities reflect the connected account and granted OAuth scopes. Missing access stays unavailable until it is granted.</p>
+        </div>
+      </div>
+      <div class="flex items-start gap-4">
+        <i data-lucide="list-checks" class="mt-0.5 h-5 w-5 flex-none text-sky-700"></i>
+        <div class="min-w-0">
+          <h3 class="text-sm font-semibold text-slate-950">Visible work record</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">The timeline keeps messages, plans, tool activity, pending requests, generated files, and completed deliverables together.</p>
+        </div>
+      </div>
+      <div class="flex items-start gap-4">
+        <i data-lucide="octagon-pause" class="mt-0.5 h-5 w-5 flex-none text-amber-700"></i>
+        <div class="min-w-0">
+          <h3 class="text-sm font-semibold text-slate-950">Approval gates</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">A Gobii can pause for human input, a credential, contact permission, or approval before an important change or external action.</p>
+        </div>
+      </div>
+      <div class="flex max-w-2xl items-start gap-4 sm:col-span-2">
+        <i data-lucide="unplug" class="mt-0.5 h-5 w-5 flex-none text-violet-700"></i>
+        <div class="min-w-0">
+          <h3 class="text-sm font-semibold text-slate-950">Remove access</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">Disconnect an app or remove a stored secret when the workflow no longer needs it. Access can be narrowed without rebuilding the AI teammate.</p>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -374,6 +445,36 @@
           <p class="mt-3 text-sm leading-6 text-slate-700">Watch recurring inputs, reconcile lists, flag exceptions, and send structured summaries to owners.</p>
         </article>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing" class="bg-indigo-50 py-16 scroll-mt-20">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Starting point</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Start one real workflow on hosted Pro</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        Deploy the first AI teammate around work your team can review quickly. Add more workflows after the inputs, output, and approval boundaries are working the way you expect.
+      </p>
+    </div>
+
+    <div>
+      <p class="flex items-baseline gap-2 text-slate-950">
+        <span class="text-5xl font-light">{{ ai_employees_pro_price_display }}</span>
+        <span class="text-base font-medium text-slate-600">per month</span>
+      </p>
+      <p class="mt-3 text-sm font-semibold text-indigo-800">Hosted Pro · {{ ai_employees_pro_task_credits_display }} tasks included each month</p>
+      <ul class="mt-6 grid gap-3 text-sm leading-6 text-slate-700 sm:grid-cols-2">
+        <li class="flex gap-3"><i data-lucide="check" class="mt-0.5 h-4 w-4 flex-none text-emerald-700"></i><span>Unlimited always-on agents</span></li>
+        <li class="flex gap-3"><i data-lucide="check" class="mt-0.5 h-4 w-4 flex-none text-emerald-700"></i><span>Month-to-month billing</span></li>
+        <li class="flex gap-3"><i data-lucide="check" class="mt-0.5 h-4 w-4 flex-none text-emerald-700"></i><span>Priority support</span></li>
+        <li class="flex gap-3"><i data-lucide="check" class="mt-0.5 h-4 w-4 flex-none text-emerald-700"></i><span>Usage-based tasks beyond the included amount</span></li>
+      </ul>
+      <a href="{% url 'proprietary:pricing' %}" class="mt-7 inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-800">
+        See all plan details
+        <i data-lucide="arrow-right" class="h-4 w-4"></i>
+      </a>
     </div>
   </div>
 </section>
@@ -474,7 +575,7 @@
   </div>
 </section>
 
-<section class="bg-white py-16">
+<section id="faq" class="bg-white py-16 scroll-mt-20">
   <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16 lg:px-12">
     <div>
       <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">FAQ</p>

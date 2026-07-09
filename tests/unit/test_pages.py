@@ -2634,6 +2634,8 @@ class AIEmployeesPageTests(TestCase):
             {
                 "@type": "Offer",
                 "url": "https://gobii.ai/pricing/",
+                "price": 50,
+                "priceCurrency": "USD",
             },
         )
         self.assertEqual(
@@ -2699,6 +2701,54 @@ class AIEmployeesPageTests(TestCase):
             },
         )
         self.assertTrue(all(image.get("alt") for image in proof.find_all("img")))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_ai_employees_page_renders_buyer_decision_sections(self):
+        _response, soup = self._get_proprietary_page()
+
+        section_nav = soup.find("nav", attrs={"aria-label": "AI employees page sections"})
+        self.assertEqual(
+            {link.get_text(" ", strip=True): link["href"] for link in section_nav.find_all("a")},
+            {
+                "Definition": "#definition",
+                "Workflows": "#workflow-examples",
+                "Product proof": "#product-proof",
+                "Deployment": "#deployment",
+                "Pricing": "#pricing",
+                "FAQ": "#faq",
+            },
+        )
+
+        comparison = soup.find("section", id="comparison")
+        comparison_text = re.sub(r"\s+", " ", comparison.get_text(" ", strip=True)).lower()
+        for term in (
+            "gobii ai teammates",
+            "chatbots",
+            "generic ai agents",
+            "ai employee marketplaces",
+            "workflow ownership",
+            "evidence and handoff",
+        ):
+            with self.subTest(term=term):
+                self.assertIn(term, comparison_text)
+
+        governance = soup.find("section", id="governance")
+        governance_text = re.sub(r"\s+", " ", governance.get_text(" ", strip=True)).lower()
+        for term in (
+            "credentials outside chat",
+            "permission scope",
+            "visible work record",
+            "approval gates",
+            "remove access",
+        ):
+            with self.subTest(term=term):
+                self.assertIn(term, governance_text)
+
+        pricing = soup.find("section", id="pricing")
+        pricing_text = re.sub(r"\s+", " ", pricing.get_text(" ", strip=True)).lower()
+        self.assertIn("$50 per month", pricing_text)
+        self.assertIn("500 tasks included each month", pricing_text)
+        self.assertIsNotNone(pricing.find("a", href=reverse("proprietary:pricing")))
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_ai_employees_page_redirects_in_community_mode(self):

@@ -67,6 +67,7 @@ from billing.checkout_metadata import (
 from billing.checkout_context import record_checkout_context
 from billing.checkout_sessions import create_stripe_checkout_session
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
+from config.plans import STARTUP_MONTHLY_PRICE_USD
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -4269,6 +4270,8 @@ class AIEmployeesView(TemplateView):
         pricing_url = _public_site_absolute_url(reverse("proprietary:pricing"))
         social_image_url = _public_site_absolute_url(static(self.social_image))
         live_cluster_links = self._live_cluster_links()
+        pro_price = STARTUP_MONTHLY_PRICE_USD
+        pro_task_credits = get_active_public_plan_monthly_task_credits(PlanNames.STARTUP)
         structured_data = build_ai_employees_structured_data(
             page_title=self.page_title,
             seo_title=self.seo_title,
@@ -4280,6 +4283,7 @@ class AIEmployeesView(TemplateView):
             organization_logo_url=_public_site_absolute_url(static(self.ORGANIZATION_LOGO_PATH)),
             organization_same_as=self.ORGANIZATION_SAME_AS,
             live_cluster_links=live_cluster_links,
+            starting_price=pro_price,
         )
 
         context.update({
@@ -4293,6 +4297,8 @@ class AIEmployeesView(TemplateView):
             "ai_employees_faq_items": [dict(item) for item in AI_EMPLOYEES_FAQ_ITEMS],
             "ai_employees_workflow_items": [dict(item) for item in AI_EMPLOYEES_WORKFLOW_ITEMS],
             "ai_employees_live_cluster_links": live_cluster_links,
+            "ai_employees_pro_price_display": f"${pro_price:,}",
+            "ai_employees_pro_task_credits_display": f"{pro_task_credits:,}",
             "ai_employees_planned_cluster_links": [
                 dict(link) for link in AI_EMPLOYEES_CLUSTER_LINKS
             ],

@@ -15,6 +15,7 @@ AGENTS_UNLIMITED = -2147483648
 # Maximum number of agents any user can have, regardless of plan. Acts as a safety valve.
 MAX_AGENT_LIMIT = 1000  # TODO: Adjust once we have confidence scaling beyond this
 # NOTE: Keep this above AGENTS_UNLIMITED so comparisons using min() work correctly.
+STARTUP_MONTHLY_PRICE_USD = 50
 
 PLAN_CONFIG = {
     PlanNames.FREE: {
@@ -41,7 +42,7 @@ PLAN_CONFIG = {
         "agent_limit": AGENTS_UNLIMITED,
         "name": "Pro",
         "description": "Pro plan with enhanced features and support.",
-        "price": 50,
+        "price": STARTUP_MONTHLY_PRICE_USD,
         "currency": "USD",
         "max_contacts_per_agent": 20,
         "org": False
@@ -113,7 +114,7 @@ def _refresh_plan_products() -> None:
     PLAN_CONFIG[PlanNames.STARTUP]["dedicated_ip_product_id"] = stripe_settings.startup_dedicated_ip_product_id or ""
     PLAN_CONFIG[PlanNames.STARTUP]["dedicated_ip_price_id"] = stripe_settings.startup_dedicated_ip_price_id or ""
     PLAN_CONFIG[PlanNames.STARTUP]["price"] = _get_price_amount(
-        stripe_settings.startup_price_id, default=50
+        stripe_settings.startup_price_id, default=STARTUP_MONTHLY_PRICE_USD
     )
 
     PLAN_CONFIG[PlanNames.SCALE]["product_id"] = stripe_settings.scale_product_id or ""
