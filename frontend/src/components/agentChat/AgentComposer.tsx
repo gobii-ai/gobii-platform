@@ -1,7 +1,9 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, Ref } from 'react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
-import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, KeyRound, Loader2, Mail, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
+import {
+  ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, KeyRound, Loader2, Mail, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X,
+} from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { ApolloInsightPanel } from './insights/ApolloInsightPanel'
@@ -28,7 +30,9 @@ import { sanitizeHtml } from '../../util/sanitize'
 import { clearAgentChatMessageDraft, readAgentChatMessageDraft, writeAgentChatMessageDraft } from '../../util/agentChatDraftStorage'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import { useModal } from '../../hooks/useModal'
-import { AgentChatMenuItem } from './uiPrimitives'
+import { AgentChatMenuItem } from './uiPrimitives';
+
+// Detect if user is on macOS
 
 // Detect if user is on macOS
 function isMacOS(): boolean {

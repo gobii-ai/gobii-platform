@@ -1,6 +1,8 @@
 import type { FormEvent, ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowUpFromLine, Check, CheckCircle2, ChevronDown, CircleHelp, Copy, Folder, Info, KeyRound, Mail, Phone, Plus, ServerCog, ShieldAlert, Trash2, UserPlus, XCircle, Zap } from 'lucide-react'
+import {
+  AlertTriangle, ArrowUpFromLine, Check, CheckCircle2, ChevronDown, CircleHelp, Copy, Folder, Info, KeyRound, Mail, Phone, Plus, ServerCog, ShieldAlert, Trash2, UserPlus, XCircle, Zap,
+} from 'lucide-react'
 import { Slider as AriaSlider, SliderThumb, SliderTrack, Switch as AriaSwitch } from 'react-aria-components'
 import { ActionConfirmDialog as CommonActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { CheckboxField, FormField, SelectInput, TextInput } from '../components/common/FormControls'
@@ -20,7 +22,10 @@ import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
-import type { AgentDailyCreditsInfo as DailyCreditsInfo, AgentInboundWebhook, AgentOrganization, AgentSettingsData, AgentSettingsReassignmentInfo as ReassignmentInfo, AgentSummary, AgentWebhook, AllowlistState, CollaboratorState, DedicatedIpInfo, McpServersInfo, PeerLinkCandidate, PeerLinkEntry, PeerLinksInfo, PrimaryEndpoint } from '../types/agentSettings'
+import type {
+  AgentDailyCreditsInfo as DailyCreditsInfo, AgentInboundWebhook, AgentOrganization, AgentSettingsData, AgentSettingsReassignmentInfo as ReassignmentInfo, AgentSummary, AgentWebhook, AllowlistState,
+  CollaboratorState, DedicatedIpInfo, McpServersInfo, PeerLinkCandidate, PeerLinkEntry, PeerLinksInfo, PrimaryEndpoint,
+} from '../types/agentSettings'
 
 type PendingWebhookAction =
   | { type: 'create'; tempId: string; name: string; url: string }

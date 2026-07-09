@@ -658,7 +658,7 @@ def log_agent_completion(
     try:
         from ...services.billing_snapshot import get_billing_snapshot_for_owner
         from ...services.owner_execution_pause import resolve_agent_owner
-        from ...models import PersistentAgentCompletion  # local import to avoid cycles
+        from ...models import PersistentAgentCompletion
 
         billing_snapshot = get_billing_snapshot_for_owner(resolve_agent_owner(agent))
         PersistentAgentCompletion.objects.create(

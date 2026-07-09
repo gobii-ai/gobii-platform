@@ -36,7 +36,11 @@ from django.utils import timezone as dj_timezone
 from observability import mark_span_failed_with_exception
 from .budget import AgentBudgetManager, BudgetContext, get_current_context as get_budget_context, set_current_context as set_budget_context
 from .burn_control import BurnRateAction, handle_burn_rate_limit
-from .processing_flags import clear_processing_lock_active, claim_pending_drain_slot, clear_processing_heartbeat, clear_processing_queued_flag, clear_processing_stop_requested, clear_processing_work_state, enqueue_pending_agent, get_human_inbound_generation, get_pending_drain_settings, is_human_inbound_generation_consumed, is_agent_pending, is_processing_queued, is_processing_stop_requested, mark_human_inbound_generation_consumed, mark_processing_lock_active, processing_lock_storage_keys, remove_pending_agent, set_processing_heartbeat
+from .processing_flags import (
+    clear_processing_lock_active, claim_pending_drain_slot, clear_processing_heartbeat, clear_processing_queued_flag, clear_processing_stop_requested, clear_processing_work_state,
+    enqueue_pending_agent, get_human_inbound_generation, get_pending_drain_settings, is_human_inbound_generation_consumed, is_agent_pending, is_processing_queued, is_processing_stop_requested,
+    mark_human_inbound_generation_consumed, mark_processing_lock_active, processing_lock_storage_keys, remove_pending_agent, set_processing_heartbeat,
+)
 from .llm_utils import EmptyLiteLLMResponseError, raise_if_empty_litellm_response, raise_if_invalid_litellm_response, run_completion
 from .multimodal_context import collect_fresh_read_file_image_attachments, prepare_multimodal_read_file_request
 from .llm_streaming import StreamAccumulator
@@ -52,7 +56,9 @@ from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
 from . import internal_reasoning
-from .daily_limit_mode import DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT, DAILY_LIMIT_MESSAGE_TOOL_NAMES, filter_tools_for_daily_limit_message_only_mode, is_daily_limit_allowed_tool, is_daily_hard_limit_message_only_mode
+from .daily_limit_mode import (
+    DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT, DAILY_LIMIT_MESSAGE_TOOL_NAMES, filter_tools_for_daily_limit_message_only_mode, is_daily_limit_allowed_tool, is_daily_hard_limit_message_only_mode,
+)
 from .period_events import DAILY_HARD_LIMIT_BLOCKED_EVENT, DAILY_HARD_LIMIT_EXCEEDED_EVENT, DAILY_SOFT_LIMIT_EXCEEDED_EVENT, should_emit_daily_agent_event
 from .agent_judge import maybe_run_agent_judge
 from .prompt_context import build_prompt_context, get_agent_daily_credit_state, get_agent_tools
@@ -85,7 +91,10 @@ from ..tools.agent_variables import clear_variables, get_all_variables, replace_
 from ..tools.file_export_helpers import resolve_export_target
 from ..files.filespace_service import _normalize_write_path
 from ..comms.human_input_requests import attach_originating_step_from_result
-from ...models import CommsChannel, PersistentAgent, PersistentAgentMessage, PersistentAgentStep, PersistentAgentCompletion, PersistentAgentError, PersistentAgentSystemStep, PersistentAgentToolCall, PersistentAgentPromptArchive, SmsContactPurpose
+from ...models import (
+    CommsChannel, PersistentAgent, PersistentAgentMessage, PersistentAgentStep, PersistentAgentCompletion, PersistentAgentError, PersistentAgentSystemStep, PersistentAgentToolCall,
+    PersistentAgentPromptArchive, SmsContactPurpose,
+)
 from api.services.sandbox_warmup import recent_sandbox_tool_history_warm_reason
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
@@ -817,7 +826,7 @@ def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, sp
     if not claim_pending_drain_slot(ttl=schedule_ttl_seconds):
         return
     try:
-        from ..tasks.process_events import process_pending_agent_events_task  # noqa: WPS433 (runtime import)
+        from ..tasks.process_events import process_pending_agent_events_task  # noqa: WPS433
 
         process_pending_agent_events_task.apply_async(countdown=delay_seconds)
         if span is not None:
@@ -844,7 +853,7 @@ def _schedule_agent_follow_up(
         )
         return
     try:
-        from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
+        from ..tasks.process_events import process_agent_events_task  # noqa: WPS433
 
         apply_async_kwargs = {
             "args": [str(agent_id)],

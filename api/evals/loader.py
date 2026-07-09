@@ -1,7 +1,7 @@
 
 from api.evals.registry import ScenarioRegistry
 # Import scenarios here to ensure they are registered when the registry is imported elsewhere
-from api.evals.scenarios import * # noqa
+from api.evals.scenarios import *  # noqa
 from api.evals.scenarios.behavior_micro import BEHAVIOR_MICRO_SCENARIO_SLUGS, CHARTER_MEMORY_MICRO_SCENARIO_SLUGS, PLANNING_MICRO_SCENARIO_SLUGS, TOOL_CHOICE_MICRO_SCENARIO_SLUGS
 from api.evals.scenarios.effort_calibration import EFFORT_CALIBRATION_SCENARIO_SLUGS
 from api.evals.scenarios.custom_tool_result_contract import CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS, CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG

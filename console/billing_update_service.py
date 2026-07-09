@@ -22,7 +22,10 @@ from console.role_constants import BILLING_MANAGE_ROLES
 from util.integrations import stripe_status
 from util.payments_helper import PaymentsHelper
 from util.urls import IMMERSIVE_APP_BASE_PATH
-from util.subscription_helper import ensure_single_individual_subscription, get_active_subscription, get_or_create_stripe_customer, get_organization_plan, reconcile_user_plan_from_stripe, sync_subscription_after_direct_update as _sync_subscription_after_direct_update
+from util.subscription_helper import (
+    ensure_single_individual_subscription, get_active_subscription, get_or_create_stripe_customer, get_organization_plan, reconcile_user_plan_from_stripe,
+    sync_subscription_after_direct_update as _sync_subscription_after_direct_update,
+)
 
 from api.models import BrowserUseAgent, UserBilling
 from api.services.dedicated_proxy_service import DedicatedProxyService, DedicatedProxyUnavailableError

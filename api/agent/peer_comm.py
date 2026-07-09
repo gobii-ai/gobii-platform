@@ -18,7 +18,9 @@ from observability import traced
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace, get_or_create_dir
 from api.agent.tools.outbound_duplicate_guard import detect_recent_duplicate_message
-from api.models import AgentCommPeerState, AgentFsNode, AgentPeerLink, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversation, PersistentAgentMessage, PersistentAgentMessageAttachment
+from api.models import (
+    AgentCommPeerState, AgentFsNode, AgentPeerLink, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversation, PersistentAgentMessage, PersistentAgentMessageAttachment,
+)
 
 logger = logging.getLogger(__name__)
 

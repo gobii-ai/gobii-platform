@@ -40,7 +40,12 @@ from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time
 from api.services.agent_owner_custom_instructions import get_custom_instructions_for_organization_id, get_custom_instructions_for_user_id
 
-from ...models import AgentCommPeerState, AgentFileSpaceAccess, AgentFsNode, AgentPeerLink, BrowserUseAgentTask, BrowserUseAgentTaskStep, build_web_user_address, parse_web_user_address, AgentCollaborator, CommsAllowlistEntry, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentCommsSnapshot, PersistentAgentHumanInputRequest, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentPromptArchive, PersistentAgentSecret, GlobalSecret, OrganizationMembership, PersistentAgentStep, PersistentAgentStepSnapshot, PersistentAgentSystemMessage, PersistentAgentSystemStep, PersistentAgentToolCall, UserPhoneNumber
+from ...models import (
+    AgentCommPeerState, AgentFileSpaceAccess, AgentFsNode, AgentPeerLink, BrowserUseAgentTask, BrowserUseAgentTaskStep, build_web_user_address, parse_web_user_address, AgentCollaborator,
+    CommsAllowlistEntry, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentCommsSnapshot, PersistentAgentHumanInputRequest, PersistentAgentMessage,
+    PersistentAgentMessageAttachment, PersistentAgentPromptArchive, PersistentAgentSecret, GlobalSecret, OrganizationMembership, PersistentAgentStep, PersistentAgentStepSnapshot,
+    PersistentAgentSystemMessage, PersistentAgentSystemStep, PersistentAgentToolCall, UserPhoneNumber,
+)
 from ...services.web_sessions import get_deliverable_web_sessions
 from ..comms.source_metadata import get_message_source_metadata
 

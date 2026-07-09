@@ -36,12 +36,22 @@ from config.plans import PLAN_CONFIG
 from config.settings import INITIAL_TASK_CREDIT_EXPIRATION_DAYS
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames, PlanNamesChoices, PlanSlugsChoices, UserPlanNamesChoices, OrganizationPlanNamesChoices
-from api.services.prompt_settings import DEFAULT_INTERNAL_REASONING_HISTORY_LIMIT, DEFAULT_MAX_MESSAGE_HISTORY_LIMIT, DEFAULT_MAX_PROMPT_TOKEN_BUDGET, DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT, DEFAULT_MAX_SKILL_PROMPT_LIMIT, DEFAULT_ULTRA_MAX_MESSAGE_HISTORY_LIMIT, DEFAULT_ULTRA_MAX_PROMPT_TOKEN_BUDGET, DEFAULT_ULTRA_MAX_SKILL_PROMPT_LIMIT, DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT, DEFAULT_ULTRA_MESSAGE_HISTORY_LIMIT, DEFAULT_ULTRA_PROMPT_TOKEN_BUDGET, DEFAULT_ULTRA_SKILL_PROMPT_LIMIT, DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT, DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT, DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET, DEFAULT_PREMIUM_SKILL_PROMPT_LIMIT, DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT, DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT, DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET, DEFAULT_STANDARD_SKILL_PROMPT_LIMIT, DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT, DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT, DEFAULT_MAX_ENABLED_TOOL_LIMIT, DEFAULT_ULTRA_ENABLED_TOOL_LIMIT, DEFAULT_ULTRA_MAX_ENABLED_TOOL_LIMIT, DEFAULT_UNIFIED_HISTORY_LIMIT, DEFAULT_UNIFIED_HISTORY_HYSTERESIS
+from api.services.prompt_settings import (
+    DEFAULT_INTERNAL_REASONING_HISTORY_LIMIT, DEFAULT_MAX_MESSAGE_HISTORY_LIMIT, DEFAULT_MAX_PROMPT_TOKEN_BUDGET, DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT, DEFAULT_MAX_SKILL_PROMPT_LIMIT,
+    DEFAULT_ULTRA_MAX_MESSAGE_HISTORY_LIMIT, DEFAULT_ULTRA_MAX_PROMPT_TOKEN_BUDGET, DEFAULT_ULTRA_MAX_SKILL_PROMPT_LIMIT, DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT,
+    DEFAULT_ULTRA_MESSAGE_HISTORY_LIMIT, DEFAULT_ULTRA_PROMPT_TOKEN_BUDGET, DEFAULT_ULTRA_SKILL_PROMPT_LIMIT, DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT, DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT,
+    DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET, DEFAULT_PREMIUM_SKILL_PROMPT_LIMIT, DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT, DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT, DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET,
+    DEFAULT_STANDARD_SKILL_PROMPT_LIMIT, DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT, DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT, DEFAULT_MAX_ENABLED_TOOL_LIMIT,
+    DEFAULT_ULTRA_ENABLED_TOOL_LIMIT, DEFAULT_ULTRA_MAX_ENABLED_TOOL_LIMIT, DEFAULT_UNIFIED_HISTORY_LIMIT, DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+)
 from api.services.browser_settings import DEFAULT_MAX_ACTIVE_BROWSER_TASKS, DEFAULT_MAX_BROWSER_STEPS, DEFAULT_MAX_BROWSER_TASKS, DEFAULT_VISION_DETAIL_LEVEL
 from api.pipedream_app_utils import normalize_app_slugs as normalize_pipedream_app_slugs
 from util.attribution_referrers import first_meaningful_referrer_for_attribution, signup_source_bucket_for_attribution
 from api.services.mcp_tool_cache import invalidate_mcp_tool_cache
-from api.services.tool_settings import DEFAULT_MIN_CRON_SCHEDULE_MINUTES, DEFAULT_SEARCH_WEB_RESULT_COUNT, DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT, DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT, DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD, DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS
+from api.services.tool_settings import (
+    DEFAULT_MIN_CRON_SCHEDULE_MINUTES, DEFAULT_SEARCH_WEB_RESULT_COUNT, DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT, DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT, DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
+    DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS,
+)
 from constants.regex import E164_PHONE_REGEX
 from api.storage_backends import AliasedStorage, PUBLIC_TEMPLATE_SOCIAL_IMAGE_STORAGE_ALIAS
 from observability import traced
@@ -8427,7 +8437,9 @@ class PersistentAgentCustomTool(models.Model):
 
     def clean(self):
         super().clean()
-        from api.agent.tools.custom_tools import normalize_custom_tool_name, normalize_custom_tool_entrypoint, normalize_custom_tool_parameters_schema, normalize_custom_tool_source_path, normalize_custom_tool_timeout_seconds
+        from api.agent.tools.custom_tools import (
+            normalize_custom_tool_name, normalize_custom_tool_entrypoint, normalize_custom_tool_parameters_schema, normalize_custom_tool_source_path, normalize_custom_tool_timeout_seconds,
+        )
 
         self.name = (self.name or "").strip()
         self.description = (self.description or "").strip()
@@ -8569,7 +8581,9 @@ class GlobalAgentSkillCustomTool(models.Model):
 
     def clean(self):
         super().clean()
-        from api.agent.tools.custom_tools import MAX_CUSTOM_TOOL_SOURCE_BYTES, normalize_custom_tool_name, normalize_custom_tool_parameters_schema, normalize_custom_tool_timeout_seconds, validate_custom_tool_source_code
+        from api.agent.tools.custom_tools import (
+            MAX_CUSTOM_TOOL_SOURCE_BYTES, normalize_custom_tool_name, normalize_custom_tool_parameters_schema, normalize_custom_tool_timeout_seconds, validate_custom_tool_source_code,
+        )
 
         self.name = (self.name or "").strip()
         self.description = (self.description or "").strip()

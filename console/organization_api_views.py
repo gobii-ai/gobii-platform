@@ -20,7 +20,9 @@ from waffle import flag_is_active
 from agents.services import PretrainedWorkerTemplateService
 from api.models import IntelligenceTier, Organization, OrganizationInvite, OrganizationMembership, PersistentAgent, PersistentAgentTemplate
 from api.agent.core.llm_config import AgentLLMTier
-from api.services.agent_owner_custom_instructions import CUSTOM_INSTRUCTIONS_FIELD, CustomInstructionsValidationError, get_custom_instructions_for_organization_id, normalize_custom_instructions, save_custom_instructions_for_organization_id
+from api.services.agent_owner_custom_instructions import (
+    CUSTOM_INSTRUCTIONS_FIELD, CustomInstructionsValidationError, get_custom_instructions_for_organization_id, normalize_custom_instructions, save_custom_instructions_for_organization_id,
+)
 from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES, ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS, organization_members_can_create_agents, user_role_can_create_org_agents
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from console.api_helpers import _parse_json_body as _parse_json_body_or_raise

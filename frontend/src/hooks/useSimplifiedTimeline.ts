@@ -4,7 +4,9 @@ import { isClusterRenderable, transformToolCluster } from '../components/agentCh
 import { buildActionCountLabel, flattenTimelineEventsToEntries } from '../components/agentChat/activityEntryUtils'
 import type { StatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import { eventHasLatestStatus, isStatusDisplayEntry, resolveEntrySeparation } from '../components/agentChat/statusExpansion'
-import type { ToolEntryDisplay } from '../components/agentChat/tooling/types'
+import type {
+  ToolEntryDisplay,
+} from '../components/agentChat/tooling/types'
 
 // ---------------------------------------------------------------------------
 // Types

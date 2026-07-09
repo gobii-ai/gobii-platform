@@ -9,7 +9,7 @@ from api.evals.realtime import broadcast_run_update, broadcast_suite_update, bro
 from api.evals.metrics import aggregate_run_metrics
 from api.evals.execution import set_current_eval_run_id, set_current_eval_routing_profile
 from api.evals.fingerprint import compute_scenario_fingerprint, get_code_version, get_code_branch, get_primary_model
-import api.evals.loader # noqa: F401
+import api.evals.loader  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

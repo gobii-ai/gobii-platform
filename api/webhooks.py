@@ -8,7 +8,10 @@ from django.utils import timezone
 from email.utils import getaddresses
 
 from api.agent.comms import ingest_inbound_message, ingest_inbound_webhook_message, TwilioSmsAdapter, PostmarkEmailAdapter, MailgunEmailAdapter
-from api.models import CommsChannel, PersistentAgent, PersistentAgentInboundWebhook, PersistentAgentCommsEndpoint, OutboundMessageAttempt, DeliveryStatus, PipedreamConnectSession, PersistentAgentPipedreamTriggerSubscription
+from api.models import (
+    CommsChannel, PersistentAgent, PersistentAgentInboundWebhook, PersistentAgentCommsEndpoint, OutboundMessageAttempt, DeliveryStatus, PipedreamConnectSession,
+    PersistentAgentPipedreamTriggerSubscription,
+)
 from api.agent.comms.message_reads import READ_SOURCE_EMAIL_CLICK, READ_SOURCE_EMAIL_OPEN, mark_postmark_event_message_read
 from opentelemetry import trace
 import json

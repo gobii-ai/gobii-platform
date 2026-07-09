@@ -25,7 +25,10 @@ from api.services.agent_error_logging import log_task_quota_exceeded, validation
 from api.services.owner_execution_pause import is_owner_execution_paused, resolve_agent_owner
 from ..core.event_processing import process_agent_events, _lock_storage_keys
 from ...services.referral_service import ReferralService
-from ..core.processing_flags import claim_pending_drain_slot, clear_pending_drain_slot, clear_processing_lock_active, clear_processing_queued_flag, count_pending_agents, get_processing_heartbeat, get_pending_drain_settings, is_human_inbound_generation_consumed, is_agent_pending, pop_pending_agents, set_processing_queued_flag
+from ..core.processing_flags import (
+    claim_pending_drain_slot, clear_pending_drain_slot, clear_processing_lock_active, clear_processing_queued_flag, count_pending_agents, get_processing_heartbeat, get_pending_drain_settings,
+    is_human_inbound_generation_consumed, is_agent_pending, pop_pending_agents, set_processing_queued_flag,
+)
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)

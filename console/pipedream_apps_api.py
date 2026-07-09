@@ -4,8 +4,12 @@ from django.views import View
 
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.models import MCPServerConfig
-from api.services.pipedream_agent_apps import disconnect_agent_pipedream_app, list_agent_pipedream_app_rows, list_pipedream_app_agent_connections, remove_agent_pipedream_app, start_agent_pipedream_app_connect
-from api.services.pipedream_apps import PipedreamCatalogError, PipedreamCatalogService, filter_deprecated_pipedream_apps_without_agent, get_owner_apps_state, serialize_owner_apps_state, set_owner_selected_app_slugs
+from api.services.pipedream_agent_apps import (
+    disconnect_agent_pipedream_app, list_agent_pipedream_app_rows, list_pipedream_app_agent_connections, remove_agent_pipedream_app, start_agent_pipedream_app_connect,
+)
+from api.services.pipedream_apps import (
+    PipedreamCatalogError, PipedreamCatalogService, filter_deprecated_pipedream_apps_without_agent, get_owner_apps_state, serialize_owner_apps_state, set_owner_selected_app_slugs,
+)
 from api.services.pipedream_connections import PipedreamConnectionError
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body

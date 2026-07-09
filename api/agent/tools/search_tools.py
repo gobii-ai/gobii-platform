@@ -19,7 +19,10 @@ from opentelemetry import trace
 from api.agent.eval_agents import is_eval_agent
 
 from ...models import MCPServerConfig, PersistentAgent, PersistentAgentCompletion, PersistentAgentSkill
-from ...services.pipedream_apps import PipedreamCatalogError, PipedreamCatalogService, enable_pipedream_apps_for_agent, filter_deprecated_pipedream_apps_for_agent, filter_deprecated_pipedream_tools_for_agent, get_effective_pipedream_app_slugs_for_agent
+from ...services.pipedream_apps import (
+    PipedreamCatalogError, PipedreamCatalogService, enable_pipedream_apps_for_agent, filter_deprecated_pipedream_apps_for_agent, filter_deprecated_pipedream_tools_for_agent,
+    get_effective_pipedream_app_slugs_for_agent,
+)
 from ...services.tool_blacklist import get_agent_tool_blacklist
 from ...services.tool_settings import get_tool_settings_for_owner
 from ...evals.execution import get_current_eval_routing_profile
@@ -33,7 +36,9 @@ from .eval_synthetic_tools import get_available_eval_synthetic_tool_catalog
 from .mcp_manager import get_mcp_manager
 from .skill_utils import format_skill_secret_requirement, normalize_skill_tool_ids
 from .sqlite_skills import get_latest_skill_versions
-from .tool_manager import enable_tools, CREATE_IMAGE_TOOL_NAME, HTTP_REQUEST_TOOL_NAME, PIPEDREAM_TOOL_SERVER_NAME, get_available_builtin_tool_entries, get_available_custom_tool_entries, get_enabled_tool_limit
+from .tool_manager import (
+    enable_tools, CREATE_IMAGE_TOOL_NAME, HTTP_REQUEST_TOOL_NAME, PIPEDREAM_TOOL_SERVER_NAME, get_available_builtin_tool_entries, get_available_custom_tool_entries, get_enabled_tool_limit,
+)
 from .autotool_heuristics import find_matching_tools
 
 logger = logging.getLogger(__name__)

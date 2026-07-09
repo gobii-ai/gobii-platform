@@ -26,7 +26,7 @@ from util.integrations import twilio_status
 from util import sms
 
 try:
-    from twilio.rest import Client  # type: ignore
+    from twilio.rest import Client
 except ImportError as exc:  # pragma: no cover – optional dependency
     raise CommandError(
         "Twilio SDK missing – install with `pip install twilio`.") from exc

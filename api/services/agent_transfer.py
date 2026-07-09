@@ -12,7 +12,10 @@ from django.utils import timezone
 from agents.services import AgentService
 from api.agent.tasks import process_agent_events_task
 from api.services.persistent_agents import maybe_sync_agent_email_display_name
-from api.models import AgentFileSpace, AgentPeerLink, AgentTransferInvite, BrowserUseAgent, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversation, PersistentAgentConversationParticipant, PersistentAgentMessage
+from api.models import (
+    AgentFileSpace, AgentPeerLink, AgentTransferInvite, BrowserUseAgent, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversation,
+    PersistentAgentConversationParticipant, PersistentAgentMessage,
+)
 
 User = get_user_model()
 logger = logging.getLogger(__name__)

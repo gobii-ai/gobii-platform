@@ -53,10 +53,10 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
     """
     import re
     import logging
-    from inscriptis import get_text  # type: ignore
-    from inscriptis.model.config import ParserConfig  # type: ignore
-    from inscriptis.css_profiles import CSS_PROFILES  # type: ignore
-    import pypandoc  # type: ignore
+    from inscriptis import get_text
+    from inscriptis.model.config import ParserConfig
+    from inscriptis.css_profiles import CSS_PROFILES
+    import pypandoc
 
     logger = logging.getLogger(__name__)
 
@@ -1305,7 +1305,9 @@ def deliver_agent_sms(message: PersistentAgentMessage):
     try:
         from constants.feature_flags import AGENT_CRON_THROTTLE
         from config.redis_client import get_redis_client
-        from api.services.cron_throttle import build_upgrade_link, cron_throttle_footer_cooldown_key, cron_throttle_pending_footer_key, evaluate_free_plan_cron_throttle, select_cron_throttle_sms_suffix
+        from api.services.cron_throttle import (
+            build_upgrade_link, cron_throttle_footer_cooldown_key, cron_throttle_pending_footer_key, evaluate_free_plan_cron_throttle, select_cron_throttle_sms_suffix,
+        )
 
         agent = getattr(message, "owner_agent", None)
         if agent is not None and switch_is_active(AGENT_CRON_THROTTLE):

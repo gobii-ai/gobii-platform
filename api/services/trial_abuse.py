@@ -8,7 +8,10 @@ from django.conf import settings
 from django.db.models import F
 from django.utils import timezone
 
-from api.models import TaskCredit, UserAttribution, UserFingerprintVisit, UserBilling, UserIdentitySignal, UserIdentitySignalTypeChoices, UserTrialEligibility, UserTrialEligibilityAutoStatusChoices, UserTrialEligibilityManualActionChoices
+from api.models import (
+    TaskCredit, UserAttribution, UserFingerprintVisit, UserBilling, UserIdentitySignal, UserIdentitySignalTypeChoices, UserTrialEligibility, UserTrialEligibilityAutoStatusChoices,
+    UserTrialEligibilityManualActionChoices,
+)
 from api.services.user_fingerprint import stage_user_fingerprint_visit
 from constants.plans import PlanNames
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource

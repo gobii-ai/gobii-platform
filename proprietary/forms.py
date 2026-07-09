@@ -17,7 +17,7 @@ class SupportForm(forms.Form):
 
         if settings.TURNSTILE_ENABLED:
             # Import lazily so the turnstile package is only required when enabled.
-            from turnstile.fields import TurnstileField  # type: ignore[import]
+            from turnstile.fields import TurnstileField
 
             self.fields["turnstile"] = TurnstileField(label="")
 
@@ -73,6 +73,6 @@ class PrequalifyForm(forms.Form):
 
         if settings.TURNSTILE_ENABLED:
             # Import lazily so the turnstile package is only required when enabled.
-            from turnstile.fields import TurnstileField  # type: ignore[import]
+            from turnstile.fields import TurnstileField
 
             self.fields["turnstile"] = TurnstileField(label="")

@@ -25,7 +25,10 @@ from api.agent.comms.human_input_requests import serialize_human_input_tool_resu
 from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 from api.agent.comms.source_metadata import get_message_source_metadata, get_webhook_timeline_metadata
-from api.models import BrowserUseAgentTask, BrowserUseAgentTaskQuerySet, CommsChannel, PersistentAgent, PersistentAgentKanbanEvent, PersistentAgentCompletion, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentStep, PersistentAgentToolCall, ToolFriendlyName, parse_web_user_address
+from api.models import (
+    BrowserUseAgentTask, BrowserUseAgentTaskQuerySet, CommsChannel, PersistentAgent, PersistentAgentKanbanEvent, PersistentAgentCompletion, PersistentAgentMessage, PersistentAgentMessageAttachment,
+    PersistentAgentStep, PersistentAgentToolCall, ToolFriendlyName, parse_web_user_address,
+)
 
 from api.agent.tools.plan import PlanSnapshot, build_plan_snapshot
 from .plan_events import ensure_plan_baseline_event

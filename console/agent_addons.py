@@ -9,7 +9,9 @@ from billing.addons import AddonEntitlementService
 from billing.services import BillingService
 from api.services.owner_execution_pause import get_owner_account_pause_state
 from util.integrations import IntegrationDisabledError, stripe_status
-from util.subscription_helper import _ensure_stripe_ready, get_customer_subscription_candidate, get_active_subscription, get_organization_plan, get_stripe_customer, get_user_max_contacts_per_agent, reconcile_user_plan_from_stripe
+from util.subscription_helper import (
+    _ensure_stripe_ready, get_customer_subscription_candidate, get_active_subscription, get_organization_plan, get_stripe_customer, get_user_max_contacts_per_agent, reconcile_user_plan_from_stripe,
+)
 from util.trial_enforcement import is_user_freemium_grandfathered
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
 

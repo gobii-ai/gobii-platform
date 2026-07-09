@@ -14,7 +14,10 @@ from ..files.filespace_service import broadcast_message_attachment_update
 from util.text_sanitizer import normalize_llm_output
 from .agent_variables import substitute_variables_with_filespace
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
-from ...models import PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, DeliveryStatus, CommsChannel, build_web_agent_address, build_web_user_address, parse_web_user_address
+from ...models import (
+    PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, DeliveryStatus, CommsChannel, build_web_agent_address, build_web_user_address,
+    parse_web_user_address,
+)
 from ...services.email_verification import has_verified_email
 from ...services.web_sessions import get_deliverable_web_session, get_deliverable_web_sessions
 from .outbound_duplicate_guard import detect_recent_duplicate_message

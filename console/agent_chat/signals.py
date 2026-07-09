@@ -9,7 +9,10 @@ from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.text import Truncator
 
-from api.models import AgentSpawnRequest, AgentCollaborator, BrowserUseAgent, BrowserUseAgentTask, CommsAllowlistRequest, OrganizationMembership, PersistentAgent, PersistentAgentCompletion, PersistentAgentError, PersistentAgentHumanInputRequest, PersistentAgentMessage, PersistentAgentSecret, PersistentAgentStep, PersistentAgentSystemStep, PersistentAgentToolCall, PersistentAgentSystemMessage
+from api.models import (
+    AgentSpawnRequest, AgentCollaborator, BrowserUseAgent, BrowserUseAgentTask, CommsAllowlistRequest, OrganizationMembership, PersistentAgent, PersistentAgentCompletion, PersistentAgentError,
+    PersistentAgentHumanInputRequest, PersistentAgentMessage, PersistentAgentSecret, PersistentAgentStep, PersistentAgentSystemStep, PersistentAgentToolCall, PersistentAgentSystemMessage,
+)
 from api.services.signup_preview import transition_agent_to_signup_preview_waiting
 from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
 from console.agent_audit.serializers import serialize_completion, serialize_error, serialize_message, serialize_step, serialize_tool_call
@@ -21,7 +24,9 @@ from api.agent.comms.message_reads import build_agent_message_read_state_for_use
 from .access import user_can_manage_agent_settings
 from .plan_events import persist_plan_event
 from .pending_actions import expire_pending_action_requests, get_legacy_pending_human_input_requests, list_pending_action_requests
-from .timeline import build_processing_snapshot, build_tool_cluster_from_steps, is_chat_hidden_message, serialize_plan_event, serialize_message_event, serialize_processing_snapshot, serialize_thinking_event
+from .timeline import (
+    build_processing_snapshot, build_tool_cluster_from_steps, is_chat_hidden_message, serialize_plan_event, serialize_message_event, serialize_processing_snapshot, serialize_thinking_event,
+)
 
 logger = logging.getLogger(__name__)
 _CREDIT_EVENT_NOTES = {

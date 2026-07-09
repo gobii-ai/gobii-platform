@@ -7,7 +7,10 @@ import requests
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 
 from api.models import PersistentAgent
-from api.services.discord_bot import DiscordBotIntegrationError, disable_subscription, discover_channels, discord_setup_required_response, ensure_subscription, latest_selected_guild, list_claimed_guilds, list_subscriptions, serialize_guild
+from api.services.discord_bot import (
+    DiscordBotIntegrationError, disable_subscription, discover_channels, discord_setup_required_response, ensure_subscription, latest_selected_guild, list_claimed_guilds, list_subscriptions,
+    serialize_guild,
+)
 
 logger = logging.getLogger(__name__)
 

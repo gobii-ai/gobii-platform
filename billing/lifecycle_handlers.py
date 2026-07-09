@@ -3,10 +3,15 @@ import logging
 from waffle import switch_is_active
 
 from constants.feature_flags import OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY, OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED
-from api.services.owner_execution_pause import EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY, EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL, EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED, pause_owner_execution_by_ref
+from api.services.owner_execution_pause import (
+    EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY, EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL, EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED, pause_owner_execution_by_ref,
+)
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
-from .lifecycle_signals import SUBSCRIPTION_DELINQUENCY_ENTERED, TRIAL_CANCEL_SCHEDULED, TRIAL_CONVERSION_FAILED, TRIAL_ENDED_NON_RENEWAL, subscription_delinquency_entered, trial_cancel_scheduled, trial_conversion_failed, trial_ended_non_renewal
+from .lifecycle_signals import (
+    SUBSCRIPTION_DELINQUENCY_ENTERED, TRIAL_CANCEL_SCHEDULED, TRIAL_CONVERSION_FAILED, TRIAL_ENDED_NON_RENEWAL, subscription_delinquency_entered, trial_cancel_scheduled, trial_conversion_failed,
+    trial_ended_non_renewal,
+)
 
 logger = logging.getLogger(__name__)
 

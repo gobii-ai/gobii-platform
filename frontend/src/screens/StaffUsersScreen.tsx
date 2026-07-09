@@ -4,7 +4,11 @@ import { Activity, AlertTriangle, Building2, CheckCircle2, Clock3, ExternalLink,
 
 import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { ModalForm } from '../components/common/ModalForm'
-import { createStaffOrgSystemMessage, createStaffOrgTaskCreditGrant, createStaffUserSystemMessage, createStaffUserTaskCreditGrant, fetchStaffOrgDetail, fetchStaffUserDetail, markStaffUserEmailVerified, searchStaffUsers, sendStaffUserEmailTrigger, triggerStaffOrgProcessEvents, triggerStaffUserProcessEvents, type StaffAgentSummary, type StaffOrgDetail, type StaffScopedSystemMessagePayload, type StaffTaskCredits, type StaffTaskCreditGrantPayload, type StaffUserDetail, type StaffUserEmailTrigger } from '../api/staffUsers'
+import {
+  createStaffOrgSystemMessage, createStaffOrgTaskCreditGrant, createStaffUserSystemMessage, createStaffUserTaskCreditGrant, fetchStaffOrgDetail, fetchStaffUserDetail, markStaffUserEmailVerified,
+  searchStaffUsers, sendStaffUserEmailTrigger, triggerStaffOrgProcessEvents, triggerStaffUserProcessEvents, type StaffAgentSummary, type StaffOrgDetail, type StaffScopedSystemMessagePayload,
+  type StaffTaskCredits, type StaffTaskCreditGrantPayload, type StaffUserDetail, type StaffUserEmailTrigger,
+} from '../api/staffUsers'
 
 export type StaffUsersScreenProps = {
   selectedUserId?: number | null

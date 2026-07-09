@@ -5,7 +5,9 @@ from rest_framework.routers import SimpleRouter
 from .views import ping, BrowserUseAgentViewSet, BrowserUseAgentTaskViewSet, PersistentAgentViewSet
 from .mcp_views import GobiiMCPView
 from .custom_tool_bridge import custom_tool_bridge_execute
-from .webhooks import inbound_agent_webhook, sms_webhook, sms_status_webhook, email_webhook_postmark, email_webhook_mailgun, open_and_link_webhook, pipedream_connect_webhook, pipedream_trigger_subscription_webhook
+from .webhooks import (
+    inbound_agent_webhook, sms_webhook, sms_status_webhook, email_webhook_postmark, email_webhook_mailgun, open_and_link_webhook, pipedream_connect_webhook, pipedream_trigger_subscription_webhook,
+)
 
 app_name = "api"
 

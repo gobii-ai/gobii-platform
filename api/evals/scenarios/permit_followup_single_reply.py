@@ -6,7 +6,10 @@ from django.utils import timezone
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
-from api.models import CommsAllowlistEntry, CommsChannel, EvalRunTask, PersistentAgentCommsSnapshot, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, PersistentAgentStep, PersistentAgentStepSnapshot, PersistentAgentSystemStep, PersistentAgentToolCall
+from api.models import (
+    CommsAllowlistEntry, CommsChannel, EvalRunTask, PersistentAgentCommsSnapshot, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, PersistentAgentStep,
+    PersistentAgentStepSnapshot, PersistentAgentSystemStep, PersistentAgentToolCall,
+)
 from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation, _get_or_create_endpoint
 from api.agent.core.event_processing import process_agent_events
 

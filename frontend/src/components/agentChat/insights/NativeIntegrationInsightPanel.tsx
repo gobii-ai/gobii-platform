@@ -5,7 +5,9 @@ import { CheckCircle2, Loader2, Plug } from 'lucide-react'
 
 import { fetchNativeIntegrations, startNativeIntegrationConnect, type NativeIntegrationProvider } from '../../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../../api/safeErrorMessage'
-import { NativeProviderIcon, nativeOAuthContextPayload, openNativeOAuthPopup, storePendingNativeOAuth, usesManualNativeIntegrationCredentials, useNativeIntegrationRefreshEffects } from '../../mcp/NativeIntegrationShared'
+import {
+  NativeProviderIcon, nativeOAuthContextPayload, openNativeOAuthPopup, storePendingNativeOAuth, usesManualNativeIntegrationCredentials, useNativeIntegrationRefreshEffects,
+} from '../../mcp/NativeIntegrationShared'
 import { useManualNativeIntegrationConnect } from '../../mcp/useManualNativeIntegrationConnect'
 
 export type NativeIntegrationPendingAction = string | null

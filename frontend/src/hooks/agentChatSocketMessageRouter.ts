@@ -4,7 +4,9 @@ import { normalizePendingActionRequests, normalizePendingHumanInputRequests } fr
 import type { AgentMessageNotification, PendingActionRequest, ProcessingSnapshot, StreamEventPayload, TimelineEvent } from '../types/agentChat'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BurnRateMetadata, UsageInsightUpdatePayload } from '../types/insight'
-import { injectRealtimeEventIntoCache, replacePendingActionRequestsInCache, replacePendingHumanInputRequestsInCache, replaceProcessingSnapshotInCache, updateAgentIdentityInCache } from './useTimelineCacheInjector'
+import {
+  injectRealtimeEventIntoCache, replacePendingActionRequestsInCache, replacePendingHumanInputRequestsInCache, replaceProcessingSnapshotInCache, updateAgentIdentityInCache,
+} from './useTimelineCacheInjector'
 import { extractAgentChatSocketEnvelopeAgentId } from './agentChatSocketProtocol'
 
 type AgentIdentityUpdate = {

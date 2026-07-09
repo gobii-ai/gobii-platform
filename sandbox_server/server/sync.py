@@ -10,7 +10,10 @@ import requests
 from sandbox_server.config import _agent_workspace, _workspace_max_bytes
 from sandbox_server.manifest import _load_manifest, _proxy_env_from_manifest, _save_manifest, _store_proxy_env
 from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH, is_filespace_sync_ignored_path
-from sandbox_server.workspace import _checksum_bytes, _decode_content, _elapsed_ms, _ensure_capacity, _guess_mime_type, _iter_workspace_files, _normalize_checksum, _normalize_workspace_path, _parse_entry_updated_at, _parse_since, _require_agent_id, _resolve_local_checksum, _safe_url_for_log, _trace_context, _workspace_root_git_worktree_prefixes, _workspace_size_bytes
+from sandbox_server.workspace import (
+    _checksum_bytes, _decode_content, _elapsed_ms, _ensure_capacity, _guess_mime_type, _iter_workspace_files, _normalize_checksum, _normalize_workspace_path, _parse_entry_updated_at, _parse_since,
+    _require_agent_id, _resolve_local_checksum, _safe_url_for_log, _trace_context, _workspace_root_git_worktree_prefixes, _workspace_size_bytes,
+)
 
 logger = logging.getLogger(__name__)
 _SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")

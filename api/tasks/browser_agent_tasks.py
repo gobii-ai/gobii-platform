@@ -109,8 +109,8 @@ def _browser_proxy_scheme(proxy_server: Optional[ProxyServer]) -> str:
 os.environ["ANONYMIZED_TELEMETRY"] = "false"
 
 try:
-    from browser_use import BrowserSession, BrowserProfile, Agent as BUAgent, Controller  # safe: telemetry is already off
-    from browser_use.llm import ChatGoogle, ChatOpenAI, ChatAnthropic  # safe: telemetry is already off
+    from browser_use import BrowserSession, BrowserProfile, Agent as BUAgent, Controller
+    from browser_use.llm import ChatGoogle, ChatOpenAI, ChatAnthropic
     from json_schema_to_pydantic import create_model
     from opentelemetry import baggage
 

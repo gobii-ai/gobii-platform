@@ -18,7 +18,10 @@ from api.agent.tools.custom_tools import CUSTOM_TOOL_PREFIX
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.core.llm_config import AgentLLMTier, resolve_intelligence_tier_for_owner
 from api.agent.tools.mcp_manager import get_mcp_manager
-from api.models import CommsChannel, MCPServerConfig, Organization, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, PersistentAgentSmsEndpoint, build_web_agent_address, build_web_user_address
+from api.models import (
+    CommsChannel, MCPServerConfig, Organization, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, PersistentAgentSmsEndpoint,
+    build_web_agent_address, build_web_user_address,
+)
 from api.services.persistent_agents import PersistentAgentProvisioningError, PersistentAgentProvisioningService, ensure_default_agent_email_endpoint
 from api.services.owner_execution_pause import get_owner_account_pause_state
 from api.services.signup_preview import get_signup_preview_creation_state

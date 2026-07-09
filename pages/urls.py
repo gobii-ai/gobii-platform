@@ -5,7 +5,12 @@ from django.shortcuts import redirect
 
 from proprietary.views import BlogSitemap
 from .library_views import LibraryAgentLikeAPIView, LibraryAgentsAPIView, LibraryView
-from .views import MarkdownPageView, DocsIndexRedirectView, HomePage, HomepageCsrfTokenView, HomeAgentSpawnView, health_check, HomepageIntegrationsSearchView, StaticViewSitemap, ComparisonsSitemap, PublicTemplateSitemap, PublicTemplateCategorySitemap, LandingRedirectView, LandingLaunchView, ClearSignupTrackingView, PretrainedWorkerDirectoryRedirectView, PretrainedWorkerDetailView, PretrainedWorkerHireView, PretrainedWorkerLaunchView, EngineeringProSignupView, SolutionsIndexView, SolutionView, SolutionsSitemap, RecruitingContactView, MarketingContactRequestView, SpecialAccessStartView, SpecialAccessView, WebManifestView, InstallScriptView, PublicTemplateDetailView, PublicTemplateHireView, PublicTemplateLaunchView, public_template_social_image
+from .views import (
+    MarkdownPageView, DocsIndexRedirectView, HomePage, HomepageCsrfTokenView, HomeAgentSpawnView, health_check, HomepageIntegrationsSearchView, StaticViewSitemap, ComparisonsSitemap,
+    PublicTemplateSitemap, PublicTemplateCategorySitemap, LandingRedirectView, LandingLaunchView, ClearSignupTrackingView, PretrainedWorkerDirectoryRedirectView, PretrainedWorkerDetailView,
+    PretrainedWorkerHireView, PretrainedWorkerLaunchView, EngineeringProSignupView, SolutionsIndexView, SolutionView, SolutionsSitemap, RecruitingContactView, MarketingContactRequestView,
+    SpecialAccessStartView, SpecialAccessView, WebManifestView, InstallScriptView, PublicTemplateDetailView, PublicTemplateHireView, PublicTemplateLaunchView, public_template_social_image,
+)
 
 from djstripe import views as djstripe_views
 from django.contrib.sitemaps.views import sitemap

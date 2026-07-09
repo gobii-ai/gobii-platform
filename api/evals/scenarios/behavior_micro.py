@@ -10,8 +10,15 @@ from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry, register_scenario
-from api.evals.stop_policy import sqlite_batch_is_only_eval_bookkeeping_read, sqlite_batch_is_only_planning_state_read, sqlite_batch_is_only_planning_state_mutation, sqlite_batch_mutates_agent_config_field, sqlite_batch_mutates_planning_state
-from api.models import EvalRunTask, CommsAllowlistEntry, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentCompletion, PersistentAgentConversation, PersistentAgentEnabledTool, PersistentAgentHumanInputRequest, PersistentAgentKanbanCard, PersistentAgentMessage, PersistentAgentStep, PersistentAgentSystemStep, PersistentAgentToolCall, build_web_agent_address, build_web_user_address
+from api.evals.stop_policy import (
+    sqlite_batch_is_only_eval_bookkeeping_read, sqlite_batch_is_only_planning_state_read, sqlite_batch_is_only_planning_state_mutation, sqlite_batch_mutates_agent_config_field,
+    sqlite_batch_mutates_planning_state,
+)
+from api.models import (
+    EvalRunTask, CommsAllowlistEntry, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentCompletion, PersistentAgentConversation, PersistentAgentEnabledTool,
+    PersistentAgentHumanInputRequest, PersistentAgentKanbanCard, PersistentAgentMessage, PersistentAgentStep, PersistentAgentSystemStep, PersistentAgentToolCall, build_web_agent_address,
+    build_web_user_address,
+)
 
 PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS = "planning_first_turn_asks_bounded_questions"
 PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST = "planning_clear_task_ends_planning_first"

@@ -8,7 +8,9 @@ from django.urls import reverse
 from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.human_input_requests import serialize_human_input_tool_result
 from api.agent.core.token_usage import completion_tokens_per_second
-from api.models import PersistentAgentMessage, PersistentAgentStep, PersistentAgentCompletion, PersistentAgentError, PersistentAgentPromptArchive, PersistentAgentSystemStep, PersistentAgentSystemMessage
+from api.models import (
+    PersistentAgentMessage, PersistentAgentStep, PersistentAgentCompletion, PersistentAgentError, PersistentAgentPromptArchive, PersistentAgentSystemStep, PersistentAgentSystemMessage,
+)
 
 
 def _dt_to_iso(dt: datetime | None) -> str | None:

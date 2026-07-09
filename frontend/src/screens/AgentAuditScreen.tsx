@@ -4,7 +4,10 @@ import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import { auditActions, initializeAudit, jumpAuditToTime, loadAuditTimeline, loadMoreAudit, selectAuditState } from '../store/auditSlice'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import type { AuditToolCallEvent, AuditErrorEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
-import { createSystemMessage, decideAgentJudgeSuggestion, fetchPromptArchive, runAgentJudge, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type ManualJudgeSuggestion, type StaffAgentSearchResult } from '../api/agentAudit'
+import {
+  createSystemMessage, decideAgentJudgeSuggestion, fetchPromptArchive, runAgentJudge, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type ManualJudgeSuggestion,
+  type StaffAgentSearchResult,
+} from '../api/agentAudit'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
 import { Modal } from '../components/common/Modal'
 import { SystemMessageCard } from '../components/agentAudit/SystemMessageCard'

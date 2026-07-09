@@ -21,7 +21,12 @@ from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.integrations.pipedream_connect import create_connect_session
 from api.models import CommsChannel, DeliveryStatus, PersistentAgent, PersistentAgentConversation, PersistentAgentMessage, PersistentAgentPipedreamTriggerSubscription
-from api.services.discord_messages import create_discord_outbound_message as _create_discord_outbound_message, discord_agent_address as _discord_agent_address, discord_channel_address as _discord_channel_address, discord_channel_source_label as _discord_channel_source_label, discord_conversation_address as _discord_conversation_address, ensure_discord_agent_endpoint as _ensure_discord_agent_endpoint, ensure_discord_conversation_participants as _ensure_discord_conversation_participants, find_recent_discord_outbound, get_or_create_discord_conversation as _get_or_create_discord_conversation, schedule_discord_inbound_processing
+from api.services.discord_messages import (
+    create_discord_outbound_message as _create_discord_outbound_message, discord_agent_address as _discord_agent_address, discord_channel_address as _discord_channel_address,
+    discord_channel_source_label as _discord_channel_source_label, discord_conversation_address as _discord_conversation_address, ensure_discord_agent_endpoint as _ensure_discord_agent_endpoint,
+    ensure_discord_conversation_participants as _ensure_discord_conversation_participants, find_recent_discord_outbound, get_or_create_discord_conversation as _get_or_create_discord_conversation,
+    schedule_discord_inbound_processing,
+)
 
 PIPEDREAM_API_BASE = "https://api.pipedream.com/v1"
 DISCORD_APP_SLUG = "discord"

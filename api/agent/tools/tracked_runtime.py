@@ -49,7 +49,10 @@ def execute_tracked_runtime_tool_call(
     parent_step: Optional[PersistentAgentStep] = None,
     isolated_mcp: bool = False,
 ) -> tuple[Any, Optional[list[dict]]]:
-    from api.agent.core.event_processing import _build_safe_error_payload, _create_pending_tool_call_step, _enforce_tool_rate_limit, _ensure_credit_for_tool, _finalize_pending_tool_call_step, _is_error_status, _normalize_error_result, _persist_tool_call_step
+    from api.agent.core.event_processing import (
+        _build_safe_error_payload, _create_pending_tool_call_step, _enforce_tool_rate_limit, _ensure_credit_for_tool, _finalize_pending_tool_call_step, _is_error_status, _normalize_error_result,
+        _persist_tool_call_step,
+    )
 
     attach_completion = _build_attach_completion(parent_step)
     parent_tool_call = _parent_tool_call_from_step(parent_step)

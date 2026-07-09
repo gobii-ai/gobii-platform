@@ -29,6 +29,6 @@ class MarketingContactForm(forms.Form):
         super().__init__(*args, **kwargs)
 
         if settings.TURNSTILE_ENABLED:
-            from turnstile.fields import TurnstileField  # type: ignore[import]
+            from turnstile.fields import TurnstileField
 
             self.fields["turnstile"] = TurnstileField(label="")

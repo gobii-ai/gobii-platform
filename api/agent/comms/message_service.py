@@ -26,7 +26,11 @@ from django.utils import timezone
 from api.agent.core.processing_flags import bump_human_inbound_generation
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
 
-from ...models import PersistentAgentInboundWebhook, PersistentAgentCommsEndpoint, PersistentAgentConversation, PersistentAgent, PersistentAgentConversationParticipant, PersistentAgentMessage, PersistentAgentMessageAttachment, CommsChannel, UserPhoneNumber, build_inbound_webhook_agent_address, build_inbound_webhook_sender_address, build_web_agent_address, build_web_user_address, parse_web_user_address
+from ...models import (
+    PersistentAgentInboundWebhook, PersistentAgentCommsEndpoint, PersistentAgentConversation, PersistentAgent, PersistentAgentConversationParticipant, PersistentAgentMessage,
+    PersistentAgentMessageAttachment, CommsChannel, UserPhoneNumber, build_inbound_webhook_agent_address, build_inbound_webhook_sender_address, build_web_agent_address, build_web_user_address,
+    parse_web_user_address,
+)
 from api.services.system_settings import get_max_file_size
 from api.services.billing_pause_notifications import is_billing_execution_pause_reason, send_billing_pause_auto_reply
 from api.services.owner_execution_pause import get_owner_execution_pause_state, resolve_agent_owner

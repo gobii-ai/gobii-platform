@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, List, MutableMapping, Optional, Tuple
 from django.http import HttpRequest
 from api.models import CommsChannel
-import  logging
+import logging
 import re
 
 from config.settings import EMAIL_STRIP_REPLIES
@@ -165,7 +165,7 @@ def _html_to_text(html: str) -> str:
         return ""
     try:
         # strong, layout-aware conversion
-        from inscriptis import get_text  # pip install inscriptis
+        from inscriptis import get_text
         return get_text(html)
     except Exception:
         # minimal fallback

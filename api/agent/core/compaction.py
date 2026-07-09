@@ -293,4 +293,4 @@ def llm_summarise_comms(
         return _default_summarise(previous, messages)
 
 # Re-export for convenience – avoids changing existing imports elsewhere
-from .step_compaction import ensure_steps_compacted  # noqa: E402, isort:skip 
+from .step_compaction import ensure_steps_compacted  # noqa: E402, ISORT

@@ -37,9 +37,16 @@ from api.agent.short_description import build_listing_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
 from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial_eligibility, user_has_prior_individual_history
-from api.services.trial_promos import TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED, TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED, TrialPromoError, build_trial_promo_checkout_metadata, build_trial_promo_metadata, can_user_start_trial_promo, find_active_trial_promo_by_code, get_session_trial_promo, is_user_email_allowed_for_trial_promo, is_user_email_verified_for_trial_promo, mark_trial_promo_redemption_checkout_started, mark_trial_promo_redemption_failed, reserve_trial_promo_redemption, store_trial_promo_in_session
+from api.services.trial_promos import (
+    TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED, TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED, TrialPromoError, build_trial_promo_checkout_metadata, build_trial_promo_metadata, can_user_start_trial_promo,
+    find_active_trial_promo_by_code, get_session_trial_promo, is_user_email_allowed_for_trial_promo, is_user_email_verified_for_trial_promo, mark_trial_promo_redemption_checkout_started,
+    mark_trial_promo_redemption_failed, reserve_trial_promo_redemption, store_trial_promo_in_session,
+)
 from config.socialaccount_adapter import OAUTH_ATTRIBUTION_COOKIE, OAUTH_ATTRIBUTION_SESSION_KEYS, OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS, serialize_oauth_charter_cookie_payload
-from billing.checkout_metadata import STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY, STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE, STRIPE_CHECKOUT_FLOW_TYPE_TRIAL, build_checkout_fingerprint_metadata, build_checkout_customer_metadata, build_checkout_flow_metadata, clear_checkout_customer_metadata, clear_checkout_fingerprint_metadata
+from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY, STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE, STRIPE_CHECKOUT_FLOW_TYPE_TRIAL, build_checkout_fingerprint_metadata, build_checkout_customer_metadata,
+    build_checkout_flow_metadata, clear_checkout_customer_metadata, clear_checkout_fingerprint_metadata,
+)
 from billing.checkout_context import record_checkout_context
 from billing.checkout_sessions import create_stripe_checkout_session
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
@@ -51,12 +58,18 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.payments_helper import PaymentsHelper
 from util.subscription_helper import ensure_single_individual_subscription, get_existing_individual_subscriptions, get_or_create_stripe_customer, reconcile_user_plan_from_stripe
 from util.integrations import stripe_status, IntegrationDisabledError
-from util.onboarding import TRIAL_ONBOARDING_TARGET_AGENT_UI, TRIAL_ONBOARDING_TARGET_API_KEYS, clear_trial_onboarding_intent, is_truthy_flag, normalize_trial_onboarding_target, set_trial_onboarding_intent, set_trial_onboarding_requires_plan_selection
+from util.onboarding import (
+    TRIAL_ONBOARDING_TARGET_AGENT_UI, TRIAL_ONBOARDING_TARGET_API_KEYS, clear_trial_onboarding_intent, is_truthy_flag, normalize_trial_onboarding_target, set_trial_onboarding_intent,
+    set_trial_onboarding_requires_plan_selection,
+)
 from util.trial_eligibility import is_user_trial_allowed_by_policy, is_user_trial_eligibility_enforcement_enabled, is_user_trial_eligibility_enforcement_one_per_user_enabled
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
-from constants.feature_flags import CTA_SIGNUP_FIRST, CTA_SIGNUP_MODAL, HOMEPAGE_PERF_MOTION_REDUCTION, SOLUTION_CRAWLABLE_LINKS, STRIPE_SCALE_TRIAL_CHECKOUT_BILLING_ADDRESS_REQUIRED, STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_ENABLED, STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_OPTIONAL
+from constants.feature_flags import (
+    CTA_SIGNUP_FIRST, CTA_SIGNUP_MODAL, HOMEPAGE_PERF_MOTION_REDUCTION, SOLUTION_CRAWLABLE_LINKS, STRIPE_SCALE_TRIAL_CHECKOUT_BILLING_ADDRESS_REQUIRED,
+    STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_ENABLED, STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_OPTIONAL,
+)
 from util.urls import IMMERSIVE_APP_BASE_PATH, IMMERSIVE_RETURN_TO_SESSION_KEY, append_context_query, append_query_params, build_immersive_agents_url, build_immersive_chat_url, normalize_return_to
 from pages.context_processors import account_info as build_account_info_context
 from util.attribution_referrers import ATTRIBUTION_REFERRER_SESSION_KEYS, clean_acquisition_referrer, decode_attribution_value
@@ -72,7 +85,10 @@ from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import render_public_template_markdown, load_page, get_prev_next, get_all_doc_pages
 from .homepage_cache import get_homepage_integrations_payload, get_homepage_pretrained_payload
 from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, build_homepage_structured_data
-from .public_template_urls import public_template_category_label, public_template_category_path, public_template_category_slug, public_template_category_slug_from_label, public_template_detail_path, public_template_hire_path, public_template_launch_path, public_template_route_slug
+from .public_template_urls import (
+    public_template_category_label, public_template_category_path, public_template_category_slug, public_template_category_slug_from_label, public_template_detail_path, public_template_hire_path,
+    public_template_launch_path, public_template_route_slug,
+)
 from .comparisons import COMPARISON_CATALOG, COMPARISON_STATUS_PUBLISHED, get_comparison, get_published_comparisons
 from .forms import MarketingContactForm
 from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY
@@ -2591,7 +2607,7 @@ def health_check(request):
     immediately mark the pod as *NotReady* and stop routing new traffic. This
     allows the pod to finish any in-flight requests while draining.
     """
-    import os  # Local import to avoid at-import cost on hot path
+    import os
 
     if os.path.exists("/tmp/shutdown"):
         # Indicate we are shutting down – fail readiness checks

@@ -11,7 +11,10 @@ from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
-from api.models import CommsAllowlistEntry, CommsChannel, DeliveryStatus, EvalRunTask, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, PersistentAgentToolCall
+from api.models import (
+    CommsAllowlistEntry, CommsChannel, DeliveryStatus, EvalRunTask, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage,
+    PersistentAgentToolCall,
+)
 
 
 MESSAGE_QUALITY_SUITE_SLUG = "message_quality_reports"

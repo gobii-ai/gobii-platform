@@ -19,7 +19,7 @@ def schedule_proactive_agents_task(batch_size: int = 10) -> int:
     if not triggered_agents:
         return 0
 
-    from api.agent.tasks import process_agent_events_task  # Local import to avoid circular dependency
+    from api.agent.tasks import process_agent_events_task
 
     success = 0
     for agent in triggered_agents:

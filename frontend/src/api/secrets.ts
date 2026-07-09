@@ -1,4 +1,6 @@
-import { jsonFetch, jsonRequest } from './http'
+import { jsonFetch, jsonRequest } from './http';
+
+// ---- DTOs (match backend JSON) ----
 
 // ---- DTOs (match backend JSON) ----
 

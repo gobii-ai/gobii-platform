@@ -1,4 +1,7 @@
-import { Workflow, FileCheck2, CalendarClock, Building2, Database, ShoppingBag, ClipboardList, BrainCircuit, Linkedin, Home, Search, Network, FileText, FilePen, Globe, ContactRound, MessageSquareQuote, Mail, MessageSquareText, MessageCircle, MessageSquareDot, BotMessageSquare, Webhook, KeyRound, ScanText, BrainCog, BarChart3, Image as ImageIcon, Video, type LucideIcon } from 'lucide-react'
+import {
+  Workflow, FileCheck2, CalendarClock, Building2, Database, ShoppingBag, ClipboardList, BrainCircuit, Linkedin, Home, Search, Network, FileText, FilePen, Globe, ContactRound, MessageSquareQuote, Mail,
+  MessageSquareText, MessageCircle, MessageSquareDot, BotMessageSquare, Webhook, KeyRound, ScanText, BrainCog, BarChart3, Image as ImageIcon, Video, type LucideIcon,
+} from 'lucide-react'
 import { summarizeSchedule } from '../../util/schedule'
 import { parseResultObject } from '../../util/objectUtils'
 import type { ToolCallEntry } from '../agentChat/types'

@@ -4,7 +4,7 @@ import time
 import signal
 import atexit
 import fcntl
-import errno  # Needed for robust PID liveness detection
+import errno
 from contextlib import AbstractContextManager, contextmanager
 
 __all__ = [

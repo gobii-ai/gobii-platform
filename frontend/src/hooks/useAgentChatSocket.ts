@@ -8,7 +8,9 @@ import { chatActions, receiveRealtimeEvent, receiveStreamEvent, updateActiveProc
 import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { TIMELINE_STALE_TIME_MS, timelineQueryKey } from './useAgentTimeline'
-import { findActiveAgentChatSocketId, normalizeAgentChatSocketSubscriptions, syncAgentChatSocketSubscriptions, type AgentChatSocketContextOverride, type AgentChatSocketSubscription } from './agentChatSocketProtocol'
+import {
+  findActiveAgentChatSocketId, normalizeAgentChatSocketSubscriptions, syncAgentChatSocketSubscriptions, type AgentChatSocketContextOverride, type AgentChatSocketSubscription,
+} from './agentChatSocketProtocol'
 import { routeAgentChatSocketMessage } from './agentChatSocketMessageRouter'
 
 const RECONNECT_BASE_DELAY_MS = 1000

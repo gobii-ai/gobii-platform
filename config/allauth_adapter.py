@@ -23,7 +23,7 @@ try:
     from MailChecker import MailChecker as _MailChecker
 except ImportError:  # pragma: no cover - dependency is expected in production
     try:
-        from mailchecker import MailChecker as _MailChecker  # type: ignore[attr-defined]
+        from mailchecker import MailChecker as _MailChecker
     except ImportError:
         _MailChecker = None
 

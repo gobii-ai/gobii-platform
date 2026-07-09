@@ -20,7 +20,7 @@ It provides verbose output for requests and responses.
 """
 import os
 import requests
-import json # For pretty printing JSON, requests handles most (de)serialization
+import json
 import argparse
 import uuid
 import sys

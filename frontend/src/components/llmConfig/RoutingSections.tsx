@@ -2,7 +2,10 @@ import { AlertCircle, Check, ChevronDown, ChevronUp, Clock3, Loader2, PlugZap, P
 import { useEffect, useMemo, useState } from 'react'
 
 import * as llmApi from '../../api/llmConfig'
-import { actionKey, type ActivityNotice, buildTierGroups, button, getTierKey, getTierStyle, parseUnitInput, reasoningEffortOptions, roundToDisplayUnit, type Tier, type TierEndpoint, type TierGroup, type TierScope, type TokenRange } from './shared'
+import {
+  actionKey, type ActivityNotice, buildTierGroups, button, getTierKey, getTierStyle, parseUnitInput, reasoningEffortOptions, roundToDisplayUnit, type Tier, type TierEndpoint, type TierGroup,
+  type TierScope, type TokenRange,
+} from './shared'
 
 export function ActivityDock({
   notices,

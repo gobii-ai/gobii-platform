@@ -19,7 +19,10 @@ from api.agent.core.promptree import Prompt
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.tools.plan import build_plan_snapshot
 from api.services.prompt_settings import get_prompt_settings
-from api.models import LLMRoutingProfile, PersistentAgent, PersistentAgentCompletion, PersistentAgentCustomTool, PersistentAgentJudgeSuggestion, PersistentAgentMessage, PersistentAgentSkill, PersistentAgentStep, PersistentAgentSystemSkillState, PersistentAgentSystemMessage, PersistentAgentSystemStep, PersistentAgentToolCall
+from api.models import (
+    LLMRoutingProfile, PersistentAgent, PersistentAgentCompletion, PersistentAgentCustomTool, PersistentAgentJudgeSuggestion, PersistentAgentMessage, PersistentAgentSkill, PersistentAgentStep,
+    PersistentAgentSystemSkillState, PersistentAgentSystemMessage, PersistentAgentSystemStep, PersistentAgentToolCall,
+)
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)

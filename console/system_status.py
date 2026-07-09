@@ -8,7 +8,10 @@ from django.conf import settings
 from django.db.models import CharField, Count, DateTimeField, OuterRef, Subquery
 from django.utils import timezone
 
-from api.agent.core.processing_flags import clear_processing_lock_active, clear_processing_heartbeat, clear_processing_queued_flag, get_processing_heartbeat, get_processing_heartbeat_agent_ids, get_processing_locked_agent_ids, get_processing_queued_agent_ids, is_processing_queued, pending_set_key, processing_lock_storage_keys
+from api.agent.core.processing_flags import (
+    clear_processing_lock_active, clear_processing_heartbeat, clear_processing_queued_flag, get_processing_heartbeat, get_processing_heartbeat_agent_ids, get_processing_locked_agent_ids,
+    get_processing_queued_agent_ids, is_processing_queued, pending_set_key, processing_lock_storage_keys,
+)
 from api.models import AgentComputeSession, BrowserUseAgentTask, PersistentAgent, PersistentAgentError, ProxyHealthCheckResult, ProxyServer
 from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, get_live_web_sessions_for_environment
 from config.redis_client import get_redis_client

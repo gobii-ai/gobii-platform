@@ -124,7 +124,7 @@ def read_csv_rows(
     reader_kwargs = dialect_to_reader_kwargs(dialect)
     reader_fns = []
     try:
-        import clevercsv  # type: ignore[import-not-found]
+        import clevercsv
     except Exception:
         clevercsv = None
     if clevercsv is not None:
@@ -148,7 +148,7 @@ def _sniff_dialect(sample_text: str, delimiters: Sequence[str]) -> Optional[csv.
         return None
 
     try:
-        import clevercsv  # type: ignore[import-not-found]
+        import clevercsv
     except Exception:
         clevercsv = None
 

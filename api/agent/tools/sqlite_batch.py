@@ -17,7 +17,7 @@ from sqlparse.sql import Statement
 from .sqlite_guardrails import clear_guarded_connection, get_blocked_statement_reason, open_guarded_sqlite_connection, start_query_timer, stop_query_timer
 from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
 from .sqlite_query_quality import build_tool_result_query_advisories
-from .sqlite_state import EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
+from .sqlite_state import EPHEMERAL_TABLES, _sqlite_db_path_var
 
 if TYPE_CHECKING:
     from ...models import PersistentAgent

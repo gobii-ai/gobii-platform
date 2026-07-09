@@ -1,4 +1,7 @@
-import type { UsageAgentsResponse, UsageSummaryQueryInput, UsageSummaryResponse, UsageBurnRateQueryInput, UsageBurnRateResponse, UsageTrendQueryInput, UsageTrendResponse, UsageAgentLeaderboardQueryInput, UsageAgentLeaderboardResponse } from './types'
+import type {
+  UsageAgentsResponse, UsageSummaryQueryInput, UsageSummaryResponse, UsageBurnRateQueryInput, UsageBurnRateResponse, UsageTrendQueryInput, UsageTrendResponse, UsageAgentLeaderboardQueryInput,
+  UsageAgentLeaderboardResponse,
+} from './types'
 import { jsonFetch } from '../../api/http'
 
 export const fetchUsageSummary = async (params: UsageSummaryQueryInput, signal: AbortSignal): Promise<UsageSummaryResponse> => {

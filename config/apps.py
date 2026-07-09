@@ -3,7 +3,7 @@ import sys
 import logging
 logging.getLogger("opentelemetry").setLevel(logging.DEBUG)
 from django.apps import AppConfig
-from observability import init_tracing, GobiiService   # adjust import path if observability lives elsewhere
+from observability import init_tracing, GobiiService
 
 
 logger = logging.getLogger(__name__)

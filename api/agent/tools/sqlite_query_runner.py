@@ -9,7 +9,7 @@ timer/cleanup logic.
 import logging
 from typing import Any, List, Optional, Tuple
 
-from .sqlite_state import _sqlite_db_path_var  # type: ignore
+from .sqlite_state import _sqlite_db_path_var
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection, start_query_timer, stop_query_timer
 
 logger = logging.getLogger(__name__)

@@ -5,7 +5,10 @@ import time
 from django.conf import settings
 from django.db import DatabaseError
 
-from util.trial_eligibility import is_complete_registration_capi_decision_allowed, is_complete_registration_capi_trial_eligibility_enforcement_enabled, is_start_trial_capi_decision_allowed, is_start_trial_capi_trial_eligibility_enforcement_enabled
+from util.trial_eligibility import (
+    is_complete_registration_capi_decision_allowed, is_complete_registration_capi_trial_eligibility_enforcement_enabled, is_start_trial_capi_decision_allowed,
+    is_start_trial_capi_trial_eligibility_enforcement_enabled,
+)
 
 from .context import extract_click_context
 from .tasks import enqueue_delayed_subscription_guarded_marketing_event, enqueue_marketing_event, enqueue_start_trial_marketing_event

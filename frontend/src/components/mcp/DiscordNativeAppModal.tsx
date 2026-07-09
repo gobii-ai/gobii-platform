@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, Hash, Loader2, Plug, Save, Settings } from 'lucide-react'
 
-import { agentDiscordAppQueryKey, disconnectDiscordNative, fetchAgentDiscordGuildChannels, startAgentDiscordConnect, updateAgentDiscordSubscriptions, type AgentDiscordApp, type DiscordChannel, type DiscordGuild, type DiscordSubscription, type DiscordSubscriptionSelection } from '../../api/discordNative'
+import {
+  agentDiscordAppQueryKey, disconnectDiscordNative, fetchAgentDiscordGuildChannels, startAgentDiscordConnect, updateAgentDiscordSubscriptions, type AgentDiscordApp, type DiscordChannel,
+  type DiscordGuild, type DiscordSubscription, type DiscordSubscriptionSelection,
+} from '../../api/discordNative'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { PipedreamEmptyState, PipedreamErrorState, PipedreamLoadingState, PipedreamStatusBanner, type PipedreamStatusMessage } from './PipedreamAppsShared'

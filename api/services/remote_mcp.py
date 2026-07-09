@@ -17,17 +17,24 @@ from django.db.models import Q
 
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
-from api.agent.core.llm_config import AgentLLMTier, get_allowed_tier_rank, get_llm_tier_description, get_llm_tier_label, get_system_default_tier, resolve_intelligence_tier_for_owner, resolve_preferred_tier_for_owner
+from api.agent.core.llm_config import (
+    AgentLLMTier, get_allowed_tier_rank, get_llm_tier_description, get_llm_tier_label, get_system_default_tier, resolve_intelligence_tier_for_owner, resolve_preferred_tier_for_owner,
+)
 from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.models import AgentFsNode, AgentPeerLink, ApiKey, CommsChannel, Organization, OrganizationMembership, PersistentAgent, build_web_user_address
 from api.serializers import PersistentAgentSerializer
 from api.services.agent_settings_resume import queue_settings_change_resume
-from api.services.agent_debug_trace import DEBUG_TRACE_DEFAULT_INCLUDE, DEBUG_TRACE_DEFAULT_LIMIT, DEBUG_TRACE_DEFAULT_RECENT_MINUTES, DEBUG_TRACE_DETAIL_LEVELS, DEBUG_TRACE_INCLUDE_SECTIONS, DEBUG_TRACE_MAX_LIMIT, DEBUG_TRACE_MAX_RECENT_MINUTES, DEBUG_TRACE_TOOL_NAME, AgentDebugTraceValidationError, build_agent_debug_trace
+from api.services.agent_debug_trace import (
+    DEBUG_TRACE_DEFAULT_INCLUDE, DEBUG_TRACE_DEFAULT_LIMIT, DEBUG_TRACE_DEFAULT_RECENT_MINUTES, DEBUG_TRACE_DETAIL_LEVELS, DEBUG_TRACE_INCLUDE_SECTIONS, DEBUG_TRACE_MAX_LIMIT,
+    DEBUG_TRACE_MAX_RECENT_MINUTES, DEBUG_TRACE_TOOL_NAME, AgentDebugTraceValidationError, build_agent_debug_trace,
+)
 from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
-from console.agent_chat.timeline import DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE, fetch_timeline_window, serialize_message_event, serialize_processing_snapshot
+from console.agent_chat.timeline import (
+    DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE, fetch_timeline_window, serialize_message_event, serialize_processing_snapshot,
+)
 from pages.account_info_cache import invalidate_account_info_cache
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 

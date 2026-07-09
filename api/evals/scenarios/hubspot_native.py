@@ -2,7 +2,9 @@ from typing import Any
 
 from api.agent.system_skills.defaults import HUBSPOT_NATIVE_SYSTEM_SKILL_KEY
 from api.evals.base import ScenarioTask
-from api.evals.scenarios.native_http import HttpRequestExpectation, NativeHttpCase as HubSpotNativeCase, NativeHttpScenarioBase, call_matches_expectation as _call_matches_expectation, register_native_http_scenarios
+from api.evals.scenarios.native_http import (
+    HttpRequestExpectation, NativeHttpCase as HubSpotNativeCase, NativeHttpScenarioBase, call_matches_expectation as _call_matches_expectation, register_native_http_scenarios,
+)
 
 
 HUBSPOT_NATIVE_SUITE_SLUG = "hubspot_native"

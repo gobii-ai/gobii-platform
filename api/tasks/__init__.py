@@ -8,7 +8,10 @@
 # Import all tasks from their new modules
 from .browser_agent_tasks import process_browser_use_task, _process_browser_use_task_core, select_proxy_for_task, _run_agent, _safe_aclose, _jsonify  # noqa: F401
 
-from .proxy_tasks import sync_all_ip_blocks, sync_ip_block, backfill_missing_proxy_records, proxy_health_check_nightly, proxy_health_check_single, decodo_low_inventory_reminder, _perform_proxy_health_check, _fetch_decodo_ip_data, _update_or_create_ip_record, _update_or_create_proxy_record  # noqa: F401
+from .proxy_tasks import (  # noqa: F401
+    sync_all_ip_blocks, sync_ip_block, backfill_missing_proxy_records, proxy_health_check_nightly, proxy_health_check_single, decodo_low_inventory_reminder, _perform_proxy_health_check,
+    _fetch_decodo_ip_data, _update_or_create_ip_record, _update_or_create_proxy_record,
+)
 
 from .subscription_tasks import grant_monthly_free_credits  # noqa: F401
 

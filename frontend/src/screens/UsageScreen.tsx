@@ -1,9 +1,9 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
-import {useQuery} from '@tanstack/react-query'
-import {getLocalTimeZone, parseDate, today} from '@internationalized/date'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
 
 import { UsagePeriodHeader, UsageTrendSection, UsageMetricsGrid, UsageAgentLeaderboard } from '../components/usage'
-import {fetchUsageAgents} from '../components/usage/api'
+import { fetchUsageAgents } from '../components/usage/api'
 import type { DateRangeValue, PeriodInfo, UsageAgent, UsageStatus, UsageSummaryQueryInput, UsageSummaryResponse } from '../components/usage'
 import { cloneRange, areRangesEqual, getRangeLengthInDays, getAnchorDay, shiftBillingRange, shiftCustomRangeByDays, clampRangeToMax } from '../components/usage/utils'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'

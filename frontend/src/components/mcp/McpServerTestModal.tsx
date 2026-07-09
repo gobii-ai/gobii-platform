@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { AlertCircle, CheckCircle2, Loader2, Search, Stethoscope } from 'lucide-react'
 
-import { fetchMcpServerAssignments, testMcpServer, type McpServer, type McpServerAssignmentAgent, type McpServerAssignmentResponse, type McpServerTestResponse, type McpServerTestTool } from '../../api/mcp'
+import {
+  fetchMcpServerAssignments, testMcpServer, type McpServer, type McpServerAssignmentAgent, type McpServerAssignmentResponse, type McpServerTestResponse, type McpServerTestTool,
+} from '../../api/mcp'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { Modal } from '../common/Modal'
 

@@ -14,7 +14,9 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from api.evals.catalog import serialize_scenario_catalog_item, scenario_to_suite_slugs
-from api.evals.global_skill_evals import GLOBAL_SKILL_EVAL_RUBRIC_VERSION, GLOBAL_SKILL_EVAL_SCENARIO_SLUG, GLOBAL_SKILL_EVAL_SUITE_SLUG, build_global_skill_eval_secret_status, build_skill_eval_summary, serialize_global_skill_eval_skill
+from api.evals.global_skill_evals import (
+    GLOBAL_SKILL_EVAL_RUBRIC_VERSION, GLOBAL_SKILL_EVAL_SCENARIO_SLUG, GLOBAL_SKILL_EVAL_SUITE_SLUG, build_global_skill_eval_secret_status, build_skill_eval_summary, serialize_global_skill_eval_skill,
+)
 from api.evals.llm_routing_profile_snapshot import create_eval_profile_snapshot
 from api.evals.owner import ensure_eval_runner_user_and_owner
 from api.evals.realtime import broadcast_run_update, broadcast_suite_update

@@ -11,7 +11,9 @@ import { getReturnToPath } from '../../../util/returnTo'
 import { PhoneNumberInput, formatPhoneNational } from '../../common/PhoneNumberInput'
 import { useUserPhoneVerification } from '../../../hooks/useUserPhoneVerification'
 import { agentInsightsQueryKey } from '../../../hooks/useAgentInsights'
-import '../../../styles/insights.css'
+import '../../../styles/insights.css';
+
+// Staggered animation variants for insight panels
 
 // Staggered animation variants for insight panels
 const containerVariants = {

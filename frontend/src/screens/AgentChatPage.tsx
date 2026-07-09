@@ -5,7 +5,10 @@ import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { createAgent, respondToAgentTransferInvite } from '../api/agents'
 import { currentOrganizationTemplatesQueryKey, fetchCurrentOrganizationTemplates, launchOrganizationTemplate, type OrganizationTemplate } from '../api/organization'
-import { stopAgentProcessing, fulfillRequestedSecrets, removeRequestedSecrets, resolveContactRequests, resolveSpawnRequest, dismissHumanInputRequest, respondToHumanInputRequest, respondToHumanInputRequestsBatch, skipAgentPlanning, markLatestAgentMessageRead, normalizeAgentMessageReadState, type AgentMessageReadState } from '../api/agentChat'
+import {
+  stopAgentProcessing, fulfillRequestedSecrets, removeRequestedSecrets, resolveContactRequests, resolveSpawnRequest, dismissHumanInputRequest, respondToHumanInputRequest,
+  respondToHumanInputRequestsBatch, skipAgentPlanning, markLatestAgentMessageRead, normalizeAgentMessageReadState, type AgentMessageReadState,
+} from '../api/agentChat'
 import type { AgentSpawnIntent } from '../api/agentSpawnIntent'
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
@@ -43,10 +46,18 @@ import { useImmersiveShellBridge } from '../hooks/useImmersiveShellBridge'
 import { usePendingActionsBridge } from '../hooks/usePendingActionsBridge'
 import { useRosterPreferencesBridge } from '../hooks/useRosterPreferencesBridge'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { chatActions, persistPendingEventsToCache as persistPendingEventsToCacheThunk, receiveRealtimeEvent as receiveRealtimeEventThunk, refreshProcessing as refreshProcessingThunk, selectActiveChatAgentId, selectActiveChatSession, sendMessage as sendMessageThunk, setAutoScrollPinned as setAutoScrollPinnedThunk } from '../store/chatSlice'
+import {
+  chatActions, persistPendingEventsToCache as persistPendingEventsToCacheThunk, receiveRealtimeEvent as receiveRealtimeEventThunk, refreshProcessing as refreshProcessingThunk, selectActiveChatAgentId,
+  selectActiveChatSession, sendMessage as sendMessageThunk, setAutoScrollPinned as setAutoScrollPinnedThunk,
+} from '../store/chatSlice'
 import { immersiveShellActions } from '../store/immersiveShellSlice'
-import { agentRosterPreferencesActions, persistAgentRosterPreference, selectAgentChatNotificationsEnabled, selectAgentRosterSortMode, selectFavoriteAgentIds, selectInsightsPanelExpandedPreference, selectMutedAgentIds, toggleAgentRosterStringPreference } from '../store/agentRosterPreferencesSlice'
-import { agentSettingsActions, selectAgentTierErrorById, selectAgentTierOverrides, selectAgentTierSavingById, selectDraftIntelligenceTier, updateAgentIntelligenceTier } from '../store/agentSettingsSlice'
+import {
+  agentRosterPreferencesActions, persistAgentRosterPreference, selectAgentChatNotificationsEnabled, selectAgentRosterSortMode, selectFavoriteAgentIds, selectInsightsPanelExpandedPreference,
+  selectMutedAgentIds, toggleAgentRosterStringPreference,
+} from '../store/agentRosterPreferencesSlice'
+import {
+  agentSettingsActions, selectAgentTierErrorById, selectAgentTierOverrides, selectAgentTierSavingById, selectDraftIntelligenceTier, updateAgentIntelligenceTier,
+} from '../store/agentSettingsSlice'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
