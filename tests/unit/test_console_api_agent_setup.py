@@ -291,6 +291,64 @@ class AgentSetupApiTests(TestCase):
         self.assertEqual(agent.preferred_contact_endpoint.channel, CommsChannel.SMS)
         self.assertEqual(agent.preferred_contact_endpoint.address, pending_phone.phone_number)
 
+    @patch("util.sms.check_verification", return_value=True)
+    def test_phone_verify_replacement_updates_manageable_org_agent_sms_endpoint(self, _mock_check_verification):
+        other_user = User.objects.create_user(
+            username="org-agent-owner",
+            email="org-owner@example.com",
+            password="password123",
+        )
+        org = Organization.objects.create(name="Acme", slug="acme", created_by=other_user)
+        billing = org.billing
+        billing.subscription = PlanNames.ORG_TEAM
+        billing.purchased_seats = 2
+        billing.save(update_fields=["subscription", "purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        current_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+            verified_at=timezone.now(),
+        )
+        pending_phone = UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530002",
+            is_verified=False,
+            is_primary=False,
+            last_verification_attempt=timezone.now() - timedelta(seconds=120),
+        )
+        old_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address=current_phone.phone_number,
+            owner_agent=None,
+        )
+        browser = BrowserUseAgent.objects.create(user=other_user, name="Org Browser Agent")
+        agent = PersistentAgent.objects.create(
+            user=other_user,
+            organization=org,
+            name="Org Console Tester",
+            charter="Do useful org things",
+            browser_use_agent=browser,
+            preferred_contact_endpoint=old_endpoint,
+        )
+
+        response = self.client.post(
+            "/console/api/user/phone/verify/",
+            data=json.dumps({"verification_code": "123456"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        agent.refresh_from_db()
+        self.assertEqual(agent.preferred_contact_endpoint.channel, CommsChannel.SMS)
+        self.assertEqual(agent.preferred_contact_endpoint.address, pending_phone.phone_number)
+
     @patch("console.agent_creation.process_agent_events_task.delay")
     @patch("console.agent_creation.sms.send_sms")
     @patch("console.agent_creation.find_unused_number")

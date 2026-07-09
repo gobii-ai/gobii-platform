@@ -3440,6 +3440,19 @@ class UserPhoneCancelAPIView(ApiLoginRequiredMixin, View):
         return JsonResponse(serialize_phone_state(request.user))
 
 
+def _manageable_agents_using_endpoint_for_user(user, endpoint):
+    agents = PersistentAgent.objects.filter(preferred_contact_endpoint=endpoint)
+    if user.is_staff:
+        return agents
+    return agents.filter(
+        Q(user=user, organization__isnull=True)
+        | Q(
+            organization__organizationmembership__user=user,
+            organization__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+    ).distinct()
+
+
 class UserPhoneVerifyAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
@@ -3493,10 +3506,13 @@ class UserPhoneVerifyAPIView(ApiLoginRequiredMixin, View):
                             address=verified_phone.phone_number,
                             defaults={"owner_agent": None},
                         )
-                        PersistentAgent.objects.filter(
-                            user=request.user,
-                            preferred_contact_endpoint=old_sms_endpoint,
-                        ).update(preferred_contact_endpoint=new_sms_endpoint)
+                        manageable_agent_ids = _manageable_agents_using_endpoint_for_user(
+                            request.user,
+                            old_sms_endpoint,
+                        ).values("id")
+                        PersistentAgent.objects.filter(id__in=manageable_agent_ids).update(
+                            preferred_contact_endpoint=new_sms_endpoint,
+                        )
 
                     if old_primary_phone:
                         old_primary_phone.delete()

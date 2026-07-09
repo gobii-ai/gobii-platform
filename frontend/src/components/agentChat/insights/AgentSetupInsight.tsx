@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { ArrowRight, Brain, Check, CheckCircle2, Copy, Mail, MessageSquare, Pencil, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
@@ -16,6 +17,7 @@ import {
   formatPhoneNational,
 } from '../../common/PhoneNumberInput'
 import { useUserPhoneVerification } from '../../../hooks/useUserPhoneVerification'
+import { agentInsightsQueryKey } from '../../../hooks/useAgentInsights'
 import '../../../styles/insights.css'
 
 // Staggered animation variants for insight panels
@@ -83,6 +85,7 @@ function describeError(error: unknown): string {
 export function AgentSetupInsight({
   insight,
 }: AgentSetupInsightProps) {
+  const queryClient = useQueryClient()
   const metadata = insight.metadata as AgentSetupMetadata
   const panel = (metadata.panel ?? 'always_on') as AgentSetupPanel
 
@@ -94,11 +97,16 @@ export function AgentSetupInsight({
   const [emailResendState, setEmailResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [emailResendError, setEmailResendError] = useState<string | null>(null)
   const supportedPhoneRegions = metadata.sms.supportedPhoneRegions ?? []
+  const invalidateAgentSetupData = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: agentInsightsQueryKey(metadata.agentId) })
+    void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
+  }, [metadata.agentId, queryClient])
   const phoneVerification = useUserPhoneVerification({
     phone: metadata.sms.userPhone ?? null,
     pendingPhone: metadata.sms.pendingUserPhone ?? null,
     supportedRegions: supportedPhoneRegions,
     describeError,
+    onPhoneChange: invalidateAgentSetupData,
     onAddSuccess: () => track(AnalyticsEvent.AGENT_SETUP_SMS_CODE_SENT, { agentId: metadata.agentId }),
     onVerifySuccess: () => track(AnalyticsEvent.AGENT_SETUP_SMS_VERIFIED, { agentId: metadata.agentId }),
   })

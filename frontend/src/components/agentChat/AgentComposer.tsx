@@ -232,6 +232,10 @@ function isPendingWorkingTabId(tabId: string | null): boolean {
   return Boolean(tabId?.startsWith('pending:'))
 }
 
+function isInsightWorkingTabId(tabId: string | null): boolean {
+  return Boolean(tabId?.startsWith('insight:'))
+}
+
 type PendingActionNavigationItem =
   | { actionId: string; kind: 'human_input'; requestId: string }
   | { actionId: string; kind: 'action' }
@@ -1101,6 +1105,32 @@ export const AgentComposer = memo(function AgentComposer({
       }
     }
   }, [hasMultipleInsights, isInsightsPaused, isProcessing])
+
+  useEffect(() => {
+    if (!hasMultipleInsights || isInsightsPaused || !isProcessing) {
+      return undefined
+    }
+
+    const interval = window.setInterval(() => {
+      const nextIndex = (currentInsightIndex + 1) % totalInsights
+      const nextInsight = insights[nextIndex]
+      onInsightIndexChange?.(nextIndex)
+      if (nextInsight && (!activeWorkingTabId || isInsightWorkingTabId(activeWorkingTabId))) {
+        setActiveWorkingTabId(`insight:${nextInsight.insightId}`)
+      }
+    }, INSIGHT_TIMING.rotationIntervalMs)
+
+    return () => window.clearInterval(interval)
+  }, [
+    activeWorkingTabId,
+    currentInsightIndex,
+    hasMultipleInsights,
+    insights,
+    isInsightsPaused,
+    isProcessing,
+    onInsightIndexChange,
+    totalInsights,
+  ])
 
   // Reset countdown when insight changes
   useEffect(() => {
