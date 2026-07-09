@@ -68,10 +68,12 @@ from api.agent.core.processing_flags import (
     enqueue_pending_agent,
     is_agent_pending,
     is_processing_stop_requested,
+    processing_lock_storage_keys,
 )
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.services.pipedream_apps import get_owner_apps_state
 from api.services.web_sessions import heartbeat_web_session, start_web_session
+from config.redis_client import get_redis_client
 from console.agent_chat.plan_events import persist_plan_event
 from console.agent_chat.timeline import build_processing_snapshot
 from console.agent_chat.timeline import fetch_timeline_window
@@ -796,6 +798,26 @@ class AgentChatAPITests(TestCase):
         self.assertIn("active", snapshot)
         self.assertIn("webTasks", snapshot)
         self.assertIsInstance(snapshot.get("webTasks"), list)
+
+    @tag("batch_agent_chat")
+    @override_settings(GOBII_RELEASE_ENV="staging")
+    def test_timeline_includes_schedule_next_run_from_loaded_agent(self):
+        self.agent.schedule = "@hourly"
+        self.agent.execution_environment = "prod"
+        self.agent.is_active = True
+        self.agent.life_state = PersistentAgent.LifeState.ACTIVE
+        self.agent.save(
+            update_fields=["schedule", "execution_environment", "is_active", "life_state"],
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload.get("agent_schedule"), "@hourly")
+        self.assertIsInstance(payload.get("agent_next_scheduled_at"), str)
+        snapshot = payload.get("processing_snapshot") or {}
+        self.assertIsNone(snapshot.get("nextScheduledAt"))
 
     @tag("batch_agent_chat")
     def test_timeline_includes_pending_action_requests_for_manager(self):
@@ -2578,6 +2600,22 @@ class AgentChatAPITests(TestCase):
             self.assertEqual(snapshot.get("webTasks"), [])
         finally:
             clear_processing_queued_flag(self.agent.id)
+
+    @tag("batch_agent_chat")
+    def test_processing_status_reports_active_for_processing_lock_storage_key(self):
+        redis_client = get_redis_client()
+        _, legacy_lock_key = processing_lock_storage_keys(self.agent.id)
+        redis_client.set(legacy_lock_key, "1", ex=60)
+        try:
+            response = self.client.get(f"/console/api/agents/{self.agent.id}/processing/")
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(payload.get("processing_active"))
+
+            snapshot = payload.get("processing_snapshot") or {}
+            self.assertTrue(snapshot.get("active"))
+        finally:
+            redis_client.delete(legacy_lock_key)
 
     @tag("batch_agent_chat")
     def test_stop_endpoint_stops_processing_and_cancels_active_web_tasks(self):

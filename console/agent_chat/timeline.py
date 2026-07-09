@@ -18,7 +18,11 @@ from django.utils import timezone
 from django.utils.timesince import timesince
 from django.urls import reverse
 
-from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
+from api.agent.core.processing_flags import (
+    get_processing_heartbeat,
+    is_processing_queued,
+    processing_lock_storage_keys,
+)
 from api.agent.core.schedule_parser import ScheduleParser
 from api.agent.comms.chat_email_display_cache import (
     get_cached_chat_body_html,
@@ -1097,17 +1101,12 @@ def _coerce_schedule_eta_to_timedelta(eta: object) -> timedelta | None:
     return None
 
 
-def _compute_next_scheduled_run(agent: PersistentAgent, *, now: datetime | None = None) -> datetime | None:
-    """Return the next known scheduled wake-up for an agent."""
-
-    if not agent.is_active or agent.life_state != PersistentAgent.LifeState.ACTIVE:
-        return None
-
-    current_env = getattr(settings, "GOBII_RELEASE_ENV", "local")
-    if (agent.execution_environment or "local") != current_env:
-        return None
-
-    schedule_value = (agent.schedule or "").strip()
+def _compute_next_scheduled_run_for_schedule(
+    schedule_value: str | None,
+    *,
+    now: datetime | None = None,
+) -> datetime | None:
+    schedule_value = (schedule_value or "").strip()
     if not schedule_value:
         return None
 
@@ -1133,20 +1132,40 @@ def _compute_next_scheduled_run(agent: PersistentAgent, *, now: datetime | None 
     return current_time + delay
 
 
+def compute_agent_schedule_next_run(
+    agent: PersistentAgent,
+    *,
+    now: datetime | None = None,
+) -> datetime | None:
+    if not agent.is_active or agent.life_state != PersistentAgent.LifeState.ACTIVE:
+        return None
+    return _compute_next_scheduled_run_for_schedule(agent.schedule, now=now)
+
+
+def _compute_next_scheduled_run(agent: PersistentAgent, *, now: datetime | None = None) -> datetime | None:
+    """Return the next known scheduled wake-up for an agent in this release env."""
+
+    current_env = getattr(settings, "GOBII_RELEASE_ENV", "local")
+    if (agent.execution_environment or "local") != current_env:
+        return None
+    return compute_agent_schedule_next_run(agent, now=now)
+
+
 def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
     """Compute current processing activity and active web tasks for an agent."""
 
-    # Check if the agent event processing lock is held
-    # Note: Redlock prefixes keys with "redlock:" internally
+    # Check if the agent event processing lock is held.
     from config.redis_client import get_redis_client
 
-    lock_key = f"redlock:agent-event-processing:{agent.id}"
     lock_active = False
     queued_flag = False
     heartbeat_active = False
     try:
         redis_client = get_redis_client()
-        lock_active = bool(redis_client.exists(lock_key))
+        lock_active = any(
+            bool(redis_client.exists(key))
+            for key in processing_lock_storage_keys(agent.id)
+        )
         queued_flag = is_processing_queued(agent.id, client=redis_client)
         heartbeat_active = bool(get_processing_heartbeat(agent.id, client=redis_client))
     except Exception:
@@ -1245,6 +1264,13 @@ def serialize_processing_snapshot(snapshot: ProcessingSnapshot) -> dict:
         "active": snapshot.active,
         "webTasks": snapshot.web_tasks,
         "nextScheduledAt": _format_timestamp(snapshot.next_scheduled_at),
+    }
+
+
+def serialize_agent_schedule(agent: PersistentAgent) -> dict:
+    return {
+        "agent_schedule": agent.schedule or "",
+        "agent_next_scheduled_at": _format_timestamp(compute_agent_schedule_next_run(agent)),
     }
 
 

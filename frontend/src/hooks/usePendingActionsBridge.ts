@@ -39,13 +39,19 @@ export function usePendingActionsBridge(
 
     const name = initialPageResponse.agent_name ?? null
     const avatar = initialPageResponse.agent_avatar_url ?? null
+    const nextScheduledAt = initialPageResponse.agent_next_scheduled_at ?? null
+    const hasNextScheduledAt = Object.prototype.hasOwnProperty.call(
+      initialPageResponse,
+      'agent_next_scheduled_at',
+    )
     const signupPreviewState = normalizeSignupPreviewState(initialPageResponse.signup_preview_state)
     const planningState = normalizePlanningState(initialPageResponse.planning_state)
-    if (name || avatar || signupPreviewState !== 'none' || planningState !== 'skipped') {
+    if (name || avatar || hasNextScheduledAt || signupPreviewState !== 'none' || planningState !== 'skipped') {
       dispatch(chatActions.agentIdentityUpdated({
         agentId: activeAgentId,
         ...(name ? { agentName: name } : {}),
         ...(avatar ? { agentAvatarUrl: avatar } : {}),
+        ...(hasNextScheduledAt ? { agentNextScheduledAt: nextScheduledAt } : {}),
         signupPreviewState,
         planningState,
       }))

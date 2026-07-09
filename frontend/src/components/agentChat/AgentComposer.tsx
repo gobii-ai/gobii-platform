@@ -681,6 +681,7 @@ export const AgentComposer = memo(function AgentComposer({
     ]
   }, [baseInsights, storeAgentEmail, storeAgentSms])
   const nextScheduledAt = activeSession.processing.nextScheduledAt
+    ?? activeSession.identity.agentNextScheduledAt
   const readyWakeTime = formatReadyWakeTime(nextScheduledAt)
   const readyWakeDuration = readyWakeTime?.startsWith('in ') ? readyWakeTime.slice(3) : readyWakeTime
   const readyWakeLabel = readyWakeTime?.startsWith('in ') ? 'Next wake-up in' : 'Next wake-up'

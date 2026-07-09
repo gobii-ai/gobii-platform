@@ -42,6 +42,7 @@ export type AgentChatIdentityState = {
   agentMiniDescription: string | null
   agentEmail: string | null
   agentSms: string | null
+  agentNextScheduledAt: string | null
   auditUrl: string | null
   agentIsOrgOwned: boolean
   canManageAgent: boolean
@@ -106,6 +107,7 @@ type AgentIdentityUpdateInput = {
   agentMiniDescription?: string | null
   agentEmail?: string | null
   agentSms?: string | null
+  agentNextScheduledAt?: string | null
   auditUrl?: string | null
   agentIsOrgOwned?: boolean
   canManageAgent?: boolean
@@ -156,6 +158,7 @@ export function createInitialSession(): AgentChatSession {
       agentMiniDescription: null,
       agentEmail: null,
       agentSms: null,
+      agentNextScheduledAt: null,
       auditUrl: null,
       agentIsOrgOwned: false,
       canManageAgent: true,
@@ -241,6 +244,9 @@ function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpd
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentSms')) {
     session.identity.agentSms = update?.agentSms ?? null
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentNextScheduledAt')) {
+    session.identity.agentNextScheduledAt = update?.agentNextScheduledAt ?? null
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'auditUrl')) {
     session.identity.auditUrl = update?.auditUrl ?? null

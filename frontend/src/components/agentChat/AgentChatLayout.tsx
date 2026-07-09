@@ -469,6 +469,7 @@ export function AgentChatLayout({
   const runtimeAwaitingResponse = runtimeSession.processing.awaitingResponse
   const runtimeProcessingWebTasks = runtimeSession.processing.processingWebTasks
   const runtimeNextScheduledAt = runtimeSession.processing.nextScheduledAt
+    ?? runtimeSession.identity.agentNextScheduledAt
   const runtimeStopProcessingRequested = runtimeSession.processing.stopProcessingRequested
   const runtimeSkipPlanningBusy = runtimeSession.processing.skipPlanningBusy
   const runtimeStreaming = runtimeSession.stream.streaming
