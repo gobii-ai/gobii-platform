@@ -847,6 +847,96 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(action["metadata"], {"secret_names": ["GitHub token"]})
 
     @tag("batch_agent_chat")
+    def test_timeline_redacts_manager_only_user_action_metadata_for_collaborator(self):
+        collaborator = get_user_model().objects.create_user(
+            username="timeline-action-collaborator",
+            email="timeline-action-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(
+            agent=self.agent,
+            user=collaborator,
+            invited_by=self.user,
+        )
+        PersistentAgentUserActionEvent.objects.create(
+            agent=self.agent,
+            actor_user=self.user,
+            action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED,
+            count=1,
+            metadata={"secret_names": ["GitHub token"], "scope": "agent"},
+            occurred_at=timezone.now() + timedelta(seconds=5),
+        )
+        PersistentAgentUserActionEvent.objects.create(
+            agent=self.agent,
+            actor_user=self.user,
+            action_type=PersistentAgentUserActionEvent.ActionType.CONTACTS_APPROVED,
+            count=1,
+            metadata={
+                "approved_count": 1,
+                "declined_count": 0,
+                "skipped_count": 0,
+                "contact_labels": ["approver@example.com"],
+            },
+            occurred_at=timezone.now() + timedelta(seconds=6),
+        )
+
+        collaborator_client = Client()
+        collaborator_client.force_login(collaborator)
+        response = collaborator_client.get(f"/console/api/agents/{self.agent.id}/timeline/?limit=10")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        actions = {
+            event["action"]["actionType"]: event["action"]
+            for event in payload["events"]
+            if event.get("kind") == "user_action"
+        }
+        self.assertEqual(actions["secrets_saved"]["metadata"], {"scope": "agent"})
+        contact_metadata = actions["contacts_approved"]["metadata"]
+        self.assertEqual(contact_metadata["approved_count"], 1)
+        self.assertNotIn("contact_labels", contact_metadata)
+
+    @tag("batch_agent_chat")
+    def test_timeline_newer_from_same_timestamp_message_includes_user_action(self):
+        shared_timestamp = timezone.now() + timedelta(seconds=10)
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            conversation=self.conversation,
+            body="Cursor message at shared timestamp",
+            owner_agent=self.agent,
+            timestamp=shared_timestamp,
+        )
+        action_event = PersistentAgentUserActionEvent.objects.create(
+            agent=self.agent,
+            actor_user=self.user,
+            action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED,
+            count=1,
+            metadata={"secret_names": ["GitHub token"]},
+            occurred_at=shared_timestamp,
+        )
+
+        initial_window = fetch_timeline_window(self.agent, limit=10, viewer_user=self.user)
+        message_cursor = next(
+            event["cursor"]
+            for event in initial_window.events
+            if event.get("kind") == "message"
+            and event["message"].get("id") == str(message.id)
+        )
+
+        newer_window = fetch_timeline_window(
+            self.agent,
+            cursor=message_cursor,
+            direction="newer",
+            limit=1,
+            viewer_user=self.user,
+        )
+
+        self.assertEqual(len(newer_window.events), 1)
+        self.assertEqual(newer_window.events[0]["kind"], "user_action")
+        self.assertEqual(newer_window.events[0]["action"]["id"], str(action_event.id))
+
+    @tag("batch_agent_chat")
     @patch("console.api_views.process_agent_events_task.delay")
     def test_requested_secret_fulfill_returns_user_action_without_secret_value(self, mock_delay):
         requested_secret = PersistentAgentSecret(

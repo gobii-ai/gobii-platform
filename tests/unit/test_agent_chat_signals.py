@@ -252,6 +252,7 @@ class AgentChatSignalTests(TestCase):
         self.assertNotIn("summary", payload.get("action", {}))
         self.assertNotIn("detail", payload.get("action", {}))
         self.assertEqual(payload.get("action", {}).get("actorUserId"), self.user.id)
+        self.assertEqual(payload.get("action", {}).get("metadata"), {})
 
     @tag("batch_agent_chat")
     def test_create_image_tool_call_emits_preview_url(self):

@@ -472,7 +472,7 @@ def broadcast_user_action_event(sender, instance: PersistentAgentUserActionEvent
         try:
             event = (
                 PersistentAgentUserActionEvent.objects
-                .select_related("actor_user")
+                .select_related("actor_user", "agent")
                 .get(id=event_id)
             )
         except PersistentAgentUserActionEvent.DoesNotExist:

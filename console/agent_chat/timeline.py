@@ -46,6 +46,7 @@ from api.models import (
 )
 
 from api.agent.tools.plan import PlanSnapshot, build_plan_snapshot
+from .access import user_can_manage_agent_settings
 from .plan_events import ensure_plan_baseline_event
 
 DEFAULT_PAGE_SIZE = 40
@@ -53,6 +54,13 @@ MAX_PAGE_SIZE = 100
 COLLAPSE_THRESHOLD = 3
 THINKING_COMPLETION_TYPES = (PersistentAgentCompletion.CompletionType.ORCHESTRATOR,)
 HIDE_IN_CHAT_PAYLOAD_KEY = "hide_in_chat"
+MANAGER_ONLY_USER_ACTION_METADATA_KEYS_BY_TYPE = {
+    PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED: frozenset({"secret_names"}),
+    PersistentAgentUserActionEvent.ActionType.SECRETS_REMOVED: frozenset({"secret_names"}),
+    PersistentAgentUserActionEvent.ActionType.CONTACTS_APPROVED: frozenset({"contact_labels"}),
+    PersistentAgentUserActionEvent.ActionType.CONTACTS_DECLINED: frozenset({"contact_labels"}),
+    PersistentAgentUserActionEvent.ActionType.CONTACTS_RESOLVED: frozenset({"contact_labels"}),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -546,7 +554,33 @@ def _serialize_thinking(env: ThinkingEnvelope) -> dict:
     }
 
 
-def _serialize_user_action(env: UserActionEnvelope) -> dict:
+def _viewer_can_see_manager_action_metadata(
+    agent: PersistentAgent,
+    viewer_user,
+) -> bool:
+    if viewer_user is None or not getattr(viewer_user, "is_authenticated", False):
+        return False
+    return user_can_manage_agent_settings(
+        viewer_user,
+        agent,
+        allow_delinquent_personal_chat=True,
+    )
+
+
+def _serialize_user_action_metadata(
+    event: PersistentAgentUserActionEvent,
+    *,
+    viewer_user=None,
+) -> dict:
+    metadata = dict(event.metadata or {})
+    redacted_keys = MANAGER_ONLY_USER_ACTION_METADATA_KEYS_BY_TYPE.get(event.action_type)
+    if redacted_keys and not _viewer_can_see_manager_action_metadata(event.agent, viewer_user):
+        for key in redacted_keys:
+            metadata.pop(key, None)
+    return metadata
+
+
+def _serialize_user_action(env: UserActionEnvelope, *, viewer_user=None) -> dict:
     event = env.event
     actor = event.actor_user
     actor_name = _build_user_display_name(actor) if actor else None
@@ -560,7 +594,7 @@ def _serialize_user_action(env: UserActionEnvelope) -> dict:
             "count": event.count,
             "actorUserId": event.actor_user_id,
             "actorName": actor_name,
-            "metadata": event.metadata or {},
+            "metadata": _serialize_user_action_metadata(event, viewer_user=viewer_user),
         },
     }
 
@@ -834,11 +868,22 @@ def _user_action_event_queryset(
     limit = MAX_PAGE_SIZE * 3
     qs = (
         PersistentAgentUserActionEvent.objects.filter(agent=agent)
-        .select_related("actor_user")
+        .select_related("actor_user", "agent")
         .order_by("-occurred_at", "-cursor_identifier")
     )
     if direction == "older" and cursor is not None:
-        qs = qs.filter(occurred_at__lte=_dt_from_cursor(cursor))
+        dt = _dt_from_cursor(cursor)
+        if cursor.kind == "user_action":
+            try:
+                cursor_uuid = uuid.UUID(cursor.identifier)
+                qs = qs.filter(
+                    Q(occurred_at__lt=dt)
+                    | Q(occurred_at=dt, cursor_identifier__lt=cursor_uuid)
+                )
+            except (TypeError, ValueError):
+                qs = qs.filter(occurred_at__lte=dt)
+        else:
+            qs = qs.filter(occurred_at__lt=dt)
     elif direction == "newer" and cursor is not None:
         dt = _dt_from_cursor(cursor)
         if cursor.kind == "user_action":
@@ -851,7 +896,7 @@ def _user_action_event_queryset(
             except (TypeError, ValueError):
                 qs = qs.filter(occurred_at__gt=dt)
         else:
-            qs = qs.filter(occurred_at__gt=dt)
+            qs = qs.filter(occurred_at__gte=dt)
     return list(qs[:limit])
 
 
@@ -1140,11 +1185,11 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
         except Exception:
             pass
 
-    user_action_exists = PersistentAgentUserActionEvent.objects.filter(
-        agent=agent,
-        occurred_at__gt=dt,
-    ).exists()
     if cursor.kind == "user_action":
+        user_action_exists = PersistentAgentUserActionEvent.objects.filter(
+            agent=agent,
+            occurred_at__gt=dt,
+        ).exists()
         try:
             cursor_uuid = uuid.UUID(cursor.identifier)
             user_action_exists = user_action_exists or PersistentAgentUserActionEvent.objects.filter(
@@ -1154,6 +1199,11 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
             ).exists()
         except (TypeError, ValueError):
             pass
+    else:
+        user_action_exists = PersistentAgentUserActionEvent.objects.filter(
+            agent=agent,
+            occurred_at__gte=dt,
+        ).exists()
 
     return message_exists or step_exists or completion_exists or plan_event_exists or user_action_exists
 
@@ -1381,6 +1431,7 @@ def fetch_timeline_window(
     cursor: str | None = None,
     direction: TimelineDirection = "initial",
     limit: int = DEFAULT_PAGE_SIZE,
+    viewer_user=None,
 ) -> TimelineWindow:
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     cursor_payload = CursorPayload.decode(cursor)
@@ -1428,7 +1479,7 @@ def fetch_timeline_window(
         elif isinstance(env, PlanEnvelope):
             timeline_events.append(serialize_persisted_plan_event(env, agent_name))
         elif isinstance(env, UserActionEnvelope):
-            timeline_events.append(_serialize_user_action(env))
+            timeline_events.append(_serialize_user_action(env, viewer_user=viewer_user))
         else:
             timeline_events.append(_serialize_message(env, user_lookup))
     if cluster_buffer:
@@ -1460,9 +1511,9 @@ def serialize_message_event(message: PersistentAgentMessage) -> dict:
     return _serialize_message(envelope)
 
 
-def serialize_user_action_event(event: PersistentAgentUserActionEvent) -> dict:
+def serialize_user_action_event(event: PersistentAgentUserActionEvent, *, viewer_user=None) -> dict:
     envelope = _envelop_user_action_events([event])[0]
-    return _serialize_user_action(envelope)
+    return _serialize_user_action(envelope, viewer_user=viewer_user)
 
 
 def serialize_thinking_event(completion: PersistentAgentCompletion) -> dict | None:
