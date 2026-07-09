@@ -16,7 +16,7 @@ from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
 from api.models import (
-    AgentOwnerTemplateRecommendationState,
+    AgentOwnerCategoryProfile,
     BrowserUseAgent,
     Organization,
     OrganizationMembership,
@@ -306,7 +306,7 @@ class NewAgentTemplateRecommendationTests(TestCase):
             [template["templateCode"] for template in payload["templates"]],
             ["people-mid", "people-high", "people-low"],
         )
-        state = AgentOwnerTemplateRecommendationState.objects.get(user=self.user)
+        state = AgentOwnerCategoryProfile.objects.get(user=self.user)
         self.assertEqual(state.categories, ["People"])
 
     @tag("batch_public_templates")

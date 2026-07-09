@@ -9,7 +9,7 @@ from django.db.models.functions import Lower
 
 from api.agent.core.llm_config import LLMNotConfiguredError, get_summarization_llm_configs
 from api.agent.core.llm_utils import LiteLLMResponseError, run_completion
-from api.models import AgentOwnerTemplateRecommendationState, PersistentAgent, PersistentAgentTemplate
+from api.models import AgentOwnerCategoryProfile, PersistentAgent, PersistentAgentTemplate
 from console.context_helpers import ConsoleContextInfo
 
 logger = logging.getLogger(__name__)
@@ -113,7 +113,7 @@ def _dedupe_categories(categories) -> list[str]:
 
 def _stored_categories(user, context_info: ConsoleContextInfo, *, source_fingerprint: str) -> list[str]:
     state = (
-        AgentOwnerTemplateRecommendationState.objects
+        AgentOwnerCategoryProfile.objects
         .filter(**_owner_state_kwargs(user, context_info), source_fingerprint=source_fingerprint)
         .first()
     )
@@ -135,7 +135,7 @@ def _persist_categories(
     normalized_categories = _dedupe_categories(categories)
     if not normalized_categories:
         return
-    AgentOwnerTemplateRecommendationState.objects.update_or_create(
+    AgentOwnerCategoryProfile.objects.update_or_create(
         **_owner_state_kwargs(user, context_info),
         defaults={
             "categories": normalized_categories,

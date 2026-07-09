@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name="AgentOwnerTemplateRecommendationState",
+            name="AgentOwnerCategoryProfile",
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("categories", models.JSONField(blank=True, default=list)),
@@ -25,7 +25,7 @@ class Migration(migrations.Migration):
                         blank=True,
                         null=True,
                         on_delete=django.db.models.deletion.CASCADE,
-                        related_name="template_recommendation_states",
+                        related_name="agent_category_profiles",
                         to="api.organization",
                     ),
                 ),
@@ -35,40 +35,40 @@ class Migration(migrations.Migration):
                         blank=True,
                         null=True,
                         on_delete=django.db.models.deletion.CASCADE,
-                        related_name="template_recommendation_states",
+                        related_name="agent_category_profiles",
                         to=settings.AUTH_USER_MODEL,
                     ),
                 ),
             ],
             options={
-                "verbose_name": "agent owner template recommendation state",
-                "verbose_name_plural": "agent owner template recommendation states",
+                "verbose_name": "agent owner category profile",
+                "verbose_name_plural": "agent owner category profiles",
             },
         ),
         migrations.AddConstraint(
-            model_name="agentownertemplaterecommendationstate",
+            model_name="agentownercategoryprofile",
             constraint=models.CheckConstraint(
                 condition=(
                     models.Q(("organization__isnull", True), ("user__isnull", False))
                     | models.Q(("organization__isnull", False), ("user__isnull", True))
                 ),
-                name="agent_owner_template_rec_exactly_one_owner",
+                name="agent_owner_category_profile_exactly_one_owner",
             ),
         ),
         migrations.AddConstraint(
-            model_name="agentownertemplaterecommendationstate",
+            model_name="agentownercategoryprofile",
             constraint=models.UniqueConstraint(
                 condition=models.Q(("user__isnull", False)),
                 fields=("user",),
-                name="unique_template_rec_state_user",
+                name="unique_agent_owner_category_profile_user",
             ),
         ),
         migrations.AddConstraint(
-            model_name="agentownertemplaterecommendationstate",
+            model_name="agentownercategoryprofile",
             constraint=models.UniqueConstraint(
                 condition=models.Q(("organization__isnull", False)),
                 fields=("organization",),
-                name="unique_template_rec_state_org",
+                name="unique_agent_owner_category_profile_org",
             ),
         ),
     ]

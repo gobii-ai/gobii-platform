@@ -13071,20 +13071,20 @@ class AgentOwnerCustomInstructions(models.Model):
         return f"Custom instructions for {owner}"
 
 
-class AgentOwnerTemplateRecommendationState(models.Model):
+class AgentOwnerCategoryProfile(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         null=True,
         blank=True,
-        related_name="template_recommendation_states",
+        related_name="agent_category_profiles",
     )
     organization = models.ForeignKey(
         Organization,
         on_delete=models.CASCADE,
         null=True,
         blank=True,
-        related_name="template_recommendation_states",
+        related_name="agent_category_profiles",
     )
     categories = models.JSONField(default=list, blank=True)
     source_fingerprint = models.CharField(max_length=64, blank=True)
@@ -13098,25 +13098,25 @@ class AgentOwnerTemplateRecommendationState(models.Model):
                     models.Q(user__isnull=False, organization__isnull=True)
                     | models.Q(user__isnull=True, organization__isnull=False)
                 ),
-                name="agent_owner_template_rec_exactly_one_owner",
+                name="agent_owner_category_profile_exactly_one_owner",
             ),
             models.UniqueConstraint(
                 fields=["user"],
                 condition=models.Q(user__isnull=False),
-                name="unique_template_rec_state_user",
+                name="unique_agent_owner_category_profile_user",
             ),
             models.UniqueConstraint(
                 fields=["organization"],
                 condition=models.Q(organization__isnull=False),
-                name="unique_template_rec_state_org",
+                name="unique_agent_owner_category_profile_org",
             ),
         ]
-        verbose_name = "agent owner template recommendation state"
-        verbose_name_plural = "agent owner template recommendation states"
+        verbose_name = "agent owner category profile"
+        verbose_name_plural = "agent owner category profiles"
 
     def __str__(self) -> str:
         owner = self.organization or self.user
-        return f"Template recommendation state for {owner}"
+        return f"Agent owner category profile for {owner}"
 
 
 @receiver(post_save, sender=Organization)
