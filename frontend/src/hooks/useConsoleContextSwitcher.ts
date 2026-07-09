@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import {
-  createOrganization,
-  fetchConsoleContext,
-  switchConsoleContext,
-  type ConsoleContext,
-  type ConsoleContextData,
-  type ConsoleContextOption,
-} from '../api/context'
+import { createOrganization, fetchConsoleContext, switchConsoleContext, type ConsoleContext, type ConsoleContextData, type ConsoleContextOption } from '../api/context'
 import { readStoredConsoleContext, storeConsoleContext } from '../util/consoleContextStorage'
 
 type UseConsoleContextSwitcherOptions = {

@@ -6,14 +6,7 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
-import type {
-  DateRangeValue,
-  TrendChartOption,
-  UsageTrendBucket,
-  UsageTrendMode,
-  UsageTrendQueryInput,
-  UsageTrendResponse,
-} from './types'
+import type { DateRangeValue, TrendChartOption, UsageTrendBucket, UsageTrendMode, UsageTrendQueryInput, UsageTrendResponse } from './types'
 import { fetchUsageTrends } from './api'
 import { getRangeLengthInDays } from './utils'
 import { useEchartsSizeSensor } from '../../hooks/useEchartsSizeSensor'

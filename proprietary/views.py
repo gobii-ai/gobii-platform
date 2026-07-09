@@ -4,10 +4,7 @@ from smtplib import SMTPException
 from email.utils import formataddr
 
 from anymail.exceptions import AnymailAPIError
-from billing.plan_resolver import (
-    get_active_public_plan_context,
-    get_active_public_plan_monthly_task_credits,
-)
+from billing.plan_resolver import get_active_public_plan_context, get_active_public_plan_monthly_task_credits
 from django.conf import settings
 from django.contrib import sitemaps
 from django.http import HttpResponse, Http404, JsonResponse
@@ -22,25 +19,10 @@ from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 from proprietary.forms import SupportForm, PrequalifyForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
 from util.waffle_flags import is_waffle_flag_active
-from util.subscription_helper import (
-    get_user_plan,
-)
-from api.services.trial_abuse import (
-    evaluate_user_trial_eligibility,
-    user_has_prior_individual_history,
-)
-from constants.feature_flags import (
-    CTA_NO_CHARGE_DURING_TRIAL,
-    CTA_PRICING_CANCEL_TEXT_UNDER_BTN,
-    CTA_START_FREE_TRIAL,
-    CTA_UNLOCK_AGENT_COPY,
-    SUPPORT_INTERCOM,
-)
-from util.trial_eligibility import (
-    is_user_trial_allowed_by_policy,
-    is_user_trial_eligibility_enforcement_enabled,
-    is_user_trial_eligibility_enforcement_one_per_user_enabled,
-)
+from util.subscription_helper import get_user_plan
+from api.services.trial_abuse import evaluate_user_trial_eligibility, user_has_prior_individual_history
+from constants.feature_flags import CTA_NO_CHARGE_DURING_TRIAL, CTA_PRICING_CANCEL_TEXT_UNDER_BTN, CTA_START_FREE_TRIAL, CTA_UNLOCK_AGENT_COPY, SUPPORT_INTERCOM
+from util.trial_eligibility import is_user_trial_allowed_by_policy, is_user_trial_eligibility_enforcement_enabled, is_user_trial_eligibility_enforcement_one_per_user_enabled
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
 from config.stripe_config import get_stripe_settings

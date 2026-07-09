@@ -12,12 +12,7 @@ from console.extra_tasks_settings import derive_extra_tasks_settings
 from console.org_billing_helpers import build_org_billing_overview
 from console.role_constants import BILLING_MANAGE_ROLES
 from constants.plans import PlanNamesChoices
-from util.subscription_helper import (
-    get_active_subscription,
-    get_stripe_customer,
-    get_subscription_base_price,
-    reconcile_user_plan_from_stripe,
-)
+from util.subscription_helper import get_active_subscription, get_stripe_customer, get_subscription_base_price, reconcile_user_plan_from_stripe
 
 
 def _serialize_addon_context(addon_context: dict) -> dict[str, object]:

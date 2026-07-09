@@ -1,24 +1,4 @@
-import {
-  AlertCircle,
-  Atom,
-  BookText,
-  Brain,
-  Check,
-  Clock3,
-  Copy,
-  PlugZap,
-  Loader2,
-  LoaderCircle,
-  Pencil,
-  Plus,
-  PlusCircle,
-  Scale,
-  Search,
-  Settings2,
-  Sparkles,
-  Trash2,
-  X,
-} from 'lucide-react'
+import { AlertCircle, Atom, BookText, Brain, Check, Clock3, Copy, PlugZap, Loader2, LoaderCircle, Pencil, Plus, PlusCircle, Scale, Search, Settings2, Sparkles, Trash2, X } from 'lucide-react'
 
 import { SectionCard } from './SectionCard'
 import { StatCard } from './StatCard'

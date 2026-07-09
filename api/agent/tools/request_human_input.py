@@ -2,12 +2,7 @@
 
 from typing import Any
 
-from api.agent.comms.human_input_requests import (
-    MAX_HUMAN_INPUT_QUESTION_LENGTH,
-    MAX_OPTION_COUNT,
-    create_human_input_request,
-    create_human_input_requests_batch,
-)
+from api.agent.comms.human_input_requests import MAX_HUMAN_INPUT_QUESTION_LENGTH, MAX_OPTION_COUNT, create_human_input_request, create_human_input_requests_batch
 from api.models import CommsChannel, PersistentAgent
 
 

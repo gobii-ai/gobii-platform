@@ -32,23 +32,11 @@ from django.templatetags.static import static
 from django.db import DatabaseError
 from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.db.models.functions import Lower
-from api.models import (
-    MCPServerConfig,
-    PaidPlanIntent,
-    PersistentAgent,
-    PersistentAgentTemplate,
-    PersistentAgentTemplateUrlAlias,
-    TrialPromo,
-    UserBilling,
-)
+from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, PersistentAgentTemplateUrlAlias, TrialPromo, UserBilling
 from api.agent.short_description import build_listing_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
-from api.services.trial_abuse import (
-    SIGNAL_SOURCE_CHECKOUT,
-    evaluate_user_trial_eligibility,
-    user_has_prior_individual_history,
-)
+from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial_eligibility, user_has_prior_individual_history
 from api.services.trial_promos import (
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
     TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
@@ -65,13 +53,7 @@ from api.services.trial_promos import (
     reserve_trial_promo_redemption,
     store_trial_promo_in_session,
 )
-from config.socialaccount_adapter import (
-    OAUTH_ATTRIBUTION_COOKIE,
-    OAUTH_ATTRIBUTION_SESSION_KEYS,
-    OAUTH_CHARTER_COOKIE,
-    OAUTH_CHARTER_SESSION_KEYS,
-    serialize_oauth_charter_cookie_payload,
-)
+from config.socialaccount_adapter import OAUTH_ATTRIBUTION_COOKIE, OAUTH_ATTRIBUTION_SESSION_KEYS, OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS, serialize_oauth_charter_cookie_payload
 from billing.checkout_metadata import (
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
@@ -91,12 +73,7 @@ import stripe
 from djstripe.models import Customer, Subscription, Price
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.payments_helper import PaymentsHelper
-from util.subscription_helper import (
-    ensure_single_individual_subscription,
-    get_existing_individual_subscriptions,
-    get_or_create_stripe_customer,
-    reconcile_user_plan_from_stripe,
-)
+from util.subscription_helper import ensure_single_individual_subscription, get_existing_individual_subscriptions, get_or_create_stripe_customer, reconcile_user_plan_from_stripe
 from util.integrations import stripe_status, IntegrationDisabledError
 from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
@@ -107,11 +84,7 @@ from util.onboarding import (
     set_trial_onboarding_intent,
     set_trial_onboarding_requires_plan_selection,
 )
-from util.trial_eligibility import (
-    is_user_trial_allowed_by_policy,
-    is_user_trial_eligibility_enforcement_enabled,
-    is_user_trial_eligibility_enforcement_one_per_user_enabled,
-)
+from util.trial_eligibility import is_user_trial_allowed_by_policy, is_user_trial_eligibility_enforcement_enabled, is_user_trial_eligibility_enforcement_one_per_user_enabled
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
@@ -124,48 +97,21 @@ from constants.feature_flags import (
     STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_ENABLED,
     STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_OPTIONAL,
 )
-from util.urls import (
-    IMMERSIVE_APP_BASE_PATH,
-    IMMERSIVE_RETURN_TO_SESSION_KEY,
-    append_context_query,
-    append_query_params,
-    build_immersive_agents_url,
-    build_immersive_chat_url,
-    normalize_return_to,
-)
+from util.urls import IMMERSIVE_APP_BASE_PATH, IMMERSIVE_RETURN_TO_SESSION_KEY, append_context_query, append_query_params, build_immersive_agents_url, build_immersive_chat_url, normalize_return_to
 from pages.context_processors import account_info as build_account_info_context
-from util.attribution_referrers import (
-    ATTRIBUTION_REFERRER_SESSION_KEYS,
-    clean_acquisition_referrer,
-    decode_attribution_value,
-)
+from util.attribution_referrers import ATTRIBUTION_REFERRER_SESSION_KEYS, clean_acquisition_referrer, decode_attribution_value
 from util.waffle_flags import is_waffle_flag_active, is_waffle_switch_active
 from util.fish_collateral import build_web_manifest_payload
-from api.services.pipedream_apps import (
-    PipedreamCatalogError,
-    PipedreamCatalogService,
-    get_owner_selected_app_slugs,
-)
+from api.services.pipedream_apps import PipedreamCatalogError, PipedreamCatalogService, get_owner_selected_app_slugs
 from api.services.native_integrations import list_native_integration_providers
 from api.pipedream_app_utils import normalize_app_slugs
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from middleware.utm_capture import UTMTrackingMiddleware
 from console.context_helpers import build_console_context, resolve_console_context
 from pages.mini_mode import set_mini_mode_cookie
-from .utils_markdown import (
-    render_public_template_markdown,
-    load_page,
-    get_prev_next,
-    get_all_doc_pages,
-)
-from .homepage_cache import (
-    get_homepage_integrations_payload,
-    get_homepage_pretrained_payload,
-)
-from .homepage_schema import (
-    HOMEPAGE_SOCIAL_IMAGE_PATH,
-    build_homepage_structured_data,
-)
+from .utils_markdown import render_public_template_markdown, load_page, get_prev_next, get_all_doc_pages
+from .homepage_cache import get_homepage_integrations_payload, get_homepage_pretrained_payload
+from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, build_homepage_structured_data
 from .public_template_urls import (
     public_template_category_label,
     public_template_category_path,
@@ -176,19 +122,9 @@ from .public_template_urls import (
     public_template_launch_path,
     public_template_route_slug,
 )
-from .comparisons import (
-    COMPARISON_CATALOG,
-    COMPARISON_STATUS_PUBLISHED,
-    get_comparison,
-    get_published_comparisons,
-)
+from .comparisons import COMPARISON_CATALOG, COMPARISON_STATUS_PUBLISHED, get_comparison, get_published_comparisons
 from .forms import MarketingContactForm
-from console.agent_creation import (
-    AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
-    AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
-    AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE,
-    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
-)
+from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY
 from console.views import build_llm_intelligence_props
 from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
@@ -199,10 +135,7 @@ from django.utils.safestring import mark_safe
 from opentelemetry import trace
 from marketing_events.api import capi
 from marketing_events.telemetry import record_fbc_synthesized
-from marketing_events.value_utils import (
-    calculate_start_trial_values,
-    resolve_start_trial_conversion_rate,
-)
+from marketing_events.value_utils import calculate_start_trial_values, resolve_start_trial_conversion_rate
 from waffle import switch_is_active
 import logging
 
@@ -3017,10 +2950,7 @@ def _resend_special_access_email_verification(request, promo: TrialPromo):
     from allauth.core.exceptions import ImmediateHttpResponse
     from anymail.exceptions import AnymailError
 
-    from api.services.email_verification import (
-        get_user_email_address_for_verification,
-        send_email_verification,
-    )
+    from api.services.email_verification import get_user_email_address_for_verification, send_email_verification
 
     if not promo.email_allowlist_enabled:
         messages.info(request, "This special trial does not require email verification.")

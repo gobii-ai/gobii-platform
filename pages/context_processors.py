@@ -13,10 +13,7 @@ from config import settings
 from config.plans import AGENTS_UNLIMITED
 from constants.feature_flags import CTA_SIGNUP_MODAL
 from constants.plans import PlanNames
-from pages.account_info_cache import (
-    account_info_cache_key,
-    account_info_cache_lock_key,
-)
+from pages.account_info_cache import account_info_cache_key, account_info_cache_lock_key
 from pages.mini_mode import is_mini_mode_enabled
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics

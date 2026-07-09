@@ -35,13 +35,7 @@ from agents.services import AgentService
 from config.plans import PLAN_CONFIG
 from config.settings import INITIAL_TASK_CREDIT_EXPIRATION_DAYS
 from constants.grant_types import GrantTypeChoices
-from constants.plans import (
-    PlanNames,
-    PlanNamesChoices,
-    PlanSlugsChoices,
-    UserPlanNamesChoices,
-    OrganizationPlanNamesChoices,
-)
+from constants.plans import PlanNames, PlanNamesChoices, PlanSlugsChoices, UserPlanNamesChoices, OrganizationPlanNamesChoices
 from api.services.prompt_settings import (
     DEFAULT_INTERNAL_REASONING_HISTORY_LIMIT,
     DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
@@ -72,17 +66,9 @@ from api.services.prompt_settings import (
     DEFAULT_UNIFIED_HISTORY_LIMIT,
     DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
 )
-from api.services.browser_settings import (
-    DEFAULT_MAX_ACTIVE_BROWSER_TASKS,
-    DEFAULT_MAX_BROWSER_STEPS,
-    DEFAULT_MAX_BROWSER_TASKS,
-    DEFAULT_VISION_DETAIL_LEVEL,
-)
+from api.services.browser_settings import DEFAULT_MAX_ACTIVE_BROWSER_TASKS, DEFAULT_MAX_BROWSER_STEPS, DEFAULT_MAX_BROWSER_TASKS, DEFAULT_VISION_DETAIL_LEVEL
 from api.pipedream_app_utils import normalize_app_slugs as normalize_pipedream_app_slugs
-from util.attribution_referrers import (
-    first_meaningful_referrer_for_attribution,
-    signup_source_bucket_for_attribution,
-)
+from util.attribution_referrers import first_meaningful_referrer_for_attribution, signup_source_bucket_for_attribution
 from api.services.mcp_tool_cache import invalidate_mcp_tool_cache
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
@@ -93,18 +79,14 @@ from api.services.tool_settings import (
     DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS,
 )
 from constants.regex import E164_PHONE_REGEX
-from api.storage_backends import (
-    AliasedStorage,
-    PUBLIC_TEMPLATE_SOCIAL_IMAGE_STORAGE_ALIAS,
-)
+from api.storage_backends import AliasedStorage, PUBLIC_TEMPLATE_SOCIAL_IMAGE_STORAGE_ALIAS
 from observability import traced
 from email.utils import parseaddr
 
 from tasks.services import TaskCreditService
 from api.evals.credit_policy import is_eval_credit_exempt_context, is_eval_credit_exempt_step
 
-from util.subscription_helper import (
-    get_active_subscription, )
+from util.subscription_helper import get_active_subscription
 from util.tool_costs import get_default_task_credit_cost
 from datetime import timedelta
 
@@ -2690,10 +2672,7 @@ class BrowserUseAgentTask(models.Model):
 
     def clean(self):
         super().clean()
-        from api.services.owner_execution_pause import (
-            EXECUTION_PAUSE_MESSAGE,
-            is_owner_execution_paused,
-        )
+        from api.services.owner_execution_pause import EXECUTION_PAUSE_MESSAGE, is_owner_execution_paused
 
         if self._state.adding:
             with traced("CHECK Clean BrowserUseAgentTask User Credit") as span:
@@ -8558,10 +8537,7 @@ class GlobalAgentSkill(models.Model):
 
     def clean(self):
         super().clean()
-        from api.agent.tools.skill_utils import (
-            normalize_skill_secret_requirements,
-            normalize_skill_tool_ids,
-        )
+        from api.agent.tools.skill_utils import normalize_skill_secret_requirements, normalize_skill_tool_ids
 
         if self.name:
             self.name = self.name.strip()
@@ -8741,10 +8717,7 @@ class PersistentAgentSkill(models.Model):
 
     def clean(self):
         super().clean()
-        from api.agent.tools.skill_utils import (
-            normalize_skill_secret_requirements,
-            normalize_skill_tool_ids,
-        )
+        from api.agent.tools.skill_utils import normalize_skill_secret_requirements, normalize_skill_tool_ids
 
         if self.name:
             self.name = self.name.strip()
@@ -10652,11 +10625,7 @@ class AgentSpawnRequest(models.Model):
             raise ValidationError("Agent limit reached. No additional agents are available.")
 
         from api.agent.peer_comm import PeerMessagingError, PeerMessagingService
-        from api.services.persistent_agents import (
-            ensure_default_agent_email_endpoint,
-            PersistentAgentProvisioningError,
-            PersistentAgentProvisioningService,
-        )
+        from api.services.persistent_agents import ensure_default_agent_email_endpoint, PersistentAgentProvisioningError, PersistentAgentProvisioningService
 
         try:
             provisioning = PersistentAgentProvisioningService.provision(

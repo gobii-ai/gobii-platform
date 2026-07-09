@@ -4,15 +4,7 @@ import re
 import time
 from typing import Any
 
-from litellm.exceptions import (
-    APIConnectionError,
-    APIError,
-    BadGatewayError,
-    InternalServerError,
-    OpenAIError,
-    RateLimitError,
-    ServiceUnavailableError,
-)
+from litellm.exceptions import APIConnectionError, APIError, BadGatewayError, InternalServerError, OpenAIError, RateLimitError, ServiceUnavailableError
 
 from api.agent.core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError, run_completion
@@ -35,16 +27,7 @@ from api.evals.meta_gobii import (
     score_meta_gobii_case,
 )
 from api.evals.registry import ScenarioRegistry
-from api.models import (
-    EvalRun,
-    EvalRunTask,
-    PersistentAgent,
-    PersistentAgentCompletion,
-    PersistentAgentStep,
-    PersistentAgentSystemSkillState,
-    PersistentAgentSystemStep,
-    PersistentAgentToolCall,
-)
+from api.models import EvalRun, EvalRunTask, PersistentAgent, PersistentAgentCompletion, PersistentAgentStep, PersistentAgentSystemSkillState, PersistentAgentSystemStep, PersistentAgentToolCall
 
 logger = logging.getLogger(__name__)
 

@@ -7,13 +7,7 @@ from constants.feature_flags import AGENT_CRON_THROTTLE
 from config.redis_client import get_redis_client
 
 from api.models import PersistentAgent, PersistentAgentEmailFooter
-from api.services.cron_throttle import (
-    cron_throttle_footer_cooldown_key,
-    cron_throttle_pending_footer_key,
-    evaluate_free_plan_cron_throttle,
-    build_upgrade_link,
-    select_cron_throttle_footer,
-)
+from api.services.cron_throttle import cron_throttle_footer_cooldown_key, cron_throttle_pending_footer_key, evaluate_free_plan_cron_throttle, build_upgrade_link, select_cron_throttle_footer
 
 logger = logging.getLogger(__name__)
 

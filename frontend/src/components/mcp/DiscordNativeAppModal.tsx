@@ -16,13 +16,7 @@ import {
 } from '../../api/discordNative'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import type { AgentRosterEntry } from '../../types/agentRoster'
-import {
-  PipedreamEmptyState,
-  PipedreamErrorState,
-  PipedreamLoadingState,
-  PipedreamStatusBanner,
-  type PipedreamStatusMessage,
-} from './PipedreamAppsShared'
+import { PipedreamEmptyState, PipedreamErrorState, PipedreamLoadingState, PipedreamStatusBanner, type PipedreamStatusMessage } from './PipedreamAppsShared'
 
 export type PendingDiscordAction = 'connect' | 'save' | null
 

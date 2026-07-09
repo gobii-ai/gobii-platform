@@ -1,21 +1,10 @@
 import { useMutation } from '@tanstack/react-query'
 import { FolderOpen, Loader2 } from 'lucide-react'
 
-import {
-  fetchNativeIntegrationPickerToken,
-  recordNativeIntegrationAgentEvent,
-  type NativeIntegrationProvider,
-} from '../../../api/nativeIntegrations'
+import { fetchNativeIntegrationPickerToken, recordNativeIntegrationAgentEvent, type NativeIntegrationProvider } from '../../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../../api/safeErrorMessage'
-import {
-  openGoogleDrivePicker,
-  supportsNativeIntegrationPicker,
-} from '../../mcp/NativeIntegrationShared'
-import {
-  NativeIntegrationConnectButton,
-  NativeIntegrationInsightPanelFrame,
-  useNativeIntegrationPanelState,
-} from './NativeIntegrationInsightPanel'
+import { openGoogleDrivePicker, supportsNativeIntegrationPicker } from '../../mcp/NativeIntegrationShared'
+import { NativeIntegrationConnectButton, NativeIntegrationInsightPanelFrame, useNativeIntegrationPanelState } from './NativeIntegrationInsightPanel'
 
 const GOOGLE_DRIVE_PROVIDER_KEY = 'google_drive'
 

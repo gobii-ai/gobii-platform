@@ -1,12 +1,7 @@
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
-from api.models import (
-    BrowserUseAgentTask,
-    EvalRunTask,
-    PersistentAgentMessage,
-    PersistentAgentToolCall,
-)
+from api.models import BrowserUseAgentTask, EvalRunTask, PersistentAgentMessage, PersistentAgentToolCall
 
 LINKEDIN_TOOLS = [
     "mcp_brightdata_web_data_linkedin_person_profile",

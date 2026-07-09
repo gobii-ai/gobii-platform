@@ -12,10 +12,7 @@ from waffle import get_waffle_flag_model
 
 from config.redis_client import get_redis_client
 from api.models import Organization, PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep
-from api.services.owner_execution_pause import (
-    is_owner_execution_paused,
-    resolve_agent_owner,
-)
+from api.services.owner_execution_pause import is_owner_execution_paused, resolve_agent_owner
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)

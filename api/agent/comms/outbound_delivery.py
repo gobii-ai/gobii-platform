@@ -13,15 +13,7 @@ from waffle import switch_is_active
 from anymail.message import AnymailMessage
 from anymail.exceptions import AnymailAPIError
 
-from api.models import (
-    AgentEmailAccount,
-    AgentFsNode,
-    CommsChannel,
-    DeliveryStatus,
-    OutboundMessageAttempt,
-    PersistentAgentEmailEndpoint,
-    PersistentAgentMessage,
-)
+from api.models import AgentEmailAccount, AgentFsNode, CommsChannel, DeliveryStatus, OutboundMessageAttempt, PersistentAgentEmailEndpoint, PersistentAgentMessage
 from api.services.system_settings import get_max_file_size
 from api.agent.files.attachment_helpers import track_file_send_failed, track_file_unsupported
 from opentelemetry.trace import get_current_span

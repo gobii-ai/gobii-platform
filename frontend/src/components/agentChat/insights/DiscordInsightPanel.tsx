@@ -1,10 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
 
-import {
-  agentDiscordAppQueryKey,
-  fetchAgentDiscordApp,
-} from '../../../api/discordNative'
+import { agentDiscordAppQueryKey, fetchAgentDiscordApp } from '../../../api/discordNative'
 import type { NativeIntegrationProvider } from '../../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../../api/safeErrorMessage'
 import { NativeIntegrationInsightPanelFrame } from './NativeIntegrationInsightPanel'

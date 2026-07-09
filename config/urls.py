@@ -4,9 +4,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.shortcuts import redirect
 from django.views.generic.base import RedirectView
-from drf_spectacular.views import (
-    SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
-)
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 from config.account_views import (
     AccountAuthPopupCompleteView,
     AccountLoginModalView,
@@ -129,17 +127,8 @@ from console.pipedream_apps_api import (
     PipedreamAppsAPIView,
     PipedreamAppSearchAPIView,
 )
-from console.api_keys_api_views import (
-    ApiKeyDetailAPIView,
-    ApiKeyListAPIView,
-)
-from console.secrets_api_views import (
-    GlobalSecretListAPIView,
-    GlobalSecretDetailAPIView,
-    AgentSecretListAPIView,
-    AgentSecretDetailAPIView,
-    AgentSecretPromoteAPIView,
-)
+from console.api_keys_api_views import ApiKeyDetailAPIView, ApiKeyListAPIView
+from console.secrets_api_views import GlobalSecretListAPIView, GlobalSecretDetailAPIView, AgentSecretListAPIView, AgentSecretDetailAPIView, AgentSecretPromoteAPIView
 from console.native_integrations_api import (
     NativeIntegrationCallbackAPIView,
     NativeIntegrationAgentEventAPIView,
@@ -149,11 +138,7 @@ from console.native_integrations_api import (
     NativeIntegrationPickerTokenAPIView,
     NativeIntegrationRevokeAPIView,
 )
-from console.email_settings.views import (
-    AgentEmailSettingsAPIView,
-    AgentEmailSettingsEnsureAccountAPIView,
-    AgentEmailSettingsTestAPIView,
-)
+from console.email_settings.views import AgentEmailSettingsAPIView, AgentEmailSettingsEnsureAccountAPIView, AgentEmailSettingsTestAPIView
 from console.discord_api import (
     AgentDiscordAppView,
     AgentDiscordChannelsView,
@@ -163,13 +148,7 @@ from console.discord_api import (
     DiscordOAuthCallbackView,
     DiscordOAuthStartView,
 )
-from console.usage_views import (
-    UsageSummaryAPIView,
-    UsageBurnRateSnapshotAPIView,
-    UsageTrendAPIView,
-    UsageAgentLeaderboardAPIView,
-    UsageAgentsAPIView,
-)
+from console.usage_views import UsageSummaryAPIView, UsageBurnRateSnapshotAPIView, UsageTrendAPIView, UsageAgentLeaderboardAPIView, UsageAgentsAPIView
 from console.insight_views import AgentInsightsAPIView
 from console.legacy_redirects import LegacyConsoleRedirectView
 from console.views import (

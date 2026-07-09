@@ -12,10 +12,7 @@ from django.conf import settings
 import litellm
 
 from api.llm.utils import is_openai_model_name
-from api.services.system_settings import (
-    get_litellm_first_data_timeout_seconds,
-    get_litellm_timeout_seconds,
-)
+from api.services.system_settings import get_litellm_first_data_timeout_seconds, get_litellm_timeout_seconds
 from api.utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from .token_usage import extract_reasoning_content
 _HINT_KEYS = (

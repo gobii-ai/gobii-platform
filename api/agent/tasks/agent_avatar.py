@@ -10,12 +10,7 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 
-from api.agent.avatar import (
-    agent_needs_avatar_generation,
-    build_avatar_prompt,
-    maybe_schedule_agent_avatar,
-    prepare_visual_description,
-)
+from api.agent.avatar import agent_needs_avatar_generation, build_avatar_prompt, maybe_schedule_agent_avatar, prepare_visual_description
 from api.agent.core.image_generation_config import get_avatar_image_generation_llm_configs
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
@@ -23,11 +18,7 @@ from api.agent.core.provider_hints import provider_hint_from_model
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.eval_agents import is_eval_agent
 from api.agent.short_description import compute_charter_hash
-from api.agent.tools.create_image import (
-    ImageGenerationResponseError,
-    _extension_for_mime,
-    _generate_image_bytes,
-)
+from api.agent.tools.create_image import ImageGenerationResponseError, _extension_for_mime, _generate_image_bytes
 from api.models import PersistentAgent, PersistentAgentCompletion
 
 logger = logging.getLogger(__name__)

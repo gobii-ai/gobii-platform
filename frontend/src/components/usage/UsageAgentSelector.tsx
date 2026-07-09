@@ -1,14 +1,5 @@
 import { useId, useMemo } from 'react'
-import {
-  Button,
-  Dialog,
-  DialogTrigger,
-  ListBox,
-  ListBoxItem,
-  Popover,
-  type Key,
-  type Selection,
-} from 'react-aria-components'
+import { Button, Dialog, DialogTrigger, ListBox, ListBoxItem, Popover, type Key, type Selection } from 'react-aria-components'
 
 import type { UsageAgent, UsageStatus } from './types'
 

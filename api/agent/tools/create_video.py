@@ -12,10 +12,7 @@ from litellm.types.videos.main import VideoObject
 from PIL import Image, ImageOps
 
 from api.models import AgentFsNode, PersistentAgent, PersistentAgentCompletion
-from api.agent.core.video_generation_config import (
-    get_create_video_generation_llm_configs,
-    is_create_video_generation_configured,
-)
+from api.agent.core.video_generation_config import get_create_video_generation_llm_configs, is_create_video_generation_configured
 from api.agent.core.provider_hints import provider_hint_from_model
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.files.attachment_helpers import build_signed_filespace_download_url

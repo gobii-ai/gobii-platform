@@ -10,14 +10,7 @@ from django.utils import timezone
 
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
-from .models import (
-    AgentEmailAccount,
-    CommsChannel,
-    StripeConfig,
-    TrialPromo,
-    TrialPromoAllowedEmail,
-    UserFlagDefinition,
-)
+from .models import AgentEmailAccount, CommsChannel, StripeConfig, TrialPromo, TrialPromoAllowedEmail, UserFlagDefinition
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 class AgentEmailAccountForm(ModelForm):

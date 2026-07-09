@@ -2,11 +2,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
 from api.models import Organization
-from api.services.owner_execution_pause import (
-    get_owner_execution_pause_state,
-    pause_owner_execution,
-    resume_owner_execution,
-)
+from api.services.owner_execution_pause import get_owner_execution_pause_state, pause_owner_execution, resume_owner_execution
 from util.analytics import AnalyticsSource
 
 

@@ -1,9 +1,6 @@
 from typing import Any
 
-from api.agent.tools.skill_utils import (
-    format_skill_secret_requirement,
-    normalize_skill_secret_requirements,
-)
+from api.agent.tools.skill_utils import format_skill_secret_requirement, normalize_skill_secret_requirements
 from api.models import GlobalAgentSkill, GlobalSecret
 
 GLOBAL_SKILL_EVAL_SUITE_SLUG = "global_skill_eval"

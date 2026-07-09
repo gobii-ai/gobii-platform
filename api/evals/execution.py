@@ -6,15 +6,7 @@ import contextvars
 
 from litellm.exceptions import APIError, BadRequestError, NotFoundError, OpenAIError, ServiceUnavailableError
 
-from api.models import (
-    BrowserUseAgentTask,
-    PersistentAgent,
-    PersistentAgentMessage,
-    PersistentAgentStep,
-    EvalRunTask,
-    EvalRun,
-    CommsAllowlistEntry
-)
+from api.models import BrowserUseAgentTask, PersistentAgent, PersistentAgentMessage, PersistentAgentStep, EvalRunTask, EvalRun, CommsAllowlistEntry
 from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.core.llm_utils import LiteLLMResponseError, run_completion
 from api.agent.events import AgentEventType, get_agent_event_stream
@@ -552,11 +544,7 @@ class ScenarioExecutionTools:
         Returns:
             A tuple of (choice, reasoning). choice will be one of the strings in `options`.
         """
-        from api.agent.core.llm_config import (
-            get_eval_judge_llm_config,
-            get_llm_config_with_failover,
-            LLMNotConfiguredError,
-        )
+        from api.agent.core.llm_config import get_eval_judge_llm_config, get_llm_config_with_failover, LLMNotConfiguredError
 
         options_list = list(options)
 

@@ -5,12 +5,7 @@ import { parseDate } from '@internationalized/date'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { InsightGauge } from '../common/InsightGauge'
 import { fetchUsageSummary } from './api'
-import type {
-  UsageAgent,
-  UsageStatus,
-  UsageSummaryQueryInput,
-  UsageSummaryResponse,
-} from './types'
+import type { UsageAgent, UsageStatus, UsageSummaryQueryInput, UsageSummaryResponse } from './types'
 
 const API_AGENT_ID = 'api'
 

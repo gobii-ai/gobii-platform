@@ -1,20 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  CheckCircle2,
-  Copy,
-  Mail,
-  Phone,
-  RefreshCcw,
-  Save,
-  ShieldCheck,
-  Trash2,
-  User,
-  XCircle,
-} from 'lucide-react'
+import { CheckCircle2, Copy, Mail, Phone, RefreshCcw, Save, ShieldCheck, Trash2, User, XCircle } from 'lucide-react'
 
-import {
-  resendEmailVerification,
-} from '../../api/agentSetup'
+import { resendEmailVerification } from '../../api/agentSetup'
 import type { PhoneState } from '../../api/agentSetup'
 import { HttpError } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'

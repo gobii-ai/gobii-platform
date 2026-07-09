@@ -8,10 +8,7 @@ from celery.schedules import crontab, schedule as celery_schedule
 from django.core.exceptions import ValidationError
 
 from ..core.schedule_parser import ScheduleParser
-from api.services.tool_settings import (
-    DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
-    get_tool_settings_for_owner,
-)
+from api.services.tool_settings import DEFAULT_MIN_CRON_SCHEDULE_MINUTES, get_tool_settings_for_owner
 from api.services.schedule_enforcement import cron_satisfies_min_interval, cron_interval_seconds
 
 logger = logging.getLogger(__name__)

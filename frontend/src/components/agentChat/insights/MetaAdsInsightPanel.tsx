@@ -1,8 +1,4 @@
-import {
-  NativeIntegrationConnectButton,
-  NativeIntegrationInsightPanelFrame,
-  useNativeIntegrationPanelState,
-} from './NativeIntegrationInsightPanel'
+import { NativeIntegrationConnectButton, NativeIntegrationInsightPanelFrame, useNativeIntegrationPanelState } from './NativeIntegrationInsightPanel'
 
 const META_ADS_PROVIDER_KEY = 'meta_ads'
 

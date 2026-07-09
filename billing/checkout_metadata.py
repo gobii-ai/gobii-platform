@@ -3,9 +3,7 @@ from typing import Any, Mapping
 
 from django.utils import timezone
 
-from api.services.user_fingerprint import (
-    get_latest_user_fingerprint_visit,
-)
+from api.services.user_fingerprint import get_latest_user_fingerprint_visit
 
 STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE = "purchase"
 STRIPE_CHECKOUT_FLOW_TYPE_TRIAL = "trial"

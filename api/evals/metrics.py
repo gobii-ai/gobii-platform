@@ -6,13 +6,7 @@ from django.db.models import DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from api.models import (
-    BrowserUseAgentTask,
-    EvalRun,
-    EvalRunTask,
-    PersistentAgentCompletion,
-    PersistentAgentStep,
-)
+from api.models import BrowserUseAgentTask, EvalRun, EvalRunTask, PersistentAgentCompletion, PersistentAgentStep
 
 logger = logging.getLogger(__name__)
 

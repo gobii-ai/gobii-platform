@@ -12,19 +12,8 @@ from typing import Dict, Any
 from django.conf import settings
 from django.db import transaction
 
-from ...models import (
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentConversationParticipant,
-    PersistentAgentMessage,
-    CommsChannel,
-    DeliveryStatus,
-)
-from ..comms.email_threading import (
-    get_message_channel,
-    get_message_contact_address,
-    normalize_email_address,
-)
+from ...models import PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, CommsChannel, DeliveryStatus
+from ..comms.email_threading import get_message_channel, get_message_contact_address, normalize_email_address
 from ..comms.outbound_delivery import deliver_agent_email
 from ..comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
 from ..comms.message_service import _ensure_participant, _get_or_create_conversation
@@ -32,16 +21,10 @@ from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
 from util.text_sanitizer import decode_unicode_escapes, strip_control_chars
 from .agent_variables import substitute_variables_with_filespace
-from ..files.attachment_helpers import (
-    AttachmentResolutionError,
-    create_message_attachments,
-    resolve_filespace_attachments,
-)
+from ..files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from ..files.filespace_service import broadcast_message_attachment_update
 from api.services.email_verification import require_verified_email, EmailVerificationError
-from api.services.signup_preview import (
-    can_bypass_email_verification_for_signup_preview_first_email,
-)
+from api.services.signup_preview import can_bypass_email_verification_for_signup_preview_first_email
 from .attachment_guidance import SEND_EMAIL_ATTACHMENTS_DESCRIPTION
 
 logger = logging.getLogger(__name__)

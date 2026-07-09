@@ -9,10 +9,7 @@ from typing import Dict, Any
 
 from ...models import PersistentAgent
 from ..avatar import maybe_schedule_agent_avatar
-from ..short_description import (
-    maybe_schedule_mini_description,
-    maybe_schedule_short_description,
-)
+from ..short_description import maybe_schedule_mini_description, maybe_schedule_short_description
 from ..tags import maybe_schedule_agent_tags
 from api.evals.execution import get_current_eval_routing_profile
 

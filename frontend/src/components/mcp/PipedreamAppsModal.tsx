@@ -2,10 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Loader2, Unplug, Users } from 'lucide-react'
 
-import {
-  agentDiscordAppQueryKey,
-  fetchAgentDiscordApp,
-} from '../../api/discordNative'
+import { agentDiscordAppQueryKey, fetchAgentDiscordApp } from '../../api/discordNative'
 import { fetchAgentRoster } from '../../api/agents'
 import {
   disconnectAgentPipedreamApp,
@@ -18,18 +15,9 @@ import {
   type PipedreamAppSettings,
   type PipedreamAppSummary,
 } from '../../api/mcp'
-import {
-  fetchNativeIntegrationPickerToken,
-  fetchNativeIntegrations,
-  revokeNativeIntegration,
-  startNativeIntegrationConnect,
-  type NativeIntegrationProvider,
-} from '../../api/nativeIntegrations'
+import { fetchNativeIntegrationPickerToken, fetchNativeIntegrations, revokeNativeIntegration, startNativeIntegrationConnect, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
-import {
-  DISCORD_NATIVE_PROVIDER_KEY,
-  withDiscordNativeProvider,
-} from './DiscordNativeShared'
+import { DISCORD_NATIVE_PROVIDER_KEY, withDiscordNativeProvider } from './DiscordNativeShared'
 import {
   AgentConnectionAvatar,
   PipedreamAppIcon,

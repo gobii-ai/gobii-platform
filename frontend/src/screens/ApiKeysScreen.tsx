@@ -2,13 +2,7 @@ import { useCallback, useMemo, useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ban, Check, Clipboard, KeyRound, Plus, ShieldAlert, Trash2, type LucideIcon } from 'lucide-react'
 
-import {
-  createApiKey,
-  deleteApiKey,
-  fetchApiKeys,
-  revokeApiKey,
-  type ApiKeyDTO,
-} from '../api/apiKeys'
+import { createApiKey, deleteApiKey, fetchApiKeys, revokeApiKey, type ApiKeyDTO } from '../api/apiKeys'
 import { apiErrorMessages } from '../api/safeErrorMessage'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'

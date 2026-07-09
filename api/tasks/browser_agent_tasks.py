@@ -27,22 +27,9 @@ from observability import traced, trace
 from ..agent.core.budget import AgentBudgetManager
 from ..agent.core.llm_config import AgentLLMTier, get_agent_llm_tier, get_allowed_tier_rank
 from ..agent.files.filespace_service import get_or_create_default_filespace
-from ..models import (
-    BrowserUseAgentTask,
-    BrowserUseAgentTaskStep,
-    ProxyServer,
-    AgentFsNode, PersistentAgent,
-)
-from ..services.browser_settings import (
-    DEFAULT_MAX_BROWSER_STEPS,
-    get_browser_settings_for_owner,
-)
-from ..services.owner_execution_pause import (
-    EXECUTION_PAUSE_MESSAGE,
-    is_owner_execution_paused,
-    resolve_agent_owner,
-    resolve_browser_task_owner,
-)
+from ..models import BrowserUseAgentTask, BrowserUseAgentTaskStep, ProxyServer, AgentFsNode, PersistentAgent
+from ..services.browser_settings import DEFAULT_MAX_BROWSER_STEPS, get_browser_settings_for_owner
+from ..services.owner_execution_pause import EXECUTION_PAUSE_MESSAGE, is_owner_execution_paused, resolve_agent_owner, resolve_browser_task_owner
 from ..services.task_webhooks import trigger_task_webhook
 from ..services.referral_service import ReferralService
 from ..openrouter import DEFAULT_API_BASE, get_attribution_headers
@@ -1903,10 +1890,7 @@ def _process_browser_use_task_core(
                 agent_span.set_attribute("captcha.addon_enabled", captcha_enabled)
                 actions = ['mcp_brightdata_search_engine']
                 try:
-                    from ..agent.browser_actions import (
-                        register_captcha_actions,
-                        register_web_search_action,
-                    )
+                    from ..agent.browser_actions import register_captcha_actions, register_web_search_action
 
                     register_web_search_action(controller)
                     if captcha_enabled:

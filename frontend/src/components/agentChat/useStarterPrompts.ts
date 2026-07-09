@@ -5,9 +5,7 @@ import { fetchAgentSuggestions } from '../../api/agentChat'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { TimelineEvent } from './types'
-import {
-  type StarterPrompt,
-} from './StarterPromptSuggestions'
+import { type StarterPrompt } from './StarterPromptSuggestions'
 
 const EMPTY_PROMPTS: StarterPrompt[] = []
 const STARTER_PROMPT_FETCH_DELAY_MS = 350

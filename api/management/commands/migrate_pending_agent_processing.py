@@ -5,14 +5,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from pottery import Redlock
 
-from api.agent.core.processing_flags import (
-    claim_pending_drain_slot,
-    enqueue_pending_agent,
-    get_pending_drain_settings,
-    is_agent_pending,
-    pending_drain_schedule_key,
-    pending_set_key,
-)
+from api.agent.core.processing_flags import claim_pending_drain_slot, enqueue_pending_agent, get_pending_drain_settings, is_agent_pending, pending_drain_schedule_key, pending_set_key
 from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)

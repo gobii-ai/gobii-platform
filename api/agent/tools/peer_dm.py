@@ -7,11 +7,7 @@ from uuid import UUID
 
 from ..files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
-from ..peer_comm import (
-    PeerMessagingDuplicateError,
-    PeerMessagingError,
-    PeerMessagingService,
-)
+from ..peer_comm import PeerMessagingDuplicateError, PeerMessagingError, PeerMessagingService
 from ...models import PersistentAgent
 
 logger = logging.getLogger(__name__)

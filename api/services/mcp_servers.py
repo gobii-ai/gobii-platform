@@ -5,12 +5,7 @@ from typing import Iterable, Iterable as IterableType, List, Dict, Any, Set
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
-from api.models import (
-    MCPServerConfig,
-    PersistentAgent,
-    PersistentAgentMCPServer,
-    PersistentAgentEnabledTool,
-)
+from api.models import MCPServerConfig, PersistentAgent, PersistentAgentMCPServer, PersistentAgentEnabledTool
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 

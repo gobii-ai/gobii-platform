@@ -1,10 +1,4 @@
-import type {
-  AgentMessage,
-  PlanFileDeliverable,
-  PlanMessageDeliverable,
-  PlanSnapshot,
-  TimelineEvent,
-} from '../../types/agentChat'
+import type { AgentMessage, PlanFileDeliverable, PlanMessageDeliverable, PlanSnapshot, TimelineEvent } from '../../types/agentChat'
 
 function planTitlesByStatus(plan: PlanSnapshot | null | undefined): Record<'todo' | 'doing' | 'done', Set<string>> {
   return {

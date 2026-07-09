@@ -44,11 +44,7 @@ from .effort_calibration import (
     EffortSimpleCurrentCompanyReportScenario,
     EffortExplicitDeepResearchRemainsCapableScenario,
 )
-from .custom_tool_result_contract import (
-    CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS,
-    CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG,
-    CustomToolResultContractScenario,
-)
+from .custom_tool_result_contract import CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS, CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG, CustomToolResultContractScenario
 from .daily_credit_prompt import (
     DAILY_CREDIT_PROMPT_SCENARIO_SLUGS,
     DAILY_CREDIT_PROMPT_SUITE_SLUG,
@@ -66,28 +62,8 @@ from .sqlite_tool_results import (
     SqliteItemLinkReportScenario,
     SqliteMultiResultWebSynthesisScenario,
 )
-from .message_quality import (
-    MESSAGE_QUALITY_SCENARIO_SLUGS,
-    MESSAGE_QUALITY_SUITE_SLUG,
-    MessageQualityScenario,
-)
-from .google_sheets_native import (
-    GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
-    GOOGLE_SHEETS_NATIVE_SUITE_SLUG,
-    GoogleSheetsNativeScenario,
-)
-from .apollo_native import (
-    APOLLO_NATIVE_SCENARIO_SLUGS,
-    APOLLO_NATIVE_SUITE_SLUG,
-    ApolloNativeScenario,
-)
-from .recruitment_sourcing import (
-    RECRUITMENT_SOURCING_SCENARIO_SLUGS,
-    RECRUITMENT_SOURCING_SUITE_SLUG,
-    RecruitmentSourcingScenario,
-)
-from .hubspot_native import (
-    HUBSPOT_NATIVE_SCENARIO_SLUGS,
-    HUBSPOT_NATIVE_SUITE_SLUG,
-    HubSpotNativeScenario,
-)
+from .message_quality import MESSAGE_QUALITY_SCENARIO_SLUGS, MESSAGE_QUALITY_SUITE_SLUG, MessageQualityScenario
+from .google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS, GOOGLE_SHEETS_NATIVE_SUITE_SLUG, GoogleSheetsNativeScenario
+from .apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG, ApolloNativeScenario
+from .recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG, RecruitmentSourcingScenario
+from .hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG, HubSpotNativeScenario

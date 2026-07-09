@@ -12,16 +12,11 @@ import httpx
 from django.db import DatabaseError
 
 from api.models import AgentFsNode, PersistentAgent, PersistentAgentCompletion
-from api.agent.core.image_generation_config import (
-    get_create_image_generation_llm_configs,
-    is_create_image_generation_configured,
-)
+from api.agent.core.image_generation_config import get_create_image_generation_llm_configs, is_create_image_generation_configured
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.provider_hints import provider_hint_from_model
 from api.agent.core.token_usage import log_agent_completion
-from api.agent.files.attachment_helpers import (
-    load_signed_filespace_download_payload,
-)
+from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import get_or_create_default_filespace
 from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 

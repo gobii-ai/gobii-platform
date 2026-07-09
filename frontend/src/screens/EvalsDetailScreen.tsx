@@ -1,7 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle, ChevronDown, ChevronRight, Cpu, BarChart3, Stethoscope } from 'lucide-react'
 
-import { fetchSuiteRunDetail, updateSuiteRunType, fetchRunComparison, fetchSuiteRunComparison, type EvalRun, type EvalSuiteRun, type EvalTask, type LLMRoutingProfileSnapshot, type LLMProfileTokenRange, type LLMProfileTier, type ComparisonResponse, type SuiteComparisonResponse, type ComparisonGroupBy } from '../api/evals'
+import {
+  fetchSuiteRunDetail,
+  updateSuiteRunType,
+  fetchRunComparison,
+  fetchSuiteRunComparison,
+  type EvalRun,
+  type EvalSuiteRun,
+  type EvalTask,
+  type LLMRoutingProfileSnapshot,
+  type LLMProfileTokenRange,
+  type LLMProfileTier,
+  type ComparisonResponse,
+  type SuiteComparisonResponse,
+  type ComparisonGroupBy,
+} from '../api/evals'
 import { RunTypeBadge, StatusBadge } from '../components/evals/Badges'
 import { CompareModal, CompareResultsView, type CompareConfig } from '../components/evals'
 

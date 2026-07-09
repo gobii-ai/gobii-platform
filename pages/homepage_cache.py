@@ -5,12 +5,7 @@ from django.utils import timezone
 
 from agents.services import PretrainedWorkerTemplateService
 from api.models import MCPServerConfig
-from api.services.pipedream_apps import (
-    PIPEDREAM_RUNTIME_NAME,
-    PipedreamCatalogService,
-    filter_deprecated_pipedream_apps_without_agent,
-    get_platform_pipedream_app_slugs,
-)
+from api.services.pipedream_apps import PIPEDREAM_RUNTIME_NAME, PipedreamCatalogService, filter_deprecated_pipedream_apps_without_agent, get_platform_pipedream_app_slugs
 from api.services.native_integrations import list_native_integration_providers
 from util.integrations import pipedream_status
 

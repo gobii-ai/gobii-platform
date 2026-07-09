@@ -9,21 +9,14 @@ from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 
-from agents.pretrained_worker_definitions import (
-    TEMPLATE_DEFINITIONS,
-    PretrainedWorkerTemplateDefinition,
-)
+from agents.pretrained_worker_definitions import TEMPLATE_DEFINITIONS, PretrainedWorkerTemplateDefinition
 from config.plans import AGENTS_UNLIMITED, MAX_AGENT_LIMIT, PLAN_CONFIG
 from observability import trace
 
 from cron_descriptor import get_description, Options
 from cron_descriptor.Exception import FormatError
 
-from util.subscription_helper import (
-    get_organization_plan,
-    has_unlimited_agents,
-    is_community_unlimited_mode,
-)
+from util.subscription_helper import get_organization_plan, has_unlimited_agents, is_community_unlimited_mode
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')

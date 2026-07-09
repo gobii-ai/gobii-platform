@@ -3,11 +3,7 @@ import type { TimelineEvent, ToolCallEntry, ToolClusterEvent } from '../types/ag
 import { isClusterRenderable, transformToolCluster } from '../components/agentChat/tooling/toolRegistry'
 import { buildActionCountLabel, flattenTimelineEventsToEntries } from '../components/agentChat/activityEntryUtils'
 import type { StatusExpansionTargets } from '../components/agentChat/statusExpansion'
-import {
-  eventHasLatestStatus,
-  isStatusDisplayEntry,
-  resolveEntrySeparation,
-} from '../components/agentChat/statusExpansion'
+import { eventHasLatestStatus, isStatusDisplayEntry, resolveEntrySeparation } from '../components/agentChat/statusExpansion'
 import type { ToolEntryDisplay } from '../components/agentChat/tooling/types'
 
 // ---------------------------------------------------------------------------

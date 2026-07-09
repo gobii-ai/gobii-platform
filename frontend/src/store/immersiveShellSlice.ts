@@ -1,10 +1,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 
 import type { RootState } from './appStore'
-import type {
-  AgentChatShellSubview,
-  AgentChatSidebarMode,
-} from '../types/immersiveShell'
+import type { AgentChatShellSubview, AgentChatSidebarMode } from '../types/immersiveShell'
 
 export type ImmersiveConnectionStatus = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 export const IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY = 'gobii:immersive:selection-sidebar-mode'

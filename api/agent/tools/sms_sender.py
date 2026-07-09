@@ -20,19 +20,9 @@ from ..comms.outbound_delivery import deliver_agent_sms
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.text_sanitizer import decode_unicode_escapes, strip_control_chars, strip_markdown_for_sms
 from .agent_variables import substitute_variables_with_filespace
-from ..files.attachment_helpers import (
-    AttachmentResolutionError,
-    build_signed_filespace_download_url,
-    create_message_attachments,
-    resolve_filespace_attachments,
-)
+from ..files.attachment_helpers import AttachmentResolutionError, build_signed_filespace_download_url, create_message_attachments, resolve_filespace_attachments
 from ..files.filespace_service import broadcast_message_attachment_update
-from ...models import (
-    CommsChannel,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentMessage, LinkShortener,
-)
+from ...models import CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentMessage, LinkShortener
 from opentelemetry import trace
 from urlextract import URLExtract
 from api.services.email_verification import require_verified_email, EmailVerificationError

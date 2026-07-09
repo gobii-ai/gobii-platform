@@ -9,11 +9,7 @@ from django.views import View
 
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
-from api.models import (
-    PersistentAgentDiscordChannelSubscription,
-    PersistentAgentDiscordOAuthSession,
-    PersistentAgentSystemSkillState,
-)
+from api.models import PersistentAgentDiscordChannelSubscription, PersistentAgentDiscordOAuthSession, PersistentAgentSystemSkillState
 from api.services.discord_bot import (
     DiscordBotIntegrationError,
     build_discord_bot_invite_url,

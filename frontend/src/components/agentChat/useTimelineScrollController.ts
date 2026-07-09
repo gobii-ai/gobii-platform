@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type RefCallback,
-} from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefCallback } from 'react'
 
 const NEAR_BOTTOM_PX = 96
 const UNPIN_PX = 160

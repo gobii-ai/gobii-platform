@@ -5,13 +5,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.generic import DetailView
 
 from console.views import *  # noqa: F403 - transitional extraction from the legacy view module.
-from console.views import (
-    _agent_avatar_thumbnail_name,
-    _agent_collaborator_invite_app_path,
-    _agent_settings_app_path,
-    _format_validation_error,
-    _posted_bool,
-)
+from console.views import _agent_avatar_thumbnail_name, _agent_collaborator_invite_app_path, _agent_settings_app_path, _format_validation_error, _posted_bool
 from console.daily_credit import build_agent_daily_credit_context, serialize_daily_credit_payload
 from console.mixins import AgentOwnerContextOverrideMixin
 from console.agent_chat.access import resolve_manageable_agent_for_request, user_can_manage_agent, user_is_collaborator

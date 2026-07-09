@@ -12,16 +12,7 @@ from pages.views import (
     TeamView,
     TermsOfServiceView,
 )
-from .views import (
-    BlogIndexView,
-    BlogPostView,
-    ContactView,
-    PrequalifyView,
-    PricingView,
-    ShirtRedirectView,
-    SupportView,
-    TeamsView,
-)
+from .views import BlogIndexView, BlogPostView, ContactView, PrequalifyView, PricingView, ShirtRedirectView, SupportView, TeamsView
 
 # Keep names consistent with pages app so existing {% url 'proprietary:...'%} still work
 app_name = "proprietary"

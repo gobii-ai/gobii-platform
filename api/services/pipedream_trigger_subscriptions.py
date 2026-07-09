@@ -20,14 +20,7 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.integrations.pipedream_connect import create_connect_session
-from api.models import (
-    CommsChannel,
-    DeliveryStatus,
-    PersistentAgent,
-    PersistentAgentConversation,
-    PersistentAgentMessage,
-    PersistentAgentPipedreamTriggerSubscription,
-)
+from api.models import CommsChannel, DeliveryStatus, PersistentAgent, PersistentAgentConversation, PersistentAgentMessage, PersistentAgentPipedreamTriggerSubscription
 from api.services.discord_messages import (
     create_discord_outbound_message as _create_discord_outbound_message,
     discord_agent_address as _discord_agent_address,

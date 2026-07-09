@@ -10,19 +10,10 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from api.agent.core.token_usage import completion_tokens_per_second
-from api.models import (
-    EvalRunTask,
-    PersistentAgent,
-    PersistentAgentCompletion,
-    PersistentAgentStep,
-)
+from api.models import EvalRunTask, PersistentAgent, PersistentAgentCompletion, PersistentAgentStep
 from console.agent_audit.events import Cursor, fetch_audit_events
 from console.agent_audit.serializers import serialize_prompt_meta
-from console.agent_chat.timeline import (
-    MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE,
-    fetch_timeline_window,
-    serialize_processing_snapshot,
-)
+from console.agent_chat.timeline import MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE, fetch_timeline_window, serialize_processing_snapshot
 
 
 DEBUG_TRACE_TOOL_NAME = "gobii_get_agent_debug_trace"

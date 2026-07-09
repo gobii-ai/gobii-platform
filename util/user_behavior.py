@@ -185,12 +185,7 @@ def count_messages_sent_to_gobii(user) -> int:
     if user is None or getattr(user, "id", None) is None:
         return 0
 
-    from api.models import (
-        CommsChannel,
-        PersistentAgentCommsEndpoint,
-        PersistentAgentMessage,
-        UserPhoneNumber,
-    )
+    from api.models import CommsChannel, PersistentAgentCommsEndpoint, PersistentAgentMessage, UserPhoneNumber
 
     message_filter = Q(
         is_outbound=False,

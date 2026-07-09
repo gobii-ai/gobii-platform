@@ -193,15 +193,7 @@ def ensure_eval_local_routing_profile(seed: EvalLocalRoutingProfileSeed, stdout=
     The profile stores the provider env var name only. It never reads, stores,
     or prints the raw key value.
     """
-    from api.models import (
-        IntelligenceTier,
-        LLMProvider,
-        LLMRoutingProfile,
-        PersistentModelEndpoint,
-        ProfilePersistentTier,
-        ProfilePersistentTierEndpoint,
-        ProfileTokenRange,
-    )
+    from api.models import IntelligenceTier, LLMProvider, LLMRoutingProfile, PersistentModelEndpoint, ProfilePersistentTier, ProfilePersistentTierEndpoint, ProfileTokenRange
 
     standard_tier, _ = IntelligenceTier.objects.update_or_create(
         key="standard",

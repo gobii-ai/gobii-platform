@@ -5,12 +5,7 @@ import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRe
 import type { AgentRosterEntry } from '../types/agentRoster'
 import { compareTimelineCursors } from '../util/timelineCursor'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
-import {
-  timelineQueryKey,
-  timelineResponseToPage,
-  TIMELINE_PAGE_SIZE,
-  type TimelinePage,
-} from './useAgentTimeline'
+import { timelineQueryKey, timelineResponseToPage, TIMELINE_PAGE_SIZE, type TimelinePage } from './useAgentTimeline'
 
 export const DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES = 20
 

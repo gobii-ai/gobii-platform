@@ -21,12 +21,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react'
-import {
-  Slider as AriaSlider,
-  SliderThumb,
-  SliderTrack,
-  Switch as AriaSwitch,
-} from 'react-aria-components'
+import { Slider as AriaSlider, SliderThumb, SliderTrack, Switch as AriaSwitch } from 'react-aria-components'
 import { ActionConfirmDialog as CommonActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { CheckboxField, FormField, SelectInput, TextInput } from '../components/common/FormControls'
 import { ModalForm } from '../components/common/ModalForm'
@@ -39,13 +34,7 @@ import { SaveBar } from '../components/common/SaveBar'
 import { AddContactModal } from '../components/agentSettings/AddContactModal'
 import { AllowlistContactsTable } from '../components/agentSettings/AllowlistContactsTable'
 import { CollaboratorsTable } from '../components/agentSettings/CollaboratorsTable'
-import type {
-  AllowlistInput,
-  AllowlistTableRow,
-  CollaboratorTableRow,
-  PendingAllowlistAction,
-  PendingCollaboratorAction,
-} from '../components/agentSettings/contactTypes'
+import type { AllowlistInput, AllowlistTableRow, CollaboratorTableRow, PendingAllowlistAction, PendingCollaboratorAction } from '../components/agentSettings/contactTypes'
 import { useModal } from '../hooks/useModal'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'

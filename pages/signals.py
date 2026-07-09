@@ -23,10 +23,7 @@ from observability import traced, trace
 
 from config.plans import PLAN_CONFIG, get_plan_by_product_id
 from config.stripe_config import get_stripe_settings
-from constants.stripe import (
-    ORG_OVERAGE_STATE_META_KEY,
-    ORG_OVERAGE_STATE_DETACHED_PENDING,
-)
+from constants.stripe import ORG_OVERAGE_STATE_META_KEY, ORG_OVERAGE_STATE_DETACHED_PENDING
 from constants.plans import PlanNames, PlanSlugs
 from constants.grant_types import GrantTypeChoices
 from dateutil.relativedelta import relativedelta
@@ -38,22 +35,13 @@ from marketing_events.api import capi
 from marketing_events.constants import AD_CAPI_PROVIDER_TARGETS
 from marketing_events.context import build_marketing_context_from_user, extract_click_context
 from marketing_events.telemetry import record_fbc_synthesized
-from marketing_events.value_utils import (
-    calculate_start_trial_values,
-    resolve_start_trial_conversion_rate,
-)
+from marketing_events.value_utils import calculate_start_trial_values, resolve_start_trial_conversion_rate
 import logging
 import stripe
 
 from billing.addons import AddonEntitlementService
-from billing.checkout_metadata import (
-    STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
-    STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
-    clear_checkout_customer_metadata,
-)
-from billing.checkout_context import (
-    bind_setup_intent_checkout_context,
-)
+from billing.checkout_metadata import STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE, STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY, clear_checkout_customer_metadata
+from billing.checkout_context import bind_setup_intent_checkout_context
 from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
     is_trial_cancel_scheduled,
@@ -62,30 +50,10 @@ from billing.lifecycle_classifier import (
     is_trial_conversion_invoice,
     is_trial_ended_non_renewal,
 )
-from billing.lifecycle_signals import (
-    BillingLifecyclePayload,
-    SUBSCRIPTION_DELINQUENCY_ENTERED,
-    TRIAL_CANCEL_SCHEDULED,
-    TRIAL_CONVERSION_FAILED,
-    TRIAL_ENDED_NON_RENEWAL,
-    emit_billing_lifecycle_event,
-)
-from billing.plan_resolver import (
-    get_plan_context_for_version,
-    get_plan_version_by_price_id,
-    get_plan_version_by_product_id,
-)
-from api.models import (
-    OrganizationBilling,
-    StripeCheckoutContext,
-    TrialPromoRedemptionStatusChoices,
-    UserAttribution,
-    UserBilling,
-)
-from api.services.dedicated_proxy_service import (
-    DedicatedProxyService,
-    DedicatedProxyUnavailableError,
-)
+from billing.lifecycle_signals import BillingLifecyclePayload, SUBSCRIPTION_DELINQUENCY_ENTERED, TRIAL_CANCEL_SCHEDULED, TRIAL_CONVERSION_FAILED, TRIAL_ENDED_NON_RENEWAL, emit_billing_lifecycle_event
+from billing.plan_resolver import get_plan_context_for_version, get_plan_version_by_price_id, get_plan_version_by_product_id
+from api.models import OrganizationBilling, StripeCheckoutContext, TrialPromoRedemptionStatusChoices, UserAttribution, UserBilling
+from api.services.dedicated_proxy_service import DedicatedProxyService, DedicatedProxyUnavailableError
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_REASON_ACCOUNT_CANCELLATION,
     EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
@@ -97,18 +65,8 @@ from api.services.owner_execution_pause import (
 )
 from api.services.referral_service import ReferralService
 from api.services.signup_preview import resume_signup_preview_agents_for_user_if_eligible
-from api.services.trial_abuse import (
-    SIGNUP_GA_CLIENT_COOKIE_NAME,
-    SIGNAL_SOURCE_LOGIN,
-    SIGNAL_SOURCE_SIGNUP,
-    capture_request_identity_signals_and_attribution,
-    evaluate_user_trial_eligibility,
-)
-from api.services.trial_promos import (
-    mark_trial_promo_redemption_from_checkout_session,
-    mark_trial_promo_redemption_subscription,
-    parse_trial_promo_credit_amount,
-)
+from api.services.trial_abuse import SIGNUP_GA_CLIENT_COOKIE_NAME, SIGNAL_SOURCE_LOGIN, SIGNAL_SOURCE_SIGNUP, capture_request_identity_signals_and_attribution, evaluate_user_trial_eligibility
+from api.services.trial_promos import mark_trial_promo_redemption_from_checkout_session, mark_trial_promo_redemption_subscription, parse_trial_promo_credit_amount
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
 from util.subscription_helper import (
@@ -122,10 +80,7 @@ from util.subscription_helper import (
     downgrade_owner_to_free_plan,
     sync_subscription_after_direct_update,
 )
-from util.trial_eligibility import (
-    is_add_payment_info_capi_decision_allowed,
-    is_add_payment_info_capi_trial_eligibility_enforcement_enabled,
-)
+from util.trial_eligibility import is_add_payment_info_capi_decision_allowed, is_add_payment_info_capi_trial_eligibility_enforcement_enabled
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")

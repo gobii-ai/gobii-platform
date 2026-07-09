@@ -4,14 +4,7 @@ import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-tabl
 import { Clock3, UserPlus, Users } from 'lucide-react'
 
 import type { CollaboratorTableRow } from './contactTypes'
-import {
-  EmbeddedRemoveButton,
-  EmbeddedStatusBadge,
-  EmbeddedTableFrame,
-  EmbeddedTableHeader,
-  embeddedTableBodyClassName,
-  embeddedTableHeadClassName,
-} from './embeddedTablePrimitives'
+import { EmbeddedRemoveButton, EmbeddedStatusBadge, EmbeddedTableFrame, EmbeddedTableHeader, embeddedTableBodyClassName, embeddedTableHeadClassName } from './embeddedTablePrimitives'
 
 type CollaboratorsTableProps = {
   rows: CollaboratorTableRow[]

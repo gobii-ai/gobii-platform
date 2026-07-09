@@ -137,9 +137,7 @@ def maybe_schedule_short_description(
         return False
 
     try:
-        from api.agent.tasks.short_description import (
-            generate_agent_short_description_task,
-        )
+        from api.agent.tasks.short_description import generate_agent_short_description_task
 
         generate_agent_short_description_task.delay(str(agent.id), charter_hash, routing_profile_id)
         logger.debug(
@@ -190,9 +188,7 @@ def maybe_schedule_mini_description(
         return False
 
     try:
-        from api.agent.tasks.mini_description import (
-            generate_agent_mini_description_task,
-        )
+        from api.agent.tasks.mini_description import generate_agent_mini_description_task
 
         generate_agent_mini_description_task.delay(str(agent.id), charter_hash, routing_profile_id)
         logger.debug(

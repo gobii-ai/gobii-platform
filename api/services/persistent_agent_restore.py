@@ -8,14 +8,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from api.models import (
-    AgentPeerLink,
-    CommsChannel,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentConversation,
-    PersistentAgentMessage,
-)
+from api.models import AgentPeerLink, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversation, PersistentAgentMessage
 
 
 logger = logging.getLogger(__name__)

@@ -11,18 +11,8 @@ from api.agent.system_skills.service import enable_system_skills
 from api.evals.base import EvalScenario
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
-from api.models import (
-    EvalRunTask,
-    PersistentAgent,
-    PersistentAgentMessage,
-    PersistentAgentSystemStep,
-    PersistentAgentStep,
-    PersistentAgentToolCall,
-)
-from api.services.native_integrations import (
-    get_native_integration_provider,
-    save_native_integration_credentials,
-)
+from api.models import EvalRunTask, PersistentAgent, PersistentAgentMessage, PersistentAgentSystemStep, PersistentAgentStep, PersistentAgentToolCall
+from api.services.native_integrations import get_native_integration_provider, save_native_integration_credentials
 from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
 
 

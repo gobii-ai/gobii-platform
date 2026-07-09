@@ -1,10 +1,4 @@
-import {
-  BrainCog,
-  FileText,
-  MessageSquareText,
-  ScanText,
-  type LucideIcon,
-} from 'lucide-react'
+import { BrainCog, FileText, MessageSquareText, ScanText, type LucideIcon } from 'lucide-react'
 
 import { parseResultObject } from '../../util/objectUtils'
 import type { DetailKind } from '../agentChat/toolDetails'

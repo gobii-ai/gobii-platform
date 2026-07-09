@@ -13,11 +13,7 @@ from django.utils import timezone
 from kombu.exceptions import OperationalError as KombuOperationalError
 from requests import RequestException
 
-from api.models import (
-    UserFingerprintVisit,
-    UserFingerprintVisitFetchStatusChoices,
-    UserIdentitySignalTypeChoices,
-)
+from api.models import UserFingerprintVisit, UserFingerprintVisitFetchStatusChoices, UserIdentitySignalTypeChoices
 from util.analytics import Analytics
 
 

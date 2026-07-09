@@ -10,11 +10,7 @@ from uuid import UUID
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import (
-    PersistentAgentKanbanCard,
-    PersistentAgentMessage,
-    PersistentAgentPlanDeliverable,
-)
+from api.models import PersistentAgentKanbanCard, PersistentAgentMessage, PersistentAgentPlanDeliverable
 
 logger = logging.getLogger(__name__)
 

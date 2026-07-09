@@ -13,24 +13,13 @@ import { RedditPostsDetail } from './details/reddit'
 import { YahooFinanceBusinessDetail } from './details/finance'
 import { CrunchbaseCompanyDetail } from './details/crunchbase'
 import { AmazonProductDetail, AmazonProductReviewsDetail, AmazonProductSearchDetail } from './details/commerce'
-import {
-  RequestContactPermissionDetail,
-  RequestHumanInputDetail,
-  SecureCredentialsDetail,
-  SpawnAgentDetail,
-} from './details/permissions'
+import { RequestContactPermissionDetail, RequestHumanInputDetail, SecureCredentialsDetail, SpawnAgentDetail } from './details/permissions'
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
 import { ChartDetail } from './details/chart'
 import { ImageDetail } from './details/image'
 import { VideoDetail } from './details/video'
-import {
-  ApplyPatchDetail,
-  CreateCustomToolDetail,
-  CustomToolRunDetail,
-  PythonExecDetail,
-  RunCommandDetail,
-} from './details/sandbox'
+import { ApplyPatchDetail, CreateCustomToolDetail, CustomToolRunDetail, PythonExecDetail, RunCommandDetail } from './details/sandbox'
 
 export { normalizeStructuredValue } from './normalize'
 export {

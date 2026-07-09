@@ -2,16 +2,8 @@ import logging
 from typing import Dict, Iterable, Tuple
 from urllib.parse import urlencode
 
-from pages.mini_mode import (
-    campaign_matches_mini_mode,
-    set_mini_mode_cookie,
-    set_request_mini_mode,
-)
-from util.attribution_referrers import (
-    clean_acquisition_referrer,
-    is_internal_referrer,
-    referrer_hostname,
-)
+from pages.mini_mode import campaign_matches_mini_mode, set_mini_mode_cookie, set_request_mini_mode
+from util.attribution_referrers import clean_acquisition_referrer, is_internal_referrer, referrer_hostname
 
 logger = logging.getLogger(__name__)
 

@@ -12,10 +12,7 @@ from django.utils import timezone
 
 from api.models import ExecutionPauseReasonChoices
 from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
-from api.services.billing_pause_notifications import (
-    is_billing_execution_pause_reason,
-    send_owner_billing_pause_notification,
-)
+from api.services.billing_pause_notifications import is_billing_execution_pause_reason, send_owner_billing_pause_notification
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)

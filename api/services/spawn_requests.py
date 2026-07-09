@@ -3,12 +3,7 @@ from datetime import timedelta
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from api.models import (
-    AgentSpawnRequest,
-    PersistentAgent,
-    PersistentAgentStep,
-    PersistentAgentSystemStep,
-)
+from api.models import AgentSpawnRequest, PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 

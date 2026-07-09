@@ -2,12 +2,7 @@ import { useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
-import {
-  isContinuationUpgradeModalSource,
-  type PlanTier,
-  selectSubscriptionState,
-  subscriptionActions,
-} from '../../store/subscriptionSlice'
+import { isContinuationUpgradeModalSource, type PlanTier, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'

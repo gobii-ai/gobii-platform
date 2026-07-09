@@ -3,11 +3,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { CheckCircle2, Loader2, Plug } from 'lucide-react'
 
-import {
-  fetchNativeIntegrations,
-  startNativeIntegrationConnect,
-  type NativeIntegrationProvider,
-} from '../../../api/nativeIntegrations'
+import { fetchNativeIntegrations, startNativeIntegrationConnect, type NativeIntegrationProvider } from '../../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../../api/safeErrorMessage'
 import {
   NativeProviderIcon,
