@@ -51,6 +51,12 @@ export const AnalyticsEvent = {
   HUMAN_INPUT_PANEL_SHOWN: 'Human Input Panel Shown',
   HUMAN_INPUT_OPTION_SELECTED: 'Human Input Option Selected',
 
+  NOTIFICATION_BELL_OPENED: 'Notification Bell Opened',
+  NOTIFICATION_BELL_ITEM_OPENED: 'Notification Bell Item Opened',
+  NOTIFICATION_BELL_ACTION_CLICKED: 'Notification Bell Action Clicked',
+  NOTIFICATION_BELL_ITEM_MARK_READ_CLICKED: 'Notification Bell Item Mark Read Clicked',
+  NOTIFICATION_BELL_MARK_ALL_READ_CLICKED: 'Notification Bell Mark All Read Clicked',
+
   CTA_CLICKED: 'CTA Clicked',
 } as const
 

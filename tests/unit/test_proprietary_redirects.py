@@ -15,6 +15,16 @@ class ProprietaryRedirectTests(TestCase):
                     "/?utm_source=shirt&utm_medium=clothing",
                 )
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_shirt_redirect_preserves_incoming_tracking_query(self):
+        response = self.client.get("/shirt?gclid=test-click")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"],
+            "/?utm_source=shirt&utm_medium=clothing&gclid=test-click",
+        )
+
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_shirt_redirect_is_proprietary_only(self):
         response = self.client.get("/shirt")
