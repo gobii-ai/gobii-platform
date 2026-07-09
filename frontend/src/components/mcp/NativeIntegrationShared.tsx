@@ -283,6 +283,11 @@ type NativeIntegrationActionFeedback = {
   onError?: (message: string) => void
 }
 
+function nativeIntegrationDisplayName(provider: NativeIntegrationProvider): string {
+  const fallback = provider.providerKey.replace(/[_-]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+  return provider.displayName?.trim() || fallback || provider.providerKey
+}
+
 function notifyNativeIntegrationError({
   message,
   setStatusMessage,
@@ -301,7 +306,7 @@ export function handleNativeOAuthConnectSuccess({
   provider,
   popup,
   agentId,
-  closedMessage = 'Connection window was closed before Google opened.',
+  closedMessage,
   onClosed,
 }: {
   payload: NativeIntegrationConnectResponse
@@ -318,7 +323,7 @@ export function handleNativeOAuthConnectSuccess({
     return
   }
   if (popup?.closed) {
-    onClosed?.(closedMessage)
+    onClosed?.(closedMessage ?? `Connection window was closed before ${nativeIntegrationDisplayName(provider)} opened.`)
     return
   }
   window.location.href = payload.authorizationUrl
@@ -399,8 +404,10 @@ export function useNativeIntegrationPickerMutation({
   setPendingAction,
   setStatusMessage,
   onError,
+  openPicker = openGoogleDrivePicker,
   preparePicker,
 }: NativeIntegrationActionFeedback & {
+  openPicker?: (token: NativeIntegrationPickerTokenResponse) => Promise<NativeIntegrationAccessibleFile[]>
   preparePicker?: (provider: NativeIntegrationProvider) => Promise<void | (() => void)> | void | (() => void)
 }) {
   const queryClient = useQueryClient()
@@ -409,7 +416,7 @@ export function useNativeIntegrationPickerMutation({
       const cleanup = await preparePicker?.(provider)
       try {
         const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-        const selectedFiles = await openGoogleDrivePicker(token)
+        const selectedFiles = await openPicker(token)
         return { provider, selectedCount: selectedFiles.length }
       } finally {
         cleanup?.()

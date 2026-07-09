@@ -91,6 +91,7 @@ function renderHomepageIntegrationsModal() {
         searchUrl: '/console/api/pipedream-apps/search/',
         selectedFieldsContainerId: 'selected-fields',
         initialOpen: true,
+        openNativePicker: mocks.openGoogleDrivePicker,
       }),
     ),
   )

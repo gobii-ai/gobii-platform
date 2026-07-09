@@ -21,6 +21,7 @@ import {
   NativeIntegrationActionButtons,
   NativeIntegrationFilesDisclosure,
   NativeIntegrationSummaryCell,
+  openGoogleDrivePicker,
   openNativeOAuthPopup,
   usesManualNativeIntegrationCredentials,
   useNativeIntegrationConnectMutation,
@@ -48,6 +49,7 @@ export type HomepageIntegrationsModalProps = {
   searchUrl: string
   selectedFieldsContainerId: string
   initialOpen?: boolean
+  openNativePicker?: typeof openGoogleDrivePicker
 }
 
 function fallbackAppForSlug(slug: string): PipedreamAppSummary {
@@ -96,6 +98,7 @@ export function HomepageIntegrationsModal({
   searchUrl,
   selectedFieldsContainerId,
   initialOpen = false,
+  openNativePicker = openGoogleDrivePicker,
 }: HomepageIntegrationsModalProps) {
   const [open, setOpen] = useState(Boolean(initialOpen || initialSearchTerm))
   const isMobile = useIsMobile()
@@ -217,6 +220,7 @@ export function HomepageIntegrationsModal({
   const nativePickerMutation = useNativeIntegrationPickerMutation({
     setPendingAction: setPendingNativeAction,
     setStatusMessage: setNativeErrorMessage,
+    openPicker: openNativePicker,
     preparePicker: () => {
       const previousScrollX = window.scrollX
       const previousScrollY = window.scrollY

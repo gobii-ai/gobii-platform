@@ -22,6 +22,30 @@ vi.mock('../../../api/nativeIntegrations', () => ({
 
 vi.mock('../../mcp/NativeIntegrationShared', () => ({
   NativeProviderIcon: () => <img src="/static/images/integrations/native/apollo.svg" alt="" />,
+  handleNativeOAuthConnectSuccess: vi.fn(({
+    payload,
+    provider,
+    popup,
+    closedMessage,
+    onClosed,
+  }: {
+    payload: { authorizationUrl: string }
+    provider: { displayName: string }
+    popup: Window | null
+    closedMessage?: string
+    onClosed?: (message: string) => void
+  }) => {
+    if (popup && !popup.closed) {
+      popup.location.href = payload.authorizationUrl
+      popup.focus()
+      return
+    }
+    if (popup?.closed) {
+      onClosed?.(closedMessage ?? `Connection window was closed before ${provider.displayName} opened.`)
+      return
+    }
+    window.location.href = payload.authorizationUrl
+  }),
   nativeOAuthContextPayload: () => ({ providerKey: 'apollo' }),
   openGoogleDrivePicker: vi.fn(),
   openNativeOAuthPopup: vi.fn(),
