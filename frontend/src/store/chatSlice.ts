@@ -28,6 +28,7 @@ export type AgentChatIdentityState = {
   agentMiniDescription: string | null
   agentEmail: string | null
   agentSms: string | null
+  agentNextScheduledAt: string | null
   auditUrl: string | null
   agentIsOrgOwned: boolean
   canManageAgent: boolean
@@ -92,6 +93,7 @@ type AgentIdentityUpdateInput = {
   agentMiniDescription?: string | null
   agentEmail?: string | null
   agentSms?: string | null
+  agentNextScheduledAt?: string | null
   auditUrl?: string | null
   agentIsOrgOwned?: boolean
   canManageAgent?: boolean
@@ -142,6 +144,7 @@ export function createInitialSession(): AgentChatSession {
       agentMiniDescription: null,
       agentEmail: null,
       agentSms: null,
+      agentNextScheduledAt: null,
       auditUrl: null,
       agentIsOrgOwned: false,
       canManageAgent: true,
@@ -227,6 +230,9 @@ function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpd
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentSms')) {
     session.identity.agentSms = update?.agentSms ?? null
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentNextScheduledAt')) {
+    session.identity.agentNextScheduledAt = update?.agentNextScheduledAt ?? null
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'auditUrl')) {
     session.identity.auditUrl = update?.auditUrl ?? null
@@ -512,11 +518,19 @@ export const refreshProcessing = createAsyncThunk<void, void, { state: RootState
     const agentId = getState().chat.activeAgentId
     if (!agentId) return
     try {
-      const { processing_active, processing_snapshot, signup_preview_state, planning_state } = await fetchProcessingStatus(agentId)
+      const status = await fetchProcessingStatus(agentId)
+      const {
+        processing_active,
+        processing_snapshot,
+        signup_preview_state,
+        planning_state,
+      } = status
       const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
+      const hasNextScheduledAt = Object.prototype.hasOwnProperty.call(status, 'agent_next_scheduled_at')
       dispatch(chatActions.processingUpdated({ agentId, snapshot }))
       dispatch(chatActions.agentIdentityUpdated({
         agentId,
+        ...(hasNextScheduledAt ? { agentNextScheduledAt: status.agent_next_scheduled_at ?? null } : {}),
         signupPreviewState: signup_preview_state ?? undefined,
         planningState: planning_state ?? undefined,
       }))

@@ -33,6 +33,8 @@ export type TimelineResponse = {
   processing_snapshot?: ProcessingSnapshot
   agent_name?: string | null
   agent_avatar_url?: string | null
+  agent_schedule?: string | null
+  agent_next_scheduled_at?: string | null
   signup_preview_state?: SignupPreviewState | null
   planning_state?: PlanningState | null
   pending_human_input_requests?: PendingHumanInputRequest[]
@@ -675,6 +677,7 @@ export function resolveSpawnRequest(
 export type ProcessingStatusResponse = {
   processing_active: boolean
   processing_snapshot?: ProcessingSnapshot
+  agent_next_scheduled_at?: string | null
   signup_preview_state?: SignupPreviewState | null
   planning_state?: PlanningState | null
 }
@@ -684,6 +687,7 @@ export type StopAgentResponse = {
   cancelledWebTaskCount: number
   processing_active: boolean
   processing_snapshot?: ProcessingSnapshot
+  agent_next_scheduled_at?: string | null
 }
 
 export async function fetchProcessingStatus(agentId: string): Promise<ProcessingStatusResponse> {

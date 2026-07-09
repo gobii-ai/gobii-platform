@@ -225,10 +225,19 @@ export function replaceProcessingSnapshotInCache(
   agentId: string,
   processingSnapshot: ProcessingSnapshot,
 ) {
+  const processingPayload = processingSnapshot as ProcessingSnapshot & Record<string, unknown>
+  const hasNextScheduledAt = Object.prototype.hasOwnProperty.call(processingPayload, 'agent_next_scheduled_at')
   updateLatestTimelineRawInCache(queryClient, agentId, (current) => ({
     ...current,
     processing_active: processingSnapshot.active,
     processing_snapshot: processingSnapshot,
+    ...(hasNextScheduledAt
+      ? {
+          agent_next_scheduled_at: typeof processingPayload.agent_next_scheduled_at === 'string'
+            ? processingPayload.agent_next_scheduled_at
+            : null,
+        }
+      : {}),
   }))
 }
 
@@ -287,6 +296,15 @@ export function updateAgentIdentityInCache(
       const processingActive = Boolean(payload.processing_active)
       if (processingActive !== current.processing_active) {
         next.processing_active = processingActive
+        changed = true
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'agent_next_scheduled_at')) {
+      const agentNextScheduledAt = typeof payload.agent_next_scheduled_at === 'string'
+        ? payload.agent_next_scheduled_at
+        : null
+      if (agentNextScheduledAt !== (current.agent_next_scheduled_at ?? null)) {
+        next.agent_next_scheduled_at = agentNextScheduledAt
         changed = true
       }
     }

@@ -840,6 +840,28 @@ class AgentChatSignalTests(TestCase):
         )
 
     @tag("batch_agent_chat")
+    def test_schedule_update_emits_agent_profile_event_with_next_scheduled_at(self):
+        self.agent.schedule = "@hourly"
+        with self.captureOnCommitCallbacks(execute=True):
+            self.agent.save(update_fields=["schedule"])
+
+        scheduled_profile_event = self._receive_with_timeout(self.owner_profile_channel_name)
+        scheduled_payload = scheduled_profile_event.get("payload", {})
+        self.assertEqual(scheduled_profile_event.get("type"), "agent_profile_event")
+        self.assertEqual(scheduled_payload.get("agent_schedule"), "@hourly")
+        self.assertIsInstance(scheduled_payload.get("agent_next_scheduled_at"), str)
+
+        self.agent.schedule = None
+        with self.captureOnCommitCallbacks(execute=True):
+            self.agent.save(update_fields=["schedule"])
+
+        cleared_profile_event = self._receive_with_timeout(self.owner_profile_channel_name)
+        cleared_payload = cleared_profile_event.get("payload", {})
+        self.assertEqual(cleared_profile_event.get("type"), "agent_profile_event")
+        self.assertEqual(cleared_payload.get("agent_schedule"), "")
+        self.assertIsNone(cleared_payload.get("agent_next_scheduled_at"))
+
+    @tag("batch_agent_chat")
     @patch("console.agent_chat.signals.build_processing_snapshot")
     def test_processing_broadcast_emits_agent_profile_event_with_processing_state(self, mock_build_processing_snapshot):
         mock_build_processing_snapshot.return_value = type(
