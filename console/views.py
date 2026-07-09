@@ -17,15 +17,7 @@ from django.urls import NoReverseMatch, reverse
 from django.contrib import messages
 from django.db import transaction, IntegrityError, DatabaseError
 from django.db.models import Q
-from django.http import (
-    FileResponse,
-    HttpResponseForbidden,
-    HttpResponseNotAllowed,
-    HttpResponse,
-    JsonResponse,
-    Http404,
-    HttpRequest,
-)
+from django.http import FileResponse, HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404, HttpRequest
 from django.core.exceptions import ValidationError, PermissionDenied, ImproperlyConfigured
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
@@ -40,134 +32,41 @@ import uuid
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from config.socialaccount_adapter import (
-    OAUTH_ATTRIBUTION_COOKIE,
-    OAUTH_CHARTER_COOKIE,
-    restore_oauth_session_state,
-)
-from billing.checkout_metadata import (
-    STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
-    build_checkout_flow_metadata,
-)
+from config.socialaccount_adapter import OAUTH_ATTRIBUTION_COOKIE, OAUTH_CHARTER_COOKIE, restore_oauth_session_state
+from billing.checkout_metadata import STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE, build_checkout_flow_metadata
 from billing.checkout_sessions import create_stripe_checkout_session
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from billing.services import BillingService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
 from api.services.signup_preview import user_can_access_signup_preview_agent
-from api.services.dedicated_proxy_service import (
-    DedicatedProxyService,
-    is_multi_assign_enabled,
-)
+from api.services.dedicated_proxy_service import DedicatedProxyService, is_multi_assign_enabled
 from api.services.persistent_agents import maybe_sync_agent_email_display_name
-from api.agent.core.llm_config import (
-    AgentLLMTier,
-    TIER_ORDER,
-    get_system_default_tier,
-    get_llm_tier_description,
-    get_llm_tier_label,
-    get_llm_tier_multipliers,
-    get_llm_tier_ranks,
-    apply_user_quota_tier_override,
-    max_allowed_tier_for_plan,
-)
+from api.agent.core.llm_config import AgentLLMTier, TIER_ORDER, get_system_default_tier, get_llm_tier_description, get_llm_tier_label, get_llm_tier_multipliers, get_llm_tier_ranks, apply_user_quota_tier_override, max_allowed_tier_for_plan
 from api.agent.avatar import maybe_schedule_agent_avatar
-from api.agent.short_description import (
-    compute_charter_hash,
-    maybe_schedule_mini_description,
-    maybe_schedule_short_description,
-)
+from api.agent.short_description import compute_charter_hash, maybe_schedule_mini_description, maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
-from api.services.daily_credit_limits import (
-    get_agent_credit_multiplier,
-    get_tier_credit_multiplier,
-    scale_daily_credit_limit_for_tier_change,
-)
+from api.services.daily_credit_limits import get_agent_credit_multiplier, get_tier_credit_multiplier, scale_daily_credit_limit_for_tier_change
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
-from api.services.owner_execution_pause import (
-    get_owner_account_pause_state,
-    sync_owner_customer_account_pause,
-)
-from api.services.agent_settings_resume import (
-    queue_owner_task_pack_resume,
-    queue_settings_change_resume,
-)
+from api.services.owner_execution_pause import get_owner_account_pause_state, sync_owner_customer_account_pause
+from api.services.agent_settings_resume import queue_owner_task_pack_resume, queue_settings_change_resume
 from api.services.agent_avatar_public import validate_public_agent_avatar_thumbnail_token
-from api.services.trial_abuse import (
-    evaluate_user_trial_eligibility,
-    user_has_prior_individual_history,
-)
-from console.daily_credit import (
-    build_agent_daily_credit_context,
-    get_daily_credit_slider_bounds,
-    parse_daily_credit_limit,
-    serialize_daily_credit_payload,
-)
+from api.services.trial_abuse import evaluate_user_trial_eligibility, user_has_prior_individual_history
+from console.daily_credit import build_agent_daily_credit_context, get_daily_credit_slider_bounds, parse_daily_credit_limit, serialize_daily_credit_payload
 from console.role_constants import BILLING_MANAGE_ROLES
-from api.models import (
-    UserBilling,
-    BrowserUseAgent,
-    ProxyServer,
-    PersistentAgent,
-    PersistentAgentInboundWebhook,
-    PersistentAgentWebhook,
-    IntelligenceTier,
-    AgentPeerLink,
-    CommsChannel,
-    UserPhoneNumber,
-    Organization,
-    OrganizationMembership,
-    OrganizationInvite,
-    TaskCredit,
-    AgentCollaborator,
-    AgentCollaboratorInvite,
-    get_agent_contact_counts,
-)
+from api.models import UserBilling, BrowserUseAgent, ProxyServer, PersistentAgent, PersistentAgentInboundWebhook, PersistentAgentWebhook, IntelligenceTier, AgentPeerLink, CommsChannel, UserPhoneNumber, Organization, OrganizationMembership, OrganizationInvite, TaskCredit, AgentCollaborator, AgentCollaboratorInvite, get_agent_contact_counts
 from console.mixins import AgentOwnerContextOverrideMixin, ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
 from pages.account_info_cache import invalidate_account_info_cache
 
 from .context_helpers import build_console_context
 from billing.addons import AddonEntitlementService
 from util.payments_helper import PaymentsHelper
-from util.integrations import (
-    IntegrationDisabledError,
-    stripe_status,
-)
-from util.onboarding import (
-    TRIAL_ONBOARDING_TARGET_AGENT_UI,
-    set_trial_onboarding_intent,
-    set_trial_onboarding_requires_plan_selection,
-)
-from util.personal_signup_preview import (
-    resolve_personal_signup_preview,
-)
-from util.subscription_helper import (
-    reconcile_user_plan_from_stripe,
-    get_active_subscription,
-    get_stripe_customer,
-    get_organization_plan,
-    get_user_max_contacts_per_agent,
-    sync_subscription_after_direct_update as _sync_subscription_after_direct_update,
-)
-from util.trial_enforcement import (
-    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-    TrialRequiredValidationError,
-    can_user_use_personal_agents_and_api,
-)
-from util.urls import (
-    IMMERSIVE_APP_BASE_PATH,
-    IMMERSIVE_RETURN_TO_SESSION_KEY,
-    append_query_params,
-    append_context_query,
-    build_immersive_chat_url,
-    build_immersive_contact_requests_url,
-    load_daily_limit_action_payload,
-)
-from console.agent_chat.access import (
-    resolve_agent_for_request,
-    resolve_manageable_agent_for_request,
-    user_can_manage_agent,
-    user_is_collaborator,
-)
+from util.integrations import IntegrationDisabledError, stripe_status
+from util.onboarding import TRIAL_ONBOARDING_TARGET_AGENT_UI, set_trial_onboarding_intent, set_trial_onboarding_requires_plan_selection
+from util.personal_signup_preview import resolve_personal_signup_preview
+from util.subscription_helper import reconcile_user_plan_from_stripe, get_active_subscription, get_stripe_customer, get_organization_plan, get_user_max_contacts_per_agent, sync_subscription_after_direct_update as _sync_subscription_after_direct_update
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, TrialRequiredValidationError, can_user_use_personal_agents_and_api
+from util.urls import IMMERSIVE_APP_BASE_PATH, IMMERSIVE_RETURN_TO_SESSION_KEY, append_query_params, append_context_query, build_immersive_chat_url, build_immersive_contact_requests_url, load_daily_limit_action_payload
+from console.agent_chat.access import resolve_agent_for_request, resolve_manageable_agent_for_request, user_can_manage_agent, user_is_collaborator
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG
@@ -338,38 +237,18 @@ def _resolve_dedicated_ip_pricing(plan):
     return price_decimal, normalized_currency
 
 
-from .forms import (
-    DedicatedIpAddForm,
-    AddonQuantityForm,
-)
+from .forms import DedicatedIpAddForm, AddonQuantityForm
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.services.sms_contact_purpose import track_sms_contact_approval
 from waffle.mixins import WaffleFlagMixin
-from constants.feature_flags import (
-    CTA_CONTINUE_AGENT_BTN,
-    CTA_NO_CHARGE_DURING_TRIAL,
-    CTA_PICK_A_PLAN,
-    CTA_PRICING_CANCEL_TEXT_UNDER_BTN,
-    CTA_START_FREE_TRIAL,
-    CTA_UNLOCK_AGENT_COPY,
-    ORGANIZATIONS,
-    PRICING_MODAL_ALMOST_FULL_SCREEN,
-)
+from constants.feature_flags import CTA_CONTINUE_AGENT_BTN, CTA_NO_CHARGE_DURING_TRIAL, CTA_PICK_A_PLAN, CTA_PRICING_CANCEL_TEXT_UNDER_BTN, CTA_START_FREE_TRIAL, CTA_UNLOCK_AGENT_COPY, ORGANIZATIONS, PRICING_MODAL_ALMOST_FULL_SCREEN
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames, PlanNamesChoices
-from constants.stripe import (
-    ORG_OVERAGE_STATE_META_KEY,
-    ORG_OVERAGE_STATE_DETACHED_PENDING,
-    EXCLUDED_PAYMENT_METHOD_TYPES,
-)
+from constants.stripe import ORG_OVERAGE_STATE_META_KEY, ORG_OVERAGE_STATE_DETACHED_PENDING, EXCLUDED_PAYMENT_METHOD_TYPES
 from util.waffle_flags import is_waffle_flag_active
-from util.trial_eligibility import (
-    is_user_trial_allowed_by_policy,
-    is_user_trial_eligibility_enforcement_enabled,
-    is_user_trial_eligibility_enforcement_one_per_user_enabled,
-)
+from util.trial_eligibility import is_user_trial_allowed_by_policy, is_user_trial_eligibility_enforcement_enabled, is_user_trial_eligibility_enforcement_one_per_user_enabled
 from opentelemetry import trace
 from api.services import mcp_servers as mcp_server_service
 from console.agent_creation import create_persistent_agent_from_charter
@@ -3387,11 +3266,7 @@ def update_contact_pack_quantity(request, owner, owner_type):
 @with_billing_owner
 @tracer.start_as_current_span("BILLING Update Add-ons Batch")
 def update_addons(request, owner, owner_type):
-    from console.billing_update_service import (
-        BillingUpdateError,
-        SUPPORT_DETAIL,
-        apply_addon_price_quantities,
-    )
+    from console.billing_update_service import BillingUpdateError, SUPPORT_DETAIL, apply_addon_price_quantities
 
     if not stripe_status().enabled:
         messages.error(request, "Stripe billing is not available in this deployment.")
@@ -3480,11 +3355,7 @@ def add_dedicated_ip_quantity(request, owner, owner_type):
                 messages.error(request, error)
         return redirect(_billing_redirect(owner, owner_type))
 
-    from console.billing_update_service import (
-        BillingUpdateError,
-        SUPPORT_DETAIL,
-        apply_dedicated_ip_changes,
-    )
+    from console.billing_update_service import BillingUpdateError, SUPPORT_DETAIL, apply_dedicated_ip_changes
 
     add_quantity = int(form.cleaned_data["quantity"])
     try:
@@ -3521,11 +3392,7 @@ def remove_dedicated_ip(request, owner, owner_type):
         messages.error(request, "Missing dedicated IP identifier.")
         return redirect(_billing_redirect(owner, owner_type))
 
-    from console.billing_update_service import (
-        BillingUpdateError,
-        SUPPORT_DETAIL,
-        apply_dedicated_ip_changes,
-    )
+    from console.billing_update_service import BillingUpdateError, SUPPORT_DETAIL, apply_dedicated_ip_changes
 
     try:
         action_url = apply_dedicated_ip_changes(
@@ -3557,11 +3424,7 @@ def remove_all_dedicated_ip(request, owner, owner_type):
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect(f'{IMMERSIVE_APP_BASE_PATH}/billing')
 
-    from console.billing_update_service import (
-        BillingUpdateError,
-        SUPPORT_DETAIL,
-        apply_dedicated_ip_changes,
-    )
+    from console.billing_update_service import BillingUpdateError, SUPPORT_DETAIL, apply_dedicated_ip_changes
 
     try:
         proxy_ids = list(

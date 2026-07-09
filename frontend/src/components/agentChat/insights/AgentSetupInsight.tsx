@@ -4,18 +4,11 @@ import { motion } from 'framer-motion'
 import { ArrowRight, Brain, Check, CheckCircle2, Copy, Mail, MessageSquare, Pencil, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, InsightEvent } from '../../../types/insight'
-import {
-  disableAgentSms,
-  enableAgentSms,
-  resendEmailVerification,
-} from '../../../api/agentSetup'
+import { disableAgentSms, enableAgentSms, resendEmailVerification } from '../../../api/agentSetup'
 import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
 import { getReturnToPath } from '../../../util/returnTo'
-import {
-  PhoneNumberInput,
-  formatPhoneNational,
-} from '../../common/PhoneNumberInput'
+import { PhoneNumberInput, formatPhoneNational } from '../../common/PhoneNumberInput'
 import { useUserPhoneVerification } from '../../../hooks/useUserPhoneVerification'
 import { agentInsightsQueryKey } from '../../../hooks/useAgentInsights'
 import '../../../styles/insights.css'

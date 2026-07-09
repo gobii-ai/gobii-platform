@@ -10,29 +10,14 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 import api.evals.loader  # noqa: F401 - registers canonical scenarios and suites
-from api.evals.catalog import (
-    ScenarioCatalogFilters,
-    filter_scenario_slugs,
-    get_scenario_metadata,
-    normalized_filter_values,
-    scenario_to_suite_slugs,
-)
+from api.evals.catalog import ScenarioCatalogFilters, filter_scenario_slugs, get_scenario_metadata, normalized_filter_values, scenario_to_suite_slugs
 from api.evals.local_setup import ensure_eval_local_setup, get_eval_local_routing_profile_seeds
-from api.evals.owner import (
-    ensure_eval_runner_user_and_owner,
-)
+from api.evals.owner import ensure_eval_runner_user_and_owner
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task, gc_eval_runs_task
 from api.evals.runner import _update_suite_state
-from api.models import (
-    BrowserUseAgent,
-    EvalRun,
-    EvalRunTask,
-    EvalSuiteRun,
-    LLMRoutingProfile,
-    PersistentAgent,
-)
+from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, LLMRoutingProfile, PersistentAgent
 from api.evals.llm_routing_profile_snapshot import create_eval_profile_snapshot
 
 

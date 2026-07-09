@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ArrowRight, CheckCircle2, LoaderCircle } from 'lucide-react'
 
-import {
-  acceptOrganizationInvite,
-  type OrganizationInviteAcceptPayload,
-} from '../../api/organization'
+import { acceptOrganizationInvite, type OrganizationInviteAcceptPayload } from '../../api/organization'
 
 type InviteStatus = 'loading' | 'accepted' | 'issue' | 'error'
 

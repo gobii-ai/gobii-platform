@@ -15,11 +15,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime, parse_date
 
 from billing.services import BillingService
-from util.subscription_helper import (
-    get_active_subscription,
-    report_task_usage_to_stripe,
-    report_organization_task_usage_to_stripe,
-)
+from util.subscription_helper import get_active_subscription, report_task_usage_to_stripe, report_organization_task_usage_to_stripe
 from api.models import BrowserUseAgentTask, PersistentAgentStep, MeteringBatch, Organization
 
 import logging

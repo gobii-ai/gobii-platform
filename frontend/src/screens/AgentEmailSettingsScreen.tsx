@@ -2,28 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Mail, ShieldCheck } from 'lucide-react'
 
-import {
-  ensureAgentEmailAccount,
-  fetchAgentEmailSettings,
-  fetchEmailOAuthStatus,
-  resetAgentEmailSettingsToDefault,
-  revokeEmailOAuth,
-  saveAgentEmailSettings,
-  startEmailOAuth,
-  testAgentEmailSettings,
-  type AgentEmailSettingsPayload,
-  type EmailSettingsSaveRequest,
-} from '../api/agentEmailSettings'
+import { ensureAgentEmailAccount, fetchAgentEmailSettings, fetchEmailOAuthStatus, resetAgentEmailSettingsToDefault, revokeEmailOAuth, saveAgentEmailSettings, startEmailOAuth, testAgentEmailSettings, type AgentEmailSettingsPayload, type EmailSettingsSaveRequest } from '../api/agentEmailSettings'
 import { HttpError } from '../api/http'
-import {
-  EMAIL_OAUTH_PROVIDER_CONFIG,
-  EMAIL_PROVIDER_OPTIONS,
-  getProviderLabel,
-  isOAuthProviderKey,
-  matchProviderFromDefaults,
-  type OAuthProviderKey,
-  type ProviderKey,
-} from './agentEmailSettingsProviders'
+import { EMAIL_OAUTH_PROVIDER_CONFIG, EMAIL_PROVIDER_OPTIONS, getProviderLabel, isOAuthProviderKey, matchProviderFromDefaults, type OAuthProviderKey, type ProviderKey } from './agentEmailSettingsProviders'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { InlineStatusBanner } from '../components/common/InlineStatusBanner'

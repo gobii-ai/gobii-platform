@@ -15,12 +15,7 @@ from django.db import IntegrityError, transaction
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 from api.services.system_settings import get_max_file_size
-from ...models import (
-    PersistentAgentMessage,
-    AgentFileSpace,
-    AgentFileSpaceAccess,
-    AgentFsNode,
-)
+from ...models import PersistentAgentMessage, AgentFileSpace, AgentFileSpaceAccess, AgentFsNode
 
 logger = get_task_logger(__name__)
 EXPORTS_DIR_NAME = "exports"
@@ -519,9 +514,7 @@ def enqueue_import_after_commit(message_id: str) -> None:
 
     def _schedule():
         try:
-            from api.agent.tasks.filespace_imports import (
-                import_message_attachments_to_filespace_task,
-            )
+            from api.agent.tasks.filespace_imports import import_message_attachments_to_filespace_task
             import_message_attachments_to_filespace_task.delay(str(message_id))
         except Exception:
             # Best-effort scheduling; ignore failures here

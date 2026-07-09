@@ -43,43 +43,19 @@ from django.db import DatabaseError
 from django.db.models import Max
 from django.urls import reverse
 
-from api.services.system_settings import (
-    get_mcp_http_timeout_seconds,
-    get_mcp_stdio_timeout_seconds,
-)
+from api.services.system_settings import get_mcp_http_timeout_seconds, get_mcp_stdio_timeout_seconds
 from django.utils import timezone
 
 from .mcp_param_guards import MCPParamGuardRegistry
 from .mcp_error_normalizers import MCPErrorNormalizerRegistry
 from .mcp_result_adapters import MCPResultAdapterRegistry, mcp_result_owner_context
-from ...models import (
-    MCPServerConfig,
-    MCPServerOAuthCredential,
-    PersistentAgent,
-    PersistentAgentEnabledTool,
-    PipedreamConnectSession,
-)
+from ...models import MCPServerConfig, MCPServerOAuthCredential, PersistentAgent, PersistentAgentEnabledTool, PipedreamConnectSession
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
 from ...services.mcp_tool_discovery import schedule_mcp_tool_discovery
-from ...services.sandbox_compute import (
-    SandboxComputeService,
-    SandboxComputeUnavailable,
-    sandbox_compute_enabled,
-    sandbox_compute_enabled_for_agent,
-)
-from ...services.mcp_tool_cache import (
-    build_mcp_tool_cache_fingerprint,
-    get_cached_mcp_tool_definitions,
-    invalidate_mcp_tool_cache,
-    set_cached_mcp_tool_definitions,
-)
-from ...services.pipedream_apps import (
-    build_owner_key,
-    get_effective_pipedream_app_slugs_for_agent,
-    get_platform_pipedream_app_slugs,
-    normalize_app_slugs,
-)
+from ...services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, sandbox_compute_enabled, sandbox_compute_enabled_for_agent
+from ...services.mcp_tool_cache import build_mcp_tool_cache_fingerprint, get_cached_mcp_tool_definitions, invalidate_mcp_tool_cache, set_cached_mcp_tool_definitions
+from ...services.pipedream_apps import build_owner_key, get_effective_pipedream_app_slugs_for_agent, get_platform_pipedream_app_slugs, normalize_app_slugs
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -2604,10 +2580,7 @@ class MCPToolManager:
             app_slug = self._pd_app_slug_for_tool_call(info.tool_name, params)
             if app_slug:
                 try:
-                    from ...services.pipedream_connections import (
-                        PipedreamConnectionError,
-                        list_pipedream_connected_accounts,
-                    )
+                    from ...services.pipedream_connections import PipedreamConnectionError, list_pipedream_connected_accounts
 
                     connected_accounts = list_pipedream_connected_accounts(agent, app_slug=app_slug)
                 except PipedreamConnectionError as exc:

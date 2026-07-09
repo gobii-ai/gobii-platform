@@ -14,17 +14,9 @@ import requests
 from requests import Response
 from requests.exceptions import RequestException
 
-from api.meta_ads_setup import (
-    META_ADS_SETUP_INSTRUCTIONS,
-    META_ADS_SETUP_STEPS,
-    META_ADS_TROUBLESHOOTING_TIPS,
-)
+from api.meta_ads_setup import META_ADS_SETUP_INSTRUCTIONS, META_ADS_SETUP_STEPS, META_ADS_TROUBLESHOOTING_TIPS
 from api.models import PersistentAgent
-from api.services.native_integrations import (
-    META_ADS_PROVIDER,
-    list_native_integration_credential_fields,
-    resolve_meta_ads_credentials_for_agent,
-)
+from api.services.native_integrations import META_ADS_PROVIDER, list_native_integration_credential_fields, resolve_meta_ads_credentials_for_agent
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from .sqlite_state import get_sqlite_db_path
 

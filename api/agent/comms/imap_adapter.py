@@ -16,13 +16,7 @@ from typing import Any, MutableMapping, Optional, Tuple, List
 from django.core.files.base import ContentFile
 
 from api.models import CommsChannel
-from .adapters import (
-    EMAIL_BODY_HTML_PAYLOAD_KEY,
-    ParsedMessage,
-    _html_to_text,
-    _is_forward_like,
-    _extract_forward_sections,
-)
+from .adapters import EMAIL_BODY_HTML_PAYLOAD_KEY, ParsedMessage, _html_to_text, _is_forward_like, _extract_forward_sections
 from .attachment_filters import is_signature_image_attachment
 from .chat_email_display_cache import merge_chat_body_html_cache
 from .rejected_attachments import build_rejected_attachment_metadata

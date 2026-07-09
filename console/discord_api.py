@@ -9,24 +9,8 @@ from django.views import View
 
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
-from api.models import (
-    PersistentAgentDiscordChannelSubscription,
-    PersistentAgentDiscordOAuthSession,
-    PersistentAgentSystemSkillState,
-)
-from api.services.discord_bot import (
-    DiscordBotIntegrationError,
-    build_discord_bot_invite_url,
-    build_discord_oauth_start_url,
-    disconnect_discord_native_integration,
-    disable_subscription,
-    discover_channels,
-    ensure_subscription,
-    handle_discord_oauth_callback,
-    list_claimed_guilds,
-    list_subscriptions,
-    start_discord_oauth,
-)
+from api.models import PersistentAgentDiscordChannelSubscription, PersistentAgentDiscordOAuthSession, PersistentAgentSystemSkillState
+from api.services.discord_bot import DiscordBotIntegrationError, build_discord_bot_invite_url, build_discord_oauth_start_url, disconnect_discord_native_integration, disable_subscription, discover_channels, ensure_subscription, handle_discord_oauth_callback, list_claimed_guilds, list_subscriptions, start_discord_oauth
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
 from console.context_helpers import build_console_context

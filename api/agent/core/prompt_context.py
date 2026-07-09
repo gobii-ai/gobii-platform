@@ -38,54 +38,15 @@ from api.services.daily_credit_settings import get_daily_credit_settings_for_own
 from api.services.prompt_settings import get_prompt_settings
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time
-from api.services.agent_owner_custom_instructions import (
-    get_custom_instructions_for_organization_id,
-    get_custom_instructions_for_user_id,
-)
+from api.services.agent_owner_custom_instructions import get_custom_instructions_for_organization_id, get_custom_instructions_for_user_id
 
-from ...models import (
-    AgentCommPeerState,
-    AgentFileSpaceAccess,
-    AgentFsNode,
-    AgentPeerLink,
-    BrowserUseAgentTask,
-    BrowserUseAgentTaskStep,
-    build_web_user_address,
-    parse_web_user_address,
-    AgentCollaborator,
-    CommsAllowlistEntry,
-    CommsChannel,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentCommsSnapshot,
-    PersistentAgentHumanInputRequest,
-    PersistentAgentMessage,
-    PersistentAgentMessageAttachment,
-    PersistentAgentPromptArchive,
-    PersistentAgentSecret,
-    GlobalSecret,
-    OrganizationMembership,
-    PersistentAgentStep,
-    PersistentAgentStepSnapshot,
-    PersistentAgentSystemMessage,
-    PersistentAgentSystemStep,
-    PersistentAgentToolCall,
-    UserPhoneNumber,
-)
+from ...models import AgentCommPeerState, AgentFileSpaceAccess, AgentFsNode, AgentPeerLink, BrowserUseAgentTask, BrowserUseAgentTaskStep, build_web_user_address, parse_web_user_address, AgentCollaborator, CommsAllowlistEntry, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentCommsSnapshot, PersistentAgentHumanInputRequest, PersistentAgentMessage, PersistentAgentMessageAttachment, PersistentAgentPromptArchive, PersistentAgentSecret, GlobalSecret, OrganizationMembership, PersistentAgentStep, PersistentAgentStepSnapshot, PersistentAgentSystemMessage, PersistentAgentSystemStep, PersistentAgentToolCall, UserPhoneNumber
 from ...services.web_sessions import get_deliverable_web_sessions
 from ..comms.source_metadata import get_message_source_metadata
 
 from .budget import AgentBudgetManager, get_current_context as get_budget_context
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
-from .llm_config import (
-    AgentLLMTier,
-    LLMNotConfiguredError,
-    REFERENCE_TOKENIZER_MODEL,
-    apply_tier_credit_multiplier,
-    get_agent_llm_tier,
-    get_llm_config,
-    get_llm_config_with_failover,
-)
+from .llm_config import AgentLLMTier, LLMNotConfiguredError, REFERENCE_TOKENIZER_MODEL, apply_tier_credit_multiplier, get_agent_llm_tier, get_llm_config, get_llm_config_with_failover
 from . import internal_reasoning
 from .promptree import Prompt, hmt
 from .step_compaction import llm_summarise_steps
@@ -96,44 +57,19 @@ from ..tools.attachment_guidance import SYSTEM_ATTACHMENT_PREFLIGHT_GUIDANCE
 from ..tools.plan import format_current_plan_for_prompt
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
-from ..tools.sqlite_state import (
-    AGENT_CONFIG_TABLE,
-    AGENT_SKILLS_TABLE,
-    CONTACTS_TABLE,
-    FILES_TABLE,
-    get_sqlite_digest_prompt,
-    get_sqlite_schema_prompt,
-)
+from ..tools.sqlite_state import AGENT_CONFIG_TABLE, AGENT_SKILLS_TABLE, CONTACTS_TABLE, FILES_TABLE, get_sqlite_digest_prompt, get_sqlite_schema_prompt
 from ..tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
 from ..tools.sqlite_skills import format_recent_skills_for_prompt
-from ..tools.tool_manager import (
-    ensure_default_tools_enabled,
-    ensure_skill_tools_enabled,
-    get_enabled_tool_definitions,
-)
-from .tool_results import (
-    PREVIEW_TIER_COUNT,
-    SPAWN_WEB_TASK_RESULT_TOOL_NAME,
-    ToolCallResultRecord,
-    ToolResultPromptInfo,
-    prepare_tool_results_for_prompt,
-)
-from .daily_limit_mode import (
-    DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT,
-    is_daily_hard_limit_message_only_mode,
-)
+from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
+from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
+from .daily_limit_mode import DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT, is_daily_hard_limit_message_only_mode
 from .contact_results import ContactSQLiteRecord, store_contacts_for_prompt
-from .contact_snapshot import (
-    build_contact_activity_by_key,
-    build_contacts_snapshot_records,
-)
+from .contact_snapshot import build_contact_activity_by_key, build_contacts_snapshot_records
 from .file_results import FileSQLiteRecord, store_files_for_prompt
 from .message_results import MessageSQLiteRecord, store_messages_for_prompt
 from api.services.email_verification import has_verified_email
 from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
-from api.services.signup_preview import (
-    can_bypass_email_verification_for_signup_preview_first_email,
-)
+from api.services.signup_preview import can_bypass_email_verification_for_signup_preview_first_email
 from util.urls import build_agent_daily_limit_action_links
 
 logger = logging.getLogger(__name__)

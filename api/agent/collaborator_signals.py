@@ -4,11 +4,7 @@ from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from api.models import (
-    AgentCollaborator,
-    PersistentAgentStep,
-    PersistentAgentSystemStep,
-)
+from api.models import AgentCollaborator, PersistentAgentStep, PersistentAgentSystemStep
 
 logger = logging.getLogger(__name__)
 

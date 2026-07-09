@@ -6,13 +6,7 @@ from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
 
-from api.integrations.pipedream_connect_gc import (
-    iter_accounts,
-    delete_external_user,
-    delete_account,
-    extract_external_user_id,
-    extract_account_id,
-)
+from api.integrations.pipedream_connect_gc import iter_accounts, delete_external_user, delete_account, extract_external_user_id, extract_account_id
 from api.models import PersistentAgent
 
 

@@ -16,12 +16,7 @@ import { OrganizationInviteAcceptPage } from './organization/OrganizationInviteA
 import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
 import { ImmersiveSecretsPage } from './secrets/ImmersiveSecretsPage'
 import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
-import {
-  ensureAuthenticated,
-  selectSubscriptionState,
-  subscriptionActions,
-  type PlanTier,
-} from '../store/subscriptionSlice'
+import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { track } from '../util/analytics'
 import { APP_NAVIGATE_EVENT } from '../util/appNavigation'

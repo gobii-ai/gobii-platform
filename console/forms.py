@@ -3,24 +3,14 @@ from django.contrib.auth import get_user_model
 from django.db.utils import IntegrityError
 from functools import lru_cache
 
-from api.models import (
-    ApiKey,
-    MCPServerConfig,
-    Organization,
-    OrganizationMembership,
-    OrganizationInvite,
-    UserPreference,
-)
+from api.models import ApiKey, MCPServerConfig, Organization, OrganizationMembership, OrganizationInvite, UserPreference
 from api.models import UserPhoneNumber
 from django.utils import timezone
 from django.utils.text import slugify
 from django.core.exceptions import ValidationError
 
 from api.services.user_timezone import normalize_timezone_value, resolve_user_timezone
-from api.services.mcp_config_validation import (
-    validate_environment_mapping,
-    validate_mcp_metadata_environment_references,
-)
+from api.services.mcp_config_validation import validate_environment_mapping, validate_mcp_metadata_environment_references
 from util import sms
 import logging
 

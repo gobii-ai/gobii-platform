@@ -4,15 +4,7 @@ import re
 import time
 from typing import Any
 
-from litellm.exceptions import (
-    APIConnectionError,
-    APIError,
-    BadGatewayError,
-    InternalServerError,
-    OpenAIError,
-    RateLimitError,
-    ServiceUnavailableError,
-)
+from litellm.exceptions import APIConnectionError, APIError, BadGatewayError, InternalServerError, OpenAIError, RateLimitError, ServiceUnavailableError
 
 from api.agent.core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError, run_completion
@@ -21,30 +13,9 @@ from api.agent.tools.meta_gobii import TOOL_DEFINITIONS
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools, get_current_eval_routing_profile
-from api.evals.meta_gobii import (
-    ENABLE_SYSTEM_SKILLS_TOOL_NAME,
-    LEGACY_SPAWN_TOOL_NAME,
-    META_GOBII_EVAL_CASES,
-    META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS,
-    MUTATING_META_GOBII_TOOLS,
-    SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
-    SCHEDULE_EXPECTATION_EXPLICIT,
-    SCHEDULE_EXPECTATION_NONE,
-    SKILL_SEARCH_TOOL_NAME,
-    MetaGobiiEvalCase,
-    score_meta_gobii_case,
-)
+from api.evals.meta_gobii import ENABLE_SYSTEM_SKILLS_TOOL_NAME, LEGACY_SPAWN_TOOL_NAME, META_GOBII_EVAL_CASES, META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS, MUTATING_META_GOBII_TOOLS, SCHEDULE_EXPECTATION_CLARIFY_OR_NONE, SCHEDULE_EXPECTATION_EXPLICIT, SCHEDULE_EXPECTATION_NONE, SKILL_SEARCH_TOOL_NAME, MetaGobiiEvalCase, score_meta_gobii_case
 from api.evals.registry import ScenarioRegistry
-from api.models import (
-    EvalRun,
-    EvalRunTask,
-    PersistentAgent,
-    PersistentAgentCompletion,
-    PersistentAgentStep,
-    PersistentAgentSystemSkillState,
-    PersistentAgentSystemStep,
-    PersistentAgentToolCall,
-)
+from api.models import EvalRun, EvalRunTask, PersistentAgent, PersistentAgentCompletion, PersistentAgentStep, PersistentAgentSystemSkillState, PersistentAgentSystemStep, PersistentAgentToolCall
 
 logger = logging.getLogger(__name__)
 

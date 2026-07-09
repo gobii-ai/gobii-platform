@@ -5,13 +5,7 @@ import * as llmApi from '../../api/llmConfig'
 import { HttpError } from '../../api/http'
 import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
 import { ModalForm } from '../common/ModalForm'
-import {
-  button,
-  type ConfirmDialogConfig,
-  formatNullableNumber,
-  type Tier,
-  type TierScope,
-} from './shared'
+import { button, type ConfirmDialogConfig, formatNullableNumber, type Tier, type TierScope } from './shared'
 
 export function AddEndpointModal({
   tier,

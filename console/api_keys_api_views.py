@@ -10,19 +10,11 @@ from django.views import View
 
 from api.models import ApiKey, OrganizationMembership
 from api.services.email_verification import has_verified_email
-from console.api_helpers import (
-    ApiLoginRequiredMixin,
-    _parse_json_body,
-    _permission_denied_response,
-    _validation_error_payload,
-)
+from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body, _permission_denied_response, _validation_error_payload
 from console.context_helpers import build_console_context
 from console.forms import ApiKeyForm
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from util.trial_enforcement import (
-    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-    can_user_use_personal_agents_and_api,
-)
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, can_user_use_personal_agents_and_api
 
 
 API_KEY_MANAGE_ROLES = {

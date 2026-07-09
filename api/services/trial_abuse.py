@@ -8,27 +8,12 @@ from django.conf import settings
 from django.db.models import F
 from django.utils import timezone
 
-from api.models import (
-    TaskCredit,
-    UserAttribution,
-    UserFingerprintVisit,
-    UserBilling,
-    UserIdentitySignal,
-    UserIdentitySignalTypeChoices,
-    UserTrialEligibility,
-    UserTrialEligibilityAutoStatusChoices,
-    UserTrialEligibilityManualActionChoices,
-)
+from api.models import TaskCredit, UserAttribution, UserFingerprintVisit, UserBilling, UserIdentitySignal, UserIdentitySignalTypeChoices, UserTrialEligibility, UserTrialEligibilityAutoStatusChoices, UserTrialEligibilityManualActionChoices
 from api.services.user_fingerprint import stage_user_fingerprint_visit
 from constants.plans import PlanNames
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.integrations import IntegrationDisabledError
-from util.subscription_helper import (
-    _individual_plan_price_ids,
-    _individual_plan_product_ids,
-    customer_has_any_individual_subscription,
-    get_stripe_customer,
-)
+from util.subscription_helper import _individual_plan_price_ids, _individual_plan_product_ids, customer_has_any_individual_subscription, get_stripe_customer
 
 try:
     import stripe

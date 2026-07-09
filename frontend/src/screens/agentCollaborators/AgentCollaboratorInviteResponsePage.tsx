@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ArrowRight, CheckCircle2, LoaderCircle, XCircle } from 'lucide-react'
 
-import {
-  acceptAgentCollaboratorInvite,
-  declineAgentCollaboratorInvite,
-  type AgentCollaboratorInviteResponseAction,
-  type AgentCollaboratorInviteResponsePayload,
-} from '../../api/agentCollaboratorInvites'
+import { acceptAgentCollaboratorInvite, declineAgentCollaboratorInvite, type AgentCollaboratorInviteResponseAction, type AgentCollaboratorInviteResponsePayload } from '../../api/agentCollaboratorInvites'
 
 type InviteStatus = 'loading' | 'accepted' | 'declined' | 'issue' | 'error'
 

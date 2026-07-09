@@ -10,11 +10,7 @@ from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.views import View
 
 from api.models import GlobalSecret, PersistentAgentSecret
-from api.services.persistent_agent_secrets import (
-    global_secrets_queryset_for_agent,
-    move_agent_secret_to_global,
-    resolve_global_secret_owner_for_agent,
-)
+from api.services.persistent_agent_secrets import global_secrets_queryset_for_agent, move_agent_secret_to_global, resolve_global_secret_owner_for_agent
 from console.api_helpers import _parse_json_body
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.context_helpers import build_console_context

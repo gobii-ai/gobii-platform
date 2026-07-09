@@ -25,11 +25,7 @@ import { track, AnalyticsEvent } from '../../util/analytics'
 import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
 import { sanitizeHtml } from '../../util/sanitize'
-import {
-  clearAgentChatMessageDraft,
-  readAgentChatMessageDraft,
-  writeAgentChatMessageDraft,
-} from '../../util/agentChatDraftStorage'
+import { clearAgentChatMessageDraft, readAgentChatMessageDraft, writeAgentChatMessageDraft } from '../../util/agentChatDraftStorage'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import { useModal } from '../../hooks/useModal'
 import { AgentChatMenuItem } from './uiPrimitives'

@@ -11,13 +11,7 @@ from typing import Dict, Any, Optional
 from django.conf import settings
 from django.utils import timezone
 
-from ...models import (
-    PersistentAgent,
-    BrowserUseAgentTask,
-    BrowserUseAgentTaskStep,
-    GlobalSecret,
-    PersistentAgentSecret,
-)
+from ...models import PersistentAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, GlobalSecret, PersistentAgentSecret
 from ..core.budget import get_current_context as get_budget_context, AgentBudgetManager
 from ...services.persistent_agent_secrets import build_browser_task_secret_payload
 from ...services.billing_snapshot import get_billing_snapshot_for_owner

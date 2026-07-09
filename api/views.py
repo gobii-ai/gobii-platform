@@ -14,25 +14,8 @@ from django.db import models, transaction
 from observability import traced, dict_to_attributes
 from util.constants.task_constants import TASKS_UNLIMITED
 from .agent.tools.sms_sender import ensure_scheme
-from .models import (
-    ApiKey,
-    BrowserUseAgent,
-    BrowserUseAgentTask,
-    BrowserUseAgentTaskStep,
-    LinkShortener,
-    OrganizationMembership,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    CommsChannel,
-)
-from .serializers import (
-    BrowserUseAgentSerializer,
-    BrowserUseAgentListSerializer,
-    BrowserUseAgentTaskSerializer,
-    BrowserUseAgentTaskListSerializer,
-    PersistentAgentSerializer,
-    PersistentAgentListSerializer,
-)
+from .models import ApiKey, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, LinkShortener, OrganizationMembership, PersistentAgent, PersistentAgentCommsEndpoint, CommsChannel
+from .serializers import BrowserUseAgentSerializer, BrowserUseAgentListSerializer, BrowserUseAgentTaskSerializer, BrowserUseAgentTaskListSerializer, PersistentAgentSerializer, PersistentAgentListSerializer
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from .tasks import process_browser_use_task
@@ -45,19 +28,9 @@ import logging
 
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from util.trial_enforcement import (
-    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-    can_user_use_personal_agents_and_api,
-)
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, can_user_use_personal_agents_and_api
 from util.integrations import pipedream_status
-from console.agent_chat.timeline import (
-    DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE,
-    build_processing_snapshot,
-    fetch_timeline_window,
-    serialize_message_event,
-    serialize_processing_snapshot,
-)
+from console.agent_chat.timeline import DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE, build_processing_snapshot, fetch_timeline_window, serialize_message_event, serialize_processing_snapshot
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.core.schedule_parser import ScheduleParser

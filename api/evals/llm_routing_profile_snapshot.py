@@ -29,16 +29,7 @@ def create_eval_profile_snapshot(source_profile, suite_run_id: str):
     Returns:
         The cloned LLMRoutingProfile instance
     """
-    from api.models import (
-        LLMRoutingProfile,
-        ProfileTokenRange,
-        ProfilePersistentTier,
-        ProfilePersistentTierEndpoint,
-        ProfileBrowserTier,
-        ProfileBrowserTierEndpoint,
-        ProfileEmbeddingsTier,
-        ProfileEmbeddingsTierEndpoint,
-    )
+    from api.models import LLMRoutingProfile, ProfileTokenRange, ProfilePersistentTier, ProfilePersistentTierEndpoint, ProfileBrowserTier, ProfileBrowserTierEndpoint, ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint
 
     if source_profile is None:
         return None

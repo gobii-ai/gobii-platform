@@ -2,13 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Search } from 'lucide-react'
 
-import {
-  fetchMcpServerAssignments,
-  updateMcpServerAssignments,
-  type McpServer,
-  type McpServerAssignmentAgent,
-  type McpServerAssignmentResponse,
-} from '../../api/mcp'
+import { fetchMcpServerAssignments, updateMcpServerAssignments, type McpServer, type McpServerAssignmentAgent, type McpServerAssignmentResponse } from '../../api/mcp'
 import { ModalForm } from '../common/ModalForm'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 

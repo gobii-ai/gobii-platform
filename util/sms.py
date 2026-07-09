@@ -131,14 +131,7 @@ def get_user_primary_sms_number(user) -> Optional[UserPhoneNumber]:
 
 def _normalize_us_phone_number(phone_number: str) -> Optional[str]:
     try:
-        from phonenumbers import (
-            NumberParseException,
-            PhoneNumberFormat,
-            format_number,
-            is_valid_number,
-            parse,
-            region_code_for_number,
-        )
+        from phonenumbers import NumberParseException, PhoneNumberFormat, format_number, is_valid_number, parse, region_code_for_number
     except ImportError:
         logger.warning("phonenumbers is unavailable; leaving Twilio riskCheck enabled.")
         return None

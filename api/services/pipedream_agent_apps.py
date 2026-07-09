@@ -8,21 +8,8 @@ from django.http import Http404
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.models import MCPServerConfig, PersistentAgent
 from api.pipedream_app_utils import normalize_app_slug, normalize_app_slugs
-from api.services.pipedream_apps import (
-    PipedreamCatalogService,
-    get_platform_pipedream_app_slugs,
-    get_owner_apps_state,
-    get_pipedream_app_visibility_for_agent,
-    owner_agents_queryset,
-    set_owner_selected_app_slugs,
-)
-from api.services.pipedream_connections import (
-    PipedreamConnectionError,
-    delete_pipedream_connected_accounts,
-    group_pipedream_connected_accounts_by_app,
-    invalidate_pipedream_connected_accounts_cache,
-    list_pipedream_connected_accounts,
-)
+from api.services.pipedream_apps import PipedreamCatalogService, get_platform_pipedream_app_slugs, get_owner_apps_state, get_pipedream_app_visibility_for_agent, owner_agents_queryset, set_owner_selected_app_slugs
+from api.services.pipedream_connections import PipedreamConnectionError, delete_pipedream_connected_accounts, group_pipedream_connected_accounts_by_app, invalidate_pipedream_connected_accounts_cache, list_pipedream_connected_accounts
 
 
 @dataclass(frozen=True)

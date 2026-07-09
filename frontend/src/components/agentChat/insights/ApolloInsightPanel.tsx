@@ -1,8 +1,4 @@
-import {
-  NativeIntegrationConnectButton,
-  NativeIntegrationInsightPanelFrame,
-  useNativeIntegrationPanelState,
-} from './NativeIntegrationInsightPanel'
+import { NativeIntegrationConnectButton, NativeIntegrationInsightPanelFrame, useNativeIntegrationPanelState } from './NativeIntegrationInsightPanel'
 
 const APOLLO_PROVIDER_KEY = 'apollo'
 

@@ -5,10 +5,7 @@ from typing import Any, Dict
 from django.db.models import Prefetch, Q
 
 from api.agent.core.endpoint_config_utils import resolve_endpoint_model_and_params
-from api.models import (
-    ImageGenerationLLMTier,
-    ImageGenerationTierEndpoint,
-)
+from api.models import ImageGenerationLLMTier, ImageGenerationTierEndpoint
 
 logger = logging.getLogger(__name__)
 

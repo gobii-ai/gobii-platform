@@ -4,14 +4,7 @@ from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.global_skill_evals import GLOBAL_SKILL_EVAL_SCENARIO_SLUG
 from api.evals.registry import register_scenario
-from api.models import (
-    EvalRunTask,
-    EvalSuiteRun,
-    GlobalAgentSkill,
-    PersistentAgentMessage,
-    PersistentAgentSkill,
-    PersistentAgentToolCall,
-)
+from api.models import EvalRunTask, EvalSuiteRun, GlobalAgentSkill, PersistentAgentMessage, PersistentAgentSkill, PersistentAgentToolCall
 
 
 def _preview_json(value, limit: int = 800) -> str:

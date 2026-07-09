@@ -6,19 +6,9 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import (
-    TrialPromo,
-    TrialPromoRedemption,
-    TrialPromoRedemptionStatusChoices,
-    UserTrialEligibility,
-    UserTrialEligibilityManualActionChoices,
-)
+from api.models import TrialPromo, TrialPromoRedemption, TrialPromoRedemptionStatusChoices, UserTrialEligibility, UserTrialEligibilityManualActionChoices
 from api.services.email_verification import has_verified_email_address
-from api.services.trial_abuse import (
-    SIGNAL_SOURCE_CHECKOUT,
-    evaluate_user_trial_identity_abuse,
-    user_has_prior_individual_history,
-)
+from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial_identity_abuse, user_has_prior_individual_history
 from billing.checkout_metadata import build_checkout_flow_metadata
 from util.trial_eligibility import is_trial_decision_allowed
 

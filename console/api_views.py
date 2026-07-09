@@ -41,30 +41,11 @@ from django.utils.text import get_valid_filename
 from kombu.exceptions import OperationalError as KombuOperationalError
 
 from api.agent.comms.adapters import ParsedMessage
-from api.agent.comms.human_input_requests import (
-    dismiss_human_input_request,
-    submit_human_input_response,
-    submit_human_input_responses_batch,
-)
+from api.agent.comms.human_input_requests import dismiss_human_input_request, submit_human_input_response, submit_human_input_responses_batch
 from api.agent.comms.message_service import ingest_inbound_message
-from api.agent.comms.message_reads import (
-    READ_SOURCE_CHAT_OPEN,
-    build_latest_agent_message_read_state,
-    mark_latest_visible_outbound_message_read,
-    serialize_agent_message_read_state,
-    serialize_latest_agent_message_read_state,
-)
-from api.agent.core.processing_flags import (
-    bump_human_inbound_generation,
-    clear_processing_stop_requested,
-    clear_processing_work_state,
-    set_processing_stop_requested,
-)
-from api.agent.core.agent_judge import (
-    approve_judge_suggestion,
-    dismiss_judge_suggestion,
-    run_manual_agent_judge,
-)
+from api.agent.comms.message_reads import READ_SOURCE_CHAT_OPEN, build_latest_agent_message_read_state, mark_latest_visible_outbound_message_read, serialize_agent_message_read_state, serialize_latest_agent_message_read_state
+from api.agent.core.processing_flags import bump_human_inbound_generation, clear_processing_stop_requested, clear_processing_work_state, set_processing_stop_requested
+from api.agent.core.agent_judge import approve_judge_suggestion, dismiss_judge_suggestion, run_manual_agent_judge
 from api.domain_validation import DomainPatternValidator
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
@@ -72,165 +53,38 @@ from api.agent.tasks.reported_message_judge import run_reported_agent_judge_task
 from api.agent.tools.mcp_manager import get_mcp_manager
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from pages.public_template_urls import public_template_detail_path
-from api.models import (
-    BrowserLLMPolicy,
-    BrowserUseAgentTask,
-    BrowserLLMTier,
-    BrowserModelEndpoint,
-    BrowserTierEndpoint,
-    CommsAllowlistEntry,
-    CommsAllowlistRequest,
-    CommsChannel,
-    EmbeddingsLLMTier,
-    EmbeddingsModelEndpoint,
-    EmbeddingsTierEndpoint,
-    FileHandlerLLMTier,
-    FileHandlerModelEndpoint,
-    FileHandlerTierEndpoint,
-    ImageGenerationLLMTier,
-    ImageGenerationModelEndpoint,
-    ImageGenerationTierEndpoint,
-    VideoGenerationLLMTier,
-    VideoGenerationModelEndpoint,
-    VideoGenerationTierEndpoint,
-    IntelligenceTier,
-    LLMProvider,
-    LLMRoutingProfile,
-    MCPServerConfig,
-    MCPServerOAuthCredential,
-    MCPServerOAuthSession,
-    AgentEmailAccount,
-    AgentEmailOAuthCredential,
-    AgentEmailOAuthSession,
-    AgentTransferInvite,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentHumanInputRequest,
-    PersistentAgentJudgeSuggestion,
-    PersistentAgentMessage,
-    PersistentAgentSecret,
-    PersistentAgentSystemSkillState,
-    PersistentAgentSystemMessage,
-    PersistentAgentSystemStep,
-    PersistentAgentStep,
-    PersistentAgentTemplate,
-    PersistentLLMTier,
-    PersistentModelEndpoint,
-    PersistentTierEndpoint,
-    PersistentTokenRange,
-    PublicProfile,
-    ProfileBrowserTierEndpoint,
-    ProfileBrowserTier,
-    ProfileEmbeddingsTier,
-    ProfileEmbeddingsTierEndpoint,
-    ProfilePersistentTier,
-    ProfilePersistentTierEndpoint,
-    ProfileTokenRange,
-    PersistentAgentPromptArchive,
-    SmsContactPurpose,
-    AgentFileSpaceAccess,
-    AgentFsNode,
-    Organization,
-    OrganizationMembership,
-    UserPhoneNumber,
-    UserPreference,
-    UserEmail,
-    AddonEntitlement,
-    TaskCredit,
-    build_web_agent_address,
-    build_web_user_address,
-    get_agent_contact_counts,
-)
+from api.models import BrowserLLMPolicy, BrowserUseAgentTask, BrowserLLMTier, BrowserModelEndpoint, BrowserTierEndpoint, CommsAllowlistEntry, CommsAllowlistRequest, CommsChannel, EmbeddingsLLMTier, EmbeddingsModelEndpoint, EmbeddingsTierEndpoint, FileHandlerLLMTier, FileHandlerModelEndpoint, FileHandlerTierEndpoint, ImageGenerationLLMTier, ImageGenerationModelEndpoint, ImageGenerationTierEndpoint, VideoGenerationLLMTier, VideoGenerationModelEndpoint, VideoGenerationTierEndpoint, IntelligenceTier, LLMProvider, LLMRoutingProfile, MCPServerConfig, MCPServerOAuthCredential, MCPServerOAuthSession, AgentEmailAccount, AgentEmailOAuthCredential, AgentEmailOAuthSession, AgentTransferInvite, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentHumanInputRequest, PersistentAgentJudgeSuggestion, PersistentAgentMessage, PersistentAgentSecret, PersistentAgentSystemSkillState, PersistentAgentSystemMessage, PersistentAgentSystemStep, PersistentAgentStep, PersistentAgentTemplate, PersistentLLMTier, PersistentModelEndpoint, PersistentTierEndpoint, PersistentTokenRange, PublicProfile, ProfileBrowserTierEndpoint, ProfileBrowserTier, ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint, ProfilePersistentTier, ProfilePersistentTierEndpoint, ProfileTokenRange, PersistentAgentPromptArchive, SmsContactPurpose, AgentFileSpaceAccess, AgentFsNode, Organization, OrganizationMembership, UserPhoneNumber, UserPreference, UserEmail, AddonEntitlement, TaskCredit, build_web_agent_address, build_web_user_address, get_agent_contact_counts
 from api.public_profiles import generate_handle_suggestion
 from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
 from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, restore_oauth_session_state
 from console.agent_audit.events import fetch_audit_events
-from console.agent_audit.export import (
-    InvalidAuditExportRange,
-    build_audit_export_range,
-    write_agent_audit_export_json,
-)
+from console.agent_audit.export import InvalidAuditExportRange, build_audit_export_range, write_agent_audit_export_json
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
-from console.llm_tier_usage import (
-    build_browser_endpoint_tier_usage,
-    build_persistent_endpoint_tier_usage,
-)
+from console.llm_tier_usage import build_browser_endpoint_tier_usage, build_persistent_endpoint_tier_usage
 from api.encryption import SecretsEncryption
 from api.agent.tasks import process_agent_events_task, queue_agent_process_events_batch_task
 from api.services.system_settings import get_max_file_size
 from api.services.owner_execution_pause import get_owner_account_pause_state
-from api.services.agent_owner_custom_instructions import (
-    CUSTOM_INSTRUCTIONS_FIELD,
-    CustomInstructionsValidationError,
-    get_custom_instructions_for_user_id,
-    normalize_custom_instructions,
-    save_custom_instructions_for_user_id,
-)
-from api.services.product_announcements import (
-    build_product_announcements_payload,
-    mark_product_announcements_read,
-)
-from api.services.signup_preview import (
-    resume_signup_preview_agent_if_eligible,
-)
+from api.services.agent_owner_custom_instructions import CUSTOM_INSTRUCTIONS_FIELD, CustomInstructionsValidationError, get_custom_instructions_for_user_id, normalize_custom_instructions, save_custom_instructions_for_user_id
+from api.services.product_announcements import build_product_announcements_payload, mark_product_announcements_read
+from api.services.signup_preview import resume_signup_preview_agent_if_eligible
 from api.services.agent_planning import skip_agent_planning
 from api.services.referral_service import ReferralService
-from api.services.web_sessions import (
-    WEB_SESSION_TTL_SECONDS,
-    end_web_session,
-    heartbeat_web_session,
-    start_web_session,
-    touch_web_session,
-)
+from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, end_web_session, heartbeat_web_session, start_web_session, touch_web_session
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from util.onboarding import (
-    TRIAL_ONBOARDING_TARGET_AGENT_UI,
-    set_trial_onboarding_intent,
-    set_trial_onboarding_requires_plan_selection,
-)
-from util.personal_signup_preview import (
-    build_personal_signup_starter_charter,
-    resolve_personal_signup_preview,
-    resolve_personal_signup_preview_onboarding_state,
-)
-from util.trial_enforcement import (
-    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-    TrialRequiredValidationError,
-    can_user_send_personal_agent_chat_message,
-)
+from util.onboarding import TRIAL_ONBOARDING_TARGET_AGENT_UI, set_trial_onboarding_intent, set_trial_onboarding_requires_plan_selection
+from util.personal_signup_preview import build_personal_signup_starter_charter, resolve_personal_signup_preview, resolve_personal_signup_preview_onboarding_state
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, TrialRequiredValidationError, can_user_send_personal_agent_chat_message
 from util.subscription_helper import get_user_max_contacts_per_agent
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
 
-from console.agent_chat.access import (
-    agent_queryset_for,
-    resolve_agent_for_request,
-    resolve_manageable_agent_for_request,
-    shared_agent_queryset_for,
-    user_can_manage_agent,
-    user_can_manage_agent_settings,
-    user_is_collaborator,
-)
-from console.agent_chat.pending_actions import (
-    count_pending_action_requests_for_agents,
-    expire_pending_action_requests,
-    get_legacy_pending_human_input_requests,
-    list_pending_action_requests,
-    serialize_contact_request,
-)
-from console.agent_chat.timeline import (
-    DEFAULT_PAGE_SIZE,
-    TimelineDirection,
-    build_processing_activity_map,
-    build_processing_snapshot,
-    compute_processing_status,
-    fetch_timeline_window,
-    serialize_message_event,
-    serialize_processing_snapshot,
-)
+from console.agent_chat.access import agent_queryset_for, resolve_agent_for_request, resolve_manageable_agent_for_request, shared_agent_queryset_for, user_can_manage_agent, user_can_manage_agent_settings, user_is_collaborator
+from console.agent_chat.pending_actions import count_pending_action_requests_for_agents, expire_pending_action_requests, get_legacy_pending_human_input_requests, list_pending_action_requests, serialize_contact_request
+from console.agent_chat.timeline import DEFAULT_PAGE_SIZE, TimelineDirection, build_processing_activity_map, build_processing_snapshot, compute_processing_status, fetch_timeline_window, serialize_message_event, serialize_processing_snapshot
 from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_timeline_suggestions
 from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
 from console.context_helpers import build_console_context, resolve_console_context
@@ -238,44 +92,17 @@ from console.context_overrides import get_context_override
 from console.agent_context import resolve_context_override_for_agent
 from console.billing_initial_data import build_billing_initial_data
 from console.forms import MCPServerConfigForm, PhoneVerifyForm, UserProfileForm
-from console.phone_utils import (
-    PhoneVerificationSendError,
-    get_pending_phone,
-    get_phone_cooldown_remaining,
-    get_primary_phone,
-    send_phone_verification,
-    serialize_phone,
-    serialize_phone_state,
-)
+from console.phone_utils import PhoneVerificationSendError, get_pending_phone, get_phone_cooldown_remaining, get_primary_phone, send_phone_verification, serialize_phone, serialize_phone_state
 from constants.phone_countries import serialize_supported_phone_regions
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
-from console.support_requests import (
-    SupportRequestConfigurationError,
-    clean_support_message,
-    send_agent_message_report_email,
-    send_app_support_request,
-)
+from console.support_requests import SupportRequestConfigurationError, clean_support_message, send_agent_message_report_email, send_app_support_request
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
 from console.agent_settings import build_agent_settings_payload, handle_agent_settings_mutation
 from console.views import build_llm_intelligence_props
-from console.agent_addons import (
-    _build_billing_status_payload,
-    build_account_pause_payload,
-    build_agent_addons_payload,
-    update_contact_pack_quantities,
-    update_task_pack_quantities,
-)
-from console.daily_credit import (
-    parse_daily_credit_limit,
-)
-from console.agent_creation import (
-    AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
-    AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY,
-    AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
-    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
-    enable_agent_sms_contact,
-)
+from console.agent_addons import _build_billing_status_payload, build_account_pause_payload, build_agent_addons_payload, update_contact_pack_quantities, update_task_pack_quantities
+from console.daily_credit import parse_daily_credit_limit
+from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY, enable_agent_sms_contact
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG, SandboxComputeService, SandboxComputeUnavailable
@@ -291,35 +118,16 @@ from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from api.services.spawn_requests import SpawnRequestResolutionError, SpawnRequestService
-from api.services.persistent_agent_secrets import (
-    ensure_global_secret_capacity_for_agent,
-    move_agent_secret_to_global,
-    validate_agent_secret_globalization,
-)
+from api.services.persistent_agent_secrets import ensure_global_secret_capacity_for_agent, move_agent_secret_to_global, validate_agent_secret_globalization
 from api.services.daily_credit_limits import get_agent_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
-from api.services.agent_settings_resume import (
-    queue_owner_task_pack_resume,
-    queue_settings_change_resume,
-)
-from api.services.system_settings import (
-    clear_setting_value,
-    get_setting_definition,
-    list_system_settings,
-    serialize_setting,
-    set_setting_value,
-)
+from api.services.agent_settings_resume import queue_owner_task_pack_resume, queue_settings_change_resume
+from api.services.system_settings import clear_setting_value, get_setting_definition, list_system_settings, serialize_setting, set_setting_value
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from tasks.services import TaskCreditService
 from util.integrations import stripe_status
-from util.subscription_helper import (
-    get_active_subscription,
-    get_stripe_customer,
-    get_organization_plan,
-    reconcile_user_plan_from_stripe,
-    get_user_plan,
-)
+from util.subscription_helper import get_active_subscription, get_stripe_customer, get_organization_plan, reconcile_user_plan_from_stripe, get_user_plan
 from util.constants.task_constants import TASKS_UNLIMITED
 from console.role_constants import BILLING_MANAGE_ROLES
 
@@ -3554,10 +3362,7 @@ class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
         from allauth.core.exceptions import ImmediateHttpResponse
         from anymail.exceptions import AnymailError
 
-        from api.services.email_verification import (
-            get_email_address_for_verification,
-            send_email_verification,
-        )
+        from api.services.email_verification import get_email_address_for_verification, send_email_verification
 
         email_address = get_email_address_for_verification(request.user)
         if not email_address:
@@ -6413,16 +6218,7 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
-        from api.models import (
-            LLMRoutingProfile,
-            ProfileTokenRange,
-            ProfilePersistentTier,
-            ProfilePersistentTierEndpoint,
-            ProfileBrowserTier,
-            ProfileBrowserTierEndpoint,
-            ProfileEmbeddingsTier,
-            ProfileEmbeddingsTierEndpoint,
-        )
+        from api.models import LLMRoutingProfile, ProfileTokenRange, ProfilePersistentTier, ProfilePersistentTierEndpoint, ProfileBrowserTier, ProfileBrowserTierEndpoint, ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint
         from console.llm_serializers import get_routing_profile_with_prefetch
 
         try:

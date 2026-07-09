@@ -139,9 +139,7 @@ def _send_billing_pause_message(agent, recipient_endpoint, *, reason: str, audie
     kind = "billing_pause_owner_notice" if audience == "owner" else "billing_pause_auto_reply"
 
     if channel == "email":
-        from api.agent.comms.email_endpoint_routing import (
-            resolve_agent_email_sender_endpoint_for_message,
-        )
+        from api.agent.comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
         from api.agent.comms.outbound_delivery import deliver_agent_email
 
         from_endpoint = resolve_agent_email_sender_endpoint_for_message(

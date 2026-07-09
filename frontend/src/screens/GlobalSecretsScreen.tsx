@@ -1,13 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import { Plus } from 'lucide-react'
 
-import {
-  fetchGlobalSecrets,
-  createGlobalSecret,
-  updateGlobalSecret,
-  deleteGlobalSecret,
-  type GlobalSecretListResponse,
-} from '../api/secrets'
+import { fetchGlobalSecrets, createGlobalSecret, updateGlobalSecret, deleteGlobalSecret, type GlobalSecretListResponse } from '../api/secrets'
 import { SecretTable } from '../components/secrets/SecretTable'
 import { SecretSecurityNotice } from '../components/secrets/SecretSecurityNotice'
 import { useSecretCrud } from '../components/secrets/useSecretCrud'

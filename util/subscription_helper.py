@@ -26,13 +26,7 @@ from djstripe.enums import SubscriptionStatus
 from django.apps import apps
 from dateutil.relativedelta import relativedelta
 from billing.addons import AddonEntitlementService
-from billing.plan_resolver import (
-    get_plan_context_for_version,
-    get_owner_plan_context,
-    get_plan_version_by_legacy_code,
-    get_plan_version_by_price_id,
-    get_plan_version_by_product_id,
-)
+from billing.plan_resolver import get_plan_context_for_version, get_owner_plan_context, get_plan_version_by_legacy_code, get_plan_version_by_price_id, get_plan_version_by_product_id
 from billing.services import BillingService
 
 try:

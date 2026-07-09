@@ -26,37 +26,19 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import type { SelectionShellPage } from './SelectionShellPageSwitcher'
 import type { SidebarSettingsInfo } from './SidebarSettingsMenu'
 import type { AgentTimelineProps } from './types'
-import type {
-  PendingActionRequest,
-  AgentMessage,
-  PlanSnapshot,
-} from '../../types/agentChat'
+import type { PendingActionRequest, AgentMessage, PlanSnapshot } from '../../types/agentChat'
 import type { SignupPreviewState } from '../../types/agentRoster'
-import {
-  isContinuationUpgradeModalSource,
-  selectSubscriptionState,
-  subscriptionActions,
-  type PlanTier,
-} from '../../store/subscriptionSlice'
+import { isContinuationUpgradeModalSource, selectSubscriptionState, subscriptionActions, type PlanTier } from '../../store/subscriptionSlice'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import type { StatusExpansionTargets } from './statusExpansion'
-import {
-  addInferredPlanFiles,
-  filterChangedPlanSnapshot,
-  hasCompletedPlanDeliverables,
-} from './planSnapshotUtils'
+import { addInferredPlanFiles, filterChangedPlanSnapshot, hasCompletedPlanDeliverables } from './planSnapshotUtils'
 import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
-import {
-  immersiveShellActions,
-  selectImmersiveShellActiveAgentId,
-  selectImmersiveShellViewer,
-  selectImmersiveSidebarMode,
-} from '../../store/immersiveShellSlice'
+import { immersiveShellActions, selectImmersiveShellActiveAgentId, selectImmersiveShellViewer, selectImmersiveSidebarMode } from '../../store/immersiveShellSlice'
 
 type TaskQuotaInfo = {
   available: number

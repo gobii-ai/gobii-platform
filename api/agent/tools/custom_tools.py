@@ -18,26 +18,12 @@ from django.core.files.storage import default_storage
 from django.urls import reverse
 
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
-from api.models import (
-    AgentFileSpaceAccess,
-    AgentFsNode,
-    PersistentAgent,
-    PersistentAgentCustomTool,
-    PersistentAgentEnabledTool,
-)
+from api.models import AgentFileSpaceAccess, AgentFsNode, PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from api.agent.tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from api.agent.tools.runtime_execution_context import get_tool_execution_context
-from api.utils.json_schema import (
-    normalize_parameters_schema,
-)
-from api.services.sandbox_compute import (
-    LocalSandboxBackend,
-    SandboxComputeService,
-    SandboxComputeUnavailable,
-    custom_tool_workspace_root_for_backend,
-    sandbox_compute_enabled_for_agent,
-)
+from api.utils.json_schema import normalize_parameters_schema
+from api.services.sandbox_compute import LocalSandboxBackend, SandboxComputeService, SandboxComputeUnavailable, custom_tool_workspace_root_for_backend, sandbox_compute_enabled_for_agent
 from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)

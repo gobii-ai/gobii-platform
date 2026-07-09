@@ -6,22 +6,9 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 from sandbox_server.sandbox_utils import normalize_timeout as _normalize_timeout
-from sandbox_server.config import (
-    _agent_workspace,
-    _python_default_timeout_seconds,
-    _python_max_timeout_seconds,
-    _run_command_timeout_seconds,
-    _sandbox_env,
-    _stdio_max_bytes,
-)
+from sandbox_server.config import _agent_workspace, _python_default_timeout_seconds, _python_max_timeout_seconds, _run_command_timeout_seconds, _sandbox_env, _stdio_max_bytes
 from sandbox_server.manifest import _proxy_env_from_manifest, _store_proxy_env
-from sandbox_server.workspace import (
-    _elapsed_ms,
-    _normalize_workspace_path,
-    _require_agent_id,
-    _session_update,
-    _trace_context,
-)
+from sandbox_server.workspace import _elapsed_ms, _normalize_workspace_path, _require_agent_id, _session_update, _trace_context
 
 logger = logging.getLogger(__name__)
 

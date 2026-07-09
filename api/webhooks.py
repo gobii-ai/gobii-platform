@@ -7,28 +7,9 @@ from django.views.decorators.http import require_POST
 from django.utils import timezone
 from email.utils import getaddresses
 
-from api.agent.comms import (
-    ingest_inbound_message,
-    ingest_inbound_webhook_message,
-    TwilioSmsAdapter,
-    PostmarkEmailAdapter,
-    MailgunEmailAdapter,
-)
-from api.models import (
-    CommsChannel,
-    PersistentAgent,
-    PersistentAgentInboundWebhook,
-    PersistentAgentCommsEndpoint,
-    OutboundMessageAttempt,
-    DeliveryStatus,
-    PipedreamConnectSession,
-    PersistentAgentPipedreamTriggerSubscription,
-)
-from api.agent.comms.message_reads import (
-    READ_SOURCE_EMAIL_CLICK,
-    READ_SOURCE_EMAIL_OPEN,
-    mark_postmark_event_message_read,
-)
+from api.agent.comms import ingest_inbound_message, ingest_inbound_webhook_message, TwilioSmsAdapter, PostmarkEmailAdapter, MailgunEmailAdapter
+from api.models import CommsChannel, PersistentAgent, PersistentAgentInboundWebhook, PersistentAgentCommsEndpoint, OutboundMessageAttempt, DeliveryStatus, PipedreamConnectSession, PersistentAgentPipedreamTriggerSubscription
+from api.agent.comms.message_reads import READ_SOURCE_EMAIL_CLICK, READ_SOURCE_EMAIL_OPEN, mark_postmark_event_message_read
 from opentelemetry import trace
 import json
 import re
@@ -36,11 +17,7 @@ from config import settings
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.services.email_verification import has_verified_email
-from api.services.pipedream_trigger_subscriptions import (
-    PipedreamTriggerSignatureError,
-    ingest_trigger_delivery,
-    verify_pipedream_signature,
-)
+from api.services.pipedream_trigger_subscriptions import PipedreamTriggerSignatureError, ingest_trigger_delivery, verify_pipedream_signature
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")

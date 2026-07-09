@@ -3,31 +3,7 @@ import { createPortal } from 'react-dom'
 
 import * as llmApi from '../../api/llmConfig'
 import { AddEndpointModal, CreateProfileModal, EditProfileModal } from './modals'
-import {
-  actionKey,
-  addProfileTierEndpointByScope,
-  addTierEndpointByScope,
-  deleteProfileTierEndpointByScope,
-  deleteTierEndpointByScope,
-  distributeEvenWeights,
-  encodeServerWeight,
-  ensureServerUnits,
-  IMAGE_GENERATION_SECTION_CONFIG,
-  MIN_SERVER_UNIT,
-  rebalanceTierWeights,
-  updateProfileTierEndpointByScope,
-  updateTierEndpointByScope,
-  VIDEO_GENERATION_SECTION_CONFIG,
-  type AsyncFeedback,
-  type ConfirmDialogConfig,
-  type ImageGenerationUseCase,
-  type MutationOptions,
-  type Tier,
-  type TierEndpoint,
-  type TierScope,
-  type TokenRange,
-  type VideoGenerationUseCase,
-} from './shared'
+import { actionKey, addProfileTierEndpointByScope, addTierEndpointByScope, deleteProfileTierEndpointByScope, deleteTierEndpointByScope, distributeEvenWeights, encodeServerWeight, ensureServerUnits, IMAGE_GENERATION_SECTION_CONFIG, MIN_SERVER_UNIT, rebalanceTierWeights, updateProfileTierEndpointByScope, updateTierEndpointByScope, VIDEO_GENERATION_SECTION_CONFIG, type AsyncFeedback, type ConfirmDialogConfig, type ImageGenerationUseCase, type MutationOptions, type Tier, type TierEndpoint, type TierScope, type TokenRange, type VideoGenerationUseCase } from './shared'
 
 type RunMutation = <T>(action: () => Promise<T>, options?: MutationOptions) => Promise<void>
 type ShowModal = (renderer: (onClose: () => void) => ReactNode) => void

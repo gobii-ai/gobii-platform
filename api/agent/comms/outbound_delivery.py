@@ -13,15 +13,7 @@ from waffle import switch_is_active
 from anymail.message import AnymailMessage
 from anymail.exceptions import AnymailAPIError
 
-from api.models import (
-    AgentEmailAccount,
-    AgentFsNode,
-    CommsChannel,
-    DeliveryStatus,
-    OutboundMessageAttempt,
-    PersistentAgentEmailEndpoint,
-    PersistentAgentMessage,
-)
+from api.models import AgentEmailAccount, AgentFsNode, CommsChannel, DeliveryStatus, OutboundMessageAttempt, PersistentAgentEmailEndpoint, PersistentAgentMessage
 from api.services.system_settings import get_max_file_size
 from api.agent.files.attachment_helpers import track_file_send_failed, track_file_unsupported
 from opentelemetry.trace import get_current_span
@@ -1313,13 +1305,7 @@ def deliver_agent_sms(message: PersistentAgentMessage):
     try:
         from constants.feature_flags import AGENT_CRON_THROTTLE
         from config.redis_client import get_redis_client
-        from api.services.cron_throttle import (
-            build_upgrade_link,
-            cron_throttle_footer_cooldown_key,
-            cron_throttle_pending_footer_key,
-            evaluate_free_plan_cron_throttle,
-            select_cron_throttle_sms_suffix,
-        )
+        from api.services.cron_throttle import build_upgrade_link, cron_throttle_footer_cooldown_key, cron_throttle_pending_footer_key, evaluate_free_plan_cron_throttle, select_cron_throttle_sms_suffix
 
         agent = getattr(message, "owner_agent", None)
         if agent is not None and switch_is_active(AGENT_CRON_THROTTLE):

@@ -9,16 +9,7 @@ from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.native_http import response_contains_term
-from api.models import (
-    EvalRunTask,
-    PersistentAgent,
-    PersistentAgentEnabledTool,
-    PersistentAgentHumanInputRequest,
-    PersistentAgentMessage,
-    PersistentAgentStep,
-    PersistentAgentSystemStep,
-    PersistentAgentToolCall,
-)
+from api.models import EvalRunTask, PersistentAgent, PersistentAgentEnabledTool, PersistentAgentHumanInputRequest, PersistentAgentMessage, PersistentAgentStep, PersistentAgentSystemStep, PersistentAgentToolCall
 
 
 RECRUITMENT_SOURCING_SUITE_SLUG = "recruitment_sourcing"

@@ -1,8 +1,4 @@
-import {
-  NativeIntegrationConnectButton,
-  NativeIntegrationInsightPanelFrame,
-  useNativeIntegrationPanelState,
-} from './NativeIntegrationInsightPanel'
+import { NativeIntegrationConnectButton, NativeIntegrationInsightPanelFrame, useNativeIntegrationPanelState } from './NativeIntegrationInsightPanel'
 
 const HUBSPOT_PROVIDER_KEY = 'hubspot'
 

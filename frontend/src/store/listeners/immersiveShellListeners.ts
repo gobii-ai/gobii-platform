@@ -1,10 +1,7 @@
 import type { ListenerMiddlewareInstance } from '@reduxjs/toolkit'
 
 import type { AppDispatch, AppStoreExtra, RootState } from '../appStore'
-import {
-  IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY,
-  immersiveShellActions,
-} from '../immersiveShellSlice'
+import { IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY, immersiveShellActions } from '../immersiveShellSlice'
 
 export function registerImmersiveShellListeners(
   listenerMiddleware: ListenerMiddlewareInstance<RootState, AppDispatch, AppStoreExtra>,

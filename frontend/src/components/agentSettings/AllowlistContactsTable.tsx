@@ -4,16 +4,7 @@ import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-tabl
 import { ArrowDownToLine, ArrowUpFromLine, Mail, Phone, Trash2 } from 'lucide-react'
 
 import type { AllowlistTableRow } from './contactTypes'
-import {
-  EmbeddedRemoveButton,
-  EmbeddedStatusBadge,
-  EmbeddedTableFrame,
-  EmbeddedTableHeader,
-  embeddedBulkBannerClassName,
-  embeddedBulkButtonClassName,
-  embeddedTableBodyClassName,
-  embeddedTableHeadClassName,
-} from './embeddedTablePrimitives'
+import { EmbeddedRemoveButton, EmbeddedStatusBadge, EmbeddedTableFrame, EmbeddedTableHeader, embeddedBulkBannerClassName, embeddedBulkButtonClassName, embeddedTableBodyClassName, embeddedTableHeadClassName } from './embeddedTablePrimitives'
 
 type AllowlistContactsTableProps = {
   rows: AllowlistTableRow[]

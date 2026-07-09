@@ -29,15 +29,7 @@ from django.db import transaction
 from django.db.models import Case, F, TextField, Value, When
 from django.db.models.functions import Concat, Length, Substr, Greatest
 
-from ...models import (
-    PersistentAgent,
-    PersistentAgentStep,
-    PersistentAgentStepSnapshot,
-    PersistentAgentToolCall,
-    PersistentAgentCronTrigger,
-    PersistentAgentSystemStep,
-    PersistentAgentCompletion,
-)
+from ...models import PersistentAgent, PersistentAgentStep, PersistentAgentStepSnapshot, PersistentAgentToolCall, PersistentAgentCronTrigger, PersistentAgentSystemStep, PersistentAgentCompletion
 
 import logging
 from opentelemetry import trace

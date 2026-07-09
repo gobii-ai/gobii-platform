@@ -13,13 +13,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.generic import TemplateView, View
 
 from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike, PersistentAgentTemplateUrlAlias
-from pages.public_template_urls import (
-    public_template_category_slug,
-    public_template_category_slug_aliases_from_label,
-    public_template_category_slug_from_label,
-    public_template_detail_path,
-    public_template_route_slug,
-)
+from pages.public_template_urls import public_template_category_slug, public_template_category_slug_aliases_from_label, public_template_category_slug_from_label, public_template_detail_path, public_template_route_slug
 
 LIBRARY_CACHE_KEY = "pages:library:payload:v1"
 LIBRARY_OFFICIAL_CACHE_KEY = "pages:library:payload:official:v2"

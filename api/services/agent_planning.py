@@ -6,10 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.agent.avatar import maybe_schedule_agent_avatar
-from api.agent.short_description import (
-    maybe_schedule_mini_description,
-    maybe_schedule_short_description,
-)
+from api.agent.short_description import maybe_schedule_mini_description, maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
 from api.evals.execution import get_current_eval_routing_profile
 from api.models import PersistentAgent, PersistentAgentHumanInputRequest

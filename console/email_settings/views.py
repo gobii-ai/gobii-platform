@@ -13,24 +13,10 @@ from django.utils import timezone
 from django.views import View
 
 from api.encryption import SecretsEncryption
-from api.models import (
-    AgentEmailAccount,
-    AgentEmailOAuthCredential,
-    CommsChannel,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-)
-from api.services.agent_email_aliases import (
-    get_default_agent_email_domain,
-    get_default_agent_email_endpoint,
-    is_default_agent_email_address,
-)
+from api.models import AgentEmailAccount, AgentEmailOAuthCredential, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint
+from api.services.agent_email_aliases import get_default_agent_email_domain, get_default_agent_email_endpoint, is_default_agent_email_address
 from api.services.persistent_agents import ensure_default_agent_email_endpoint
-from console.api_helpers import (
-    ApiLoginRequiredMixin,
-    _coerce_bool,
-    _parse_json_body,
-)
+from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
 from util.urls import IMMERSIVE_APP_BASE_PATH
 from console.email_settings.constants import EMAIL_OAUTH_PROVIDER_DEFAULTS
 from console.agent_chat.access import resolve_manageable_agent_for_request

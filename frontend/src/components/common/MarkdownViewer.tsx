@@ -1,11 +1,4 @@
-import type {
-  AnchorHTMLAttributes,
-  DetailedHTMLProps,
-  HTMLAttributes,
-  ImgHTMLAttributes,
-  TdHTMLAttributes,
-  ThHTMLAttributes,
-} from 'react'
+import type { AnchorHTMLAttributes, DetailedHTMLProps, HTMLAttributes, ImgHTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from 'react'
 import { memo, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkBreaks from 'remark-breaks'

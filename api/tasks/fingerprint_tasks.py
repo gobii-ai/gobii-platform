@@ -5,13 +5,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from api.models import UserFingerprintVisit, UserFingerprintVisitFetchStatusChoices
-from api.services.user_fingerprint import (
-    FingerprintConfigurationError,
-    FingerprintRetryableError,
-    FingerprintTerminalError,
-    identify_user_fingerprint_visit,
-    refresh_user_fingerprint_visit,
-)
+from api.services.user_fingerprint import FingerprintConfigurationError, FingerprintRetryableError, FingerprintTerminalError, identify_user_fingerprint_visit, refresh_user_fingerprint_visit
 
 
 logger = logging.getLogger(__name__)

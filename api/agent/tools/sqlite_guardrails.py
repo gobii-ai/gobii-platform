@@ -8,12 +8,7 @@ import sqlite3
 import time
 from typing import Optional
 
-from ..core.csv_utils import (
-    build_csv_sample,
-    detect_csv_dialect,
-    normalize_csv_text,
-    read_csv_rows,
-)
+from ..core.csv_utils import build_csv_sample, detect_csv_dialect, normalize_csv_text, read_csv_rows
 
 logger = logging.getLogger(__name__)
 

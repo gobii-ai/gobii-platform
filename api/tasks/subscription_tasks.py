@@ -11,10 +11,7 @@ from constants.plans import PlanNamesChoices
 from observability import traced
 
 from tasks.services import TaskCreditService
-from util.subscription_helper import (
-    get_users_due_for_monthly_grant,
-    filter_users_without_active_subscription
-)
+from util.subscription_helper import get_users_due_for_monthly_grant, filter_users_without_active_subscription
 from billing.services import BillingService
 from constants.grant_types import GrantTypeChoices
 

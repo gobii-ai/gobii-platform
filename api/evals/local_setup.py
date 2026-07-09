@@ -33,21 +33,7 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
     tables, but it does not alter existing SQLite tables when model fields are added.
     Keep this list explicit so local schema repair stays non-destructive.
     """
-    from api.models import (
-        AgentAllowlistInvite,
-        BrowserUseAgentTask,
-        CommsAllowlistEntry,
-        CommsAllowlistRequest,
-        EmbeddingsModelEndpoint,
-        EvalRunTask,
-        FileHandlerModelEndpoint,
-        ImageGenerationModelEndpoint,
-        PersistentAgent,
-        PersistentAgentCompletion,
-        PersistentAgentToolCall,
-        PersistentModelEndpoint,
-        VideoGenerationModelEndpoint,
-    )
+    from api.models import AgentAllowlistInvite, BrowserUseAgentTask, CommsAllowlistEntry, CommsAllowlistRequest, EmbeddingsModelEndpoint, EvalRunTask, FileHandlerModelEndpoint, ImageGenerationModelEndpoint, PersistentAgent, PersistentAgentCompletion, PersistentAgentToolCall, PersistentModelEndpoint, VideoGenerationModelEndpoint
 
     sms_contact_fields = (
         "sms_contact_purpose",
@@ -193,15 +179,7 @@ def ensure_eval_local_routing_profile(seed: EvalLocalRoutingProfileSeed, stdout=
     The profile stores the provider env var name only. It never reads, stores,
     or prints the raw key value.
     """
-    from api.models import (
-        IntelligenceTier,
-        LLMProvider,
-        LLMRoutingProfile,
-        PersistentModelEndpoint,
-        ProfilePersistentTier,
-        ProfilePersistentTierEndpoint,
-        ProfileTokenRange,
-    )
+    from api.models import IntelligenceTier, LLMProvider, LLMRoutingProfile, PersistentModelEndpoint, ProfilePersistentTier, ProfilePersistentTierEndpoint, ProfileTokenRange
 
     standard_tier, _ = IntelligenceTier.objects.update_or_create(
         key="standard",

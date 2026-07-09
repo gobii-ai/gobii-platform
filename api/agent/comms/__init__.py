@@ -5,20 +5,9 @@ agents.  Adapters normalize inbound webhook payloads while sender classes
 provide an abstraction over outbound providers.
 """
 
-from .adapters import (
-    SmsAdapter,
-    EmailAdapter,
-    TwilioSmsAdapter,
-    PostmarkEmailAdapter,
-    MailgunEmailAdapter,
-    ParsedMessage,
-)
+from .adapters import SmsAdapter, EmailAdapter, TwilioSmsAdapter, PostmarkEmailAdapter, MailgunEmailAdapter, ParsedMessage
 from .senders import SmsSender, EmailSender
-from .message_service import (
-    ingest_inbound_message,
-    ingest_inbound_webhook_message,
-    InboundMessageInfo,
-)
+from .message_service import ingest_inbound_message, ingest_inbound_webhook_message, InboundMessageInfo
 
 __all__ = [
     "ParsedMessage",

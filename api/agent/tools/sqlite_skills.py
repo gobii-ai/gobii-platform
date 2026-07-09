@@ -16,30 +16,13 @@ from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
-from api.models import (
-    GlobalSecret,
-    PersistentAgentSecret,
-    PersistentAgentSkill,
-    PersistentAgentSystemSkillState,
-)
+from api.models import GlobalSecret, PersistentAgentSecret, PersistentAgentSkill, PersistentAgentSystemSkillState
 from api.agent.system_skills.registry import get_system_skill_definition
-from api.agent.system_skills.service import (
-    ensure_default_system_skills_enabled,
-    get_enabled_system_skill_states,
-    refresh_system_skills_for_tool,
-)
-from api.services.skill_analytics import (
-    SKILL_ORIGIN_FORKED_FROM_GLOBAL,
-    infer_agent_skill_origin,
-    track_agent_skill_event,
-)
+from api.agent.system_skills.service import ensure_default_system_skills_enabled, get_enabled_system_skill_states, refresh_system_skills_for_tool
+from api.services.skill_analytics import SKILL_ORIGIN_FORKED_FROM_GLOBAL, infer_agent_skill_origin, track_agent_skill_event
 from util.analytics import AnalyticsEvent
 
-from .skill_utils import (
-    format_skill_secret_requirement,
-    normalize_skill_secret_requirements,
-    normalize_skill_tool_ids,
-)
+from .skill_utils import format_skill_secret_requirement, normalize_skill_secret_requirements, normalize_skill_tool_ids
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from .sqlite_state import AGENT_SKILLS_TABLE, get_sqlite_db_path
 

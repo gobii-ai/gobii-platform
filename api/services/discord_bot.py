@@ -19,33 +19,12 @@ from django.utils import timezone
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
-from api.models import (
-    CommsChannel,
-    PersistentAgent,
-    PersistentAgentConversation,
-    PersistentAgentDiscordChannelSubscription,
-    PersistentAgentDiscordGuild,
-    PersistentAgentDiscordOAuthSession,
-    PersistentAgentDiscordWebhook,
-    PersistentAgentDiscordWebhookEcho,
-    PersistentAgentMessage,
-    PersistentAgentStep,
-    PersistentAgentSystemSkillState,
-    PersistentAgentSystemStep,
-)
+from api.models import CommsChannel, PersistentAgent, PersistentAgentConversation, PersistentAgentDiscordChannelSubscription, PersistentAgentDiscordGuild, PersistentAgentDiscordOAuthSession, PersistentAgentDiscordWebhook, PersistentAgentDiscordWebhookEcho, PersistentAgentMessage, PersistentAgentStep, PersistentAgentSystemSkillState, PersistentAgentSystemStep
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
 from api.agent.files.filespace_service import broadcast_message_attachment_update
 from api.services.agent_avatar_public import build_public_agent_avatar_thumbnail_url
-from api.services.discord_messages import (
-    create_discord_outbound_message,
-    discord_agent_address,
-    discord_channel_address,
-    discord_channel_source_label,
-    discord_conversation_address,
-    ensure_discord_agent_endpoint,
-    schedule_discord_inbound_processing,
-)
+from api.services.discord_messages import create_discord_outbound_message, discord_agent_address, discord_channel_address, discord_channel_source_label, discord_conversation_address, ensure_discord_agent_endpoint, schedule_discord_inbound_processing
 from util.text_sanitizer import decode_unicode_character_escapes
 
 logger = logging.getLogger(__name__)

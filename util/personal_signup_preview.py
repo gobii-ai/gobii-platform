@@ -3,10 +3,7 @@ from dataclasses import dataclass
 from django.conf import settings
 from django.http import HttpRequest
 
-from constants.feature_flags import (
-    PERSONAL_AGENT_SIGNUP_PREVIEW_PROCESSING_LIMIT,
-    PERSONAL_AGENT_SIGNUP_PREVIEW_UI,
-)
+from constants.feature_flags import PERSONAL_AGENT_SIGNUP_PREVIEW_PROCESSING_LIMIT, PERSONAL_AGENT_SIGNUP_PREVIEW_UI
 from util.onboarding import clear_trial_onboarding_intent, get_trial_onboarding_state
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_query_params

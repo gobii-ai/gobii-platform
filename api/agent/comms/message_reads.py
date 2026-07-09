@@ -7,18 +7,7 @@ from django.db import transaction
 from django.db.models import OuterRef, Q, Subquery
 from django.utils import timezone
 
-from api.models import (
-    AgentCollaborator,
-    CommsChannel,
-    OrganizationMembership,
-    OutboundMessageAttempt,
-    PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentMessage,
-    PersistentAgentMessageRead,
-    UserPhoneNumber,
-    parse_web_user_address,
-)
+from api.models import AgentCollaborator, CommsChannel, OrganizationMembership, OutboundMessageAttempt, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageRead, UserPhoneNumber, parse_web_user_address
 
 HIDE_IN_CHAT_PAYLOAD_KEY = "hide_in_chat"
 

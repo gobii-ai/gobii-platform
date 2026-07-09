@@ -8,12 +8,7 @@ from django.utils import timezone
 from api.models import PersistentAgent, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
 from api.services.pipedream_apps import enable_pipedream_apps_for_agent
 
-from .registry import (
-    SystemSkillDefinition,
-    equivalent_system_skill_keys,
-    get_system_skill_definition,
-    normalize_system_skill_key,
-)
+from .registry import SystemSkillDefinition, equivalent_system_skill_keys, get_system_skill_definition, normalize_system_skill_key
 from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS
 
 

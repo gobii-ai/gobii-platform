@@ -6,37 +6,13 @@
 # --------------------------------------------------------------------------- #
 
 # Import all tasks from their new modules
-from .browser_agent_tasks import (
-    process_browser_use_task,  # noqa: F401
-    _process_browser_use_task_core,  # noqa: F401
-    select_proxy_for_task,  # noqa: F401
-    _run_agent,  # noqa: F401
-    _safe_aclose,  # noqa: F401
-    _jsonify,  # noqa: F401
-)
+from .browser_agent_tasks import process_browser_use_task, _process_browser_use_task_core, select_proxy_for_task, _run_agent, _safe_aclose, _jsonify  # noqa: F401
 
-from .proxy_tasks import (
-    sync_all_ip_blocks,  # noqa: F401
-    sync_ip_block,  # noqa: F401
-    backfill_missing_proxy_records,  # noqa: F401
-    proxy_health_check_nightly,  # noqa: F401
-    proxy_health_check_single,  # noqa: F401
-    decodo_low_inventory_reminder,  # noqa: F401
-    _perform_proxy_health_check,  # noqa: F401
-    _fetch_decodo_ip_data,  # noqa: F401
-    _update_or_create_ip_record,  # noqa: F401
-    _update_or_create_proxy_record,  # noqa: F401
-)
+from .proxy_tasks import sync_all_ip_blocks, sync_ip_block, backfill_missing_proxy_records, proxy_health_check_nightly, proxy_health_check_single, decodo_low_inventory_reminder, _perform_proxy_health_check, _fetch_decodo_ip_data, _update_or_create_ip_record, _update_or_create_proxy_record  # noqa: F401
 
-from .subscription_tasks import (
-    grant_monthly_free_credits,  # noqa: F401
-)
+from .subscription_tasks import grant_monthly_free_credits  # noqa: F401
 
-from .maintenance_tasks import (
-    cleanup_temp_files,  # noqa: F401
-    garbage_collect_timed_out_tasks,  # noqa: F401
-    prune_prompt_archives,  # noqa: F401
-)
+from .maintenance_tasks import cleanup_temp_files, garbage_collect_timed_out_tasks, prune_prompt_archives  # noqa: F401
 
 from .fingerprint_tasks import fetch_user_fingerprint_visit_task  # noqa: F401
 

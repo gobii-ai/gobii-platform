@@ -2,21 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import * as llmApi from '../../api/llmConfig'
-import {
-  buildTierGroups,
-  DEFAULT_INTELLIGENCE_TIERS,
-  IMAGE_GENERATION_SECTION_CONFIG,
-  mapBrowserTiers,
-  mapBrowserTiersFromProfile,
-  mapEmbeddingTiers,
-  mapEmbeddingTiersFromProfile,
-  mapFileHandlerTiers,
-  mapImageGenerationTiers,
-  mapPersistentData,
-  mapProviders,
-  mapVideoGenerationTiers,
-  VIDEO_GENERATION_SECTION_CONFIG,
-} from './shared'
+import { buildTierGroups, DEFAULT_INTELLIGENCE_TIERS, IMAGE_GENERATION_SECTION_CONFIG, mapBrowserTiers, mapBrowserTiersFromProfile, mapEmbeddingTiers, mapEmbeddingTiersFromProfile, mapFileHandlerTiers, mapImageGenerationTiers, mapPersistentData, mapProviders, mapVideoGenerationTiers, VIDEO_GENERATION_SECTION_CONFIG } from './shared'
 
 const emptyEndpointChoices: llmApi.EndpointChoices = {
   persistent_endpoints: [],

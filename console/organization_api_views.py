@@ -18,38 +18,16 @@ from anymail.exceptions import AnymailError
 from waffle import flag_is_active
 
 from agents.services import PretrainedWorkerTemplateService
-from api.models import (
-    IntelligenceTier,
-    Organization,
-    OrganizationInvite,
-    OrganizationMembership,
-    PersistentAgent,
-    PersistentAgentTemplate,
-)
+from api.models import IntelligenceTier, Organization, OrganizationInvite, OrganizationMembership, PersistentAgent, PersistentAgentTemplate
 from api.agent.core.llm_config import AgentLLMTier
-from api.services.agent_owner_custom_instructions import (
-    CUSTOM_INSTRUCTIONS_FIELD,
-    CustomInstructionsValidationError,
-    get_custom_instructions_for_organization_id,
-    normalize_custom_instructions,
-    save_custom_instructions_for_organization_id,
-)
-from api.services.organization_permissions import (
-    ORG_AGENT_CONFIG_AUTHORITY_ROLES,
-    ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS,
-    organization_members_can_create_agents,
-    user_role_can_create_org_agents,
-)
+from api.services.agent_owner_custom_instructions import CUSTOM_INSTRUCTIONS_FIELD, CustomInstructionsValidationError, get_custom_instructions_for_organization_id, normalize_custom_instructions, save_custom_instructions_for_organization_id
+from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES, ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS, organization_members_can_create_agents, user_role_can_create_org_agents
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from console.api_helpers import _parse_json_body as _parse_json_body_or_raise
 from console.context_helpers import build_console_context
 from console.forms import OrganizationForm, OrganizationInviteForm
 from console.views import build_llm_intelligence_props
-from console.agent_creation import (
-    AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY,
-    AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
-    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
-)
+from console.agent_creation import AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY, AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY
 from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.urls import IMMERSIVE_APP_BASE_PATH

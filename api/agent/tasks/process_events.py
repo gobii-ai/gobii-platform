@@ -21,29 +21,11 @@ from django.db import transaction
 from django.core.exceptions import ValidationError
 
 from config.redis_client import get_redis_client
-from api.services.agent_error_logging import (
-    log_task_quota_exceeded,
-    validation_error_messages,
-)
-from api.services.owner_execution_pause import (
-    is_owner_execution_paused,
-    resolve_agent_owner,
-)
+from api.services.agent_error_logging import log_task_quota_exceeded, validation_error_messages
+from api.services.owner_execution_pause import is_owner_execution_paused, resolve_agent_owner
 from ..core.event_processing import process_agent_events, _lock_storage_keys
 from ...services.referral_service import ReferralService
-from ..core.processing_flags import (
-    claim_pending_drain_slot,
-    clear_pending_drain_slot,
-    clear_processing_lock_active,
-    clear_processing_queued_flag,
-    count_pending_agents,
-    get_processing_heartbeat,
-    get_pending_drain_settings,
-    is_human_inbound_generation_consumed,
-    is_agent_pending,
-    pop_pending_agents,
-    set_processing_queued_flag,
-)
+from ..core.processing_flags import claim_pending_drain_slot, clear_pending_drain_slot, clear_processing_lock_active, clear_processing_queued_flag, count_pending_agents, get_processing_heartbeat, get_pending_drain_settings, is_human_inbound_generation_consumed, is_agent_pending, pop_pending_agents, set_processing_queued_flag
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
@@ -446,10 +428,7 @@ def process_unseen_web_chat_followup_task(self, message_id: str) -> None:  # noq
 def process_planning_timeout_task(self, persistent_agent_id: str) -> None:  # noqa: D401, ANN001
     """Create a one-time planning timeout directive and queue agent processing."""
     from api.models import PersistentAgent, PersistentAgentSystemMessage
-    from api.services.agent_planning import (
-        PLANNING_TIMEOUT_SYSTEM_MESSAGE_MARKER,
-        build_planning_timeout_directive,
-    )
+    from api.services.agent_planning import PLANNING_TIMEOUT_SYSTEM_MESSAGE_MARKER, build_planning_timeout_directive
 
     queued_agent_id = None
     with transaction.atomic():
@@ -599,12 +578,7 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
     try:
         from constants.feature_flags import AGENT_CRON_THROTTLE
         from config.redis_client import get_redis_client
-        from api.services.cron_throttle import (
-            cron_throttle_gate_key,
-            cron_throttle_footer_cooldown_key,
-            cron_throttle_pending_footer_key,
-            evaluate_free_plan_cron_throttle,
-        )
+        from api.services.cron_throttle import cron_throttle_gate_key, cron_throttle_footer_cooldown_key, cron_throttle_pending_footer_key, evaluate_free_plan_cron_throttle
 
         agent = (
             PersistentAgent.objects.alive()

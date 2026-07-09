@@ -1,17 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 
-import {
-  parseBooleanPreference,
-  parseFavoriteAgentIdsPreference,
-  parseNullableBooleanPreference,
-  updateUserPreferences,
-  USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
-  USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS,
-  USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
-  USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
-  USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
-} from '../api/userPreferences'
+import { parseBooleanPreference, parseFavoriteAgentIdsPreference, parseNullableBooleanPreference, updateUserPreferences, USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED, USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS, USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED, USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS, USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE } from '../api/userPreferences'
 import type { AgentRosterSortMode } from '../types/agentRoster'
 import { parseAgentRosterSortMode } from '../util/agentRosterSort'
 import type { AppDispatch, RootState } from './appStore'

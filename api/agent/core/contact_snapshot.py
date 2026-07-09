@@ -5,16 +5,7 @@ from typing import Callable, List
 from api.services.email_verification import has_verified_email
 from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
 
-from ...models import (
-    AgentCollaborator,
-    CommsAllowlistEntry,
-    CommsAllowlistRequest,
-    CommsChannel,
-    OrganizationMembership,
-    PersistentAgent,
-    PersistentAgentMessage,
-    UserPhoneNumber,
-)
+from ...models import AgentCollaborator, CommsAllowlistEntry, CommsAllowlistRequest, CommsChannel, OrganizationMembership, PersistentAgent, PersistentAgentMessage, UserPhoneNumber
 from .contact_results import ContactSQLiteRecord
 
 DisplayNameFn = Callable[[object], str | None]

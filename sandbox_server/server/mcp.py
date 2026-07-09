@@ -13,13 +13,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from sandbox_server.config import (
-    _PROXY_ENV_KEYS,
-    _agent_workspace,
-    _mcp_timeout_seconds,
-    _runtime_cache_paths,
-    _workspace_root,
-)
+from sandbox_server.config import _PROXY_ENV_KEYS, _agent_workspace, _mcp_timeout_seconds, _runtime_cache_paths, _workspace_root
 from sandbox_server.manifest import _proxy_env_from_manifest, _store_proxy_env
 from sandbox_server.workspace import _elapsed_ms, _require_agent_id, _trace_context
 

@@ -16,19 +16,7 @@ from api.agent.core.processing_flags import bump_human_inbound_generation
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.token_usage import log_agent_completion
-from api.models import (
-    CommsChannel,
-    PersistentAgent,
-    PersistentAgentCompletion,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentConversation,
-    PersistentAgentConversationParticipant,
-    PersistentAgentHumanInputRequest,
-    PersistentAgentMessage,
-    PersistentAgentStep,
-    build_web_agent_address,
-    build_web_user_address,
-)
+from api.models import CommsChannel, PersistentAgent, PersistentAgentCompletion, PersistentAgentCommsEndpoint, PersistentAgentConversation, PersistentAgentConversationParticipant, PersistentAgentHumanInputRequest, PersistentAgentMessage, PersistentAgentStep, build_web_agent_address, build_web_user_address
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.text_sanitizer import normalize_llm_output
 
@@ -773,10 +761,7 @@ def attach_originating_step_from_result(step, result: dict[str, Any] | None) -> 
 def _emit_pending_human_input_updates(agent_id) -> None:
     if not agent_id:
         return
-    from console.agent_chat.signals import (
-        emit_pending_action_requests_update,
-        emit_pending_human_input_requests_update,
-    )
+    from console.agent_chat.signals import emit_pending_action_requests_update, emit_pending_human_input_requests_update
 
     try:
         agent = PersistentAgent.objects.get(id=agent_id)

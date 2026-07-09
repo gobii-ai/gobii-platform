@@ -4,11 +4,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 
-from sandbox_server.server.internal_paths import (
-    GOBII_REPO_WORKDIR_ENV,
-    GOBII_SCRATCH_DIR_ENV,
-    SCRATCH_DIR_NAME,
-)
+from sandbox_server.server.internal_paths import GOBII_REPO_WORKDIR_ENV, GOBII_SCRATCH_DIR_ENV, SCRATCH_DIR_NAME
 
 _DEFAULT_ALLOWED_ENV_KEYS = {
     "PATH",

@@ -7,12 +7,7 @@ from django.db.models import Q
 from api.agent.core.prompt_context import tool_call_history_limit
 from api.agent.tools.custom_tools import CUSTOM_TOOL_PREFIX
 from api.agent.tools.tool_manager import BUILTIN_TOOL_REGISTRY
-from api.models import (
-    MCPServerConfig,
-    PersistentAgent,
-    PersistentAgentEnabledTool,
-    PersistentAgentToolCall,
-)
+from api.models import MCPServerConfig, PersistentAgent, PersistentAgentEnabledTool, PersistentAgentToolCall
 
 logger = logging.getLogger(__name__)
 

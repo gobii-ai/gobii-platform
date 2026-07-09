@@ -5,31 +5,11 @@ import { Check, Loader2, Search, Sparkles, X } from 'lucide-react'
 
 import { scheduleLoginRedirect } from '../../api/http'
 import { mapPipedreamApp, searchPipedreamApps, type PipedreamAppSummary } from '../../api/mcp'
-import {
-  fetchNativeIntegrationPickerToken,
-  fetchNativeIntegrations,
-  mapNativeIntegrationProvider,
-  revokeNativeIntegration,
-  startNativeIntegrationConnect,
-  type NativeIntegrationProvider,
-  type NativeIntegrationProviderDTO,
-} from '../../api/nativeIntegrations'
+import { fetchNativeIntegrationPickerToken, fetchNativeIntegrations, mapNativeIntegrationProvider, revokeNativeIntegration, startNativeIntegrationConnect, type NativeIntegrationProvider, type NativeIntegrationProviderDTO } from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
-import {
-  confirmNativeIntegrationDisconnect,
-  NativeIntegrationActionButtons,
-  NativeIntegrationFilesDisclosure,
-  NativeIntegrationSummaryCell,
-  nativeIntegrationFilesQueryKey,
-  nativeOAuthContextPayload,
-  openGoogleDrivePicker,
-  openNativeOAuthPopup,
-  storePendingNativeOAuth,
-  usesManualNativeIntegrationCredentials,
-  useNativeIntegrationRefreshEffects,
-} from '../mcp/NativeIntegrationShared'
+import { confirmNativeIntegrationDisconnect, NativeIntegrationActionButtons, NativeIntegrationFilesDisclosure, NativeIntegrationSummaryCell, nativeIntegrationFilesQueryKey, nativeOAuthContextPayload, openGoogleDrivePicker, openNativeOAuthPopup, storePendingNativeOAuth, usesManualNativeIntegrationCredentials, useNativeIntegrationRefreshEffects } from '../mcp/NativeIntegrationShared'
 import { useManualNativeIntegrationConnect } from '../mcp/useManualNativeIntegrationConnect'
 import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from '../mcp/PipedreamAppsShared'
 

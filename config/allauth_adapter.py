@@ -13,18 +13,10 @@ from django.http import HttpResponseRedirect
 from django.urls import reverse
 from allauth.utils import build_absolute_uri
 
-from api.services.system_settings import (
-    get_account_allow_password_login,
-    get_account_allow_password_signup,
-    get_account_allow_social_login,
-    get_account_allow_social_signup,
-)
+from api.services.system_settings import get_account_allow_password_login, get_account_allow_password_signup, get_account_allow_social_login, get_account_allow_social_signup
 from api.services.email_verification import EMAIL_VERIFICATION_REDIRECT_URL_SESSION_KEY
 from util.onboarding import set_trial_onboarding_requires_plan_selection
-from util.personal_signup_preview import (
-    get_personal_signup_preview_signup_redirect_url,
-    resolve_personal_signup_preview,
-)
+from util.personal_signup_preview import get_personal_signup_preview_signup_redirect_url, resolve_personal_signup_preview
 from util.urls import append_query_params
 
 try:

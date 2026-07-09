@@ -5,13 +5,7 @@ from django.db import DatabaseError
 from redis.exceptions import RedisError
 
 from api.models import AgentComputeSession, PersistentAgent
-from api.services.sandbox_compute import (
-    SandboxComputeService,
-    SandboxComputeUnavailable,
-    _post_sync_queue_key,
-    sandbox_compute_enabled,
-    sandbox_compute_enabled_for_agent,
-)
+from api.services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, _post_sync_queue_key, sandbox_compute_enabled, sandbox_compute_enabled_for_agent
 from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)

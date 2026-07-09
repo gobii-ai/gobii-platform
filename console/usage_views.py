@@ -16,18 +16,9 @@ from django.views import View
 from billing.services import BillingService
 from tasks.services import TaskCreditService
 
-from api.models import (
-    BrowserUseAgent,
-    BrowserUseAgentTask,
-    Organization,
-    PersistentAgentStep,
-    UserPreference,
-)
+from api.models import BrowserUseAgent, BrowserUseAgentTask, Organization, PersistentAgentStep, UserPreference
 from api.agent.core.llm_config import get_credit_multiplier_for_tier
-from api.services.burn_rate_snapshots import (
-    get_burn_rate_snapshot_for_owner,
-    serialize_burn_rate_snapshot,
-)
+from api.services.burn_rate_snapshots import get_burn_rate_snapshot_for_owner, serialize_burn_rate_snapshot
 from console.context_helpers import build_console_context
 from util.constants.task_constants import TASKS_UNLIMITED
 from util.subscription_helper import allow_organization_extra_tasks, allow_user_extra_tasks

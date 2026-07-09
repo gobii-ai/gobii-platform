@@ -7,11 +7,7 @@ from typing import Any, List, Optional, Tuple
 
 from django.db import DatabaseError
 
-from api.agent.tools.content_skeleton import (
-    extract_serp_skeleton,
-    extract_skeleton,
-    ContentSkeleton,
-)
+from api.agent.tools.content_skeleton import extract_serp_skeleton, extract_skeleton, ContentSkeleton
 from api.services.tool_settings import get_tool_settings_for_owner
 
 logger = logging.getLogger(__name__)

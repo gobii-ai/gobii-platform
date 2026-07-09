@@ -5,14 +5,7 @@ from typing import Dict, List, Optional
 from django.db.models import Count, Min
 from django.db.models.functions import TruncDay
 
-from api.models import (
-    PersistentAgent,
-    PersistentAgentCompletion,
-    PersistentAgentError,
-    PersistentAgentMessage,
-    PersistentAgentStep,
-    PersistentAgentSystemMessage,
-)
+from api.models import PersistentAgent, PersistentAgentCompletion, PersistentAgentError, PersistentAgentMessage, PersistentAgentStep, PersistentAgentSystemMessage
 
 
 @dataclass

@@ -1,22 +1,5 @@
-import type {
-  AgentErrorStatusSection,
-  AgentProcessingStatusSection,
-  BrowserTaskStatusSection,
-  CeleryStatusSection,
-  ComputeStatusSection,
-  ProxyStatusSection,
-  SystemStatusPayload,
-  WebSessionStatusSection,
-} from '../../types/systemStatus'
-import {
-  BooleanPill,
-  DataTable,
-  EmptyRows,
-  SectionCard,
-  UnavailableSection,
-  formatDateTime,
-  formatStatusLabel,
-} from './common'
+import type { AgentErrorStatusSection, AgentProcessingStatusSection, BrowserTaskStatusSection, CeleryStatusSection, ComputeStatusSection, ProxyStatusSection, SystemStatusPayload, WebSessionStatusSection } from '../../types/systemStatus'
+import { BooleanPill, DataTable, EmptyRows, SectionCard, UnavailableSection, formatDateTime, formatStatusLabel } from './common'
 
 function CelerySection({ section }: { section: CeleryStatusSection }) {
   return (

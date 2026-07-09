@@ -28,11 +28,7 @@ from browser_use.browser.events import FileDownloadedEvent
 
 from api.services.system_settings import get_max_file_size
 from ...models import AgentFsNode, PersistentAgent
-from ..files.filespace_service import (
-    get_or_create_default_filespace,
-    get_or_create_dir,
-    dedupe_name,
-)
+from ..files.filespace_service import get_or_create_default_filespace, get_or_create_dir, dedupe_name
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)

@@ -2,11 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronDown, ChevronRight, FileText, FolderOpen, Loader2, Plug, Table2, Unplug } from 'lucide-react'
 
-import type {
-  NativeIntegrationAccessibleFile,
-  NativeIntegrationPickerTokenResponse,
-  NativeIntegrationProvider,
-} from '../../api/nativeIntegrations'
+import type { NativeIntegrationAccessibleFile, NativeIntegrationPickerTokenResponse, NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import { fetchNativeIntegrationFiles } from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { readStoredConsoleContext } from '../../util/consoleContextStorage'

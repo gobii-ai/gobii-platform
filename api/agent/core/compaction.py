@@ -17,12 +17,7 @@ from typing import Callable, List, Sequence, Optional
 from django.conf import settings
 from django.db import transaction
 
-from ...models import (
-    PersistentAgent,
-    PersistentAgentMessage,
-    PersistentAgentCommsSnapshot,
-    PersistentAgentCompletion,
-)
+from ...models import PersistentAgent, PersistentAgentMessage, PersistentAgentCommsSnapshot, PersistentAgentCompletion
 
 import logging
 

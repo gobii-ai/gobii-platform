@@ -7,13 +7,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from api.agent.tools.plan import build_plan_snapshot
-from api.models import (
-    PersistentAgent,
-    PersistentAgentKanbanCard,
-    PersistentAgentKanbanEvent,
-    PersistentAgentKanbanEventChange,
-    PersistentAgentKanbanEventTitle,
-)
+from api.models import PersistentAgent, PersistentAgentKanbanCard, PersistentAgentKanbanEvent, PersistentAgentKanbanEventChange, PersistentAgentKanbanEventTitle
 logger = logging.getLogger(__name__)
 
 

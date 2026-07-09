@@ -4,23 +4,8 @@ from typing import Literal, get_args
 from django.db.models import Q
 from django.utils import timezone
 
-from api.models import (
-    PersistentAgent,
-    PersistentAgentCompletion,
-    PersistentAgentError,
-    PersistentAgentMessage,
-    PersistentAgentStep,
-    PersistentAgentSystemStep,
-    PersistentAgentSystemMessage,
-)
-from console.agent_audit.serializers import (
-    serialize_completion,
-    serialize_error,
-    serialize_message,
-    serialize_prompt_meta,
-    serialize_tool_call,
-    serialize_system_message,
-)
+from api.models import PersistentAgent, PersistentAgentCompletion, PersistentAgentError, PersistentAgentMessage, PersistentAgentStep, PersistentAgentSystemStep, PersistentAgentSystemMessage
+from console.agent_audit.serializers import serialize_completion, serialize_error, serialize_message, serialize_prompt_meta, serialize_tool_call, serialize_system_message
 
 DEFAULT_LIMIT = 30
 MAX_LIMIT = 100

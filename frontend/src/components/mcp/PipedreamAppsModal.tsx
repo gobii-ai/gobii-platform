@@ -2,74 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Loader2, Unplug, Users } from 'lucide-react'
 
-import {
-  agentDiscordAppQueryKey,
-  fetchAgentDiscordApp,
-} from '../../api/discordNative'
+import { agentDiscordAppQueryKey, fetchAgentDiscordApp } from '../../api/discordNative'
 import { fetchAgentRoster } from '../../api/agents'
-import {
-  disconnectAgentPipedreamApp,
-  fetchPipedreamAppAgentConnections,
-  searchPipedreamApps,
-  startAgentPipedreamAppConnect,
-  updatePipedreamAppSettings,
-  type AgentPipedreamAppSource,
-  type PipedreamAppAgentConnection,
-  type PipedreamAppSettings,
-  type PipedreamAppSummary,
-} from '../../api/mcp'
-import {
-  fetchNativeIntegrationPickerToken,
-  fetchNativeIntegrations,
-  revokeNativeIntegration,
-  startNativeIntegrationConnect,
-  type NativeIntegrationProvider,
-} from '../../api/nativeIntegrations'
+import { disconnectAgentPipedreamApp, fetchPipedreamAppAgentConnections, searchPipedreamApps, startAgentPipedreamAppConnect, updatePipedreamAppSettings, type AgentPipedreamAppSource, type PipedreamAppAgentConnection, type PipedreamAppSettings, type PipedreamAppSummary } from '../../api/mcp'
+import { fetchNativeIntegrationPickerToken, fetchNativeIntegrations, revokeNativeIntegration, startNativeIntegrationConnect, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
-import {
-  DISCORD_NATIVE_PROVIDER_KEY,
-  withDiscordNativeProvider,
-} from './DiscordNativeShared'
-import {
-  AgentConnectionAvatar,
-  PipedreamAppIcon,
-  PipedreamAppSummaryCell,
-  PipedreamConnectionButton,
-  PipedreamEmptyState,
-  PipedreamErrorState,
-  PipedreamListFrame,
-  PipedreamLoadingState,
-  PipedreamModalShell,
-  PipedreamRemoveButton,
-  PipedreamSearchInput,
-  PipedreamStatusBanner,
-  resolvePipedreamAppsErrorMessage,
-  useDebouncedValue,
-  useIsMobile,
-  useWindowFocusRefetch,
-  type PipedreamStatusMessage,
-} from './PipedreamAppsShared'
-import {
-  confirmNativeIntegrationDisconnect,
-  NativeIntegrationGridRow,
-  NativeIntegrationSummaryCell,
-  nativeIntegrationFilesQueryKey,
-  nativeOAuthContextPayload,
-  openGoogleDrivePicker,
-  openNativeOAuthPopup,
-  storePendingNativeOAuth,
-  usesManualNativeIntegrationCredentials,
-  useNativeIntegrationRefreshEffects,
-} from './NativeIntegrationShared'
+import { DISCORD_NATIVE_PROVIDER_KEY, withDiscordNativeProvider } from './DiscordNativeShared'
+import { AgentConnectionAvatar, PipedreamAppIcon, PipedreamAppSummaryCell, PipedreamConnectionButton, PipedreamEmptyState, PipedreamErrorState, PipedreamListFrame, PipedreamLoadingState, PipedreamModalShell, PipedreamRemoveButton, PipedreamSearchInput, PipedreamStatusBanner, resolvePipedreamAppsErrorMessage, useDebouncedValue, useIsMobile, useWindowFocusRefetch, type PipedreamStatusMessage } from './PipedreamAppsShared'
+import { confirmNativeIntegrationDisconnect, NativeIntegrationGridRow, NativeIntegrationSummaryCell, nativeIntegrationFilesQueryKey, nativeOAuthContextPayload, openGoogleDrivePicker, openNativeOAuthPopup, storePendingNativeOAuth, usesManualNativeIntegrationCredentials, useNativeIntegrationRefreshEffects } from './NativeIntegrationShared'
 import { useManualNativeIntegrationConnect } from './useManualNativeIntegrationConnect'
-import {
-  agentHasDiscordNative,
-  DiscordAgentConnectionsScreen,
-  DiscordConfigurationScreen,
-  useDiscordNativeAgentActions,
-  useDiscordNativeDisconnect,
-  useDiscordOAuthCompleteRefetch,
-} from './DiscordNativeAppModal'
+import { agentHasDiscordNative, DiscordAgentConnectionsScreen, DiscordConfigurationScreen, useDiscordNativeAgentActions, useDiscordNativeDisconnect, useDiscordOAuthCompleteRefetch } from './DiscordNativeAppModal'
 
 type PipedreamAppsModalProps = {
   settingsUrl: string | null

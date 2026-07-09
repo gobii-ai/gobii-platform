@@ -3,29 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Building2, Pencil, Play, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
 import { createOrganization, type ConsoleContext, type ConsoleContextOption } from '../api/context'
-import {
-  currentOrganizationTemplatesQueryKey,
-  createOrganizationTemplate,
-  deactivateOrganizationTemplate,
-  fetchCurrentOrganization,
-  fetchCurrentOrganizationTemplates,
-  inviteOrganizationMember,
-  launchOrganizationTemplate,
-  removeOrganizationMember,
-  resendOrganizationInvite,
-  revokeOrganizationInvite,
-  updateCurrentOrganizationCustomInstructions,
-  updateCurrentOrganizationMemberAgentCreation,
-  updateCurrentOrganizationName,
-  updateOrganizationTemplate,
-  updateOrganizationMemberRole,
-  type CurrentOrganizationPayload,
-  type CurrentOrganizationTemplatesPayload,
-  type OrganizationInvite,
-  type OrganizationMember,
-  type OrganizationTemplate,
-  type OrganizationTemplateEditorPayload,
-} from '../api/organization'
+import { currentOrganizationTemplatesQueryKey, createOrganizationTemplate, deactivateOrganizationTemplate, fetchCurrentOrganization, fetchCurrentOrganizationTemplates, inviteOrganizationMember, launchOrganizationTemplate, removeOrganizationMember, resendOrganizationInvite, revokeOrganizationInvite, updateCurrentOrganizationCustomInstructions, updateCurrentOrganizationMemberAgentCreation, updateCurrentOrganizationName, updateOrganizationTemplate, updateOrganizationMemberRole, type CurrentOrganizationPayload, type CurrentOrganizationTemplatesPayload, type OrganizationInvite, type OrganizationMember, type OrganizationTemplate, type OrganizationTemplateEditorPayload } from '../api/organization'
 import { HttpError } from '../api/http'
 import { apiErrorMessages } from '../api/safeErrorMessage'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'

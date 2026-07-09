@@ -5,11 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db.utils import DatabaseError, OperationalError, ProgrammingError
 
 from constants.plans import PlanNames
-from util.subscription_helper import (
-    get_active_subscription,
-    get_customer_subscription_candidate,
-    get_stripe_customer,
-)
+from util.subscription_helper import get_active_subscription, get_customer_subscription_candidate, get_stripe_customer
 from waffle import get_waffle_switch_model
 
 logger = logging.getLogger(__name__)

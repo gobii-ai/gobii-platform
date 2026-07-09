@@ -19,16 +19,7 @@ import django
 
 django.setup()
 
-from api.agent.browser_actions.captcha_solver import (
-    CAPSOLVER_DEFAULT_MAX_WAIT_SEC,
-    CAPSOLVER_DEFAULT_POLL_INTERVAL_SEC,
-    _build_task_payload,
-    _capsolver_create_task,
-    _capsolver_error_message,
-    _capsolver_poll_result,
-    _detect_captcha_with_timeout,
-    _inject_captcha_token,
-)
+from api.agent.browser_actions.captcha_solver import CAPSOLVER_DEFAULT_MAX_WAIT_SEC, CAPSOLVER_DEFAULT_POLL_INTERVAL_SEC, _build_task_payload, _capsolver_create_task, _capsolver_error_message, _capsolver_poll_result, _detect_captcha_with_timeout, _inject_captcha_token
 from config import settings
 
 

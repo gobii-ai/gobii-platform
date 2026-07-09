@@ -2,11 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, CircleHelp, CircleSlash2, Link2, Plus, Terminal } from 'lucide-react'
 
-import {
-  fetchMcpServers,
-  type McpServer,
-  type McpServerListResponse,
-} from '../api/mcp'
+import { fetchMcpServers, type McpServer, type McpServerListResponse } from '../api/mcp'
 import { McpServerFormModal } from '../components/mcp/McpServerFormModal'
 import { AssignServerModal } from '../components/mcp/AssignServerModal'
 import { DeleteServerDialog } from '../components/mcp/DeleteServerDialog'

@@ -23,16 +23,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from api.models import (
-    UserReferral,
-    UserAttribution,
-    PersistentAgentTemplate,
-    BrowserUseAgentTask,
-    PersistentAgentStep,
-    TaskCredit,
-    ReferralIncentiveConfig,
-    ReferralGrant,
-)
+from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, BrowserUseAgentTask, PersistentAgentStep, TaskCredit, ReferralIncentiveConfig, ReferralGrant
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from api.services.email_verification import has_verified_email
