@@ -1,0 +1,519 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ ai_employees_seo_title }}{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="{{ ai_employees_seo_description }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ ai_employees_seo_title }}">
+<meta property="og:description" content="{{ ai_employees_seo_description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="Gobii">
+<meta property="og:image" content="{{ ai_employees_social_image_url }}">
+<meta property="og:image:alt" content="{{ ai_employees_social_image_alt }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ ai_employees_seo_title }}">
+<meta name="twitter:description" content="{{ ai_employees_seo_description }}">
+<meta name="twitter:image" content="{{ ai_employees_social_image_url }}">
+<meta name="twitter:image:alt" content="{{ ai_employees_social_image_alt }}">
+<script type="application/ld+json">{{ ai_employees_structured_data_json }}</script>
+{% endblock %}
+
+{% block content %}
+<section class="relative isolate overflow-hidden bg-slate-950 text-white">
+  <picture class="absolute inset-0 -z-10 h-full w-full">
+    <source
+      type="image/webp"
+      srcset="{% static 'images/solutions/sales-hero-640.webp' %} 640w,
+              {% static 'images/solutions/sales-hero-960.webp' %} 960w,
+              {% static 'images/solutions/sales-hero-1280.webp' %} 1280w,
+              {% static 'images/solutions/sales-hero-1920.webp' %} 1920w"
+      sizes="100vw"
+    >
+    <img
+      src="{% static 'images/solutions/sales-hero-1280.jpg' %}"
+      srcset="{% static 'images/solutions/sales-hero-640.jpg' %} 640w,
+              {% static 'images/solutions/sales-hero-960.jpg' %} 960w,
+              {% static 'images/solutions/sales-hero-1280.jpg' %} 1280w,
+              {% static 'images/solutions/sales-hero-1920.jpg' %} 1920w"
+      sizes="100vw"
+      alt=""
+      class="h-full w-full object-cover object-[58%_center] opacity-40"
+      width="1280"
+      height="698"
+      loading="eager"
+      fetchpriority="high"
+      decoding="async"
+    >
+  </picture>
+  <div class="absolute inset-0 -z-10 bg-slate-950/70"></div>
+  <div class="absolute inset-x-0 bottom-0 -z-10 h-40 bg-gradient-to-t from-slate-950 to-slate-950/0"></div>
+
+  <div class="mx-auto max-w-7xl px-6 pb-16 pt-5 sm:px-8 lg:px-12 lg:pb-20">
+    <nav class="flex items-center gap-2 text-sm text-indigo-100" aria-label="Breadcrumb">
+      <a href="{% url 'pages:home' %}" class="font-medium text-white hover:text-emerald-200">Gobii</a>
+      <i data-lucide="chevron-right" class="h-4 w-4 text-indigo-200"></i>
+      <span>AI Employees</span>
+    </nav>
+
+    <div class="mt-20 max-w-4xl lg:mt-28">
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">AI employees for business workflows</p>
+      <h1 class="mt-5 max-w-4xl text-4xl font-light leading-[1.05] tracking-tight sm:text-5xl lg:text-7xl">
+        AI Employees for Real Work
+      </h1>
+      <p class="mt-6 max-w-3xl text-lg leading-8 text-indigo-50 sm:text-xl">
+        Gobii helps teams deploy AI employees as supervised AI teammates: persistent workers that browse, research, collect data, prepare outputs, and hand work back with sources and review points intact.
+      </p>
+      <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+        <a href="{% url 'proprietary:pricing' %}" class="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">
+          View pricing
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </a>
+        <a href="#workflow-examples" class="inline-flex items-center justify-center gap-2 rounded-lg border border-white/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
+          See workflows
+          <i data-lucide="workflow" class="h-4 w-4"></i>
+        </a>
+      </div>
+
+      <dl class="mt-12 grid max-w-4xl gap-3 sm:grid-cols-3">
+        <div class="rounded-lg border border-white/15 bg-white/10 p-4 backdrop-blur">
+          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-200">Deploy</dt>
+          <dd class="mt-2 text-sm leading-6 text-indigo-50">Start with a defined workflow, approved sources, and a clear output format.</dd>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-4 backdrop-blur">
+          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-200">Supervise</dt>
+          <dd class="mt-2 text-sm leading-6 text-indigo-50">Set review gates where human judgment, compliance, or relationship context matters.</dd>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-4 backdrop-blur">
+          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">Handoff</dt>
+          <dd class="mt-2 text-sm leading-6 text-indigo-50">Receive source-linked work that can move into sheets, CRMs, docs, or downstream tools.</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.86fr_1.14fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Definition</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">What are AI employees?</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        AI employees are software workers that can take on a defined business workflow rather than only answer prompts. They use context, tools, browser access, files, and instructions to produce useful work across multiple steps.
+      </p>
+      <p class="mt-4 text-base leading-7 text-slate-700">
+        Gobii uses the term <strong>AI teammates</strong> because the best AI employee model is collaborative. The AI teammate does repeatable execution. People define the goal, choose the sources, review uncertain work, and decide what moves forward.
+      </p>
+    </div>
+
+    <div class="rounded-lg border border-indigo-100 bg-white p-5">
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <i data-lucide="clipboard-check" class="h-5 w-5 text-emerald-700"></i>
+          <h3 class="mt-3 text-base font-semibold text-slate-950">Clear charter</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">The AI employee knows the workflow, success criteria, tools, and output shape.</p>
+        </div>
+        <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+          <i data-lucide="mouse-pointer-click" class="h-5 w-5 text-sky-700"></i>
+          <h3 class="mt-3 text-base font-semibold text-slate-950">Tool action</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">It can browse, compare sources, collect data, structure findings, and prepare handoffs.</p>
+        </div>
+        <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <i data-lucide="user-check" class="h-5 w-5 text-amber-700"></i>
+          <h3 class="mt-3 text-base font-semibold text-slate-950">Human review</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">People approve ambiguous decisions, sensitive actions, and outputs that affect customers.</p>
+        </div>
+        <div class="rounded-lg border border-violet-200 bg-violet-50 p-4">
+          <i data-lucide="repeat-2" class="h-5 w-5 text-violet-700"></i>
+          <h3 class="mt-3 text-base font-semibold text-slate-950">Recurring cadence</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">The workflow can run again with better instructions and feedback from reviewers.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="max-w-3xl">
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Capabilities</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">What AI employees can do</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        Searchers use terms like ai employees, ai employee, AI workers, virtual AI employees, and AI teammates for the same underlying question: can this system own real work with enough reliability to be useful? The answer depends on how clearly the workflow is framed.
+      </p>
+    </div>
+
+    <div class="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {% for item in ai_employees_workflow_items %}
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="{% cycle 'search' 'table-properties' 'radar' 'file-pen-line' 'send' %}" class="h-5 w-5 text-indigo-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">{{ item.name }}</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">{{ item.description }}</p>
+        </article>
+      {% endfor %}
+      <article class="rounded-lg border border-indigo-200 bg-indigo-50 p-5">
+        <i data-lucide="git-branch" class="h-5 w-5 text-indigo-700"></i>
+        <h3 class="mt-4 text-lg font-semibold text-slate-950">Escalation and exception handling</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Pause for approval when a workflow needs judgment, access, compliance review, or a decision that should stay with a person.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="workflow-examples" class="bg-slate-950 py-16 text-white scroll-mt-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Workflow examples</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">Start with work that already has a review path</h2>
+        <p class="mt-5 text-base leading-7 text-indigo-100">
+          The best place to hire AI employees is the space between existing tools: research that needs sources, lists that need enrichment, monitoring that needs summarizing, and handoffs that need a consistent structure.
+        </p>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <article class="rounded-lg border border-white/15 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">Sales</span>
+          <h3 class="mt-3 text-lg font-semibold">Source-linked prospect research</h3>
+          <p class="mt-3 text-sm leading-6 text-indigo-100">Find accounts, inspect fit signals, prepare notes, and hand qualified leads to sellers for review.</p>
+          <a href="{% url 'pages:solution_sales_ai_sales_agent' %}" class="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-200 hover:text-white">
+            AI sales agent
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </a>
+        </article>
+        <article class="rounded-lg border border-white/15 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">Recruiting</span>
+          <h3 class="mt-3 text-lg font-semibold">Candidate and market mapping</h3>
+          <p class="mt-3 text-sm leading-6 text-indigo-100">Collect candidate context, compare role fit, summarize source links, and prepare a recruiter-reviewed shortlist.</p>
+        </article>
+        <article class="rounded-lg border border-white/15 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">Operations</span>
+          <h3 class="mt-3 text-lg font-semibold">Vendor and process monitoring</h3>
+          <p class="mt-3 text-sm leading-6 text-indigo-100">Check approved pages, gather changes, flag exceptions, and prepare a concise update for the owner.</p>
+        </article>
+        <article class="rounded-lg border border-white/15 p-5">
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-violet-300">Marketing</span>
+          <h3 class="mt-3 text-lg font-semibold">Campaign research and draft prep</h3>
+          <p class="mt-3 text-sm leading-6 text-indigo-100">Turn audience notes, competitor pages, and source material into draft briefs that a marketer can edit.</p>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Terminology</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">AI employees vs AI agents, AI workers, AI teammates, and AI coworkers</h2>
+        <p class="mt-5 text-base leading-7 text-slate-700">
+          These terms overlap, but they signal different buyer concerns. Gobii ranks for AI employees while using AI teammates in the product story because teams need trust, not just automation language.
+        </p>
+      </div>
+
+      <div class="overflow-hidden rounded-lg border border-slate-200">
+        <div class="grid border-b border-slate-200 bg-white px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 sm:grid-cols-[0.34fr_0.66fr]">
+          <span>Term</span>
+          <span class="hidden sm:block">Practical difference</span>
+        </div>
+        <div class="divide-y divide-slate-200">
+          <div class="grid gap-2 px-5 py-4 sm:grid-cols-[0.34fr_0.66fr]">
+            <h3 class="text-sm font-semibold text-slate-950">AI employees</h3>
+            <p class="text-sm leading-6 text-slate-700">The commercial category: software workers with a workflow, tools, review points, and accountability for output.</p>
+          </div>
+          <div class="grid gap-2 px-5 py-4 sm:grid-cols-[0.34fr_0.66fr]">
+            <h3 class="text-sm font-semibold text-slate-950">AI agents</h3>
+            <p class="text-sm leading-6 text-slate-700">The technical pattern: systems that can reason through steps and take tool actions to complete a task.</p>
+          </div>
+          <div class="grid gap-2 px-5 py-4 sm:grid-cols-[0.34fr_0.66fr]">
+            <h3 class="text-sm font-semibold text-slate-950">AI workers</h3>
+            <p class="text-sm leading-6 text-slate-700">A broader label for automated labor. It can include workflow tools, agents, and role-specific digital workers.</p>
+          </div>
+          <div class="grid gap-2 px-5 py-4 sm:grid-cols-[0.34fr_0.66fr]">
+            <h3 class="text-sm font-semibold text-slate-950">AI teammates</h3>
+            <p class="text-sm leading-6 text-slate-700">Gobii's preferred product language: a collaborative AI employee that works under team supervision.</p>
+          </div>
+          <div class="grid gap-2 px-5 py-4 sm:grid-cols-[0.34fr_0.66fr]">
+            <h3 class="text-sm font-semibold text-slate-950">AI coworkers</h3>
+            <p class="text-sm leading-6 text-slate-700">A human-friendly phrase for persistent collaborators, especially when the agent has identity, memory, and a regular cadence.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Gobii operating model</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Where Gobii AI teammates fit into real workflows</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        Gobii is strongest when an AI teammate can move through browser work, documents, spreadsheets, and connected systems with a specific outcome in mind. The product does not need to pretend to replace a department. It needs to remove the slow, repeatable execution around a team.
+      </p>
+      <p class="mt-4 text-base leading-7 text-slate-700">
+        That makes Gobii useful for AI employees for business teams that already know what good output looks like: RevOps, sales, recruiting, marketing, research, operations, and customer-facing teams with clear review expectations.
+      </p>
+    </div>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5">
+      <div class="grid gap-4">
+        <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+          <div class="flex items-start gap-3">
+            <i data-lucide="inbox" class="mt-0.5 h-5 w-5 text-indigo-700"></i>
+            <div>
+              <h3 class="text-base font-semibold text-slate-950">Inputs</h3>
+              <p class="mt-2 text-sm leading-6 text-slate-700">Workflow brief, source lists, files, examples, tools, constraints, and output requirements.</p>
+            </div>
+          </div>
+        </div>
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <div class="flex items-start gap-3">
+            <i data-lucide="bot" class="mt-0.5 h-5 w-5 text-emerald-700"></i>
+            <div>
+              <h3 class="text-base font-semibold text-slate-950">AI teammate execution</h3>
+              <p class="mt-2 text-sm leading-6 text-slate-700">Browse, inspect, extract, compare, summarize, draft, structure, and record what happened.</p>
+            </div>
+          </div>
+        </div>
+        <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div class="flex items-start gap-3">
+            <i data-lucide="badge-check" class="mt-0.5 h-5 w-5 text-amber-700"></i>
+            <div>
+              <h3 class="text-base font-semibold text-slate-950">Review</h3>
+              <p class="mt-2 text-sm leading-6 text-slate-700">A human checks judgment calls, rejects poor matches, approves good work, and gives feedback.</p>
+            </div>
+          </div>
+        </div>
+        <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+          <div class="flex items-start gap-3">
+            <i data-lucide="send" class="mt-0.5 h-5 w-5 text-sky-700"></i>
+            <div>
+              <h3 class="text-base font-semibold text-slate-950">Handoff</h3>
+              <p class="mt-2 text-sm leading-6 text-slate-700">Send reviewed output to a spreadsheet, CRM-ready import, document, message, webhook, or next task.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-slate-950 py-16 text-white">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Deployment</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">How deployment, supervision, review, and handoff work</h2>
+      <p class="mt-5 text-base leading-7 text-indigo-100">
+        A useful AI employee has a management system around it. The team defines what the AI teammate can do, where it can look, how it should report uncertainty, and who decides when output is ready.
+      </p>
+    </div>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      <article class="rounded-lg border border-white/15 p-5">
+        <i data-lucide="route" class="h-5 w-5 text-emerald-300"></i>
+        <h3 class="mt-4 text-lg font-semibold">1. Deploy a narrow workflow</h3>
+        <p class="mt-3 text-sm leading-6 text-indigo-100">Choose one repeatable workflow with known inputs, a useful output, and enough examples to show what good work looks like.</p>
+      </article>
+      <article class="rounded-lg border border-white/15 p-5">
+        <i data-lucide="shield-check" class="h-5 w-5 text-sky-300"></i>
+        <h3 class="mt-4 text-lg font-semibold">2. Set boundaries</h3>
+        <p class="mt-3 text-sm leading-6 text-indigo-100">Limit sources, tools, credentials, cadence, data fields, approval gates, and actions that need explicit human permission.</p>
+      </article>
+      <article class="rounded-lg border border-white/15 p-5">
+        <i data-lucide="messages-square" class="h-5 w-5 text-amber-300"></i>
+        <h3 class="mt-4 text-lg font-semibold">3. Review output</h3>
+        <p class="mt-3 text-sm leading-6 text-indigo-100">Inspect sources, check fit, correct mistakes, and turn feedback into better workflow instructions for the next run.</p>
+      </article>
+      <article class="rounded-lg border border-white/15 p-5">
+        <i data-lucide="package-check" class="h-5 w-5 text-violet-300"></i>
+        <h3 class="mt-4 text-lg font-semibold">4. Handoff cleanly</h3>
+        <p class="mt-3 text-sm leading-6 text-indigo-100">Move approved work into the team's system of record with links, fields, reviewer notes, and a next action.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Where to start</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Which teams should start with an AI employee?</h2>
+        <p class="mt-5 text-base leading-7 text-slate-700">
+          Start where the workflow is valuable, repeatable, and currently slowed by manual collection or formatting. The best first use case has a human owner who can review output quickly and explain what needs to improve.
+        </p>
+        <a href="{% url 'proprietary:pricing' %}" class="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-indigo-700 hover:text-indigo-900">
+          Compare Gobii starting points
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </a>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="target" class="h-5 w-5 text-indigo-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Revenue teams</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Use AI employees for prospect research, account monitoring, enrichment, CRM-ready prep, and sales handoffs.</p>
+        </article>
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="users" class="h-5 w-5 text-emerald-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Talent teams</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Map candidate markets, gather role-fit evidence, organize sourcing notes, and prepare recruiter review queues.</p>
+        </article>
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="megaphone" class="h-5 w-5 text-amber-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Marketing teams</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Collect market examples, monitor competitor pages, turn source material into briefs, and prepare first-pass drafts.</p>
+        </article>
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="settings-2" class="h-5 w-5 text-sky-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">Operations teams</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">Watch recurring inputs, reconcile lists, flag exceptions, and send structured summaries to owners.</p>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="product-proof" class="bg-white py-16 scroll-mt-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Real workflow proof</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">One assignment. A visible trail from brief to evidence.</h2>
+      </div>
+      <div>
+        <p class="text-base leading-7 text-slate-700">
+          This anonymized recruiting workflow shows how a Gobii AI teammate clarifies the job, turns the answers into an explicit plan, and returns a source-backed shortlist for human review. Each stage leaves something concrete for the team to inspect.
+        </p>
+        {% for link in ai_employees_live_cluster_links %}
+          <a href="{{ link.url }}" class="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-indigo-700 hover:text-indigo-900">
+            Explore the {{ link.anchor }} workflow
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </a>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="mt-10 grid gap-6 lg:grid-cols-2 lg:items-start">
+      <figure class="overflow-hidden rounded-lg border border-indigo-100 bg-white">
+        <picture>
+          <source
+            type="image/webp"
+            srcset="{% static 'images/ai-employees/assignment-scope-960.webp' %} 960w,
+                    {% static 'images/ai-employees/assignment-scope-1389.webp' %} 1389w"
+            sizes="(max-width: 1023px) 100vw, 560px"
+          >
+          <img
+            src="{% static 'images/ai-employees/assignment-scope.png' %}"
+            alt="Gobii recruiting AI teammate Mae collecting role, seniority, and location requirements before beginning candidate research"
+            class="block h-auto w-full"
+            width="1389"
+            height="1132"
+            loading="lazy"
+            decoding="async"
+          >
+        </picture>
+        <figcaption class="px-5 pb-5 pt-4 text-sm leading-6 text-slate-700">
+          <strong class="font-semibold text-slate-950">1. Scope the assignment.</strong>
+          Mae explains the expected deliverable and confirms the role, seniority, and location before starting research.
+        </figcaption>
+      </figure>
+
+      <figure class="overflow-hidden rounded-lg border border-indigo-100 bg-white">
+        <picture>
+          <source
+            type="image/webp"
+            srcset="{% static 'images/ai-employees/planning-execution-960.webp' %} 960w,
+                    {% static 'images/ai-employees/planning-execution-1700.webp' %} 1700w"
+            sizes="(max-width: 1023px) 100vw, 560px"
+          >
+          <img
+            src="{% static 'images/ai-employees/planning-execution.png' %}"
+            alt="Gobii AI teammate turning confirmed recruiting requirements into a sourcing plan and beginning execution"
+            class="block h-auto w-full"
+            width="1700"
+            height="925"
+            loading="lazy"
+            decoding="async"
+          >
+        </picture>
+        <figcaption class="px-5 pb-5 pt-4 text-sm leading-6 text-slate-700">
+          <strong class="font-semibold text-slate-950">2. Make execution visible.</strong>
+          The planning record preserves the answers, defines the goal, and shows when the AI teammate moves into active work.
+        </figcaption>
+      </figure>
+    </div>
+
+    <figure class="mt-6 overflow-hidden rounded-lg border border-emerald-200 bg-white">
+      <picture>
+        <source
+          type="image/webp"
+          srcset="{% static 'images/ai-employees/source-backed-shortlist-960.webp' %} 960w,
+                  {% static 'images/ai-employees/source-backed-shortlist-1618.webp' %} 1618w"
+          sizes="(max-width: 1279px) 100vw, 1184px"
+        >
+        <img
+          src="{% static 'images/ai-employees/source-backed-shortlist.png' %}"
+          alt="Anonymized Gobii candidate shortlist showing a fit score, source verification, evidence, known gaps, and a recruiter outreach angle"
+          class="block h-auto w-full"
+          width="1618"
+          height="972"
+          loading="lazy"
+          decoding="async"
+        >
+      </picture>
+      <figcaption class="px-5 pb-5 pt-4 text-sm leading-6 text-slate-700">
+        <strong class="font-semibold text-slate-950">3. Return review-ready evidence.</strong>
+        The completed shortlist pairs each fit score with source verification, reasoning, known gaps, and an outreach angle so a recruiter can decide what moves forward.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">FAQ</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">AI employee FAQs</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        These are the practical questions teams ask before they deploy AI employees into workflows with real data, real handoffs, and real review obligations.
+      </p>
+    </div>
+
+    <div class="space-y-3">
+      {% for item in ai_employees_faq_items %}
+        <details class="group rounded-lg border border-slate-200 bg-white p-5"{% if forloop.first %} open{% endif %}>
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-6">
+            <span class="text-base font-semibold text-slate-950">{{ item.question }}</span>
+            <i data-lucide="plus" class="mt-0.5 h-5 w-5 flex-none text-slate-500 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">{{ item.answer }}</p>
+        </details>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="bg-slate-950 py-16 text-white">
+  <div class="mx-auto max-w-4xl px-6 text-center sm:px-8 lg:px-12">
+    <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Ready to try the operating model?</p>
+    <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">Deploy one AI teammate around one concrete workflow</h2>
+    <p class="mx-auto mt-5 max-w-2xl text-base leading-7 text-indigo-100">
+      Start with the work your team already understands: the inputs, the acceptable sources, the review rules, and the handoff. Gobii gives that workflow a persistent AI teammate.
+    </p>
+    <div class="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+      <a href="{% url 'proprietary:pricing' %}" class="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">
+        View pricing
+        <i data-lucide="arrow-right" class="h-4 w-4"></i>
+      </a>
+      <a href="{% url 'pages:solution_sales_ai_sales_agent' %}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-white/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
+        Explore the AI sales agent
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}
