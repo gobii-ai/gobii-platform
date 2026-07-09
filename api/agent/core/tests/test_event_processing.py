@@ -992,9 +992,9 @@ class ContinuationModePromptContextTests(TestCase):
         system_prompt = self._render_system_prompt(is_first_run=False)
 
         self.assertIn("## Communication Style", system_prompt)
-        self.assertIn("clear, specific, direct, and unpadded", system_prompt)
-        self.assertIn("not forced enthusiasm, exaggeration, decorative emoji, or extra check-ins", system_prompt)
-        self.assertIn("preserve their meaning, voice, key terms, and commitments", system_prompt)
+        self.assertIn("warm, natural, direct, and context-aware without padding", system_prompt)
+        self.assertIn("clarity and honesty beat forced friendliness", system_prompt)
+        self.assertIn("preserve the user's meaning, voice, key terms, and commitments", system_prompt)
         self.assertIn("AI-giveaway phrases", system_prompt)
 
 
