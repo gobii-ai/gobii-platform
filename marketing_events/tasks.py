@@ -146,22 +146,6 @@ def _payload_event_name(payload: dict) -> str:
     return str((payload or {}).get("event_name") or "").strip() or "UnknownEvent"
 
 
-def _start_trial_ineligibility_skip_properties(payload: dict) -> dict[str, Any] | None:
-    snapshot = (payload or {}).get("start_trial_eligibility")
-    if not isinstance(snapshot, dict):
-        return None
-
-    if snapshot.get("send_allowed") is not False:
-        return None
-
-    return {
-        "trial_eligibility_decision": snapshot.get("decision"),
-        "trial_eligibility_manual_action": snapshot.get("manual_action"),
-        "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
-        "trial_eligibility_policy_send_allowed": False,
-    }
-
-
 def _complete_registration_ineligibility_skip_properties(
     payload: dict,
 ) -> dict[str, Any] | None:
@@ -374,15 +358,6 @@ def enqueue_marketing_event(self, payload: dict):
 )
 def enqueue_start_trial_marketing_event(self, payload: dict):
     if not settings.GOBII_PROPRIETARY_MODE:
-        return
-    ineligibility_skip_properties = _start_trial_ineligibility_skip_properties(payload)
-    if ineligibility_skip_properties is not None:
-        _track_marketing_skip(
-            payload,
-            reason="trial_eligibility_disallowed",
-            decision_source=((payload or {}).get("start_trial_eligibility") or {}).get("decision_source"),
-            extra_properties=ineligibility_skip_properties,
-        )
         return
     should_send, decision_source = _should_send_subscription_guarded_event(payload)
     if not should_send:
