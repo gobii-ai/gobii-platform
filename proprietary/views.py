@@ -1086,6 +1086,11 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         default_image_url = self.request.build_absolute_uri(static(default_image_path))
 
         seo_title = post["meta"].get("seo_title") or post["meta"].get("title") or slug.replace("-", " ").title()
+        browser_title = (
+            seo_title
+            if str(seo_title).rstrip().endswith((" | Gobii", " - Gobii"))
+            else f"{seo_title} - Gobii"
+        )
         seo_description = (
             post["meta"].get("seo_description")
             or post["meta"].get("description")
@@ -1180,6 +1185,7 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             {
                 "post": post,
                 "seo_title": seo_title,
+                "browser_title": browser_title,
                 "seo_description": seo_description,
                 "canonical_url": canonical_url,
                 "og_image_url": og_image_url,
@@ -1196,6 +1202,8 @@ class BlogSitemap(sitemaps.Sitemap):
     changefreq = 'weekly'
 
     def items(self):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return []
         return get_all_blog_posts()
 
     def location(self, item):

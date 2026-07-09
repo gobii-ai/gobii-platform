@@ -2324,6 +2324,8 @@ class SitemapTests(TestCase):
         self.assertIn("<loc>http://example.com/solutions/recruiting/</loc>", content)
         self.assertIn("<loc>http://example.com/solutions/sales/ai-sales-agent/</loc>", content)
         self.assertIn("<loc>http://example.com/solutions/engineering/</loc>", content)
+        self.assertIn("<loc>http://example.com/blog/best-ai-employees/</loc>", content)
+        self.assertIn("<loc>http://example.com/blog/hire-ai-employees/</loc>", content)
         self.assertNotIn("<loc>http://example.com/solutions/sales/ai-sales-employee/</loc>", content)
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
@@ -2576,6 +2578,8 @@ class SitemapTests(TestCase):
         content = response.content.decode()
         self.assertIn("http://example.com/docs/", content)
         self.assertNotIn("http://example.com/ai-employees/", content)
+        self.assertNotIn("http://example.com/blog/best-ai-employees/", content)
+        self.assertNotIn("http://example.com/blog/hire-ai-employees/", content)
         self.assertNotIn("http://example.com/solutions/", content)
 
 
