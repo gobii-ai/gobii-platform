@@ -2353,8 +2353,16 @@ class SitemapTests(TestCase):
         self.assertContains(response, "webhooks")
         self.assertNotContains(response, "When not to use one")
         self.assertNotContains(response, "Do not use an AI sales agent")
-        self.assertContains(response, "Real Gobii workspace screenshot")
-        self.assertContains(response, "Sample batch metric: 25 qualified prospects")
+        self.assertContains(response, "Fully anonymized Leroy output")
+        self.assertContains(response, "Sample batch metric: 10 role-matched prospects")
+        self.assertContains(response, "Will asked for 10 marketing decision makers")
+        self.assertContains(response, "in a recent run for Will, Leroy")
+        self.assertContains(response, "verify email addresses")
+        self.assertContains(response, "export a CSV")
+        self.assertContains(response, "I think its a lot better than Manus genuinely")
+        self.assertNotContains(response, "Kramer Beverage")
+        self.assertNotContains(response, "Shore Point")
+        self.assertNotContains(response, "Stateside Brands")
         hero_image = soup.find("img", {"src": static("images/solutions/sales-hero-1280.jpg")})
         self.assertIsNotNone(hero_image)
         hero_webp_source = hero_image.find_parent("picture").find("source", {"type": "image/webp"})
@@ -2362,17 +2370,17 @@ class SitemapTests(TestCase):
         self.assertIn("sales-hero-1280.webp", hero_webp_source.get("srcset"))
         proof_image = soup.find(
             "img",
-            {"alt": "Gobii agent workspace showing a completed agent update and always-on status"},
+            {"alt": "Fully anonymized Leroy output example showing source-linked sales leads in a review table"},
         )
         self.assertIsNotNone(proof_image)
         self.assertIn(
-            "newsletter-2026-01-20-watch-your-agents-work-in-real-time-hero.png",
+            "lead-hunter-output-example-960.png",
             proof_image.get("src"),
         )
         proof_webp_source = proof_image.find_parent("picture").find("source", {"type": "image/webp"})
         self.assertIsNotNone(proof_webp_source)
         self.assertIn(
-            "newsletter-2026-01-20-watch-your-agents-work-in-real-time-hero.webp",
+            "lead-hunter-output-example-960.webp",
             proof_webp_source.get("srcset"),
         )
         self.assertNotIn("localhost", page_html)
@@ -2414,7 +2422,7 @@ class SitemapTests(TestCase):
                 "url": "https://gobii.ai/pricing/",
             },
         )
-        self.assertEqual(structured_data["dateModified"], "2026-07-08")
+        self.assertEqual(structured_data["dateModified"], "2026-07-09")
         self.assertNotIn("FAQPage", json_ld_by_type)
 
         pricing_links = soup.find_all("a", href=reverse("proprietary:pricing"))
