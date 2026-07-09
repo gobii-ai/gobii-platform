@@ -186,6 +186,7 @@ SHIRT_REDIRECT_URL = "/?utm_source=shirt&utm_medium=clothing"
 class ShirtRedirectView(ProprietaryModeRequiredMixin, RedirectView):
     url = SHIRT_REDIRECT_URL
     permanent = False
+    query_string = True
 
 
 def _coerce_plan_int(value, default=0):

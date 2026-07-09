@@ -4,12 +4,15 @@ import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import type { ProductAnnouncement } from '../../api/productAnnouncements'
 import { useMarkProductAnnouncementsRead, useProductAnnouncements } from '../../hooks/useProductAnnouncements'
+import { AnalyticsEvent, track } from '../../util/analytics'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentChatButton, AgentChatIconButton, AgentChatMenuItem, joinClassNames } from './uiPrimitives'
 
 type ProductAnnouncementBellProps = {
   variant?: 'sidebar' | 'mobile'
 }
+
+const NOTIFICATION_ITEM_TYPE = 'product_announcement'
 
 function formatPublishedAt(value: string | null): string {
   if (!value) {
@@ -35,6 +38,10 @@ function resolveUnreadLabel(unreadCount: number): string {
   return `Updates, ${unreadCount} unread`
 }
 
+function resolveActionUrlType(value: string): 'internal' | 'external' {
+  return value.startsWith('/') ? 'internal' : 'external'
+}
+
 type AnnouncementPanelProps = {
   announcements: ProductAnnouncement[]
   loading: boolean
@@ -47,7 +54,7 @@ type AnnouncementPanelProps = {
   onBackToList: () => void
   onOpenAnnouncement: (announcement: ProductAnnouncement) => void
   onMarkAllRead: () => void
-  onMarkRead: (announcementId: string) => void
+  onMarkRead: (announcement: ProductAnnouncement) => void
   onAction: (announcement: ProductAnnouncement) => void
 }
 
@@ -174,7 +181,7 @@ function AnnouncementPanel({
                   size="sm"
                   className="product-announcement-panel__read-button"
                   aria-label={`Mark "${announcement.title}" as read`}
-                  onClick={() => onMarkRead(announcement.id)}
+                  onClick={() => onMarkRead(announcement)}
                   disabled={markBusy}
                 >
                   <Check className="product-announcement-panel__read-icon" aria-hidden="true" />
@@ -199,12 +206,37 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
   const announcements = announcementsQuery.data?.announcements ?? []
   const unreadCount = announcementsQuery.data?.unreadCount ?? 0
   const hasUnread = announcementsQuery.data?.hasUnread ?? false
+  const recentLimit = announcementsQuery.data?.recentLimit ?? null
   const label = useMemo(() => resolveUnreadLabel(unreadCount), [unreadCount])
   const markBusy = markReadMutation.isPending
   const selectedAnnouncement = useMemo(
     () => announcements.find((announcement) => announcement.id === selectedAnnouncementId) ?? null,
     [announcements, selectedAnnouncementId],
   )
+  const buildNotificationBellAnalyticsProperties = useCallback(() => ({
+    variant,
+    itemType: NOTIFICATION_ITEM_TYPE,
+    unreadCount,
+    visibleItemCount: announcements.length,
+    recentLimit,
+    hasUnread,
+  }), [announcements.length, hasUnread, recentLimit, unreadCount, variant])
+  const buildNotificationBellItemAnalyticsProperties = useCallback((announcement: ProductAnnouncement) => {
+    const itemIndex = announcements.findIndex((item) => item.id === announcement.id)
+    return {
+      ...buildNotificationBellAnalyticsProperties(),
+      itemId: announcement.id,
+      itemPosition: itemIndex >= 0 ? itemIndex + 1 : null,
+      isUnreadBeforeAction: !announcement.isRead,
+      publishedAt: announcement.publishedAt,
+    }
+  }, [announcements, buildNotificationBellAnalyticsProperties])
+  const trackNotificationBellOpened = useCallback(() => {
+    track(
+      AnalyticsEvent.NOTIFICATION_BELL_OPENED,
+      buildNotificationBellAnalyticsProperties(),
+    )
+  }, [buildNotificationBellAnalyticsProperties])
   useEffect(() => {
     if (!desktopOpen || typeof document === 'undefined') {
       return
@@ -231,23 +263,46 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
     if (unreadCount <= 0) {
       return
     }
+    track(
+      AnalyticsEvent.NOTIFICATION_BELL_MARK_ALL_READ_CLICKED,
+      buildNotificationBellAnalyticsProperties(),
+    )
     markReadMutation.mutate({ all: true })
-  }, [markReadMutation, unreadCount])
+  }, [buildNotificationBellAnalyticsProperties, markReadMutation, unreadCount])
 
-  const handleMarkRead = useCallback((announcementId: string) => {
-    markReadMutation.mutate({ announcementIds: [announcementId] })
-  }, [markReadMutation])
+  const handleMarkRead = useCallback((announcement: ProductAnnouncement) => {
+    track(
+      AnalyticsEvent.NOTIFICATION_BELL_ITEM_MARK_READ_CLICKED,
+      buildNotificationBellItemAnalyticsProperties(announcement),
+    )
+    markReadMutation.mutate({ announcementIds: [announcement.id] })
+  }, [buildNotificationBellItemAnalyticsProperties, markReadMutation])
 
   const handleOpenAnnouncement = useCallback((announcement: ProductAnnouncement) => {
+    track(
+      AnalyticsEvent.NOTIFICATION_BELL_ITEM_OPENED,
+      buildNotificationBellItemAnalyticsProperties(announcement),
+    )
     setSelectedAnnouncementId(announcement.id)
     if (!announcement.isRead) {
       markReadMutation.mutate({ announcementIds: [announcement.id] })
     }
-  }, [markReadMutation])
+  }, [buildNotificationBellItemAnalyticsProperties, markReadMutation])
 
   const handleAction = useCallback((announcement: ProductAnnouncement) => {
     const actionUrl = announcement.actionUrl
-    if (!actionUrl || typeof window === 'undefined') {
+    if (!actionUrl) {
+      return
+    }
+    track(
+      AnalyticsEvent.NOTIFICATION_BELL_ACTION_CLICKED,
+      {
+        ...buildNotificationBellItemAnalyticsProperties(announcement),
+        actionLabel: announcement.actionLabel,
+        actionUrlType: resolveActionUrlType(actionUrl),
+      },
+    )
+    if (typeof window === 'undefined') {
       return
     }
     if (!announcement.isRead) {
@@ -258,7 +313,21 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
       return
     }
     window.open(actionUrl, '_blank', 'noopener,noreferrer')
-  }, [markReadMutation])
+  }, [buildNotificationBellItemAnalyticsProperties, markReadMutation])
+
+  const handleMobileOpen = useCallback(() => {
+    if (!mobileOpen) {
+      trackNotificationBellOpened()
+    }
+    setMobileOpen(true)
+  }, [mobileOpen, trackNotificationBellOpened])
+
+  const handleDesktopOpenChange = useCallback((nextOpen: boolean) => {
+    if (nextOpen && !desktopOpen) {
+      trackNotificationBellOpened()
+    }
+    setDesktopOpen(nextOpen)
+  }, [desktopOpen, trackNotificationBellOpened])
 
   const handleDesktopTriggerPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (!desktopOpen) {
@@ -298,7 +367,7 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
             'product-announcement-bell__trigger--settings',
           )}
           aria-label={label}
-          onClick={() => setMobileOpen(true)}
+          onClick={handleMobileOpen}
         >
           <Bell className="h-4 w-4" aria-hidden="true" />
           {hasUnread ? <span className="product-announcement-bell__dot" aria-hidden="true" /> : null}
@@ -319,7 +388,7 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
   }
 
   return (
-    <DialogTrigger isOpen={desktopOpen} onOpenChange={setDesktopOpen}>
+    <DialogTrigger isOpen={desktopOpen} onOpenChange={handleDesktopOpenChange}>
       <Button
         ref={desktopTriggerRef}
         className={joinClassNames(
