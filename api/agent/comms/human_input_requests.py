@@ -1862,6 +1862,7 @@ def submit_human_input_responses_batch(
     )
     raw_payload: dict[str, Any] = {
         "source": "console_human_input_response_batch" if len(prepared_responses) > 1 else "console_human_input_response",
+        "hide_in_chat": True,
         "human_input_request_ids": [str(prepared.request.id) for prepared in prepared_responses],
         "human_input_responses": [
             {
@@ -2014,6 +2015,7 @@ def dismiss_human_input_request(
     body = f"Dismissed question: {request_obj.question}\nContinue without an answer."
     raw_payload: dict[str, Any] = {
         "source": "console_human_input_dismissed",
+        "hide_in_chat": True,
         "human_input_request_ids": [str(request_obj.id)],
         "human_input_dismissed": True,
         "dismissed_question": request_obj.question,

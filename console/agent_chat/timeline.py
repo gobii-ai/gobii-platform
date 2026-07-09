@@ -40,11 +40,13 @@ from api.models import (
     PersistentAgentMessageAttachment,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    PersistentAgentUserActionEvent,
     ToolFriendlyName,
     parse_web_user_address,
 )
 
 from api.agent.tools.plan import PlanSnapshot, build_plan_snapshot
+from .access import user_can_manage_agent_settings
 from .plan_events import ensure_plan_baseline_event
 
 DEFAULT_PAGE_SIZE = 40
@@ -52,6 +54,13 @@ MAX_PAGE_SIZE = 100
 COLLAPSE_THRESHOLD = 3
 THINKING_COMPLETION_TYPES = (PersistentAgentCompletion.CompletionType.ORCHESTRATOR,)
 HIDE_IN_CHAT_PAYLOAD_KEY = "hide_in_chat"
+MANAGER_ONLY_USER_ACTION_METADATA_KEYS_BY_TYPE = {
+    PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED: frozenset({"secret_names"}),
+    PersistentAgentUserActionEvent.ActionType.SECRETS_REMOVED: frozenset({"secret_names"}),
+    PersistentAgentUserActionEvent.ActionType.CONTACTS_APPROVED: frozenset({"contact_labels"}),
+    PersistentAgentUserActionEvent.ActionType.CONTACTS_DECLINED: frozenset({"contact_labels"}),
+    PersistentAgentUserActionEvent.ActionType.CONTACTS_RESOLVED: frozenset({"contact_labels"}),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +82,7 @@ TimelineDirection = Literal["initial", "older", "newer"]
 @dataclass(slots=True)
 class CursorPayload:
     value: int
-    kind: Literal["message", "step", "thinking", "kanban", "plan"]
+    kind: Literal["message", "step", "thinking", "kanban", "plan", "user_action"]
     identifier: str
 
     def encode(self) -> str:
@@ -118,6 +127,13 @@ class PlanEnvelope:
     sort_key: tuple[int, str, str]
     cursor: CursorPayload
     event: PersistentAgentKanbanEvent
+
+
+@dataclass(slots=True)
+class UserActionEnvelope:
+    sort_key: tuple[int, str, str]
+    cursor: CursorPayload
+    event: PersistentAgentUserActionEvent
 
 
 @dataclass(slots=True)
@@ -538,6 +554,51 @@ def _serialize_thinking(env: ThinkingEnvelope) -> dict:
     }
 
 
+def _viewer_can_see_manager_action_metadata(
+    agent: PersistentAgent,
+    viewer_user,
+) -> bool:
+    if viewer_user is None or not getattr(viewer_user, "is_authenticated", False):
+        return False
+    return user_can_manage_agent_settings(
+        viewer_user,
+        agent,
+        allow_delinquent_personal_chat=True,
+    )
+
+
+def _serialize_user_action_metadata(
+    event: PersistentAgentUserActionEvent,
+    *,
+    viewer_user=None,
+) -> dict:
+    metadata = dict(event.metadata or {})
+    redacted_keys = MANAGER_ONLY_USER_ACTION_METADATA_KEYS_BY_TYPE.get(event.action_type)
+    if redacted_keys and not _viewer_can_see_manager_action_metadata(event.agent, viewer_user):
+        for key in redacted_keys:
+            metadata.pop(key, None)
+    return metadata
+
+
+def _serialize_user_action(env: UserActionEnvelope, *, viewer_user=None) -> dict:
+    event = env.event
+    actor = event.actor_user
+    actor_name = _build_user_display_name(actor) if actor else None
+    return {
+        "kind": "user_action",
+        "cursor": env.cursor.encode(),
+        "timestamp": _format_timestamp(event.occurred_at),
+        "action": {
+            "id": str(event.id),
+            "actionType": event.action_type,
+            "count": event.count,
+            "actorUserId": event.actor_user_id,
+            "actorName": actor_name,
+            "metadata": _serialize_user_action_metadata(event, viewer_user=viewer_user),
+        },
+    }
+
+
 _FILE_REF_RE = re.compile(r"^\$\[(.+)\]$")
 _INLINE_IMG_SRC_RE = re.compile(r"<img[^>]+src=['\"]([^'\"]+)['\"]", re.IGNORECASE)
 _INLINE_VIDEO_SRC_RE = re.compile(r"<(?:video|source)[^>]+src=['\"]([^'\"]+)['\"]", re.IGNORECASE)
@@ -799,6 +860,46 @@ def _plan_event_queryset(
     return list(qs[:limit])
 
 
+def _user_action_event_queryset(
+    agent: PersistentAgent,
+    direction: TimelineDirection,
+    cursor: CursorPayload | None,
+) -> Sequence[PersistentAgentUserActionEvent]:
+    limit = MAX_PAGE_SIZE * 3
+    qs = (
+        PersistentAgentUserActionEvent.objects.filter(agent=agent)
+        .select_related("actor_user", "agent")
+        .order_by("-occurred_at", "-id")
+    )
+    if direction == "older" and cursor is not None:
+        dt = _dt_from_cursor(cursor)
+        if cursor.kind == "user_action":
+            try:
+                cursor_uuid = uuid.UUID(cursor.identifier)
+                qs = qs.filter(
+                    Q(occurred_at__lt=dt)
+                    | Q(occurred_at=dt, id__lt=cursor_uuid)
+                )
+            except (TypeError, ValueError):
+                qs = qs.filter(occurred_at__lte=dt)
+        else:
+            qs = qs.filter(occurred_at__lt=dt)
+    elif direction == "newer" and cursor is not None:
+        dt = _dt_from_cursor(cursor)
+        if cursor.kind == "user_action":
+            try:
+                cursor_uuid = uuid.UUID(cursor.identifier)
+                qs = qs.filter(
+                    Q(occurred_at__gt=dt)
+                    | Q(occurred_at=dt, id__gt=cursor_uuid)
+                )
+            except (TypeError, ValueError):
+                qs = qs.filter(occurred_at__gt=dt)
+        else:
+            qs = qs.filter(occurred_at__gte=dt)
+    return list(qs[:limit])
+
+
 def _dt_from_cursor(cursor: CursorPayload) -> datetime:
     micros = cursor.value
     return datetime.fromtimestamp(micros / 1_000_000, tz=dt_timezone.utc)
@@ -877,15 +978,34 @@ def _envelop_plan_events(events: Iterable[PersistentAgentKanbanEvent]) -> list[P
     return envelopes
 
 
+def _envelop_user_action_events(events: Iterable[PersistentAgentUserActionEvent]) -> list[UserActionEnvelope]:
+    envelopes: list[UserActionEnvelope] = []
+    for event in events:
+        sort_value = _microsecond_epoch(event.occurred_at)
+        cursor = CursorPayload(
+            value=sort_value,
+            kind="user_action",
+            identifier=str(event.id),
+        )
+        envelopes.append(
+            UserActionEnvelope(
+                sort_key=(sort_value, "user_action", str(event.id)),
+                cursor=cursor,
+                event=event,
+            )
+        )
+    return envelopes
+
+
 def _filter_by_direction(
-    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope],
+    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope],
     direction: TimelineDirection,
     cursor: CursorPayload | None,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope]:
     if not cursor or direction == "initial":
         return list(envelopes)
     pivot = (cursor.value, cursor.kind, cursor.identifier)
-    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope] = []
+    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope] = []
     for env in envelopes:
         key = env.sort_key
         if direction == "older" and key < pivot:
@@ -896,10 +1016,10 @@ def _filter_by_direction(
 
 
 def _truncate_for_direction(
-    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope],
+    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope],
     direction: TimelineDirection,
     limit: int,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope]:
     if not envelopes:
         return []
     if direction == "older":
@@ -978,7 +1098,22 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
         except Exception:
             pass
 
-    return message_exists or step_exists or completion_exists or plan_event_exists
+    user_action_exists = PersistentAgentUserActionEvent.objects.filter(
+        agent=agent,
+        occurred_at__lt=dt,
+    ).exists()
+    if cursor.kind == "user_action":
+        try:
+            cursor_uuid = uuid.UUID(cursor.identifier)
+            user_action_exists = user_action_exists or PersistentAgentUserActionEvent.objects.filter(
+                agent=agent,
+                occurred_at=dt,
+                id__lt=cursor_uuid,
+            ).exists()
+        except (TypeError, ValueError):
+            pass
+
+    return message_exists or step_exists or completion_exists or plan_event_exists or user_action_exists
 
 
 def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> bool:
@@ -1050,7 +1185,27 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
         except Exception:
             pass
 
-    return message_exists or step_exists or completion_exists or plan_event_exists
+    if cursor.kind == "user_action":
+        user_action_exists = PersistentAgentUserActionEvent.objects.filter(
+            agent=agent,
+            occurred_at__gt=dt,
+        ).exists()
+        try:
+            cursor_uuid = uuid.UUID(cursor.identifier)
+            user_action_exists = user_action_exists or PersistentAgentUserActionEvent.objects.filter(
+                agent=agent,
+                occurred_at=dt,
+                id__gt=cursor_uuid,
+            ).exists()
+        except (TypeError, ValueError):
+            pass
+    else:
+        user_action_exists = PersistentAgentUserActionEvent.objects.filter(
+            agent=agent,
+            occurred_at__gte=dt,
+        ).exists()
+
+    return message_exists or step_exists or completion_exists or plan_event_exists or user_action_exists
 
 
 WEB_TASK_ACTIVE_STATUSES = (
@@ -1276,6 +1431,7 @@ def fetch_timeline_window(
     cursor: str | None = None,
     direction: TimelineDirection = "initial",
     limit: int = DEFAULT_PAGE_SIZE,
+    viewer_user=None,
 ) -> TimelineWindow:
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     cursor_payload = CursorPayload.decode(cursor)
@@ -1284,13 +1440,14 @@ def fetch_timeline_window(
     step_envelopes = _envelop_steps(_steps_queryset(agent, direction, cursor_payload))
     thinking_envelopes = _envelop_thinking(_thinking_queryset(agent, direction, cursor_payload))
     plan_envelopes = _envelop_plan_events(_plan_event_queryset(agent, direction, cursor_payload))
+    user_action_envelopes = _envelop_user_action_events(_user_action_event_queryset(agent, direction, cursor_payload))
     if direction == "initial" and not plan_envelopes:
         baseline_event = ensure_plan_baseline_event(agent)
         if baseline_event:
             plan_envelopes = _envelop_plan_events([baseline_event])
 
-    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope] = sorted(
-        [*message_envelopes, *step_envelopes, *thinking_envelopes, *plan_envelopes],
+    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope] = sorted(
+        [*message_envelopes, *step_envelopes, *thinking_envelopes, *plan_envelopes, *user_action_envelopes],
         key=lambda env: env.sort_key,
     )
 
@@ -1321,6 +1478,8 @@ def fetch_timeline_window(
             timeline_events.append(_serialize_thinking(env))
         elif isinstance(env, PlanEnvelope):
             timeline_events.append(serialize_persisted_plan_event(env, agent_name))
+        elif isinstance(env, UserActionEnvelope):
+            timeline_events.append(_serialize_user_action(env, viewer_user=viewer_user))
         else:
             timeline_events.append(_serialize_message(env, user_lookup))
     if cluster_buffer:
@@ -1350,6 +1509,11 @@ def fetch_timeline_window(
 def serialize_message_event(message: PersistentAgentMessage) -> dict:
     envelope = _envelop_messages([message])[0]
     return _serialize_message(envelope)
+
+
+def serialize_user_action_event(event: PersistentAgentUserActionEvent, *, viewer_user=None) -> dict:
+    envelope = _envelop_user_action_events([event])[0]
+    return _serialize_user_action(envelope, viewer_user=viewer_user)
 
 
 def serialize_thinking_event(completion: PersistentAgentCompletion) -> dict | None:

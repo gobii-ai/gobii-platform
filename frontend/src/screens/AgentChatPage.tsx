@@ -3637,9 +3637,12 @@ export function AgentChatPage({
       make_global: makeGlobal,
     })
     replacePendingActionState(activeAgentId, result.pendingActionRequests)
+    if (result.event) {
+      receiveRealtimeEvent(result.event)
+    }
     void queryClient.invalidateQueries({ queryKey: ['agent-settings', activeAgentId], exact: true })
     void queryClient.invalidateQueries({ queryKey: ['agent-quick-settings', activeAgentId], exact: true })
-  }, [activeAgentId, queryClient, replacePendingActionState])
+  }, [activeAgentId, queryClient, receiveRealtimeEvent, replacePendingActionState])
 
   const handleRemoveRequestedSecrets = useCallback(async (secretIds: string[]) => {
     if (!activeAgentId) {
@@ -3647,7 +3650,10 @@ export function AgentChatPage({
     }
     const result = await removeRequestedSecrets(activeAgentId, { secret_ids: secretIds })
     replacePendingActionState(activeAgentId, result.pendingActionRequests)
-  }, [activeAgentId, replacePendingActionState])
+    if (result.event) {
+      receiveRealtimeEvent(result.event)
+    }
+  }, [activeAgentId, receiveRealtimeEvent, replacePendingActionState])
 
   const handleResolveContactRequests = useCallback(async (
     responses: Array<{
@@ -3671,8 +3677,11 @@ export function AgentChatPage({
       })),
     })
     replacePendingActionState(activeAgentId, result.pendingActionRequests)
+    if (result.event) {
+      receiveRealtimeEvent(result.event)
+    }
     return result
-  }, [activeAgentId, replacePendingActionState])
+  }, [activeAgentId, receiveRealtimeEvent, replacePendingActionState])
 
   useEffect(() => {
     if (!isNewAgent || !spawnFlow || !requiresTrialPlanSelection) {

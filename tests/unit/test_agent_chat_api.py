@@ -53,6 +53,7 @@ from api.models import (
     PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    PersistentAgentUserActionEvent,
     PersistentAgentWebSession,
     MCPServerConfig,
     Organization,
@@ -818,6 +819,207 @@ class AgentChatAPITests(TestCase):
         self.assertIsInstance(payload.get("agent_next_scheduled_at"), str)
         snapshot = payload.get("processing_snapshot") or {}
         self.assertIsNone(snapshot.get("nextScheduledAt"))
+
+    @tag("batch_agent_chat")
+    def test_timeline_endpoint_returns_user_action_events(self):
+        action_event = PersistentAgentUserActionEvent.objects.create(
+            agent=self.agent,
+            actor_user=self.user,
+            action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED,
+            count=1,
+            metadata={"secret_names": ["GitHub token"]},
+            occurred_at=timezone.now() + timedelta(seconds=5),
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/?limit=1")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["events"][0]["kind"], "user_action")
+        self.assertEqual(payload["events"][0]["cursor"], f"{payload['events'][0]['cursor'].split(':', 2)[0]}:user_action:{action_event.id}")
+        action = payload["events"][0]["action"]
+        self.assertEqual(action["actionType"], "secrets_saved")
+        self.assertNotIn("summary", action)
+        self.assertNotIn("detail", action)
+        self.assertEqual(action["count"], 1)
+        self.assertEqual(action["actorUserId"], self.user.id)
+        self.assertEqual(action["actorName"], self.user.email)
+        self.assertEqual(action["metadata"], {"secret_names": ["GitHub token"]})
+
+    @tag("batch_agent_chat")
+    def test_timeline_redacts_manager_only_user_action_metadata_for_collaborator(self):
+        collaborator = get_user_model().objects.create_user(
+            username="timeline-action-collaborator",
+            email="timeline-action-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(
+            agent=self.agent,
+            user=collaborator,
+            invited_by=self.user,
+        )
+        PersistentAgentUserActionEvent.objects.create(
+            agent=self.agent,
+            actor_user=self.user,
+            action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED,
+            count=1,
+            metadata={"secret_names": ["GitHub token"], "scope": "agent"},
+            occurred_at=timezone.now() + timedelta(seconds=5),
+        )
+        PersistentAgentUserActionEvent.objects.create(
+            agent=self.agent,
+            actor_user=self.user,
+            action_type=PersistentAgentUserActionEvent.ActionType.CONTACTS_APPROVED,
+            count=1,
+            metadata={
+                "approved_count": 1,
+                "declined_count": 0,
+                "skipped_count": 0,
+                "contact_labels": ["approver@example.com"],
+            },
+            occurred_at=timezone.now() + timedelta(seconds=6),
+        )
+
+        collaborator_client = Client()
+        collaborator_client.force_login(collaborator)
+        response = collaborator_client.get(f"/console/api/agents/{self.agent.id}/timeline/?limit=10")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        actions = {
+            event["action"]["actionType"]: event["action"]
+            for event in payload["events"]
+            if event.get("kind") == "user_action"
+        }
+        self.assertEqual(actions["secrets_saved"]["metadata"], {"scope": "agent"})
+        contact_metadata = actions["contacts_approved"]["metadata"]
+        self.assertEqual(contact_metadata["approved_count"], 1)
+        self.assertNotIn("contact_labels", contact_metadata)
+
+    @tag("batch_agent_chat")
+    def test_timeline_newer_from_same_timestamp_message_includes_user_action(self):
+        shared_timestamp = timezone.now() + timedelta(seconds=10)
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            conversation=self.conversation,
+            body="Cursor message at shared timestamp",
+            owner_agent=self.agent,
+            timestamp=shared_timestamp,
+        )
+        action_event = PersistentAgentUserActionEvent.objects.create(
+            agent=self.agent,
+            actor_user=self.user,
+            action_type=PersistentAgentUserActionEvent.ActionType.SECRETS_SAVED,
+            count=1,
+            metadata={"secret_names": ["GitHub token"]},
+            occurred_at=shared_timestamp,
+        )
+
+        initial_window = fetch_timeline_window(self.agent, limit=10, viewer_user=self.user)
+        message_cursor = next(
+            event["cursor"]
+            for event in initial_window.events
+            if event.get("kind") == "message"
+            and event["message"].get("id") == str(message.id)
+        )
+
+        newer_window = fetch_timeline_window(
+            self.agent,
+            cursor=message_cursor,
+            direction="newer",
+            limit=1,
+            viewer_user=self.user,
+        )
+
+        self.assertEqual(len(newer_window.events), 1)
+        self.assertEqual(newer_window.events[0]["kind"], "user_action")
+        self.assertEqual(newer_window.events[0]["action"]["id"], str(action_event.id))
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.process_agent_events_task.delay")
+    def test_requested_secret_fulfill_returns_user_action_without_secret_value(self, mock_delay):
+        requested_secret = PersistentAgentSecret(
+            agent=self.agent,
+            name="GitHub token",
+            description="Used for GitHub",
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://github.com",
+            requested=True,
+        )
+        requested_secret.key = "github_token"
+        requested_secret.encrypted_value = b""
+        requested_secret.save()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/requested-secrets/fulfill/",
+                data=json.dumps({"values": {str(requested_secret.id): "ghp_secret_value"}}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["event"]["kind"], "user_action")
+        action = payload["event"]["action"]
+        self.assertEqual(action["actionType"], "secrets_saved")
+        self.assertNotIn("summary", action)
+        self.assertNotIn("detail", action)
+        self.assertEqual(action["metadata"]["secret_names"], ["GitHub token"])
+        self.assertNotIn("ghp_secret_value", json.dumps(action))
+        requested_secret.refresh_from_db()
+        self.assertFalse(requested_secret.requested)
+        mock_delay.assert_called_once_with(str(self.agent.pk))
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.process_agent_events_task.delay")
+    def test_contact_request_resolve_returns_bundled_user_action(self, mock_delay):
+        first = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="first@example.com",
+            name="First Contact",
+            reason="Need approval",
+            purpose="Approve contract",
+        )
+        second = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="second@example.com",
+            name="Second Contact",
+            reason="Need review",
+            purpose="Review contract",
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/contact-requests/resolve/",
+                data=json.dumps(
+                    {
+                        "responses": [
+                            {"request_id": str(first.id), "decision": "approve"},
+                            {"request_id": str(second.id), "decision": "decline"},
+                        ]
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["event"]["kind"], "user_action")
+        action = payload["event"]["action"]
+        self.assertEqual(action["actionType"], "contacts_resolved")
+        self.assertNotIn("summary", action)
+        self.assertNotIn("detail", action)
+        self.assertEqual(action["count"], 2)
+        self.assertEqual(action["metadata"]["approved_count"], 1)
+        self.assertEqual(action["metadata"]["declined_count"], 1)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.status, CommsAllowlistRequest.RequestStatus.APPROVED)
+        self.assertEqual(second.status, CommsAllowlistRequest.RequestStatus.REJECTED)
+        mock_delay.assert_called_once_with(str(self.agent.pk))
 
     @tag("batch_agent_chat")
     def test_timeline_includes_pending_action_requests_for_manager(self):

@@ -188,6 +188,14 @@ from console.agent_chat.timeline import (
     serialize_agent_schedule,
     serialize_message_event,
     serialize_processing_snapshot,
+    serialize_user_action_event,
+)
+from console.agent_chat.user_actions import (
+    record_contact_requests_resolved,
+    record_human_input_answered,
+    record_human_input_dismissed,
+    record_requested_secrets_removed,
+    record_requested_secrets_saved,
 )
 from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_timeline_suggestions
 from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
@@ -350,6 +358,14 @@ def _pending_action_payload(agent: PersistentAgent, viewer_user) -> dict[str, An
         "pending_human_input_requests": get_legacy_pending_human_input_requests(pending_action_requests),
         "pending_action_requests": pending_action_requests,
     }
+
+
+def _user_action_event_payload(action_event, viewer_user) -> dict[str, Any]:
+    return (
+        {"event": serialize_user_action_event(action_event, viewer_user=viewer_user)}
+        if action_event
+        else {}
+    )
 
 
 def _emit_pending_action_requests_update_on_commit(agent: PersistentAgent) -> None:
@@ -3683,6 +3699,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             cursor=cursor,
             direction=direction,
             limit=limit,
+            viewer_user=request.user,
         )
         payload = {
             "events": window.events,
@@ -3766,7 +3783,7 @@ class AgentHumanInputRequestResponseAPIView(LoginRequiredMixin, View):
             )
 
         try:
-            message = submit_human_input_response(
+            _message = submit_human_input_response(
                 human_input_request,
                 selected_option_key=selected_option_key,
                 free_text=free_text,
@@ -3774,10 +3791,17 @@ class AgentHumanInputRequestResponseAPIView(LoginRequiredMixin, View):
             )
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
+        human_input_request.refresh_from_db()
+        action_event = record_human_input_answered(
+            agent=agent,
+            actor_user=request.user,
+            request_ids=[str(human_input_request.id)],
+            responses=[human_input_request],
+        )
 
         return JsonResponse(
             {
-                "event": serialize_message_event(message),
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             },
             status=201,
@@ -3826,16 +3850,18 @@ class AgentHumanInputRequestDismissAPIView(LoginRequiredMixin, View):
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
 
+        action_event = record_human_input_dismissed(
+            agent=agent,
+            actor_user=request.user,
+            request_id=str(human_input_request.id),
+        )
         payload = _pending_action_payload(agent, request.user)
-        if message is None:
-            return JsonResponse(payload, status=200)
-
         return JsonResponse(
             {
-                "event": serialize_message_event(message),
+                **_user_action_event_payload(action_event, request.user),
                 **payload,
             },
-            status=201,
+            status=201 if message else 200,
         )
 
 
@@ -3878,17 +3904,35 @@ class AgentHumanInputRequestBatchResponseAPIView(LoginRequiredMixin, View):
             )
 
         try:
-            message = submit_human_input_responses_batch(
+            _message = submit_human_input_responses_batch(
                 agent,
                 normalized_responses,
                 actor_user_id=request.user.id,
             )
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
+        request_ids = [response["request_id"] for response in normalized_responses]
+        answered_requests = list(
+            PersistentAgentHumanInputRequest.objects.filter(
+                agent=agent,
+                id__in=request_ids,
+            )
+        )
+        answered_requests_by_id = {str(request_obj.id): request_obj for request_obj in answered_requests}
+        action_event = record_human_input_answered(
+            agent=agent,
+            actor_user=request.user,
+            request_ids=request_ids,
+            responses=[
+                answered_requests_by_id[request_id]
+                for request_id in request_ids
+                if request_id in answered_requests_by_id
+            ],
+        )
 
         return JsonResponse(
             {
-                "event": serialize_message_event(message),
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             },
             status=201,
@@ -4037,6 +4081,8 @@ class AgentRequestedSecretsFulfillAPIView(ApiLoginRequiredMixin, View):
             if global_errors:
                 return JsonResponse({"errors": global_errors}, status=400)
 
+        secret_labels = [secret.name for secret in requested_secrets]
+        action_event = None
         try:
             with transaction.atomic():
                 updated_count = 0
@@ -4073,6 +4119,12 @@ class AgentRequestedSecretsFulfillAPIView(ApiLoginRequiredMixin, View):
                             "secret_types": sorted(provided_secret_types),
                         },
                     )
+                    action_event = record_requested_secrets_saved(
+                        agent=agent,
+                        actor_user=request.user,
+                        secret_labels=secret_labels,
+                        make_global=should_make_global,
+                    )
         except ValidationError as exc:
             return JsonResponse({"errors": {"__all__": [_format_validation_error(exc)]}}, status=400)
         except IntegrityError:
@@ -4085,6 +4137,7 @@ class AgentRequestedSecretsFulfillAPIView(ApiLoginRequiredMixin, View):
             {
                 "message": f"Saved {len(requested_secrets)} requested secret value(s).",
                 "saved_count": len(requested_secrets),
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             }
         )
@@ -4114,19 +4167,28 @@ class AgentRequestedSecretsRemoveAPIView(ApiLoginRequiredMixin, View):
         if not secret_ids:
             return JsonResponse({"error": "Provide a non-empty secret_ids array."}, status=400)
 
+        action_event = None
         with transaction.atomic():
-            requested_secrets = PersistentAgentSecret.objects.filter(
+            requested_secrets = list(PersistentAgentSecret.objects.filter(
                 agent=agent,
                 requested=True,
                 id__in=secret_ids,
-            )
-            removed_count = requested_secrets.count()
-            requested_secrets.delete()
+            ))
+            removed_count = len(requested_secrets)
+            secret_labels = [secret.name for secret in requested_secrets]
+            PersistentAgentSecret.objects.filter(id__in=[secret.id for secret in requested_secrets]).delete()
+            if removed_count:
+                action_event = record_requested_secrets_removed(
+                    agent=agent,
+                    actor_user=request.user,
+                    secret_labels=secret_labels,
+                )
 
         return JsonResponse(
             {
                 "message": f"Removed {removed_count} requested secret(s).",
                 "removed_count": removed_count,
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             }
         )
@@ -4237,7 +4299,9 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                 rejected_count = 0
                 skipped_count = 0
                 approved_addresses: list[str] = []
+                resolved_contact_labels: list[str] = []
                 approval_capacity: int | None = None
+                action_event = None
                 now = timezone.now()
                 if any(response["decision"] == "approve" for response in normalized_responses):
                     cap = get_user_max_contacts_per_agent(
@@ -4395,12 +4459,15 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                         if request_obj.channel == CommsChannel.SMS:
                             approved_sms_events.append((request_obj, result))
                         approved_count += 1
-                        approved_addresses.append(request_obj.name or request_obj.address)
+                        contact_label = request_obj.name or request_obj.address
+                        approved_addresses.append(contact_label)
+                        resolved_contact_labels.append(contact_label)
                     else:
                         request_obj.status = CommsAllowlistRequest.RequestStatus.REJECTED
                         request_obj.responded_at = now
                         requests_to_update.append(request_obj)
                         rejected_count += 1
+                        resolved_contact_labels.append(request_obj.name or request_obj.address)
 
                 if new_entries:
                     CommsAllowlistEntry.objects.bulk_create(new_entries, batch_size=500)
@@ -4483,6 +4550,14 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                             "invitations_sent": 0,
                         },
                     )
+                action_event = record_contact_requests_resolved(
+                    agent=agent,
+                    actor_user=request.user,
+                    approved_count=approved_count,
+                    declined_count=rejected_count,
+                    skipped_count=skipped_count,
+                    contact_labels=resolved_contact_labels,
+                )
         except ValidationError as exc:
             return JsonResponse({"errors": {"__all__": [_format_validation_error(exc)]}}, status=400)
         except ValueError as exc:
@@ -4500,6 +4575,7 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                 "approved_count": approved_count,
                 "rejected_count": rejected_count,
                 "skipped_count": skipped_count,
+                **_user_action_event_payload(action_event, request.user),
                 **_pending_action_payload(agent, request.user),
             }
         )

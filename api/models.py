@@ -7835,6 +7835,46 @@ class PersistentAgentKanbanEventChange(models.Model):
         return f"KanbanEventChange<{self.action}:{self.card_id}>"
 
 
+class PersistentAgentUserActionEvent(models.Model):
+
+    class ActionType(models.TextChoices):
+        HUMAN_INPUT_ANSWERED = "human_input_answered", "Human Input Answered"
+        HUMAN_INPUT_DISMISSED = "human_input_dismissed", "Human Input Dismissed"
+        SECRETS_SAVED = "secrets_saved", "Secrets Saved"
+        SECRETS_REMOVED = "secrets_removed", "Secrets Removed"
+        CONTACTS_APPROVED = "contacts_approved", "Contacts Approved"
+        CONTACTS_DECLINED = "contacts_declined", "Contacts Declined"
+        CONTACTS_RESOLVED = "contacts_resolved", "Contacts Resolved"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="user_action_events",
+    )
+    actor_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="persistent_agent_action_events",
+    )
+    action_type = models.CharField(max_length=64, choices=ActionType.choices)
+    count = models.PositiveIntegerField(default=1)
+    metadata = models.JSONField(default=dict, blank=True)
+    occurred_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-occurred_at", "-id"]
+        indexes = [
+            models.Index(fields=["agent", "-occurred_at"], name="pa_action_agent_recent_idx"),
+            models.Index(fields=["agent", "action_type", "-occurred_at"], name="pa_action_agent_type_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - simple display helper
+        return f"UserActionEvent<{self.agent_id}:{self.action_type}>"
+
+
 class PersistentAgentPlanDeliverable(models.Model):
 
     class Kind(models.TextChoices):

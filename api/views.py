@@ -877,7 +877,13 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             raise DRFValidationError({'limit': ['limit must be an integer']})
         limit = max(1, min(limit, TIMELINE_MAX_PAGE_SIZE))
 
-        window = fetch_timeline_window(agent, cursor=cursor, direction=direction, limit=limit)
+        window = fetch_timeline_window(
+            agent,
+            cursor=cursor,
+            direction=direction,
+            limit=limit,
+            viewer_user=request.user,
+        )
         payload = {
             'events': window.events,
             'oldest_cursor': window.oldest_cursor,

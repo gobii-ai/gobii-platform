@@ -37,6 +37,7 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentUserActionEvent,
     UserPhoneNumber,
     build_web_agent_address,
     build_web_user_address,
@@ -1982,13 +1983,36 @@ class HumanInputRequestApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         payload = response.json()
-        self.assertEqual(payload["event"]["kind"], "message")
-        self.assertEqual(payload["event"]["message"]["bodyText"], "Ship it")
+        self.assertEqual(payload["event"]["kind"], "user_action")
+        self.assertEqual(payload["event"]["action"]["actionType"], "human_input_answered")
+        self.assertNotIn("summary", payload["event"]["action"])
+        self.assertNotIn("detail", payload["event"]["action"])
+        self.assertEqual(
+            payload["event"]["action"]["metadata"]["responses"],
+            [
+                {
+                    "request_id": str(self.request_obj.id),
+                    "question": "What should I do next?",
+                    "answer": "Ship it",
+                    "answer_type": "selected_option",
+                    "selected_option_key": "ship",
+                }
+            ],
+        )
         self.assertEqual(payload["pending_human_input_requests"], [])
 
         self.request_obj.refresh_from_db()
         self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(self.request_obj.selected_option_key, "ship")
+        self.assertIsNotNone(self.request_obj.raw_reply_message_id)
+        self.assertTrue(self.request_obj.raw_reply_message.raw_payload["hide_in_chat"])
+        self.assertTrue(
+            PersistentAgentUserActionEvent.objects.filter(
+                agent=self.agent,
+                action_type=PersistentAgentUserActionEvent.ActionType.HUMAN_INPUT_ANSWERED,
+                count=1,
+            ).exists()
+        )
 
     def test_response_endpoint_rejects_expired_request(self):
         self.request_obj.expires_at = timezone.now() - timedelta(seconds=1)
@@ -2024,7 +2048,8 @@ class HumanInputRequestApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertNotIn("event", payload)
+        self.assertEqual(payload["event"]["kind"], "user_action")
+        self.assertEqual(payload["event"]["action"]["actionType"], "human_input_dismissed")
         self.assertEqual(payload["pending_human_input_requests"], [])
         self.assertEqual(payload["pending_action_requests"], [])
 
@@ -2056,11 +2081,8 @@ class HumanInputRequestApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         payload = response.json()
-        self.assertEqual(payload["event"]["kind"], "message")
-        self.assertEqual(
-            payload["event"]["message"]["bodyText"],
-            "Dismissed question: What should I do next?\nContinue without an answer.",
-        )
+        self.assertEqual(payload["event"]["kind"], "user_action")
+        self.assertEqual(payload["event"]["action"]["actionType"], "human_input_dismissed")
         self.assertEqual(payload["pending_human_input_requests"], [])
         self.assertEqual(payload["pending_action_requests"], [])
 
@@ -2075,6 +2097,7 @@ class HumanInputRequestApiTests(TestCase):
             PersistentAgentHumanInputRequest.ResolutionSource.DIRECT,
         )
         self.assertTrue(self.request_obj.raw_reply_message_id)
+        self.assertTrue(self.request_obj.raw_reply_message.raw_payload["hide_in_chat"])
         self.assertIsNotNone(self.request_obj.resolved_at)
         self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
         mock_delay.assert_called_once_with(
@@ -2118,6 +2141,7 @@ class HumanInputRequestApiTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["event"]["kind"], "user_action")
         self.request_obj.refresh_from_db()
         self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.CANCELLED)
         self.assertIsNone(self.request_obj.raw_reply_message_id)
@@ -2175,14 +2199,29 @@ class HumanInputRequestApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         payload = response.json()
-        self.assertEqual(payload["event"]["kind"], "message")
-        self.assertEqual(payload["event"]["message"]["channel"], CommsChannel.WEB)
+        self.assertEqual(payload["event"]["kind"], "user_action")
+        self.assertEqual(payload["event"]["action"]["actionType"], "human_input_answered")
+        self.assertNotIn("summary", payload["event"]["action"])
+        self.assertNotIn("detail", payload["event"]["action"])
+        self.assertEqual(payload["event"]["action"]["count"], 2)
         self.assertEqual(
-            payload["event"]["message"]["bodyText"],
-            "Question: What should I do first?\n"
-            "Answer: Ship it\n\n"
-            "Question: What should I do second?\n"
-            "Answer: Follow up with a summary.",
+            payload["event"]["action"]["metadata"]["responses"],
+            [
+                {
+                    "request_id": str(first_request.id),
+                    "question": "What should I do first?",
+                    "answer": "Ship it",
+                    "answer_type": "selected_option",
+                    "selected_option_key": "ship",
+                },
+                {
+                    "request_id": str(second_request.id),
+                    "question": "What should I do second?",
+                    "answer": "Follow up with a summary.",
+                    "answer_type": "free_text",
+                    "selected_option_key": None,
+                },
+            ],
         )
         self.assertEqual(len(payload["pending_human_input_requests"]), 1)
         self.assertEqual(payload["pending_human_input_requests"][0]["id"], str(self.request_obj.id))
@@ -2195,6 +2234,15 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(second_request.free_text, "Follow up with a summary.")
         self.assertEqual(first_request.raw_reply_message_id, second_request.raw_reply_message_id)
         reply_message = PersistentAgentMessage.objects.get(id=first_request.raw_reply_message_id)
+        self.assertTrue(reply_message.raw_payload["hide_in_chat"])
+        self.assertEqual(reply_message.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(
+            reply_message.body,
+            "Question: What should I do first?\n"
+            "Answer: Ship it\n\n"
+            "Question: What should I do second?\n"
+            "Answer: Follow up with a summary.",
+        )
         self.assertEqual(reply_message.conversation.channel, CommsChannel.WEB)
         self.assertEqual(reply_message.conversation.address, self.user_address)
         self.assertEqual(reply_message.from_endpoint.address, self.user_address)
@@ -2266,7 +2314,9 @@ class HumanInputRequestApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         payload = response.json()
-        self.assertEqual(payload["event"]["message"]["channel"], CommsChannel.WEB)
+        self.assertEqual(payload["event"]["kind"], "user_action")
+        self.assertEqual(payload["event"]["action"]["actionType"], "human_input_answered")
+        self.assertEqual(payload["event"]["action"]["count"], 2)
 
         first_request.refresh_from_db()
         second_request.refresh_from_db()

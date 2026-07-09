@@ -3154,6 +3154,105 @@
     color: #1e293b;
     border-color: rgba(199, 210, 254, 0.5);
 }
+.user-action-card {
+    display: grid;
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    align-items: start;
+    gap: 0.75rem;
+    width: min(85%, 54rem);
+    min-width: 0;
+}
+.user-action-card__icon {
+    display: grid;
+    place-items: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    margin-top: 0.1rem;
+    border-radius: 0.75rem;
+    background: #eef2ff;
+    color: #6366f1;
+}
+.user-action-card__body,
+.user-action-card__title {
+    min-width: 0;
+}
+.user-action-card__header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    min-width: 0;
+}
+.user-action-card__title {
+    overflow-wrap: anywhere;
+    color: #6366f1;
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.4;
+}
+.user-action-card__detail {
+    margin: 0.15rem 0 0;
+    overflow-wrap: anywhere;
+    color: #334155;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+}
+.user-action-card__qa-list {
+    display: grid;
+    gap: 0.65rem;
+    margin-top: 0.45rem;
+}
+.user-action-card__qa {
+    display: grid;
+    gap: 0.35rem;
+    padding-left: 0.65rem;
+    border-left: 2px solid rgba(99, 102, 241, 0.26);
+}
+.user-action-card__qa-row {
+    display: grid;
+    gap: 0.1rem;
+}
+.user-action-card__qa-label {
+    color: #64748b;
+    font-size: 0.625rem;
+    font-weight: 650;
+    letter-spacing: 0;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+.user-action-card__qa-text {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+}
+.user-action-card__qa-text--question {
+    color: #475569;
+}
+.user-action-card__qa-text--answer {
+    color: #1e293b;
+    font-weight: 500;
+}
+.user-action-card__time {
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: #94a3b8;
+    font-size: 0.6875rem;
+    font-weight: 400;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+@media (max-width: 640px) {
+    .user-action-card {
+        width: 94%;
+    }
+    .user-action-card__header {
+        flex-wrap: wrap;
+        gap: 0.35rem 0.6rem;
+    }
+    .user-action-card__time {
+        margin-left: 0;
+    }
+}
 .chat-bubble--agent {
     background: rgba(255, 255, 255, 0.9);
     color: #1e293b;

@@ -236,6 +236,31 @@ export type ThinkingEvent = {
   completionId?: string | null
 }
 
+export type UserActionType =
+  | 'human_input_answered'
+  | 'human_input_dismissed'
+  | 'secrets_saved'
+  | 'secrets_removed'
+  | 'contacts_approved'
+  | 'contacts_declined'
+  | 'contacts_resolved'
+
+export type UserAction = {
+  id: string
+  actionType: UserActionType | string
+  count: number
+  actorUserId?: number | null
+  actorName?: string | null
+  metadata?: Record<string, unknown>
+}
+
+export type UserActionEvent = {
+  kind: 'user_action'
+  cursor: string
+  timestamp?: string | null
+  action: UserAction
+}
+
 export type PlanStepChange = {
   stepId: string
   cardId?: string
@@ -283,7 +308,7 @@ export type HistoricalPlanCompatEvent = Omit<PlanEvent, 'kind'> & {
   changes: Array<Omit<PlanStepChange, 'stepId'> & { cardId: string; stepId?: string }>
 }
 
-export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent | PlanEvent | HistoricalPlanCompatEvent
+export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent | UserActionEvent | PlanEvent | HistoricalPlanCompatEvent
 
 export type AgentTimelineSnapshot = {
   events: TimelineEvent[]
