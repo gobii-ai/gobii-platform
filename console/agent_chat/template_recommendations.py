@@ -4,10 +4,8 @@ import logging
 from typing import Any
 
 import litellm
-from django.core.cache import cache
 from django.db.models import Case, CharField, Count, F, Max, Q, Value, When
 from django.db.models.functions import Lower
-from django.utils import timezone
 
 from api.agent.core.llm_config import LLMNotConfiguredError, get_summarization_llm_configs
 from api.agent.core.llm_utils import LiteLLMResponseError, run_completion
@@ -18,8 +16,6 @@ logger = logging.getLogger(__name__)
 
 RECOMMENDATION_LIMIT = 3
 CONTEXT_CHARTER_LIMIT = 30
-CACHE_TTL_SECONDS = 300
-CACHE_VERSION = "v2"
 DEFAULT_TEMPLATE_CODES = ("talent-scout", "candidate-researcher", "lead-hunter")
 DEFAULT_RECRUITING_CATEGORIES = ("people", "recruiting")
 DEFAULT_SALES_CATEGORIES = ("revenue", "sales")
@@ -53,7 +49,7 @@ def _normalized_category_expression():
     )
 
 
-def _context_owner_cache_key(context_info: ConsoleContextInfo) -> str:
+def _context_owner_key(context_info: ConsoleContextInfo) -> str:
     context = context_info.current_context
     return f"{context.type}:{context.id}"
 
@@ -69,7 +65,7 @@ def _context_agent_queryset(user, context_info: ConsoleContextInfo):
     return queryset.filter(user=user, organization__isnull=True)
 
 
-def _recommendation_source_state(user, context_info: ConsoleContextInfo) -> dict[str, Any]:
+def _recommendation_source_fingerprint(user, context_info: ConsoleContextInfo) -> str:
     agent_stats = _context_agent_queryset(user, context_info).aggregate(
         count=Count("id"),
         latest_update=Max("updated_at"),
@@ -83,7 +79,7 @@ def _recommendation_source_state(user, context_info: ConsoleContextInfo) -> dict
         latest_update=Max("updated_at"),
     )
     source = [
-        _context_owner_cache_key(context_info),
+        _context_owner_key(context_info),
         str(agent_stats.get("count") or 0),
         str(agent_stats.get("latest_update") or ""),
         str(template_stats.get("count") or 0),
@@ -91,29 +87,7 @@ def _recommendation_source_state(user, context_info: ConsoleContextInfo) -> dict
         str(org_template_stats.get("count") or 0),
         str(org_template_stats.get("latest_update") or ""),
     ]
-    return {
-        "agent_count": int(agent_stats.get("count") or 0),
-        "fingerprint": hashlib.sha256("|".join(source).encode("utf-8")).hexdigest(),
-    }
-
-
-def _recommendation_cache_key(
-    user,
-    context_info: ConsoleContextInfo,
-    *,
-    source_state: dict[str, Any] | None = None,
-) -> str:
-    if source_state is None:
-        source_state = _recommendation_source_state(user, context_info)
-    fingerprint = hashlib.sha256(
-        "|".join(
-            [
-                _context_owner_cache_key(context_info),
-                source_state["fingerprint"],
-            ]
-        ).encode("utf-8")
-    ).hexdigest()[:24]
-    return ":".join(["agent-chat", "template-recommendations", CACHE_VERSION, fingerprint])
+    return hashlib.sha256("|".join(source).encode("utf-8")).hexdigest()
 
 
 def _owner_state_kwargs(user, context_info: ConsoleContextInfo) -> dict[str, Any]:
@@ -157,7 +131,6 @@ def _persist_categories(
     *,
     categories: list[str],
     source_fingerprint: str,
-    source_agent_count: int,
 ) -> None:
     normalized_categories = _dedupe_categories(categories)
     if not normalized_categories:
@@ -167,8 +140,6 @@ def _persist_categories(
         defaults={
             "categories": normalized_categories,
             "source_fingerprint": source_fingerprint,
-            "source_agent_count": source_agent_count,
-            "last_classified_at": timezone.now(),
         },
     )
 
@@ -436,14 +407,7 @@ def _classify_categories(charters: list[str], categories: list[str]) -> list[str
 
 
 def build_new_agent_template_recommendations(user, context_info: ConsoleContextInfo) -> dict[str, Any]:
-    source_state = _recommendation_source_state(user, context_info)
-    cache_key = _recommendation_cache_key(user, context_info, source_state=source_state)
-    cached = cache.get(cache_key)
-    if isinstance(cached, dict) and isinstance(cached.get("templates"), list):
-        return cached
-
-    source_fingerprint = source_state["fingerprint"]
-    source_agent_count = source_state["agent_count"]
+    source_fingerprint = _recommendation_source_fingerprint(user, context_info)
 
     cards: list[dict[str, Any]] = []
     _append_unique_templates(cards, _organization_recommendations(context_info))
@@ -454,7 +418,6 @@ def build_new_agent_template_recommendations(user, context_info: ConsoleContextI
             "source": "organization",
             "templates": cards,
         }
-        cache.set(cache_key, payload, timeout=CACHE_TTL_SECONDS)
         return payload
 
     stored_categories = _stored_categories(user, context_info, source_fingerprint=source_fingerprint)
@@ -467,7 +430,6 @@ def build_new_agent_template_recommendations(user, context_info: ConsoleContextI
             "source": "category",
             "templates": cards,
         }
-        cache.set(cache_key, payload, timeout=CACHE_TTL_SECONDS)
         return payload
 
     categories = _available_categories()
@@ -481,7 +443,6 @@ def build_new_agent_template_recommendations(user, context_info: ConsoleContextI
             context_info,
             categories=selected_categories,
             source_fingerprint=source_fingerprint,
-            source_agent_count=source_agent_count,
         )
     if not templates:
         selected_categories = []
@@ -495,5 +456,4 @@ def build_new_agent_template_recommendations(user, context_info: ConsoleContextI
         "source": source,
         "templates": cards,
     }
-    cache.set(cache_key, payload, timeout=CACHE_TTL_SECONDS)
     return payload

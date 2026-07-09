@@ -308,7 +308,6 @@ class NewAgentTemplateRecommendationTests(TestCase):
         )
         state = AgentOwnerTemplateRecommendationState.objects.get(user=self.user)
         self.assertEqual(state.categories, ["People"])
-        self.assertEqual(state.source_agent_count, 1)
 
     @tag("batch_public_templates")
     @patch("console.agent_chat.template_recommendations.run_completion")

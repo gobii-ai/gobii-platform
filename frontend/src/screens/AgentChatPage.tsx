@@ -3,7 +3,7 @@ import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-que
 import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
-import { createAgent, respondToAgentTransferInvite } from '../api/agents'
+import { createAgent, respondToAgentTransferInvite, type CreateAgentTemplateOptions } from '../api/agents'
 import { currentOrganizationTemplatesQueryKey, fetchCurrentOrganizationTemplates, launchOrganizationTemplate, type OrganizationTemplate } from '../api/organization'
 import {
   stopAgentProcessing,
@@ -570,11 +570,6 @@ type AppShellOpenHandler = (() => void) | undefined
 type AppShellDestinationKey = 'billing' | 'usage' | 'apiKeys' | 'profile' | 'organization' | 'secrets' | 'integrations'
 type AppShellDestinations = Record<AppShellDestinationKey, string | null>
 type AppShellOpenHandlers = Record<AppShellDestinationKey, () => void>
-type CreateAgentTemplatePayload = {
-  templateCode?: string | null
-  templateId?: string | null
-  templateSource?: 'organization' | 'public' | null
-}
 
 const EMBEDDED_SETTINGS_TITLES: Record<Exclude<AgentChatShellSubview, 'chat'>, string> = {
   settings: 'Agent Settings',
@@ -941,7 +936,7 @@ export function AgentChatPage({
     tier: IntelligenceTierKey
     charterOverride?: string | null
     selectedPipedreamAppSlugs?: string[]
-    template?: CreateAgentTemplatePayload | null
+    template?: CreateAgentTemplateOptions | null
   } | null>(null)
   const googleSheetsRosterRefreshAgentsRef = useRef<Set<string>>(new Set())
   const previewEnteredAgentIdsRef = useRef<Set<string>>(new Set())
@@ -2591,7 +2586,7 @@ export function AgentChatPage({
       charterOverride?: string | null,
       selectedPipedreamAppSlugs?: string[],
       attachments: File[] = [],
-      template?: CreateAgentTemplatePayload | null,
+      template?: CreateAgentTemplateOptions | null,
     ) => {
       setTransientBannerAgentName('New Agent')
       dispatch(chatActions.createAgentErrorSet(null))
@@ -3387,7 +3382,7 @@ export function AgentChatPage({
     attachments: File[] = [],
     charterOverride?: string | null,
     selectedPipedreamAppSlugs?: string[],
-    template?: CreateAgentTemplatePayload | null,
+    template?: CreateAgentTemplateOptions | null,
   ) => {
     if (!activeAgentId && !isNewAgent) {
       return

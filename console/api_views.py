@@ -797,83 +797,6 @@ def _template_charter_error(template: PersistentAgentTemplate) -> JsonResponse |
     return None
 
 
-def _resolve_quick_create_public_template(
-    *,
-    template_code: str,
-    template_id: str,
-) -> tuple[PersistentAgentTemplate | None, JsonResponse | None]:
-    normalized_code = str(template_code or "").strip()
-    normalized_id = str(template_id or "").strip()
-    if not normalized_code and not normalized_id:
-        return None, None
-
-    public_filter = Q()
-    if normalized_code:
-        public_filter |= Q(code__iexact=normalized_code) | Q(slug__iexact=normalized_code)
-    if normalized_id:
-        try:
-            public_filter |= Q(id=uuid.UUID(normalized_id))
-        except (TypeError, ValueError, AttributeError):
-            return None, JsonResponse({"error": "template_id must be a valid UUID."}, status=400)
-
-    template = (
-        PersistentAgentTemplate.objects
-        .select_related("preferred_llm_tier", "organization")
-        .filter(organization__isnull=True, is_active=True)
-        .filter(public_filter)
-        .filter(Q(code__gt="") | Q(slug__gt=""))
-        .order_by("priority", "display_name", "id")
-        .first()
-    )
-    if template is None:
-        return None, JsonResponse({"error": "This template is no longer available."}, status=404)
-    charter_error = _template_charter_error(template)
-    if charter_error is not None:
-        return None, charter_error
-    return template, None
-
-
-def _resolve_quick_create_organization_template(
-    request: HttpRequest,
-    *,
-    template_id: str,
-) -> tuple[PersistentAgentTemplate | None, JsonResponse | None]:
-    normalized_id = str(template_id or "").strip()
-    if not normalized_id:
-        return None, JsonResponse({"error": "template_id is required for organization templates."}, status=400)
-    try:
-        template_uuid = uuid.UUID(normalized_id)
-    except (TypeError, ValueError, AttributeError):
-        return None, JsonResponse({"error": "template_id must be a valid UUID."}, status=400)
-
-    try:
-        resolved_context = build_console_context(request)
-    except PermissionDenied:
-        return None, JsonResponse({"error": "Invalid context override."}, status=403)
-    if resolved_context.current_context.type != "organization" or resolved_context.current_membership is None:
-        return None, JsonResponse({"error": "Switch to the organization context to use this template."}, status=400)
-    if not resolved_context.can_create_org_agents:
-        return None, JsonResponse({"error": "You do not have permission to create agents for this organization."}, status=403)
-
-    template = (
-        PersistentAgentTemplate.objects
-        .select_related("preferred_llm_tier", "organization")
-        .filter(
-            id=template_uuid,
-            organization_id=resolved_context.current_context.id,
-            public_profile__isnull=True,
-            is_active=True,
-        )
-        .first()
-    )
-    if template is None:
-        return None, JsonResponse({"error": "This template is no longer available."}, status=404)
-    charter_error = _template_charter_error(template)
-    if charter_error is not None:
-        return None, charter_error
-    return template, None
-
-
 def _resolve_quick_create_template(
     request: HttpRequest,
     *,
@@ -881,26 +804,69 @@ def _resolve_quick_create_template(
     template_id: str,
     template_code: str,
 ) -> tuple[PersistentAgentTemplate | None, str, JsonResponse | None]:
-    normalized_source = str(template_source or "").strip().lower()
-    if not normalized_source:
-        normalized_source = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE if (template_code or template_id) else ""
+    normalized_code = str(template_code or "").strip()
+    normalized_id = str(template_id or "").strip()
+    normalized_source = {
+        "public": AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE,
+        "organization": AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE,
+    }.get(str(template_source or "").strip().lower(), str(template_source or "").strip().lower())
+    if not normalized_source and (normalized_code or normalized_id):
+        normalized_source = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE
     if not normalized_source:
         return None, "", None
-    if normalized_source == "public":
-        normalized_source = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE
-    if normalized_source == "organization":
-        normalized_source = AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE
 
     if normalized_source == AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE:
-        template, error = _resolve_quick_create_public_template(
-            template_code=template_code,
-            template_id=template_id,
+        public_filter = Q()
+        if normalized_code:
+            public_filter |= Q(code__iexact=normalized_code) | Q(slug__iexact=normalized_code)
+        if normalized_id:
+            try:
+                public_filter |= Q(id=uuid.UUID(normalized_id))
+            except (TypeError, ValueError, AttributeError):
+                return None, normalized_source, JsonResponse({"error": "template_id must be a valid UUID."}, status=400)
+        if not public_filter:
+            return None, normalized_source, None
+        template = (
+            PersistentAgentTemplate.objects
+            .select_related("preferred_llm_tier", "organization")
+            .filter(organization__isnull=True, is_active=True)
+            .filter(public_filter)
+            .filter(Q(code__gt="") | Q(slug__gt=""))
+            .order_by("priority", "display_name", "id")
+            .first()
         )
-        return template, normalized_source, error
-    if normalized_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE:
-        template, error = _resolve_quick_create_organization_template(request, template_id=template_id)
-        return template, normalized_source, error
-    return None, normalized_source, JsonResponse({"error": "Invalid template source."}, status=400)
+    elif normalized_source == AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE:
+        if not normalized_id:
+            return None, normalized_source, JsonResponse({"error": "template_id is required for organization templates."}, status=400)
+        try:
+            template_uuid = uuid.UUID(normalized_id)
+        except (TypeError, ValueError, AttributeError):
+            return None, normalized_source, JsonResponse({"error": "template_id must be a valid UUID."}, status=400)
+        try:
+            resolved_context = build_console_context(request)
+        except PermissionDenied:
+            return None, normalized_source, JsonResponse({"error": "Invalid context override."}, status=403)
+        if resolved_context.current_context.type != "organization" or resolved_context.current_membership is None:
+            return None, normalized_source, JsonResponse({"error": "Switch to the organization context to use this template."}, status=400)
+        if not resolved_context.can_create_org_agents:
+            return None, normalized_source, JsonResponse({"error": "You do not have permission to create agents for this organization."}, status=403)
+        template = (
+            PersistentAgentTemplate.objects
+            .select_related("preferred_llm_tier", "organization")
+            .filter(
+                id=template_uuid,
+                organization_id=resolved_context.current_context.id,
+                public_profile__isnull=True,
+                is_active=True,
+            )
+            .first()
+        )
+    else:
+        return None, normalized_source, JsonResponse({"error": "Invalid template source."}, status=400)
+
+    if template is None:
+        return None, normalized_source, JsonResponse({"error": "This template is no longer available."}, status=404)
+    return template, normalized_source, _template_charter_error(template)
 
 
 def _path_meta(path: str | None) -> tuple[str | None, str | None]:

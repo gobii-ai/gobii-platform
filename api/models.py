@@ -13088,8 +13088,6 @@ class AgentOwnerTemplateRecommendationState(models.Model):
     )
     categories = models.JSONField(default=list, blank=True)
     source_fingerprint = models.CharField(max_length=64, blank=True)
-    source_agent_count = models.PositiveIntegerField(default=0)
-    last_classified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
