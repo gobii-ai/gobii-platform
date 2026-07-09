@@ -37,7 +37,7 @@ from api.services.dedicated_proxy_service import DedicatedProxyService
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.prompt_settings import get_prompt_settings
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
-from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time
+from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time, resolve_user_timezone
 from api.services.agent_owner_custom_instructions import get_custom_instructions_for_organization_id, get_custom_instructions_for_user_id
 
 from ...models import (
@@ -216,6 +216,33 @@ except LLMNotConfiguredError:
     _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
 except Exception:
     _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
+
+
+def _get_prompt_now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _format_current_datetime_for_prompt(agent: PersistentAgent, now_utc: datetime) -> tuple[str, str]:
+    current_datetime_lines = [f"UTC: {now_utc.isoformat()}"]
+    agent_user = agent.user if getattr(agent, "user_id", None) else None
+    saved_user_timezone = resolve_user_timezone(agent_user, fallback_to_utc=False) if agent_user else ""
+    if saved_user_timezone:
+        user_local_now, resolved_user_timezone = resolve_user_local_time(agent_user, now_utc)
+        current_datetime_lines.append(
+            f"User local time ({resolved_user_timezone}): {user_local_now.isoformat()}"
+        )
+        current_datetime_note = (
+            f"User local time is based on the saved user timezone ({resolved_user_timezone}). "
+            "All times before this are the past. All times after this are the future. "
+            "Do not assume that because something is in your training data or in a web search result that it is still true."
+        )
+    else:
+        current_datetime_note = (
+            "(Note user's TZ may be different! Confirm with them if there is any doubt.) "
+            "All times before this are the past. All times after this are the future. "
+            "Do not assume that because something is in your training data or in a web search result that it is still true."
+        )
+    return "\n".join(current_datetime_lines), current_datetime_note
 
 
 def tool_call_history_limit(agent: PersistentAgent) -> int:
@@ -1696,16 +1723,17 @@ def _render_prompt_context_once(
         )
 
     # Current datetime - small but critical for time-aware decisions
-    timestamp_iso = datetime.now(timezone.utc).isoformat()
+    now_utc = _get_prompt_now_utc()
+    current_datetime_text, current_datetime_note = _format_current_datetime_for_prompt(agent, now_utc)
     critical_group.section_text(
         "current_datetime",
-        timestamp_iso,
+        current_datetime_text,
         weight=3,
         non_shrinkable=True
     )
     critical_group.section_text(
         "current_datetime_note",
-        "(Note user's TZ may be different! Confirm with them if there is any doubt.) All times before this are the past. All times after this are the future. Do not assume that because something is in your training data or in a web search result that it is still true.",
+        current_datetime_note,
         weight=2,
         non_shrinkable=True
     )
@@ -3681,13 +3709,13 @@ def _get_system_instruction(
 
         "Action over deliberation.\n\n"
 
-        "## Warm Continuity\n\n"
-        "Be warm, natural, and context-aware in user-facing messages without becoming verbose. "
-        "For casual greetings or check-ins such as \"how are you?\" or \"what's up?\", respond socially instead of giving a bare generic status. "
-        "When recent work or conversation context is known, briefly acknowledge it and bridge back to what would be useful next. "
-        "Do not invent completed work, sent messages, tool results, preferences, or personal experiences. "
-        "Keep casual replies to 2-5 sentences unless the user asks for detail. "
-        "This warmth applies to actual delivered messages, blockers, questions, and final reports; it does not permit progress-only narration before tool calls.\n\n"
+        "## Communication Style\n\n"
+        "Be warm, natural, direct, and context-aware without padding. "
+        "Use plain language; clarity and honesty beat forced friendliness. "
+        "Cut filler, hype, cliches, redundant setup, decorative emoji, and AI-giveaway phrases like \"dive into\", \"unleash\", and \"game-changing\". "
+        "Hedge only when unsure. When drafting/editing copy, preserve the user's meaning, voice, key terms, and commitments. "
+        "For casual greetings, respond socially; if recent context matters, acknowledge it briefly and bridge to the next useful step. "
+        "Do not invent work, results, preferences, or personal experiences. This applies only to delivered messages, not progress narration before tool calls.\n\n"
 
         "## Output Rules\n\n"
         "Use the lightest clear structure: labeled fact, short list, compact table, or sectioned report. Ground facts, numbers, units, and URLs in tool results; do not relabel or convert units unless asked. Present returned data directly, omit unavailable extras, summarize overflow, and do not add follow-up offers after simple facts, prices, statuses, or quick lookups. "

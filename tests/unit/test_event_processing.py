@@ -4,7 +4,7 @@ import sqlite3
 import shutil
 import tempfile
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from django.contrib import admin as django_admin
@@ -66,6 +66,7 @@ from api.agent.core.internal_reasoning import (
     build_internal_reasoning_description,
 )
 from api.agent.core.prompt_context import (
+    _format_current_datetime_for_prompt,
     build_prompt_context_preview,
     get_agent_tools,
     get_prompt_token_budget,
@@ -120,6 +121,7 @@ from api.models import (
     AgentComputeSession,
     PromptConfig,
     TaskCredit,
+    UserPreference,
     UserBilling,
     ToolConfig,
 )
@@ -1200,6 +1202,56 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<pacing_guidance>', content)
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
+
+    def test_current_datetime_includes_user_local_time_when_timezone_saved(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_USER_TIMEZONE: "America/New_York"},
+        )
+        frozen_now = datetime(2026, 3, 10, 16, 0, 0, tzinfo=dt_timezone.utc)
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+             patch('api.agent.core.prompt_context._get_prompt_now_utc', return_value=frozen_now):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("UTC: 2026-03-10T16:00:00+00:00", content)
+        self.assertIn("User local time (America/New_York): 2026-03-10T12:00:00-04:00", content)
+        self.assertIn("User local time is based on the saved user timezone (America/New_York).", content)
+
+    def test_current_datetime_omits_user_local_time_when_timezone_unset(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_USER_TIMEZONE: ""},
+        )
+        frozen_now = datetime(2026, 3, 10, 16, 0, 0, tzinfo=dt_timezone.utc)
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+             patch('api.agent.core.prompt_context._get_prompt_now_utc', return_value=frozen_now):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("UTC: 2026-03-10T16:00:00+00:00", content)
+        self.assertNotIn("User local time", content)
+        self.assertIn("Note user's TZ may be different", content)
+
+    def test_current_datetime_helper_handles_agent_without_user(self):
+        frozen_now = datetime(2026, 3, 10, 16, 0, 0, tzinfo=dt_timezone.utc)
+
+        content, note = _format_current_datetime_for_prompt(
+            SimpleNamespace(user=None, user_id=None),
+            frozen_now,
+        )
+
+        self.assertIn("UTC: 2026-03-10T16:00:00+00:00", content)
+        self.assertNotIn("User local time", content)
+        self.assertIn("Note user's TZ may be different", note)
 
     def test_unified_history_message_headers_omit_recent_age_suffix(self):
         message = PersistentAgentMessage.objects.create(

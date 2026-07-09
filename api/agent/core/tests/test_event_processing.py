@@ -988,6 +988,15 @@ class ContinuationModePromptContextTests(TestCase):
 
         self.assertNotIn("## Continuation Mode", system_prompt)
 
+    def test_prompt_includes_human_communication_style_guidance(self):
+        system_prompt = self._render_system_prompt(is_first_run=False)
+
+        self.assertIn("## Communication Style", system_prompt)
+        self.assertIn("warm, natural, direct, and context-aware without padding", system_prompt)
+        self.assertIn("clarity and honesty beat forced friendliness", system_prompt)
+        self.assertIn("preserve the user's meaning, voice, key terms, and commitments", system_prompt)
+        self.assertIn("AI-giveaway phrases", system_prompt)
+
 
 @tag("batch_event_processing")
 class DailyLimitProcessingTests(TestCase):
