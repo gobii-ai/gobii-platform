@@ -86,3 +86,60 @@
     overflow-wrap: anywhere;
     word-break: break-word;
 }
+
+/* Keep Markdown tables readable without widening the surrounding blog prose. */
+.prose .blog-table-scroll {
+    width: calc(100vw - 3rem);
+    max-width: 48rem;
+    margin: 2.5rem 50%;
+    overflow-x: auto;
+    transform: translateX(-50%);
+    border: 1px solid rgb(226 232 240);
+    border-radius: 0.75rem;
+    background: white;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+    -webkit-overflow-scrolling: touch;
+}
+
+.prose .blog-table-scroll--wide {
+    max-width: 72rem;
+}
+
+.prose .blog-table-scroll table {
+    width: 100%;
+    min-width: 38rem;
+    margin: 0;
+}
+
+.prose .blog-table-scroll--wide table {
+    min-width: 64rem;
+}
+
+.prose .blog-table-scroll th,
+.prose .blog-table-scroll td {
+    padding: 0.875rem 1rem;
+    overflow-wrap: normal;
+    word-break: normal;
+    vertical-align: top;
+}
+
+.prose .blog-table-scroll th {
+    background: rgb(248 250 252);
+}
+
+.prose .blog-table-scroll th:first-child,
+.prose .blog-table-scroll td:first-child {
+    min-width: 9rem;
+}
+
+.prose .blog-table-scroll tbody tr:last-child td {
+    border-bottom-width: 0;
+}
+
+@media (max-width: 640px) {
+    .prose .blog-table-scroll {
+        width: calc(100vw - 2rem);
+        margin-top: 2rem;
+        margin-bottom: 2rem;
+    }
+}

@@ -2326,6 +2326,7 @@ class SitemapTests(TestCase):
         self.assertIn("<loc>http://example.com/solutions/engineering/</loc>", content)
         self.assertIn("<loc>http://example.com/blog/best-ai-employees/</loc>", content)
         self.assertIn("<loc>http://example.com/blog/hire-ai-employees/</loc>", content)
+        self.assertIn("<loc>http://example.com/editorial-policy/</loc>", content)
         self.assertNotIn("<loc>http://example.com/solutions/sales/ai-sales-employee/</loc>", content)
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
