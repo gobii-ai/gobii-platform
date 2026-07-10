@@ -4751,6 +4751,15 @@ def _ensure_credit_for_tool(
 # --------------------------------------------------------------------------- #
 #  Public API
 # --------------------------------------------------------------------------- #
+def _resolve_low_latency_preference(
+    agent: PersistentAgent,
+    explicit_preference: bool | None,
+) -> bool:
+    if explicit_preference is not None:
+        return explicit_preference
+    return has_deliverable_web_session(agent)
+
+
 def process_agent_events(
     persistent_agent_id: Union[str, UUID],
     budget_id: Optional[str] = None,
@@ -4761,6 +4770,7 @@ def process_agent_events(
     eval_stop_policy: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: Optional[str] = None,
     inbound_generation: int | str | None = None,
+    prefer_low_latency: bool | None = None,
     max_loop_iterations: int | None = None,
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
@@ -4987,6 +4997,7 @@ def process_agent_events(
                 span,
                 lock_extender=lock_extender,
                 heartbeat=heartbeat,
+                prefer_low_latency=prefer_low_latency,
                 max_loop_iterations=max_loop_iterations,
                 max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
                 max_iterations_followup_queue=max_iterations_followup_queue,
@@ -5077,6 +5088,7 @@ def _process_agent_events_locked(
     *,
     lock_extender: Optional[_LockExtender] = None,
     heartbeat: Optional[_ProcessingHeartbeat] = None,
+    prefer_low_latency: bool | None = None,
     max_loop_iterations: int | None = None,
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
@@ -5383,6 +5395,7 @@ def _process_agent_events_locked(
             run_sequence_number=run_sequence_number,
             lock_extender=lock_extender,
             heartbeat=heartbeat,
+            prefer_low_latency=prefer_low_latency,
             max_loop_iterations=max_loop_iterations,
             max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
             max_iterations_followup_queue=max_iterations_followup_queue,
@@ -5416,6 +5429,7 @@ def _run_agent_loop(
     run_sequence_number: Optional[int] = None,
     lock_extender: Optional[_LockExtender] = None,
     heartbeat: Optional[_ProcessingHeartbeat] = None,
+    prefer_low_latency: bool | None = None,
     max_loop_iterations: int | None = None,
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
@@ -5514,6 +5528,7 @@ def _run_agent_loop(
     continuation_notice: Optional[str] = None
     stale_prompt_system_directive_block = ""
     empty_response_loop_retries = 0
+    explicit_prefer_low_latency = prefer_low_latency
 
     def _current_human_inbound_generation() -> int:
         return get_human_inbound_generation(agent.id, client=redis_client)
@@ -5538,7 +5553,10 @@ def _run_agent_loop(
             if current_planning_state != previous_planning_state:
                 tools = get_agent_tools(agent)
 
-            had_deliverable_web_target_at_start = has_deliverable_web_session(agent)
+            iteration_prefers_low_latency = _resolve_low_latency_preference(
+                agent,
+                explicit_prefer_low_latency,
+            )
             if _should_abort_processing(
                 agent,
                 budget_ctx=budget_ctx,
@@ -5622,7 +5640,7 @@ def _run_agent_loop(
                 current_notice = continuation_notice
                 continuation_notice = None
                 routing_profile = get_current_eval_routing_profile()
-                prefer_low_latency = had_deliverable_web_target_at_start
+                prefer_low_latency = iteration_prefers_low_latency
                 try:
                     prompt_context_result = build_prompt_context(
                         agent,

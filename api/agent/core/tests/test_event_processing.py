@@ -1047,9 +1047,14 @@ class DailyLimitProcessingTests(TestCase):
         _mock_agent_avatar,
         mock_run_loop,
     ):
-        _process_agent_events_locked(self.agent.id, _DummySpan())
+        _process_agent_events_locked(
+            self.agent.id,
+            _DummySpan(),
+            prefer_low_latency=True,
+        )
 
         mock_run_loop.assert_called_once()
+        self.assertIs(mock_run_loop.call_args.kwargs["prefer_low_latency"], True)
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,

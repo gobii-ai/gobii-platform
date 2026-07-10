@@ -267,7 +267,10 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(attachment_row.content_type, "image/png")
         self.assertIsNotNone(attachment_row.filespace_node)
         self.assertEqual(attachment_row.filespace_node.name, "screenshot.png")
-        mock_delay.assert_called_once_with(str(created_agent.id))
+        mock_delay.assert_called_once_with(
+            str(created_agent.id),
+            prefer_low_latency=True,
+        )
 
     @tag("batch_agent_chat")
     def test_quick_create_ignores_files_not_named_attachments(self):
@@ -312,7 +315,10 @@ class AgentChatAPITests(TestCase):
         seeded_message = PersistentAgentMessage.objects.get(owner_agent=created_agent, body=message_text)
         self.assertEqual(seeded_message.attachments.count(), 1)
         mock_import.assert_called_once_with(str(seeded_message.id))
-        mock_delay.assert_called_once_with(str(created_agent.id))
+        mock_delay.assert_called_once_with(
+            str(created_agent.id),
+            prefer_low_latency=True,
+        )
 
     @override_settings(MAX_FILE_SIZE=5)
     @tag("batch_agent_chat")

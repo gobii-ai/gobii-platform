@@ -507,13 +507,19 @@ def create_persistent_agent_from_charter(
                     initial_message_id,
                 )
             finally:
-                enqueue_interactive_process_agent_events(str(persistent_agent.id))
+                enqueue_interactive_process_agent_events(
+                    str(persistent_agent.id),
+                    prefer_low_latency=True,
+                )
 
         if has_initial_attachments:
             transaction.on_commit(_import_initial_attachments_then_process)
         else:
             transaction.on_commit(
-                lambda: enqueue_interactive_process_agent_events(str(persistent_agent.id))
+                lambda: enqueue_interactive_process_agent_events(
+                    str(persistent_agent.id),
+                    prefer_low_latency=True,
+                )
             )
 
         for key in (

@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, tag
 
+from api.agent.core.event_processing import _resolve_low_latency_preference
 from api.agent.tasks.process_events import (
     AGENT_DEFAULT_PROCESSING_QUEUE,
     AGENT_INTERACTIVE_PROCESSING_QUEUE,
@@ -16,6 +17,28 @@ from api.agent.tasks.process_events import (
 
 
 class ProcessAgentEventsTaskTests(SimpleTestCase):
+    @tag("batch_agent_chat")
+    def test_explicit_low_latency_preference_overrides_web_session_detection(self):
+        agent = Mock()
+
+        with patch("api.agent.core.event_processing.has_deliverable_web_session") as mock_has_session:
+            self.assertTrue(_resolve_low_latency_preference(agent, True))
+            self.assertFalse(_resolve_low_latency_preference(agent, False))
+
+        mock_has_session.assert_not_called()
+
+    @tag("batch_agent_chat")
+    def test_unspecified_low_latency_preference_uses_web_session_detection(self):
+        agent = Mock()
+
+        with patch(
+            "api.agent.core.event_processing.has_deliverable_web_session",
+            return_value=True,
+        ) as mock_has_session:
+            self.assertTrue(_resolve_low_latency_preference(agent, None))
+
+        mock_has_session.assert_called_once_with(agent)
+
     @tag("batch_console_agents")
     def test_queue_agent_process_events_batch_fans_out_valid_agent_ids(self):
         valid_agent_id = "11111111-1111-1111-1111-111111111111"
@@ -116,6 +139,19 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
         )
 
     @tag("batch_agent_chat")
+    def test_enqueue_interactive_process_agent_events_includes_low_latency_preference(self):
+        agent_id = "44444444-4444-4444-4444-444444444444"
+
+        with patch("api.agent.tasks.process_events.process_agent_events_task.apply_async") as mock_apply_async:
+            enqueue_interactive_process_agent_events(agent_id, prefer_low_latency=True)
+
+        mock_apply_async.assert_called_once_with(
+            args=[agent_id],
+            kwargs={"prefer_low_latency": True},
+            queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+        )
+
+    @tag("batch_agent_chat")
     def test_enqueue_interactive_process_agent_events_omits_empty_generation(self):
         agent_id = "44444444-4444-4444-4444-444444444444"
 
@@ -148,7 +184,7 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
                 id="interactive-task",
             )
             try:
-                process_agent_events_task.run(agent_id)
+                process_agent_events_task.run(agent_id, prefer_low_latency=True)
             finally:
                 process_agent_events_task.pop_request()
 
@@ -156,6 +192,7 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
         self.assertEqual(call_kwargs["max_loop_iterations"], 10)
         self.assertEqual(call_kwargs["max_iterations_followup_delay_seconds"], 0)
         self.assertEqual(call_kwargs["max_iterations_followup_queue"], AGENT_DEFAULT_PROCESSING_QUEUE)
+        self.assertIs(call_kwargs["prefer_low_latency"], True)
 
     @tag("batch_agent_chat")
     def test_default_delivery_leaves_loop_controls_unset(self):
