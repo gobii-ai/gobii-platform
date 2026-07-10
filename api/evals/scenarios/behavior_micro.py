@@ -22,6 +22,7 @@ from api.evals.stop_policy import (
     sqlite_batch_is_only_planning_state_mutation,
     sqlite_batch_mutates_agent_config_field,
     sqlite_batch_mutates_planning_state,
+    tool_call_has_succeeded,
 )
 from api.models import (
     EvalRunTask,
@@ -1908,7 +1909,7 @@ class CharterMemoryScenario(BehaviorMicroScenario):
         return [
             call
             for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=["sqlite_batch"])
-            if sqlite_batch_mutates_agent_config_field(call, "charter")
+            if sqlite_batch_mutates_agent_config_field(call, "charter") and tool_call_has_succeeded(call)
         ]
 
     def _mutation_calls_for_verification(self, run_id, inbound):
@@ -3461,6 +3462,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             "common_use_case_062_send_attachment_email": (CommsChannel.EMAIL, "pat@example.test"),
             "common_use_case_063_send_followup_email": (CommsChannel.EMAIL, "lee@example.test"),
             "common_use_case_064_send_digest_email": (CommsChannel.EMAIL, "ops@example.test"),
+            "common_use_case_100_schedule_daily_email_digest": (CommsChannel.EMAIL, "ops@example.test"),
         }.get(case.slug)
 
     def _seed_outbound_contact_context(self, agent_id):
@@ -3772,7 +3774,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         return False
 
     def _call_satisfies_expected_tool(self, call, expected_tool_name):
-        if not self._tool_call_succeeded(call):
+        if not tool_call_has_succeeded(call):
             return False
         if call.tool_name not in self.case.accepted_tool_names_for_expected_tool(expected_tool_name):
             return False
@@ -3793,19 +3795,6 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         if config_field and call.tool_name == "sqlite_batch":
             return sqlite_batch_mutates_agent_config_field(call, config_field)
         return True
-
-    @staticmethod
-    def _tool_call_succeeded(call):
-        if str(call.status or "").casefold() != "complete":
-            return False
-        try:
-            result = json.loads(call.result or "{}")
-        except (TypeError, json.JSONDecodeError):
-            return False
-        if not isinstance(result, dict):
-            return False
-        status = str(result.get("status") or "ok").casefold()
-        return status in {"ok", "success", "sent", "queued"} and not result.get("error")
 
     def _blocking_chat_satisfies_human_input_case(self, call):
         body = " ".join(str((call.tool_params or {}).get("body") or "").casefold().split())

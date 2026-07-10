@@ -179,6 +179,26 @@ def _sqlite_result_text_reads(sql: str) -> list[str]:
     return reads
 
 
+_PREEXECUTION_SQLITE_RESULT_SHAPE_REJECTIONS = frozenset(
+    {
+        "repeated_unshaped_tool_result_projection",
+        "unshaped_multi_result_payload",
+    }
+)
+
+
+def _tool_call_was_preexecution_shape_rejection(call: PersistentAgentToolCall) -> bool:
+    try:
+        result = json.loads(call.result or "")
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return bool(
+        isinstance(result, dict)
+        and str(result.get("status") or "").casefold() == "error"
+        and result.get("error_type") in _PREEXECUTION_SQLITE_RESULT_SHAPE_REJECTIONS
+    )
+
+
 def _hierarchical_report_shape(
     body: str,
     *,
@@ -364,6 +384,7 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         _relevant_tool_calls_for_run,
         _outbound_messages_after,
         _sqlite_call_persists_resume_state,
+        _tool_call_was_preexecution_shape_rejection,
         _human_input_requests_for_run,
         _question_count,
         _orchestrator_completion_count,
@@ -379,6 +400,9 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         "web_query_param_names": WEB_QUERY_PARAM_NAMES,
         "word_pattern": _WORD_RE.pattern,
         "sqlite_result_text_pattern": _SQL_TOOL_RESULT_TEXT_RE.pattern,
+        "preexecution_sqlite_result_shape_rejections": sorted(
+            _PREEXECUTION_SQLITE_RESULT_SHAPE_REJECTIONS
+        ),
         "sqlite_result_id_pattern": _SQL_RESULT_ID_RE.pattern,
         "heading_pattern": _HEADING_RE.pattern,
         "list_or_table_pattern": _LIST_OR_TABLE_RE.pattern,
@@ -892,7 +916,10 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         reads = []
         first_bad_call = None
-        sqlite_calls = _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"})
+        sqlite_calls = [
+            call for call in _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"})
+            if not _tool_call_was_preexecution_shape_rejection(call)
+        ]
         for call in sqlite_calls:
             call_reads = _sqlite_result_text_reads(sqlite_batch_sql(call))
             if call_reads and first_bad_call is None:

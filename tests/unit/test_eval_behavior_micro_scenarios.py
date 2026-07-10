@@ -918,6 +918,17 @@ class BehaviorMicroHelperTests(TestCase):
             requested_via_channel=CommsChannel.WEB,
         )
 
+    def test_charter_patch_evals_ignore_failed_mutation_attempts(self):
+        scenario = ScenarioRegistry.get(CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL)
+        inbound = SimpleNamespace(timestamp=timezone.now() - timedelta(seconds=1))
+        failed = self._add_tool_call("sqlite_batch", {"sql": "UPDATE __agent_config SET charter = 'lost'"})
+        PersistentAgentToolCall.objects.filter(pk=failed.pk).update(result='{"status":"error"}')
+        succeeded = self._add_tool_call(
+            "sqlite_batch", {"sql": "UPDATE __agent_config SET charter = charter || ' preserved'"}
+        )
+
+        self.assertEqual(scenario._charter_mutation_calls(self.run.id, inbound), [succeeded])
+
     def test_eval_synthetic_tools_are_catalog_backed_for_eval_agents(self):
         self.agent.execution_environment = "eval"
         self.agent.save(update_fields=["execution_environment"])
@@ -1007,6 +1018,7 @@ class BehaviorMicroHelperTests(TestCase):
             ("common_use_case_062_send_attachment_email", "pat@example.test"),
             ("common_use_case_063_send_followup_email", "lee@example.test"),
             ("common_use_case_064_send_digest_email", "ops@example.test"),
+            ("common_use_case_100_schedule_daily_email_digest", "ops@example.test"),
         ):
             with self.subTest(slug=slug):
                 scenario = ScenarioRegistry.get(slug)

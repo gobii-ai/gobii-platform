@@ -37,7 +37,7 @@ MAX_CUSTOM_TOOL_TIMEOUT_SECONDS = 900
 MAX_CUSTOM_TOOL_SOURCE_BYTES = 64 * 1024
 CUSTOM_TOOL_RETRY_CHECKLIST = (
     "Patch all validation issues before retrying: exact import, exact final line, referenced imports, "
-    "required params, and remaining_work/next_cursor when batching."
+    "required params/requested runtime filters, and remaining_work/next_cursor when batching."
 )
 
 _PARAMS_ENV_KEY = "SANDBOX_CUSTOM_TOOL_PARAMS_B64"
@@ -580,6 +580,20 @@ _BATCH_PROGRESS_TERMS = (
     "cursor",
 )
 
+_HARDCODED_SOURCE_STATE_FILTER_RE = re.compile(
+    r"\b[a-z_]*(?:status|state|synced)[a-z_]*\b\s*={1,2}\s*"
+    r"(?:['\"](?:pending|unsynced|queued|failed|new|ready|open|retryable)['\"]|0\b|false\b)",
+    re.IGNORECASE,
+)
+_FIXED_SOURCE_STATE_MARKERS = (
+    "fixed status",
+    "fixed state",
+    "status is fixed",
+    "state is fixed",
+    "pending-only",
+    "unsynced-only",
+)
+
 
 def _source_string_literals(tree: ast.Module) -> set[str]:
     return {
@@ -641,6 +655,30 @@ def _needs_batch_progress_signal(source_text: str) -> bool:
 def _has_batch_progress_signal(tree: ast.Module) -> bool:
     terms = _source_string_literals(tree) | _source_identifiers(tree)
     return any(progress_term in term for term in terms for progress_term in _BATCH_PROGRESS_TERMS)
+
+
+def _has_hardcoded_source_state_filter(source_text: str) -> bool:
+    tree = ast.parse(source_text)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            for match in _HARDCODED_SOURCE_STATE_FILTER_RE.finditer(node.value):
+                if re.search(r"\bwhere\b", node.value[:match.start()], re.IGNORECASE):
+                    return True
+            continue
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names = {name.casefold() for target in targets for name in _target_bound_names(target)}
+        if not any(marker in name for name in names for marker in ("where", "filter", "condition")):
+            continue
+        if any(
+            isinstance(child, ast.Constant)
+            and isinstance(child.value, str)
+            and _HARDCODED_SOURCE_STATE_FILTER_RE.match(child.value.strip())
+            for child in ast.walk(node.value)
+        ):
+            return True
+    return False
 
 
 def _invalid_datetime_timezone_refs(tree: ast.Module) -> list[str]:
@@ -717,6 +755,28 @@ def _validate_schema_runtime_params_for_source(
     if not isinstance(properties, dict) or not properties:
         return None
 
+    property_names = set(properties)
+    state_param_markers = ("status", "state", "synced", "pending", "unsynced")
+    configurable_filter_markers = ("filter", "date", "since", "until", "before", "after", "threshold")
+    has_configurable_filter = any(
+        any(marker in str(name).casefold() for marker in configurable_filter_markers)
+        or str(name).casefold().startswith(("min_", "max_"))
+        for name in property_names
+    )
+    if (
+        has_configurable_filter
+        and _needs_batch_progress_signal(source_text)
+        and _has_hardcoded_source_state_filter(source_text)
+        and not any(marker in description.casefold() for marker in _FIXED_SOURCE_STATE_MARKERS)
+        and not any(marker in str(name).casefold() for name in property_names for marker in state_param_markers)
+    ):
+        return (
+            "Configurable batch custom tools must expose source-row status/state selection as a runtime parameter instead of "
+            "hardcoding pending/unsynced. Add `status_filter` (or equivalent) to parameters_schema, read it from "
+            "params, parameterize the source query, and invoke the tool with a concrete value. If pending-only is "
+            "a deliberate fixed invariant, state that explicitly in the tool description."
+        )
+
     combined_text = "\n".join(
         (
             source_text.lower(),
@@ -744,7 +804,6 @@ def _validate_schema_runtime_params_for_source(
         "limit",
         "batch_size",
     }
-    property_names = set(properties)
     if not property_names & input_like_names:
         return None
 

@@ -274,6 +274,57 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertEqual(reads, ["abc123", "def456"])
 
+    def test_result_text_loop_check_ignores_safely_rejected_projection(self):
+        scenario, recorded = EffortCalibrationScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="rejected",
+                result='{"status":"error","error_type":"unshaped_multi_result_payload"}',
+                tool_name="sqlite_batch",
+                tool_params={"sql": "SELECT result_text FROM __tool_results WHERE result_id='raw'"},
+            ),
+            SimpleNamespace(
+                step="shaped",
+                result='{"status":"ok"}',
+                tool_name="sqlite_batch",
+                tool_params={"sql": "SELECT json_extract(result_json, '$.vendor') FROM __tool_results"},
+            ),
+        ]
+
+        with patch("api.evals.scenarios.effort_calibration._tool_calls_for_run", return_value=calls):
+            passed = scenario._record_no_sqlite_result_text_reread_loop(
+                "run", after=None, task_name="verify_no_query_or_sqlite_loops"
+            )
+
+        self.assertTrue(passed)
+        self.assertIn("Observed 0 __tool_results.result_text read(s)", recorded[-1][1]["observed_summary"])
+
+    def test_result_text_loop_check_counts_runtime_error_after_read(self):
+        scenario, recorded = EffortCalibrationScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="runtime-error",
+                result='{"status":"error","message":"no such table: missing_table","results":[{"rows":[]}]}',
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": (
+                        "SELECT result_text FROM __tool_results WHERE result_id='r1'; "
+                        "SELECT missing_column FROM missing_table;"
+                    )
+                },
+            )
+        ]
+
+        with patch("api.evals.scenarios.effort_calibration._tool_calls_for_run", return_value=calls):
+            passed = scenario._record_no_sqlite_result_text_reread_loop(
+                "run", after=None, task_name="verify_no_query_or_sqlite_loops"
+            )
+
+        self.assertFalse(passed)
+        self.assertIn("saw reads=['r1']", recorded[-1][1]["observed_summary"])
+
     def test_hierarchical_report_shape_requires_sources_and_structure(self):
         ok, summary = _hierarchical_report_shape(
             (

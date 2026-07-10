@@ -29,6 +29,7 @@ from api.agent.tools.custom_tools import (
     CUSTOM_TOOL_RESULT_MARKER,
     _GOBII_CTX_MODULE,
     _sync_workspace_source,
+    _validate_schema_runtime_params_for_source,
     build_custom_tool_bridge_token,
     execute_create_custom_tool,
     execute_custom_tool,
@@ -215,6 +216,8 @@ class CustomToolsTests(TestCase):
             "db.row_factory = sqlite3.Row",
             "rows do not support `row.get`",
             "never call with empty params",
+            "Mirror each requested variable",
+            "status/date/threshold filters",
             "validation/dedupe",
             "Every result includes `next_action`",
             "changed/ready outputs",
@@ -820,6 +823,91 @@ def run(params, ctx):
         self.assertEqual(result["status"], "ok")
         self.assertTrue(
             PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_url_classifier_valid").exists()
+        )
+
+    def test_batch_source_state_filters_must_be_runtime_params(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "source_table": {"type": "string"},
+                "batch_size": {"type": "integer"},
+                "date_from": {"type": "string"},
+            },
+        }
+        for predicate in ("sync_status = 'pending'", "synced = 0"):
+            with self.subTest(predicate=predicate):
+                source = self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    batch_size = params.get('batch_size', 10)\n"
+                    f"    where_clauses = [{predicate!r}]\n"
+                    "    return {'status': 'ok', 'remaining_work': 0, 'next_action': 'done'}\n"
+                )
+
+                error = _validate_schema_runtime_params_for_source(source, "Read a bounded source batch.", schema)
+
+                self.assertIn("status_filter", error)
+                self.assertIn("invoke the tool with a concrete value", error)
+
+    def test_batch_source_state_filter_allows_explicit_fixed_invariant(self):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    batch_size = params.get('batch_size', 10)\n"
+            "    where_clauses = [\"sync_status = 'pending'\"]\n"
+            "    return {'status': 'ok', 'remaining_work': 0, 'next_action': 'done'}\n"
+        )
+        schema = {
+            "type": "object",
+            "properties": {
+                "batch_size": {"type": "integer"},
+                "date_from": {"type": "string"},
+            },
+        }
+
+        self.assertIsNone(
+            _validate_schema_runtime_params_for_source(
+                source,
+                "Process a pending-only queue; source state is fixed by the workflow.",
+                schema,
+            )
+        )
+
+    def test_batch_output_state_literal_is_not_treated_as_source_filter(self):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    batch_size = params.get('batch_size', 10)\n"
+            "    update_clauses = [\"status = 'failed'\"]\n"
+            "    return {'status': 'ok', 'remaining_work': 0, 'next_action': 'done'}\n"
+        )
+        schema = {
+            "type": "object",
+            "properties": {
+                "batch_size": {"type": "integer"},
+                "date_from": {"type": "string"},
+            },
+        }
+
+        self.assertIsNone(
+            _validate_schema_runtime_params_for_source(source, "Update a bounded source batch.", schema)
+        )
+
+    def test_batch_source_state_filter_accepts_runtime_parameter(self):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    batch_size = params.get('batch_size', 10)\n"
+            "    status_filter = params.get('status_filter', 'pending')\n"
+            "    query = 'SELECT * FROM source WHERE sync_status = ? LIMIT ?'\n"
+            "    return {'status': 'ok', 'remaining_work': 0, 'next_action': 'done'}\n"
+        )
+        schema = {
+            "type": "object",
+            "properties": {
+                "batch_size": {"type": "integer"},
+                "status_filter": {"type": "string", "default": "pending"},
+            },
+        }
+
+        self.assertIsNone(
+            _validate_schema_runtime_params_for_source(source, "Read a bounded source batch.", schema)
         )
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)

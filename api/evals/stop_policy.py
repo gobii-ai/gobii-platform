@@ -220,7 +220,7 @@ def _expected_condition_matches_call(
     if not _has_required_param_any(actual_params, condition.get("required_params_any")):
         return False
     if condition.get("after_execution") and (
-        _tool_call_was_skipped(tool_call) or not _tool_call_has_succeeded(tool_call)
+        _tool_call_was_skipped(tool_call) or not tool_call_has_succeeded(tool_call)
     ):
         return False
     if condition.get("after_finish") and not _tool_call_has_finished(tool_call):
@@ -247,7 +247,7 @@ def _tool_call_has_finished(tool_call) -> bool:
     return str(getattr(tool_call, "status", "") or "").lower() in {"complete", "error"}
 
 
-def _tool_call_has_succeeded(tool_call) -> bool:
+def tool_call_has_succeeded(tool_call) -> bool:
     if str(getattr(tool_call, "status", "") or "").lower() != "complete":
         return False
     try:
@@ -306,7 +306,7 @@ def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] 
             if (
                 call.tool_name in stop_after_execution_tool_names
                 and not _tool_call_was_skipped(call)
-                and _tool_call_has_succeeded(call)
+                and tool_call_has_succeeded(call)
             ):
                 return True, f"terminal tool call completed: {call.tool_name}"
 

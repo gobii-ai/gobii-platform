@@ -1074,7 +1074,7 @@ def _autocorrect_missing_table_with_schema(
         return sql, None
 
     best = _best_identifier_match(missing, candidates)
-    if not best:
+    if not best or best.casefold() in PROTECTED_TABLE_NAMES:
         return sql, None
 
     if prefix:
@@ -1874,6 +1874,16 @@ def _execute_sqlite_batch_inner(
         quality_summary = summarize_sqlite_tool_result_sql(queries)
         raw_projection_count = quality_summary.unshaped_result_payload_queries
         if (
+            quality_summary.large_unshaped_multi_result_payload_queries
+            and _table_row_count(conn, "__tool_results") > 1
+        ):
+            return _retryable_error(
+                "unshaped_multi_result_payload",
+                "Unbounded or oversized raw __tool_results payload projection was rejected before execution. "
+                "Use one preview of at most 4000 characters, or shape scalar rows with leaf JSON paths, json_each, "
+                "targeted grep_context_all, joins, filters, or aggregates.",
+            )
+        if (
             raw_projection_count
             and _runtime_raw_projection_count(conn, task_boundary) + raw_projection_count > 1
         ):
@@ -2085,9 +2095,26 @@ def _current_sqlite_task_boundary(agent: "PersistentAgent") -> str:
 
 def execute_sqlite_batch(agent: "PersistentAgent", params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute one or more SQL queries against the agent's SQLite DB."""
+    from .sqlite_agent_config import sqlite_batch_has_destructive_charter_replacement
+
     db_path = _sqlite_db_path_var.get(None)
     if not db_path:
         return {"status": "error", "message": "SQLite DB path unavailable"}
+    normalized_queries = _normalize_queries(params)
+    guarded_queries = [
+        _apply_all_sql_fixes(query)[0]
+        for query in (normalized_queries or [])
+    ]
+    if sqlite_batch_has_destructive_charter_replacement(
+        {"queries": guarded_queries},
+        agent.charter or "",
+    ):
+        return _retryable_error(
+            "destructive_charter_replacement",
+            "Replacing a nonempty charter without preserving its existing bytes was rejected. Patch only the "
+            "requested text with replace(charter, 'exact old text', 'new text'), append with charter || '...', "
+            "or use replace(charter, charter, 'new charter') for a deliberate full rewrite/clear, then retry.",
+        )
 
     limits = _resolve_sqlite_batch_limits()
     return _run_sqlite_batch_in_subprocess(

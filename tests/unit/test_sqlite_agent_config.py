@@ -8,9 +8,14 @@ from django.test import TestCase, tag
 from api.agent.tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     seed_sqlite_agent_config,
+    sqlite_batch_has_destructive_charter_replacement,
     sqlite_batch_mutates_agent_config,
 )
-from api.agent.tools.sqlite_state import AGENT_CONFIG_TABLE, reset_sqlite_db_path, set_sqlite_db_path
+from api.agent.tools.sqlite_state import (
+    AGENT_CONFIG_TABLE,
+    reset_sqlite_db_path,
+    set_sqlite_db_path,
+)
 from api.models import BrowserUseAgent, PersistentAgent
 
 
@@ -33,6 +38,71 @@ class SqliteAgentConfigTests(TestCase):
             charter="Original charter",
             schedule="0 9 * * *",
             browser_use_agent=self.browser_agent,
+        )
+
+    def test_destructive_charter_replacement_requires_structural_patch(self):
+        baseline = "Monitor pricing.\n- Use bullets.\n- Send updates in Slack."
+
+        self.assertTrue(
+            sqlite_batch_has_destructive_charter_replacement(
+                {"sql": "UPDATE __agent_config SET charter='Monitor enterprise pricing.' WHERE id=1"},
+                baseline,
+            )
+        )
+        for sql in (
+            "UPDATE __agent_config SET charter=replace(charter, 'pricing', 'enterprise pricing') WHERE id=1",
+            "UPDATE __agent_config SET charter=charter || '\n- Include sources.' WHERE id=1",
+            "UPDATE __agent_config SET charter=replace(charter, charter, 'Track renewal risk.') WHERE id=1",
+        ):
+            with self.subTest(sql=sql):
+                self.assertFalse(sqlite_batch_has_destructive_charter_replacement({"sql": sql}, baseline))
+
+    def test_charter_replacement_guard_handles_quoted_insert_and_multiple_statements(self):
+        baseline = "Monitor pricing. Send updates in Slack."
+        destructive = (
+            "CREATE TABLE scratch(value TEXT); "
+            "UPDATE \"__agent_config\" SET \"charter\"='Track renewals.' WHERE id=1;"
+        )
+        preserving_insert = (
+            "INSERT OR REPLACE INTO __agent_config (id, charter, schedule) "
+            f"VALUES (1, '{baseline}', NULL)"
+        )
+
+        self.assertTrue(sqlite_batch_has_destructive_charter_replacement({"sql": destructive}, baseline))
+        self.assertFalse(sqlite_batch_has_destructive_charter_replacement({"sql": preserving_insert}, baseline))
+        self.assertTrue(
+            sqlite_batch_has_destructive_charter_replacement(
+                {"sql": "REPLACE INTO __agent_config VALUES (1, 'Track renewals.', NULL)"},
+                baseline,
+            )
+        )
+        self.assertTrue(
+            sqlite_batch_has_destructive_charter_replacement(
+                {
+                    "sql": (
+                        "INSERT INTO __agent_config (id, charter) VALUES "
+                        f"(1, '{baseline}') ON CONFLICT(id) DO UPDATE SET charter='Track renewals.'"
+                    )
+                },
+                baseline,
+            )
+        )
+        self.assertTrue(
+            sqlite_batch_has_destructive_charter_replacement(
+                {
+                    "sql": (
+                        "INSERT INTO __agent_config (id, schedule) VALUES (1, NULL) "
+                        "ON CONFLICT(id) DO UPDATE SET charter='Track renewals.'"
+                    )
+                },
+                baseline,
+            )
+        )
+        self.assertFalse(
+            sqlite_batch_has_destructive_charter_replacement(
+                {"sql": "UPDATE __agent_config SET charter='Initial charter' WHERE id=1"},
+                "",
+            )
         )
 
     def test_sqlite_agent_config_applies_updates_and_drops_table(self):

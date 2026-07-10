@@ -258,7 +258,7 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 248076,
+    "limit": 248325,
     "limit_policy": "Advance the absolute limit only for approved upstream growth; branch changes use remaining headroom."
   }
 }

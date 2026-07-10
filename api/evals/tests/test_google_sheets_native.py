@@ -261,6 +261,7 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         absence_terms = case.response_term_groups[1]
 
         self.assertIn("not found", absence_terms)
+        self.assertIn("found nothing", absence_terms)
         self.assertIn("no results", absence_terms)
         self.assertNotIn("connected", case.response_term_groups[2])
 

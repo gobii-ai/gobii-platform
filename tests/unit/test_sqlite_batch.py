@@ -478,7 +478,7 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(out.get("advisories", [{}])[0].get("severity"), "info")
             self.assertIn("query needed rows together", out.get("message", ""))
 
-    def test_bulk_raw_tool_result_projection_returns_shaping_advisory(self):
+    def test_oversized_raw_tool_result_projection_is_rejected_before_execution(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             conn = sqlite3.connect(db_path)
             try:
@@ -507,12 +507,165 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "warning")
-            advisory = out.get("advisories", [{}])[0]
-            self.assertEqual(advisory.get("code"), "unshaped_multi_result_payload")
-            self.assertEqual(advisory.get("severity"), "warning")
-            self.assertIn("Shape payloads set-wise", advisory.get("message", ""))
-            self.assertIn("json_extract/json_each", advisory.get("message", ""))
+            self.assertEqual(out.get("status"), "error")
+            self.assertEqual(out.get("error_type"), "unshaped_multi_result_payload")
+            self.assertTrue(out.get("retryable"))
+            self.assertIn("rejected before execution", out.get("message", ""))
+
+    def test_destructive_charter_replacement_is_rejected_before_execution(self):
+        baseline = "Monitor pricing.\n- Use bullets.\n- Send updates in Slack."
+        agent = PersistentAgent.objects.get(pk=self.agent.pk)
+        agent.charter = baseline
+        agent.save(update_fields=["charter"])
+
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __agent_config (id INTEGER PRIMARY KEY, charter TEXT, schedule TEXT)")
+                conn.execute(
+                    "INSERT INTO __agent_config (id, charter) VALUES (1, ?)",
+                    (baseline,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            destructive = "UPDATE __agent_config SET charter='Monitor enterprise pricing.' WHERE id=1"
+            for params in (
+                {"queries": "SELECT 1", "sql": destructive},
+                {"sql": f'"{destructive}"'},
+                {"sql": json.dumps([destructive])},
+                {"sql": f"```sql\n{destructive}\n```"},
+            ):
+                with self.subTest(params=params):
+                    rejected = execute_sqlite_batch(agent, params)
+                    self.assertEqual(rejected.get("status"), "error")
+                    self.assertEqual(rejected.get("error_type"), "destructive_charter_replacement")
+                    self.assertTrue(rejected.get("retryable"))
+                    self.assertIn("replace(charter", rejected.get("message", ""))
+
+            for typo_table in ("__agent_confg", "agent_config"):
+                with self.subTest(typo_table=typo_table):
+                    typo = execute_sqlite_batch(
+                        agent,
+                        {"sql": f"UPDATE {typo_table} SET charter='Monitor enterprise pricing.' WHERE id=1"},
+                    )
+                    self.assertEqual(typo.get("status"), "error")
+                    self.assertNotIn("AUTO-CORRECTED", typo.get("message", ""))
+
+            preserved = execute_sqlite_batch(
+                agent,
+                {
+                    "sql": (
+                        "UPDATE __agent_config "
+                        "SET charter=replace(charter, 'Monitor pricing.', 'Monitor enterprise pricing.') "
+                        "WHERE id=1"
+                    )
+                },
+            )
+            self.assertEqual(preserved.get("status"), "ok", preserved.get("message"))
+            conn = sqlite3.connect(db_path)
+            try:
+                charter = conn.execute("SELECT charter FROM __agent_config WHERE id=1").fetchone()[0]
+            finally:
+                conn.close()
+            self.assertEqual(
+                charter,
+                "Monitor enterprise pricing.\n- Use bullets.\n- Send updates in Slack.",
+            )
+
+    def test_wrapped_and_compound_raw_tool_result_projections_are_rejected(self):
+        for sql in (
+            "SELECT result_id FROM __tool_results UNION ALL SELECT result_text FROM __tool_results",
+            "SELECT coalesce(result_text, '') AS payload FROM __tool_results",
+            (
+                "SELECT result_text, json_extract(result_json, '$.vendor') AS vendor "
+                "FROM __tool_results"
+            ),
+            (
+                "SELECT result_text FROM __tool_results UNION ALL "
+                "SELECT json_extract(result_json, '$.vendor') FROM __tool_results"
+            ),
+            (
+                "WITH raw AS (SELECT result_json FROM __tool_results) "
+                "SELECT *, json_extract(result_json, '$.vendor') FROM raw"
+            ),
+        ):
+            with self.subTest(sql=sql):
+                summary = summarize_sqlite_tool_result_sql([sql])
+                self.assertEqual(summary.large_unshaped_multi_result_payload_queries, 1)
+
+    def test_single_result_and_single_available_row_raw_reads_are_allowed(self):
+        in_one = summarize_sqlite_tool_result_sql(
+            ["SELECT result_text FROM __tool_results WHERE result_id IN ('r1')"]
+        )
+        self.assertEqual(in_one.single_result_id_filters, 1)
+        self.assertEqual(in_one.large_unshaped_multi_result_payload_queries, 0)
+        bounded_wrapper = summarize_sqlite_tool_result_sql(
+            ["SELECT coalesce(substr(result_text, 1, 1000), '') FROM __tool_results"]
+        )
+        self.assertEqual(bounded_wrapper.large_unshaped_multi_result_payload_queries, 0)
+        self.assertEqual(bounded_wrapper.unshaped_multi_result_payload_queries, 1)
+        shaped_bounded_input = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT grep_context_all(substr(result_text, 1, 8000), 'Vendor', 120, 3) "
+                "FROM __tool_results"
+            ]
+        )
+        self.assertEqual(shaped_bounded_input.unshaped_multi_result_payload_queries, 0)
+        self.assertEqual(shaped_bounded_input.smart_tool_result_queries, 1)
+        json_each_container_input = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT json_extract(item.value, '$.name') AS name "
+                "FROM __tool_results, json_each(json_extract(result_text, '$.result')) AS item "
+                "WHERE result_id = 'r1' AND (json_extract(item.value, '$.title') LIKE '%VP%' "
+                "OR json_extract(item.value, '$.title') LIKE '%Director%')"
+            ]
+        )
+        self.assertEqual(json_each_container_input.single_result_id_filters, 1)
+        self.assertEqual(json_each_container_input.unshaped_result_payload_queries, 0)
+        shaped_cte = summarize_sqlite_tool_result_sql(
+            [
+                "WITH raw AS (SELECT result_json FROM __tool_results) "
+                "SELECT json_extract(result_json, '$.vendor') FROM raw"
+            ]
+        )
+        self.assertEqual(shaped_cte.smart_tool_result_queries, 1)
+        self.assertEqual(shaped_cte.large_unshaped_multi_result_payload_queries, 0)
+
+        for multi_filter in (
+            "result_id IN ('r1') OR result_id IN ('r2')",
+            "result_id IN (SELECT result_id FROM selected_results)",
+            "result_id = 'r1' OR tool_name = 'search'",
+            "(result_id = 'r1' OR tool_name = 'search') AND created_at IS NOT NULL",
+        ):
+            with self.subTest(multi_filter=multi_filter):
+                summary = summarize_sqlite_tool_result_sql(
+                    [f"SELECT result_text FROM __tool_results WHERE {multi_filter}"]
+                )
+                self.assertEqual(summary.large_unshaped_multi_result_payload_queries, 1)
+
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
+                conn.execute(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    ("r1", "alpha payload"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT result_text FROM __tool_results ORDER BY result_id",
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
 
     def test_bulk_tool_result_metadata_and_shaped_payload_queries_are_not_warned(self):
         metadata_advisories = build_tool_result_query_advisories(

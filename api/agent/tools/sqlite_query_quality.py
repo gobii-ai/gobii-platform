@@ -3,6 +3,7 @@ from collections import Counter
 from types import SimpleNamespace
 from typing import Iterable
 
+import sqlglot
 import sqlparse
 
 
@@ -88,9 +89,12 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         mentions = bool(TOOL_RESULTS_RE.search(code))
         eq_count = len(RESULT_ID_EQ_RE.findall(code))
         in_count = _result_id_in_count(code)
-        single_result_filter = mentions and eq_count == 1 and in_count == 0
+        single_result_filter = mentions and (
+            (eq_count == 1 and in_count == 0)
+            or (eq_count == 0 and in_count == 1)
+        ) and not _result_filter_has_or_ancestor(code)
         direct_fetch = single_result_filter and _directly_selects_result_payload(code)
-        aggregate = mentions and not direct_fetch and (in_count > 1 or eq_count != 1)
+        aggregate = mentions and not direct_fetch and not single_result_filter
         counts.update(
             uses_json_functions=bool(JSON_FUNCTION_RE.search(code)),
             uses_cte=lowered.startswith("with ") or " with " in lowered,
@@ -106,9 +110,10 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         reads_payload = mentions and bool(RESULT_PAYLOAD_RE.search(code))
         shapes_payload = reads_payload and _has_structured_payload_shaping(code)
         projects_raw_payload, raw_preview_chars = _raw_result_payload_projection(code)
-        unshaped_payload = (
-            projects_raw_payload or _projects_json_container(code, {"result_json", "result_text"})
-        ) and not shapes_payload
+        unshaped_payload = bool(
+            projects_raw_payload
+            or _projects_json_container(code, {"result_json", "result_text"})
+        ) and not _cte_shapes_all_projected_payloads(code)
         counts["smart_tool_result_queries"] += int(aggregate and reads_payload and shapes_payload)
         counts["aggregate_payload_queries"] += int(aggregate and (shapes_payload or projects_raw_payload))
         counts["unshaped_result_payload_queries"] += int(unshaped_payload)
@@ -229,12 +234,17 @@ def _normalize(statement: str) -> str:
 
 
 def _result_id_in_count(statement: str) -> int:
-    counts = [len([v for v in match.group("values").split(",") if v.strip()]) for match in RESULT_ID_IN_RE.finditer(statement or "")]
-    return max(counts or [0])
+    count = 0
+    for match in RESULT_ID_IN_RE.finditer(statement or ""):
+        values = [value.strip() for value in match.group("values").split(",") if value.strip()]
+        if any(not re.fullmatch(r"(['\"]).*\1", value, re.S) for value in values):
+            return max(2, count + len(values))
+        count += len(values)
+    return count
 
 
-def _has_structured_payload_shaping(statement: str) -> bool:
-    payload_names = {"result_json", "result_text"}
+def _has_structured_payload_shaping(statement: str, payload_names: set[str] | None = None) -> bool:
+    payload_names = set(payload_names or {"result_json", "result_text"})
     payload_names.update(match.group("alias").lower() for match in PAYLOAD_ALIAS_RE.finditer(statement))
 
     for function_name, args in _sql_function_calls(statement):
@@ -264,13 +274,47 @@ def _has_structured_payload_shaping(statement: str) -> bool:
     )
 
 
+def _result_filter_has_or_ancestor(statement: str) -> bool:
+    try:
+        tree = sqlglot.parse_one(statement, read="sqlite")
+    except sqlglot.errors.ParseError:
+        return False
+    for select in tree.find_all(sqlglot.exp.Select):
+        where = select.args.get("where")
+        for column in where.find_all(sqlglot.exp.Column) if where else ():
+            if column.name.casefold() != "result_id":
+                continue
+            ancestor = column.parent
+            while ancestor is not None and ancestor is not where:
+                if isinstance(ancestor, sqlglot.exp.Or):
+                    return True
+                ancestor = ancestor.parent
+    return False
+
+
+def _cte_shapes_all_projected_payloads(statement: str) -> bool:
+    try:
+        tree = sqlglot.parse_one(statement, read="sqlite")
+    except sqlglot.errors.ParseError:
+        return False
+    if not isinstance(tree, sqlglot.exp.Select) or not tree.args.get("with_"):
+        return False
+    if any(part.is_star for part in tree.expressions):
+        return False
+    payload_names = {"result_json", "result_text"}
+    payload_names.update(match.group("alias").lower() for match in PAYLOAD_ALIAS_RE.finditer(statement))
+    projected = [part.sql(dialect="sqlite") for part in tree.expressions if _expression_reads_payload(part.sql(), payload_names)]
+    return bool(projected) and all(_has_structured_payload_shaping(part, payload_names) for part in projected)
+
+
 def _projects_json_container(statement: str, payload_names: set[str]) -> bool:
     return any(
         function_name == "json_extract"
         and len(args) >= 2
         and _expression_reads_payload(args[0], payload_names)
         and JSON_CONTAINER_PATH_RE.fullmatch(args[1].strip().strip("'\""))
-        for function_name, args in _sql_function_calls(statement)
+        for match in TOOL_RESULTS_SELECT_RE.finditer(statement or "")
+        for function_name, args in _sql_function_calls(match.group("select"))
     )
 
 
@@ -320,10 +364,15 @@ def _parse_sql_call_arguments(statement: str, open_paren: int) -> list[str] | No
 
 
 def _directly_selects_result_payload(statement: str) -> bool:
-    match = TOOL_RESULTS_SELECT_RE.search(statement or "")
-    if not match:
-        return False
-    for field in match.group("select").split(","):
+    return any(
+        _projection_directly_selects_result_payload(match.group("select"))
+        for match in TOOL_RESULTS_SELECT_RE.finditer(statement or "")
+    )
+
+
+def _projection_directly_selects_result_payload(projection: str) -> bool:
+    fields = _parse_sql_call_arguments(f"({projection})", 0) or projection.split(",")
+    for field in fields:
         cleaned = re.sub(r"\s+as\s+\"?[a-z_]\w*\"?$", "", field.strip(), flags=re.I).strip('"')
         if (
             cleaned == "*"
@@ -346,23 +395,31 @@ def _raw_result_payload_projection(statement: str) -> tuple[bool, int | None]:
     The caller separately checks whether the payload is shaped with a structured
     helper. ``None`` means the projection is unbounded or its bound is unknown.
     """
-    match = TOOL_RESULTS_SELECT_RE.search(statement or "")
-    if not match:
+    matches = tuple(TOOL_RESULTS_SELECT_RE.finditer(statement or ""))
+    if not matches:
         return False, None
 
-    projection = match.group("select").strip()
-    projection = re.sub(r"^(?:distinct|all)\s+", "", projection, flags=re.I)
-    if _directly_selects_result_payload(f"SELECT {projection} FROM __tool_results"):
-        return True, None
-
     preview_lengths = []
-    for function_match in re.finditer(r"\bsubstr(?:ing)?\s*\(", projection, re.I):
-        args = _parse_sql_call_arguments(projection, function_match.end() - 1)
-        if not args or not _expression_reads_payload(args[0], {"result_json", "result_text"}):
-            continue
-        if len(args) < 3 or not re.fullmatch(r"\+?\d+", args[2].strip()):
+    raw_wrapper_re = re.compile(
+        r"\b(?:coalesce|ifnull|nullif|trim|ltrim|rtrim|lower|upper|replace)\s*\(\s*"
+        r"(?:[a-z_]\w*\.)?result_(?:json|text)\b",
+        re.I,
+    )
+    for match in matches:
+        projection = re.sub(r"^(?:distinct|all)\s+", "", match.group("select").strip(), flags=re.I)
+        if _projection_directly_selects_result_payload(projection) or raw_wrapper_re.search(projection):
             return True, None
-        preview_lengths.append(int(args[2].strip()))
+        for function_match in re.finditer(r"\bsubstr(?:ing)?\s*\(", projection, re.I):
+            args = _parse_sql_call_arguments(projection, function_match.end() - 1)
+            if not args or not _expression_reads_payload(args[0], {"result_json", "result_text"}):
+                continue
+            if re.search(r"\b(?:grep_context_all|parse_date|parse_number|split_sections)\s*\([^)]*$", projection[:function_match.start()], re.I):
+                continue
+            if any(re.search(r"\binstr\s*\(", arg, re.I) for arg in args[1:]):
+                continue
+            if len(args) < 3 or not re.fullmatch(r"\+?\d+", args[2].strip()):
+                return True, None
+            preview_lengths.append(int(args[2].strip()))
 
     if preview_lengths:
         return True, sum(preview_lengths)
