@@ -67,6 +67,7 @@ from billing.checkout_metadata import (
 from billing.checkout_context import record_checkout_context
 from billing.checkout_sessions import create_stripe_checkout_session
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
+from config.plans import STARTUP_MONTHLY_PRICE_USD, get_plan_config
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -112,6 +113,12 @@ from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import render_public_template_markdown, load_page, get_prev_next, get_all_doc_pages
 from .homepage_cache import get_homepage_integrations_payload, get_homepage_pretrained_payload
 from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, build_homepage_structured_data
+from .ai_employees import (
+    AI_EMPLOYEES_CLUSTER_LINKS,
+    AI_EMPLOYEES_FAQ_ITEMS,
+    AI_EMPLOYEES_WORKFLOW_ITEMS,
+    build_ai_employees_structured_data,
+)
 from .public_template_urls import (
     public_template_category_label,
     public_template_category_path,
@@ -3936,6 +3943,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 'proprietary:careers',
                 'proprietary:blog_index',
                 'proprietary:comparisons',
+                'pages:ai_employees',
                 'pages:solutions',
                 'pages:recruiting_contact',
             ]
@@ -4216,6 +4224,93 @@ class ClearSignupTrackingView(View):
                 del request.session[key]
 
         return JsonResponse(data)
+
+
+class AIEmployeesView(TemplateView):
+    template_name = "ai_employees.html"
+
+    ORGANIZATION_LOGO_PATH = "images/gobii_fish_with_text_purple_nav_2x.webp"
+    ORGANIZATION_SAME_AS = (
+        "https://www.linkedin.com/company/gobii-ai",
+        "https://github.com/gobii-ai",
+        "https://x.com/gobii_ai",
+        "https://medium.com/gobiiai",
+        "https://docs.gobii.ai/",
+    )
+    page_title = "AI Employees for Real Work"
+    seo_title = "AI Employees for Real Work: Workflows and Examples | Gobii"
+    seo_description = (
+        "Gobii AI teammates work like AI employees for business workflows: defined tasks, human "
+        "supervision, review-ready outputs, and clean handoffs. See how it works."
+    )
+    social_image = "images/ai-employees/ai-employees-og-1200x630.jpg"
+    social_image_alt = "Gobii AI teammates handling supervised business workflows"
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("/", permanent=True)
+        return super().dispatch(request, *args, **kwargs)
+
+    def _live_cluster_links(self):
+        links = []
+        for link in AI_EMPLOYEES_CLUSTER_LINKS:
+            if link["status"] != "live":
+                continue
+            rendered_link = dict(link)
+            if rendered_link.get("route"):
+                rendered_link["url"] = reverse(rendered_link["route"])
+            rendered_link["absolute_url"] = _public_site_absolute_url(rendered_link["url"])
+            links.append(rendered_link)
+        return links
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        canonical_url = _public_site_absolute_url(reverse("pages:ai_employees"))
+        home_url = _public_site_absolute_url(reverse("pages:home"))
+        pricing_url = _public_site_absolute_url(reverse("proprietary:pricing"))
+        social_image_url = _public_site_absolute_url(static(self.social_image))
+        live_cluster_links = self._live_cluster_links()
+        pro_config = get_plan_config(PlanNames.STARTUP) or {}
+        pro_price = pro_config.get("price", STARTUP_MONTHLY_PRICE_USD)
+        pro_task_credits = get_active_public_plan_monthly_task_credits(PlanNames.STARTUP)
+        structured_data = build_ai_employees_structured_data(
+            page_title=self.page_title,
+            seo_title=self.seo_title,
+            seo_description=self.seo_description,
+            canonical_url=canonical_url,
+            home_url=home_url,
+            pricing_url=pricing_url,
+            social_image_url=social_image_url,
+            organization_logo_url=_public_site_absolute_url(static(self.ORGANIZATION_LOGO_PATH)),
+            organization_same_as=self.ORGANIZATION_SAME_AS,
+            live_cluster_links=live_cluster_links,
+            starting_price=pro_price,
+        )
+
+        context.update({
+            "suppress_htmx": True,
+            "suppress_preline": True,
+            "suppress_public_conversion_assets": True,
+            "suppress_phone_format_js": True,
+            "suppress_rewardful_js": True,
+            "suppress_stripe_js": True,
+            "ai_employees_page_title": self.page_title,
+            "ai_employees_seo_title": self.seo_title,
+            "ai_employees_seo_description": self.seo_description,
+            "ai_employees_social_image_url": social_image_url,
+            "ai_employees_social_image_alt": self.social_image_alt,
+            "ai_employees_structured_data_json": html_safe_json_dumps(structured_data),
+            "ai_employees_faq_items": [dict(item) for item in AI_EMPLOYEES_FAQ_ITEMS],
+            "ai_employees_workflow_items": [dict(item) for item in AI_EMPLOYEES_WORKFLOW_ITEMS],
+            "ai_employees_live_cluster_links": live_cluster_links,
+            "ai_employees_pro_price_display": f"${pro_price:,}",
+            "ai_employees_pro_task_credits_display": f"{pro_task_credits:,}",
+            "ai_employees_planned_cluster_links": [
+                dict(link) for link in AI_EMPLOYEES_CLUSTER_LINKS
+            ],
+            "canonical_url": canonical_url,
+        })
+        return context
 
 
 class SolutionsIndexView(TemplateView):

@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 import json
 import re
@@ -2304,6 +2305,7 @@ class SitemapTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("<loc>http://example.com/</loc>", content)
+        self.assertIn("<loc>http://example.com/ai-employees/</loc>", content)
         self.assertIn("<loc>http://example.com/recruiting/contact/</loc>", content)
         self.assertIn("<loc>http://example.com/library/</loc>", content)
         self.assertIn("<loc>http://example.com/library/team-ops/</loc>", content)
@@ -2419,6 +2421,11 @@ class SitemapTests(TestCase):
         self.assertContains(response, "AI sales agent for supervised pipeline work")
         self.assertContains(response, "AI sales employee")
         self.assertContains(response, "Start with Lead Hunter")
+        self.assertContains(
+            response,
+            f'href="{reverse("pages:ai_employees")}"',
+        )
+        self.assertContains(response, ">AI employees</a>")
         self.assertContains(response, "Which type of AI sales agent should you buy?")
         self.assertContains(response, "CRM-native agents")
         self.assertContains(response, "Voice and calling agents")
@@ -2544,7 +2551,290 @@ class SitemapTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("http://example.com/docs/", content)
+        self.assertNotIn("http://example.com/ai-employees/", content)
         self.assertNotIn("http://example.com/solutions/", content)
+
+
+@tag("batch_pages")
+class AIEmployeesPageTests(TestCase):
+    def _get_proprietary_page(self):
+        response = self.client.get(reverse("pages:ai_employees"))
+        self.assertEqual(response.status_code, 200)
+        return response, BeautifulSoup(response.content, "html.parser")
+
+    def _schema_nodes(self, soup):
+        scripts = soup.find_all("script", {"type": "application/ld+json"})
+        self.assertEqual(len(scripts), 1)
+        schema = json.loads(scripts[0].string)
+        self.assertEqual(schema["@context"], "https://schema.org")
+        graph = schema["@graph"]
+        return schema, {node["@type"]: node for node in graph}
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        GOBII_RELEASE_ENV="prod",
+        PUBLIC_SITE_URL="https://gobii.ai",
+    )
+    def test_ai_employees_page_renders_metadata_and_keywords(self):
+        response, soup = self._get_proprietary_page()
+
+        expected_url = "https://gobii.ai/ai-employees/"
+        expected_title = "AI Employees for Real Work: Workflows and Examples | Gobii"
+        self.assertEqual(soup.title.string, expected_title)
+        self.assertGreaterEqual(len(expected_title), 50)
+        self.assertLessEqual(len(expected_title), 60)
+        self.assertEqual(soup.find("meta", property="og:title")["content"], expected_title)
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "twitter:title"})["content"],
+            expected_title,
+        )
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            "Gobii AI teammates work like AI employees for business workflows: defined tasks, human "
+            "supervision, review-ready outputs, and clean handoffs. See how it works.",
+        )
+        self.assertEqual(soup.find("link", rel="canonical")["href"], expected_url)
+        self.assertEqual(soup.find("meta", property="og:url")["content"], expected_url)
+        self.assertEqual(
+            soup.find("meta", property="og:image")["content"],
+            "https://gobii.ai/static/images/ai-employees/ai-employees-og-1200x630.jpg",
+        )
+        self.assertEqual(soup.find("meta", attrs={"name": "twitter:card"})["content"], "summary_large_image")
+        self.assertNotIn("localhost", response.content.decode("utf-8"))
+        self.assertNotIn("http://testserver", response.content.decode("utf-8"))
+
+        page_text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).lower()
+        for term in (
+            "ai employees",
+            "ai employee",
+            "ai workers",
+            "ai teammates",
+            "hire ai employees",
+            "ai employees for business",
+            "virtual ai employees",
+        ):
+            with self.subTest(term=term):
+                self.assertIn(term, page_text)
+
+        self.assertIn("what are ai employees?", page_text)
+        self.assertIn("what ai employees can do", page_text)
+        self.assertIn("workflow examples", page_text)
+        self.assertIn("deployment, supervision, review, and handoff", page_text)
+        self.assertIn("which teams should start with an ai employee?", page_text)
+        self.assertNotIn("small business", page_text)
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        GOBII_RELEASE_ENV="prod",
+        PUBLIC_SITE_URL="https://gobii.ai",
+    )
+    def test_ai_employees_page_includes_required_structured_data(self):
+        _response, soup = self._get_proprietary_page()
+        _schema, nodes = self._schema_nodes(soup)
+
+        self.assertEqual(
+            set(nodes),
+            {
+                "Organization",
+                "WebSite",
+                "WebPage",
+                "SoftwareApplication",
+                "FAQPage",
+                "BreadcrumbList",
+                "ItemList",
+            },
+        )
+        self.assertEqual(nodes["WebPage"]["url"], "https://gobii.ai/ai-employees/")
+        self.assertEqual(nodes["WebPage"]["dateModified"], "2026-07-10")
+        self.assertEqual(nodes["WebPage"]["mainEntity"], {"@id": "https://gobii.ai/ai-employees#software"})
+        self.assertEqual(nodes["SoftwareApplication"]["name"], "Gobii AI Teammates")
+        self.assertEqual(
+            nodes["SoftwareApplication"]["offers"],
+            {
+                "@type": "Offer",
+                "url": "https://gobii.ai/pricing/",
+                "price": 50,
+                "priceCurrency": "USD",
+            },
+        )
+        self.assertEqual(
+            [item["name"] for item in nodes["BreadcrumbList"]["itemListElement"]],
+            ["Home", "AI Employees for Real Work"],
+        )
+        self.assertEqual(len(nodes["ItemList"]["itemListElement"]), 5)
+
+        faq = nodes["FAQPage"]
+        self.assertEqual(
+            [item["name"] for item in faq["mainEntity"]],
+            [
+                "What is an AI employee?",
+                "Can you have AI employees?",
+                "How are AI employees different from chatbots?",
+                "What work can an AI employee do?",
+                "How do you hire or deploy an AI employee?",
+            ],
+        )
+        self.assertTrue(
+            all(
+                "acceptedAnswer" in item and item["acceptedAnswer"]["@type"] == "Answer"
+                for item in faq["mainEntity"]
+            )
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.views.get_plan_config", return_value={"price": 72})
+    def test_ai_employees_page_uses_plan_price_for_copy_and_schema(self, _mock_plan_config):
+        _response, soup = self._get_proprietary_page()
+        _schema, nodes = self._schema_nodes(soup)
+
+        pricing = soup.find("section", id="pricing")
+        self.assertIn("$72 per month", pricing.get_text(" ", strip=True))
+        self.assertEqual(nodes["SoftwareApplication"]["offers"]["price"], 72)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_ai_employees_page_links_only_to_live_cluster_spokes(self):
+        _response, soup = self._get_proprietary_page()
+        rendered_paths = {
+            urlparse(anchor["href"]).path
+            for anchor in soup.find_all("a", href=True)
+        }
+
+        self.assertIn(reverse("pages:solution_sales_ai_sales_agent"), rendered_paths)
+        planned_cluster_paths = {
+            link["url"]
+            for link in page_views.AI_EMPLOYEES_CLUSTER_LINKS
+            if link["status"] != "live"
+        }
+        self.assertFalse(planned_cluster_paths & rendered_paths)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_ai_employees_page_renders_anonymized_workflow_proof(self):
+        _response, soup = self._get_proprietary_page()
+        proof = soup.find("section", id="product-proof")
+
+        self.assertIsNotNone(proof)
+        self.assertIn(
+            "One assignment. A visible trail from brief to evidence.",
+            proof.get_text(" ", strip=True),
+        )
+        rendered_sources = {
+            image["src"]
+            for image in proof.find_all("img", src=True)
+        }
+        self.assertEqual(
+            rendered_sources,
+            {
+                "/static/images/ai-employees/assignment-scope.jpg",
+                "/static/images/ai-employees/planning-execution.jpg",
+                "/static/images/ai-employees/source-backed-shortlist.jpg",
+            },
+        )
+        self.assertTrue(all(image.get("alt") for image in proof.find_all("img")))
+        for source in rendered_sources:
+            with self.subTest(source=source):
+                image_path = (
+                    Path(settings.BASE_DIR)
+                    / "static"
+                    / source.removeprefix("/static/")
+                )
+                self.assertLess(image_path.stat().st_size, 200_000)
+        social_image = (
+            Path(settings.BASE_DIR)
+            / "static/images/ai-employees/ai-employees-og-1200x630.jpg"
+        )
+        self.assertLess(social_image.stat().st_size, 200_000)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_ai_employees_page_suppresses_unused_global_scripts(self):
+        response, _soup = self._get_proprietary_page()
+
+        for asset in (
+            "django_htmx/htmx",
+            "https://js.stripe.com",
+            "turnstile/v0/api.js",
+            "js/account_identity_signals.js",
+            "js/account_auth_forms.js",
+            "js/cta_signup_modal.js",
+            "libphonenumber-js",
+            "js/phone_format.js",
+            "https://r.wdfl.co/rw.js",
+            "preline.min.js",
+        ):
+            with self.subTest(asset=asset):
+                self.assertNotContains(response, asset)
+        self.assertContains(response, "alpinejs@3.13.7")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_ai_employees_page_renders_buyer_decision_sections(self):
+        _response, soup = self._get_proprietary_page()
+
+        section_nav = soup.find("nav", attrs={"aria-label": "AI employees page sections"})
+        self.assertEqual(
+            {link.get_text(" ", strip=True): link["href"] for link in section_nav.find_all("a")},
+            {
+                "Definition": "#definition",
+                "Workflows": "#workflow-examples",
+                "Product proof": "#product-proof",
+                "Deployment": "#deployment",
+                "Pricing": "#pricing",
+                "FAQ": "#faq",
+            },
+        )
+
+        comparison = soup.find("section", id="comparison")
+        comparison_text = re.sub(r"\s+", " ", comparison.get_text(" ", strip=True)).lower()
+        for term in (
+            "gobii ai teammates",
+            "chatbots",
+            "generic ai agents",
+            "ai employee marketplaces",
+            "workflow ownership",
+            "evidence and handoff",
+        ):
+            with self.subTest(term=term):
+                self.assertIn(term, comparison_text)
+
+        governance = soup.find("section", id="governance")
+        governance_text = re.sub(r"\s+", " ", governance.get_text(" ", strip=True)).lower()
+        for term in (
+            "credentials outside chat",
+            "permission scope",
+            "visible work record",
+            "approval gates",
+            "remove access",
+        ):
+            with self.subTest(term=term):
+                self.assertIn(term, governance_text)
+
+        pricing = soup.find("section", id="pricing")
+        pricing_text = re.sub(r"\s+", " ", pricing.get_text(" ", strip=True)).lower()
+        self.assertIn("$50 per month", pricing_text)
+        self.assertIn("500 tasks included each month", pricing_text)
+        self.assertIsNotNone(pricing.find("a", href=reverse("proprietary:pricing")))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_ai_employees_page_redirects_in_community_mode(self):
+        response = self.client.get(reverse("pages:ai_employees"))
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/")
+
+    def test_ai_employees_sitemap_visibility_matches_proprietary_mode(self):
+        with override_settings(GOBII_PROPRIETARY_MODE=True):
+            proprietary_response = self.client.get("/sitemap.xml")
+        self.assertEqual(proprietary_response.status_code, 200)
+        self.assertIn(
+            "<loc>http://example.com/ai-employees/</loc>",
+            proprietary_response.content.decode(),
+        )
+
+        with override_settings(GOBII_PROPRIETARY_MODE=False):
+            community_response = self.client.get("/sitemap.xml")
+        self.assertEqual(community_response.status_code, 200)
+        self.assertNotIn(
+            "<loc>http://example.com/ai-employees/</loc>",
+            community_response.content.decode(),
+        )
 
 
 @tag("batch_pages")
