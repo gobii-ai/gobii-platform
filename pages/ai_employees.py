@@ -1,3 +1,6 @@
+AI_EMPLOYEES_LAST_MODIFIED_DATE = "2026-07-10"
+
+
 AI_EMPLOYEES_CLUSTER_LINKS = (
     {
         "anchor": "best AI employees",
@@ -86,44 +89,41 @@ AI_EMPLOYEES_FAQ_ITEMS = (
     {
         "question": "What is an AI employee?",
         "answer": (
-            "An AI employee is software that can own a defined workstream: gather context, use tools, "
-            "take approved actions, and produce review-ready output. Gobii uses the warmer phrase AI "
-            "teammate because the strongest workflows keep human judgment in charge while AI handles "
-            "the repeatable execution."
+            "An AI employee is software that owns a defined workstream. It gathers context, uses tools, "
+            "takes approved actions, and produces output for review. Gobii uses AI teammate because people "
+            "keep control while AI handles repeatable execution."
         ),
     },
     {
         "question": "Can you have AI employees?",
         "answer": (
-            "Yes. Teams can deploy AI employees when the work has clear inputs, approved tools, success "
-            "criteria, and review points. The practical starting point is not a job title. It is one "
-            "repeatable workflow that a virtual AI employee can run, document, and hand back to the team."
+            "Yes. Teams can deploy AI employees when work has clear inputs, approved tools, success "
+            "criteria, and review points. Start with one repeatable workflow, not a job title. A virtual "
+            "AI employee can run it, document the work, and hand it back."
         ),
     },
     {
         "question": "How are AI employees different from chatbots?",
         "answer": (
-            "Chatbots usually answer questions inside a conversation. AI employees do work across a "
-            "workflow: they browse approved sources, update structured outputs, compare information, "
-            "prepare drafts, and request review when judgment is needed. The difference is sustained "
-            "execution, not just a better reply."
+            "A chatbot answers questions in a conversation. An AI employee works across a workflow. It can "
+            "browse approved sources, update structured outputs, compare information, prepare drafts, and "
+            "ask for review. The key difference is sustained execution."
         ),
     },
     {
         "question": "What work can an AI employee do?",
         "answer": (
-            "An AI employee can handle research, monitoring, enrichment, list building, first-pass "
-            "analysis, document prep, CRM-ready updates, spreadsheet work, and handoff summaries. The "
-            "best fit is high-context, repeatable work where sources, rules, and review criteria can "
-            "be explained."
+            "An AI employee can research, monitor, enrich lists, prepare documents, update spreadsheets, "
+            "and create handoff summaries. It works best on repeatable tasks with clear sources, rules, "
+            "and review criteria."
         ),
     },
     {
         "question": "How do you hire or deploy an AI employee?",
         "answer": (
-            "To hire AI employees well, start with a workflow brief: the goal, input sources, allowed "
-            "tools, output format, cadence, and human reviewer. Gobii AI teammates can then run the "
-            "workflow, surface uncertainty, and improve as reviewers give feedback."
+            "To hire AI employees, start with a short workflow brief. Define the goal, sources, allowed "
+            "tools, output, schedule, and reviewer. A Gobii AI teammate can then run the work, flag "
+            "uncertainty, and improve from feedback."
         ),
     },
 )
@@ -290,7 +290,7 @@ def build_ai_employees_structured_data(
         "about": {"@id": software_id},
         "mainEntity": {"@id": software_id},
         "mainEntityOfPage": {"@id": webpage_id},
-        "dateModified": "2026-07-09",
+        "dateModified": AI_EMPLOYEES_LAST_MODIFIED_DATE,
         "breadcrumb": {"@id": breadcrumb_id},
         "hasPart": [
             {"@id": faq_id},

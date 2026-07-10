@@ -67,7 +67,7 @@ from billing.checkout_metadata import (
 from billing.checkout_context import record_checkout_context
 from billing.checkout_sessions import create_stripe_checkout_session
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
-from config.plans import STARTUP_MONTHLY_PRICE_USD
+from config.plans import STARTUP_MONTHLY_PRICE_USD, get_plan_config
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -4238,12 +4238,12 @@ class AIEmployeesView(TemplateView):
         "https://docs.gobii.ai/",
     )
     page_title = "AI Employees for Real Work"
-    seo_title = "AI Employees for Real Work | Gobii"
+    seo_title = "AI Employees for Real Work: Workflows and Examples | Gobii"
     seo_description = (
         "Gobii AI teammates work like AI employees for business workflows: defined tasks, human "
-        "supervision, review-ready outputs, and clean handoffs."
+        "supervision, review-ready outputs, and clean handoffs. See how it works."
     )
-    social_image = "images/solutions/sales-hero.jpg"
+    social_image = "images/ai-employees/ai-employees-og-1200x630.jpg"
     social_image_alt = "Gobii AI teammates handling supervised business workflows"
 
     def dispatch(self, request, *args, **kwargs):
@@ -4270,7 +4270,8 @@ class AIEmployeesView(TemplateView):
         pricing_url = _public_site_absolute_url(reverse("proprietary:pricing"))
         social_image_url = _public_site_absolute_url(static(self.social_image))
         live_cluster_links = self._live_cluster_links()
-        pro_price = STARTUP_MONTHLY_PRICE_USD
+        pro_config = get_plan_config(PlanNames.STARTUP) or {}
+        pro_price = pro_config.get("price", STARTUP_MONTHLY_PRICE_USD)
         pro_task_credits = get_active_public_plan_monthly_task_credits(PlanNames.STARTUP)
         structured_data = build_ai_employees_structured_data(
             page_title=self.page_title,
@@ -4287,7 +4288,12 @@ class AIEmployeesView(TemplateView):
         )
 
         context.update({
+            "suppress_htmx": True,
             "suppress_preline": True,
+            "suppress_public_conversion_assets": True,
+            "suppress_phone_format_js": True,
+            "suppress_rewardful_js": True,
+            "suppress_stripe_js": True,
             "ai_employees_page_title": self.page_title,
             "ai_employees_seo_title": self.seo_title,
             "ai_employees_seo_description": self.seo_description,
