@@ -1,16 +1,9 @@
 {% load static %}
 
 {% if settings.GOBII_PROPRIETARY_MODE %}
-<div class="relative mb-8 mx-auto grid max-w-4xl items-center gap-5 md:grid-cols-[1fr_auto] md:gap-8">
-  <div class="text-center md:text-left">
-    <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-200/80 bg-white/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-violet-700 backdrop-blur-sm">
-      <span class="relative flex h-2 w-2" aria-hidden="true">
-        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-60"></span>
-        <span class="relative inline-flex h-2 w-2 rounded-full bg-violet-600"></span>
-      </span>
-      Always-on sourcing
-    </div>
-    <h1 class="text-4xl font-light leading-[1.08] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
+<div class="mx-auto mb-6 flex max-w-5xl flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-8">
+  <div class="min-w-0 text-center md:max-w-2xl md:text-left">
+    <h1 class="text-4xl font-light leading-[1.08] tracking-tight text-slate-950 lg:text-5xl">
       {% if landing_hero_text %}
         <span class="font-light">{{ landing_hero_text|safe }}</span>
       {% else %}
@@ -28,14 +21,7 @@
   </div>
 </div>
 {% else %}
-<div class="relative mx-auto mb-8 max-w-4xl text-center">
-  <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-200/80 bg-white/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-violet-700 backdrop-blur-sm">
-    <span class="relative flex h-2 w-2" aria-hidden="true">
-      <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-60"></span>
-      <span class="relative inline-flex h-2 w-2 rounded-full bg-violet-600"></span>
-    </span>
-    Always-on sourcing
-  </div>
+<div class="mx-auto mb-8 max-w-4xl text-center">
   <h1 class="mx-auto max-w-4xl text-4xl font-light leading-[1.08] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
     {% if landing_hero_text %}
       <span class="font-light">{{ landing_hero_text|safe }}</span>
