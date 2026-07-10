@@ -29,12 +29,15 @@ class TestMCPToolBlacklist(TestCase):
             self.manager._is_tool_blacklisted("mcp_brightdata_scraping_browser_go_back")
         )
         
-        # Test non-matching patterns
-        self.assertFalse(
+        self.assertTrue(
             self.manager._is_tool_blacklisted("mcp_brightdata_scrape_as_markdown")
         )
-        self.assertFalse(
+        self.assertTrue(
             self.manager._is_tool_blacklisted("mcp_brightdata_search_engine")
+        )
+        # Other Bright Data MCP tools remain available.
+        self.assertFalse(
+            self.manager._is_tool_blacklisted("mcp_brightdata_search_engine_batch")
         )
         self.assertFalse(
             self.manager._is_tool_blacklisted("mcp_other_scraping_browser_tool")
@@ -54,6 +57,7 @@ class TestMCPToolBlacklist(TestCase):
             MockTool('scraping_browser_click', 'Click element', {}),
             MockTool('scrape_as_markdown', 'Scrape as markdown', {}),
             MockTool('search_engine', 'Search engine', {}),
+            MockTool('search_engine_batch', 'Search engine batch', {}),
         ]
         
         # Create a mock async function that returns tools
@@ -100,10 +104,11 @@ class TestMCPToolBlacklist(TestCase):
             loop.close()
         
         # Verify only non-blacklisted tools are returned
-        self.assertEqual(len(tools), 2)
+        self.assertEqual(len(tools), 1)
         tool_names = [tool.full_name for tool in tools]
-        self.assertIn("mcp_brightdata_scrape_as_markdown", tool_names)
-        self.assertIn("mcp_brightdata_search_engine", tool_names)
+        self.assertIn("mcp_brightdata_search_engine_batch", tool_names)
+        self.assertNotIn("mcp_brightdata_scrape_as_markdown", tool_names)
+        self.assertNotIn("mcp_brightdata_search_engine", tool_names)
         self.assertNotIn("mcp_brightdata_scraping_browser_navigate", tool_names)
         self.assertNotIn("mcp_brightdata_scraping_browser_click", tool_names)
     
@@ -181,8 +186,7 @@ class TestMCPToolBlacklist(TestCase):
                     with patch('api.agent.tools.tool_manager.enable_mcp_tool') as mock_enable:
                         ensure_default_tools_enabled(agent)
                         
-                        # Should only enable non-blacklisted tools
-                        mock_enable.assert_called_once_with(agent, "mcp_brightdata_scrape_as_markdown")
+                        mock_enable.assert_not_called()
         
         finally:
             # Restore original defaults

@@ -84,13 +84,13 @@ Depending on which Gobii features you enable, your deployment may also need:
 
 ### Bright Data
 
-Bright Data is preconfigured as a platform MCP server in self-hosted deployments. You only need to supply the token:
+Bright Data web search and markdown scraping use the native Bright Data API. Other Bright Data tools continue to use the preconfigured platform MCP server.
 
-1. Set `BRIGHT_DATA_TOKEN` in your deployment environment.
-   - For Docker Compose, place it in a `.env` file and pass it into the `web` and `worker` services (or use an `env_file`).
-   - Optional: set `BRIGHT_DATA_WEB_UNLOCKER_ZONE` if you use Bright Data Web Unlocker.
-   - Optional: add `WEB_UNLOCKER_ZONE_FALLBACK` to the Bright Data MCP server environment to retry failed search calls with a fallback Web Unlocker zone. If you want this sourced from the deployment environment, add it to the server metadata `env_fallback` map.
-2. Restart the stack so the containers pick up the variable.
-3. In the Console, open **MCP Servers** and enable Bright Data tools for the agents that should use them.
+1. Set both `BRIGHT_DATA_TOKEN` and `BRIGHT_DATA_WEB_UNLOCKER_ZONE` in your deployment environment.
+   - For Docker Compose, place them in a `.env` file and pass them into the `web` and `worker` services (or use an `env_file`).
+   - The zone must already exist; Gobii does not create or modify Bright Data zones.
+   - Optionally set `BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK` to retry failed native search and markdown scraping requests once with a second existing zone.
+2. Restart the stack so the containers pick up the variables.
+3. Native Bright Data search and markdown scraping are enabled by default. In the Console, use **MCP Servers** to manage any additional Bright Data tools.
 
 See [MCP Servers](/using-gobii/mcp-servers) for user/admin MCP server management and [Remote MCP](/developers/mcp-server) for Gobii's developer MCP endpoint.

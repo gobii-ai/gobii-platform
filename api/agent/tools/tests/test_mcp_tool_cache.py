@@ -571,11 +571,11 @@ class MCPToolErrorNormalizationTests(SimpleTestCase):
     def test_platform_brightdata_routes_to_isolated_mcp_execution(self):
         entry = ToolCatalogEntry(
             provider="mcp",
-            full_name="mcp_brightdata_search_engine",
-            description="Bright Data Search",
+            full_name="mcp_brightdata_search_engine_batch",
+            description="Bright Data Batch Search",
             parameters={"type": "object", "properties": {}},
             tool_server="brightdata",
-            tool_name="search_engine",
+            tool_name="search_engine_batch",
             server_config_id="cache-test-id",
         )
 
@@ -598,8 +598,8 @@ class MCPToolErrorNormalizationTests(SimpleTestCase):
             ):
                 result = execute_enabled_tool(
                     SimpleNamespace(id="agent-id"),
-                    "mcp_brightdata_search_engine",
-                    {"query": "gobii"},
+                    "mcp_brightdata_search_engine_batch",
+                    {"queries": [{"query": "gobii"}]},
                 )
 
         self.assertEqual(result["status"], "success")
@@ -609,11 +609,11 @@ class MCPToolErrorNormalizationTests(SimpleTestCase):
     def test_non_platform_brightdata_preserves_shared_mcp_execution(self):
         entry = ToolCatalogEntry(
             provider="mcp",
-            full_name="mcp_brightdata_search_engine",
-            description="User Bright Data Search",
+            full_name="mcp_brightdata_search_engine_batch",
+            description="User Bright Data Batch Search",
             parameters={"type": "object", "properties": {}},
             tool_server="brightdata",
-            tool_name="search_engine",
+            tool_name="search_engine_batch",
             server_config_id="user-brightdata-config-id",
         )
 
@@ -635,8 +635,8 @@ class MCPToolErrorNormalizationTests(SimpleTestCase):
 
             result = execute_enabled_tool(
                 SimpleNamespace(id="agent-id"),
-                "mcp_brightdata_search_engine",
-                {"query": "gobii"},
+                "mcp_brightdata_search_engine_batch",
+                {"queries": [{"query": "gobii"}]},
             )
 
         self.assertEqual(result["status"], "success")

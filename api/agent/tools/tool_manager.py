@@ -29,6 +29,14 @@ from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
+from .brightdata import (
+    BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME,
+    BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME,
+    execute_brightdata_scrape_as_markdown,
+    execute_brightdata_search_engine,
+    get_brightdata_scrape_as_markdown_tool,
+    get_brightdata_search_engine_tool,
+)
 from .read_file import get_read_file_tool, execute_read_file
 from .create_file import get_create_file_tool, execute_create_file
 from .create_csv import get_create_csv_tool, execute_create_csv
@@ -69,7 +77,13 @@ META_ADS_TOOL_NAME = "meta_ads"
 DISCORD_CHANNEL_SUBSCRIPTIONS_TOOL_NAME = "discord_channel_subscriptions"
 DISCORD_SEND_MESSAGE_TOOL_NAME = "send_discord_message"
 PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
-DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
+DEFAULT_BUILTIN_TOOLS = {
+    READ_FILE_TOOL_NAME,
+    SQLITE_TOOL_NAME,
+    CREATE_CHART_TOOL_NAME,
+    BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME,
+    BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME,
+}
 
 
 def _coerce_params_to_schema(params: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -175,6 +189,14 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_http_request_tool,
         "executor": execute_http_request,
         "parallel_safe": True,
+    },
+    BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME: {
+        "definition": get_brightdata_search_engine_tool,
+        "executor": execute_brightdata_search_engine,
+    },
+    BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME: {
+        "definition": get_brightdata_scrape_as_markdown_tool,
+        "executor": execute_brightdata_scrape_as_markdown,
     },
     READ_FILE_TOOL_NAME: {
         "definition": get_read_file_tool,

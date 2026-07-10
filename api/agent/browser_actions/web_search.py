@@ -1,6 +1,4 @@
-"""
-Custom browser use agent action for web search using Bright Data MCP search.
-"""
+"""Custom browser-use action for native Bright Data web search."""
 
 import json
 import logging
@@ -10,7 +8,7 @@ from opentelemetry import trace
 from browser_use import ActionResult
 
 from ..core.web_search_formatter import format_search_results, format_search_error
-from ..tools.mcp_manager import execute_platform_mcp_tool
+from ..tools.brightdata import execute_brightdata_search_engine
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -83,14 +81,14 @@ def register_web_search_action(
 ):
     """Register the Bright Data search action with the given controller."""
 
-    logger.info("Registering mcp_brightdata_search_engine action to controller %s (platform scope)", controller)
+    logger.info("Registering native mcp_brightdata_search_engine action on controller %s", controller)
 
     @controller.action(
         "Search the web using Bright Data search engine. Returns relevant web content for the query."
     )
     def mcp_brightdata_search_engine(query: str) -> ActionResult:
         """
-        Search the web using Bright Data MCP search.
+        Search the web using the Bright Data API.
 
         Args:
             query: Search query string. Be specific and detailed for best results.
@@ -109,14 +107,10 @@ def register_web_search_action(
                 )
 
             try:
-                span.set_attribute("search.engine", "brightdata_mcp")
-                response = execute_platform_mcp_tool(
-                    "brightdata",
-                    "mcp_brightdata_search_engine",
-                    {"query": query},
-                )
+                span.set_attribute("search.engine", "brightdata_api")
+                response = execute_brightdata_search_engine(None, {"query": query})
             except Exception as exc:
-                logger.exception("Bright Data MCP search failed")
+                logger.exception("Bright Data API search failed")
                 response = {"status": "error", "message": str(exc)}
 
             status = response.get("status") if isinstance(response, dict) else None

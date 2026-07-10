@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from urllib.parse import urlparse
-from typing import Callable, Dict, Any, Iterable, List, Optional, Tuple
+from typing import Dict, Any, Iterable, List, Optional, Tuple
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime, time, timedelta, UTC
 from uuid import UUID
@@ -100,15 +100,9 @@ def _sandbox_mcp_fallback_enabled() -> bool:
 
 
 MCP_WILL_CONTINUE_TOOL_NAMES = {
-    "search_engine",
     "search_engine_batch",
 }
 
-# Bright Data MCP's search_utils.parse_google_search_response raises this
-# message when Google returns HTML or other non-JSON content despite brd_json=1.
-BRIGHTDATA_NON_JSON_ERROR = "Unexpected non-JSON response from Bright Data"
-BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV = "WEB_UNLOCKER_ZONE_FALLBACK"
-BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY = "brightdata_search_fallback_zone_env"
 MCP_SESSION_DEATH_ERROR_SNIPPETS = (
     "connection closed",
     "server session was closed",
@@ -327,16 +321,14 @@ class MCPToolManager:
     PIPEDREAM_RUNTIME_NAME = "pipedream"
     PIPEDREAM_COMPONENT_OPTION_TOOLS = {"retrieve_options", "configure_component"}
 
-    # Default MCP tools that should be enabled for all agents
-    DEFAULT_ENABLED_TOOLS = [
-        "mcp_brightdata_search_engine",
-        "mcp_brightdata_scrape_as_markdown",
-        # Add more default tools here as needed
-    ]
+    # Default tools still backed by MCP. Native defaults live in tool_manager.
+    DEFAULT_ENABLED_TOOLS = []
     
     # Blacklisted tool patterns (glob-style patterns)
     # Tools matching these patterns will be excluded from discovery and execution
     TOOL_BLACKLIST = [
+        "mcp_brightdata_search_engine",
+        "mcp_brightdata_scrape_as_markdown",
         "mcp_brightdata_scraping_browser_*",  # Blacklist all scraping browser tools
         "mcp_brightdata_scrape_as_html", # usually results in huge result sets that we don't want
         "select_apps"
@@ -476,44 +468,6 @@ class MCPToolManager:
         )
         self._stdio_proxy_clients[cache_key] = client
         return client
-
-    def _execute_with_transient_stdio_env(
-        self,
-        runtime: MCPServerRuntime,
-        tool_name: str,
-        params: Dict[str, Any],
-        *,
-        timeout_seconds: float,
-        proxy_url: Optional[str],
-        env_overrides: Dict[str, str],
-        isolated: bool = False,
-    ) -> Any:
-        merged_env = self._build_stdio_proxy_env(proxy_url) if proxy_url else {}
-        merged_env.update(env_overrides)
-        client = self._build_client_for_runtime(runtime, env_overrides=merged_env)
-
-        async def execute_and_close():
-            try:
-                return await self._execute_async(
-                    client,
-                    tool_name,
-                    params,
-                    timeout_seconds=timeout_seconds,
-                )
-            finally:
-                try:
-                    await client.close()
-                except Exception:
-                    logger.debug(
-                        "Failed to close MCP client for %s:transient-env",
-                        runtime.config_id,
-                        exc_info=True,
-                    )
-
-        coroutine = execute_and_close()
-        if isolated:
-            return self._run_coroutine_isolated(coroutine)
-        return self._run_coroutine_sync(coroutine)
 
     def _is_tool_blacklisted(self, tool_name: str) -> bool:
         """Check if a tool name matches any blacklist pattern."""
@@ -2087,58 +2041,6 @@ class MCPToolManager:
             return str(getattr(content[0], "text", "Unknown error"))
         return "Unknown error"
 
-    @staticmethod
-    def _json_loads_ok(value: str) -> bool:
-        try:
-            json.loads(value)
-        except json.JSONDecodeError:
-            return False
-        return True
-
-    @staticmethod
-    def _is_empty_scrape_value(value: Any) -> bool:
-        if value is None:
-            return True
-        if isinstance(value, str):
-            stripped = value.strip()
-            return not stripped or stripped == MCP_TOOL_SUCCESS_SENTINEL
-        return False
-
-    def _validate_tool_result_content(
-        self,
-        server_name: str,
-        tool_name: str,
-        content: Any,
-    ) -> Optional[Dict[str, str]]:
-        if server_name != "brightdata" or tool_name != "scrape_as_markdown":
-            return None
-
-        def error_payload() -> Dict[str, str]:
-            return {
-                "status": "error",
-                "message": "Bright Data returned an empty scrape_as_markdown result.",
-            }
-
-        if self._is_empty_scrape_value(content):
-            return error_payload()
-
-        payload = None
-        if isinstance(content, dict):
-            payload = content
-        elif isinstance(content, str):
-            try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError:
-                return None
-            if isinstance(parsed, dict):
-                payload = parsed
-
-        if isinstance(payload, dict) and "result" in payload:
-            if self._is_empty_scrape_value(payload.get("result")):
-                return error_payload()
-
-        return None
-
     def _result_to_error_response(
         self,
         server_name: str,
@@ -2161,9 +2063,6 @@ class MCPToolManager:
         *,
         use_success_sentinel: bool = True,
     ) -> Dict[str, Any]:
-        content_error = self._validate_tool_result_content(server_name, tool_name, content)
-        if content_error:
-            return content_error
         if use_success_sentinel:
             content = content or MCP_TOOL_SUCCESS_SENTINEL
         return {"status": "success", "result": content}
@@ -2187,133 +2086,6 @@ class MCPToolManager:
             content,
             use_success_sentinel=use_success_sentinel,
         )
-
-    @staticmethod
-    def _is_google_brightdata_search(
-        server_name: str,
-        tool_name: str,
-        params: Dict[str, Any],
-    ) -> bool:
-        if str(server_name or "").strip().lower() != "brightdata" or tool_name != "search_engine":
-            return False
-        engine = params.get("engine") if isinstance(params, dict) else None
-        return not engine or str(engine).strip().lower() == "google"
-
-    @staticmethod
-    def _is_brightdata_search_exception(exc: Exception) -> bool:
-        return isinstance(exc, ToolError)
-
-    def _is_brightdata_search_non_json_result(self, result: Any) -> bool:
-        message = self._tool_result_error_message(result)
-        if message is not None:
-            # Some sandboxed MCP paths surface tool errors as result dictionaries
-            # rather than FastMCP ToolError instances, and they do not include a
-            # structured code for Bright Data parse failures.
-            return BRIGHTDATA_NON_JSON_ERROR in message
-
-        content = self._extract_tool_result_content(result)
-        if isinstance(content, str):
-            return not self._json_loads_ok(content)
-        return False
-
-    def _brightdata_search_fallback_zone(self, runtime: Optional[MCPServerRuntime]) -> Optional[str]:
-        if runtime is None or str(runtime.name or "").strip().lower() != "brightdata":
-            return None
-
-        metadata = runtime.metadata if isinstance(runtime.metadata, dict) else {}
-        env_var = str(
-            metadata.get(BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY)
-            or BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV
-        ).strip()
-        if not env_var:
-            return None
-
-        fallback_zone = str((runtime.env or {}).get(env_var) or "").strip()
-        if not fallback_zone:
-            return None
-
-        primary_zone = str((runtime.env or {}).get("WEB_UNLOCKER_ZONE") or "").strip()
-        if primary_zone and primary_zone == fallback_zone:
-            return None
-        return fallback_zone
-
-    def _is_brightdata_search_failure_result(self, result: Any) -> bool:
-        if self._tool_result_error_message(result) is not None:
-            return True
-        return self._is_brightdata_search_non_json_result(result)
-
-    def _brightdata_search_failure_message(self, result: Any) -> str:
-        return self._tool_result_error_message(result) or "Non-JSON search response"
-
-    def _execute_with_brightdata_search_fallback(
-        self,
-        run_once: Callable[[Dict[str, Any]], Any],
-        server_name: str,
-        tool_name: str,
-        params: Dict[str, Any],
-        *,
-        runtime: Optional[MCPServerRuntime] = None,
-        run_fallback: Optional[Callable[[Dict[str, Any], Dict[str, str]], Any]] = None,
-    ) -> Any:
-        if not self._is_google_brightdata_search(server_name, tool_name, params):
-            return run_once(params)
-
-        original_params = dict(params)
-        last_failure: Optional[str] = None
-
-        try:
-            result = run_once(dict(original_params))
-        except Exception as exc:
-            if not self._is_brightdata_search_exception(exc):
-                raise
-            last_failure = str(exc)
-            logger.warning(
-                "Bright Data Google search failed on the primary zone attempt: %s",
-                last_failure,
-            )
-        else:
-            if not self._is_brightdata_search_failure_result(result):
-                return result
-            last_failure = self._brightdata_search_failure_message(result)
-            logger.warning("Bright Data Google search failed on the primary zone attempt: %s", last_failure)
-
-        fallback_zone = self._brightdata_search_fallback_zone(runtime)
-        if not fallback_zone or run_fallback is None:
-            logger.warning(
-                "Bright Data Google search failed on the primary zone attempt and no fallback zone is configured. "
-                "Last failure: %s",
-                last_failure or "unknown",
-            )
-            return {
-                "status": "error",
-                "message": (
-                    "Bright Data Google search failed on the primary zone attempt and no fallback zone is configured. "
-                    f"Last failure: {last_failure or 'unknown'}"
-                ),
-            }
-
-        fallback_env = {"WEB_UNLOCKER_ZONE": fallback_zone}
-        try:
-            fallback_result = run_fallback(dict(original_params), fallback_env)
-        except Exception as exc:
-            if not self._is_brightdata_search_exception(exc):
-                raise
-            last_failure = str(exc)
-            logger.warning("Bright Data Google search failed on the fallback zone attempt: %s", last_failure)
-        else:
-            if not self._is_brightdata_search_failure_result(fallback_result):
-                logger.info("Bright Data Google search succeeded on the fallback zone attempt.")
-                return fallback_result
-            last_failure = self._brightdata_search_failure_message(fallback_result)
-            logger.warning("Bright Data Google search failed on the fallback zone attempt: %s", last_failure)
-
-        return {
-            "status": "error",
-            "message": (
-                "Bright Data Google search failed after primary and fallback zone attempts. "
-                f"Last failure: {last_failure or 'unknown'}"
-            ),
-        }
 
     def execute_platform_tool(self, server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a platform-scoped MCP tool without an agent context."""
@@ -2381,37 +2153,13 @@ class MCPToolManager:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             http_timeout_seconds = timeout_seconds if runtime.url else None
             with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
-                def run_once(attempt_params: Dict[str, Any]) -> Any:
-                    return self._run_coroutine_sync(
-                        self._execute_async(
-                            client,
-                            info.tool_name,
-                            attempt_params,
-                            timeout_seconds=timeout_seconds,
-                        )
-                    )
-                def run_fallback(attempt_params: Dict[str, Any], env_overrides: Dict[str, str]) -> Any:
-                    if not self._is_stdio_runtime(runtime):
-                        return {
-                            "status": "error",
-                            "message": "Bright Data search fallback zone requires a stdio MCP runtime.",
-                        }
-                    return self._execute_with_transient_stdio_env(
-                        runtime,
+                result = self._run_coroutine_sync(
+                    self._execute_async(
+                        client,
                         info.tool_name,
-                        attempt_params,
+                        params,
                         timeout_seconds=timeout_seconds,
-                        proxy_url=proxy_url,
-                        env_overrides=env_overrides,
                     )
-
-                result = self._execute_with_brightdata_search_fallback(
-                    run_once,
-                    runtime.name,
-                    info.tool_name,
-                    params,
-                    runtime=runtime,
-                    run_fallback=run_fallback,
                 )
             with mcp_result_owner_context(None):
                 result = self._adapt_tool_result(runtime.name, info.tool_name, result)
@@ -2479,13 +2227,6 @@ class MCPToolManager:
                     actual_tool_name,
                     sandbox_result.get("result"),
                 )
-                content_error = self._validate_tool_result_content(
-                    server_name,
-                    actual_tool_name,
-                    adapted,
-                )
-                if content_error:
-                    return content_error, False
                 adapted_result = dict(sandbox_result)
                 adapted_result["result"] = adapted
                 return adapted_result, False
@@ -2616,37 +2357,13 @@ class MCPToolManager:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             http_timeout_seconds = timeout_seconds if runtime and runtime.url else None
             with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
-                def run_once(attempt_params: Dict[str, Any]) -> Any:
-                    return self._run_coroutine_sync(
-                        self._execute_async(
-                            client,
-                            actual_tool_name,
-                            attempt_params,
-                            timeout_seconds=timeout_seconds,
-                        )
-                    )
-                def run_fallback(attempt_params: Dict[str, Any], env_overrides: Dict[str, str]) -> Any:
-                    if not runtime or not self._is_stdio_runtime(runtime):
-                        return {
-                            "status": "error",
-                            "message": "Bright Data search fallback zone requires a stdio MCP runtime.",
-                        }
-                    return self._execute_with_transient_stdio_env(
-                        runtime,
+                result = self._run_coroutine_sync(
+                    self._execute_async(
+                        client,
                         actual_tool_name,
-                        attempt_params,
+                        params,
                         timeout_seconds=timeout_seconds,
-                        proxy_url=proxy_url,
-                        env_overrides=env_overrides,
                     )
-
-                result = self._execute_with_brightdata_search_fallback(
-                    run_once,
-                    server_name,
-                    actual_tool_name,
-                    params,
-                    runtime=runtime,
-                    run_fallback=run_fallback,
                 )
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
@@ -2876,38 +2593,13 @@ class MCPToolManager:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             http_timeout_seconds = timeout_seconds if runtime.url else None
             with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
-                def run_once(attempt_params: Dict[str, Any]) -> Any:
-                    return self._run_coroutine_isolated(
-                        self._execute_async(
-                            client,
-                            actual_tool_name,
-                            attempt_params,
-                            timeout_seconds=timeout_seconds,
-                        )
-                    )
-                def run_fallback(attempt_params: Dict[str, Any], env_overrides: Dict[str, str]) -> Any:
-                    if not self._is_stdio_runtime(runtime):
-                        return {
-                            "status": "error",
-                            "message": "Bright Data search fallback zone requires a stdio MCP runtime.",
-                        }
-                    return self._execute_with_transient_stdio_env(
-                        runtime,
+                result = self._run_coroutine_isolated(
+                    self._execute_async(
+                        client,
                         actual_tool_name,
-                        attempt_params,
+                        params,
                         timeout_seconds=timeout_seconds,
-                        proxy_url=proxy_url,
-                        env_overrides=env_overrides,
-                        isolated=True,
                     )
-
-                result = self._execute_with_brightdata_search_fallback(
-                    run_once,
-                    server_name,
-                    actual_tool_name,
-                    params,
-                    runtime=runtime,
-                    run_fallback=run_fallback,
                 )
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
