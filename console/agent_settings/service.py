@@ -1576,23 +1576,20 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             request.POST.get('mini_description_mode')
             or agent.mini_description_mode
         ).strip().lower()
-        valid_mini_description_modes = {
-            choice.value for choice in PersistentAgent.MiniDescriptionMode
-        }
-        if new_mini_description_mode not in valid_mini_description_modes:
+        if new_mini_description_mode not in PersistentAgent.MiniDescriptionMode.values:
             return _general_error("Mini description mode must be automatic or manual.")
 
-        posted_mini_description = (
-            request.POST.get('mini_description')
-            if 'mini_description' in request.POST
-            else agent.mini_description
-        )
+        posted_mini_description = request.POST.get('mini_description', agent.mini_description)
         new_mini_description = " ".join((posted_mini_description or "").split())
         if new_mini_description_mode == PersistentAgent.MiniDescriptionMode.MANUAL:
             if not new_mini_description:
                 return _general_error("Mini description cannot be empty in manual mode.")
             if len(new_mini_description) > 80:
                 return _general_error("Mini description must be 80 characters or fewer.")
+        restoring_automatic_mini_description = (
+            agent.mini_description_mode != PersistentAgent.MiniDescriptionMode.AUTO
+            and new_mini_description_mode == PersistentAgent.MiniDescriptionMode.AUTO
+        )
         # Checkbox inputs are only present in POST data when checked. Determine the desired
         # active state based on whether the "is_active" field was submitted.
         new_is_active = 'is_active' in request.POST
@@ -1799,28 +1796,24 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     agent.charter = new_charter
                     agent_fields_to_update.append('charter')
 
+                mini_description_updates = {}
                 if new_mini_description_mode == PersistentAgent.MiniDescriptionMode.MANUAL:
-                    if agent.mini_description != new_mini_description:
-                        agent.mini_description = new_mini_description
-                        agent_fields_to_update.append('mini_description')
-                    if agent.mini_description_mode != PersistentAgent.MiniDescriptionMode.MANUAL:
-                        agent.mini_description_mode = PersistentAgent.MiniDescriptionMode.MANUAL
-                        agent_fields_to_update.append('mini_description_mode')
-                    if agent.mini_description_charter_hash:
-                        agent.mini_description_charter_hash = ""
-                        agent_fields_to_update.append('mini_description_charter_hash')
-                    if agent.mini_description_requested_hash:
-                        agent.mini_description_requested_hash = ""
-                        agent_fields_to_update.append('mini_description_requested_hash')
-                elif agent.mini_description_mode != PersistentAgent.MiniDescriptionMode.AUTO:
-                    agent.mini_description_mode = PersistentAgent.MiniDescriptionMode.AUTO
-                    agent.mini_description_charter_hash = ""
-                    agent.mini_description_requested_hash = ""
-                    agent_fields_to_update.extend([
-                        'mini_description_mode',
-                        'mini_description_charter_hash',
-                        'mini_description_requested_hash',
-                    ])
+                    mini_description_updates = {
+                        'mini_description': new_mini_description,
+                        'mini_description_mode': PersistentAgent.MiniDescriptionMode.MANUAL,
+                        'mini_description_charter_hash': "",
+                        'mini_description_requested_hash': "",
+                    }
+                elif restoring_automatic_mini_description:
+                    mini_description_updates = {
+                        'mini_description_mode': PersistentAgent.MiniDescriptionMode.AUTO,
+                        'mini_description_charter_hash': "",
+                        'mini_description_requested_hash': "",
+                    }
+                for field, value in mini_description_updates.items():
+                    if getattr(agent, field) != value:
+                        setattr(agent, field, value)
+                        agent_fields_to_update.append(field)
 
                 # Update active status if it changed
                 if agent.is_active != new_is_active:
@@ -1893,52 +1886,41 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 if browser_agent is not None and browser_agent_fields_to_update:
                     browser_agent.save(update_fields=browser_agent_fields_to_update)
 
-                if 'charter' in agent_fields_to_update:
+                charter_changed = 'charter' in agent_fields_to_update
+                if charter_changed or restoring_automatic_mini_description:
                     def _schedule_charter_artifacts() -> None:
-                        try:
-                            maybe_schedule_short_description(agent)
-                        except Exception:
-                            logger.exception(
-                                "Failed to schedule short description generation after charter update for agent %s",
-                                agent.id,
-                            )
-                        try:
-                            maybe_schedule_mini_description(agent)
-                        except Exception:
-                            logger.exception(
-                                "Failed to schedule mini description generation after charter update for agent %s",
-                                agent.id,
-                            )
-                        try:
-                            maybe_schedule_agent_tags(agent)
-                        except Exception:
-                            logger.exception(
-                                "Failed to schedule tag generation after charter update for agent %s",
-                                agent.id,
-                            )
-                        try:
-                            maybe_schedule_agent_avatar(agent)
-                        except Exception:
-                            logger.exception(
-                                "Failed to schedule avatar generation after charter update for agent %s",
-                                agent.id,
-                            )
-
-                    transaction.on_commit(_schedule_charter_artifacts)
-                elif (
-                    'mini_description_mode' in agent_fields_to_update
-                    and agent.mini_description_mode == PersistentAgent.MiniDescriptionMode.AUTO
-                ):
-                    def _schedule_restored_mini_description() -> None:
+                        if charter_changed:
+                            try:
+                                maybe_schedule_short_description(agent)
+                            except Exception:
+                                logger.exception(
+                                    "Failed to schedule short description generation after charter update for agent %s",
+                                    agent.id,
+                                )
                         try:
                             maybe_schedule_mini_description(agent)
                         except DatabaseError:
                             logger.exception(
-                                "Failed to schedule mini description generation after restoring automatic mode for agent %s",
+                                "Failed to schedule mini description generation after settings update for agent %s",
                                 agent.id,
                             )
+                        if charter_changed:
+                            try:
+                                maybe_schedule_agent_tags(agent)
+                            except Exception:
+                                logger.exception(
+                                    "Failed to schedule tag generation after charter update for agent %s",
+                                    agent.id,
+                                )
+                            try:
+                                maybe_schedule_agent_avatar(agent)
+                            except Exception:
+                                logger.exception(
+                                    "Failed to schedule avatar generation after charter update for agent %s",
+                                    agent.id,
+                                )
 
-                    transaction.on_commit(_schedule_restored_mini_description)
+                    transaction.on_commit(_schedule_charter_artifacts)
 
                 # If agent was soft-expired, restore schedule (from snapshot if missing) and mark active
                 if agent.life_state == PersistentAgent.LifeState.EXPIRED and agent.is_active:

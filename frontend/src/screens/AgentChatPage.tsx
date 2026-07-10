@@ -842,6 +842,7 @@ export type AgentChatPageProps = {
   maxChatUploadSizeBytes?: number | null
   viewerUserId?: number | null
   viewerEmail?: string | null
+  viewerTimeZone?: string | null
   canManageCollaborators?: boolean | null
   isCollaborator?: boolean | null
   pipedreamAppsSettingsUrl?: string | null
@@ -885,6 +886,7 @@ export function AgentChatPage({
   maxChatUploadSizeBytes = null,
   viewerUserId,
   viewerEmail,
+  viewerTimeZone,
   canManageCollaborators,
   isCollaborator,
   pipedreamAppsSettingsUrl = null,
@@ -1033,8 +1035,9 @@ export function AgentChatPage({
     dispatch(immersiveShellActions.setViewer({
       userId: viewerUserId ?? null,
       email: viewerEmail ?? null,
+      timeZone: viewerTimeZone ?? null,
     }))
-  }, [dispatch, viewerEmail, viewerUserId])
+  }, [dispatch, viewerEmail, viewerTimeZone, viewerUserId])
 
   // React-query timeline data
   const timelineQuery = useAgentTimeline(activeAgentId, { enabled: agentContextReady && !isNewAgent })
@@ -1124,7 +1127,6 @@ export function AgentChatPage({
     [dispatch],
   )
   const previousViewedAgentIdRef = useRef<string | null>(activeAgentId)
-  const rosterProcessingHydratedAgentIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     const previousAgentId = previousViewedAgentIdRef.current
@@ -1169,7 +1171,7 @@ export function AgentChatPage({
   )
   const displayEvents = useMemo(
     () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets, { keepTrailingActivityExpanded }),
-    [keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets],
+    [keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets, viewerTimeZone],
   )
   const latestTimelineCursor = timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : ''
   const timelineStreamingVersion = timelineStreaming
@@ -1795,51 +1797,19 @@ export function AgentChatPage({
     setAgentId(activeAgentId, {
       agentName: resolvedPendingMeta?.agentName ?? agentName,
       agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
-      processingActive: resolvedPendingMeta?.processingActive,
+      processingActive: resolvedPendingMeta?.processingActive ?? activeRosterMeta?.processingActive,
       signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
       planningState: resolvedPendingMeta?.planningState ?? activeRosterPlanningState,
     })
   }, [
     activeAgentId,
     activeRosterMeta?.planningState,
+    activeRosterMeta?.processingActive,
     activeRosterMeta?.signupPreviewState,
     agentAvatarUrl,
     agentName,
     setAgentId,
     agentContextReady,
-  ])
-  useEffect(() => {
-    if (
-      !agentContextReady
-      || !activeAgentId
-      || storeAgentId !== activeAgentId
-    ) {
-      return
-    }
-    if (!activeRosterMeta?.processingActive) {
-      if (rosterProcessingHydratedAgentIdRef.current === activeAgentId) {
-        rosterProcessingHydratedAgentIdRef.current = null
-      }
-      return
-    }
-    if (rosterProcessingHydratedAgentIdRef.current === activeAgentId) {
-      return
-    }
-    rosterProcessingHydratedAgentIdRef.current = activeAgentId
-    if (processingActive) {
-      return
-    }
-    dispatch(chatActions.processingUpdated({
-      agentId: activeAgentId,
-      snapshot: { active: true, webTasks: [] },
-    }))
-  }, [
-    activeAgentId,
-    activeRosterMeta?.processingActive,
-    agentContextReady,
-    dispatch,
-    processingActive,
-    storeAgentId,
   ])
   const storeAgentName = isStoreSynced ? storedAgentName : null
   const storeResolvedAvatarUrl = isStoreSynced ? storedAgentAvatarUrl : null

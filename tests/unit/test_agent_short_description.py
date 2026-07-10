@@ -228,6 +228,32 @@ class AgentShortDescriptionTests(TestCase):
         self.assertEqual(agent.mini_description_requested_hash, "")
         mocked_emit.assert_not_called()
 
+    def test_generate_mini_description_does_not_overwrite_charter_change_during_generation(self) -> None:
+        agent = self._create_agent()
+        old_hash = compute_charter_hash(agent.charter)
+        agent.mini_description_requested_hash = old_hash
+        agent.save(update_fields=["mini_description_requested_hash"])
+
+        new_charter = "Lead a newly expanded operations function"
+        new_hash = compute_charter_hash(new_charter)
+
+        def change_charter(*_args, **_kwargs):
+            PersistentAgent.objects.filter(id=agent.id).update(
+                charter=new_charter,
+                mini_description_requested_hash=new_hash,
+            )
+            return "Outdated Operations Assistant"
+
+        with patch("api.agent.tasks.mini_description._generate_via_llm", side_effect=change_charter), patch(
+            "console.agent_chat.signals.emit_agent_profile_update"
+        ) as mocked_emit:
+            generate_agent_mini_description_task.run(str(agent.id), old_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description, "")
+        self.assertEqual(agent.mini_description_requested_hash, new_hash)
+        mocked_emit.assert_not_called()
+
     def test_generate_mini_description_uses_charter_fallback_in_auto_mode(self) -> None:
         agent = self._create_agent(charter="Coordinate executive recruiting operations across teams")
         charter_hash = compute_charter_hash(agent.charter)

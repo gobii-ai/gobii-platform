@@ -138,6 +138,7 @@ def generate_agent_mini_description_task(
     updated = PersistentAgent.objects.filter(
         id=agent.id,
         mini_description_mode=PersistentAgent.MiniDescriptionMode.AUTO,
+        mini_description_requested_hash=charter_hash,
     ).update(
         mini_description=prepared,
         mini_description_charter_hash=current_hash,

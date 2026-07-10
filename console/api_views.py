@@ -430,6 +430,7 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
             {
                 "user_id": str(request.user.id),
                 "email": request.user.email,
+                "timezone": UserPreference.resolve_user_timezone(request.user),
             }
         )
 

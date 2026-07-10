@@ -7,6 +7,8 @@ import type { ScheduleDescription } from '../../../../util/schedule'
 import type { ToolDetailProps } from '../../tooling/types'
 import { parseAgentConfigUpdates } from '../../../tooling/agentConfigSql'
 import { KeyValueList, Section, TruncatedMarkdown } from '../shared'
+import { useAppSelector } from '../../../../store/hooks'
+import { selectImmersiveShellViewer } from '../../../../store/immersiveShellSlice'
 
 function formatSummaryText(summary: string): string {
   return /[.!?]\s*$/.test(summary) ? summary : `${summary}.`
@@ -163,6 +165,7 @@ function renderScheduleDetails(schedule: ScheduleDescription): ReactNode {
 }
 
 export function UpdateScheduleDetail({ entry }: ToolDetailProps) {
+  const timeZone = useAppSelector(selectImmersiveShellViewer).timeZone
   const params = (entry.parameters as Record<string, unknown>) || {}
   const newScheduleValue = params['new_schedule']
   const newScheduleRaw = typeof newScheduleValue === 'string' ? newScheduleValue.trim() : null
@@ -174,7 +177,7 @@ export function UpdateScheduleDetail({ entry }: ToolDetailProps) {
   const statusLabel = resultObject?.status ? resultObject.status.toUpperCase() : null
   const messageText =
     resultObject?.message || entry.summary || (scheduleValue ? 'Schedule updated successfully.' : 'Schedule disabled.')
-  const scheduleDetails = describeSchedule(scheduleValue)
+  const scheduleDetails = describeSchedule(scheduleValue, { timeZone: timeZone ?? undefined })
   const detailItems: Array<{ label: string; value: ReactNode }> = []
   if (statusLabel) {
     detailItems.push({ label: 'Status', value: statusLabel })
@@ -189,6 +192,7 @@ export function UpdateScheduleDetail({ entry }: ToolDetailProps) {
 }
 
 export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
+  const timeZone = useAppSelector(selectImmersiveShellViewer).timeZone
   const statements = entry.sqlStatements ?? []
   const parsedUpdate = parseAgentConfigUpdates(statements)
   const charterText = parsedUpdate?.charterValue ?? entry.charterText ?? null
@@ -198,7 +202,9 @@ export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
   const scheduleRaw = parsedUpdate?.scheduleValue ?? null
   const scheduleKnown = scheduleCleared || scheduleRaw !== null
   const scheduleValue = scheduleCleared ? null : scheduleRaw
-  const scheduleDetails = scheduleKnown ? describeSchedule(scheduleValue) : null
+  const scheduleDetails = scheduleKnown
+    ? describeSchedule(scheduleValue, { timeZone: timeZone ?? undefined })
+    : null
 
   return (
     <div className="space-y-4">

@@ -75,7 +75,7 @@ export type ToolMetadataConfig = {
   iconColorClass: string
   detailKind: DetailKind
   skip?: boolean
-  derive?(entry: ToolCallEntry, parameters: Record<string, unknown> | null): ToolDescriptorTransform | void
+  derive?: ToolDescriptor['derive']
 }
 
 export function truncate(value: string, max = 60): string {

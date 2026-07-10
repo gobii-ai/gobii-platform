@@ -21,6 +21,7 @@ import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { track } from '../util/analytics'
 import { APP_NAVIGATE_EVENT } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
+import { setScheduleDisplayTimeZone } from '../util/schedule'
 import '../styles/immersiveApp.css'
 
 const APP_BASE = '/app'
@@ -54,6 +55,7 @@ type LocationSnapshot = {
 type ConsoleSessionPayload = {
   user_id?: string
   email?: string
+  timezone?: string
 }
 
 type ImmersiveAppProps = {
@@ -691,6 +693,7 @@ export function ImmersiveApp({
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
   const [viewerUserId, setViewerUserId] = useState<number | null>(null)
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
+  const [viewerTimeZone, setViewerTimeZone] = useState<string | null>(null)
   const [selectionRefreshKey, setSelectionRefreshKey] = useState(0)
   const hasSkippedInitialSegmentPage = useRef(false)
   const dispatch = useAppDispatch()
@@ -788,14 +791,18 @@ export function ImmersiveApp({
         const payload = await jsonFetch<ConsoleSessionPayload>('/console/api/session/', { signal: controller.signal })
         const raw = payload?.user_id ?? null
         const numeric = raw ? Number(raw) : null
+        setScheduleDisplayTimeZone(payload?.timezone)
         setViewerUserId(Number.isFinite(numeric) ? numeric : null)
         setViewerEmail(payload?.email ? payload.email : null)
+        setViewerTimeZone(payload?.timezone?.trim() || null)
       } catch (err) {
         if (controller.signal.aborted) {
           return
         }
         setViewerUserId(null)
         setViewerEmail(null)
+        setScheduleDisplayTimeZone(null)
+        setViewerTimeZone(null)
       }
     }
     void loadViewer()
@@ -916,6 +923,7 @@ export function ImmersiveApp({
     maxChatUploadSizeBytes,
     viewerUserId,
     viewerEmail,
+    viewerTimeZone,
     pipedreamAppsSettingsUrl,
     pipedreamAppSearchUrl,
     nativeIntegrationsUrl,

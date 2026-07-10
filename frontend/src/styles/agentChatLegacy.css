@@ -5799,7 +5799,7 @@
     letter-spacing: 0.06em;
 }
 .agent-roster-item {
-    --roster-item-gap: 0.75rem;
+    --roster-item-gap: 0;
     --roster-item-padding: 0.625rem 0.5rem;
     --roster-item-radius: 0.5rem;
     --roster-item-color: rgba(255, 255, 255, 0.7);
@@ -5890,9 +5890,6 @@
     --roster-desc-size: 0.8125rem;
     --roster-state-color: #f97316;
     --roster-state-size: 0.7rem;
-}
-.agent-roster-item[data-variant='sidebar'] {
-    gap: 0;
 }
 .agent-roster-item[data-variant='sidebar'][data-collapsed='false'] .agent-roster-item__leading {
     margin-right: 0.5rem;
@@ -6049,23 +6046,17 @@
     color: var(--roster-favorite-active-color);
     background: var(--roster-favorite-active-bg);
 }
-.agent-roster-item[data-variant='sidebar'] .agent-roster-item__favorite[data-active='true']:is(:hover, :focus-visible) {
+.agent-roster-item__favorite[data-active='true']:is(:hover, :focus-visible) {
     color: var(--roster-favorite-hover-color);
     background: var(--roster-favorite-hover-bg);
 }
-.agent-roster-item[data-variant='sidebar'] .agent-roster-item__favorite[data-active] {
-    opacity: 0;
-    pointer-events: none;
-}
-.agent-roster-item[data-variant='sidebar']:hover .agent-roster-item__favorite[data-active],
-.agent-roster-item[data-variant='sidebar']:focus-within .agent-roster-item__favorite[data-active] {
-    opacity: 1;
-    pointer-events: auto;
-}
+.agent-roster-item[data-variant='sidebar'] .agent-roster-item__favorite,
 .agent-roster-item__favorite[data-active='false'] {
     opacity: 0;
     pointer-events: none;
 }
+.agent-roster-item[data-variant='sidebar']:hover .agent-roster-item__favorite,
+.agent-roster-item[data-variant='sidebar']:focus-within .agent-roster-item__favorite,
 .agent-roster-item:hover .agent-roster-item__favorite[data-active='false'],
 .agent-roster-item:focus-within .agent-roster-item__favorite[data-active='false'] {
     opacity: 1;

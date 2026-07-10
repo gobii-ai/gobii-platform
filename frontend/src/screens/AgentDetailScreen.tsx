@@ -21,7 +21,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react'
-import { Slider as AriaSlider, SliderThumb, SliderTrack, Switch as AriaSwitch } from 'react-aria-components'
+import { Slider as AriaSlider, SliderThumb, SliderTrack, Switch as AriaSwitch, type SwitchProps } from 'react-aria-components'
 import { AsyncActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { CheckboxField, FormField, SelectInput, TextInput } from '../components/common/FormControls'
 import { ModalForm } from '../components/common/ModalForm'
@@ -385,6 +385,18 @@ function areSetsEqual<T>(a: Set<T>, b: Set<T>): boolean {
     }
   }
   return true
+}
+
+function SettingsSwitch(props: SwitchProps) {
+  return (
+    <AriaSwitch
+      {...props}
+      className="group relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
+    >
+      <span aria-hidden="true" className="h-6 w-11 rounded-full bg-violet-200 transition group-data-[selected]:bg-blue-600" />
+      <span aria-hidden="true" className="absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform group-data-[selected]:translate-x-5" />
+    </AriaSwitch>
+  )
 }
 
 export function AgentSettingsWorkspace({
@@ -1995,30 +2007,13 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                       </p>
                     </div>
                   </div>
-                  <AriaSwitch
+                  <SettingsSwitch
                     name="is_active"
                     value="true"
                     aria-label="Toggle agent status"
                     isSelected={formState.isActive}
                     onChange={(isSelected) => setFormState((prev) => ({ ...prev, isActive: isSelected }))}
-                    className="relative inline-flex h-6 w-11 cursor-pointer items-center focus:outline-none"
-                  >
-                    {({ isSelected, isFocusVisible }) => (
-                      <>
-                        <span
-                          aria-hidden="true"
-                          className={`h-6 w-11 rounded-full transition ${isSelected ? 'bg-blue-600' : 'bg-gray-200'}`}
-                        />
-                        <span
-                          aria-hidden="true"
-                          className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                            isSelected ? 'translate-x-5' : 'translate-x-0'
-                          }`}
-                        />
-                        {isFocusVisible && <span className="absolute -inset-1 rounded-full ring-2 ring-blue-300" aria-hidden="true" />}
-                      </>
-                    )}
-                  </AriaSwitch>
+                  />
                 </div>
                 <p className="mt-2 text-xs text-gray-500">Toggle the switch and click "Save Changes" to activate or pause the agent.</p>
               </div>
@@ -2059,31 +2054,14 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                     <p className="text-sm font-medium text-gray-800">Generate automatically</p>
                     <p className="text-xs text-gray-500">Update this label when the assignment changes.</p>
                   </div>
-                  <AriaSwitch
+                  <SettingsSwitch
                     aria-label="Generate mini description automatically"
                     isSelected={formState.miniDescriptionMode === 'auto'}
                     onChange={(isSelected) => setFormState((prev) => ({
                       ...prev,
                       miniDescriptionMode: isSelected ? 'auto' : 'manual',
                     }))}
-                    className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center focus:outline-none"
-                  >
-                    {({ isSelected, isFocusVisible }) => (
-                      <>
-                        <span
-                          aria-hidden="true"
-                          className={`h-6 w-11 rounded-full transition ${isSelected ? 'bg-blue-600' : 'bg-violet-200'}`}
-                        />
-                        <span
-                          aria-hidden="true"
-                          className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                            isSelected ? 'translate-x-5' : 'translate-x-0'
-                          }`}
-                        />
-                        {isFocusVisible && <span className="absolute -inset-1 rounded-full ring-2 ring-blue-300" aria-hidden="true" />}
-                      </>
-                    )}
-                  </AriaSwitch>
+                  />
                 </div>
                 <input
                   id="agent-mini-description"

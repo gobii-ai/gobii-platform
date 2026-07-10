@@ -9,6 +9,12 @@ export type ScheduleDisplayOptions = {
   referenceDate?: Date
 }
 
+let defaultDisplayTimeZone: string | undefined
+
+export function setScheduleDisplayTimeZone(timeZone: string | null | undefined): void {
+  defaultDisplayTimeZone = timeZone?.trim() || undefined
+}
+
 export type ScheduleDescription =
   | { kind: 'disabled'; summary: string }
   | { kind: 'preset'; raw: string; description: string; summary: string }
@@ -18,26 +24,15 @@ export type ScheduleDescription =
 
 const CRON_FIELD_LABELS = ['Minute', 'Hour', 'Day of month', 'Month', 'Day of week', 'Year']
 
-const SPECIAL_SCHEDULE_DESCRIPTIONS: Record<string, string> = {
-  '@hourly': 'Runs at the top of every hour.',
-  '@daily': 'Runs every day at midnight UTC.',
-  '@midnight': 'Runs every day at midnight UTC.',
-  '@weekly': 'Runs once a week at midnight UTC on Sunday.',
-  '@monthly': 'Runs once a month at midnight UTC on the first day.',
-  '@annually': 'Runs once a year at midnight UTC on January 1st.',
-  '@yearly': 'Runs once a year at midnight UTC on January 1st.',
-  '@reboot': 'Runs immediately when the agent restarts.',
-}
-
-const SPECIAL_SCHEDULE_SUMMARIES: Record<string, string> = {
-  '@hourly': 'Every hour',
-  '@daily': 'Every day at midnight UTC',
-  '@midnight': 'Every day at midnight UTC',
-  '@weekly': 'Every Sunday at midnight UTC',
-  '@monthly': 'The first day of each month at midnight UTC',
-  '@annually': 'January 1 at midnight UTC',
-  '@yearly': 'January 1 at midnight UTC',
-  '@reboot': 'When the agent restarts',
+const SPECIAL_SCHEDULES: Record<string, { cron?: string; description?: string; summary?: string }> = {
+  '@hourly': { cron: '0 * * * *' },
+  '@daily': { cron: '0 0 * * *' },
+  '@midnight': { cron: '0 0 * * *' },
+  '@weekly': { cron: '0 0 * * 0' },
+  '@monthly': { cron: '0 0 1 * *' },
+  '@annually': { cron: '0 0 1 1 *' },
+  '@yearly': { cron: '0 0 1 1 *' },
+  '@reboot': { description: 'Runs immediately when the agent restarts.', summary: 'When the agent restarts' },
 }
 
 const DURATION_UNITS: Record<string, { label: string; shortLabel: string }> = {
@@ -101,13 +96,17 @@ export function describeSchedule(raw: string | null, options: ScheduleDisplayOpt
     return { kind: 'disabled', summary: 'Disabled' }
   }
 
-  const presetDescription = SPECIAL_SCHEDULE_DESCRIPTIONS[raw]
-  if (presetDescription) {
+  const preset = SPECIAL_SCHEDULES[raw]
+  if (preset) {
+    const summary = (preset.cron ? buildCronSummary(preset.cron.split(' '), options) : null)
+      ?? preset.summary
+      ?? preset.description
+      ?? 'Scheduled'
     return {
       kind: 'preset',
       raw,
-      description: presetDescription,
-      summary: SPECIAL_SCHEDULE_SUMMARIES[raw] ?? presetDescription,
+      description: preset.cron ? `${summary.replace(/[.!?]+$/, '')}.` : preset.description ?? summary,
+      summary,
     }
   }
 
@@ -179,6 +178,9 @@ function buildCronSummary(fields: string[], options: ScheduleDisplayOptions): st
   const [minuteRaw, hourRaw, domRaw, monthRaw, dowRaw, yearRaw] = [...fields, undefined]
 
   const localized = localizeFixedUtcCronTime(minuteRaw, hourRaw, domRaw, monthRaw, dowRaw, options)
+  if (localized?.summary) {
+    return localized.summary
+  }
   const timeSummary = localized
     ? { text: `at ${localized.time}`, kind: 'at' as const }
     : buildCronTimeSummary(minuteRaw, hourRaw)
@@ -205,6 +207,7 @@ function buildCronSummary(fields: string[], options: ScheduleDisplayOptions): st
 type LocalizedCronTime = {
   time: string
   dayOfWeek: string | undefined
+  summary?: string
 }
 
 function localizeFixedUtcCronTime(
@@ -217,7 +220,7 @@ function localizeFixedUtcCronTime(
 ): LocalizedCronTime | null {
   const minute = parseCronNumber(minuteRaw)
   const hour = parseCronNumber(hourRaw)
-  if (minute === null || hour === null || !isWildcard(dayOfMonthRaw) || !isWildcard(monthRaw)) {
+  if (minute === null || hour === null || (!isWildcard(dayOfMonthRaw) && !isWildcard(dayOfWeekRaw))) {
     return null
   }
 
@@ -228,7 +231,14 @@ function localizeFixedUtcCronTime(
 
   const timeZone = resolveDisplayTimeZone(options.timeZone)
   const referenceDate = isValidDate(options.referenceDate) ? options.referenceDate : new Date()
-  const occurrence = findNextUtcOccurrence(hour, minute, sourceWeekdays, referenceDate)
+  const occurrence = findNextUtcOccurrence(
+    hour,
+    minute,
+    sourceWeekdays,
+    referenceDate,
+    dayOfMonthRaw,
+    monthRaw,
+  )
   if (!occurrence) {
     return null
   }
@@ -244,25 +254,22 @@ function localizeFixedUtcCronTime(
   return {
     time,
     dayOfWeek: shiftCronWeekdays(dayOfWeekRaw, dayShift),
+    ...(!isWildcard(dayOfMonthRaw) || !isWildcard(monthRaw)
+      ? { summary: formatNextZonedOccurrence(occurrence, timeZone) }
+      : {}),
   }
 }
 
 function resolveDisplayTimeZone(preferredTimeZone: string | undefined): string {
-  const candidate = preferredTimeZone?.trim() || getBrowserTimeZone() || 'UTC'
   try {
+    const candidate = preferredTimeZone?.trim()
+      || defaultDisplayTimeZone
+      || Intl.DateTimeFormat().resolvedOptions().timeZone
+      || 'UTC'
     new Intl.DateTimeFormat('en-US', { timeZone: candidate }).format()
     return candidate
   } catch {
     return 'UTC'
-  }
-}
-
-function getBrowserTimeZone(): string | null {
-  try {
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    return typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : null
-  } catch {
-    return null
   }
 }
 
@@ -275,7 +282,14 @@ function findNextUtcOccurrence(
   minute: number,
   weekdays: Set<number>,
   referenceDate: Date,
+  dayOfMonthRaw: string | undefined,
+  monthRaw: string | undefined,
 ): Date | null {
+  const dayOfMonth = isWildcard(dayOfMonthRaw) ? null : parseCronNumber(dayOfMonthRaw)
+  const month = isWildcard(monthRaw) ? null : parseCronMonth(monthRaw)
+  if ((!isWildcard(dayOfMonthRaw) && dayOfMonth === null) || (!isWildcard(monthRaw) && month === null)) {
+    return null
+  }
   const start = Date.UTC(
     referenceDate.getUTCFullYear(),
     referenceDate.getUTCMonth(),
@@ -284,13 +298,36 @@ function findNextUtcOccurrence(
     minute,
   )
 
-  for (let dayOffset = 0; dayOffset <= 7; dayOffset += 1) {
+  const searchDays = dayOfMonth === null && month === null ? 7 : 366 * 4
+  for (let dayOffset = 0; dayOffset <= searchDays; dayOffset += 1) {
     const candidate = new Date(start + dayOffset * 24 * 60 * 60 * 1000)
-    if (candidate.getTime() >= referenceDate.getTime() && weekdays.has(candidate.getUTCDay())) {
+    if (
+      candidate.getTime() >= referenceDate.getTime()
+      && weekdays.has(candidate.getUTCDay())
+      && (dayOfMonth === null || candidate.getUTCDate() === dayOfMonth)
+      && (month === null || candidate.getUTCMonth() + 1 === month)
+    ) {
       return candidate
     }
   }
   return null
+}
+
+function formatNextZonedOccurrence(value: Date, timeZone: string): string | undefined {
+  try {
+    const formatted = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }).format(value)
+    return `Next run ${formatted}`
+  } catch {
+    return undefined
+  }
 }
 
 function formatZonedTime(value: Date, timeZone: string): string | null {
@@ -317,6 +354,16 @@ function getZonedWeekdayIndex(value: Date, timeZone: string): number | null {
 }
 
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+function parseCronMonth(value: string | undefined): number | null {
+  if (!value) return null
+  const numeric = parseCronNumber(value)
+  if (numeric !== null) return numeric >= 1 && numeric <= 12 ? numeric : null
+  const month = resolveMonthName(value)
+  const index = month ? MONTH_NAMES.indexOf(month) : -1
+  return index >= 0 ? index + 1 : null
+}
 
 function parseCronWeekdayIndexes(value: string | undefined): Set<number> | null {
   if (isWildcard(value)) {

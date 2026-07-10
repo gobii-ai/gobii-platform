@@ -54,6 +54,20 @@ class ConsoleViewsTest(TestCase):
         self.client = Client()
         self.client.login(email='test@example.com', password='testpass123')
 
+    @tag("batch_console_agents_management")
+    def test_console_session_returns_saved_timezone(self):
+        from api.models import UserPreference
+
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_USER_TIMEZONE: "America/New_York"},
+        )
+
+        response = self.client.get(reverse("console_session"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["timezone"], "America/New_York")
+
     @tag("batch_console_agents")
     def test_billing_initial_data_api_returns_personal_payload(self):
         response = self.client.get(reverse("console_billing_initial_data"))

@@ -12,6 +12,8 @@ import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { buildActionCountLabel } from './activityEntryUtils'
 import type { StatusExpansionTargets } from './statusExpansion'
 import { isStatusDisplayEntry, resolveEntrySeparation } from './statusExpansion'
+import { useAppSelector } from '../../store/hooks'
+import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
@@ -30,6 +32,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
   animateIncoming = false,
   onIncomingAnimationConsumed,
 }: ToolClusterCardProps) {
+  const scheduleTimeZone = useAppSelector(selectImmersiveShellViewer).timeZone
   const transformed = useMemo(
     () => {
       const base = transformToolCluster(cluster, { suppressedThinkingCursor })
@@ -47,7 +50,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
         collapseThreshold: Infinity,
       }
     },
-    [cluster, suppressedThinkingCursor],
+    [cluster, scheduleTimeZone, suppressedThinkingCursor],
   )
   const resolvedTransformed = useMemo(() => {
     if (!statusExpansionTargets) {

@@ -8,6 +8,8 @@ import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import type { AgentMessage } from '../../types/agentChat'
 import { buildThinkingCluster, flattenTimelineEventsToEntries } from './activityEntryUtils'
 import type { StatusExpansionTargets } from './statusExpansion'
+import { useAppSelector } from '../../store/hooks'
+import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
 
 type TimelineEventItemProps = {
   event: SimplifiedTimelineItem
@@ -42,12 +44,13 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   onReportMessage,
   onRetryMessage,
 }: TimelineEventItemProps) {
+  const timeZone = useAppSelector(selectImmersiveShellViewer).timeZone
   const collapsedEntries = useMemo(() => {
     if (event.kind !== 'collapsed-group') {
       return []
     }
     return event.displayEntries ?? flattenTimelineEventsToEntries(event.events)
-  }, [event])
+  }, [event, timeZone])
 
   if (event.kind === 'collapsed-group') {
     return <CollapsedActivityCard overlayId={event.cursor} entries={collapsedEntries} label={event.summary.label} subtitle="Collapsed actions" />
