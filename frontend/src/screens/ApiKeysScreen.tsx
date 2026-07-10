@@ -1,11 +1,22 @@
 import { useCallback, useMemo, useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ban, Check, Clipboard, KeyRound, Plus, ShieldAlert, Trash2, type LucideIcon } from 'lucide-react'
+import { Ban, Check, Clipboard, KeyRound, Plus, ShieldAlert, Trash2 } from 'lucide-react'
 
 import { createApiKey, deleteApiKey, fetchApiKeys, revokeApiKey, type ApiKeyDTO } from '../api/apiKeys'
 import { apiErrorMessages } from '../api/safeErrorMessage'
+import {
+  EmbeddedTableActionButton,
+  embeddedCompactDestructiveButtonClassName,
+  embeddedDarkTableHeadClassName,
+  embeddedSecondaryActionButtonClassName,
+  embeddedDividedTableBodyClassName,
+  embeddedTableCellClassName,
+  embeddedTableClassName,
+  embeddedTableHeaderCellClassName,
+  embeddedTableRowClassName,
+} from '../components/agentSettings/embeddedTablePrimitives'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
-import { ActionConfirmDialog } from '../components/common/ActionConfirmDialog'
+import { AsyncActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { FormField, TextInput } from '../components/common/FormControls'
 import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
 import { Modal } from '../components/common/Modal'
@@ -146,56 +157,6 @@ function CreatedApiKeyModal({
   )
 }
 
-function ConfirmApiKeyActionModal({
-  title,
-  subtitle,
-  confirmLabel,
-  icon,
-  onClose,
-  onConfirm,
-}: {
-  title: string
-  subtitle: string
-  confirmLabel: string
-  icon: LucideIcon
-  onClose: () => void
-  onConfirm: () => Promise<void>
-}) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const handleConfirm = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await onConfirm()
-      onClose()
-    } catch (err) {
-      setError(apiErrorMessages(err, 'Unable to update API key.')[0] ?? 'Unable to update API key.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <ActionConfirmDialog
-      open
-      title={title}
-      description={subtitle}
-      onClose={onClose}
-      onConfirm={handleConfirm}
-      confirmLabel={confirmLabel}
-      busy={busy}
-      danger
-      widthClass="sm:max-w-lg"
-      icon={icon}
-      localError={error}
-    >
-      <p className="text-sm text-slate-600">This change takes effect immediately.</p>
-    </ActionConfirmDialog>
-  )
-}
-
 export function ApiKeysScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['api-keys'] as const, [])
@@ -238,9 +199,10 @@ export function ApiKeysScreen() {
 
   const openRevokeModal = useCallback((apiKey: ApiKeyDTO) => {
     showModal((onClose) => (
-      <ConfirmApiKeyActionModal
+      <AsyncActionConfirmDialog
+        open
         title="Revoke API Key"
-        subtitle={`Revoke "${apiKey.name}"? Existing clients using this key will stop authenticating.`}
+        description={`Revoke "${apiKey.name}"? Existing clients using this key will stop authenticating.`}
         confirmLabel="Revoke Key"
         icon={Ban}
         onClose={onClose}
@@ -249,15 +211,21 @@ export function ApiKeysScreen() {
           setBanner(`API key "${apiKey.name}" revoked.`)
           refresh()
         }}
-      />
+        danger
+        widthClass="sm:max-w-lg"
+        getErrorMessage={(err) => apiErrorMessages(err, 'Unable to update API key.')[0] ?? 'Unable to update API key.'}
+      >
+        <p className="text-sm text-slate-600">This change takes effect immediately.</p>
+      </AsyncActionConfirmDialog>
     ))
   }, [refresh, showModal])
 
   const openDeleteModal = useCallback((apiKey: ApiKeyDTO) => {
     showModal((onClose) => (
-      <ConfirmApiKeyActionModal
+      <AsyncActionConfirmDialog
+        open
         title="Delete API Key"
-        subtitle={`Permanently delete "${apiKey.name}"? This cannot be undone.`}
+        description={`Permanently delete "${apiKey.name}"? This cannot be undone.`}
         confirmLabel="Delete Key"
         icon={Trash2}
         onClose={onClose}
@@ -266,18 +234,14 @@ export function ApiKeysScreen() {
           setBanner(`API key "${apiKey.name}" deleted.`)
           refresh()
         }}
-      />
+        danger
+        widthClass="sm:max-w-lg"
+        getErrorMessage={(err) => apiErrorMessages(err, 'Unable to update API key.')[0] ?? 'Unable to update API key.'}
+      >
+        <p className="text-sm text-slate-600">This change takes effect immediately.</p>
+      </AsyncActionConfirmDialog>
     ))
   }, [refresh, showModal])
-
-  const tableClassName = 'min-w-full divide-y divide-slate-200/15'
-  const tableHeadClassName = 'bg-slate-900/40'
-  const tableBodyClassName = 'divide-y divide-slate-200/15'
-  const rowClassName = 'hover:bg-slate-900/30'
-  const headerTextClassName = 'px-6 py-3 text-left text-xs font-semibold uppercase text-slate-300'
-  const cellTextClassName = 'px-6 py-4 text-sm text-slate-300'
-  const actionClassName = 'inline-flex items-center gap-1 rounded border border-slate-300/70 bg-transparent px-2 py-1 text-xs font-medium text-slate-100 transition-colors hover:border-slate-200 hover:text-white disabled:opacity-50'
-  const destructiveClassName = 'inline-flex items-center gap-1 rounded border border-rose-300/40 bg-rose-950/20 px-2 py-1 text-xs font-medium text-rose-100 transition-colors hover:border-rose-200 hover:bg-rose-900/30'
 
   return (
     <div className="space-y-6 pb-6">
@@ -343,30 +307,30 @@ export function ApiKeysScreen() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className={tableClassName}>
-              <thead className={tableHeadClassName}>
+            <table className={embeddedTableClassName}>
+              <thead className={embeddedDarkTableHeadClassName}>
                 <tr>
-                  <th scope="col" className={headerTextClassName}>Name</th>
-                  {ownerScope === 'organization' ? <th scope="col" className={headerTextClassName}>Created By</th> : null}
-                  <th scope="col" className={headerTextClassName}>Created</th>
-                  <th scope="col" className={headerTextClassName}>Last Used</th>
-                  <th scope="col" className={headerTextClassName}>Status</th>
-                  {canManage ? <th scope="col" className={`${headerTextClassName} text-right`}>Actions</th> : null}
+                  <th scope="col" className={embeddedTableHeaderCellClassName}>Name</th>
+                  {ownerScope === 'organization' ? <th scope="col" className={embeddedTableHeaderCellClassName}>Created By</th> : null}
+                  <th scope="col" className={embeddedTableHeaderCellClassName}>Created</th>
+                  <th scope="col" className={embeddedTableHeaderCellClassName}>Last Used</th>
+                  <th scope="col" className={embeddedTableHeaderCellClassName}>Status</th>
+                  {canManage ? <th scope="col" className={`${embeddedTableHeaderCellClassName} text-right`}>Actions</th> : null}
                 </tr>
               </thead>
-              <tbody className={tableBodyClassName}>
+              <tbody className={embeddedDividedTableBodyClassName}>
                 {keys.map((apiKey) => (
-                  <tr key={apiKey.id} className={rowClassName}>
-                    <td className={cellTextClassName}>
+                  <tr key={apiKey.id} className={embeddedTableRowClassName}>
+                    <td className={embeddedTableCellClassName}>
                       <div className="font-medium text-slate-100">{apiKey.name}</div>
                       <div className="mt-1 text-xs text-slate-400">Prefix: {apiKey.prefix}</div>
                     </td>
                     {ownerScope === 'organization' ? (
-                      <td className={cellTextClassName}>{apiKey.created_by ?? '-'}</td>
+                      <td className={embeddedTableCellClassName}>{apiKey.created_by ?? '-'}</td>
                     ) : null}
-                    <td className={cellTextClassName}>{formatDate(apiKey.created_at)}</td>
-                    <td className={cellTextClassName}>{formatDate(apiKey.last_used_at)}</td>
-                    <td className={cellTextClassName}>
+                    <td className={embeddedTableCellClassName}>{formatDate(apiKey.created_at)}</td>
+                    <td className={embeddedTableCellClassName}>{formatDate(apiKey.last_used_at)}</td>
+                    <td className={embeddedTableCellClassName}>
                       <span className={apiKey.is_active
                         ? 'inline-flex rounded-full border border-green-300/30 bg-green-950/20 px-2 py-0.5 text-xs font-medium text-green-100'
                         : 'inline-flex rounded-full border border-red-300/30 bg-red-950/20 px-2 py-0.5 text-xs font-medium text-red-100'}
@@ -375,25 +339,23 @@ export function ApiKeysScreen() {
                       </span>
                     </td>
                     {canManage ? (
-                      <td className={`${cellTextClassName} text-right`}>
+                      <td className={`${embeddedTableCellClassName} text-right`}>
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            className={actionClassName}
+                          <EmbeddedTableActionButton
+                            icon={Ban}
                             disabled={!apiKey.is_active}
                             onClick={() => openRevokeModal(apiKey)}
+                            className={embeddedSecondaryActionButtonClassName}
                           >
-                            <Ban className="h-3 w-3" />
                             Revoke
-                          </button>
-                          <button
-                            type="button"
-                            className={destructiveClassName}
+                          </EmbeddedTableActionButton>
+                          <EmbeddedTableActionButton
+                            icon={Trash2}
                             onClick={() => openDeleteModal(apiKey)}
+                            className={embeddedCompactDestructiveButtonClassName}
                           >
-                            <Trash2 className="h-3 w-3" />
                             Delete
-                          </button>
+                          </EmbeddedTableActionButton>
                         </div>
                       </td>
                     ) : null}

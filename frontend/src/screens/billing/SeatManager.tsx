@@ -1,5 +1,5 @@
-import { Minus, Plus } from 'lucide-react'
 import type { BillingOrgData } from './types'
+import { QuantityStepper } from './QuantityStepper'
 
 type SeatManagerProps = {
   initialData: BillingOrgData
@@ -27,29 +27,19 @@ export function SeatManager({
     <div className={variant === 'inline' ? 'flex items-center gap-3' : 'flex flex-col gap-3'}>
       <div className="flex items-center gap-2">
         <div className="text-sm font-semibold text-slate-700">Seats</div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onAdjust(-1)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-50"
-            disabled={!canManage || saving || seatTarget <= minSeats}
-            aria-label="Decrease seats"
-          >
-            <Minus className="h-4 w-4" strokeWidth={3} />
-          </button>
-          <div className="min-w-[3.75rem] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-center text-base font-bold text-slate-900 tabular-nums">
-            {seatTarget}
-          </div>
-          <button
-            type="button"
-            onClick={() => onAdjust(1)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-50"
-            disabled={!canManage || saving}
-            aria-label="Increase seats"
-          >
-            <Plus className="h-4 w-4" strokeWidth={3} />
-          </button>
-        </div>
+        <QuantityStepper
+          value={seatTarget}
+          onDecrease={() => onAdjust(-1)}
+          onIncrease={() => onAdjust(1)}
+          decreaseDisabled={!canManage || saving || seatTarget <= minSeats}
+          increaseDisabled={!canManage || saving}
+          decreaseLabel="Decrease seats"
+          increaseLabel="Increase seats"
+          incrementTone="neutral"
+          decrementDisabledOpacity="50"
+          incrementDisabledOpacity="50"
+          valueClassName="min-w-[3.75rem] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-center text-base font-bold text-slate-900 tabular-nums"
+        />
       </div>
     </div>
   )

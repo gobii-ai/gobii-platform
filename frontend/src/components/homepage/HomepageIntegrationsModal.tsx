@@ -1,12 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Check, Loader2, Search, Sparkles, X } from 'lucide-react'
 
 import { scheduleLoginRedirect } from '../../api/http'
 import { mapPipedreamApp, searchPipedreamApps, type PipedreamAppSummary } from '../../api/mcp'
 import {
-  fetchNativeIntegrationPickerToken,
   fetchNativeIntegrations,
   mapNativeIntegrationProvider,
   revokeNativeIntegration,
@@ -22,12 +21,12 @@ import {
   NativeIntegrationActionButtons,
   NativeIntegrationFilesDisclosure,
   NativeIntegrationSummaryCell,
-  nativeIntegrationFilesQueryKey,
-  nativeOAuthContextPayload,
   openGoogleDrivePicker,
   openNativeOAuthPopup,
-  storePendingNativeOAuth,
   usesManualNativeIntegrationCredentials,
+  useNativeIntegrationConnectMutation,
+  useNativeIntegrationDisconnectMutation,
+  useNativeIntegrationPickerMutation,
   useNativeIntegrationRefreshEffects,
 } from '../mcp/NativeIntegrationShared'
 import { useManualNativeIntegrationConnect } from '../mcp/useManualNativeIntegrationConnect'
@@ -50,6 +49,7 @@ export type HomepageIntegrationsModalProps = {
   searchUrl: string
   selectedFieldsContainerId: string
   initialOpen?: boolean
+  openNativePicker?: typeof openGoogleDrivePicker
 }
 
 function fallbackAppForSlug(slug: string): PipedreamAppSummary {
@@ -98,8 +98,8 @@ export function HomepageIntegrationsModal({
   searchUrl,
   selectedFieldsContainerId,
   initialOpen = false,
+  openNativePicker = openGoogleDrivePicker,
 }: HomepageIntegrationsModalProps) {
-  const queryClient = useQueryClient()
   const [open, setOpen] = useState(Boolean(initialOpen || initialSearchTerm))
   const isMobile = useIsMobile()
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm)
@@ -180,53 +180,23 @@ export function HomepageIntegrationsModal({
     ].some((value) => value.toLowerCase().includes(normalizedSearch)))
   }, [currentNativeProviders, debouncedSearchTerm])
 
-  const nativeConnectMutation = useMutation({
-    mutationFn: async ({ provider }: { provider: NativeIntegrationProvider; popup: Window | null }) => {
+  const nativeConnectMutation = useNativeIntegrationConnectMutation({
+    setPendingAction: setPendingNativeAction,
+    setStatusMessage: setNativeErrorMessage,
+    startConnect: async (provider) => {
       const csrfToken = await ensureHomepageCsrf()
       return startNativeIntegrationConnect(provider.connectUrl, csrfToken)
     },
-    onMutate: ({ provider }) => {
-      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
-      setNativeErrorMessage(null)
-    },
-    onSuccess: (payload, { provider, popup }) => {
-      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(provider, payload.state, popup))
-      if (popup && !popup.closed) {
-        popup.location.href = payload.authorizationUrl
-        popup.focus()
-        return
-      }
-      if (popup?.closed) {
-        setNativeErrorMessage('Connection window was closed before Google opened.')
-        return
-      }
-      window.location.href = payload.authorizationUrl
-    },
-    onError: (error, { popup }) => {
-      if (popup && !popup.closed) {
-        popup.close()
-      }
-      setNativeErrorMessage(safeErrorMessage(error))
-    },
-    onSettled: () => setPendingNativeAction(null),
   })
 
-  const nativeDisconnectMutation = useMutation({
-    mutationFn: async (provider: NativeIntegrationProvider) => {
+  const nativeDisconnectMutation = useNativeIntegrationDisconnectMutation({
+    nativeQueryKey,
+    setPendingAction: setPendingNativeAction,
+    setStatusMessage: setNativeErrorMessage,
+    disconnect: async (provider) => {
       const csrfToken = await ensureHomepageCsrf()
       return revokeNativeIntegration(provider.revokeUrl, csrfToken).then(() => provider)
     },
-    onMutate: (provider) => {
-      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'disconnect' })
-      setNativeErrorMessage(null)
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: nativeQueryKey })
-    },
-    onError: (error) => {
-      setNativeErrorMessage(safeErrorMessage(error))
-    },
-    onSettled: () => setPendingNativeAction(null),
   })
 
   const {
@@ -247,30 +217,18 @@ export function HomepageIntegrationsModal({
     onSettled: () => setPendingNativeAction(null),
   })
 
-  const nativePickerMutation = useMutation({
-    mutationFn: async (provider: NativeIntegrationProvider) => {
+  const nativePickerMutation = useNativeIntegrationPickerMutation({
+    setPendingAction: setPendingNativeAction,
+    setStatusMessage: setNativeErrorMessage,
+    openPicker: openNativePicker,
+    preparePicker: () => {
       const previousScrollX = window.scrollX
       const previousScrollY = window.scrollY
-      try {
-        scrollPageToTop()
-        const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-        const selectedFiles = await openGoogleDrivePicker(token)
-        return { provider, selectedCount: selectedFiles.length }
-      } finally {
+      scrollPageToTop()
+      return () => {
         window.scrollTo(previousScrollX, previousScrollY)
       }
     },
-    onMutate: (provider) => {
-      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'picker' })
-      setNativeErrorMessage(null)
-    },
-    onSuccess: ({ provider }) => {
-      void queryClient.invalidateQueries({ queryKey: nativeIntegrationFilesQueryKey(provider) })
-    },
-    onError: (error) => {
-      setNativeErrorMessage(safeErrorMessage(error))
-    },
-    onSettled: () => setPendingNativeAction(null),
   })
 
   useEffect(() => {

@@ -22,7 +22,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { Slider as AriaSlider, SliderThumb, SliderTrack, Switch as AriaSwitch } from 'react-aria-components'
-import { ActionConfirmDialog as CommonActionConfirmDialog } from '../components/common/ActionConfirmDialog'
+import { AsyncActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { CheckboxField, FormField, SelectInput, TextInput } from '../components/common/FormControls'
 import { ModalForm } from '../components/common/ModalForm'
 import { AddCollaboratorModal } from '../components/agentSettings/AddCollaboratorModal'
@@ -3525,42 +3525,24 @@ function ConfirmActionDialog({
   onConfirm,
   onClose,
 }: ConfirmActionDialogProps) {
-  const [busy, setBusy] = useState(false)
-
-  const handleConfirm = async () => {
-    if (!onConfirm) {
-      onClose()
-      return
-    }
-    setBusy(true)
-    try {
-      await onConfirm()
-      onClose()
-    } catch (error) {
-      console.error(error)
-      setBusy(false)
-    }
-  }
-
   return (
-    <CommonActionConfirmDialog
+    <AsyncActionConfirmDialog
       open
       title={title}
-      onClose={() => {
-        if (!busy) {
-          onClose()
-        }
-      }}
+      onClose={onClose}
       description={typeof body === 'string' ? body : undefined}
       icon={tone === 'danger' ? Trash2 : Info}
       confirmLabel={confirmLabel}
       cancelLabel={cancelLabel}
-      busy={busy}
       danger={tone === 'danger'}
-      onConfirm={handleConfirm}
+      onConfirm={onConfirm ?? (() => {})}
       widthClass="sm:max-w-md"
+      getErrorMessage={(error) => {
+        console.error(error)
+        return null
+      }}
     >
       {typeof body === 'string' ? null : <div className="text-sm text-gray-600">{body}</div>}
-    </CommonActionConfirmDialog>
+    </AsyncActionConfirmDialog>
   )
 }

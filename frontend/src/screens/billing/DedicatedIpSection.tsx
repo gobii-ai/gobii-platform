@@ -1,9 +1,10 @@
-import { GlobeLock, Minus, Plus } from 'lucide-react'
+import { GlobeLock } from 'lucide-react'
 
 import type { BillingInitialData, DedicatedIpProxy } from './types'
 import type { BillingDraftAction, BillingDraftState } from './draft'
 import { formatCents, normalizeCurrency } from './utils'
 import { StagedRow } from './StagedRow'
+import { QuantityStepper } from './QuantityStepper'
 
 type DedicatedIpSectionProps = {
   initialData: BillingInitialData
@@ -95,28 +96,16 @@ export function DedicatedIpSection({
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="flex flex-1 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => dispatch({ type: 'dedicated.setAddQty', value: Math.max(0, draft.dedicatedAddQty - 1) })}
-              disabled={!dedicatedInteractable || saving || draft.dedicatedAddQty <= 0}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
-              aria-label="Decrease dedicated IP quantity to add"
-            >
-              <Minus className="h-4 w-4" strokeWidth={3} />
-            </button>
-            <div className="min-w-[3.25rem] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-center text-sm font-bold text-slate-900 tabular-nums">
-              {draft.dedicatedAddQty}
-            </div>
-            <button
-              type="button"
-              onClick={() => dispatch({ type: 'dedicated.setAddQty', value: Math.min(99, draft.dedicatedAddQty + 1) })}
-              disabled={!dedicatedInteractable || saving}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-              aria-label="Increase dedicated IP quantity to add"
-            >
-              <Plus className="h-4 w-4" strokeWidth={3} />
-            </button>
+          <div className="flex flex-1 items-center">
+            <QuantityStepper
+              value={draft.dedicatedAddQty}
+              onDecrease={() => dispatch({ type: 'dedicated.setAddQty', value: Math.max(0, draft.dedicatedAddQty - 1) })}
+              onIncrease={() => dispatch({ type: 'dedicated.setAddQty', value: Math.min(99, draft.dedicatedAddQty + 1) })}
+              decreaseDisabled={!dedicatedInteractable || saving || draft.dedicatedAddQty <= 0}
+              increaseDisabled={!dedicatedInteractable || saving}
+              decreaseLabel="Decrease dedicated IP quantity to add"
+              increaseLabel="Increase dedicated IP quantity to add"
+            />
           </div>
 
           <div className="text-sm text-slate-600">Add this many new dedicated IPs.</div>

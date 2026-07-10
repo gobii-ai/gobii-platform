@@ -1,9 +1,19 @@
 import { useEffect, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronDown, ChevronRight, FileText, FolderOpen, Loader2, Plug, Table2, Unplug } from 'lucide-react'
 
-import type { NativeIntegrationAccessibleFile, NativeIntegrationPickerTokenResponse, NativeIntegrationProvider } from '../../api/nativeIntegrations'
-import { fetchNativeIntegrationFiles } from '../../api/nativeIntegrations'
+import type {
+  NativeIntegrationAccessibleFile,
+  NativeIntegrationConnectResponse,
+  NativeIntegrationPickerTokenResponse,
+  NativeIntegrationProvider,
+} from '../../api/nativeIntegrations'
+import {
+  fetchNativeIntegrationFiles,
+  fetchNativeIntegrationPickerToken,
+  revokeNativeIntegration,
+  startNativeIntegrationConnect,
+} from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { readStoredConsoleContext } from '../../util/consoleContextStorage'
 
@@ -262,6 +272,169 @@ export function NativeProviderIconTile({ provider }: { provider: NativeIntegrati
 }
 
 type NativePendingKind = 'connect' | 'disconnect' | 'picker' | null
+export type NativeIntegrationPendingOperation = {
+  providerKey: string
+  kind: NonNullable<NativePendingKind>
+} | null
+
+type NativeIntegrationActionFeedback = {
+  setPendingAction: (action: NativeIntegrationPendingOperation) => void
+  setStatusMessage: (message: string | null) => void
+  onError?: (message: string) => void
+}
+
+function nativeIntegrationDisplayName(provider: NativeIntegrationProvider): string {
+  const fallback = provider.providerKey.replace(/[_-]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+  return provider.displayName?.trim() || fallback || provider.providerKey
+}
+
+function notifyNativeIntegrationError({
+  message,
+  setStatusMessage,
+  onError,
+}: {
+  message: string
+  setStatusMessage: (message: string | null) => void
+  onError?: (message: string) => void
+}) {
+  setStatusMessage(message)
+  onError?.(message)
+}
+
+export function handleNativeOAuthConnectSuccess({
+  payload,
+  provider,
+  popup,
+  agentId,
+  closedMessage,
+  onClosed,
+}: {
+  payload: NativeIntegrationConnectResponse
+  provider: NativeIntegrationProvider
+  popup: Window | null
+  agentId?: string | null
+  closedMessage?: string
+  onClosed?: (message: string) => void
+}) {
+  storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(provider, payload.state, popup, agentId))
+  if (popup && !popup.closed) {
+    popup.location.href = payload.authorizationUrl
+    popup.focus()
+    return
+  }
+  if (popup?.closed) {
+    onClosed?.(closedMessage ?? `Connection window was closed before ${nativeIntegrationDisplayName(provider)} opened.`)
+    return
+  }
+  window.location.href = payload.authorizationUrl
+}
+
+export function useNativeIntegrationConnectMutation({
+  setPendingAction,
+  setStatusMessage,
+  onError,
+  startConnect = (provider) => startNativeIntegrationConnect(provider.connectUrl),
+  agentId = null,
+  closedMessage,
+}: NativeIntegrationActionFeedback & {
+  startConnect?: (provider: NativeIntegrationProvider) => Promise<NativeIntegrationConnectResponse>
+  agentId?: string | null
+  closedMessage?: string
+}) {
+  return useMutation({
+    mutationFn: ({ provider }: { provider: NativeIntegrationProvider; popup: Window | null }) =>
+      startConnect(provider),
+    onMutate: ({ provider }) => {
+      setPendingAction({ providerKey: provider.providerKey, kind: 'connect' })
+      setStatusMessage(null)
+    },
+    onSuccess: (payload, { provider, popup }) => {
+      handleNativeOAuthConnectSuccess({
+        payload,
+        provider,
+        popup,
+        agentId,
+        closedMessage,
+        onClosed: (message) => notifyNativeIntegrationError({ message, setStatusMessage, onError }),
+      })
+    },
+    onError: (error, { popup }) => {
+      if (popup && !popup.closed) {
+        popup.close()
+      }
+      notifyNativeIntegrationError({ message: safeErrorMessage(error), setStatusMessage, onError })
+    },
+    onSettled: () => setPendingAction(null),
+  })
+}
+
+export function useNativeIntegrationDisconnectMutation({
+  nativeQueryKey,
+  setPendingAction,
+  setStatusMessage,
+  onError,
+  disconnect = (provider) => revokeNativeIntegration(provider.revokeUrl).then(() => provider),
+  extraInvalidateQueryKeys = [],
+}: NativeIntegrationActionFeedback & {
+  nativeQueryKey: readonly unknown[]
+  disconnect?: (provider: NativeIntegrationProvider) => Promise<unknown>
+  extraInvalidateQueryKeys?: readonly unknown[][]
+}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (provider: NativeIntegrationProvider) => disconnect(provider),
+    onMutate: (provider) => {
+      setPendingAction({ providerKey: provider.providerKey, kind: 'disconnect' })
+      setStatusMessage(null)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: nativeQueryKey })
+      extraInvalidateQueryKeys.forEach((queryKey) => {
+        void queryClient.invalidateQueries({ queryKey })
+      })
+    },
+    onError: (error) => {
+      notifyNativeIntegrationError({ message: safeErrorMessage(error), setStatusMessage, onError })
+    },
+    onSettled: () => setPendingAction(null),
+  })
+}
+
+export function useNativeIntegrationPickerMutation({
+  setPendingAction,
+  setStatusMessage,
+  onError,
+  openPicker = openGoogleDrivePicker,
+  preparePicker,
+}: NativeIntegrationActionFeedback & {
+  openPicker?: (token: NativeIntegrationPickerTokenResponse) => Promise<NativeIntegrationAccessibleFile[]>
+  preparePicker?: (provider: NativeIntegrationProvider) => Promise<void | (() => void)> | void | (() => void)
+}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (provider: NativeIntegrationProvider) => {
+      const cleanup = await preparePicker?.(provider)
+      try {
+        const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
+        const selectedFiles = await openPicker(token)
+        return { provider, selectedCount: selectedFiles.length }
+      } finally {
+        cleanup?.()
+      }
+    },
+    onMutate: (provider) => {
+      setPendingAction({ providerKey: provider.providerKey, kind: 'picker' })
+      setStatusMessage(null)
+    },
+    onSuccess: ({ provider }) => {
+      void queryClient.invalidateQueries({ queryKey: nativeIntegrationFilesQueryKey(provider) })
+    },
+    onError: (error) => {
+      notifyNativeIntegrationError({ message: safeErrorMessage(error), setStatusMessage, onError })
+    },
+    onSettled: () => setPendingAction(null),
+  })
+}
 
 export function NativeIntegrationSummaryCell({
   provider,

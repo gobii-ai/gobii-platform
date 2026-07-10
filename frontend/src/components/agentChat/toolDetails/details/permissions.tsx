@@ -235,6 +235,14 @@ type SpawnDecisionResponse = {
   spawned_agent_name?: string
 }
 
+const spawnAgentActionsClassName = 'grid w-full grid-cols-1 gap-[0.45rem] min-[561px]:grid-cols-2'
+const spawnAgentActionButtonBaseClassName = 'inline-flex w-full min-w-0 cursor-pointer items-center justify-center rounded-[0.65rem] border border-transparent px-[0.75rem] py-[0.43rem] text-[0.71rem] font-[650] tracking-[0.01em] transition-all duration-[160ms] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(99,102,241,0.18)] disabled:cursor-not-allowed disabled:opacity-[0.72]'
+const spawnAgentPrimaryButtonClassName = 'border-[rgba(79,70,229,0.42)] bg-[linear-gradient(180deg,#6366f1_0%,#4f46e5_100%)] text-white shadow-[0_1px_2px_rgba(79,70,229,0.2)] enabled:hover:border-[rgba(67,56,202,0.5)] enabled:hover:bg-[linear-gradient(180deg,#5b5fe9_0%,#4338ca_100%)]'
+const spawnAgentSecondaryButtonClassName = 'border-[rgba(148,163,184,0.35)] bg-[rgba(255,255,255,0.92)] text-[#475569] shadow-[0_1px_2px_rgba(15,23,42,0.05)] enabled:hover:border-[rgba(99,115,141,0.4)] enabled:hover:bg-[rgba(248,250,252,0.96)] enabled:hover:text-[#334155]'
+const spawnAgentResolutionBaseClassName = 'flex w-full items-center justify-center rounded-[0.65rem] border border-dashed px-[0.75rem] py-[0.6rem]'
+const spawnAgentCreatedResolutionClassName = 'border-[rgba(16,185,129,0.32)] bg-[linear-gradient(180deg,rgba(236,253,245,0.9)_0%,rgba(240,253,250,0.92)_100%)]'
+const spawnAgentDeclinedResolutionClassName = 'border-[rgba(148,163,184,0.42)] bg-[linear-gradient(180deg,rgba(248,250,252,0.95)_0%,rgba(241,245,249,0.95)_100%)]'
+
 function parseErrorMessage(error: unknown): string {
   if (error instanceof HttpError) {
     return 'Something went wrong. Please try again.'
@@ -331,12 +339,12 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
         </Section>
       ) : null}
       {showActions ? (
-        <div className="spawn-agent-actions">
+        <div className={spawnAgentActionsClassName}>
           <button
             type="button"
             onClick={() => void submitDecision('approve')}
             disabled={actionsLocked}
-            className="spawn-agent-action-btn spawn-agent-action-btn--primary"
+            className={`${spawnAgentActionButtonBaseClassName} ${spawnAgentPrimaryButtonClassName}`}
           >
             {busyDecision === 'approve' ? 'Creating...' : 'Create'}
           </button>
@@ -344,7 +352,7 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
             type="button"
             onClick={() => void submitDecision('decline')}
             disabled={actionsLocked}
-            className="spawn-agent-action-btn spawn-agent-action-btn--secondary"
+            className={`${spawnAgentActionButtonBaseClassName} ${spawnAgentSecondaryButtonClassName}`}
           >
             {busyDecision === 'decline' ? 'Declining...' : 'Decline'}
           </button>
@@ -352,14 +360,14 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
       ) : null}
       {resolvedDecision ? (
         <div
-          className={`spawn-agent-resolution ${resolvedDecision === 'approve' ? 'spawn-agent-resolution--created' : 'spawn-agent-resolution--declined'}`}
+          className={`${spawnAgentResolutionBaseClassName} ${resolvedDecision === 'approve' ? spawnAgentCreatedResolutionClassName : spawnAgentDeclinedResolutionClassName}`}
         >
-          <span className="spawn-agent-resolution-text">
+          <span className="m-0 text-[0.72rem] font-semibold text-[#334155]">
             {resolvedDecision === 'approve' ? 'Created' : resolvedDecision === 'expired' ? 'Expired' : 'Declined'}
           </span>
         </div>
       ) : null}
-      {actionError ? <p className="spawn-agent-action-error">{actionError}</p> : null}
+      {actionError ? <p className="m-0 text-[0.72rem] text-[#be123c]">{actionError}</p> : null}
     </div>
   )
 }

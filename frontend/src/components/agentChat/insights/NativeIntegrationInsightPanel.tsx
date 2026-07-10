@@ -6,10 +6,9 @@ import { CheckCircle2, Loader2, Plug } from 'lucide-react'
 import { fetchNativeIntegrations, startNativeIntegrationConnect, type NativeIntegrationProvider } from '../../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../../api/safeErrorMessage'
 import {
+  handleNativeOAuthConnectSuccess,
   NativeProviderIcon,
-  nativeOAuthContextPayload,
   openNativeOAuthPopup,
-  storePendingNativeOAuth,
   usesManualNativeIntegrationCredentials,
   useNativeIntegrationRefreshEffects,
 } from '../../mcp/NativeIntegrationShared'
@@ -71,17 +70,14 @@ export function useNativeIntegrationPanelState({
       setStatusMessage(null)
     },
     onSuccess: (payload, { provider, popup }) => {
-      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(provider, payload.state, popup, agentId))
-      if (popup && !popup.closed) {
-        popup.location.href = payload.authorizationUrl
-        popup.focus()
-        return
-      }
-      if (popup?.closed) {
-        setStatusMessage(`Connection window was closed before ${providerDisplayName} opened.`)
-        return
-      }
-      window.location.href = payload.authorizationUrl
+      handleNativeOAuthConnectSuccess({
+        payload,
+        provider,
+        popup,
+        agentId,
+        closedMessage: `Connection window was closed before ${providerDisplayName} opened.`,
+        onClosed: setStatusMessage,
+      })
     },
     onError: (error, { popup }) => {
       if (popup && !popup.closed) {
@@ -129,6 +125,80 @@ export function useNativeIntegrationPanelState({
       connectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
     },
   }
+}
+
+type ConfiguredNativeIntegrationInsightPanelProps = {
+  agentId?: string | null
+  nativeIntegrationsUrl?: string | null
+  providerKey: string
+  providerLabel: string
+  fallbackIcon: ReactNode
+  unavailableMessage: string
+  loadingMessage: string
+  notConfiguredMessage: string
+  connectedTitle: string
+  disconnectedTitle: string
+  connectedText: string
+  disconnectedText: string
+  includeCredentialModal?: boolean
+}
+
+export function ConfiguredNativeIntegrationInsightPanel({
+  agentId = null,
+  nativeIntegrationsUrl = null,
+  providerKey,
+  providerLabel,
+  fallbackIcon,
+  unavailableMessage,
+  loadingMessage,
+  notConfiguredMessage,
+  connectedTitle,
+  disconnectedTitle,
+  connectedText,
+  disconnectedText,
+  includeCredentialModal = false,
+}: ConfiguredNativeIntegrationInsightPanelProps) {
+  const panel = useNativeIntegrationPanelState({
+    agentId,
+    nativeIntegrationsUrl,
+    providerKey,
+    providerDisplayName: providerLabel,
+  })
+  const busy = panel.connectPending || panel.pendingAction !== null
+  const frame = (
+    <NativeIntegrationInsightPanelFrame
+      ariaLabel={providerLabel}
+      providerLabel={providerLabel}
+      provider={panel.provider}
+      connected={Boolean(panel.provider?.connected)}
+      fallbackIcon={fallbackIcon}
+      unavailableMessage={!nativeIntegrationsUrl ? unavailableMessage : null}
+      loadingMessage={panel.isLoading ? loadingMessage : null}
+      errorMessage={panel.errorMessage}
+      notConfiguredMessage={notConfiguredMessage}
+      title={panel.provider?.connected ? connectedTitle : disconnectedTitle}
+      text={panel.provider?.connected ? connectedText : disconnectedText}
+      actions={!panel.provider?.connected && panel.provider ? (
+        <NativeIntegrationConnectButton
+          busy={busy}
+          pendingAction={panel.pendingAction}
+          onClick={() => panel.startConnect(panel.provider!)}
+        />
+      ) : null}
+      statusMessage={panel.statusMessage}
+    />
+  )
+
+  if (!includeCredentialModal) {
+    return frame
+  }
+
+  return (
+    <>
+      {frame}
+      {panel.credentialModal}
+    </>
+  )
 }
 
 type NativeIntegrationInsightPanelFrameProps = {

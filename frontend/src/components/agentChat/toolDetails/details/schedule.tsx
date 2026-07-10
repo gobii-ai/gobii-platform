@@ -37,6 +37,19 @@ function getScheduleEmoji(schedule: ScheduleDescription): string {
   return '🔄'
 }
 
+const scheduleHeroBaseClassName = 'relative flex items-center gap-[0.875rem] overflow-hidden rounded-[0.875rem] border px-[1.125rem] py-4'
+const scheduleHeroEnabledClassName = 'border-[rgba(99,102,241,0.12)] bg-[linear-gradient(135deg,rgba(99,102,241,0.06)_0%,rgba(139,92,246,0.04)_100%)]'
+const scheduleHeroDisabledClassName = 'border-[rgba(100,116,139,0.1)] bg-[linear-gradient(135deg,rgba(100,116,139,0.05)_0%,rgba(148,163,184,0.03)_100%)]'
+const scheduleHeroOverlayClassName = 'pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,transparent_60%,rgba(139,92,246,0.04)_100%)]'
+const scheduleHeroIconBaseClassName = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[rgba(255,255,255,0.85)]'
+const scheduleHeroIconEnabledClassName = 'shadow-[0_1px_3px_rgba(99,102,241,0.06),0_2px_8px_rgba(99,102,241,0.04)]'
+const scheduleHeroIconDisabledClassName = 'shadow-[0_1px_3px_rgba(100,116,139,0.06),0_2px_8px_rgba(100,116,139,0.04)]'
+const scheduleHeroEmojiClassName = 'text-[1.375rem] leading-none'
+const scheduleHeroContentClassName = 'min-w-0 flex-1'
+const scheduleHeroLabelBaseClassName = 'm-0 mb-[0.125rem] text-[0.6875rem] font-semibold uppercase tracking-[0.05em]'
+const scheduleHeroValueBaseClassName = 'm-0 text-[1.0625rem] font-semibold leading-[1.3]'
+const scheduleHeroBadgeBaseClassName = 'h-[1.125rem] w-[1.125rem] shrink-0'
+
 function renderScheduleCard(schedule: ScheduleDescription): ReactNode {
   const Icon = getScheduleIcon(schedule)
   const emoji = getScheduleEmoji(schedule)
@@ -63,15 +76,18 @@ function renderScheduleCard(schedule: ScheduleDescription): ReactNode {
   const isDisabled = schedule.kind === 'disabled'
 
   return (
-    <div className={`schedule-hero ${isDisabled ? 'schedule-hero--disabled' : ''}`}>
-      <div className="schedule-hero-icon">
-        <span className="schedule-hero-emoji" aria-hidden="true">{emoji}</span>
+    <div className={`${scheduleHeroBaseClassName} ${isDisabled ? scheduleHeroDisabledClassName : scheduleHeroEnabledClassName}`}>
+      <span className={scheduleHeroOverlayClassName} aria-hidden="true" />
+      <div className={`${scheduleHeroIconBaseClassName} ${isDisabled ? scheduleHeroIconDisabledClassName : scheduleHeroIconEnabledClassName}`}>
+        <span className={scheduleHeroEmojiClassName} aria-hidden="true">{emoji}</span>
       </div>
-      <div className="schedule-hero-content">
-        <p className="schedule-hero-label">{isDisabled ? 'Schedule paused' : 'Runs automatically'}</p>
-        <p className="schedule-hero-value">{summaryText}</p>
+      <div className={scheduleHeroContentClassName}>
+        <p className={`${scheduleHeroLabelBaseClassName} ${isDisabled ? 'text-[#64748b]' : 'text-[#6366f1]'}`}>
+          {isDisabled ? 'Schedule paused' : 'Runs automatically'}
+        </p>
+        <p className={`${scheduleHeroValueBaseClassName} ${isDisabled ? 'text-[#475569]' : 'text-[#312e81]'}`}>{summaryText}</p>
       </div>
-      <Icon className="schedule-hero-badge" aria-hidden="true" />
+      <Icon className={`${scheduleHeroBadgeBaseClassName} ${isDisabled ? 'text-[rgba(100,116,139,0.25)]' : 'text-[rgba(99,102,241,0.3)]'}`} aria-hidden="true" />
     </div>
   )
 }

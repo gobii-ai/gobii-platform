@@ -24,18 +24,54 @@ vi.mock('../../../api/nativeIntegrations', () => ({
   saveNativeIntegrationCredentials: vi.fn(),
 }))
 
-vi.mock('../../mcp/NativeIntegrationShared', () => ({
-  NativeProviderIcon: () => <img src="/static/images/integrations/native/google_drive.svg" alt="" />,
-  nativeOAuthContextPayload: vi.fn(() => ({ providerKey: 'google_drive' })),
-  openGoogleDrivePicker: vi.fn(),
-  openNativeOAuthPopup: vi.fn(),
-  storePendingNativeOAuth: vi.fn(),
-  supportsNativeIntegrationPicker: (provider: { providerKey: string; pickerTokenUrl: string }) => (
-    provider.providerKey === 'google_drive' && Boolean(provider.pickerTokenUrl)
-  ),
-  usesManualNativeIntegrationCredentials: () => false,
-  useNativeIntegrationRefreshEffects: vi.fn(),
-}))
+vi.mock('../../mcp/NativeIntegrationShared', () => {
+  const nativeOAuthContextPayload = vi.fn((
+    _provider: { displayName: string; providerKey: string },
+    _state: string,
+    _popup: Window | null,
+    _agentId?: string | null,
+  ) => ({ providerKey: 'google_drive' }))
+  const storePendingNativeOAuth = vi.fn()
+  return {
+    NativeProviderIcon: () => <img src="/static/images/integrations/native/google_drive.svg" alt="" />,
+    handleNativeOAuthConnectSuccess: vi.fn(({
+      payload,
+      provider,
+      popup,
+      agentId,
+      closedMessage,
+      onClosed,
+    }: {
+      payload: { authorizationUrl: string; state: string }
+      provider: { displayName: string; providerKey: string }
+      popup: Window | null
+      agentId?: string | null
+      closedMessage?: string
+      onClosed?: (message: string) => void
+    }) => {
+      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(provider, payload.state, popup, agentId))
+      if (popup && !popup.closed) {
+        popup.location.href = payload.authorizationUrl
+        popup.focus()
+        return
+      }
+      if (popup?.closed) {
+        onClosed?.(closedMessage ?? `Connection window was closed before ${provider.displayName} opened.`)
+        return
+      }
+      window.location.href = payload.authorizationUrl
+    }),
+    nativeOAuthContextPayload,
+    openGoogleDrivePicker: vi.fn(),
+    openNativeOAuthPopup: vi.fn(),
+    storePendingNativeOAuth,
+    supportsNativeIntegrationPicker: (provider: { providerKey: string; pickerTokenUrl: string }) => (
+      provider.providerKey === 'google_drive' && Boolean(provider.pickerTokenUrl)
+    ),
+    usesManualNativeIntegrationCredentials: () => false,
+    useNativeIntegrationRefreshEffects: vi.fn(),
+  }
+})
 
 const googleDriveProvider = {
   providerKey: 'google_drive',

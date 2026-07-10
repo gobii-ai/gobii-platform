@@ -1,10 +1,10 @@
-import { cloneElement, isValidElement, type ElementType, type ReactNode } from 'react'
+import { cloneElement, isValidElement, useState, type ElementType, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Check, Loader2, XCircle } from 'lucide-react'
 
 import { Modal } from './Modal'
 
-type ActionConfirmDialogProps = {
+export type ActionConfirmDialogProps = {
   open: boolean
   title: string
   description?: ReactNode
@@ -116,5 +116,46 @@ export function ActionConfirmDialog({
         ) : null}
       </div>
     </Modal>
+  )
+}
+
+type AsyncActionConfirmDialogProps = Omit<ActionConfirmDialogProps, 'busy' | 'localError' | 'onConfirm'> & {
+  onConfirm: () => Promise<void> | void
+  getErrorMessage?: (error: unknown) => ReactNode
+}
+
+export function AsyncActionConfirmDialog({
+  onConfirm,
+  onClose,
+  getErrorMessage,
+  ...props
+}: AsyncActionConfirmDialogProps) {
+  const [busy, setBusy] = useState(false)
+  const [localError, setLocalError] = useState<ReactNode>(null)
+
+  const handleConfirm = async () => {
+    setBusy(true)
+    setLocalError(null)
+    try {
+      await onConfirm()
+      onClose()
+    } catch (error) {
+      setLocalError(getErrorMessage ? getErrorMessage(error) : error instanceof Error ? error.message : 'Unable to complete action.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <ActionConfirmDialog
+      {...props}
+      busy={busy}
+      localError={localError}
+      onClose={() => {
+        if (!busy) {
+          onClose()
+        }
+      }}
+      onConfirm={handleConfirm}
+    />
   )
 }
