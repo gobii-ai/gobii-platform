@@ -5,7 +5,10 @@ from django.test import SimpleTestCase, tag
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.event_processing import _resolve_eval_mock_result
 from api.agent.tools.create_image import get_create_image_tool
-from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS
+from api.agent.tools.eval_synthetic_tools import (
+    EVAL_SYNTHETIC_TOOL_DEFINITIONS,
+    get_eval_synthetic_tool_fallback_result,
+)
 from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.image_generation import (
@@ -132,6 +135,19 @@ class ImageGenerationScenarioTests(SimpleTestCase):
         self.assertEqual(len(set(refs)), 3)
         self.assertTrue(all(ref.startswith("$[/exports/eval-coffee-") for ref in refs))
 
+    def test_fallback_counts_string_source_image_as_one(self):
+        string_result = get_eval_synthetic_tool_fallback_result(
+            "create_image",
+            {"source_images": "$[/Inbox/product.png]"},
+        )
+        list_result = get_eval_synthetic_tool_fallback_result(
+            "create_image",
+            {"source_images": ["$[/Inbox/a.png]", "$[/Inbox/b.png]"]},
+        )
+
+        self.assertEqual(string_result["source_image_count"], 1)
+        self.assertEqual(list_result["source_image_count"], 2)
+
     def test_prompt_contract_scorer_accepts_representative_source_edit(self):
         scenario = ScenarioRegistry.get(IMAGE_GENERATION_SOURCE_EDIT)
         calls = [
@@ -142,7 +158,7 @@ class ImageGenerationScenarioTests(SimpleTestCase):
                         "lighting, and camera angle unchanged."
                     ),
                     "file_path": "/exports/product-navy.png",
-                    "source_images": ["$[/Inbox/product.png]"],
+                    "source_images": "$[/Inbox/product.png]",
                 }
             )
         ]

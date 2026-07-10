@@ -686,7 +686,13 @@ def _apply_tool_metadata(row: PersistentAgentEnabledTool, entry: Optional[ToolCa
     return updates
 
 
-def _ensure_system_skill_enabled(agent: PersistentAgent, skill_key: str, *, tool_name: str = "") -> Optional[str]:
+def _ensure_system_skill_enabled(
+    agent: PersistentAgent,
+    skill_key: str,
+    *,
+    tool_name: str = "",
+    reactivate: bool = True,
+) -> Optional[str]:
     if not skill_key:
         return None
 
@@ -702,7 +708,7 @@ def _ensure_system_skill_enabled(agent: PersistentAgent, skill_key: str, *, tool
         skill_key=definition.skill_key,
         defaults={"is_enabled": True},
     )
-    if not state.is_enabled:
+    if reactivate and not state.is_enabled:
         state.is_enabled = True
         state.save(update_fields=["is_enabled"])
     return definition.skill_key
@@ -718,7 +724,12 @@ def _ensure_system_skill_enabled_for_tool(agent: PersistentAgent, entry: Optiona
     )
 
 
-def _ensure_system_skill_enabled_for_builtin_tool_name(agent: PersistentAgent, tool_name: str) -> Optional[str]:
+def _ensure_system_skill_enabled_for_builtin_tool_name(
+    agent: PersistentAgent,
+    tool_name: str,
+    *,
+    reactivate: bool = True,
+) -> Optional[str]:
     registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
     if not registry_entry:
         return None
@@ -726,6 +737,7 @@ def _ensure_system_skill_enabled_for_builtin_tool_name(agent: PersistentAgent, t
         agent,
         str(registry_entry.get("system_skill_key") or ""),
         tool_name=tool_name,
+        reactivate=reactivate,
     )
 
 
@@ -1140,6 +1152,13 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
         if not registry_entry:
             continue
+        # Tool rows can predate their associated system skill. Create only a
+        # missing state here so loading tools never overrides an explicit disable.
+        _ensure_system_skill_enabled_for_builtin_tool_name(
+            agent,
+            row.tool_full_name,
+            reactivate=False,
+        )
         if not _is_builtin_tool_available(row.tool_full_name, agent, include_hidden=True):
             continue
         tool_def = _build_builtin_tool_definition(row.tool_full_name, registry_entry)

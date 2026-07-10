@@ -388,7 +388,11 @@ class ImageGenerationScenario(EvalScenario, ScenarioExecutionTools):
             actual_sources = {
                 _normalize_source_path(source)
                 for item in params
-                for source in (item.get("source_images") or [])
+                for source in (
+                    [item.get("source_images")]
+                    if isinstance(item.get("source_images"), str)
+                    else (item.get("source_images") or [])
+                )
             }
             missing_sources = set(case.required_source_images) - actual_sources
             if missing_sources:

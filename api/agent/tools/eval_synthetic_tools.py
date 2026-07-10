@@ -289,13 +289,14 @@ def get_eval_synthetic_tool_fallback_result(tool_name: str, params: Dict[str, An
     if tool_name == "create_image":
         file_path = str(params.get("file_path") or "/exports/eval-image.png")
         file_ref = f"$[{file_path}]"
+        source_images = params.get("source_images") or []
         return {
             "status": "ok",
             "file": file_ref,
             "inline": f"![Generated image]({file_ref})",
             "inline_html": f"<img src='{file_ref}' alt='Generated image' />",
             "attach": file_ref,
-            "source_image_count": len(params.get("source_images") or []),
+            "source_image_count": 1 if isinstance(source_images, str) else len(source_images),
             "eval_fixture": True,
         }
     if tool_name.startswith("google_sheets-"):

@@ -3626,6 +3626,46 @@ class MCPToolFunctionsTests(TestCase):
         )
         self.assertTrue(state.is_enabled)
 
+    def test_loading_existing_create_image_backfills_missing_system_skill_state(self):
+        self._seed_create_image_tier()
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="create_image",
+            tool_server="builtin",
+            tool_name="create_image",
+        )
+
+        definitions = get_enabled_tool_definitions(self.agent)
+
+        self.assertIn("create_image", self._tool_def_names(definitions))
+        self.assertTrue(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key=IMAGE_GENERATION_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists()
+        )
+
+    def test_loading_existing_create_image_preserves_disabled_system_skill_state(self):
+        self._seed_create_image_tier()
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="create_image",
+            tool_server="builtin",
+            tool_name="create_image",
+        )
+        state = PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key=IMAGE_GENERATION_SYSTEM_SKILL_KEY,
+            is_enabled=False,
+        )
+
+        definitions = get_enabled_tool_definitions(self.agent)
+        state.refresh_from_db()
+
+        self.assertIn("create_image", self._tool_def_names(definitions))
+        self.assertFalse(state.is_enabled)
+
     @patch('api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent', return_value=False)
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')
