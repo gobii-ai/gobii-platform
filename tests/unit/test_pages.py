@@ -1092,9 +1092,13 @@ class HomePageTests(TestCase):
         normalized_page_text = (
             normalized_page_text.replace(" ,", ",").replace(" ?", "?").replace(" .", ".")
         )
-        self.assertIn("Delegate qualified sourcing to AI employees", normalized_page_text)
         self.assertIn(
-            "Find leads, candidates, companies, and opportunities on schedule.",
+            "A steady stream of qualified candidates and sales leads",
+            normalized_page_text,
+        )
+        self.assertIn(
+            "Your Gobii AI employee keeps searching, adapts to your feedback, and works inside "
+            "the tools your team already uses.",
             normalized_page_text,
         )
         self.assertIn(
