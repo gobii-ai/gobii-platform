@@ -320,6 +320,20 @@ class AgentShortDescriptionTests(TestCase):
         self.assertEqual(mini, "Helpful research assistant")
         self.assertEqual(source, "mini")
 
+    def test_build_mini_description_preserves_full_manual_description(self) -> None:
+        agent = self._create_agent()
+        agent.mini_description = "Coordinates executive hiring strategy, interviews, and candidate follow-up"
+        agent.mini_description_mode = PersistentAgent.MiniDescriptionMode.MANUAL
+        agent.save(update_fields=["mini_description", "mini_description_mode"])
+
+        mini, source = build_mini_description(agent)
+
+        self.assertEqual(
+            mini,
+            "Coordinates executive hiring strategy, interviews, and candidate follow-up",
+        )
+        self.assertEqual(source, "mini")
+
     def test_build_mini_description_uses_placeholder_when_only_short(self) -> None:
         agent = self._create_agent()
         agent.short_description = "Legacy agent with extensive context preserved in the full summary"

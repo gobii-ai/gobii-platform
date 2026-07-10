@@ -96,7 +96,7 @@ def build_mini_description(
     fallback_message: str = "Agent",
 ) -> Tuple[str, str]:
     """Return a tuple of (mini_description, source) for very small UI slots."""
-    mini = prepare_mini_description(getattr(agent, "mini_description", ""))
+    mini = _normalize_text(getattr(agent, "mini_description", ""))
     if mini:
         return mini, "mini"
 
