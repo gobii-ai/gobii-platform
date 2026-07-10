@@ -326,6 +326,7 @@ class MCPToolManager:
     TOOL_BLACKLIST = [
         "mcp_brightdata_search_engine",
         "mcp_brightdata_scrape_as_markdown",
+        "mcp_brightdata_web_data_linkedin_person_profile",
         "mcp_brightdata_scraping_browser_*",  # Blacklist all scraping browser tools
         "mcp_brightdata_scrape_as_html", # usually results in huge result sets that we don't want
         "select_apps"

@@ -6,7 +6,6 @@ from django.test import SimpleTestCase, TestCase, tag
 
 from api.agent.tools.mcp_manager import MCPServerRuntime, MCPToolInfo, MCPToolManager
 from api.agent.tools.mcp_result_adapters import (
-    BrightDataLinkedInPersonProfileAdapter,
     BrightDataScrapeBatchAdapter,
     BrightDataSearchEngineBatchAdapter,
 )
@@ -60,33 +59,6 @@ class BrightDataSearchEngineBatchAdapterTests(SimpleTestCase):
         self.assertNotIn("image", organic[1])
         self.assertNotIn("image", related[0])
         self.assertNotIn("image_base64", related[0])
-
-
-@tag("batch_mcp_tools")
-class BrightDataLinkedInPersonProfileAdapterTests(SimpleTestCase):
-    def test_strips_html_and_image_fields_recursively(self):
-        payload = {
-            "headline": "Senior Engineer",
-            "description_html": "<p>about</p>",
-            "company": {"name": "Acme", "company_logo_url": "http://logo", "tagline_html": "<p>tag</p>"},
-            "positions": [
-                {"title": "X", "banner_image": "http://banner", "details": {"summary_html": "<p>sum</p>"}},
-            ],
-            "image_url": "http://example.com/image.png",
-            "people_also_viewed": [{"name": "Alice"}],
-        }
-        result = DummyResult(json.dumps(payload))
-
-        adapted = BrightDataLinkedInPersonProfileAdapter().adapt(result)
-
-        cleaned = json.loads(adapted.content[0].text)
-        self.assertEqual(cleaned["headline"], "Senior Engineer")
-        self.assertNotIn("description_html", cleaned)
-        self.assertEqual(cleaned["company"], {"name": "Acme"})
-        self.assertNotIn("banner_image", cleaned["positions"][0])
-        self.assertNotIn("summary_html", cleaned["positions"][0]["details"])
-        self.assertNotIn("image_url", cleaned)
-        self.assertNotIn("people_also_viewed", cleaned)
 
 
 @tag("batch_mcp_tools")

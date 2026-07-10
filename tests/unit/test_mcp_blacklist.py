@@ -35,6 +35,9 @@ class TestMCPToolBlacklist(TestCase):
         self.assertTrue(
             self.manager._is_tool_blacklisted("mcp_brightdata_search_engine")
         )
+        self.assertTrue(
+            self.manager._is_tool_blacklisted("mcp_brightdata_web_data_linkedin_person_profile")
+        )
         # Other Bright Data MCP tools remain available.
         self.assertFalse(
             self.manager._is_tool_blacklisted("mcp_brightdata_search_engine_batch")
@@ -57,6 +60,7 @@ class TestMCPToolBlacklist(TestCase):
             MockTool('scraping_browser_click', 'Click element', {}),
             MockTool('scrape_as_markdown', 'Scrape as markdown', {}),
             MockTool('search_engine', 'Search engine', {}),
+            MockTool('web_data_linkedin_person_profile', 'LinkedIn person profile', {}),
             MockTool('search_engine_batch', 'Search engine batch', {}),
         ]
         
@@ -109,6 +113,7 @@ class TestMCPToolBlacklist(TestCase):
         self.assertIn("mcp_brightdata_search_engine_batch", tool_names)
         self.assertNotIn("mcp_brightdata_scrape_as_markdown", tool_names)
         self.assertNotIn("mcp_brightdata_search_engine", tool_names)
+        self.assertNotIn("mcp_brightdata_web_data_linkedin_person_profile", tool_names)
         self.assertNotIn("mcp_brightdata_scraping_browser_navigate", tool_names)
         self.assertNotIn("mcp_brightdata_scraping_browser_click", tool_names)
     

@@ -30,10 +30,13 @@ from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool, exec
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
 from .brightdata import (
+    BRIGHTDATA_LINKEDIN_PERSON_PROFILE_TOOL_NAME,
     BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME,
     BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME,
+    execute_brightdata_linkedin_person_profile,
     execute_brightdata_scrape_as_markdown,
     execute_brightdata_search_engine,
+    get_brightdata_linkedin_person_profile_tool,
     get_brightdata_scrape_as_markdown_tool,
     get_brightdata_search_engine_tool,
 )
@@ -198,6 +201,11 @@ BUILTIN_TOOL_REGISTRY = {
     BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME: {
         "definition": get_brightdata_scrape_as_markdown_tool,
         "executor": execute_brightdata_scrape_as_markdown,
+        "parallel_safe": True,
+    },
+    BRIGHTDATA_LINKEDIN_PERSON_PROFILE_TOOL_NAME: {
+        "definition": get_brightdata_linkedin_person_profile_tool,
+        "executor": execute_brightdata_linkedin_person_profile,
         "parallel_safe": True,
     },
     READ_FILE_TOOL_NAME: {
