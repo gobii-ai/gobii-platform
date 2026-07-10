@@ -1124,6 +1124,7 @@ export function AgentChatPage({
     [dispatch],
   )
   const previousViewedAgentIdRef = useRef<string | null>(activeAgentId)
+  const rosterProcessingHydratedAgentIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     const previousAgentId = previousViewedAgentIdRef.current
@@ -1806,6 +1807,39 @@ export function AgentChatPage({
     agentName,
     setAgentId,
     agentContextReady,
+  ])
+  useEffect(() => {
+    if (
+      !agentContextReady
+      || !activeAgentId
+      || storeAgentId !== activeAgentId
+    ) {
+      return
+    }
+    if (!activeRosterMeta?.processingActive) {
+      if (rosterProcessingHydratedAgentIdRef.current === activeAgentId) {
+        rosterProcessingHydratedAgentIdRef.current = null
+      }
+      return
+    }
+    if (rosterProcessingHydratedAgentIdRef.current === activeAgentId) {
+      return
+    }
+    rosterProcessingHydratedAgentIdRef.current = activeAgentId
+    if (processingActive) {
+      return
+    }
+    dispatch(chatActions.processingUpdated({
+      agentId: activeAgentId,
+      snapshot: { active: true, webTasks: [] },
+    }))
+  }, [
+    activeAgentId,
+    activeRosterMeta?.processingActive,
+    agentContextReady,
+    dispatch,
+    processingActive,
+    storeAgentId,
   ])
   const storeAgentName = isStoreSynced ? storedAgentName : null
   const storeResolvedAvatarUrl = isStoreSynced ? storedAgentAvatarUrl : null
