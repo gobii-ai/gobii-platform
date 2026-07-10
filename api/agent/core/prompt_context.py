@@ -2280,15 +2280,16 @@ def _recent_contact_records_for_prompt(
 
 
 def _allowed_communication_channels(
+    agent: PersistentAgent,
     agent_endpoints: Sequence[PersistentAgentCommsEndpoint],
-    contact_records: Sequence[ContactSQLiteRecord],
 ) -> list[str]:
-    channels = {endpoint.channel for endpoint in agent_endpoints if endpoint.channel}
-    channels.update(
-        record.channel
-        for record in contact_records
-        if record.channel and record.status == "allowed" and record.allow_outbound
-    )
+    channels = {
+        endpoint.channel
+        for endpoint in agent_endpoints
+        if endpoint.channel and not (
+            endpoint.channel == CommsChannel.SMS and agent.sms_disabled
+        )
+    }
     return sorted(channels)
 
 
@@ -2650,7 +2651,7 @@ def _build_contacts_block(
     )
     
     # Explicitly list allowed communication channels
-    allowed_channels = _allowed_communication_channels(agent_eps, contact_records)
+    allowed_channels = _allowed_communication_channels(agent, agent_eps)
 
     if allowed_channels:
         contacts_group.section_text(

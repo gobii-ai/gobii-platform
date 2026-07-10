@@ -9,6 +9,7 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    UserPhoneNumber,
 )
 
 
@@ -127,7 +128,7 @@ class PromptContextContactsGuidanceTests(TestCase):
         self.assertNotIn("person-00@example.com", allowed_contacts)
         self.assertIn("status='allowed' AND allow_outbound=1", allowed_contacts)
 
-    def test_allowed_channels_include_outbound_allowed_contact_channels(self):
+    def test_allowed_contact_channels_do_not_imply_sending_channels(self):
         PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.WEB,
@@ -166,5 +167,67 @@ class PromptContextContactsGuidanceTests(TestCase):
         )
 
         allowed_channels = collector.sections["allowed_channels"]
-        self.assertIn("You can communicate via: email, web.", allowed_channels)
+        self.assertIn("You can communicate via: web.", allowed_channels)
+        self.assertNotIn("email", allowed_channels)
         self.assertNotIn("sms", allowed_channels)
+
+    def test_verified_owner_phone_does_not_advertise_sms_without_agent_endpoint(self):
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.test",
+        )
+        UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+15555550123",
+            is_verified=True,
+        )
+        collector = _PromptSectionCollector()
+        config_authority = prompt_context._ConfigAuthorityResolver(self.agent)
+        contact_records = prompt_context.build_contacts_snapshot_records(
+            self.agent,
+            display_name_for_user=prompt_context._build_user_display_name,
+            user_can_configure=config_authority.user_can_configure,
+        )
+
+        prompt_context._build_contacts_block(
+            self.agent,
+            collector,
+            _NoopSpan(),
+            config_authority,
+            contact_records,
+        )
+
+        allowed_channels = collector.sections["allowed_channels"]
+        self.assertIn("You can communicate via: email.", allowed_channels)
+        self.assertNotIn("sms", allowed_channels)
+
+    def test_sms_endpoint_is_advertised_only_when_sms_is_enabled(self):
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.test",
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550124",
+        )
+
+        self.assertEqual(
+            prompt_context._allowed_communication_channels(
+                self.agent,
+                list(self.agent.comms_endpoints.all()),
+            ),
+            [CommsChannel.EMAIL, CommsChannel.SMS],
+        )
+
+        self.agent.sms_disabled = True
+
+        self.assertEqual(
+            prompt_context._allowed_communication_channels(
+                self.agent,
+                list(self.agent.comms_endpoints.all()),
+            ),
+            [CommsChannel.EMAIL],
+        )

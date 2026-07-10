@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Set
 
 from django.db.models import Q
 
-from api.models import AgentPeerLink, PersistentAgent
+from api.models import AgentPeerLink, CommsChannel, PersistentAgent
 from api.services.tool_blacklist import get_agent_tool_blacklist
 from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 
@@ -85,7 +85,11 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
         get_update_plan_tool(),
         get_send_email_tool(),
     ]
-    if not agent or not agent.sms_disabled:
+    if (
+        agent
+        and not agent.sms_disabled
+        and agent.comms_endpoints.filter(channel=CommsChannel.SMS).exists()
+    ):
         static_tools.append(get_send_sms_tool())
     static_tools.extend([
         get_send_chat_tool(),

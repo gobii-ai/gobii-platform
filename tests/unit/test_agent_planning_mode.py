@@ -101,7 +101,36 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("send_chat_message", names)
         self.assertTrue(PLANNING_MODE_DISABLED_TOOL_NAMES.isdisjoint(names))
 
-    def test_sms_disabled_agents_do_not_receive_send_sms_tool(self):
+    def test_agents_without_sms_endpoint_do_not_receive_send_sms_tool(self):
+        names = _tool_names(get_static_tool_definitions(self.agent))
+
+        self.assertIn("send_email", names)
+        self.assertNotIn("send_sms", names)
+
+    def test_static_tools_without_agent_do_not_include_send_sms(self):
+        names = _tool_names(get_static_tool_definitions(None))
+
+        self.assertNotIn("send_sms", names)
+
+    def test_sms_enabled_agents_with_sms_endpoint_receive_send_sms_tool(self):
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550123",
+            is_primary=True,
+        )
+
+        names = _tool_names(get_static_tool_definitions(self.agent))
+
+        self.assertIn("send_sms", names)
+
+    def test_sms_disabled_agents_with_sms_endpoint_do_not_receive_send_sms_tool(self):
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550123",
+            is_primary=True,
+        )
         self.agent.sms_disabled = True
         self.agent.save(update_fields=["sms_disabled", "updated_at"])
 
