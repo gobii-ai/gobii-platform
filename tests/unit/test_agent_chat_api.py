@@ -242,7 +242,7 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(seeded_message.conversation.address, expected_sender)
 
     @tag("batch_agent_chat")
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     def test_quick_create_accepts_initial_attachment(self, mock_delay):
         message_text = "Use this screenshot to create the agent"
         attachment = SimpleUploadedFile("screenshot.png", b"fake-image-bytes", content_type="image/png")
@@ -296,7 +296,7 @@ class AgentChatAPITests(TestCase):
         with patch(
             "console.agent_creation.import_message_attachments_to_filespace",
             side_effect=RuntimeError("storage offline"),
-        ) as mock_import, patch("console.agent_creation.process_agent_events_task.delay") as mock_delay:
+        ) as mock_import, patch("console.agent_creation.enqueue_interactive_process_agent_events") as mock_delay:
             with self.captureOnCommitCallbacks(execute=True):
                 response = self.client.post(
                     "/console/api/agents/create/",
@@ -554,7 +554,7 @@ class AgentChatAPITests(TestCase):
             override_flag("personal_agent_signup_preview_processing_limit", active=True),
             patch("console.agent_creation.can_user_use_personal_agents_and_api", return_value=False),
             patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
-            patch("console.agent_creation.process_agent_events_task.delay"),
+            patch("console.agent_creation.enqueue_interactive_process_agent_events"),
         ):
             with self.captureOnCommitCallbacks(execute=True):
                 response = preview_client.post(
@@ -604,7 +604,7 @@ class AgentChatAPITests(TestCase):
             override_flag("personal_agent_signup_preview_processing_limit", active=True),
             patch("console.agent_creation.can_user_use_personal_agents_and_api", return_value=False),
             patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
-            patch("console.agent_creation.process_agent_events_task.delay"),
+            patch("console.agent_creation.enqueue_interactive_process_agent_events"),
         ):
             with self.captureOnCommitCallbacks(execute=True):
                 response = preview_client.post(

@@ -539,7 +539,7 @@ class PersistentAgentAPITests(TestCase):
     def setUp(self):
         self.client = Client()
         self.client.force_login(self.user)
-        self._delay_patcher = patch('api.agent.tasks.process_agent_events_task.delay')
+        self._delay_patcher = patch('api.agent.tasks.enqueue_interactive_process_agent_events')
         self.process_events_mock = self._delay_patcher.start()
         self.addCleanup(self._delay_patcher.stop)
         self._on_commit_patcher = patch('api.serializers.transaction.on_commit', side_effect=lambda fn: fn())

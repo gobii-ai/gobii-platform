@@ -2448,7 +2448,7 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @tag("batch_console_agents_management")
     def test_quick_spawn_rejects_customer_account_pause(self, mock_process_events_delay):
         from api.models import ExecutionPauseReasonChoices, PersistentAgent
@@ -2489,7 +2489,7 @@ class ConsoleViewsTest(TestCase):
 
     @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
     @override_flag(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH, active=False)
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @tag("batch_console_agents_management")
     def test_trial_required_quick_create_persists_draft_for_quick_spawn_resume(self, _mock_delay):
         from agents.services import PretrainedWorkerTemplateService
@@ -2537,7 +2537,7 @@ class ConsoleViewsTest(TestCase):
 
     @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
     @override_flag(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH, active=False)
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @tag("batch_console_agents_management")
     def test_trial_required_quick_create_preserves_template_draft_for_quick_spawn_resume(
         self,
@@ -2599,7 +2599,7 @@ class ConsoleViewsTest(TestCase):
         PIPEDREAM_PREFETCH_APPS="trello",
         PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
     )
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @tag("batch_console_agents_management")
     def test_quick_spawn_enables_selected_pipedream_apps_from_session(self, _mock_delay):
         from api.models import PersistentAgent
@@ -2643,7 +2643,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @patch("console.agent_creation.Analytics.track_event")
     @tag("batch_console_agents_management")
     def test_quick_spawn_created_event_includes_pretrained_worker_template_source(
@@ -2683,7 +2683,7 @@ class ConsoleViewsTest(TestCase):
         SEGMENT_WEB_WRITE_KEY="",
         GOBII_PROPRIETARY_MODE=False,
     )
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @patch("console.agent_creation.emit_configured_custom_capi_event")
     @patch("console.agent_creation.Analytics.track_event")
     @tag("batch_console_agents_management")
@@ -2747,7 +2747,7 @@ class ConsoleViewsTest(TestCase):
         SEGMENT_WEB_WRITE_KEY="",
         GOBII_PROPRIETARY_MODE=False,
     )
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @patch("console.agent_creation.emit_configured_custom_capi_event")
     @patch("console.agent_creation.Analytics.track_event")
     @tag("batch_console_agents_management")
@@ -2792,7 +2792,7 @@ class ConsoleViewsTest(TestCase):
         SEGMENT_WEB_WRITE_KEY="",
         GOBII_PROPRIETARY_MODE=False,
     )
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @patch("console.agent_creation.emit_configured_custom_capi_event")
     @patch("console.agent_creation.Analytics.track_event")
     @tag("batch_console_agents_management")
@@ -2830,7 +2830,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(created_agent.user, self.user)
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @patch("console.agent_creation.Analytics.track_event")
     @tag("batch_console_agents_management")
     def test_quick_create_rejects_organization_template_from_different_context(
@@ -2872,7 +2872,7 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(PersistentAgent.objects.filter(organization=target_org).exists())
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @patch("console.agent_creation.Analytics.track_event")
     @tag("batch_console_agents_management")
     def test_quick_create_rejects_member_org_template_session_without_org_template(
@@ -2911,7 +2911,7 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(PersistentAgent.objects.filter(organization=organization).exists())
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @patch("console.agent_creation.Analytics.track_event")
     @tag("batch_console_agents_management")
     def test_quick_create_rejects_organization_template_from_personal_context(

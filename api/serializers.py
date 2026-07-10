@@ -638,10 +638,10 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             if personal_servers is not None:
                 self._apply_personal_servers(agent, personal_servers)
 
-            from api.agent.tasks import process_agent_events_task
+            from api.agent.tasks import enqueue_interactive_process_agent_events
 
             agent_id = str(agent.id)
-            transaction.on_commit(lambda: process_agent_events_task.delay(agent_id))
+            transaction.on_commit(lambda: enqueue_interactive_process_agent_events(agent_id))
 
         return agent
 
