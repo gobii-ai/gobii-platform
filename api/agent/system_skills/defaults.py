@@ -7,6 +7,7 @@ from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTIO
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from api.meta_ads_setup import META_ADS_SETUP_INSTRUCTIONS, META_ADS_SETUP_STEPS, META_ADS_TROUBLESHOOTING_TIPS
 
+from .image_generation import IMAGE_GENERATION_PROMPT_INSTRUCTIONS, IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from .native_api_cookbooks import render_native_api_cookbook
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
 
@@ -274,6 +275,49 @@ CODE_WORK_SYSTEM_SKILL = SystemSkillDefinition(
         "the previous live artifact for risky changes; and verify the live result once with checks that match the "
         "change. Do not run routine live health checks after unrelated cron/message events."
     ),
+)
+
+
+IMAGE_GENERATION_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=IMAGE_GENERATION_SYSTEM_SKILL_KEY,
+    name="Image Generation",
+    search_summary="Generate or edit raster image assets with Gobii's create_image tool.",
+    tool_names=("create_image",),
+    enables=(
+        "generate original raster images from text prompts",
+        "edit, restyle, composite, or preserve details from filespace source images",
+        "create multiple image assets or variants with distinct prompts and filespace paths",
+        "save generated images for messages, documents, attachments, and later edits",
+    ),
+    use_when=(
+        "the user asks to generate a photo, illustration, texture, sprite, mockup, banner, poster, thumbnail, or artwork",
+        "the user asks for a new raster logo or brand-mark concept rather than an edit to an existing vector system",
+        "the user asks to edit, transform, restyle, composite, or remove the background from an existing raster image",
+        "the user needs image-to-image generation that preserves a person, product, logo, layout, text, or visual identity",
+        "the user asks for several generated image assets or visual variants",
+    ),
+    query_aliases=(
+        "generate image",
+        "create image",
+        "make an image",
+        "image generation",
+        "image edit",
+        "edit image",
+        "modify image",
+        "transform image",
+        "image to image",
+        "style transfer",
+        "transparent background",
+        "background removal",
+        "product mockup",
+        "logo design",
+        "poster design",
+        "thumbnail design",
+        "concept art",
+        "illustration",
+        "artwork",
+    ),
+    prompt_instructions=IMAGE_GENERATION_PROMPT_INSTRUCTIONS,
 )
 
 
@@ -957,6 +1001,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
 
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     CODE_WORK_SYSTEM_SKILL.skill_key: CODE_WORK_SYSTEM_SKILL,
+    IMAGE_GENERATION_SYSTEM_SKILL.skill_key: IMAGE_GENERATION_SYSTEM_SKILL,
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,

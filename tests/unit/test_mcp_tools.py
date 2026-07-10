@@ -69,6 +69,7 @@ from api.agent.tools.search_tools import (
     search_tools,
 )
 from api.agent.system_skills.registry import SystemSkillDefinition
+from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from api.services.prompt_settings import invalidate_prompt_settings_cache
 from api.services.tool_settings import invalidate_tool_settings_cache
 from tests.utils.llm_seed import seed_persistent_basic
@@ -2000,6 +2001,7 @@ class MCPToolFunctionsTests(TestCase):
         self.assertIn("sqlite_batch", user_message)
         self.assertIn("http_request", user_message)
         self.assertNotIn("create_image", user_message)
+        self.assertNotIn(f"- {IMAGE_GENERATION_SYSTEM_SKILL_KEY}:", user_message)
         mock_search_apps.assert_not_called()
         mock_enable_tools.assert_not_called()
 
@@ -3576,7 +3578,7 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.search_tools.run_completion')
     @patch('api.agent.tools.search_tools.get_mcp_manager')
     @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
-    def test_search_tools_does_not_include_image_generation_system_skill_when_configured(
+    def test_search_tools_includes_image_generation_system_skill_when_configured(
         self,
         mock_get_config,
         mock_get_manager,
@@ -3604,24 +3606,25 @@ class MCPToolFunctionsTests(TestCase):
 
         self.assertEqual(result["status"], "success")
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
-        self.assertNotIn("Available system skills:", user_message)
-        self.assertNotIn("- image_generation:", user_message)
+        self.assertIn("Available system skills:", user_message)
+        self.assertIn(f"- {IMAGE_GENERATION_SYSTEM_SKILL_KEY}:", user_message)
         self.assertIn("create_image", user_message)
         system_message = mock_run_completion.call_args.kwargs["messages"][0]["content"]
-        self.assertNotIn("If the user asks to generate or design a NEW image asset", system_message)
+        self.assertIn("Treat system skills as capability bundles", system_message)
         mock_enable_tools.assert_not_called()
 
-    def test_enable_create_image_does_not_create_image_generation_system_skill(self):
+    def test_enable_create_image_enables_image_generation_system_skill(self):
         self._seed_create_image_tier()
 
         result = enable_tools(self.agent, ["create_image"])
 
         self.assertEqual(result["status"], "success")
         self.assertIn("create_image", result["enabled"])
-        self.assertFalse(PersistentAgentSystemSkillState.objects.filter(
+        state = PersistentAgentSystemSkillState.objects.get(
             agent=self.agent,
-            skill_key="image_generation",
-        ).exists())
+            skill_key=IMAGE_GENERATION_SYSTEM_SKILL_KEY,
+        )
+        self.assertTrue(state.is_enabled)
 
     @patch('api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent', return_value=False)
     @patch('api.agent.tools.search_tools.enable_tools')

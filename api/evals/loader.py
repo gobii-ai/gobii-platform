@@ -12,6 +12,7 @@ from api.evals.scenarios.google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENAR
 from api.evals.scenarios.apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG
 from api.evals.scenarios.recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG
 from api.evals.scenarios.hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG
+from api.evals.scenarios.image_generation import IMAGE_GENERATION_SCENARIO_SLUGS, IMAGE_GENERATION_SUITE_SLUG
 from api.evals.scenarios.meta_gobii import META_GOBII_REAL_HARNESS_SCENARIO_SLUGS, META_GOBII_REAL_HARNESS_SUITE_SLUG
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
@@ -103,6 +104,11 @@ register_builtin_suites(
             slug=HUBSPOT_NATIVE_SUITE_SLUG,
             description="Native HubSpot system-skill evals over mocked HubSpot REST APIs.",
             scenario_slugs=HUBSPOT_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=IMAGE_GENERATION_SUITE_SLUG,
+            description="Gobii image-generation skill behaviors over a mocked create_image tool.",
+            scenario_slugs=IMAGE_GENERATION_SCENARIO_SLUGS,
         ),
     ]
 )

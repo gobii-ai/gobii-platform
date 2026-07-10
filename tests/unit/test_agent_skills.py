@@ -20,7 +20,8 @@ from api.agent.system_skills.service import (
     enable_and_refresh_system_skills_for_tool,
     enable_system_skills,
 )
-from api.agent.system_skills.defaults import CODE_WORK_SYSTEM_SKILL_KEY, DEFAULT_SYSTEM_SKILL_DEFINITIONS
+from api.agent.system_skills.defaults import CODE_WORK_SYSTEM_SKILL_KEY, DEFAULT_SYSTEM_SKILL_DEFINITIONS, IMAGE_GENERATION_SYSTEM_SKILL
+from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tools.tool_manager import (
@@ -483,6 +484,36 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("$GOBII_REPO_WORKDIR", definition.prompt_instructions)
         self.assertIn("Do not clone repos directly under `/workspace`", definition.prompt_instructions)
         self.assertNotIn("search_tools", definition.prompt_instructions)
+
+    def test_image_generation_system_skill_is_registered_but_not_default_enabled(self):
+        self.assertIn(IMAGE_GENERATION_SYSTEM_SKILL_KEY, DEFAULT_SYSTEM_SKILL_DEFINITIONS)
+        self.assertNotIn(IMAGE_GENERATION_SYSTEM_SKILL_KEY, default_enabled_system_skill_keys())
+
+        definition = IMAGE_GENERATION_SYSTEM_SKILL
+        self.assertEqual(definition.tool_names, ("create_image",))
+        self.assertIn("source_images", definition.prompt_instructions)
+        self.assertIn("change only X; preserve Y unchanged", definition.prompt_instructions)
+        self.assertIn("one `create_image` call per distinct requested asset", definition.prompt_instructions)
+        self.assertIn("Do not use it for OCR", definition.prompt_instructions)
+        self.assertIn("do not claim that Gobii verified an alpha channel", definition.prompt_instructions)
+        self.assertIn("do not claim to have visually inspected", definition.prompt_instructions)
+        self.assertNotIn("OPENAI_API_KEY", definition.prompt_instructions)
+        self.assertNotIn("gpt-image", definition.prompt_instructions)
+        self.assertNotIn("remove_chroma_key", definition.prompt_instructions)
+
+    def test_prompt_block_renders_image_generation_system_skill(self):
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key=IMAGE_GENERATION_SYSTEM_SKILL_KEY,
+            is_enabled=True,
+            last_used_at=timezone.now(),
+        )
+
+        block = format_recent_skills_for_prompt(self.agent, limit=1)
+
+        self.assertIn("System Skill: Image Generation", block)
+        self.assertIn("Tools: create_image", block)
+        self.assertIn("Save each result to a descriptive path under `/exports/`", block)
 
     @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True)
     def test_enable_system_skill_accepts_available_create_custom_tool(self, _mock_sandbox):

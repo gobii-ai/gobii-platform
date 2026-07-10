@@ -45,11 +45,13 @@ from .meta_ads import get_meta_ads_tool, execute_meta_ads
 from .discord_channel_subscriptions import get_discord_channel_subscriptions_tool, execute_discord_channel_subscriptions
 from .send_discord_message import get_send_discord_message_tool, execute_send_discord_message
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
+from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from .meta_gobii import execute_meta_gobii_tool, get_meta_gobii_tool_definition, is_meta_gobii_available_for_agent
 from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
 from .static_tools import get_static_tool_names, planning_mode_disallows_tool
+
 logger = logging.getLogger(__name__)
 
 SQLITE_TOOL_NAME = "sqlite_batch"
@@ -206,6 +208,7 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_create_image_tool,
         "executor": execute_create_image,
         "is_available": is_image_generation_available_for_agent,
+        "system_skill_key": IMAGE_GENERATION_SYSTEM_SKILL_KEY,
     },
     CREATE_VIDEO_TOOL_NAME: {
         "definition": get_create_video_tool,
@@ -504,6 +507,7 @@ def _build_available_tool_index(
             tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
             tool_name=tool_name,
             server_config_id=None,
+            system_skill_key=str(metadata.get("system_skill_key") or ""),
         )
 
     return catalog
