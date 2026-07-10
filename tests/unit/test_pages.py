@@ -3699,6 +3699,21 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertIn("Solutions", soup.get_text(" ", strip=True))
         self.assertIn("Discover", soup.get_text(" ", strip=True))
         self.assertIn("Developers", soup.get_text(" ", strip=True))
+        self.assertEqual(
+            soup.find("h1").get_text(" ", strip=True),
+            "A steady stream of qualified candidates and sales leads",
+        )
+        self.assertIn(
+            "Your Gobii AI employee keeps searching, adapts to your feedback, and works inside the tools your team already uses.",
+            soup.get_text(" ", strip=True),
+        )
+        for retired_slug in ("health-care", "defense"):
+            self.assertIsNone(
+                soup.find(
+                    "a",
+                    {"href": reverse("pages:solution", kwargs={"slug": retired_slug})},
+                )
+            )
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_home_header_keeps_solution_and_developer_navigation_hidden_in_community_mode(self):
@@ -3732,6 +3747,11 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
 
         response = self.client.get("/solutions/operations/")
         self.assertEqual(response.status_code, 404)
+
+        for retired_path in ("/solutions/health-care/", "/solutions/defense/"):
+            with self.subTest(path=retired_path):
+                response = self.client.get(retired_path)
+                self.assertEqual(response.status_code, 404)
 
 
 @tag("batch_pages")

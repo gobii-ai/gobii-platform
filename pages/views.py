@@ -4334,8 +4334,6 @@ class SolutionView(TemplateView):
         'recruiting/candidate-sourcing': 'solutions/recruiting_candidate_sourcing.html',
         'sales': 'solutions/sales.html',
         'sales/ai-sales-agent': 'solutions/sales_ai_sales_agent.html',
-        'health-care': 'solutions/health-care.html',
-        'defense': 'solutions/defense.html',
         'engineering': 'solutions/engineering.html',
     }
 
@@ -4482,36 +4480,6 @@ class SolutionView(TemplateView):
                     ),
                 },
             ],
-        },
-        'health-care': {
-            'title': 'Health Care',
-            'tagline': 'Streamline patient intake and administrative tasks.',
-            'description': 'Secure, HIPAA-compliant automation for modern healthcare providers and payers.',
-            'seo_title': 'AI Healthcare Agents - Automate Admin & Patient Workflows | Gobii',
-            'seo_description': 'Open source AI agents designed to support HIPAA compliance. Self-host in your environment, fully audit the code, and automate patient intake, scheduling, and admin tasks.',
-            'social_image': 'images/solutions/healthcare-hero.jpg',
-            'social_image_alt': 'Gobii healthcare AI agents for patient intake and administrative workflows',
-            'related_link': {
-                'intro': 'Want a compliance workflow to inspect?',
-                'label': 'View the Compliance Sentinel AI agent',
-                'route': 'pages:pretrained_worker_detail',
-                'kwargs': {'slug': 'compliance-audit-sentinel'},
-            },
-        },
-        'defense': {
-            'title': 'Defense',
-            'tagline': 'Secure, on-premise AI intelligence.',
-            'description': 'Mission-critical automation for national security with strict data governance.',
-            'seo_title': 'AI Agents for Defense - Open Source, Airgapped, Fully Auditable | Gobii',
-            'seo_description': 'Open source AI agents designed for defense environments. Self-host in airgapped networks, audit every line of code, and deploy through trusted integration partners.',
-            'social_image': 'images/solutions/defense-hero.jpg',
-            'social_image_alt': 'Gobii open source AI agents for secure defense environments',
-            'related_link': {
-                'intro': 'Want a risk monitoring workflow to inspect?',
-                'label': 'View the Public Safety Scout AI agent',
-                'route': 'pages:pretrained_worker_detail',
-                'kwargs': {'slug': 'public-safety-scout'},
-            },
         },
         'engineering': {
             'title': 'Engineering',
@@ -4679,6 +4647,4 @@ class SolutionView(TemplateView):
                 default=False,
             ),
         })
-        if slug in {"health-care", "defense"}:
-            context["marketing_contact_form"] = MarketingContactForm()
         return context
