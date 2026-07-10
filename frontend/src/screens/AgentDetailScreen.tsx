@@ -45,6 +45,7 @@ import type {
   AgentInboundWebhook,
   AgentOrganization,
   AgentSettingsData,
+  MiniDescriptionMode,
   AgentSettingsReassignmentInfo as ReassignmentInfo,
   AgentSummary,
   AgentWebhook,
@@ -125,6 +126,8 @@ export type AgentSettingsWorkspaceProps = {
 type FormState = {
   name: string
   charter: string
+  miniDescription: string
+  miniDescriptionMode: MiniDescriptionMode
   isActive: boolean
   dailyCreditInput: string
   sliderValue: number
@@ -408,6 +411,8 @@ export function AgentSettingsWorkspace({
     () => ({
       name: initialData.agent.name,
       charter: initialData.agent.charter,
+      miniDescription: initialData.agent.miniDescription,
+      miniDescriptionMode: initialData.agent.miniDescriptionMode,
       isActive: initialData.agent.isActive,
       dailyCreditInput:
         typeof initialData.dailyCredits.limit === 'number' && Number.isFinite(initialData.dailyCredits.limit)
@@ -420,6 +425,8 @@ export function AgentSettingsWorkspace({
     [
       initialData.agent.name,
       initialData.agent.charter,
+      initialData.agent.miniDescription,
+      initialData.agent.miniDescriptionMode,
       initialData.agent.isActive,
       initialData.agent.preferredLlmTier,
       initialData.dailyCredits.limit,
@@ -528,6 +535,8 @@ export function AgentSettingsWorkspace({
     return (
       formState.name !== savedFormState.name ||
       formState.charter !== savedFormState.charter ||
+      formState.miniDescription !== savedFormState.miniDescription ||
+      formState.miniDescriptionMode !== savedFormState.miniDescriptionMode ||
       formState.isActive !== savedFormState.isActive ||
       formState.dailyCreditInput !== savedFormState.dailyCreditInput ||
       formState.sliderValue !== savedFormState.sliderValue ||
@@ -1161,6 +1170,12 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
           typeof data?.preferredLlmTier === 'string' && data.preferredLlmTier.trim() ? String(data.preferredLlmTier) : null
 
         const nextFormState: FormState = { ...formState }
+        if (typeof data?.miniDescription === 'string') {
+          nextFormState.miniDescription = data.miniDescription
+        }
+        if (data?.miniDescriptionMode === 'auto' || data?.miniDescriptionMode === 'manual') {
+          nextFormState.miniDescriptionMode = data.miniDescriptionMode
+        }
         if (serverTierRaw && (initialData.llmIntelligence?.options ?? []).some((option) => option.key === serverTierRaw)) {
           const serverTier = serverTierRaw as IntelligenceTierKey
           if (serverTier !== nextFormState.preferredTier) {
@@ -2025,6 +2040,73 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                   placeholder="Describe what you want your agent to do..."
                 />
                 <p className="mt-2 text-xs text-gray-500">Share goals, responsibilities, and key guardrails for this agent.</p>
+              </div>
+
+              <div className="sm:col-span-3">
+                <label htmlFor="agent-mini-description" className="inline-block text-sm font-medium text-gray-800 mt-2.5">
+                  Mini Description
+                </label>
+                <CircleHelp className="ms-1 inline-block size-3 text-gray-400" aria-hidden="true" />
+              </div>
+              <div className="sm:col-span-9 space-y-3">
+                <input
+                  type="hidden"
+                  name="mini_description_mode"
+                  value={formState.miniDescriptionMode}
+                />
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">Generate automatically</p>
+                    <p className="text-xs text-gray-500">Update this label when the assignment changes.</p>
+                  </div>
+                  <AriaSwitch
+                    aria-label="Generate mini description automatically"
+                    isSelected={formState.miniDescriptionMode === 'auto'}
+                    onChange={(isSelected) => setFormState((prev) => ({
+                      ...prev,
+                      miniDescriptionMode: isSelected ? 'auto' : 'manual',
+                    }))}
+                    className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center focus:outline-none"
+                  >
+                    {({ isSelected, isFocusVisible }) => (
+                      <>
+                        <span
+                          aria-hidden="true"
+                          className={`h-6 w-11 rounded-full transition ${isSelected ? 'bg-blue-600' : 'bg-violet-200'}`}
+                        />
+                        <span
+                          aria-hidden="true"
+                          className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                            isSelected ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                        {isFocusVisible && <span className="absolute -inset-1 rounded-full ring-2 ring-blue-300" aria-hidden="true" />}
+                      </>
+                    )}
+                  </AriaSwitch>
+                </div>
+                <input
+                  id="agent-mini-description"
+                  name="mini_description"
+                  type="text"
+                  maxLength={80}
+                  disabled={formState.miniDescriptionMode === 'auto'}
+                  required={formState.miniDescriptionMode === 'manual'}
+                  value={formState.miniDescription}
+                  onChange={(event) => setFormState((prev) => ({ ...prev, miniDescription: event.target.value }))}
+                  className="py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  placeholder="e.g. Executive Talent Researcher"
+                />
+                <div className="flex items-center justify-between gap-4 text-xs text-gray-500">
+                  <span>
+                    {formState.miniDescriptionMode === 'auto'
+                      ? 'The current label remains visible until automatic generation replaces it.'
+                      : 'Enter the compact label shown beneath the agent name.'}
+                  </span>
+                  {formState.miniDescriptionMode === 'manual' ? (
+                    <span className="shrink-0 tabular-nums">{formState.miniDescription.length}/80</span>
+                  ) : null}
+                </div>
               </div>
 
               <div className="sm:col-span-3">

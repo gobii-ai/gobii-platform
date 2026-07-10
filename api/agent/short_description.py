@@ -169,6 +169,9 @@ def maybe_schedule_mini_description(
     if is_eval_agent(agent):
         return False
 
+    if agent.mini_description_mode == PersistentAgent.MiniDescriptionMode.MANUAL:
+        return False
+
     charter = (agent.charter or "").strip()
     if not charter:
         return False

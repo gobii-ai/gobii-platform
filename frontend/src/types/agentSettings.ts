@@ -14,11 +14,15 @@ export type AgentOrganization = {
   name: string
 } | null
 
+export type MiniDescriptionMode = 'auto' | 'manual'
+
 export type AgentSummary = {
   id: string
   name: string
   avatarUrl: string | null
   charter: string
+  miniDescription: string
+  miniDescriptionMode: MiniDescriptionMode
   isActive: boolean
   createdAtDisplay: string
   pendingTransfer: PendingTransfer | null

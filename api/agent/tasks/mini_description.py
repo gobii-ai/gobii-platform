@@ -96,6 +96,10 @@ def generate_agent_mini_description_task(
         _clear_requested_hash(agent.id, charter_hash)
         logger.debug("Skipping mini description generation for eval agent %s", agent.id)
         return
+    if agent.mini_description_mode == PersistentAgent.MiniDescriptionMode.MANUAL:
+        _clear_requested_hash(agent.id, charter_hash)
+        logger.debug("Skipping mini description generation for manually labeled agent %s", agent.id)
+        return
 
     # Look up routing profile if provided
     routing_profile = None
@@ -131,11 +135,18 @@ def generate_agent_mini_description_task(
     if not prepared:
         prepared = prepare_mini_description(charter)
 
-    PersistentAgent.objects.filter(id=agent.id).update(
+    updated = PersistentAgent.objects.filter(
+        id=agent.id,
+        mini_description_mode=PersistentAgent.MiniDescriptionMode.AUTO,
+    ).update(
         mini_description=prepared,
         mini_description_charter_hash=current_hash,
         mini_description_requested_hash="",
     )
+    if not updated:
+        _clear_requested_hash(agent.id, charter_hash)
+        logger.debug("Discarded generated mini description after agent %s switched to manual mode", agent.id)
+        return
     try:
         from console.agent_chat.signals import emit_agent_profile_update
     except ImportError:

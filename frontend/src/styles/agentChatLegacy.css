@@ -5891,6 +5891,20 @@
     --roster-state-color: #f97316;
     --roster-state-size: 0.7rem;
 }
+.agent-roster-item[data-variant='sidebar'] {
+    gap: 0;
+}
+.agent-roster-item[data-variant='sidebar'][data-collapsed='false'] .agent-roster-item__leading {
+    margin-right: 0.5rem;
+}
+.agent-roster-item[data-variant='sidebar'] .agent-roster-item__trailing {
+    width: 0;
+    margin-left: 0;
+}
+.agent-roster-item[data-variant='sidebar']:is(:hover, :focus-within) .agent-roster-item__trailing {
+    width: var(--roster-favorite-size);
+    margin-left: 0.125rem;
+}
 .agent-roster-item:is(:hover, :active) {
     background: var(--roster-hover-bg);
 }
@@ -6034,6 +6048,15 @@
 .agent-roster-item__favorite[data-active='true'] {
     color: var(--roster-favorite-active-color);
     background: var(--roster-favorite-active-bg);
+}
+.agent-roster-item[data-variant='sidebar'] .agent-roster-item__favorite[data-active] {
+    opacity: 0;
+    pointer-events: none;
+}
+.agent-roster-item[data-variant='sidebar']:hover .agent-roster-item__favorite[data-active],
+.agent-roster-item[data-variant='sidebar']:focus-within .agent-roster-item__favorite[data-active] {
+    opacity: 1;
+    pointer-events: auto;
 }
 .agent-roster-item__favorite[data-active='false'] {
     opacity: 0;
