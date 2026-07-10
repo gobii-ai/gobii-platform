@@ -321,9 +321,6 @@ class MCPToolManager:
     PIPEDREAM_RUNTIME_NAME = "pipedream"
     PIPEDREAM_COMPONENT_OPTION_TOOLS = {"retrieve_options", "configure_component"}
 
-    # Default tools still backed by MCP. Native defaults live in tool_manager.
-    DEFAULT_ENABLED_TOOLS = []
-    
     # Blacklisted tool patterns (glob-style patterns)
     # Tools matching these patterns will be excluded from discovery and execution
     TOOL_BLACKLIST = [

@@ -120,10 +120,6 @@ def _response_error(response: Response) -> dict[str, Any]:
 
 
 def _post_brightdata(payload: dict[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
-    config_error = _configuration_error()
-    if config_error:
-        return None, config_error
-
     try:
         response = requests.post(
             BRIGHTDATA_API_URL,

@@ -1174,12 +1174,6 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(runtime.oauth_access_token, "valid-token")
         self.assertEqual(runtime.oauth_token_type, "Bearer")
         
-    def test_default_enabled_tools_defined(self):
-        """MCP defaults exclude tools that moved to the native registry."""
-        self.assertNotIn("mcp_brightdata_scrape_as_markdown", MCPToolManager.DEFAULT_ENABLED_TOOLS)
-        self.assertNotIn("mcp_brightdata_search_engine", MCPToolManager.DEFAULT_ENABLED_TOOLS)
-        self.assertIsInstance(MCPToolManager.DEFAULT_ENABLED_TOOLS, list)
-        
     @patch('api.agent.tools.mcp_manager.asyncio.get_running_loop')
     def test_ensure_event_loop_reuses_existing(self, mock_get_loop):
         """Test that existing event loop is reused."""

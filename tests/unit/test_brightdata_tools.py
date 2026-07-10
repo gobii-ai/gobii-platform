@@ -22,6 +22,7 @@ from api.agent.tools.tool_manager import (
     ensure_default_tools_enabled,
     execute_enabled_tool,
     get_available_builtin_tool_entries,
+    is_parallel_safe_tool_name,
 )
 from api.models import (
     BrowserUseAgent,
@@ -330,12 +331,16 @@ class BrightDataToolManagerTests(TestCase):
         self.assertEqual(entries[BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME].provider, "builtin")
         self.assertEqual(entries[BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME].provider, "builtin")
 
-    @patch("api.agent.tools.tool_manager._get_manager")
-    def test_native_tools_are_default_enabled(self, mock_get_manager):
-        mock_get_manager.return_value = MagicMock()
+    def test_only_native_brightdata_tools_are_parallel_safe(self):
+        self.assertTrue(is_parallel_safe_tool_name(BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME))
+        self.assertTrue(is_parallel_safe_tool_name(BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME))
+        self.assertFalse(is_parallel_safe_tool_name("mcp_brightdata_search_engine_batch"))
 
+    @patch("api.agent.tools.tool_manager._get_manager")
+    def test_native_tools_are_default_enabled_without_mcp_discovery(self, mock_get_manager):
         ensure_default_tools_enabled(self.agent)
 
+        mock_get_manager.assert_not_called()
         rows = {
             row.tool_full_name: row
             for row in PersistentAgentEnabledTool.objects.filter(

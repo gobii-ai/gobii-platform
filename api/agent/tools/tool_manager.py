@@ -193,10 +193,12 @@ BUILTIN_TOOL_REGISTRY = {
     BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME: {
         "definition": get_brightdata_search_engine_tool,
         "executor": execute_brightdata_search_engine,
+        "parallel_safe": True,
     },
     BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME: {
         "definition": get_brightdata_scrape_as_markdown_tool,
         "executor": execute_brightdata_scrape_as_markdown,
+        "parallel_safe": True,
     },
     READ_FILE_TOOL_NAME: {
         "definition": get_read_file_tool,
@@ -1043,40 +1045,14 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
 
 def ensure_default_tools_enabled(
     agent: PersistentAgent,
-    *,
-    allowed_server_names: Optional[Iterable[str]] = None,
 ) -> None:
     """Ensure the default tool set is enabled for new agents."""
-    manager = _get_manager()
-
     enabled_tools = set(
         PersistentAgentEnabledTool.objects.filter(agent=agent).values_list("tool_full_name", flat=True)
     )
-    default_tools = set(MCPToolManager.DEFAULT_ENABLED_TOOLS)
-    missing_mcp = default_tools - enabled_tools
     missing_builtin = DEFAULT_BUILTIN_TOOLS - enabled_tools
-    if not missing_mcp and not missing_builtin:
+    if not missing_builtin:
         return
-
-    available = set()
-    if missing_mcp:
-        available = {
-            tool.full_name
-            for tool in manager.get_tools_for_agent(agent, allowed_server_names=allowed_server_names)
-        }
-
-    for tool_name in missing_mcp:
-        if is_tool_blacklisted_for_agent(agent, tool_name):
-            logger.warning("Default tool '%s' is tier-blacklisted, skipping", tool_name)
-            continue
-        if manager.is_tool_blacklisted(tool_name):
-            logger.warning("Default tool '%s' is blacklisted, skipping", tool_name)
-            continue
-        if tool_name not in available:
-            logger.warning("Default tool '%s' not found in available tools", tool_name)
-            continue
-        enable_mcp_tool(agent, tool_name)
-        logger.info("Enabled default tool '%s' for agent %s", tool_name, agent.id)
 
     for tool_name in missing_builtin:
         if is_tool_blacklisted_for_agent(agent, tool_name):
@@ -1563,8 +1539,6 @@ def execute_enabled_tool(
 
 def is_parallel_safe_tool_name(tool_name: str) -> bool:
     """Return whether the tool name is on the explicit parallel-safe allowlist."""
-    if isinstance(tool_name, str) and tool_name.startswith("mcp_brightdata_"):
-        return False
     entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
     return bool(entry and entry.get("parallel_safe"))
 
