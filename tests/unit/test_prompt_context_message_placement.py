@@ -40,5 +40,6 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertNotIn(sqlite_examples, user_message["content"])
         all_contents = "\n".join(message["content"] for message in context)
         self.assertEqual(all_contents.count(sqlite_examples), 1)
-        self.assertIn("<sqlite_examples>", system_message["content"])
-        self.assertIn("</sqlite_examples>", system_message["content"])
+        self.assertIn("<sqlite_contract>", system_message["content"])
+        self.assertIn("## SQLite contract", system_message["content"])
+        self.assertIn("</sqlite_contract>", system_message["content"])

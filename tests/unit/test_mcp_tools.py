@@ -3643,6 +3643,8 @@ class MCPToolFunctionsTests(TestCase):
                 agent=self.agent,
                 skill_key=IMAGE_GENERATION_SYSTEM_SKILL_KEY,
                 is_enabled=True,
+                last_used_at__isnull=True,
+                usage_count=0,
             ).exists()
         )
 
@@ -3665,6 +3667,8 @@ class MCPToolFunctionsTests(TestCase):
 
         self.assertIn("create_image", self._tool_def_names(definitions))
         self.assertFalse(state.is_enabled)
+        self.assertIsNone(state.last_used_at)
+        self.assertEqual(state.usage_count, 0)
 
     @patch('api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent', return_value=False)
     @patch('api.agent.tools.search_tools.enable_tools')

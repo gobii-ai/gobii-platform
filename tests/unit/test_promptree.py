@@ -239,6 +239,38 @@ class PromptTokenCountingTests(TestCase):
         self.assertLessEqual(abs(tokens_before - tokens_after), 1)
         self.assertLess(tokens_after, budget)
 
+    def test_nested_group_structure_is_reserved_from_leaf_budget(self):
+        prompt = Prompt(token_estimator=len)
+        group = prompt.group("group")
+        wrapper_length = len("<leaf></leaf>")
+
+        def exact_prefix(text: str, ratio: float) -> str:
+            content_length = max(0, int(len(text) * ratio) - wrapper_length)
+            return text[:content_length]
+
+        group.section_text("leaf", "a" * 100, shrinker=exact_prefix)
+        group.section_text("leaf", "b" * 100, shrinker=exact_prefix)
+
+        budget = 70
+        result = prompt.render(budget)
+
+        self.assertEqual(len(result), budget)
+        self.assertEqual(prompt.get_tokens_after_fitting(), budget)
+        self.assertIn("<group>", result)
+        self.assertEqual(result.count("<leaf>"), 2)
+
+    def test_protected_minimum_includes_nested_group_structure(self):
+        prompt = Prompt(token_estimator=len)
+        group = prompt.group("group")
+        group.section_text("fixed", "x", non_shrinkable=True)
+        required = len("<group><fixed>x</fixed></group>")
+
+        with self.assertRaises(PromptBudgetExceededError) as raised:
+            prompt.render(required - 1)
+
+        self.assertEqual(raised.exception.budget, required - 1)
+        self.assertEqual(raised.exception.required, required)
+
 
 @tag("batch_promptree")
 class PromptRenderingTests(TestCase):
@@ -335,6 +367,18 @@ class PromptUnshrinkableTests(TestCase):
         exact_fixed_budget = len("<fixed>x</fixed>")
 
         self.assertEqual(prompt.render(exact_fixed_budget), "<fixed>x</fixed>")
+
+    def test_protected_leaf_survives_when_structure_uses_conservative_budget(self):
+        prompt = Prompt(token_estimator=lambda text: len(text.split()))
+        group = prompt.group("group")
+        group.section_text("fixed", "fixed", non_shrinkable=True)
+        group.section_text("optional", "one two")
+
+        result = prompt.render(2)
+
+        self.assertIn("<fixed>fixed</fixed>", result)
+        self.assertNotIn("one two", result)
+        self.assertEqual(prompt.get_tokens_after_fitting(), 2)
 
     def test_shrinker_cannot_return_output_above_budget(self):
         prompt = Prompt(token_estimator=len)

@@ -704,14 +704,13 @@ def _ensure_system_skill_enabled(
         return None
 
     used_at = datetime.now(UTC)
+    defaults = {"is_enabled": True}
+    if reactivate:
+        defaults.update(last_used_at=used_at, usage_count=1)
     state, created = PersistentAgentSystemSkillState.objects.get_or_create(
         agent=agent,
         skill_key=definition.skill_key,
-        defaults={
-            "is_enabled": True,
-            "last_used_at": used_at,
-            "usage_count": 1,
-        },
+        defaults=defaults,
     )
     if not created and reactivate:
         PersistentAgentSystemSkillState.objects.filter(id=state.id).update(

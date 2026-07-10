@@ -147,6 +147,38 @@ class TestEventProcessingLLMSelection(TestCase):
         self.assertNotIn("tool_choice", mock_run_completion.call_args.kwargs["params"])
 
     @patch('api.agent.core.event_processing.run_completion')
+    def test_streamed_required_tool_omission_retries_without_broadcasting_content(self, mock_run_completion):
+        stream_chunks = iter([
+            {"choices": [{"delta": {"content": "Invalid visible answer"}}]},
+            {"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+        ])
+        valid_response = make_completion_response(content="")
+        valid_response.choices[0].message.tool_calls = [{
+            "function": {"name": "sqlite_batch", "arguments": "{}"},
+        }]
+        mock_run_completion.side_effect = [stream_chunks, valid_response]
+        broadcaster = Mock()
+        tools = [{
+            "type": "function",
+            "function": {"name": "sqlite_batch", "parameters": {"type": "object"}},
+        }]
+
+        response, _ = _completion_with_failover(
+            [{"role": "user", "content": "continue the saved batch"}],
+            tools,
+            failover_configs=[("openai", "openai/gpt-4.1", {"supports_tool_choice": True})],
+            stream_broadcaster=broadcaster,
+            required_tool_name="sqlite_batch",
+        )
+
+        self.assertIs(response, valid_response)
+        self.assertEqual(mock_run_completion.call_count, 2)
+        self.assertTrue(mock_run_completion.call_args_list[0].kwargs["stream"])
+        self.assertNotIn("stream", mock_run_completion.call_args_list[1].kwargs)
+        for call in broadcaster.push_delta.call_args_list:
+            self.assertNotIn("Invalid visible answer", call.args)
+
+    @patch('api.agent.core.event_processing.run_completion')
     def test_completion_with_failover_suppresses_streamed_content_when_selected_model_disables_implied_send(self, mock_run_completion):
         stream_chunks = iter([
             {

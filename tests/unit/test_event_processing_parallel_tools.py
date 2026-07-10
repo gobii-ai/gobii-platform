@@ -33,6 +33,16 @@ def _tool_call(name: str, arguments: str) -> dict:
     }
 
 
+def _tool_definition(name: str) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
 def _completion_response(tool_calls: list[dict]) -> tuple[SimpleNamespace, dict]:
     message = SimpleNamespace(tool_calls=tool_calls, content=None)
     response = SimpleNamespace(
@@ -91,7 +101,11 @@ class TestParallelToolCallsExecution(TestCase):
     def _run_single_iteration(self, tool_calls: list[dict]):
         from api.agent.core import event_processing as ep
 
-        with patch("api.agent.core.event_processing.build_prompt_context") as mock_build_prompt, patch(
+        advertised_tool_names = dict.fromkeys(call["function"]["name"] for call in tool_calls)
+        with patch(
+            "api.agent.core.event_processing.get_agent_tools",
+            return_value=[_tool_definition(name) for name in advertised_tool_names],
+        ), patch("api.agent.core.event_processing.build_prompt_context") as mock_build_prompt, patch(
             "api.agent.core.event_processing._completion_with_failover"
         ) as mock_completion:
             mock_build_prompt.return_value = (

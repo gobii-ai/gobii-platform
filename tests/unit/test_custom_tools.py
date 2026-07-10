@@ -197,7 +197,7 @@ class CustomToolsTests(TestCase):
         for text in (
             "`source_path`",
             "source_code",
-            "fix validation errors and retry",
+            "Fix validation errors and retry",
             "Saves/enables `custom_*`",
         ):
             self.assertIn(text, create_tool_description)

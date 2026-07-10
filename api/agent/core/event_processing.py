@@ -57,7 +57,7 @@ from .processing_flags import (
     remove_pending_agent,
     set_processing_heartbeat,
 )
-from .llm_utils import EmptyLiteLLMResponseError, raise_if_empty_litellm_response, raise_if_invalid_litellm_response, run_completion
+from .llm_utils import EmptyLiteLLMResponseError, raise_if_empty_litellm_response, raise_if_forced_tool_response_invalid, raise_if_invalid_litellm_response, run_completion
 from .multimodal_context import collect_fresh_read_file_image_attachments, prepare_multimodal_read_file_request
 from .llm_streaming import StreamAccumulator
 from .token_usage import completion_kwargs_from_usage, extract_reasoning_content, extract_token_usage, set_usage_span_attributes
@@ -4251,6 +4251,13 @@ def _stream_completion_with_broadcast(
     response.time_to_first_token_ms = time_to_first_token_ms
     raise_if_empty_litellm_response(response, model=model, provider=provider)
     raise_if_invalid_litellm_response(response, model=model, provider=provider)
+    raise_if_forced_tool_response_invalid(
+        response,
+        tools=tools or [],
+        tool_choice=params.get("tool_choice"),
+        model=model,
+        provider=provider,
+    )
     return response
 
 
@@ -4430,7 +4437,7 @@ def _completion_with_failover(
                 if active_stream_broadcaster:
                     stream_content = allow_streamed_content and bool(
                         params_base.get("allow_implied_send", True)
-                    )
+                    ) and not required_tool_name
                     try:
                         response = _stream_completion_with_broadcast(
                             model=model,

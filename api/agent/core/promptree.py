@@ -186,24 +186,65 @@ class Prompt:
         self._render(self.root, ctx)
         leaves = self._flat(self.root)
 
-        # Pre‑compute overhead (wrapper tag) & total tokens
-        for n in leaves:
-            overhead = self._tok(f"<{n.name}></{n.name}>")
-            n._overhead_tokens = overhead  # type: ignore[attr-defined]
-            n._length = n.tokens + overhead  # type: ignore[attr-defined]
+        def _assemble(
+            node: _Node,
+            render_leaf: Callable[[_Node], str],
+        ) -> str:
+            if node.children:
+                inner = "\n".join(_assemble(child, render_leaf) for child in node.children)
+                if node.name == "root":
+                    return inner
+                return f"<{node.name}>{inner}</{node.name}>"
+            return render_leaf(node)
 
-        self._tokens_before_fitting = sum(n._length for n in leaves)  # type: ignore[attr-defined]
+        def _wrapped(node: _Node) -> str:
+            return f"<{node.name}>{node.text}</{node.name}>"
+
+        full_output = _assemble(self.root, _wrapped)
+        self._tokens_before_fitting = self._tok(full_output)
+
+        if self._tokens_before_fitting <= max_tokens:
+            for node in leaves:
+                node.text = _wrapped(node)
+                node.tokens = self._tok(node.text)
+                node.shrunk = False
+            self._tokens_after_fitting = self._tokens_before_fitting
+            self._last = leaves
+            return full_output
+
+        # Empty shrinkable leaves are the smallest legal rendering. Measure
+        # that assembled form exactly so protected content fails closed without
+        # double-counting token boundaries between tags and content.
+        minimum_output = _assemble(
+            self.root,
+            lambda node: _wrapped(node) if node.non_shrinkable else "",
+        )
+        minimum_tokens = self._tok(minimum_output)
+        if minimum_tokens > max_tokens:
+            raise PromptBudgetExceededError(
+                budget=max_tokens,
+                required=minimum_tokens,
+            )
+
+        # The allocator works on leaves, so reserve the tags and separators
+        # introduced only when the tree is assembled. Leaf budgets continue to
+        # include their own wrapper tags.
+        structure_tokens = self._tok(_assemble(self.root, lambda _node: ""))
+        leaf_budget = max(0, max_tokens - structure_tokens)
+
+        # Tokenize each wrapped leaf directly. Token estimators are not
+        # necessarily additive across a tag/content boundary.
+        for n in leaves:
+            n._length = self._tok(_wrapped(n))  # type: ignore[attr-defined]
 
         # Pass 2: global allocation
-        budgets = self._allocate(leaves, max_tokens)
+        budgets = self._allocate(leaves, leaf_budget)
 
         # Pass 3: shrink individual leaves as needed
         for n, budget in zip(leaves, budgets):
-            overhead = n._overhead_tokens  # type: ignore[attr-defined]
-
-            if n.tokens + overhead <= budget:
+            if n._length <= budget:  # type: ignore[attr-defined]
                 # Fits unshrunk: just wrap
-                n.text = f"<{n.name}>{n.text}</{n.name}>"
+                n.text = _wrapped(n)
                 n.tokens = self._tok(n.text)
                 n.shrunk = False
             else:
@@ -219,16 +260,7 @@ class Prompt:
         self._tokens_after_fitting = sum(n.tokens for n in leaves)
         self._last = leaves
 
-        # Assemble nested output with group tags
-        def _assemble(node: _Node) -> str:
-            if node.children:
-                inner = "\n".join(_assemble(c) for c in node.children)
-                if node.name == "root":
-                    return inner  # Skip wrapping the synthetic root
-                return f"<{node.name}>" + inner + f"</{node.name}>"
-            return node.text
-
-        output = _assemble(self.root)
+        output = _assemble(self.root, lambda node: node.text)
         self._tokens_after_fitting = self._tok(output)
         if self._tokens_after_fitting > max_tokens:
             raise PromptBudgetExceededError(
@@ -289,23 +321,22 @@ class Prompt:
         Each leaf i with weight w_i and length L_i gets r_i = min(L_i, μ·w_i).
         μ is chosen so Σ r_i = budget.
         """
-        if budget <= 0 or not leaves:
-            return [0] * len(leaves)
+        if not leaves:
+            return []
+        budget = max(0, budget)
 
         weights = [max(1, leaf.weight) for leaf in leaves]
         lengths = [leaf._length for leaf in leaves]  # type: ignore[attr-defined]
 
-        # Pre-allocate full length for non-shrinkable leaves
+        # Pre-allocate full length for non-shrinkable leaves. render() already
+        # validated their exact assembled minimum. Separate token counts can be
+        # conservatively larger at tag boundaries, so optional leaves simply
+        # receive no budget when that conservative accounting exhausts it.
         fixed_indices = [i for i, leaf in enumerate(leaves) if leaf.non_shrinkable]
         if fixed_indices:
             fixed_lengths = {i: lengths[i] for i in fixed_indices}
             fixed_total = sum(fixed_lengths.values())
-            if fixed_total > budget:
-                raise PromptBudgetExceededError(
-                    budget=budget,
-                    required=fixed_total,
-                )
-            budget -= fixed_total  # Remaining budget for shrinkable leaves
+            budget = max(0, budget - fixed_total)
             for i in fixed_indices:
                 weights[i] = 0
                 lengths[i] = 0

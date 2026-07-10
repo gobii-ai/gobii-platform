@@ -70,4 +70,7 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
             self.assertIn("request_human_input", policy["stop_on_tool_names"])
             self.assertIn("secure_credentials_request", policy["stop_on_tool_names"])
             self.assertIn("spawn_web_task", policy["stop_on_tool_names"])
-            self.assertEqual(policy["stop_when_all_seen"], [{"tool_name": "search_tools"}])
+            self.assertEqual(
+                policy["stop_when_all_seen"],
+                [{"tool_name": "search_tools", "after_execution": True}],
+            )

@@ -1,5 +1,5 @@
 {
-  "baseline_sha": "4de5510d080d7f2c001a52b622d9c89222d0f781",
+  "baseline_sha": "ca0e898df81fe2449cbbb8891983f9d667dda8ab",
   "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
   "prompt_size": {
     "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
@@ -258,7 +258,7 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 248021,
+    "limit": 248076,
     "limit_policy": "Advance the absolute limit only for approved upstream growth; branch changes use remaining headroom."
   }
 }

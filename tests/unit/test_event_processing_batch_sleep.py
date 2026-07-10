@@ -20,6 +20,27 @@ from api.models import (
 from api.agent.tools.tool_manager import enable_tools
 
 
+def _tool_definition(name: str) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
+_ADVERTISED_TOOL_NAMES = (
+    "send_email",
+    "update_charter",
+    "sqlite_batch",
+    "sleep_until_next_trigger",
+    "spawn_web_task",
+    "update_plan",
+    "send_chat_message",
+)
+
+
 @tag("batch_event_parallel")
 class TestBatchToolCallsWithSleep(TestCase):
     @classmethod
@@ -41,6 +62,12 @@ class TestBatchToolCallsWithSleep(TestCase):
             browser_use_agent=browser_agent,
         )
         enable_tools(self.agent, ["sqlite_batch"])
+        tools_patcher = patch(
+            "api.agent.core.event_processing.get_agent_tools",
+            return_value=[_tool_definition(name) for name in _ADVERTISED_TOOL_NAMES],
+        )
+        tools_patcher.start()
+        self.addCleanup(tools_patcher.stop)
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"})

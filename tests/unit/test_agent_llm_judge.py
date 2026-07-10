@@ -26,6 +26,7 @@ from api.agent.core.agent_judge import (
     run_reported_agent_judge,
 )
 from api.agent.core.llm_config import get_agent_llm_tier
+from api.agent.core.promptree import PromptBudgetExceededError
 from api.services.prompt_settings import invalidate_prompt_settings_cache
 from api.models import (
     BrowserUseAgent,
@@ -562,7 +563,7 @@ class AgentJudgeTests(TestCase):
     def test_judge_prompt_uses_promptree_rendered_user_content(self):
         trigger = build_manual_judge_trigger(self.agent, tools=[])
         limits = JudgePromptLimits(
-            prompt_token_budget=500,
+            prompt_token_budget=520,
             message_history_limit=2,
             tool_call_history_limit=2,
             skill_prompt_limit=1,
@@ -578,11 +579,12 @@ class AgentJudgeTests(TestCase):
         self.assertIn("<high_priority>", user_content)
         self.assertIn("<subject_agent>", user_content)
         self.assertFalse(user_content.strip().startswith("{"))
+        self.assertLessEqual(len(user_content.split()), limits.prompt_token_budget)
 
     def test_judge_prompt_distinguishes_judge_from_subject_agent(self):
         trigger = build_manual_judge_trigger(self.agent, tools=[])
         limits = JudgePromptLimits(
-            prompt_token_budget=500,
+            prompt_token_budget=520,
             message_history_limit=2,
             tool_call_history_limit=2,
             skill_prompt_limit=1,
@@ -599,6 +601,30 @@ class AgentJudgeTests(TestCase):
         self.assertIn("<subject_agent>", user_content)
         self.assertIn("The reviewed entity is the subject_agent", user_content)
         self.assertNotIn("<agent>", user_content)
+        self.assertLessEqual(len(user_content.split()), limits.prompt_token_budget)
+
+    def test_judge_prompt_rejects_budget_below_protected_minimum(self):
+        trigger = build_manual_judge_trigger(self.agent, tools=[])
+        limits = JudgePromptLimits(
+            prompt_token_budget=500,
+            message_history_limit=2,
+            tool_call_history_limit=2,
+            skill_prompt_limit=1,
+            enabled_tool_limit=1,
+        )
+
+        with patch(
+            "api.agent.core.agent_judge._create_token_estimator",
+            return_value=lambda text: len(text.split()),
+        ), self.assertRaises(PromptBudgetExceededError) as raised:
+            _build_judge_messages(
+                trigger.trajectory,
+                model="test-model",
+                prompt_limits=limits,
+            )
+
+        self.assertEqual(raised.exception.budget, 500)
+        self.assertEqual(raised.exception.required, 512)
 
     def test_judge_prompt_shrinks_large_tool_result_under_budget(self):
         trajectory = {

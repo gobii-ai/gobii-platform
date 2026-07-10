@@ -282,7 +282,7 @@ class ImageGenerationScenario(EvalScenario, ScenarioExecutionTools):
     area = "system_skills"
     tags = ("image_generation", "system_skill", "real_harness", "micro")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_tool_calls", assertion_type="tool_call"),
         ScenarioTask(name="verify_prompt_contract", assertion_type="exact_match"),
         ScenarioTask(name="verify_response", assertion_type="exact_match"),
