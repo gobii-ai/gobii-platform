@@ -154,6 +154,36 @@ class AgentShortDescriptionTests(TestCase):
         agent.refresh_from_db()
         self.assertEqual(agent.mini_description_requested_hash, "")
 
+    def test_maybe_schedule_mini_description_skips_manual_mode(self) -> None:
+        agent = self._create_agent()
+        agent.mini_description = "Operations Partner"
+        agent.mini_description_mode = PersistentAgent.MiniDescriptionMode.MANUAL
+        agent.save(update_fields=["mini_description", "mini_description_mode"])
+
+        with patch("api.agent.tasks.mini_description.generate_agent_mini_description_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_mini_description(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+
+    def test_maybe_schedule_mini_description_regenerates_retained_manual_text_in_auto_mode(self) -> None:
+        agent = self._create_agent()
+        agent.mini_description = "Former Manual Label"
+        agent.mini_description_mode = PersistentAgent.MiniDescriptionMode.AUTO
+        agent.mini_description_charter_hash = ""
+        agent.save(update_fields=[
+            "mini_description",
+            "mini_description_mode",
+            "mini_description_charter_hash",
+        ])
+
+        with patch("api.agent.tasks.mini_description.generate_agent_mini_description_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_mini_description(agent)
+
+        self.assertTrue(scheduled)
+        expected_hash = compute_charter_hash(agent.charter)
+        mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
+
     def test_generate_mini_description_updates_fields(self) -> None:
         agent = self._create_agent()
         charter_hash = compute_charter_hash(agent.charter)
@@ -172,6 +202,73 @@ class AgentShortDescriptionTests(TestCase):
         mocked_emit.assert_called_once()
         emitted_agent = mocked_emit.call_args.args[0]
         self.assertEqual(str(emitted_agent.id), str(agent.id))
+
+    def test_generate_mini_description_does_not_overwrite_manual_change_during_generation(self) -> None:
+        agent = self._create_agent()
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.mini_description_requested_hash = charter_hash
+        agent.save(update_fields=["mini_description_requested_hash"])
+
+        def switch_to_manual(*_args, **_kwargs):
+            PersistentAgent.objects.filter(id=agent.id).update(
+                mini_description="Manual Operations Partner",
+                mini_description_mode=PersistentAgent.MiniDescriptionMode.MANUAL,
+                mini_description_requested_hash="",
+            )
+            return "Generated Operations Assistant"
+
+        with patch("api.agent.tasks.mini_description._generate_via_llm", side_effect=switch_to_manual), patch(
+            "console.agent_chat.signals.emit_agent_profile_update"
+        ) as mocked_emit:
+            generate_agent_mini_description_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description, "Manual Operations Partner")
+        self.assertEqual(agent.mini_description_mode, PersistentAgent.MiniDescriptionMode.MANUAL)
+        self.assertEqual(agent.mini_description_requested_hash, "")
+        mocked_emit.assert_not_called()
+
+    def test_generate_mini_description_does_not_overwrite_charter_change_during_generation(self) -> None:
+        agent = self._create_agent()
+        old_hash = compute_charter_hash(agent.charter)
+        agent.mini_description_requested_hash = old_hash
+        agent.save(update_fields=["mini_description_requested_hash"])
+
+        new_charter = "Lead a newly expanded operations function"
+        new_hash = compute_charter_hash(new_charter)
+
+        def change_charter(*_args, **_kwargs):
+            PersistentAgent.objects.filter(id=agent.id).update(
+                charter=new_charter,
+                mini_description_requested_hash=new_hash,
+            )
+            return "Outdated Operations Assistant"
+
+        with patch("api.agent.tasks.mini_description._generate_via_llm", side_effect=change_charter), patch(
+            "console.agent_chat.signals.emit_agent_profile_update"
+        ) as mocked_emit:
+            generate_agent_mini_description_task.run(str(agent.id), old_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description, "")
+        self.assertEqual(agent.mini_description_requested_hash, new_hash)
+        mocked_emit.assert_not_called()
+
+    def test_generate_mini_description_uses_charter_fallback_in_auto_mode(self) -> None:
+        agent = self._create_agent(charter="Coordinate executive recruiting operations across teams")
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.mini_description_requested_hash = charter_hash
+        agent.save(update_fields=["mini_description_requested_hash"])
+
+        with patch("api.agent.tasks.mini_description._generate_via_llm", return_value=""), patch(
+            "console.agent_chat.signals.emit_agent_profile_update"
+        ):
+            generate_agent_mini_description_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description, "Coordinate executive recruiting operations across")
+        self.assertEqual(agent.mini_description_mode, PersistentAgent.MiniDescriptionMode.AUTO)
+        self.assertEqual(agent.mini_description_charter_hash, charter_hash)
 
     def test_mini_description_prompt_treats_charter_as_label_input(self) -> None:
         agent = self._create_agent(
@@ -247,6 +344,20 @@ class AgentShortDescriptionTests(TestCase):
         mini, source = build_mini_description(agent)
 
         self.assertEqual(mini, "Helpful research assistant")
+        self.assertEqual(source, "mini")
+
+    def test_build_mini_description_preserves_full_manual_description(self) -> None:
+        agent = self._create_agent()
+        agent.mini_description = "Coordinates executive hiring strategy, interviews, and candidate follow-up"
+        agent.mini_description_mode = PersistentAgent.MiniDescriptionMode.MANUAL
+        agent.save(update_fields=["mini_description", "mini_description_mode"])
+
+        mini, source = build_mini_description(agent)
+
+        self.assertEqual(
+            mini,
+            "Coordinates executive hiring strategy, interviews, and candidate follow-up",
+        )
         self.assertEqual(source, "mini")
 
     def test_build_mini_description_uses_placeholder_when_only_short(self) -> None:

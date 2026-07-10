@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import type { ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
+import type { ToolCallEntry } from '../../../types/agentChat'
 import type { SqliteInternalTableKind, SqliteStatementOperation } from '../../tooling/agentConfigSql'
 
 export type ToolDetailComponent = (props: ToolDetailProps) => ReactElement
@@ -59,6 +59,8 @@ export type ToolDetailProps = {
   entry: ToolEntryDisplay
 }
 
+export type ToolDisplayOptions = { timeZone?: string }
+
 export type ToolClusterTransform = ToolClusterDisplay & {
   skippedCount: number
 }
@@ -90,18 +92,5 @@ export type ToolDescriptor = {
   iconColorClass: string
   detailComponent: ToolDetailComponent
   skip?: boolean
-  derive?(entry: ToolCallEntry, parameters: Record<string, unknown> | null): ToolDescriptorTransform | void
-}
-
-export type ClusterTransformOptions = {
-  skipTools?: Set<string>
-}
-
-export type ToolClusterTransformFn = (
-  cluster: ToolClusterEvent,
-) => ToolClusterTransform
-
-export type ToolEntryKey = {
-  clusterCursor: string
-  entryId: string
+  derive?(entry: ToolCallEntry, parameters: Record<string, unknown> | null, options?: ToolDisplayOptions): ToolDescriptorTransform | void
 }

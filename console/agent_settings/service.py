@@ -1,5 +1,6 @@
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.db import DatabaseError, IntegrityError
 from django.http import HttpRequest, JsonResponse
 from django.views.generic import DetailView
@@ -1096,6 +1097,8 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'id': str(agent.id),
                 'name': agent.name,
                 'charter': agent.charter,
+                'miniDescription': agent.mini_description,
+                'miniDescriptionMode': agent.mini_description_mode,
                 'avatarUrl': agent.get_avatar_url(),
                 'isActive': agent.is_active,
                 'createdAtDisplay': _datetime_display(agent.created_at, "F j, Y \a\t g:i A"),
@@ -1570,6 +1573,24 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         new_name = request.POST.get('name', '').strip()
         new_charter = request.POST.get('charter', '').strip()
+        new_mini_description_mode = (
+            request.POST.get('mini_description_mode')
+            or agent.mini_description_mode
+        ).strip().lower()
+        if new_mini_description_mode not in PersistentAgent.MiniDescriptionMode.values:
+            return _general_error("Mini description mode must be automatic or manual.")
+
+        posted_mini_description = request.POST.get('mini_description', agent.mini_description)
+        new_mini_description = " ".join((posted_mini_description or "").split())
+        if new_mini_description_mode == PersistentAgent.MiniDescriptionMode.MANUAL:
+            if not new_mini_description:
+                return _general_error("Mini description cannot be empty in manual mode.")
+            if len(new_mini_description) > 80:
+                return _general_error("Mini description must be 80 characters or fewer.")
+        restoring_automatic_mini_description = (
+            agent.mini_description_mode != PersistentAgent.MiniDescriptionMode.AUTO
+            and new_mini_description_mode == PersistentAgent.MiniDescriptionMode.AUTO
+        )
         # Checkbox inputs are only present in POST data when checked. Determine the desired
         # active state based on whether the "is_active" field was submitted.
         new_is_active = 'is_active' in request.POST
@@ -1596,6 +1617,9 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         if not new_name:
             return _general_error("Agent name cannot be empty.")
+        agent_name_max_length = PersistentAgent._meta.get_field("name").max_length
+        if agent_name_max_length and len(new_name) > agent_name_max_length:
+            return _general_error(f"Agent name must be {agent_name_max_length} characters or fewer.")
 
         if not new_charter:
             return _general_error("Agent assignment cannot be empty.")
@@ -1776,6 +1800,25 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     agent.charter = new_charter
                     agent_fields_to_update.append('charter')
 
+                mini_description_updates = {}
+                if new_mini_description_mode == PersistentAgent.MiniDescriptionMode.MANUAL:
+                    mini_description_updates = {
+                        'mini_description': new_mini_description,
+                        'mini_description_mode': PersistentAgent.MiniDescriptionMode.MANUAL,
+                        'mini_description_charter_hash': "",
+                        'mini_description_requested_hash': "",
+                    }
+                elif restoring_automatic_mini_description:
+                    mini_description_updates = {
+                        'mini_description_mode': PersistentAgent.MiniDescriptionMode.AUTO,
+                        'mini_description_charter_hash': "",
+                        'mini_description_requested_hash': "",
+                    }
+                for field, value in mini_description_updates.items():
+                    if getattr(agent, field) != value:
+                        setattr(agent, field, value)
+                        agent_fields_to_update.append(field)
+
                 # Update active status if it changed
                 if agent.is_active != new_is_active:
                     agent.is_active = new_is_active
@@ -1847,36 +1890,39 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 if browser_agent is not None and browser_agent_fields_to_update:
                     browser_agent.save(update_fields=browser_agent_fields_to_update)
 
-                if 'charter' in agent_fields_to_update:
+                charter_changed = 'charter' in agent_fields_to_update
+                if charter_changed or restoring_automatic_mini_description:
                     def _schedule_charter_artifacts() -> None:
-                        try:
-                            maybe_schedule_short_description(agent)
-                        except Exception:
-                            logger.exception(
-                                "Failed to schedule short description generation after charter update for agent %s",
-                                agent.id,
-                            )
+                        if charter_changed:
+                            try:
+                                maybe_schedule_short_description(agent)
+                            except Exception:
+                                logger.exception(
+                                    "Failed to schedule short description generation after charter update for agent %s",
+                                    agent.id,
+                                )
                         try:
                             maybe_schedule_mini_description(agent)
                         except Exception:
                             logger.exception(
-                                "Failed to schedule mini description generation after charter update for agent %s",
+                                "Failed to schedule mini description generation after settings update for agent %s",
                                 agent.id,
                             )
-                        try:
-                            maybe_schedule_agent_tags(agent)
-                        except Exception:
-                            logger.exception(
-                                "Failed to schedule tag generation after charter update for agent %s",
-                                agent.id,
-                            )
-                        try:
-                            maybe_schedule_agent_avatar(agent)
-                        except Exception:
-                            logger.exception(
-                                "Failed to schedule avatar generation after charter update for agent %s",
-                                agent.id,
-                            )
+                        if charter_changed:
+                            try:
+                                maybe_schedule_agent_tags(agent)
+                            except Exception:
+                                logger.exception(
+                                    "Failed to schedule tag generation after charter update for agent %s",
+                                    agent.id,
+                                )
+                            try:
+                                maybe_schedule_agent_avatar(agent)
+                            except Exception:
+                                logger.exception(
+                                    "Failed to schedule avatar generation after charter update for agent %s",
+                                    agent.id,
+                                )
 
                     transaction.on_commit(_schedule_charter_artifacts)
 
@@ -1945,6 +1991,12 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                         transaction.on_commit(lambda name=old_avatar_name: default_storage.delete(name))
                     if old_avatar_thumbnail_name:
                         transaction.on_commit(lambda name=old_avatar_thumbnail_name: default_storage.delete(name))
+        except ValidationError as e:
+            message = _format_validation_error(e)
+            if is_ajax:
+                return JsonResponse({'success': False, 'error': message}, status=400)
+            messages.error(request, message)
+            return redirect(_agent_settings_app_path(agent))
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'success': False, 'error': f"Error updating agent: {e}"}, status=500)
@@ -1956,6 +2008,8 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'success': True,
                 'message': "Agent updated successfully.",
                 'avatarUrl': agent.get_avatar_url(),
+                'miniDescription': agent.mini_description,
+                'miniDescriptionMode': agent.mini_description_mode,
                 'preferredLlmTier': getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
                 'warning': preferred_tier_warning,
             })

@@ -9,6 +9,7 @@ export const IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY = 'gobii:immersive:selection-sid
 export type ImmersiveShellViewerState = {
   userId: number | null
   email: string | null
+  timeZone: string | null
 }
 
 export type ImmersiveShellConnectionState = {
@@ -34,6 +35,7 @@ const initialState: ImmersiveShellState = {
   viewer: {
     userId: null,
     email: null,
+    timeZone: null,
   },
   connection: {
     status: 'connecting',

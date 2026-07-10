@@ -2315,7 +2315,7 @@ class BrowserUseAgent(models.Model):
         on_delete=models.CASCADE,
         related_name="agents"
     )
-    name = models.CharField(max_length=64)
+    name = models.CharField(max_length=255)
     preferred_proxy = models.ForeignKey(
         'ProxyServer',
         on_delete=models.SET_NULL,
@@ -6570,6 +6570,10 @@ class ToolFriendlyName(models.Model):
 
 
 class PersistentAgent(models.Model):
+    class MiniDescriptionMode(models.TextChoices):
+        AUTO = "auto", "Automatic"
+        MANUAL = "manual", "Manual"
+
     objects = PersistentAgentQuerySet.as_manager()
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -6640,7 +6644,13 @@ class PersistentAgent(models.Model):
     mini_description = models.CharField(
         max_length=80,
         blank=True,
-        help_text="Generated ultra-short summary of the agent charter for compact displays.",
+        help_text="Ultra-short summary of the agent for compact displays.",
+    )
+    mini_description_mode = models.CharField(
+        max_length=16,
+        choices=MiniDescriptionMode.choices,
+        default=MiniDescriptionMode.AUTO,
+        help_text="Whether the mini description is generated from the charter or maintained manually.",
     )
     mini_description_charter_hash = models.CharField(
         max_length=64,

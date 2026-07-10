@@ -96,7 +96,7 @@ def build_mini_description(
     fallback_message: str = "Agent",
 ) -> Tuple[str, str]:
     """Return a tuple of (mini_description, source) for very small UI slots."""
-    mini = prepare_mini_description(getattr(agent, "mini_description", ""))
+    mini = _normalize_text(getattr(agent, "mini_description", ""))
     if mini:
         return mini, "mini"
 
@@ -167,6 +167,9 @@ def maybe_schedule_mini_description(
         routing_profile_id: Optional routing profile ID to use for LLM calls.
     """
     if is_eval_agent(agent):
+        return False
+
+    if agent.mini_description_mode == PersistentAgent.MiniDescriptionMode.MANUAL:
         return False
 
     charter = (agent.charter or "").strip()

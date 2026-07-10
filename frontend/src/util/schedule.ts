@@ -4,6 +4,17 @@ export type ScheduleIntervalPart = {
   label: string
 }
 
+export type ScheduleDisplayOptions = {
+  timeZone?: string
+  referenceDate?: Date
+}
+
+let defaultDisplayTimeZone: string | undefined
+
+export function setScheduleDisplayTimeZone(timeZone: string | null | undefined): void {
+  defaultDisplayTimeZone = timeZone?.trim() || undefined
+}
+
 export type ScheduleDescription =
   | { kind: 'disabled'; summary: string }
   | { kind: 'preset'; raw: string; description: string; summary: string }
@@ -13,26 +24,15 @@ export type ScheduleDescription =
 
 const CRON_FIELD_LABELS = ['Minute', 'Hour', 'Day of month', 'Month', 'Day of week', 'Year']
 
-const SPECIAL_SCHEDULE_DESCRIPTIONS: Record<string, string> = {
-  '@hourly': 'Runs at the top of every hour.',
-  '@daily': 'Runs every day at midnight.',
-  '@midnight': 'Runs every day at midnight.',
-  '@weekly': 'Runs once a week at midnight on Sunday.',
-  '@monthly': 'Runs once a month at midnight on the first day.',
-  '@annually': 'Runs once a year at midnight on January 1st.',
-  '@yearly': 'Runs once a year at midnight on January 1st.',
-  '@reboot': 'Runs immediately when the agent restarts.',
-}
-
-const SPECIAL_SCHEDULE_SUMMARIES: Record<string, string> = {
-  '@hourly': 'Every hour',
-  '@daily': 'Every day at midnight',
-  '@midnight': 'Every day at midnight',
-  '@weekly': 'Every Sunday at midnight',
-  '@monthly': 'The first day of each month at midnight',
-  '@annually': 'January 1 at midnight',
-  '@yearly': 'January 1 at midnight',
-  '@reboot': 'When the agent restarts',
+const SPECIAL_SCHEDULES: Record<string, { cron?: string; description?: string; summary?: string }> = {
+  '@hourly': { cron: '0 * * * *' },
+  '@daily': { cron: '0 0 * * *' },
+  '@midnight': { cron: '0 0 * * *' },
+  '@weekly': { cron: '0 0 * * 0' },
+  '@monthly': { cron: '0 0 1 * *' },
+  '@annually': { cron: '0 0 1 1 *' },
+  '@yearly': { cron: '0 0 1 1 *' },
+  '@reboot': { description: 'Runs immediately when the agent restarts.', summary: 'When the agent restarts' },
 }
 
 const DURATION_UNITS: Record<string, { label: string; shortLabel: string }> = {
@@ -91,18 +91,22 @@ const MONTH_LOOKUP: Record<string, string> = {
   DEC: 'December',
 }
 
-export function describeSchedule(raw: string | null): ScheduleDescription {
+export function describeSchedule(raw: string | null, options: ScheduleDisplayOptions = {}): ScheduleDescription {
   if (!raw) {
     return { kind: 'disabled', summary: 'Disabled' }
   }
 
-  const presetDescription = SPECIAL_SCHEDULE_DESCRIPTIONS[raw]
-  if (presetDescription) {
+  const preset = SPECIAL_SCHEDULES[raw]
+  if (preset) {
+    const summary = (preset.cron ? buildCronSummary(preset.cron.split(' '), options) : null)
+      ?? preset.summary
+      ?? preset.description
+      ?? 'Scheduled'
     return {
       kind: 'preset',
       raw,
-      description: presetDescription,
-      summary: SPECIAL_SCHEDULE_SUMMARIES[raw] ?? presetDescription,
+      description: preset.cron ? `${summary.replace(/[.!?]+$/, '')}.` : preset.description ?? summary,
+      summary,
     }
   }
 
@@ -120,14 +124,14 @@ export function describeSchedule(raw: string | null): ScheduleDescription {
   if (cronParts.length === 5 || cronParts.length === 6) {
     const labels = CRON_FIELD_LABELS.slice(0, cronParts.length)
     const fields = cronParts.map((value, index) => ({ label: labels[index], value }))
-    return { kind: 'cron', raw, fields, summary: buildCronSummary(cronParts) }
+    return { kind: 'cron', raw, fields, summary: buildCronSummary(cronParts, options) }
   }
 
   return { kind: 'unknown', raw, summary: null }
 }
 
-export function summarizeSchedule(value: string | null): string | null {
-  const description = describeSchedule(value)
+export function summarizeSchedule(value: string | null, options: ScheduleDisplayOptions = {}): string | null {
+  const description = describeSchedule(value, options)
   switch (description.kind) {
     case 'disabled':
       return 'Disabled'
@@ -169,16 +173,22 @@ function parseIntervalParts(value: string): ScheduleIntervalPart[] {
   return parts
 }
 
-function buildCronSummary(fields: string[]): string | null {
+function buildCronSummary(fields: string[], options: ScheduleDisplayOptions): string | null {
   if (fields.length < 5) return null
   const [minuteRaw, hourRaw, domRaw, monthRaw, dowRaw, yearRaw] = [...fields, undefined]
 
-  const timeSummary = buildCronTimeSummary(minuteRaw, hourRaw)
+  const localized = localizeFixedUtcCronTime(minuteRaw, hourRaw, domRaw, monthRaw, dowRaw, options)
+  if (localized?.summary) {
+    return localized.summary
+  }
+  const timeSummary = localized
+    ? { text: `at ${localized.time}`, kind: 'at' as const }
+    : buildCronTimeSummary(minuteRaw, hourRaw)
   if (!timeSummary) {
     return null
   }
 
-  const daySummary = buildCronDaySummary(domRaw, monthRaw, dowRaw)
+  const daySummary = buildCronDaySummary(domRaw, monthRaw, localized?.dayOfWeek ?? dowRaw)
   if (!daySummary) {
     return null
   }
@@ -192,6 +202,195 @@ function buildCronSummary(fields: string[]): string | null {
   }
 
   return summary
+}
+
+type LocalizedCronTime = { time: string; dayOfWeek: string | undefined; summary?: string }
+
+function localizeFixedUtcCronTime(
+  minuteRaw: string | undefined,
+  hourRaw: string | undefined,
+  dayOfMonthRaw: string | undefined,
+  monthRaw: string | undefined,
+  dayOfWeekRaw: string | undefined,
+  options: ScheduleDisplayOptions,
+): LocalizedCronTime | null {
+  const minute = parseCronNumber(minuteRaw)
+  const hour = parseCronNumber(hourRaw)
+  if (minute === null || hour === null || (!isWildcard(dayOfMonthRaw) && !isWildcard(dayOfWeekRaw))) {
+    return null
+  }
+
+  const sourceWeekdays = parseCronWeekdayIndexes(dayOfWeekRaw)
+  if (!sourceWeekdays) {
+    return null
+  }
+
+  const timeZone = resolveDisplayTimeZone(options.timeZone)
+  const referenceDate = options.referenceDate instanceof Date && !Number.isNaN(options.referenceDate.getTime())
+    ? options.referenceDate
+    : new Date()
+  const occurrence = findNextUtcOccurrence(hour, minute, sourceWeekdays, referenceDate, dayOfMonthRaw, monthRaw)
+  if (!occurrence) {
+    return null
+  }
+
+  const time = formatZonedTime(occurrence, timeZone)
+  const localWeekday = getZonedWeekdayIndex(occurrence, timeZone)
+  if (!time || localWeekday === null) {
+    return null
+  }
+
+  const sourceWeekday = occurrence.getUTCDay()
+  const dayShift = normalizeWeekday(localWeekday - sourceWeekday)
+  return {
+    time,
+    dayOfWeek: shiftCronWeekdays(dayOfWeekRaw, dayShift),
+    ...(!isWildcard(dayOfMonthRaw) || !isWildcard(monthRaw)
+      ? { summary: formatNextZonedOccurrence(occurrence, timeZone) }
+      : {}),
+  }
+}
+
+function resolveDisplayTimeZone(preferredTimeZone: string | undefined): string {
+  try {
+    const candidate = preferredTimeZone?.trim()
+      || defaultDisplayTimeZone
+      || Intl.DateTimeFormat().resolvedOptions().timeZone
+      || 'UTC'
+    new Intl.DateTimeFormat('en-US', { timeZone: candidate }).format()
+    return candidate
+  } catch {
+    return 'UTC'
+  }
+}
+
+function findNextUtcOccurrence(
+  hour: number,
+  minute: number,
+  weekdays: Set<number>,
+  referenceDate: Date,
+  dayOfMonthRaw: string | undefined,
+  monthRaw: string | undefined,
+): Date | null {
+  const dayOfMonth = isWildcard(dayOfMonthRaw) ? null : parseCronNumber(dayOfMonthRaw)
+  const month = isWildcard(monthRaw) ? null : parseCronMonth(monthRaw)
+  if ((!isWildcard(dayOfMonthRaw) && dayOfMonth === null) || (!isWildcard(monthRaw) && month === null)) {
+    return null
+  }
+  const start = Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), referenceDate.getUTCDate(), hour, minute)
+
+  const searchDays = dayOfMonth === null && month === null ? 7 : 366 * 4
+  for (let dayOffset = 0; dayOffset <= searchDays; dayOffset += 1) {
+    const candidate = new Date(start + dayOffset * 24 * 60 * 60 * 1000)
+    if (
+      candidate.getTime() >= referenceDate.getTime()
+      && weekdays.has(candidate.getUTCDay())
+      && (dayOfMonth === null || candidate.getUTCDate() === dayOfMonth)
+      && (month === null || candidate.getUTCMonth() + 1 === month)
+    ) {
+      return candidate
+    }
+  }
+  return null
+}
+
+function formatNextZonedOccurrence(value: Date, timeZone: string): string | undefined {
+  try {
+    return `Next run ${new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }).format(value)}`
+  } catch {
+    return undefined
+  }
+}
+
+function formatZonedTime(value: Date, timeZone: string): string | null {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(value)
+  } catch {
+    return null
+  }
+}
+
+function getZonedWeekdayIndex(value: Date, timeZone: string): number | null {
+  try {
+    const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(value).toUpperCase()
+    const resolved = resolveWeekdayName(weekday)
+    return resolved ? WEEKDAY_NAMES.indexOf(resolved) : null
+  } catch {
+    return null
+  }
+}
+
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+function parseCronMonth(value: string | undefined): number | null {
+  if (!value) return null
+  const numeric = parseCronNumber(value)
+  if (numeric !== null) return numeric >= 1 && numeric <= 12 ? numeric : null
+  const month = resolveMonthName(value)
+  const index = month ? MONTH_NAMES.indexOf(month) : -1
+  return index >= 0 ? index + 1 : null
+}
+
+function parseCronWeekdayIndexes(value: string | undefined): Set<number> | null {
+  if (isWildcard(value)) return new Set([0, 1, 2, 3, 4, 5, 6])
+  if (!value) return null
+
+  const indexes = new Set<number>()
+  for (const part of value.split(',')) {
+    const normalized = part.trim()
+    if (!normalized || normalized.includes('/')) return null
+    const range = normalized.split('-')
+    if (range.length > 2) return null
+    const start = parseWeekdayIndex(range[0])
+    const end = parseWeekdayIndex(range[1] ?? range[0])
+    if (start === null || end === null) return null
+
+    let current = start
+    indexes.add(current)
+    while (current !== end) {
+      current = normalizeWeekday(current + 1)
+      indexes.add(current)
+    }
+  }
+  return indexes.size ? indexes : null
+}
+
+function parseWeekdayIndex(value: string | undefined): number | null {
+  const token = value?.trim()
+  if (!token) return null
+  const numeric = parseCronNumber(token)
+  if (numeric !== null) return numeric >= 0 && numeric <= 7 ? normalizeWeekday(numeric) : null
+  const name = resolveWeekdayName(token)
+  if (!name) return null
+  const index = WEEKDAY_NAMES.indexOf(name)
+  return index >= 0 ? index : null
+}
+
+function shiftCronWeekdays(value: string | undefined, shift: number): string | undefined {
+  if (!value || isWildcard(value) || shift === 0) return value
+  return value
+    .split(',')
+    .map((part) => part
+      .split('-')
+      .map((token) => {
+        const weekday = parseWeekdayIndex(token.trim())
+        return weekday === null ? token : String(normalizeWeekday(weekday + shift))
+      })
+      .join('-'))
+    .join(',')
+}
+
+function normalizeWeekday(value: number): number {
+  return ((value % 7) + 7) % 7
 }
 
 type CronTimeSummary = {
@@ -311,33 +510,21 @@ function combineCronSummary(daySummary: string, timeSummary: CronTimeSummary): s
 }
 
 function formatMonthSummary(value: string | undefined): string | null {
-  if (isWildcard(value)) return null
-  if (!value) return null
-  const list = parseCronNamedList(value, resolveMonthName)
-  if (list?.length) {
-    return formatList(list)
-  }
-  const range = parseCronNamedRange(value, resolveMonthName)
-  if (range) {
-    return `${range[0]}–${range[1]}`
-  }
-  const single = resolveMonthName(value)
-  return single ?? null
+  return formatNamedSummary(value, resolveMonthName)
 }
 
 function formatWeekdaySummary(value: string | undefined): string | null {
+  return formatNamedSummary(value, resolveWeekdayName)
+}
+
+function formatNamedSummary(value: string | undefined, resolver: (token: string) => string | null): string | null {
   if (isWildcard(value)) return null
   if (!value) return null
-  const list = parseCronNamedList(value, resolveWeekdayName)
-  if (list?.length) {
-    return formatList(list)
-  }
-  const range = parseCronNamedRange(value, resolveWeekdayName)
-  if (range) {
-    return `${range[0]}–${range[1]}`
-  }
-  const single = resolveWeekdayName(value)
-  return single ?? null
+  const list = parseCronNamedList(value, resolver)
+  if (list?.length) return formatList(list)
+  const range = parseCronNamedRange(value, resolver)
+  if (range) return `${range[0]}–${range[1]}`
+  return resolver(value)
 }
 
 function formatDayOfMonthSummary(value: string | undefined): string | null {
@@ -368,29 +555,17 @@ function parseCronNumberList(value: string | undefined): number[] | null {
   if (!value || !value.includes(',')) return null
   const parts = value.split(',').map((part) => part.trim()).filter(Boolean)
   if (!parts.length) return null
-  const numbers: number[] = []
-  for (const part of parts) {
-    if (!/^\d+$/.test(part)) {
-      return null
-    }
-    const parsed = Number.parseInt(part, 10)
-    if (!Number.isFinite(parsed)) {
-      return null
-    }
-    numbers.push(parsed)
-  }
-  return numbers
+  if (parts.some((part) => !/^\d+$/.test(part))) return null
+  const numbers = parts.map((part) => Number.parseInt(part, 10))
+  return numbers.every(Number.isFinite) ? numbers : null
 }
 
 function parseCronNumberRange(value: string | undefined): [number, number] | null {
   if (!value || !value.includes('-')) return null
   const match = value.match(/^(\d+)\s*-\s*(\d+)$/)
   if (!match) return null
-  const start = Number.parseInt(match[1] ?? '', 10)
-  const end = Number.parseInt(match[2] ?? '', 10)
-  if (!Number.isFinite(start) || !Number.isFinite(end)) {
-    return null
-  }
+  const [start, end] = [Number.parseInt(match[1] ?? '', 10), Number.parseInt(match[2] ?? '', 10)]
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null
   return [start, end]
 }
 
@@ -420,16 +595,9 @@ function parseCronNamedList(
   if (!value || !value.includes(',')) return null
   const parts = value.split(',').map((part) => part.trim()).filter(Boolean)
   if (!parts.length) return null
-  const resolved: string[] = []
-  for (const part of parts) {
-    if (part.includes('-') || part.includes('/') || part.includes('*') || part.includes('?')) {
-      return null
-    }
-    const name = resolver(part)
-    if (!name) return null
-    resolved.push(name)
-  }
-  return resolved
+  if (parts.some((part) => part.includes('-') || part.includes('/') || part.includes('*') || part.includes('?'))) return null
+  const resolved = parts.map(resolver)
+  return resolved.every((name): name is string => Boolean(name)) ? resolved : null
 }
 
 function parseCronNamedRange(
@@ -482,7 +650,7 @@ function formatTime(hour: number, minute: number): string {
   const normalizedHour = ((hour + 24) % 24)
   const period = normalizedHour >= 12 ? 'PM' : 'AM'
   const hour12 = normalizedHour % 12 === 0 ? 12 : normalizedHour % 12
-  return `${hour12}:${normalizedMinute} ${period}`
+  return `${hour12}:${normalizedMinute} ${period} UTC`
 }
 
 function formatOrdinal(value: number): string {

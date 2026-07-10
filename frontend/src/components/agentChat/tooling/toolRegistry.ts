@@ -3,7 +3,7 @@ import { resolveDetailComponent } from '../toolDetails'
 import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
 import { compareTimelineCursors } from '../../../util/timelineCursor'
 import type { ThinkingEvent, ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
-import type { ToolClusterTransform, ToolDescriptor, ToolEntryDisplay } from './types'
+import type { ToolClusterTransform, ToolDescriptor, ToolDisplayOptions, ToolEntryDisplay } from './types'
 import { CHAT_SKIP_TOOL_NAMES, buildToolDescriptorMap, coerceString, getFriendlyToolInfo, truncate } from '../../tooling/toolMetadata'
 import { classifySqliteStatements } from '../../tooling/agentConfigSql'
 import { extractSqlStatementsFromParameters, extractSqliteStatementResult, extractSqliteGroupedResult, getSqliteInternalTableDisplay } from '../../tooling/sqliteDisplay'
@@ -140,6 +140,7 @@ function buildToolEntryDisplay(
   clusterCursor: string,
   entry: ToolCallEntry,
   descriptor: ToolDescriptor,
+  options: ToolDisplayOptions = {},
 ): ToolEntryDisplay | null {
   const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
   if (descriptor.skip) {
@@ -154,7 +155,7 @@ function buildToolEntryDisplay(
     caption: null,
     summary: undefined,
   }
-  const transform = descriptor.derive?.(entryForDerive, parameters) || {}
+  const transform = descriptor.derive?.(entryForDerive, parameters, options) || {}
   const customToolTransform =
     descriptor.name === 'default' && toolName.toLowerCase().startsWith('custom_')
       ? deriveCustomToolSummary(entry)
@@ -215,13 +216,13 @@ function buildToolEntryDisplay(
   }
 }
 
-function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay[] {
+function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry, options: ToolDisplayOptions = {}): ToolEntryDisplay[] {
   const sqliteToolName = entry.toolName ?? entry.meta?.label ?? 'sqlite_batch'
   const descriptor = descriptorFor(sqliteToolName)
   const parameters = isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null
   const statements = extractSqlStatementsFromParameters(parameters)
   if (!statements.length) {
-    const fallback = buildToolEntryDisplay(clusterCursor, entry, descriptor)
+    const fallback = buildToolEntryDisplay(clusterCursor, entry, descriptor, options)
     return fallback ? [fallback] : []
   }
 
@@ -244,7 +245,7 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEn
   let handledAgentConfigIndexes = new Set<number>()
   if (configStatementIndexes.length) {
     const configStatements = configStatementIndexes.map((index) => statements[index]).filter(Boolean)
-    const configEntry = buildAgentConfigEntry(clusterCursor, entry, configStatements, configStatementIndexes)
+    const configEntry = buildAgentConfigEntry(clusterCursor, entry, configStatements, configStatementIndexes, options)
     if (configEntry) {
       entries.push(configEntry)
       handledAgentConfigIndexes = new Set(configStatementIndexes)
@@ -337,7 +338,7 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEn
   return entries
 }
 
-function buildToolEntries(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay[] {
+function buildToolEntries(clusterCursor: string, entry: ToolCallEntry, options: ToolDisplayOptions = {}): ToolEntryDisplay[] {
   const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
   const normalizedName = (toolName || '').toLowerCase()
   if (CHAT_SKIP_TOOL_NAMES.has(normalizedName as string)) {
@@ -345,11 +346,11 @@ function buildToolEntries(clusterCursor: string, entry: ToolCallEntry): ToolEntr
   }
 
   if (normalizedName === 'sqlite_batch') {
-    return buildSqliteEntries(clusterCursor, entry)
+    return buildSqliteEntries(clusterCursor, entry, options)
   }
 
   const descriptor = descriptorFor(toolName)
-  const transformed = buildToolEntryDisplay(clusterCursor, entry, descriptor)
+  const transformed = buildToolEntryDisplay(clusterCursor, entry, descriptor, options)
   return transformed ? [transformed] : []
 }
 
@@ -391,7 +392,7 @@ function buildThinkingEntry(
 
 export function transformToolCluster(
   cluster: ToolClusterEvent,
-  options?: { suppressedThinkingCursor?: string | null },
+  options: ToolDisplayOptions & { suppressedThinkingCursor?: string | null } = {},
 ): ToolClusterTransform {
   const entries: ToolEntryDisplay[] = []
   let skippedCount = 0
@@ -399,7 +400,7 @@ export function transformToolCluster(
   const suppressedThinkingCursor = options?.suppressedThinkingCursor ?? null
 
   for (const entry of cluster.entries) {
-    const transformedEntries = buildToolEntries(cluster.cursor, entry)
+    const transformedEntries = buildToolEntries(cluster.cursor, entry, options)
     if (!transformedEntries.length) {
       skippedCount += 1
       continue

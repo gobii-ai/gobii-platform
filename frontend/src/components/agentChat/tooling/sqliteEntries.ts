@@ -5,7 +5,7 @@ import { summarizeSchedule } from '../../../util/schedule'
 import { parseAgentConfigUpdates } from '../../tooling/agentConfigSql'
 import { extractSqliteGroupedResult } from '../../tooling/sqliteDisplay'
 import { AgentConfigUpdateDetail } from '../toolDetails'
-import type { ToolEntryDisplay } from './types'
+import type { ToolDisplayOptions, ToolEntryDisplay } from './types'
 
 function truncate(value: string, max = 60): string {
   if (value.length <= max) return value
@@ -21,6 +21,7 @@ export function buildAgentConfigEntry(
   entry: ToolCallEntry,
   statements: string[],
   statementIndexes: number[],
+  options: ToolDisplayOptions = {},
 ): ToolEntryDisplay | null {
   const parsedUpdate = parseAgentConfigUpdates(statements)
   if (!parsedUpdate) {
@@ -36,7 +37,7 @@ export function buildAgentConfigEntry(
   } = parsedUpdate
   const scheduleKnown = scheduleCleared || scheduleValue !== null
   const normalizedSchedule = scheduleCleared ? null : scheduleValue
-  const scheduleSummary = scheduleKnown ? summarizeSchedule(normalizedSchedule) : null
+  const scheduleSummary = scheduleKnown ? summarizeSchedule(normalizedSchedule, { timeZone: options.timeZone }) : null
   const scheduleCaption = scheduleCleared
     ? 'Disabled'
     : scheduleSummary ?? 'Schedule updated'

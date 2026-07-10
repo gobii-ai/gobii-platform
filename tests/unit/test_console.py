@@ -54,6 +54,20 @@ class ConsoleViewsTest(TestCase):
         self.client = Client()
         self.client.login(email='test@example.com', password='testpass123')
 
+    @tag("batch_console_agents_management")
+    def test_console_session_returns_saved_timezone(self):
+        from api.models import UserPreference
+
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_USER_TIMEZONE: "America/New_York"},
+        )
+
+        response = self.client.get(reverse("console_session"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["timezone"], "America/New_York")
+
     @tag("batch_console_agents")
     def test_billing_initial_data_api_returns_personal_payload(self):
         response = self.client.get(reverse("console_billing_initial_data"))
@@ -3075,11 +3089,218 @@ class ConsoleViewsTest(TestCase):
         payload = response.json()
         self.assertEqual(payload['agent']['id'], str(agent.id))
         self.assertEqual(payload['agent']['name'], agent.name)
+        self.assertEqual(payload['agent']['miniDescription'], "")
+        self.assertEqual(payload['agent']['miniDescriptionMode'], PersistentAgent.MiniDescriptionMode.AUTO)
         self.assertEqual(payload['urls']['detail'], reverse('console_agent_settings', kwargs={'agent_id': agent.id}))
         self.assertIn('allowlist', payload)
         self.assertIn('collaborators', payload)
         self.assertIn('mcpServers', payload)
         self.assertIn('webhooks', payload)
+
+    @tag("batch_console_agents_management")
+    def test_agent_settings_saves_name_longer_than_legacy_browser_limit(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Legacy Limit Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Legacy Limit Agent",
+            charter="Coordinate operations",
+            browser_use_agent=browser_agent,
+        )
+        long_name = "Long Agent Name " + ("A" * 70)
+
+        response = self.client.post(
+            reverse("console_agent_settings", kwargs={"agent_id": agent.id}),
+            {
+                "name": long_name,
+                "charter": agent.charter,
+                "is_active": "on",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        agent.refresh_from_db()
+        browser_agent.refresh_from_db()
+        self.assertEqual(agent.name, long_name)
+        self.assertEqual(browser_agent.name, long_name)
+
+    @tag("batch_console_agents_management")
+    def test_agent_settings_formats_validation_errors(self):
+        from django.core.exceptions import ValidationError
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Validation Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Validation Agent",
+            charter="Coordinate operations",
+            browser_use_agent=browser_agent,
+        )
+
+        with patch.object(BrowserUseAgent, "save", side_effect=ValidationError({"name": ["Friendly validation message."]})):
+            response = self.client.post(
+                reverse("console_agent_settings", kwargs={"agent_id": agent.id}),
+                {
+                    "name": "Validation Agent Updated",
+                    "charter": agent.charter,
+                    "is_active": "on",
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Friendly validation message.")
+        self.assertNotIn("{", response.json()["error"])
+        agent.refresh_from_db()
+        browser_agent.refresh_from_db()
+        self.assertEqual(agent.name, "Validation Agent")
+        self.assertEqual(browser_agent.name, "Validation Browser")
+
+    @tag("batch_console_agents_management")
+    def test_agent_settings_saves_manual_mini_description_at_80_character_limit(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Manual Mini Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Manual Mini Agent",
+            charter="Coordinate operations",
+            browser_use_agent=browser_agent,
+        )
+        manual_description = "A" * 40 + " " + "B" * 39
+
+        response = self.client.post(
+            reverse("console_agent_settings", kwargs={"agent_id": agent.id}),
+            {
+                "name": agent.name,
+                "charter": agent.charter,
+                "is_active": "on",
+                "mini_description_mode": "manual",
+                "mini_description": f"  {manual_description}  ",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["miniDescription"], manual_description)
+        self.assertEqual(response.json()["miniDescriptionMode"], "manual")
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description, manual_description)
+        self.assertEqual(agent.mini_description_mode, PersistentAgent.MiniDescriptionMode.MANUAL)
+        self.assertEqual(agent.mini_description_charter_hash, "")
+        self.assertEqual(agent.mini_description_requested_hash, "")
+
+    @tag("batch_console_agents_management")
+    def test_agent_settings_rejects_invalid_manual_mini_descriptions(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Invalid Mini Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Invalid Mini Agent",
+            charter="Coordinate operations",
+            browser_use_agent=browser_agent,
+        )
+        url = reverse("console_agent_settings", kwargs={"agent_id": agent.id})
+        base_payload = {
+            "name": agent.name,
+            "charter": agent.charter,
+            "is_active": "on",
+            "mini_description_mode": "manual",
+        }
+
+        blank_response = self.client.post(
+            url,
+            {**base_payload, "mini_description": "   "},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        long_response = self.client.post(
+            url,
+            {**base_payload, "mini_description": "A" * 81},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(blank_response.status_code, 400)
+        self.assertIn("cannot be empty", blank_response.json()["error"])
+        self.assertEqual(long_response.status_code, 400)
+        self.assertIn("80 characters", long_response.json()["error"])
+
+    @tag("batch_console_agents_management")
+    @patch("console.agent_settings.service.maybe_schedule_mini_description")
+    def test_agent_settings_restores_automatic_mini_description_without_clearing_text(self, mock_schedule):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Auto Mini Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Auto Mini Agent",
+            charter="Coordinate operations",
+            mini_description="Manual Operations Partner",
+            mini_description_mode=PersistentAgent.MiniDescriptionMode.MANUAL,
+            browser_use_agent=browser_agent,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("console_agent_settings", kwargs={"agent_id": agent.id}),
+                {
+                    "name": agent.name,
+                    "charter": agent.charter,
+                    "is_active": "on",
+                    "mini_description_mode": "auto",
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description, "Manual Operations Partner")
+        self.assertEqual(agent.mini_description_mode, PersistentAgent.MiniDescriptionMode.AUTO)
+        self.assertEqual(agent.mini_description_charter_hash, "")
+        self.assertEqual(agent.mini_description_requested_hash, "")
+        mock_schedule.assert_called_once()
+        self.assertEqual(mock_schedule.call_args.args[0].id, agent.id)
+
+    @tag("batch_console_agents_management")
+    def test_agent_settings_charter_update_preserves_manual_mini_description(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Protected Mini Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Protected Mini Agent",
+            charter="Original assignment",
+            mini_description="Manual Operations Partner",
+            mini_description_mode=PersistentAgent.MiniDescriptionMode.MANUAL,
+            browser_use_agent=browser_agent,
+        )
+
+        with patch("console.agent_settings.service.maybe_schedule_short_description"), patch(
+            "console.agent_settings.service.maybe_schedule_agent_tags"
+        ), patch("console.agent_settings.service.maybe_schedule_agent_avatar"), patch(
+            "api.agent.tasks.mini_description.generate_agent_mini_description_task.delay"
+        ) as mock_mini_delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    reverse("console_agent_settings", kwargs={"agent_id": agent.id}),
+                    {
+                        "name": agent.name,
+                        "charter": "Updated assignment",
+                        "is_active": "on",
+                        "mini_description_mode": "manual",
+                        "mini_description": agent.mini_description,
+                    },
+                    HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        agent.refresh_from_db()
+        self.assertEqual(agent.charter, "Updated assignment")
+        self.assertEqual(agent.mini_description, "Manual Operations Partner")
+        self.assertEqual(agent.mini_description_mode, PersistentAgent.MiniDescriptionMode.MANUAL)
+        mock_mini_delay.assert_not_called()
 
     @tag("batch_console_agents_management")
     def test_agent_settings_api_requires_manage_permissions(self):

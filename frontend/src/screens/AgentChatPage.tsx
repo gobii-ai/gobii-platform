@@ -842,6 +842,7 @@ export type AgentChatPageProps = {
   maxChatUploadSizeBytes?: number | null
   viewerUserId?: number | null
   viewerEmail?: string | null
+  viewerTimeZone?: string | null
   canManageCollaborators?: boolean | null
   isCollaborator?: boolean | null
   pipedreamAppsSettingsUrl?: string | null
@@ -885,6 +886,7 @@ export function AgentChatPage({
   maxChatUploadSizeBytes = null,
   viewerUserId,
   viewerEmail,
+  viewerTimeZone,
   canManageCollaborators,
   isCollaborator,
   pipedreamAppsSettingsUrl = null,
@@ -1033,8 +1035,9 @@ export function AgentChatPage({
     dispatch(immersiveShellActions.setViewer({
       userId: viewerUserId ?? null,
       email: viewerEmail ?? null,
+      timeZone: viewerTimeZone ?? null,
     }))
-  }, [dispatch, viewerEmail, viewerUserId])
+  }, [dispatch, viewerEmail, viewerTimeZone, viewerUserId])
 
   // React-query timeline data
   const timelineQuery = useAgentTimeline(activeAgentId, { enabled: agentContextReady && !isNewAgent })
@@ -1168,7 +1171,7 @@ export function AgentChatPage({
   )
   const displayEvents = useMemo(
     () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets, { keepTrailingActivityExpanded }),
-    [keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets],
+    [keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets, viewerTimeZone],
   )
   const latestTimelineCursor = timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : ''
   const timelineStreamingVersion = timelineStreaming
@@ -1794,13 +1797,14 @@ export function AgentChatPage({
     setAgentId(activeAgentId, {
       agentName: resolvedPendingMeta?.agentName ?? agentName,
       agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
-      processingActive: resolvedPendingMeta?.processingActive,
+      processingActive: resolvedPendingMeta?.processingActive ?? activeRosterMeta?.processingActive,
       signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
       planningState: resolvedPendingMeta?.planningState ?? activeRosterPlanningState,
     })
   }, [
     activeAgentId,
     activeRosterMeta?.planningState,
+    activeRosterMeta?.processingActive,
     activeRosterMeta?.signupPreviewState,
     agentAvatarUrl,
     agentName,
