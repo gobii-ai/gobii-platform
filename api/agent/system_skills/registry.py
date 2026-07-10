@@ -39,6 +39,7 @@ class SystemSkillDefinition:
     name: str
     search_summary: str
     tool_names: tuple[str, ...]
+    eager_tool_names: Optional[tuple[str, ...]] = None
     enables: tuple[str, ...] = ()
     use_when: tuple[str, ...] = ()
     query_aliases: tuple[str, ...] = ()
@@ -57,6 +58,12 @@ class SystemSkillDefinition:
     troubleshooting_tips: tuple[str, ...] = ()
     bootstrap_profile_key: str = "default"
     bootstrap_profile_label: str = ""
+
+    def tools_to_enable(self) -> tuple[str, ...]:
+        """Return the small tool surface exposed when the skill is first enabled."""
+        if self.eager_tool_names is None:
+            return self.tool_names
+        return self.eager_tool_names
 
     def profile_fields(self) -> tuple[SystemSkillField, ...]:
         return tuple(self.required_profile_fields) + tuple(self.optional_profile_fields)

@@ -8,6 +8,7 @@ from api.models import EvalRunTask, PersistentAgentToolCall, PersistentAgentMess
 
 
 BITCOIN_PRICE_RE = re.compile(r"\b68,?500(?:\.50)?\b")
+GREETING_RE = re.compile(r"\b(?:hello|hi|hey|greetings)\b", re.IGNORECASE)
 URL_RE = re.compile(r"https?://[^\s)>\]]+")
 OPTIONAL_WORK_FOLLOWUP_RE = re.compile(
     r"\b("
@@ -21,6 +22,10 @@ OPTIONAL_WORK_FOLLOWUP_RE = re.compile(
 def bitcoin_response_has_unnecessary_followup_question(body: str) -> bool:
     body_without_urls = URL_RE.sub("", body or "")
     return "?" in body_without_urls and bool(OPTIONAL_WORK_FOLLOWUP_RE.search(body_without_urls))
+
+
+def is_greeting_response(body: str) -> bool:
+    return bool(GREETING_RE.search(body or ""))
 
 
 def is_supported_bitcoin_price_api_url(url: str) -> bool:
@@ -52,29 +57,44 @@ def is_supported_bitcoin_price_api_url(url: str) -> bool:
 
 def bitcoin_tool_calls_include_supported_price_api(calls) -> bool:
     return any(
-        is_supported_bitcoin_price_api_url((getattr(call, "tool_params", None) or {}).get("url", ""))
+        getattr(call, "status", "complete") == "complete"
+        and is_supported_bitcoin_price_api_url((getattr(call, "tool_params", None) or {}).get("url", ""))
         for call in calls
     )
+
+
+def bitcoin_tool_calls_include_supported_finance_lookup(calls) -> bool:
+    for call in calls:
+        if (
+            getattr(call, "tool_name", "")
+            != "mcp_brightdata_web_data_yahoo_finance_business"
+            or getattr(call, "status", "") != "complete"
+        ):
+            continue
+        params = getattr(call, "tool_params", None) or {}
+        lookup = " ".join(str(params.get(key) or "") for key in ("keyword", "query", "symbol")).lower()
+        if "btc-usd" in lookup or "bitcoin" in lookup:
+            return True
+    return False
 
 
 @register_scenario
 class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
     slug = "bitcoin_price_multiturn"
-    description = "Chatty intro followed by Bitcoin price request. Checks for efficient API usage over browser."
+    description = "Chatty intro followed by Bitcoin price request. Checks for efficient structured-data retrieval."
     tier = "core"
     category = "tool_choice"
     expected_runtime = "medium"
     cost_class = "medium"
     owner = "agent-platform"
     area = "agent_behavior"
-    tags = ("tool_choice", "multi_turn", "web_research", "http_request")
+    tags = ("tool_choice", "multi_turn", "web_research", "structured_data")
     tasks = [
-        ScenarioTask(name="inject_hello", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_hello", assertion_type="manual"),
         ScenarioTask(name="verify_hello_response", assertion_type="manual"),
-        ScenarioTask(name="inject_bitcoin_request", assertion_type="manual"),
-        ScenarioTask(name="verify_search_query_pattern", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_bitcoin_request", assertion_type="manual"),
         ScenarioTask(name="verify_efficient_tool_usage", assertion_type="manual"),
-        ScenarioTask(name="verify_http_request_after_search", assertion_type="manual"),
+        ScenarioTask(name="verify_structured_price_source", assertion_type="manual"),
         ScenarioTask(name="verify_bitcoin_response", assertion_type="manual"),
     ]
 
@@ -102,15 +122,15 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             timestamp__gt=hello_msg.timestamp
         ).order_by('-timestamp').first()
 
-        if last_msg and "hello" in last_msg.body.lower():
+        if last_msg and is_greeting_response(last_msg.body):
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.PASSED, task_name="verify_hello_response",
                 observed_summary=f"Agent replied: {last_msg.body[:50]}..."
             )
         else:
             self.record_task_result(
-                run_id, None, EvalRunTask.Status.PASSED, task_name="verify_hello_response",
-                observed_summary=f"Agent replied (greeting not found): {last_msg.body[:50] if last_msg else 'None'}"
+                run_id, None, EvalRunTask.Status.FAILED, task_name="verify_hello_response",
+                observed_summary=f"Expected a greeting reply; saw: {last_msg.body[:50] if last_msg else 'None'}"
             )
 
         # --- Turn 2: Bitcoin Price Request (with mocks) ---
@@ -126,7 +146,11 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
         mock_config = {
             "spawn_web_task": {
                 "status": "error",
-                "message": "spawn_web_task disabled - use http_request for API calls"
+                "message": "Browser work is unnecessary for a structured market quote."
+            },
+            "run_command": {
+                "status": "error",
+                "message": "Shell network access is disabled in this eval; use an available structured-data tool."
             },
             "mcp_brightdata_search_engine": {
                 "status": "ok",
@@ -134,6 +158,26 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
                     "Found free Bitcoin price API: "
                     "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
                 )
+            },
+            "mcp_brightdata_web_data_yahoo_finance_business": {
+                "status": "success",
+                "result": {
+                    "symbol": "BTC-USD",
+                    "regularMarketPrice": 68500.50,
+                    "currency": "USD",
+                    "marketState": "REGULAR",
+                },
+                "content": {
+                    "items": [
+                        {
+                            "symbol": "BTC-USD",
+                            "regularMarketPrice": 68500.50,
+                            "currency": "USD",
+                            "marketState": "REGULAR",
+                        }
+                    ],
+                    "match_count": 1,
+                },
             },
             "http_request": {
                 "rules": [
@@ -173,6 +217,9 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_tool_names": ["spawn_web_task", "run_command"],
+                },
             )
 
         self.record_task_result(
@@ -180,119 +227,48 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             observed_summary="Injected Bitcoin price prompt"
         )
 
-        # Verify efficient tool usage (no spawn_web_task)
+        # A dedicated finance/API tool is both safer and cheaper than a browser or shell process.
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_efficient_tool_usage")
 
-        spawn_calls = PersistentAgentToolCall.objects.filter(
-            step__agent_id=agent_id,
+        inefficient_calls = PersistentAgentToolCall.objects.filter(
+            step__eval_run_id=run_id,
             step__created_at__gte=btc_msg.timestamp,
-            tool_name='spawn_web_task'
+            tool_name__in=("spawn_web_task", "run_command"),
         )
 
-        if spawn_calls.exists():
+        if inefficient_calls.exists():
+            names = list(inefficient_calls.values_list("tool_name", flat=True))
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.FAILED, task_name="verify_efficient_tool_usage",
-                observed_summary="Agent used 'spawn_web_task'. Expected API usage only."
-            )
-            return
-
-        self.record_task_result(
-            run_id, None, EvalRunTask.Status.PASSED, task_name="verify_efficient_tool_usage",
-            observed_summary="Agent avoided 'spawn_web_task'."
-        )
-
-        # Verify mcp_brightdata_search_engine query pattern
-        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_search_query_pattern")
-
-        search_calls = PersistentAgentToolCall.objects.filter(
-            step__agent_id=agent_id,
-            step__created_at__gte=btc_msg.timestamp,
-            tool_name='mcp_brightdata_search_engine'
-        ).order_by('step__created_at')
-
-        http_calls = PersistentAgentToolCall.objects.filter(
-            step__agent_id=agent_id,
-            step__created_at__gte=btc_msg.timestamp,
-            tool_name='http_request'
-        )
-        http_request_to_expected_api = bitcoin_tool_calls_include_supported_price_api(http_calls)
-
-        if not search_calls.exists():
-            if http_calls.exists():
-                self.record_task_result(
-                    run_id, None, EvalRunTask.Status.PASSED, task_name="verify_search_query_pattern",
-                    observed_summary="Agent skipped search and called API directly (Optimal behavior)."
-                )
-            else:
-                self.record_task_result(
-                    run_id, None, EvalRunTask.Status.PASSED, task_name="verify_search_query_pattern",
-                    observed_summary="No search performed."
-                )
-        else:
-            first_search = search_calls.first()
-            first_query = (first_search.tool_params or {}).get('query', '')
-
-            if http_request_to_expected_api:
-                self.record_task_result(
-                    run_id, None, EvalRunTask.Status.PASSED, task_name="verify_search_query_pattern",
-                    observed_summary=(
-                        "Search wording was generic, but the agent converted it into a supported API request."
-                    ),
-                    artifacts={"query": first_query}
-                )
-            else:
-                judge_prompt = (
-                    f"Analyze the following search query: '{first_query}'. "
-                    "Does it indicate an attempt to find an API, data source, or programmatic interface? "
-                    "If the query contains words like 'API', 'endpoint', 'JSON', or 'docs', answer 'Yes'."
-                )
-                choice, reasoning = self.llm_judge(
-                    question=judge_prompt,
-                    context=f"Agent's goal: find Bitcoin price. First search query: '{first_query}'",
-                    options=["Yes", "No"]
-                )
-                if choice == "Yes":
-                    self.record_task_result(
-                        run_id, None, EvalRunTask.Status.PASSED, task_name="verify_search_query_pattern",
-                        observed_summary=f"Search query indicated API/Data intent. Reasoning: {reasoning}",
-                        artifacts={"query": first_query}
-                    )
-                else:
-                    self.record_task_result(
-                        run_id, None, EvalRunTask.Status.FAILED, task_name="verify_search_query_pattern",
-                        observed_summary=f"Search query did NOT indicate API/Data intent. Reasoning: {reasoning}",
-                        artifacts={"query": first_query}
-                    )
-
-        # Verify http_request after search
-        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_http_request_after_search")
-
-        if not http_calls.exists():
-            self.record_task_result(
-                run_id, None, EvalRunTask.Status.FAILED, task_name="verify_http_request_after_search",
-                observed_summary="Agent did not call http_request after finding an API URL via search."
-            )
-            return
-
-        if http_request_to_expected_api:
-            self.record_task_result(
-                run_id, None, EvalRunTask.Status.PASSED, task_name="verify_http_request_after_search",
-                observed_summary="Agent correctly made http_request to a supported Bitcoin price API endpoint."
+                observed_summary=f"Agent used an unnecessary browser/shell path: {names}."
             )
         else:
-            seen_urls = [
-                (call.tool_params or {}).get("url", "")
-                for call in http_calls
-                if (call.tool_params or {}).get("url", "")
-            ]
             self.record_task_result(
-                run_id, None, EvalRunTask.Status.FAILED, task_name="verify_http_request_after_search",
-                observed_summary=(
-                    "Agent did not make http_request to a supported Bitcoin price API endpoint. "
-                    f"Seen URLs: {seen_urls}"
-                )
+                run_id, None, EvalRunTask.Status.PASSED, task_name="verify_efficient_tool_usage",
+                observed_summary="Agent avoided browser and shell work for the quote."
             )
-            return
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_structured_price_source")
+        retrieval_calls = list(
+            PersistentAgentToolCall.objects.filter(
+                step__eval_run_id=run_id,
+                step__created_at__gte=btc_msg.timestamp,
+                tool_name__in=("http_request", "mcp_brightdata_web_data_yahoo_finance_business"),
+            ).order_by("step__created_at")
+        )
+        used_price_api = bitcoin_tool_calls_include_supported_price_api(retrieval_calls)
+        used_finance_lookup = bitcoin_tool_calls_include_supported_finance_lookup(retrieval_calls)
+        if used_price_api or used_finance_lookup:
+            source = "supported price API" if used_price_api else "finance market-data lookup"
+            self.record_task_result(
+                run_id, None, EvalRunTask.Status.PASSED, task_name="verify_structured_price_source",
+                observed_summary=f"Agent retrieved Bitcoin/USD through a {source}."
+            )
+        else:
+            self.record_task_result(
+                run_id, None, EvalRunTask.Status.FAILED, task_name="verify_structured_price_source",
+                observed_summary="Agent did not complete a supported structured Bitcoin/USD lookup."
+            )
 
         # Verify final response
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_bitcoin_response")

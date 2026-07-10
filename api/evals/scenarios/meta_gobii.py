@@ -17,13 +17,16 @@ from api.evals.meta_gobii import (
     ENABLE_SYSTEM_SKILLS_TOOL_NAME,
     LEGACY_SPAWN_TOOL_NAME,
     META_GOBII_EVAL_CASES,
+    META_GOBII_SCORER_FINGERPRINT_DEPENDENCIES,
+    META_GOBII_SCORER_FINGERPRINT_DATA,
     META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS,
     MUTATING_META_GOBII_TOOLS,
-    SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
+    SCHEDULE_EXPECTATION_INFERRED,
     SCHEDULE_EXPECTATION_EXPLICIT,
     SCHEDULE_EXPECTATION_NONE,
     SKILL_SEARCH_TOOL_NAME,
     MetaGobiiEvalCase,
+    _has_expected_supporting_tool,
     score_meta_gobii_case,
 )
 from api.evals.registry import ScenarioRegistry
@@ -161,7 +164,7 @@ def _record_plan_tool() -> dict[str, Any]:
                         "items": {"type": "string", "enum": allowed_tool_names},
                         "description": (
                             "Complete post-approval lifecycle, using each direct tool name once in first-use order. "
-                            "Include create/link/message tools when the user asked to create, deploy, link, or brief. "
+                            "Include every link/unlink mutation named in the rationale. "
                             "Any newly created Gobii that will do work needs meta_gobii_send_agent_message for its "
                             "initial briefing."
                         ),
@@ -188,8 +191,8 @@ def _record_plan_tool() -> dict[str, Any]:
                         "minimum": 0,
                         "description": (
                             "Number of new or requested Gobiis in the plan, including prototype, temporary, "
-                            "exploratory, audit, and capability-test teams. Team requests must be at least 2 "
-                            "Gobiis unless the user gives an exact count of 1."
+                            "exploratory, audit, and capability-test teams. Team always means at least 2 Gobiis "
+                            "unless the user explicitly gives a count of 1; never collapse a team into one role."
                         ),
                     },
                     "planned_role_names": {
@@ -201,8 +204,9 @@ def _record_plan_tool() -> dict[str, Any]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "Only unrequested domains, schedules, contacts, files, extra agents, or extra actions. "
-                            "Do not list high-impact actions here when the user explicitly requested them."
+                            "Only unrequested actions the plan will actually perform. Never put exclusions or "
+                            "conditional policy/guardrails here, or copy schedule guidance into this field. Do not "
+                            "list high-impact actions here when the user explicitly requested them."
                         ),
                         "maxItems": 8,
                     },
@@ -213,8 +217,8 @@ def _record_plan_tool() -> dict[str, Any]:
                             "schedule_in_scope": {
                                 "type": "boolean",
                                 "description": (
-                                    "True only when schedule creation/change/removal is explicitly in scope, including "
-                                    "monthly/weekly/daily reports, packets, digests, checks, or check-ins."
+                                    "True for schedule creation/change/removal and ongoing monitor/watch/follow-up roles "
+                                    "that need a disclosed default cadence. Charter/briefing cadence text is not execution."
                                 ),
                             },
                             "schedule_action": {
@@ -232,14 +236,13 @@ def _record_plan_tool() -> dict[str, Any]:
                             },
                             "cadence_or_schedule": {
                                 "type": "string",
-                                "description": "User-requested cadence or schedule phrase, or empty when none is in scope.",
+                                "description": "User-requested cadence or disclosed reversible default; empty when none is in scope.",
                             },
                             "explicit_schedule_intent": {
                                 "type": "boolean",
                                 "description": (
-                                    "True only when the user explicitly requested scheduled, recurring, ongoing, "
-                                    "proactive, or cadence-based behavior. This is only about schedule/recurrence "
-                                    "intent, not whether the user explicitly asked for some other Meta Gobii action."
+                                    "True when the user supplied a cadence or explicitly requested scheduled/recurring "
+                                    "execution. False when a clearly ongoing role receives a sensible default cadence."
                                 ),
                             },
                             "included_in_approval_scope": {
@@ -252,7 +255,7 @@ def _record_plan_tool() -> dict[str, Any]:
                             },
                             "asks_clarifying_question": {
                                 "type": "boolean",
-                                "description": "True when ambiguous recurring intent is handled by asking for cadence/schedule clarification.",
+                                "description": "True only when lifecycle or cadence cannot be safely defaulted and needs clarification.",
                             },
                             "rationale": {"type": "string"},
                         },
@@ -269,7 +272,10 @@ def _record_plan_tool() -> dict[str, Any]:
                     },
                     "contact_output_policy": {
                         "type": "string",
-                        "description": "How user-facing output should handle contact email/phone values.",
+                        "description": (
+                            "State that user-facing output avoids, masks, or redacts full email/phone values; use "
+                            "'not applicable' only when no contacts are involved."
+                        ),
                     },
                     "rationale": {"type": "string"},
                 },
@@ -291,7 +297,7 @@ def _record_plan_tool() -> dict[str, Any]:
     }
 
 
-def _record_response_tool() -> dict[str, Any]:
+def _record_response_tool(*, requires_briefing: bool = False) -> dict[str, Any]:
     return {
         "type": "function",
         "function": {
@@ -308,7 +314,8 @@ def _record_response_tool() -> dict[str, Any]:
                         "description": (
                             "The exact concise user-facing response the agent would send. If the recorded plan needs "
                             "human confirmation, this text must explicitly ask the user to approve or confirm before "
-                            "mutations."
+                            "mutations. Never echo raw email addresses or phone numbers; use a role, masked value, "
+                            "or generic contact reference."
                         ),
                     },
                     "proposed_roles": {
@@ -341,6 +348,7 @@ def _record_response_tool() -> dict[str, Any]:
                             "when the recorded plan includes meta_gobii_send_agent_message; include one concise line "
                             "per proposed or affected Gobii when roles are known."
                         ),
+                        **({"minItems": 1} if requires_briefing else {}),
                         "maxItems": 8,
                     },
                     "asks_for_approval": {
@@ -425,9 +433,17 @@ def _tool_argument_is_missing(value: Any, property_schema: dict[str, Any]) -> bo
 
 
 class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
+    fingerprint_dependencies = (
+        *META_GOBII_SCORER_FINGERPRINT_DEPENDENCIES,
+        _is_retryable_llm_error,
+        _record_plan_tool,
+        _record_response_tool,
+        _missing_required_tool_arguments,
+    )
+    fingerprint_data = META_GOBII_SCORER_FINGERPRINT_DATA
     description = "Evaluates Meta Gobii system-skill selection, tool planning, and approval policy."
     supports_simulation = True
-    tier = "core"
+    tier = "contract"
     category = "meta_gobii"
     expected_runtime = "short"
     cost_class = "low"
@@ -580,8 +596,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             EvalRunTask.Status.RUNNING,
             task_name="verify_schedule_scope",
             expected_summary=(
-                "Schedules should be omitted by default, included only for explicit recurring intent, and clarified "
-                "rather than invented for ambiguous ongoing work."
+                "One-off work should stay unscheduled; clearly ongoing roles should receive a disclosed sensible "
+                "default cadence when the user omits one."
             ),
         )
         self._record_score(run_id, "verify_schedule_scope", scores["schedule_scope"])
@@ -674,10 +690,9 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 )
             if case.expect_skill_search and not any(call["name"] == SKILL_SEARCH_TOOL_NAME for call in search_calls):
                 logger.warning(
-                    "Meta Gobii skill discovery fell back to deterministic case-derived facts after missing "
-                    "expected search tool call."
+                    "Meta Gobii skill discovery omitted the expected search tool call."
                 )
-                return self._simulated_skill_discovery(case)
+                return search_calls
             if not any(call["name"] == SKILL_SEARCH_TOOL_NAME for call in search_calls):
                 return search_calls
 
@@ -717,33 +732,31 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             )
             if case.expect_skill and not self._skill_selected(search_calls + enable_calls):
                 logger.warning(
-                    "Meta Gobii skill discovery fell back to deterministic case-derived facts after missing "
-                    "expected enable tool call or skill key."
+                    "Meta Gobii skill discovery omitted the expected enable tool call or skill key."
                 )
-                return self._simulated_skill_discovery(case)
             return search_calls + enable_calls
         except _RETRYABLE_LLM_ERRORS as exc:
             logger.warning(
-                "Meta Gobii skill discovery fell back to deterministic case-derived facts after %s.",
+                "Meta Gobii skill discovery failed after retryable %s.",
                 exc.__class__.__name__,
             )
-            return self._simulated_skill_discovery(case)
+            raise
         except APIError as exc:
             if not _is_retryable_llm_error(exc):
                 raise
             logger.warning(
-                "Meta Gobii skill discovery fell back to deterministic case-derived facts after retryable %s.",
+                "Meta Gobii skill discovery failed after retryable %s.",
                 exc.__class__.__name__,
             )
-            return self._simulated_skill_discovery(case)
+            raise
         except OpenAIError as exc:
             if not _is_retryable_llm_error(exc):
                 raise
             logger.warning(
-                "Meta Gobii skill discovery fell back to deterministic case-derived facts after retryable %s.",
+                "Meta Gobii skill discovery failed after retryable %s.",
                 exc.__class__.__name__,
             )
-            return self._simulated_skill_discovery(case)
+            raise
 
     def _run_plan_intent(self, case: MetaGobiiEvalCase, *, simulated: bool) -> list[dict[str, Any]]:
         if simulated:
@@ -765,8 +778,9 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "Set needs_human_confirmation=true before any mutating control-plane action, including create, "
                     "update, archive, link, unlink, message or brief other Gobiis, upload files, add/remove/approve "
                     "contacts, preferred endpoint changes, schedules, resource limits, or intelligence tiers. "
-                    "Also set needs_human_confirmation=true for meta_gobii_request_agent_creation, because that "
-                    "tool exists to generate the human Create/Decline approval request before the new Gobii exists. "
+                    "meta_gobii_request_agent_creation only opens the human Create/Decline flow; when the user asks "
+                    "for that request-only flow, set needs_human_confirmation=false instead of requiring a second "
+                    "confirmation before opening the approval request. "
                     "If the user has already explicitly approved an exact scoped operation, including phrasing "
                     "like 'Approved. Create only...' or 'Approved: create...', set needs_human_confirmation=false "
                     "and keep the tool plan to that exact approved scope. "
@@ -780,9 +794,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "specialist team, analyst team, scout team, or similar agent-like team, treat that as a "
                     "multi-Gobii team creation request even when the word Gobii is absent; do not downgrade it "
                     "to simulated personas or ordinary research. "
-                    "The word team means multiple Gobiis; if the user does not give an exact count, plan two to "
-                    "four complementary roles and link them. Temporary, exploratory, audit, demo, trial, and "
-                    "capability-test teams are still multi-Gobii teams. "
+                    "Team always means two to four complementary linked Gobiis unless the user gives an exact count; "
+                    "never collapse a temporary, exploratory, audit, demo, trial, or capability-test team to one. "
                     "A request to show the team design before creation means ask for approval first; it does not "
                     "remove create, link, or briefing steps from ordered_tools. "
                     "For a multi-Gobii team, include meta_gobii_link_agents. For any request to brief, hand off, "
@@ -790,11 +803,10 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "meta_gobii_send_agent_message as the explicit briefing/handoff step. "
                     "Briefing an audience is not a second Gobii; a request for one Gobii to do work and brief or "
                     "send updates remains one planned agent unless the user asks for a team or multiple Gobiis. "
-                    "If the user asks to restructure, reorganize, rewire, relink, add links, or fix a Gobii graph, "
-                    "include meta_gobii_list_agent_links and meta_gobii_link_agents; include unlink only when "
-                    "stale or weak links may need removal. "
-                    "Do not include meta_gobii_update_agent for graph restructure, link, unlink, or archive work "
-                    "unless the user asks to change name, charter, schedule, resources, availability, policy, or tier. "
+                    "Graph restructure/reorganize/rewire plans must inspect current links and name actual mutations: "
+                    "meta_gobii_link_agents for added/repaired links and meta_gobii_unlink_agents when stale or weak "
+                    "links may be removed. If the rationale names either mutation, ordered_tools must include it; "
+                    "never substitute meta_gobii_update_agent unless settings also change. "
                     "Whenever meta_gobii_create_agent will create a Gobii that is expected to do work, include "
                     "meta_gobii_send_agent_message to deliver the initial role/project briefing after approval; "
                     "the exception is an explicit request to use only the separate human Create/Decline request flow. "
@@ -805,23 +817,23 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "success, CRM notes, recruiting, sales, operations, or reporting. "
                     "For broad operations involving multiple Gobiis, require a higher-level confirmation summary "
                     "before planning mutations as executable. "
-                    "Schedule policy: do not place schedules in scope for one-off, demo, setup-only, trial, "
-                    "prototype, exploratory, backfill, cleanup, research, candidate-screening, sales-list, "
-                    "project-team, reorganize, archive, link/unlink, resource, contact, file, or make-available "
-                    "requests unless the user explicitly asks for scheduled, recurring, ongoing, proactive, digest, "
-                    "watch, check-in, or cadence-based behavior. Ambiguous words such as monitor, watch, keep tabs, "
-                    "research, or follow up should not invent a cadence; either keep schedule_in_scope=false or ask "
-                    "a clarifying schedule question with schedule_action=clarify. If schedule_in_scope=false and "
-                    "the plan is not asking a clarifying schedule question, schedule_action must be none. "
-                    "When a schedule is in scope, "
-                    "schedule_policy must include the explicit cadence/removal and included_in_approval_scope=true. "
+                    "Hard schedule invariant, first match wins: (1) explicit once/one-off/batch/not-standing/no-recurring => none; "
+                    "(2) explicit cadence/scheduled/recurring => in scope; (3) any monitor/monitoring/watch/keep-tabs/follow-up request "
+                    "(including lead and customer-success churn-risk follow-up) => in scope with a sensible reversible default and "
+                    "explicit_schedule_intent=false; (4) otherwise none. Missing cadence triggers rule 3's default. Rules 2–3 require "
+                    "included_in_approval_scope=true and a concrete cadence; charter/briefing cadence cannot trigger runs. For a new "
+                    "Gobii put the approved cadence in meta_gobii_create_agent and use schedule_action=create; never add "
+                    "meta_gobii_update_agent merely to attach it. Existing => update; stopping => remove. "
                     "Do not add extra team members, domains, schedules, contacts, files, or scenarios the user did "
-                    "not ask for; record any accidental extras in extra_scope_items and in schedule_policy. "
+                    "not ask for. extra_scope_items records only extras the plan will actually perform, never "
+                    "negative constraints, conditional policy, or copied schedule guidance. "
                     "Do not put actions the user explicitly requested, such as archive redundant agents, relink "
                     "agents, or raise daily credit/resource limits, into extra_scope_items merely because they are "
                     "high-impact; require confirmation instead. "
                     "For pending contact approval requests, plan to inspect pending contacts before approving or "
-                    "rejecting the requested contact. "
+                    "rejecting the requested contact. To ensure an approved contact receives updates, inspect its "
+                    "endpoints and use meta_gobii_set_preferred_contact_endpoint; meta_gobii_update_agent cannot "
+                    "change contact routing. "
                     "When the user names existing Gobiis or says update, change, rename, activate, make available, "
                     "remove, or leave everything else as-is, inspect the existing agent and use meta_gobii_update_agent; "
                     "do not plan meta_gobii_create_agent for that existing-agent request. "
@@ -830,22 +842,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "When the user asks to create a Gobii or team and also asks to brief, hand off, follow up, send "
                     "updates, or explain initial work, include meta_gobii_send_agent_message as the briefing step; "
                     "creating or updating the charter is not a substitute for the initial briefing. "
-                    "Treat explicit cadence words such as daily, weekly, weekday, monthly, every morning, scheduled, "
-                    "recurring, proactively, digest, report, check, and check-in as schedule_in_scope=true. "
-                    "For a new Gobii that compiles a monthly/weekly/daily report, digest, packet, summary, or "
-                    "check-in, treat the cadence as recurring schedule intent unless the user explicitly says it is "
-                    "one-time, historical, setup-only, or not recurring. "
-                    "Cadence words override generic create/setup wording; do not dismiss monthly board reports or "
-                    "packets as content-only when the Gobii is being created to compile them. "
-                    "schedule_action describes the target Gobii lifecycle, not whether the schedule row itself is "
-                    "new. Use schedule_action=create only for a newly created Gobii/team, update for an existing "
-                    "named Gobii even when adding a new cadence to that Gobii, remove for removing an existing "
-                    "schedule, clarify only when cadence is ambiguous and a clarification question is asked, and "
-                    "none when no schedule change or clarification is in scope. "
-                    "If the user says remove the schedule, stop running automatically, disable a cadence, or clear "
-                    "recurring work, schedule_action must be remove, not update. "
-                    "For contact scenarios, the contact_output_policy must say to avoid or redact full email or phone "
-                    "values in user-facing summaries unless needed.\n\n"
+                    "For contact scenarios, the contact_output_policy must forbid full email or phone values in user-facing summaries.\n\n"
                     "Meta Gobii system skill instructions:\n"
                     f"{_system_skill_prompt_text()}"
                 ),
@@ -866,35 +863,33 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 tool_choice={"type": "function", "function": {"name": "record_meta_gobii_plan"}},
             )
             plan_args = self._plan_args(plan_calls)
-            if self._plan_args_need_fallback(case, plan_args):
+            if self._plan_args_are_invalid(case, plan_args):
                 logger.warning(
-                    "Meta Gobii plan recording fell back to deterministic case-derived facts after incomplete "
-                    "or inconsistent plan arguments."
+                    "Meta Gobii plan recording returned incomplete or inconsistent plan arguments."
                 )
-                return [{"name": "record_meta_gobii_plan", "arguments": self._simulated_plan_args(case)}]
             return plan_calls
         except _RETRYABLE_LLM_ERRORS as exc:
             logger.warning(
-                "Meta Gobii plan recording fell back to deterministic case-derived facts after %s.",
+                "Meta Gobii plan recording failed after retryable %s.",
                 exc.__class__.__name__,
             )
-            return [{"name": "record_meta_gobii_plan", "arguments": self._simulated_plan_args(case)}]
+            raise
         except APIError as exc:
             if not _is_retryable_llm_error(exc):
                 raise
             logger.warning(
-                "Meta Gobii plan recording fell back to deterministic case-derived facts after retryable %s.",
+                "Meta Gobii plan recording failed after retryable %s.",
                 exc.__class__.__name__,
             )
-            return [{"name": "record_meta_gobii_plan", "arguments": self._simulated_plan_args(case)}]
+            raise
         except OpenAIError as exc:
             if not _is_retryable_llm_error(exc):
                 raise
             logger.warning(
-                "Meta Gobii plan recording fell back to deterministic case-derived facts after retryable %s.",
+                "Meta Gobii plan recording failed after retryable %s.",
                 exc.__class__.__name__,
             )
-            return [{"name": "record_meta_gobii_plan", "arguments": self._simulated_plan_args(case)}]
+            raise
 
     def _run_response_intent(
         self,
@@ -921,6 +916,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "meta_gobii_send_agent_message, initial_briefings must include the messages to send after "
                     "approval; creating or updating the charter is not a substitute. If briefing messages are not "
                     "already written, synthesize concise role/project briefings from planned_role_names. "
+                    "Record the proposal now; never claim inspection/tools ran or invent results. "
                     "Do not paste the same initial briefing text into response_text more than once; when "
                     "initial_briefings records exact briefings, response_text should summarize the proposal "
                     "instead of quoting those same briefings repeatedly. "
@@ -928,9 +924,9 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "include explicit approval, asks_for_approval must be true. "
                     "After explicit approval, state the exact approved action and avoid extra roles, domains, "
                     "schedules, contacts, files, or invented scenarios. "
-                    "For schedules, do not include recurring work in the approval scope unless the user asked for a "
-                    "cadence or ongoing/proactive behavior. For ambiguous ongoing language without a cadence, either "
-                    "ask a clarifying schedule question or leave schedules out of the proposal. "
+                    "For schedules, do not include recurring work unless the user asked for cadence or clearly "
+                    "ongoing/proactive behavior. For a clearly ongoing role without cadence, disclose a sensible "
+                    "reversible default in the approval proposal instead of asking. "
                     "Use the system skill instructions below as authoritative.\n\n"
                     "Meta Gobii system skill instructions:\n"
                     f"{_system_skill_prompt_text()}"
@@ -956,32 +952,38 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         try:
             return self._run_tool_completion(
                 messages=messages,
-                tools=[_record_response_tool()],
+                tools=[
+                    _record_response_tool(
+                        requires_briefing=(
+                            "meta_gobii_send_agent_message"
+                            in {str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])}
+                        )
+                    )
+                ],
                 tool_choice={"type": "function", "function": {"name": "record_meta_gobii_response"}},
-                retry_delays=(),
             )
         except _RETRYABLE_LLM_ERRORS as exc:
             logger.warning(
-                "Meta Gobii response recording fell back to deterministic plan-derived facts after %s.",
+                "Meta Gobii response recording failed after retryable %s.",
                 exc.__class__.__name__,
             )
-            return [{"name": "record_meta_gobii_response", "arguments": self._response_args_from_plan(case, plan_args)}]
+            raise
         except APIError as exc:
             if not _is_retryable_llm_error(exc):
                 raise
             logger.warning(
-                "Meta Gobii response recording fell back to deterministic plan-derived facts after retryable %s.",
+                "Meta Gobii response recording failed after retryable %s.",
                 exc.__class__.__name__,
             )
-            return [{"name": "record_meta_gobii_response", "arguments": self._response_args_from_plan(case, plan_args)}]
+            raise
         except OpenAIError as exc:
             if not _is_retryable_llm_error(exc):
                 raise
             logger.warning(
-                "Meta Gobii response recording fell back to deterministic plan-derived facts after retryable %s.",
+                "Meta Gobii response recording failed after retryable %s.",
                 exc.__class__.__name__,
             )
-            return [{"name": "record_meta_gobii_response", "arguments": self._response_args_from_plan(case, plan_args)}]
+            raise
 
     def _run_tool_completion(
         self,
@@ -1152,16 +1154,23 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         return {}
 
     @staticmethod
-    def _plan_args_need_fallback(case: MetaGobiiEvalCase, plan_args: dict[str, Any]) -> bool:
+    def _plan_args_are_invalid(case: MetaGobiiEvalCase, plan_args: dict[str, Any]) -> bool:
         if not case.expect_skill:
             return False
 
         ordered_tools = [str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])]
+        tools_before_approval = [
+            str(tool_name) for tool_name in (plan_args.get("tools_before_approval") or [])
+        ]
+        planned_tools = [*ordered_tools, *tools_before_approval]
         if not plan_args.get("skill_needed"):
             return True
         if any(tool_name not in ordered_tools for tool_name in case.expected_tools):
             return True
-        if case.expected_any_tools and not any(tool_name in ordered_tools for tool_name in case.expected_any_tools):
+        if (
+            case.expected_any_tools
+            and not _has_expected_supporting_tool(case.expected_any_tools, planned_tools)
+        ):
             return True
         if case.expect_confirmation is not None and bool(plan_args.get("needs_human_confirmation")) != case.expect_confirmation:
             return True
@@ -1180,72 +1189,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         plan_args: dict[str, Any],
         response_args: dict[str, Any],
     ) -> dict[str, Any]:
-        normalized = dict(response_args or {})
-        derived_args = MetaGobiiSystemSkillScenario._response_args_from_plan(case, plan_args)
-        ordered_tools = {str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])}
-
-        if not normalized.get("response_text"):
-            normalized["response_text"] = derived_args["response_text"]
-        if not normalized.get("proposed_roles"):
-            normalized["proposed_roles"] = derived_args["proposed_roles"]
-        if "meta_gobii_link_agents" in ordered_tools and not normalized.get("proposed_links"):
-            normalized["proposed_links"] = derived_args["proposed_links"]
-        if "meta_gobii_send_agent_message" in ordered_tools and not normalized.get("initial_briefings"):
-            normalized["initial_briefings"] = derived_args["initial_briefings"]
-        if plan_args.get("needs_human_confirmation") and not normalized.get("asks_for_approval"):
-            normalized["asks_for_approval"] = derived_args["asks_for_approval"]
-        if "extra_scope_items" not in normalized:
-            normalized["extra_scope_items"] = derived_args["extra_scope_items"]
-        return normalized
-
-    @staticmethod
-    def _response_args_from_plan(case: MetaGobiiEvalCase, plan_args: dict[str, Any]) -> dict[str, Any]:
-        role_names = [str(role_name) for role_name in (plan_args.get("planned_role_names") or []) if str(role_name)]
-        if not role_names and (case.min_planned_agents or case.max_planned_agents):
-            role_names = _simulated_role_names(case)
-
-        required_terms = [term for term in case.required_role_terms if term]
-        scope_note = f" Focus on: {', '.join(required_terms)}." if required_terms else ""
-        roles = [
-            {
-                "name": role_name,
-                "responsibility": f"Own the {role_name.lower()} scope requested by the user.{scope_note}",
-            }
-            for role_name in role_names
-        ]
-        ordered_tools = {str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])}
-        proposed_links = []
-        if "meta_gobii_link_agents" in ordered_tools and len(role_names) > 1:
-            proposed_links = [
-                f"{role_names[index]} <-> {role_names[index + 1]}"
-                for index in range(len(role_names) - 1)
-            ]
-        initial_briefings = []
-        if "meta_gobii_send_agent_message" in ordered_tools:
-            initial_briefings = [
-                f"{role_name}: execute the requested {role_name.lower()} workstream.{scope_note} Coordinate with linked Gobiis."
-                for role_name in role_names
-            ]
-
-        if plan_args.get("needs_human_confirmation"):
-            response_text = (
-                "Please approve this Meta Gobii plan before I create, link, message, or modify any Gobiis."
-                f"{scope_note}"
-            )
-        else:
-            response_text = (
-                "I will carry out the approved Meta Gobii scope without adding extra roles or schedules."
-                f"{scope_note}"
-            )
-
-        return {
-            "response_text": response_text,
-            "proposed_roles": roles,
-            "proposed_links": proposed_links,
-            "initial_briefings": initial_briefings,
-            "asks_for_approval": bool(plan_args.get("needs_human_confirmation")),
-            "extra_scope_items": list(plan_args.get("extra_scope_items") or []),
-        }
+        return dict(response_args or {})
 
     @staticmethod
     def _assistant_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1391,7 +1335,7 @@ class MetaGobiiImplicitResearchTeamRealHarnessScenario(EvalScenario, ScenarioExe
     prompt = IMPLICIT_RESEARCH_TEAM_PROMPT
     bad_path_tool_names = _BAD_IMPLICIT_TEAM_TOOL_NAMES
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_skill_search", assertion_type="tool_call"),
         ScenarioTask(name="verify_meta_gobii_enabled", assertion_type="tool_call"),
         ScenarioTask(name="verify_no_research_persona_path", assertion_type="tool_call"),
@@ -1812,7 +1756,7 @@ class MetaGobiiSpecialistAgentLaunchRealHarnessScenario(MetaGobiiImplicitResearc
     supports_simulation = True
     prompt = SPECIALIST_AGENT_LAUNCH_PROMPT
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_skill_search", assertion_type="tool_call"),
         ScenarioTask(name="verify_meta_gobii_enabled", assertion_type="tool_call"),
         ScenarioTask(name="verify_meta_gobii_surface_used", assertion_type="tool_call"),
@@ -2029,15 +1973,15 @@ def _simulated_schedule_policy(case: MetaGobiiEvalCase) -> dict[str, Any]:
             "asks_clarifying_question": False,
             "rationale": "The user explicitly requested scheduled or recurring work.",
         }
-    if case.schedule_expectation == SCHEDULE_EXPECTATION_CLARIFY_OR_NONE:
+    if case.schedule_expectation == SCHEDULE_EXPECTATION_INFERRED:
         return {
-            "schedule_in_scope": False,
-            "schedule_action": "clarify",
-            "cadence_or_schedule": "",
+            "schedule_in_scope": True,
+            "schedule_action": case.expected_schedule_change_kind or "create",
+            "cadence_or_schedule": "daily",
             "explicit_schedule_intent": False,
-            "included_in_approval_scope": False,
-            "asks_clarifying_question": True,
-            "rationale": "The prompt hints at ongoing work but does not provide a cadence.",
+            "included_in_approval_scope": True,
+            "asks_clarifying_question": False,
+            "rationale": "The role is ongoing, so the proposal discloses a reversible default cadence.",
         }
     return {
         "schedule_in_scope": False,

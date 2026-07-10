@@ -21,6 +21,7 @@ from allauth.account.models import EmailAddress
 
 from api.agent.core.event_processing import (
     OrchestratorPromptStale,
+    _apply_eval_mock_runtime_semantics,
     _completion_with_failover,
     _execute_tool_call_runtime,
     _execute_prepared_tool_call,
@@ -29,6 +30,8 @@ from api.agent.core.event_processing import (
     _latest_inbound_message_needs_reply,
     _should_continue_for_pending_progress_reply,
     _should_continue_for_unanswered_inbound_after_tools,
+    _should_build_implied_send,
+    _should_infer_message_tool_continuation,
     _tool_definition_names_for_completion,
     _persist_tool_call_step,
     build_prompt_context,
@@ -617,10 +620,31 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(system_message)
         assert system_message is not None
         system_content = system_message["content"]
-        self.assertIn("Use `update_plan` only for substantial multi-step work", system_content)
-        self.assertIn("Keep plans short, current, and verifiable", system_content)
-        self.assertIn("each call replaces the full active plan", system_content)
-        self.assertIn("Send the final user-facing report before any final completion update", system_content)
+        self.assertIn(
+            "Use `update_plan` only for substantial multi-step work",
+            system_content,
+        )
+        self.assertIn("Keep it current", system_content)
+        self.assertIn(
+            "deliver the result before marking it complete",
+            system_content,
+        )
+
+    def test_prompt_scopes_recurring_setup_and_uses_saved_timezone(self):
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_content = next(message for message in context if message["role"] == "system")["content"]
+        user_content = next(message for message in context if message["role"] == "user")["content"]
+        self.assertIn("NULL disables recurrence", system_content)
+        self.assertIn("Default cadence, target, and active delivery channel during setup", system_content)
+        self.assertIn("ordinary scheduled runs preserve both", system_content)
+        self.assertIn("saved/requested IANA timezone", system_content)
+        self.assertIn("if none exists, use UTC and disclose it", system_content)
+        self.assertNotIn("Use `CRON_TZ=America/New_York", system_content)
+        self.assertIn("cron shorthands and `@every` intervals are also valid", user_content)
+        self.assertIn("Prefix `CRON_TZ=Area/City ` only to cron", user_content)
 
     def test_update_plan_tool_execution_does_not_refresh_runtime_planning_system_skill(self):
         prepared = _PreparedToolExecution(
@@ -998,7 +1022,7 @@ class PromptContextBuilderTests(TestCase):
         user_message = next((m for m in context if m["role"] == "user"), None)
         self.assertIsNotNone(system_message)
         self.assertIsNotNone(user_message)
-        self.assertIn("configure-authorized organization members", system_message["content"])
+        self.assertIn("authorized organization members", system_message["content"])
         self.assertIn(f"- email: {admin.email} [org admin - can configure] - Admin User", user_message["content"])
         self.assertIn(
             f"- email: {solutions_partner.email} [org solutions_partner - can configure] - Solutions Partner",
@@ -1201,7 +1225,6 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('</current_datetime>', content)
         self.assertIn('<pacing_guidance>', content)
         self.assertIn('<time_since_last_interaction>', content)
-        self.assertIn('<burn_rate_status>', content)
 
     def test_current_datetime_includes_user_local_time_when_timezone_saved(self):
         UserPreference.update_known_preferences(
@@ -1239,7 +1262,7 @@ class PromptContextBuilderTests(TestCase):
         content = user_message["content"]
         self.assertIn("UTC: 2026-03-10T16:00:00+00:00", content)
         self.assertNotIn("User local time", content)
-        self.assertIn("Note user's TZ may be different", content)
+        self.assertIn("Use UTC for reversible defaults and disclose it", content)
 
     def test_current_datetime_helper_handles_agent_without_user(self):
         frozen_now = datetime(2026, 3, 10, 16, 0, 0, tzinfo=dt_timezone.utc)
@@ -1251,7 +1274,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIn("UTC: 2026-03-10T16:00:00+00:00", content)
         self.assertNotIn("User local time", content)
-        self.assertIn("Note user's TZ may be different", note)
+        self.assertIn("Use UTC for reversible defaults and disclose it", note)
 
     def test_unified_history_message_headers_omit_recent_age_suffix(self):
         message = PersistentAgentMessage.objects.create(
@@ -1303,14 +1326,7 @@ class PromptContextBuilderTests(TestCase):
         user_content = user_message["content"]
         combined = f"{system_content}\n{user_content}"
 
-        self.assertRegex(
-            combined,
-            re.compile(r"Use\s+__messages.*not freshness checks", re.IGNORECASE),
-        )
-        self.assertRegex(
-            combined,
-            re.compile(r"Use\s+__messages\s+only\s+for\s+structured\s+analysis/history", re.IGNORECASE),
-        )
+        self.assertIn("`__messages` communication history", combined)
         self.assertRegex(
             combined,
             re.compile(r"<unified_history>.*Fresh inbound message for this run", re.IGNORECASE | re.DOTALL),
@@ -1343,16 +1359,12 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIsNotNone(system_message)
         self.assertIn("## Planning Mode", system_message["content"])
-        self.assertIn("If there is no concrete task to do yet, your first action should be one concise welcome message", system_message["content"])
-        self.assertIn("After the welcome, continue Planning Mode", system_message["content"])
-        self.assertIn("Stay in planning only until planning is completed or skipped", system_message["content"])
-        self.assertIn("Use read-only research during planning only when the scope is unclear", system_message["content"])
-        self.assertIn("substantive execution or deliverable work before planning ends", system_message["content"])
-        self.assertIn(
-            "Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them",
-            system_message["content"],
-        )
-        self.assertNotIn("delivery cadence", system_message["content"])
+        self.assertIn("## First planning turn", system_message["content"])
+        self.assertIn("Do not send a standalone welcome or progress promise", system_message["content"])
+        self.assertIn("If the task is clear, call `end_planning` now", system_message["content"])
+        self.assertIn("If a material question remains, use `request_human_input`", system_message["content"])
+        self.assertIn("saved/requested IANA timezone", system_message["content"])
+        self.assertIn("otherwise UTC", system_message["content"])
         self.assertNotIn("## Signup Preview Handoff", system_message["content"])
         self.assertNotIn("## Signup Preview First-Run Override", system_message["content"])
         self.assertNotIn("limited preview", system_message["content"])
@@ -1501,7 +1513,7 @@ class PromptContextBuilderTests(TestCase):
         content = user_message["content"]
         self.assertIn("<user_identity>", content)
         self.assertIn(
-            "In shared chats, address the most recent inbound sender from unified history/recent contacts;",
+            "In shared chats, address the latest inbound sender rather than assuming it is the owner.",
             content,
         )
 
@@ -1714,10 +1726,10 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(user_message)
         content = user_message["content"]
 
-        self.assertIn(
-            "Use read_file for contents of known filespace paths; use sqlite_batch on __tool_results, __files, or __contacts only for prior outputs, file metadata, or contact authority.",
-            content,
-        )
+        self.assertIn("SQLite snapshots: `__tool_results` prior outputs", content)
+        self.assertIn("__files file metadata", content)
+        self.assertIn("__contacts contact authority", content)
+        self.assertIn("`read_file` gets file contents", content)
         self.assertNotIn("Query __tool_results and __files with sqlite_batch (not read_file).", content)
 
     def test_recent_contacts_include_email_message_id(self):
@@ -2065,7 +2077,7 @@ class PromptContextBuilderTests(TestCase):
         ]
         self.assertIn("send_chat_message", tool_names)
 
-    def test_prompt_adds_retry_hint_when_send_chat_message_unavailable(self):
+    def test_prompt_requires_send_tools_when_implied_send_unavailable(self):
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, _ = build_prompt_context(self.agent)
@@ -2073,12 +2085,9 @@ class PromptContextBuilderTests(TestCase):
         system_message = next((m for m in context if m['role'] == 'system'), None)
         self.assertIsNotNone(system_message)
         content = system_message["content"]
+        self.assertIn("Response text is not delivered in this mode", content)
         self.assertIn(
-            "use send_ tools for questions, blockers, findings, config changes, and final deliverables",
-            content,
-        )
-        self.assertIn(
-            "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts",
+            "Use `send_chat_message`, `send_email`, `send_sms`, or `send_agent_message` for user-facing communication",
             content,
         )
 
@@ -2091,7 +2100,8 @@ class PromptContextBuilderTests(TestCase):
         system_message = next((m for m in context if m['role'] == 'system'), None)
         self.assertIsNotNone(system_message)
         content = system_message['content']
-        self.assertIn("Implied Send", content)
+        self.assertIn("## Delivery to", content)
+        self.assertIn("Response text is delivered directly to this person", content)
 
     def test_prompt_omits_implied_send_when_primary_model_disables_it(self):
         start_web_session(self.agent, self.user)
@@ -2108,10 +2118,7 @@ class PromptContextBuilderTests(TestCase):
         content = system_message['content']
         self.assertNotIn("Implied Send", content)
         self.assertNotIn("send_<channel>", content)
-        self.assertIn(
-            "Text is not delivered in this mode",
-            content,
-        )
+        self.assertIn("Response text is not delivered in this mode", content)
         self.assertNotIn(
             "Text-only replies are not delivered without an active web chat session",
             content,
@@ -2136,10 +2143,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertFalse(metadata["prompt_allows_implied_send"])
         self.assertEqual(len(metadata["prompt_failover_configs"]), 2)
         self.assertNotIn("Implied Send", content)
-        self.assertIn(
-            "Text is not delivered in this mode",
-            content,
-        )
+        self.assertIn("Response text is not delivered in this mode", content)
 
     def test_tool_call_history_includes_cost_component(self):
         """Tool-call unified history should include a dedicated <cost> component."""
@@ -3769,6 +3773,7 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
         ]
         if self.min_interval_minutes <= 60:
             valid_schedules.append("@hourly")         # Once per hour
+        valid_schedules.append("CRON_TZ=America/New_York 0 9 * * *")
         
         for schedule in valid_schedules:
             with self.subTest(schedule=schedule):
@@ -3782,6 +3787,211 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
                 # Reset for next test
                 self.agent.schedule = original_schedule
                 self.agent.save()
+
+    def test_named_timezone_keeps_local_wall_time_across_dst(self):
+        import json
+        from zoneinfo import ZoneInfo
+
+        from api.agent.core.schedule_parser import ScheduleParser
+        from api.services.redbeat_timezone import (
+            GobiiRedBeatSchedulerEntry,
+            redbeat_options_for_schedule,
+        )
+        from redbeat.decoder import RedBeatJSONDecoder, RedBeatJSONEncoder
+
+        parsed = ScheduleParser.parse("CRON_TZ=America/New_York 0 9 * * *")
+        definition = json.loads(
+            json.dumps(
+                {"schedule": parsed, "options": redbeat_options_for_schedule(parsed)},
+                cls=RedBeatJSONEncoder,
+            ),
+            cls=RedBeatJSONDecoder,
+        )
+        entry = GobiiRedBeatSchedulerEntry(
+            name="timezone-test",
+            task="noop",
+            schedule=definition["schedule"],
+            options=definition["options"],
+        )
+        parsed = entry.schedule
+
+        def next_run(start):
+            parsed.nowfun = lambda: start
+            return start + parsed.remaining_estimate(start)
+
+        before_dst = next_run(datetime(2026, 3, 6, 15, tzinfo=dt_timezone.utc))
+        after_dst = next_run(datetime(2026, 3, 8, 12, tzinfo=dt_timezone.utc))
+        after_fall_back = next_run(datetime(2026, 11, 1, 12, tzinfo=dt_timezone.utc))
+
+        new_york = ZoneInfo("America/New_York")
+        self.assertEqual(before_dst.astimezone(new_york).hour, 9)
+        self.assertEqual(after_dst.astimezone(new_york).hour, 9)
+        self.assertEqual(after_fall_back.astimezone(new_york).hour, 9)
+        self.assertNotEqual(
+            before_dst.astimezone(new_york).utcoffset(),
+            after_dst.astimezone(new_york).utcoffset(),
+        )
+
+    def test_postfix_timezone_is_accepted_and_stored_canonically(self):
+        result = _execute_update_schedule(
+            self.agent,
+            {"new_schedule": "0 9 * * * CRON_TZ=America/New_York"},
+        )
+
+        self.agent.refresh_from_db()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(self.agent.schedule, "CRON_TZ=America/New_York 0 9 * * *")
+
+    def test_named_timezone_redbeat_score_is_correct_across_dst(self):
+        from config.celery import app as celery_app
+
+        from api.agent.core.schedule_parser import ScheduleParser
+        from api.services.redbeat_timezone import (
+            GobiiRedBeatSchedulerEntry,
+            redbeat_options_for_schedule,
+        )
+
+        transitions = (
+            (
+                datetime(2026, 3, 7, 14, tzinfo=dt_timezone.utc),
+                datetime(2026, 3, 8, 13, tzinfo=dt_timezone.utc),
+            ),
+            (
+                datetime(2026, 10, 31, 13, tzinfo=dt_timezone.utc),
+                datetime(2026, 11, 1, 14, tzinfo=dt_timezone.utc),
+            ),
+        )
+
+        for last_run_utc, expected_due_utc in transitions:
+            with self.subTest(last_run_utc=last_run_utc):
+                parsed = ScheduleParser.parse("CRON_TZ=America/New_York 0 9 * * *")
+                parsed.nowfun = lambda value=last_run_utc: value
+                entry = GobiiRedBeatSchedulerEntry(
+                    name="timezone-score-test",
+                    task="noop",
+                    schedule=parsed,
+                    options=redbeat_options_for_schedule(parsed),
+                    app=celery_app,
+                )
+
+                self.assertEqual(entry.last_run_at.astimezone(dt_timezone.utc), last_run_utc)
+                self.assertEqual(entry.due_at.astimezone(dt_timezone.utc), expected_due_utc)
+                self.assertEqual(entry.score, int(expected_due_utc.timestamp()))
+
+    def test_named_timezone_survives_redbeat_save_and_reload(self):
+        import json
+
+        import redbeat
+        from config.celery import app as celery_app
+
+        from api.agent.core.schedule_parser import ScheduleParser
+        from api.services.redbeat_timezone import (
+            GobiiRedBeatSchedulerEntry,
+            NamedTimezoneCrontab,
+            SCHEDULE_TIMEZONE_HEADER,
+            install_redbeat_timezone_serialization,
+            redbeat_options_for_schedule,
+        )
+
+        class FakeRedis:
+            def __init__(self):
+                self.hashes = {}
+                self.sorted_sets = {}
+
+            def pipeline(self):
+                return FakePipeline(self)
+
+            def hset(self, key, field, value):
+                self.hashes.setdefault(key, {})[field] = value
+                return 1
+
+            def hsetnx(self, key, field, value):
+                values = self.hashes.setdefault(key, {})
+                if field in values:
+                    return 0
+                values[field] = value
+                return 1
+
+            def hget(self, key, field):
+                return self.hashes.get(key, {}).get(field)
+
+            def zadd(self, key, mapping):
+                self.sorted_sets.setdefault(key, {}).update(mapping)
+                return len(mapping)
+
+        class FakePipeline:
+            def __init__(self, client):
+                self.client = client
+                self.operations = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+            def _queue(self, method, *args, **kwargs):
+                self.operations.append((method, args, kwargs))
+                return self
+
+            def hset(self, *args, **kwargs):
+                return self._queue("hset", *args, **kwargs)
+
+            def hsetnx(self, *args, **kwargs):
+                return self._queue("hsetnx", *args, **kwargs)
+
+            def hget(self, *args, **kwargs):
+                return self._queue("hget", *args, **kwargs)
+
+            def zadd(self, *args, **kwargs):
+                return self._queue("zadd", *args, **kwargs)
+
+            def execute(self):
+                results = [
+                    getattr(self.client, method)(*args, **kwargs)
+                    for method, args, kwargs in self.operations
+                ]
+                self.operations.clear()
+                return results
+
+        install_redbeat_timezone_serialization()
+        self.assertIs(redbeat.RedBeatSchedulerEntry, GobiiRedBeatSchedulerEntry)
+
+        fake_redis = FakeRedis()
+        parsed = ScheduleParser.parse("CRON_TZ=America/New_York 0 9 * * *")
+        entry = redbeat.RedBeatSchedulerEntry(
+            name="timezone-persistence-test",
+            task="api.agent.tasks.process_agent_cron_trigger",
+            schedule=parsed,
+            args=[str(self.agent.id), "CRON_TZ=America/New_York 0 9 * * *"],
+            options=redbeat_options_for_schedule(parsed),
+            app=celery_app,
+        )
+
+        with patch("redbeat.schedulers.get_redis", return_value=fake_redis):
+            entry.save()
+            stored_definition = json.loads(fake_redis.hget(entry.key, "definition"))
+            reloaded = redbeat.RedBeatSchedulerEntry.from_key(entry.key, app=celery_app)
+
+        self.assertEqual(stored_definition["schedule"]["__type__"], "crontab")
+        self.assertEqual(
+            stored_definition["options"]["headers"][SCHEDULE_TIMEZONE_HEADER],
+            "America/New_York",
+        )
+        self.assertIsInstance(reloaded, GobiiRedBeatSchedulerEntry)
+        self.assertIsInstance(reloaded.schedule, NamedTimezoneCrontab)
+        self.assertEqual(reloaded.schedule.timezone_name, "America/New_York")
+        self.assertEqual(reloaded.schedule.tz.key, "America/New_York")
+        self.assertIsInstance(reloaded.score, (int, float))
+        self.assertGreater(reloaded.score, 0)
+
+    def test_named_timezone_rejects_unknown_zone_and_interval_prefix(self):
+        from api.agent.core.schedule_parser import ScheduleParser
+
+        with self.assertRaisesRegex(ValueError, "Unknown schedule timezone"):
+            ScheduleParser.parse("CRON_TZ=Mars/Olympus 0 9 * * *")
+        with self.assertRaisesRegex(ValueError, "applies only to cron"):
+            ScheduleParser.parse("CRON_TZ=America/New_York @every 2h")
 
     def test_too_frequent_interval_schedules_rejected(self):
         """Test that interval schedules more frequent than the configured minimum are rejected."""
@@ -4682,6 +4892,53 @@ class PromptConfigFunctionTests(TestCase):
 
 @tag("batch_event_processing")
 class EventProcessingRuntimeGuardTests(TestCase):
+    def test_eval_http_mock_mirrors_real_write_completion_semantics(self):
+        result = _apply_eval_mock_runtime_semantics(
+            "http_request",
+            {"method": "POST", "will_continue_work": False},
+            {"status": "ok", "content": {"updatedRows": 1}},
+        )
+
+        self.assertTrue(result["auto_sleep_ok"])
+
+    def test_eval_http_mock_does_not_auto_sleep_after_error_or_continuing_call(self):
+        error = _apply_eval_mock_runtime_semantics(
+            "http_request",
+            {"method": "POST", "will_continue_work": False},
+            {"status": "error"},
+        )
+        continuing = _apply_eval_mock_runtime_semantics(
+            "http_request",
+            {"method": "POST", "will_continue_work": True},
+            {"status": "ok"},
+        )
+
+        self.assertNotIn("auto_sleep_ok", error)
+        self.assertNotIn("auto_sleep_ok", continuing)
+
+    def test_text_beside_work_tool_is_not_implied_send(self):
+        self.assertFalse(
+            _should_build_implied_send(
+                message_text="The integration is ready; let me search.",
+                has_explicit_send=False,
+                has_non_message_tool_calls=True,
+            )
+        )
+        self.assertTrue(
+            _should_build_implied_send(
+                message_text="Here is the final answer.",
+                has_explicit_send=False,
+                has_non_message_tool_calls=False,
+            )
+        )
+
+    def test_wait_for_reconnect_message_does_not_infer_immediate_continuation(self):
+        self.assertFalse(
+            _should_infer_message_tool_continuation(
+                "Open Integrations to reconnect Apollo. Once connected, let me know and I'll run the search."
+            )
+        )
+
     def setUp(self):
         self.user = User.objects.create_user(
             username="runtime_guard@example.com",

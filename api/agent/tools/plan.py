@@ -32,12 +32,8 @@ _RESEARCH_PLAN_TERMS = (
     "synthesize",
 )
 MESSAGE_DELIVERABLE_GUIDANCE = (
-    "Use messages only for substantial final deliverables in existing multi-step work, not for every quick answer, "
-    "lookup, briefing, or one-shot chart. Message deliverables must come from send_email, send_sms, or send_chat_message. "
-    "Use the exact returned message_id UUID, or omit messages. If you are sending the final message now and a completion "
-    "plan update is still needed, send it first with will_continue_work=true, then call update_plan after the send tool returns. "
-    "For explicit deep or exhaustive research with no file deliverables and no unfinished current plan items, send the final answer with will_continue_work=false. "
-    "Do not include peer messages from send_agent_message."
+    "Only substantial final deliveries belong here. Use the exact message_id from a user-facing send tool, never a peer message. "
+    "If a final plan update must follow delivery, send with will_continue_work=true, then update the plan."
 )
 
 
@@ -80,19 +76,8 @@ def get_update_plan_tool() -> dict[str, Any]:
         "function": {
             "name": PLAN_TOOL_NAME,
             "description": (
-                "Updates the task plan.\n"
-                "Use only for real multi-step work where a persistent user-visible plan is useful. Do not use for "
-                "quick lookups, simple research answers, simple latest/current company/news/batch reports, "
-                "scheduled briefings, or one-shot chart requests.\n"
-                "For deep work, use at most one initial plan update; do not call this again just to mark research done, "
-                "narrate progress, or prepare the final response.\n"
-                "Provide a list of plan items, each with a step and status.\n"
-                "At most one step can be doing at a time.\n"
-                "Every call replaces the full current active plan, including the deliverable references. "
-                "Keep plans short: usually 3-6 active steps. "
-                "When starting a new task, new iteration, or new scheduled run, omit stale prior-task or prior-run steps. "
-                "For recurring or hourly work, do not create one step per day, hour, or recurrence slot; "
-                "represent the current run with compact reusable phases."
+                "Replace the visible task plan for substantial multi-step work. Keep 3-6 current, verifiable steps with at most one doing; omit stale work and recurrence-by-recurrence entries. "
+                "Do not use for quick answers, routine scheduled briefings, or progress narration. Each call replaces all plan and deliverable entries."
             ),
             "parameters": {
                 "type": "object",
@@ -100,10 +85,11 @@ def get_update_plan_tool() -> dict[str, Any]:
                     "plan": {
                         "type": "array",
                         "description": "The list of steps",
+                        "maxItems": 6,
                         "items": {
                             "type": "object",
                             "properties": {
-                                "step": {"type": "string"},
+                                "step": {"type": "string", "maxLength": 255},
                                 "status": {
                                     "type": "string",
                                     "description": "One of: todo, doing, done",
@@ -117,9 +103,7 @@ def get_update_plan_tool() -> dict[str, Any]:
                     "files": {
                         "type": "array",
                         "description": (
-                            "Optional final file deliverables created during the work: user-visible reports, CSV exports, "
-                            "PDFs, charts, or generated documents. Include the complete current file list on every update; "
-                            "omit scratch files, temporary downloads, and intermediate analysis files."
+                            "Complete current list of final user-visible files; omit scratch and intermediate files."
                         ),
                         "items": {
                             "type": "object",
@@ -149,8 +133,7 @@ def get_update_plan_tool() -> dict[str, Any]:
                                 "message_id": {
                                     "type": "string",
                                     "description": (
-                                        "Exact UUID returned by the send tool as message_id from a user-facing delivery; "
-                                        "never use placeholders, SQL snippets, URLs, or peer-agent message references."
+                                        "Exact user-facing send-tool message_id; no placeholders, URLs, or peer messages."
                                     ),
                                 },
                                 "label": {
@@ -492,6 +475,8 @@ def _validate_update_plan_params(agent, params: dict[str, Any]) -> dict[str, Any
     if not isinstance(raw_plan, list):
         errors.append("plan must be a list.")
         raw_plan = []
+    elif len(raw_plan) > 6:
+        errors.append("plan may contain at most 6 steps.")
 
     plan_items: list[dict[str, str]] = []
     seen_keys: set[str] = set()

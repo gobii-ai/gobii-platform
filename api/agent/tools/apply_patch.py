@@ -73,23 +73,8 @@ def _agent_has_access(agent: PersistentAgent, filespace_id) -> bool:
 
 def _patch_tool_description() -> str:
     return (
-        "Apply a unified, reviewable patch to UTF-8 text files. Prefer this over exact string replacement for "
-        "source code, HTML/CSS/JS, config, and custom tool edits. Paths are Gobii filespace paths such as "
-        "/tools/my_tool.py or $[/tools/my_tool.py]. "
-        "The patch must be a single string using this format:\n"
-        "*** Begin Patch\n"
-        "*** Add File: /path/to/file\n"
-        "+new file line\n"
-        "*** Delete File: /path/to/file\n"
-        "*** Update File: /path/to/file\n"
-        "*** Move to: /new/path\n"
-        "@@\n"
-        " context line\n"
-        "-old line\n"
-        "+new line\n"
-        "*** End Patch\n"
-        "Use Add File for new files, Delete File to trash files, and Update File for line-based edits. "
-        "For Update File, include enough unchanged context lines (prefixed with a space) to make the edit unique."
+        "Apply one reviewable UTF-8 filespace patch. Wrap Add/Delete/Update File sections in `*** Begin Patch` / `*** End Patch`; "
+        "Update hunks use `@@` with space-prefixed context, `-` removals, and `+` additions. Include enough context to identify each edit uniquely."
     )
 
 

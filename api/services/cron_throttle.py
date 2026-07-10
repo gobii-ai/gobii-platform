@@ -77,6 +77,14 @@ def _parse_schedule_interval_seconds(schedule_str: str) -> Optional[int]:
     if schedule_obj is None:
         return None
 
+    if isinstance(schedule_obj, crontab) or not hasattr(schedule_obj, "run_every"):
+        try:
+            seconds = cron_interval_seconds(schedule_obj)
+            return max(1, int(math.ceil(float(seconds))))
+        except (ArithmeticError, AttributeError, TypeError, ValueError):
+            logger.debug("Failed to compute cron interval for %r", schedule_str, exc_info=True)
+            return None
+
     if isinstance(schedule_obj, celery_schedule):
         try:
             run_every = getattr(schedule_obj, "run_every", None)
@@ -84,14 +92,6 @@ def _parse_schedule_interval_seconds(schedule_str: str) -> Optional[int]:
             return max(1, int(math.ceil(seconds)))
         except Exception:
             logger.debug("Failed to parse interval schedule %r", schedule_str, exc_info=True)
-            return None
-
-    if isinstance(schedule_obj, crontab):
-        try:
-            seconds = cron_interval_seconds(schedule_obj)
-            return max(1, int(math.ceil(float(seconds))))
-        except Exception:
-            logger.debug("Failed to compute cron interval for %r", schedule_str, exc_info=True)
             return None
 
     return None

@@ -77,13 +77,19 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertIn("visually distinct", question)
         self.assertIn("status/value encoding", question)
         self.assertIn("Prefer tasteful emoji", question)
+        self.assertIn("colored rounded inline spans as badges", question)
+        self.assertIn("emoji section labels as icons or status markers", question)
+        self.assertIn("factual completeness and readability strict", question)
         self.assertNotIn("emoji used tastefully", question)
+        self.assertIn("preserve the supplied facts", question)
+        self.assertIn("wrong audience", question)
 
     def test_chat_judge_does_not_require_recommendation(self):
         case = next(case for case in REPORT_MESSAGE_QUALITY_CASES if case.channel == "chat")
         question = MessageQualityScenario._judge_question(case)
 
         self.assertIn("status labels", question)
+        self.assertIn("material factual contradictions", question)
         self.assertNotIn("recommendation", question)
 
     def test_short_judge_reasoning_is_retried(self):
@@ -94,20 +100,24 @@ class MessageQualityScenarioTests(SimpleTestCase):
             )
         )
 
-    def test_email_visual_formatting_quality_is_deferred_to_judge(self):
-        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
+    def test_email_delivery_normalization_precedes_formatting_checks(self):
+        case = next(
+            case
+            for case in MESSAGE_QUALITY_CASES
+            if case.subject == "Daily Meme & Viral Trends Summary"
+        )
         scenario = MessageQualityScenario()
         body = (
-            "<h2>Summary</h2>"
+            "<html><body style='font-family: Arial'><h2>Summary</h2>"
             "<p>This plain email has enough structure for delivery inspection, "
-            "but the judge owns whether it is visually polished.</p>"
+            "but the judge owns whether it is visually polished.</p></body></html>"
         )
 
         failures = scenario._formatting_failures(
             case,
             {
                 "to_address": case.recipient,
-                "subject": case.subject,
+                "subject": "Daily Meme &amp; Viral Trends Summary",
                 "will_continue_work": False,
             },
             body,
@@ -214,3 +224,20 @@ class MessageQualityScenarioTests(SimpleTestCase):
         )
 
         self.assertIsNone(scenario._sent_message_for_call(call))
+
+    def test_delivery_success_requires_complete_result_and_persisted_message(self):
+        delivered = object()
+        complete = type(
+            "Call",
+            (),
+            {"status": "complete", "result": '{"status":"ok"}'},
+        )()
+        failed = type(
+            "Call",
+            (),
+            {"status": "complete", "result": '{"status":"error"}'},
+        )()
+
+        self.assertTrue(MessageQualityScenario._delivery_succeeded(complete, delivered))
+        self.assertFalse(MessageQualityScenario._delivery_succeeded(failed, delivered))
+        self.assertFalse(MessageQualityScenario._delivery_succeeded(complete, None))

@@ -105,31 +105,17 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
   const passStats = useMemo<PassStats>(() => {
     if (!suite) return { passRate: null, completed: 0, total: 0 }
     const runs = suite.runs || []
-    const hasTaskData = runs.some((run) => (run.tasks || []).length > 0)
-    if (hasTaskData) {
-      let passed = 0
-      let completed = 0
-      let total = 0
-      runs.forEach((run) => {
-        const tasks = run.tasks || []
-        total += tasks.length
-        tasks.forEach((task) => {
-          if (['passed', 'failed', 'errored', 'skipped'].includes(task.status)) {
-            completed += 1
-          }
-          if (task.status === 'passed') {
-            passed += 1
-          }
-        })
-      })
-      return { passRate: completed ? passed / completed : null, completed, total }
+    const outcomes = runs.map((run) => run.scenario_outcome).filter((outcome) => outcome != null)
+    if (outcomes.length) {
+      const passed = outcomes.filter((outcome) => outcome.status === 'passed').length
+      const completed = outcomes.filter((outcome) => ['passed', 'failed'].includes(outcome.status)).length
+      return { passRate: completed ? passed / completed : null, completed, total: outcomes.length }
     }
-    const totals = suite.task_totals
-    if (totals) {
+    if (suite.scenario_totals) {
       return {
-        passRate: totals.pass_rate ?? null,
-        completed: totals.completed ?? totals.total ?? 0,
-        total: totals.total ?? totals.completed ?? 0,
+        passRate: suite.scenario_totals.pass_rate,
+        completed: suite.scenario_totals.completed,
+        total: suite.scenario_totals.total,
       }
     }
     return { passRate: null, completed: 0, total: 0 }
@@ -532,9 +518,16 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
                       {passStats.passRate != null ? `${Math.round(passStats.passRate * 100)}%` : '—'}
                     </span>
                     <span className="text-sm font-medium text-slate-500">
-                      avg pass · {passStats.completed}/{passStats.total || passStats.completed || 0} tasks
+                      scenario pass · {passStats.completed}/{passStats.total || passStats.completed || 0} scenarios complete
                     </span>
                   </div>
+                  {suite.task_totals ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Scored requirements: {suite.task_totals.passed}/{suite.task_totals.completed}
+                      {' · '}setup diagnostics: {suite.task_totals.setup_total}
+                      {' · '}other diagnostics: {suite.task_totals.diagnostic_total}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -709,6 +702,7 @@ function ScenarioGroup({
   const isCompleted = run?.status === 'completed'
   const isRunning = run?.status === 'running'
   const isMissing = !run
+  const scenarioStatus = run?.scenario_outcome?.status
   const runCost = run?.total_cost ?? null
   const runCredits = run?.credits_cost ?? null
 
@@ -720,7 +714,7 @@ function ScenarioGroup({
       >
         <div className="flex items-center gap-4">
            <div className={`w-3 h-3 rounded-full shadow-sm shrink-0
-             ${isMissing ? 'bg-slate-200' : isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`}
+             ${isMissing ? 'bg-slate-200' : scenarioStatus === 'failed' ? 'bg-rose-500' : scenarioStatus === 'passed' ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`}
            />
            <div>
               <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{scenarioSlug}</h3>
@@ -787,7 +781,7 @@ function ScenarioGroup({
               </button>
             )}
           </div>
-           {run ? <StatusBadge status={run.status || 'pending'} /> : <span className="text-xs text-slate-400 italic px-2">Not run</span>}
+           {run ? <StatusBadge status={scenarioStatus || run.status || 'pending'} /> : <span className="text-xs text-slate-400 italic px-2">Not run</span>}
         </div>
       </div>
 
@@ -837,6 +831,7 @@ function TaskRow({ task }: { task: EvalTask }) {
   const debugEntries = Object.entries(task.debug_artifacts || {})
   const artifactLinks = task.artifact_links || {}
   const hasDebugContext = debugEntries.length > 0 || task.llm_question || task.llm_answer || artifactLinks.agent_audit_url
+  const taskRole = task.is_setup ? 'Setup' : task.is_scored ? 'Scored requirement' : 'Diagnostic'
 
   return (
     <div className={`
@@ -854,7 +849,12 @@ function TaskRow({ task }: { task: EvalTask }) {
              <span className="font-mono text-xs text-slate-400 mr-2">#{task.sequence}</span>
              {task.name}
            </p>
-           <span className="shrink-0 text-[10px] font-mono text-slate-500 bg-white px-1.5 py-0.5 rounded ring-1 ring-slate-200">{task.assertion_type}</span>
+           <div className="flex shrink-0 items-center gap-1.5">
+             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ring-1 ${task.is_scored ? 'text-indigo-700 bg-indigo-50 ring-indigo-200' : 'text-slate-500 bg-slate-50 ring-slate-200'}`}>
+               {taskRole}
+             </span>
+             <span className="text-[10px] font-mono text-slate-500 bg-white px-1.5 py-0.5 rounded ring-1 ring-slate-200">{task.assertion_type}</span>
+           </div>
         </div>
 
         {task.observed_summary && (

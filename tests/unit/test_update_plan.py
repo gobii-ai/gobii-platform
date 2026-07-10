@@ -85,9 +85,14 @@ class UpdatePlanToolTests(TestCase):
         self.assertIn("will_continue_work", params["required"])
         self.assertIn("files", properties)
         self.assertIn("messages", properties)
+        self.assertEqual(properties["plan"]["maxItems"], 6)
+        self.assertEqual(
+            properties["plan"]["items"]["properties"]["step"]["maxLength"],
+            255,
+        )
         self.assertIn("path", properties["files"]["items"]["properties"])
         self.assertIn("message_id", properties["messages"]["items"]["properties"])
-        self.assertIn("returned by the send tool", properties["messages"]["items"]["properties"]["message_id"]["description"])
+        self.assertIn("user-facing send-tool message_id", properties["messages"]["items"]["properties"]["message_id"]["description"])
 
     def test_update_plan_returns_auto_sleep_hint_for_explicit_stop(self):
         result = execute_update_plan(
@@ -138,6 +143,23 @@ class UpdatePlanToolTests(TestCase):
         self.assertEqual(
             list(PersistentAgentKanbanCard.objects.filter(assigned_agent=self.agent).order_by("created_at").values_list("id", flat=True)),
             [existing.id],
+        )
+
+    def test_update_plan_rejects_more_than_six_steps(self):
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": f"Step {index}", "status": "todo"}
+                    for index in range(7)
+                ]
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("plan may contain at most 6 steps.", result["errors"])
+        self.assertFalse(
+            PersistentAgentKanbanCard.objects.filter(assigned_agent=self.agent).exists()
         )
 
     def test_update_plan_rejects_malformed_message_deliverable_id(self):

@@ -28,6 +28,23 @@ AGENT_CONFIG_INSERT_RE = re.compile(
     r"\b(?:insert|replace)\s+(?:or\s+\w+\s+)?into\s+__agent_config\s*\((?P<columns>[^)]*)\)",
     re.IGNORECASE | re.DOTALL,
 )
+FAILED_RESULT_STATUSES = {
+    "error",
+    "failed",
+    "failure",
+    "warning",
+    "pending",
+    "cancelled",
+    "canceled",
+}
+SUCCESS_RESULT_STATUSES = {
+    "ok",
+    "success",
+    "complete",
+    "completed",
+    "sent",
+    "queued",
+}
 
 
 def split_sql_statements(sql: str) -> list[str]:
@@ -202,7 +219,9 @@ def _expected_condition_matches_call(
         return False
     if not _has_required_param_any(actual_params, condition.get("required_params_any")):
         return False
-    if condition.get("after_execution") and not _tool_call_has_succeeded(tool_call):
+    if condition.get("after_execution") and (
+        _tool_call_was_skipped(tool_call) or not _tool_call_has_succeeded(tool_call)
+    ):
         return False
     if condition.get("after_finish") and not _tool_call_has_finished(tool_call):
         return False
@@ -229,7 +248,28 @@ def _tool_call_has_finished(tool_call) -> bool:
 
 
 def _tool_call_has_succeeded(tool_call) -> bool:
-    return str(getattr(tool_call, "status", "") or "").lower() == "complete"
+    if str(getattr(tool_call, "status", "") or "").lower() != "complete":
+        return False
+    try:
+        result = json.loads(getattr(tool_call, "result", "") or "{}")
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(result, dict):
+        return False
+
+    nested_result = result.get("result")
+    result_payloads = [result]
+    if isinstance(nested_result, dict):
+        result_payloads.append(nested_result)
+
+    return (
+        str(result.get("status") or "ok").casefold() in SUCCESS_RESULT_STATUSES
+        and all(
+            str(payload.get("status") or "").casefold() not in FAILED_RESULT_STATUSES
+            and not payload.get("error")
+            for payload in result_payloads
+        )
+    )
 
 
 def _tool_call_was_skipped(tool_call) -> bool:
@@ -250,8 +290,9 @@ def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] 
         return True, f"first relevant tool call observed: {calls[0].tool_name}"
 
     max_relevant_tool_calls = int(policy.get("max_relevant_tool_calls") or 0)
-    if max_relevant_tool_calls > 0 and len(calls) >= max_relevant_tool_calls:
-        return True, f"relevant tool call budget reached: {len(calls)}/{max_relevant_tool_calls}"
+    finished_calls = [call for call in calls if _tool_call_has_finished(call)]
+    if max_relevant_tool_calls > 0 and len(finished_calls) >= max_relevant_tool_calls:
+        return True, f"relevant tool call budget reached: {len(finished_calls)}/{max_relevant_tool_calls}"
 
     stop_on_tool_names = set(policy.get("stop_on_tool_names") or ())
     if stop_on_tool_names:

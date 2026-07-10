@@ -110,6 +110,43 @@ class TestEventProcessingLLMSelection(TestCase):
         self.assertFalse(response.model_extra["gobii_runtime_hints"]["allow_implied_send"])
 
     @patch('api.agent.core.event_processing.run_completion')
+    def test_completion_with_failover_can_require_runtime_tool(self, mock_run_completion):
+        mock_run_completion.return_value = make_completion_response()
+        tools = [{
+            "type": "function",
+            "function": {"name": "sqlite_batch", "parameters": {"type": "object"}},
+        }]
+
+        _completion_with_failover(
+            [{"role": "user", "content": "compare all rows"}],
+            tools,
+            failover_configs=[("openai", "openai/gpt-4.1", {"supports_tool_choice": True})],
+            required_tool_name="sqlite_batch",
+        )
+
+        self.assertEqual(
+            mock_run_completion.call_args.kwargs["params"]["tool_choice"],
+            {"type": "function", "function": {"name": "sqlite_batch"}},
+        )
+
+    @patch('api.agent.core.event_processing.run_completion')
+    def test_required_runtime_tool_respects_endpoint_capability(self, mock_run_completion):
+        mock_run_completion.return_value = make_completion_response()
+        tools = [{
+            "type": "function",
+            "function": {"name": "sqlite_batch", "parameters": {"type": "object"}},
+        }]
+
+        _completion_with_failover(
+            [{"role": "user", "content": "preserve remaining work"}],
+            tools,
+            failover_configs=[("provider", "model", {"supports_tool_choice": False})],
+            required_tool_name="sqlite_batch",
+        )
+
+        self.assertNotIn("tool_choice", mock_run_completion.call_args.kwargs["params"])
+
+    @patch('api.agent.core.event_processing.run_completion')
     def test_completion_with_failover_suppresses_streamed_content_when_selected_model_disables_implied_send(self, mock_run_completion):
         stream_chunks = iter([
             {

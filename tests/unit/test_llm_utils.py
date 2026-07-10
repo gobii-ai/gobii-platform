@@ -1,3 +1,4 @@
+import json
 import threading
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -214,7 +215,23 @@ class RunCompletionReasoningTests(TestCase):
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_responses_bridge_converts_forced_function_tool_choice(self, mock_completion):
-        response = make_completion_response(content="ok")
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="",
+                        tool_calls=[
+                            SimpleNamespace(
+                                function=SimpleNamespace(
+                                    name="enable_system_skills",
+                                    arguments="{}",
+                                )
+                            )
+                        ],
+                    )
+                )
+            ]
+        )
         mock_completion.return_value = response
 
         run_completion(
@@ -570,6 +587,60 @@ class RunCompletionReasoningTests(TestCase):
         )
 
         self.assertIs(result, non_empty_response)
+        self.assertEqual(mock_completion.call_count, 2)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_retries_forced_tool_call_missing_required_arguments(self, mock_completion):
+        tool_name = "record_structured_result"
+
+        def response(arguments):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="",
+                            tool_calls=[
+                                SimpleNamespace(
+                                    function=SimpleNamespace(
+                                        name=tool_name,
+                                        arguments=json.dumps(arguments),
+                                    )
+                                )
+                            ],
+                        )
+                    )
+                ]
+            )
+
+        malformed_response = response({})
+        repaired_response = response({"response_text": "Done", "items": []})
+        mock_completion.side_effect = [malformed_response, repaired_response]
+        tool_definition = {
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "response_text": {"type": "string"},
+                        "items": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["response_text", "items"],
+                },
+            },
+        }
+
+        result = run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+            tools=[tool_definition],
+            tool_choice={"type": "function", "function": {"name": tool_name}},
+        )
+
+        self.assertIs(result, repaired_response)
         self.assertEqual(mock_completion.call_count, 2)
 
     @tag("batch_event_llm")

@@ -1,6 +1,10 @@
 import base64
 import json
+import os
+import sqlite3
+import tempfile
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
@@ -45,6 +49,50 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertEqual(analysis.json_analysis.primary_array.length, 2)
         self.assertIn("id", analysis.json_analysis.primary_array.item_fields)
         self.assertIn("name", analysis.json_analysis.primary_array.item_fields)
+
+    def test_http_structured_content_is_stored_at_json_root(self):
+        content = {
+            "vendor": "CareMesh",
+            "source_url": "https://api.example.test/caremesh.json",
+            "plans": [{"plan": "Clinic", "price": 720}],
+        }
+        meta, stored_json, stored_text, _analysis = tool_results._summarize_result(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "status_code": 200,
+                    "method": "GET",
+                    "url": content["source_url"],
+                    "headers": {"ETag": "v1"},
+                    "content": content,
+                }
+            ),
+            "test-id",
+            "http_request",
+        )
+
+        self.assertEqual(json.loads(stored_json), content)
+        self.assertEqual(json.loads(stored_text), content)
+        self.assertEqual(meta["source_url"], content["source_url"])
+        self.assertEqual(meta["http_method"], "GET")
+        self.assertEqual(meta["http_status_code"], 200)
+        self.assertEqual(json.loads(meta["http_headers_json"]), {"ETag": "v1"})
+
+    def test_http_error_keeps_transport_status_around_structured_content(self):
+        envelope = {
+            "status": "error",
+            "status_code": 401,
+            "message": "Authentication expired",
+            "content": {"items": [{"id": "stale"}]},
+        }
+        _meta, stored_json, stored_text, _analysis = tool_results._summarize_result(
+            json.dumps(envelope),
+            "test-id",
+            "http_request",
+        )
+
+        self.assertEqual(json.loads(stored_json), envelope)
+        self.assertEqual(json.loads(stored_text), envelope)
 
     def test_no_analysis_json_for_non_json_result(self):
         meta, stored_json, stored_text, analysis = tool_results._summarize_result(
@@ -381,6 +429,52 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertEqual(stored_text, markdown)
         self.assertIsNotNone(analysis)
 
+    def test_scrape_as_markdown_stores_top_level_url_as_source_metadata(self):
+        source_url = "https://docs.example.test/gemma-4"
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-scrape-source",
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps(
+                {
+                    "status": "success",
+                    "url": source_url,
+                    "result": "# Gemma 4\n\nBenchmark table",
+                }
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "agent.sqlite3")
+            with patch.object(tool_results, "get_sqlite_db_path", return_value=db_path):
+                tool_results.prepare_tool_results_for_prompt(
+                    [record],
+                    recency_positions={record.step_id: 0},
+                )
+
+            with sqlite3.connect(db_path) as conn:
+                stored_source_url = conn.execute(
+                    "SELECT source_url FROM __tool_results WHERE result_id = ?",
+                    (record.step_id,),
+                ).fetchone()[0]
+
+        self.assertEqual(stored_source_url, source_url)
+
+    def test_external_source_metadata_requires_successful_web_url(self):
+        for payload in (
+            {"status": "error", "url": "https://example.test/error", "result": "no"},
+            {"status": "success", "source_url": "javascript:alert(1)", "result": "no"},
+            {"status": "success", "url": "https://user:secret@example.test/", "result": "no"},
+        ):
+            with self.subTest(payload=payload):
+                meta, _stored_json, _stored_text, _analysis = tool_results._summarize_result(
+                    json.dumps(payload),
+                    "test-id",
+                    "mcp_brightdata_scrape_as_markdown",
+                )
+
+                self.assertNotIn("source_url", meta)
+
     def test_scrape_as_markdown_preview_uses_plain_markdown_and_meta_guidance(self):
         markdown = "# Gemma 4\n\nBenchmark table"
         record = tool_results.ToolCallResultRecord(
@@ -699,6 +793,9 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertIn("result_id=step-http", info.meta)
         self.assertIn("parsed_with=json", info.meta)
         self.assertIn("Central bank signals rate hold", info.preview_text)
+        self.assertIn("ONE-TIME VIEW", info.preview_text)
+        self.assertIn("do not re-fetch or verify it unless ambiguous", info.preview_text)
+        self.assertNotIn("__tool_results", info.preview_text)
         self.assertNotIn("QUERY:", info.meta)
         self.assertNotIn("PATH:", info.meta)
         self.assertNotIn("SAMPLE:", info.meta)
@@ -725,8 +822,9 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertTrue(is_inline)
         # Should be wrapped with one-time view warning
         self.assertIn("[FULL RESULT (30000 chars) - ONE-TIME VIEW", preview)
-        self.assertIn("Use this visible result now", preview)
-        self.assertIn("Do not query __tool_results or sqlite_batch just to reread", preview)
+        self.assertIn("Use it now", preview)
+        self.assertIn("do not re-fetch or verify it unless ambiguous", preview)
+        self.assertIn("Transform or persist it only when the task requires", preview)
         self.assertIn(medium_text, preview)
 
     def test_fresh_tool_call_over_threshold_truncated(self):

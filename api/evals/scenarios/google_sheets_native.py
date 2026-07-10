@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
@@ -163,6 +164,7 @@ def _model_sizes_helper_column_values_rule() -> dict[str, Any]:
 def _create_local_llms_rule() -> dict[str, Any]:
     return {
         "url_contains": "sheets.googleapis.com/v4/spreadsheets",
+        "url_not_contains": ("/values/", ":batchupdate"),
         **_method_equals("POST"),
         "result": _http_result(
             "https://sheets.googleapis.com/v4/spreadsheets",
@@ -179,8 +181,7 @@ def _create_local_llms_rule() -> dict[str, Any]:
 def _local_llms_values_update_rule() -> dict[str, Any]:
     return {
         "url_contains": (
-            f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
-            "models",
+            f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values/",
         ),
         **_method_equals("PUT"),
         "result": _http_result(
@@ -190,8 +191,29 @@ def _local_llms_values_update_rule() -> dict[str, Any]:
     }
 
 
-def _local_llms_format_rule() -> dict[str, Any]:
+def _local_llms_values_append_rule() -> dict[str, Any]:
     return {
+        "url_contains": (
+            f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values/",
+            ":append",
+        ),
+        **_method_equals("POST"),
+        "result": _http_result(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values/Models!A1:F10:append",
+            {"spreadsheetId": LOCAL_LLMS_SHEET_ID, "updatedRows": 4, "updatedCells": 16},
+        ),
+    }
+
+
+def _local_llms_format_rule(*, with_banding: bool) -> dict[str, Any]:
+    replies = [
+        {"updateSheetProperties": {}},
+        {"repeatCell": {}},
+        {"autoResizeDimensions": {}},
+    ]
+    if with_banding:
+        replies.insert(2, {"addBanding": {"bandedRange": {"bandedRangeId": 88}}})
+    rule = {
         "url_contains": (
             f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchUpdate",
         ),
@@ -200,15 +222,13 @@ def _local_llms_format_rule() -> dict[str, Any]:
             f"https://sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchUpdate",
             {
                 "spreadsheetId": LOCAL_LLMS_SHEET_ID,
-                "replies": [
-                    {"updateSheetProperties": {}},
-                    {"repeatCell": {}},
-                    {"addBanding": {"bandedRange": {"bandedRangeId": 88}}},
-                    {"autoResizeDimensions": {}},
-                ],
+                "replies": replies,
             },
         ),
     }
+    if with_banding:
+        rule["param_contains"] = {"body": "addbanding"}
+    return rule
 
 
 GENERIC_TRACKER_FILE = {
@@ -231,6 +251,66 @@ TEST_TRACKER_FILE = {
     "mimeType": "application/vnd.google-apps.spreadsheet",
     "webViewLink": "https://docs.google.com/spreadsheets/d/sheet-test-2026/edit",
 }
+
+
+OPTIONAL_DRIVE_SPREADSHEET_PREFLIGHT = HttpRequestExpectation(
+    name="optional_drive_spreadsheet_preflight",
+    url_terms=(
+        "www.googleapis.com/drive/v3/files",
+        "mimetype",
+        "application/vnd.google-apps.spreadsheet",
+        "trashed",
+        "false",
+    ),
+    exact_path="/drive/v3/files",
+    min_calls=0,
+    max_calls=1,
+)
+OPTIONAL_GENERIC_METADATA_PREFLIGHT = HttpRequestExpectation(
+    name="optional_sheets_metadata_preflight",
+    url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",),
+    exact_path=f"/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+    min_calls=0,
+    max_calls=1,
+)
+OPTIONAL_LEADS_VALUES_PREFLIGHT = HttpRequestExpectation(
+    name="optional_leads_values_preflight",
+    url_terms=(
+        f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+        "leads",
+    ),
+    min_calls=0,
+    max_calls=1,
+)
+OPTIONAL_MODEL_HELPER_VALUES_PREFLIGHT = HttpRequestExpectation(
+    name="optional_model_helper_values_preflight",
+    url_terms=(
+        f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+        "/values/",
+        "models!d",
+    ),
+    min_calls=0,
+    max_calls=1,
+)
+OPTIONAL_MODEL_VALUES_PREFLIGHT = HttpRequestExpectation(
+    name="optional_model_values_preflight",
+    url_terms=(
+        f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+        "models",
+    ),
+    min_calls=0,
+    max_calls=1,
+)
+OPTIONAL_MODEL_VALUES_VERIFICATION = HttpRequestExpectation(
+    name="optional_model_values_verification",
+    url_terms=(
+        f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+        "models!a",
+        ":d",
+    ),
+    min_calls=0,
+    max_calls=1,
+)
 
 
 GOOGLE_SHEETS_NATIVE_CASES = (
@@ -273,10 +353,12 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                     "name",
                     "q2 sales tracker",
                 ),
+                exact_path="/drive/v3/files",
             ),
             HttpRequestExpectation(
                 name="sheets_metadata_after_drive_match",
                 url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{SALES_TRACKER_ID}",),
+                exact_path=f"/v4/spreadsheets/{SALES_TRACKER_ID}",
             ),
         ),
         response_term_groups=(("Leads",), ("Pipeline",)),
@@ -304,6 +386,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                     "name",
                     "test",
                 ),
+                exact_path="/drive/v3/files",
             ),
         ),
         response_term_groups=(("Gobii Google Sheets Integration Test", "sheet-test-2026"),),
@@ -321,8 +404,10 @@ GOOGLE_SHEETS_NATIVE_CASES = (
             HttpRequestExpectation(
                 name="sheets_metadata",
                 url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",),
+                exact_path=f"/v4/spreadsheets/{GENERIC_TRACKER_ID}",
             ),
         ),
+        allowed_http_requests=(OPTIONAL_DRIVE_SPREADSHEET_PREFLIGHT,),
         response_term_groups=(("Leads",), ("Tasks",), ("Archive",)),
         tags=("metadata",),
     ),
@@ -332,6 +417,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         prompt="Read Leads!A1:D5 from Google spreadsheet sheet-123 and summarize the rows.",
         http_rules=(
             _drive_spreadsheet_rule([GENERIC_TRACKER_FILE]),
+            _generic_tracker_metadata_rule(),
             {
                 "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
                 **_method_equals("GET"),
@@ -357,6 +443,10 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                     "a1:d5",
                 ),
             ),
+        ),
+        allowed_http_requests=(
+            OPTIONAL_DRIVE_SPREADSHEET_PREFLIGHT,
+            OPTIONAL_GENERIC_METADATA_PREFLIGHT,
         ),
         response_term_groups=(("Acme",), ("Globex",)),
         tags=("values_read",),
@@ -401,6 +491,11 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                 body_terms=("values", "acme", "sam", "high"),
             ),
         ),
+        allowed_http_requests=(
+            OPTIONAL_DRIVE_SPREADSHEET_PREFLIGHT,
+            OPTIONAL_LEADS_VALUES_PREFLIGHT,
+            OPTIONAL_GENERIC_METADATA_PREFLIGHT,
+        ),
         response_term_groups=(("row", "appended", "updated"),),
         tags=("values_write",),
     ),
@@ -414,7 +509,9 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         ),
         http_rules=(
             _local_llms_values_update_rule(),
-            _local_llms_format_rule(),
+            _local_llms_values_append_rule(),
+            _local_llms_format_rule(with_banding=True),
+            _local_llms_format_rule(with_banding=False),
             _create_local_llms_rule(),
         ),
         expected_http_requests=(
@@ -423,17 +520,28 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                 method="POST",
                 url_terms=("sheets.googleapis.com/v4/spreadsheets",),
                 body_terms=("top local llm models",),
+                exact_path="/v4/spreadsheets",
             ),
             HttpRequestExpectation(
                 name="write_default_columns",
                 method="PUT",
+                allowed_methods=("PUT", "POST"),
                 url_terms=(
                     f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
-                    "models",
                     "valueinputoption=user_entered",
                 ),
-                body_terms=("name", "license", "link"),
+                body_terms=("name", "license", "link", "llama 3.1 8b", "qwen2.5 7b", "mistral 7b"),
                 body_term_groups=(("size", "parameters"),),
+            ),
+        ),
+        allowed_http_requests=(
+            HttpRequestExpectation(
+                name="optional_default_sheet_formatting",
+                method="POST",
+                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchupdate",),
+                exact_path=f"/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchupdate",
+                min_calls=0,
+                max_calls=1,
             ),
         ),
         response_term_groups=(("Top Local LLM Models", "created", "ready"),),
@@ -452,7 +560,9 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         ),
         http_rules=(
             _local_llms_values_update_rule(),
-            _local_llms_format_rule(),
+            _local_llms_values_append_rule(),
+            _local_llms_format_rule(with_banding=True),
+            _local_llms_format_rule(with_banding=False),
             _create_local_llms_rule(),
         ),
         expected_http_requests=(
@@ -461,18 +571,39 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                 method="POST",
                 url_terms=("sheets.googleapis.com/v4/spreadsheets",),
                 body_terms=("top local llm models",),
+                exact_path="/v4/spreadsheets",
             ),
             HttpRequestExpectation(
                 name="write_values",
                 method="PUT",
-                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",),
-                body_terms=("release date", "license", "link"),
+                allowed_methods=("PUT", "POST"),
+                url_terms=(
+                    f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
+                ),
+                body_terms=(
+                    "release date",
+                    "license",
+                    "link",
+                    "llama 3.1 8b",
+                    "qwen2.5 7b",
+                    "mistral 7b",
+                    "2024-07-23",
+                    "2024-09-19",
+                    "2023-09-27",
+                    "llama-3.1-8b",
+                    "qwen2.5-7b",
+                    "mistral-7b-v0.1",
+                    "llama 3.1 community license",
+                    "apache 2.0",
+                ),
             ),
             HttpRequestExpectation(
                 name="format_spreadsheet",
                 method="POST",
                 url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchupdate",),
-                body_terms=("frozenrowcount", "repeatcell", "addbanding", "bandedrange", "autoresizedimensions"),
+                body_terms=("frozenrowcount", "repeatcell", "addbanding", "bandedrange"),
+                body_term_groups=(("autoresizedimensions", "updatedimensionproperties"),),
+                exact_path=f"/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}:batchupdate",
             ),
         ),
         response_term_groups=(("polishing", "polished", "formatting", "formatted", "styled"), ("Top Local LLM Models", "sheet")),
@@ -532,15 +663,21 @@ GOOGLE_SHEETS_NATIVE_CASES = (
             HttpRequestExpectation(
                 name="inspect_existing_formatting",
                 url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",),
+                exact_path=f"/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+                max_calls=2,
             ),
             HttpRequestExpectation(
                 name="format_without_duplicate_banding",
                 method="POST",
                 url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchupdate",),
-                body_terms=("repeatcell", "autoresizedimensions"),
+                body_terms=("repeatcell",),
+                body_term_groups=(("autoresizedimensions", "updatedimensionproperties"),),
+                forbidden_body_terms=("addbanding", "bandedrange"),
+                exact_path=f"/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchupdate",
             ),
         ),
-        response_term_groups=(("formatted", "polished"),),
+        allowed_http_requests=(OPTIONAL_LEADS_VALUES_PREFLIGHT,),
+        response_term_groups=(("formatted", "polished", "formatting", "styled", "styling", "applied"),),
         tags=("format", "idempotent"),
     ),
     GoogleSheetsNativeCase(
@@ -565,18 +702,40 @@ GOOGLE_SHEETS_NATIVE_CASES = (
             },
             {
                 "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
+                "param_contains": {"body": "addChart"},
+                "json_params": ("body",),
+                "json_param_path_equals": {
+                    "body": {
+                        "requests.*.addChart.chart.spec.hiddenDimensionStrategy": "SHOW_ALL",
+                    }
+                },
                 **_method_equals("POST"),
                 "result": _http_result(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
                     {"spreadsheetId": GENERIC_TRACKER_ID, "replies": [{"addChart": {"chart": {"chartId": 55}}}]},
                 ),
             },
+            {
+                "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
+                "param_contains": {"body": "addChart"},
+                **_method_equals("POST"),
+                "result": {
+                    "status": "error",
+                    "status_code": 400,
+                    "message": "ChartSpec.hiddenDimensionStrategy must be beside basicChart.",
+                    "retryable": False,
+                },
+            },
         ),
         expected_http_requests=(
             HttpRequestExpectation(
                 name="write_numeric_helper_data",
                 method="PUT",
-                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",),
+                url_terms=(
+                    f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+                    "models",
+                    "!d",
+                ),
                 body_terms=("values",),
             ),
             HttpRequestExpectation(
@@ -584,6 +743,23 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                 method="POST",
                 url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchupdate",),
                 body_terms=("addchart", "basicchart", "domains", "series", "hiddendimensionstrategy", "show_all"),
+                exact_path=f"/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchupdate",
+            ),
+        ),
+        allowed_http_requests=(
+            OPTIONAL_MODEL_HELPER_VALUES_PREFLIGHT,
+            OPTIONAL_MODEL_VALUES_PREFLIGHT,
+            OPTIONAL_MODEL_VALUES_VERIFICATION,
+            OPTIONAL_GENERIC_METADATA_PREFLIGHT,
+            HttpRequestExpectation(
+                name="optional_malformed_chart_repair",
+                method="POST",
+                url_terms=(f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchupdate",),
+                body_terms=("addchart",),
+                exact_path=f"/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchupdate",
+                allowed_statuses=("error",),
+                min_calls=0,
+                max_calls=1,
             ),
         ),
         response_term_groups=(("chart",),),
@@ -610,14 +786,17 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                     "trashed",
                     "false",
                     "name",
-                    "board budget 2026",
+                    "board budget",
                 ),
+                exact_path="/drive/v3/files",
             ),
         ),
+        allowed_http_requests=(OPTIONAL_DRIVE_SPREADSHEET_PREFLIGHT,),
         forbidden_url_terms=(("sheets.googleapis.com/v4/spreadsheets/",),),
         response_term_groups=(
             ("Google Drive", "integration"),
-            ("choose", "select", "connect", "connected"),
+            ("not found", "couldn't find", "could not find", "no matching", "no results", "not visible", "can't see", "could not locate", "empty", "zero files", "wasn't able to find"),
+            ("choose", "select", "connect", "share"),
             ("spreadsheet", "sheet"),
         ),
         tags=("drive_discovery", "missing_file"),
@@ -645,7 +824,90 @@ def _call_has_partial_drive_query(call: PersistentAgentToolCall) -> bool:
     return False
 
 
+def _request_json(call: PersistentAgentToolCall) -> dict[str, Any]:
+    body = (call.tool_params or {}).get("body")
+    if isinstance(body, dict):
+        return body
+    if isinstance(body, str):
+        try:
+            parsed = json.loads(body)
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _chart_helper_write_is_correct(call: PersistentAgentToolCall) -> bool:
+    if str((call.tool_params or {}).get("method") or "GET").upper() != "PUT":
+        return False
+    url = _decoded_url(call)
+    values = _request_json(call).get("values")
+    if not isinstance(values, list) or not all(isinstance(row, list) and row for row in values):
+        return False
+    helper_values = None
+    if "/values/models!d1:d4" in url and len(values) == 4:
+        helper_values = [values[1][0], values[2][0], values[3][0]]
+    elif "/values/models!d2:d4" in url and len(values) == 3:
+        helper_values = [values[0][0], values[1][0], values[2][0]]
+    if helper_values == [8, 7, 7] and not any(isinstance(value, bool) for value in helper_values):
+        return True
+    if _query_value(call, "valueInputOption") != "user_entered" or helper_values is None:
+        return False
+    try:
+        return [float(str(value).strip()) for value in helper_values] == [8.0, 7.0, 7.0]
+    except (TypeError, ValueError):
+        return False
+
+
+def _chart_request_binds_expected_ranges(call: PersistentAgentToolCall) -> bool:
+    requests = _request_json(call).get("requests")
+    if not isinstance(requests, list):
+        return False
+    for request in requests:
+        spec = (
+            ((request or {}).get("addChart") or {}).get("chart", {}).get("spec", {})
+            if isinstance(request, dict)
+            else {}
+        )
+        basic_chart = spec.get("basicChart", {}) if isinstance(spec, dict) else {}
+        if not basic_chart:
+            continue
+        domain_sources = (
+            ((basic_chart.get("domains") or [{}])[0].get("domain") or {})
+            .get("sourceRange", {})
+            .get("sources", [])
+        )
+        series_sources = (
+            ((basic_chart.get("series") or [{}])[0].get("series") or {})
+            .get("sourceRange", {})
+            .get("sources", [])
+        )
+        domain_ok = any(
+            source.get("startColumnIndex") == 0 and source.get("endColumnIndex") == 1
+            for source in domain_sources
+        )
+        series_ok = any(
+            source.get("startColumnIndex") == 3 and source.get("endColumnIndex") == 4
+            for source in series_sources
+        )
+        if (
+            domain_ok
+            and series_ok
+            and spec.get("hiddenDimensionStrategy") == "SHOW_ALL"
+        ):
+            return True
+    return False
+
+
 class GoogleSheetsNativeScenario(NativeHttpScenarioBase):
+    fingerprint_dependencies = (
+        *NativeHttpScenarioBase.fingerprint_dependencies,
+        _call_has_partial_drive_query,
+        _request_json,
+        _chart_helper_write_is_correct,
+        _chart_request_binds_expected_ranges,
+        _query_value,
+    )
     tier = "core"
     category = "google_sheets_native"
     expected_runtime = "short"
@@ -654,9 +916,10 @@ class GoogleSheetsNativeScenario(NativeHttpScenarioBase):
     area = "system_skills"
     tags = ("google_sheets_native", "system_skill", "micro", "http_request")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_expected_http_requests", assertion_type="tool_call"),
         ScenarioTask(name="verify_no_partial_drive_queries", assertion_type="tool_call"),
+        ScenarioTask(name="verify_sheets_semantics", assertion_type="tool_call"),
         ScenarioTask(name="verify_no_forbidden_tools", assertion_type="tool_call"),
         ScenarioTask(name="verify_response", assertion_type="exact_match"),
     ]
@@ -694,14 +957,41 @@ class GoogleSheetsNativeScenario(NativeHttpScenarioBase):
                 ),
                 artifacts={"step": bad_calls[0].step},
             )
-            return
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_no_partial_drive_queries",
+                observed_summary="Agent avoided partial Google Drive q filter URLs.",
+            )
 
         self.record_task_result(
             run_id,
             None,
-            EvalRunTask.Status.PASSED,
-            task_name="verify_no_partial_drive_queries",
-            observed_summary="Agent avoided partial Google Drive q filter URLs.",
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_sheets_semantics",
+        )
+        if self._case().slug != GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_sheets_semantics",
+                observed_summary="No case-specific chart binding check was required.",
+            )
+            return
+
+        http_calls = _tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=["http_request"])
+        helper_ok = any(_chart_helper_write_is_correct(call) for call in http_calls)
+        chart_ok = any(_chart_request_binds_expected_ranges(call) for call in http_calls)
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if helper_ok and chart_ok else EvalRunTask.Status.FAILED,
+            task_name="verify_sheets_semantics",
+            observed_summary=f"numeric_helper_values={helper_ok}, chart_ranges={chart_ok}.",
+            artifacts={"step": http_calls[-1].step} if http_calls else {},
         )
 
 register_native_http_scenarios(GOOGLE_SHEETS_NATIVE_CASES, GoogleSheetsNativeScenario)

@@ -61,7 +61,7 @@ DAILY_CREDIT_PROMPT_SCENARIO_SLUGS = [
 
 
 class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
-    tier = "core"
+    tier = "contract"
     category = "prompt_policy"
     expected_runtime = "short"
     cost_class = "low"
@@ -69,7 +69,7 @@ class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
     area = "agent_behavior"
     tags = ("agent_behavior", "micro", "prompt_policy", "daily_credit")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_prompt_archive", assertion_type="exact_match"),
     ]
     daily_credit_limit = Decimal("100")

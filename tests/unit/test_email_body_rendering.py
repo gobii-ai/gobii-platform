@@ -20,6 +20,19 @@ class EmailBodyRenderingTestCase(TestCase):
         self.assertIn("Hello", plaintext)
         self.assertIn("Thanks", plaintext)
 
+    def test_document_wrapper_becomes_fragment_and_preserves_body_style(self):
+        body = (
+            "<!doctype html><html><head><title>Ignored</title></head>"
+            "<body style='font-family: Arial; color: #123456'><h2>Summary</h2><p>Ready</p></body></html>"
+        )
+
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        self.assertNotRegex(html_snippet, r"</?(?:html|head|body)\b")
+        self.assertIn("<div style='font-family: Arial; color: #123456'>", html_snippet)
+        self.assertIn("Summary", plaintext)
+        self.assertIn("Ready", plaintext)
+
     @tag("batch_email_body")
     def test_html_table_followed_by_paragraph_does_not_gain_breaks(self):
         body = (

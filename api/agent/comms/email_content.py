@@ -102,6 +102,12 @@ INLINE_BOLD_UNDER_RE = re.compile(r"__(.+?)__")
 INLINE_ITALIC_STAR_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
 INLINE_ITALIC_UNDER_RE = re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")
 TABLE_CLOSE_RE = re.compile(r"</table>", re.IGNORECASE)
+DOCTYPE_RE = re.compile(r"^\s*<!doctype\s+html[^>]*>\s*", re.IGNORECASE)
+HTML_OPEN_RE = re.compile(r"^\s*<html\b[^>]*>\s*", re.IGNORECASE)
+HTML_CLOSE_RE = re.compile(r"\s*</html>\s*$", re.IGNORECASE)
+HEAD_BLOCK_RE = re.compile(r"^\s*<head\b[^>]*>.*?</head>\s*", re.IGNORECASE | re.DOTALL)
+BODY_OPEN_RE = re.compile(r"^\s*<body\b(?P<attrs>[^>]*)>\s*", re.IGNORECASE)
+BODY_CLOSE_RE = re.compile(r"\s*</body>\s*$", re.IGNORECASE)
 
 
 def _add_table_styles(html_content: str) -> str:
@@ -160,6 +166,33 @@ logger = logging.getLogger(__name__)
 
 def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def normalize_email_subject(value: str | None) -> str:
+    """Return a plain-text, single-line subject suitable for an email header."""
+    subject = html.unescape(normalize_llm_output(value or ""))
+    return " ".join(subject.split())
+
+
+def normalize_email_html_fragment(body: str | None) -> str:
+    """Normalize authored email HTML and remove outer document wrappers."""
+    fragment = _normalize_newlines(normalize_llm_output(body or "")).strip()
+    fragment = DOCTYPE_RE.sub("", fragment, count=1)
+    fragment = HTML_OPEN_RE.sub("", fragment, count=1)
+    fragment = HTML_CLOSE_RE.sub("", fragment, count=1)
+    fragment = HEAD_BLOCK_RE.sub("", fragment, count=1)
+
+    body_match = BODY_OPEN_RE.match(fragment)
+    if body_match:
+        raw_attrs = body_match.group("attrs")
+        has_close = bool(BODY_CLOSE_RE.search(fragment))
+        if raw_attrs.strip() and has_close:
+            fragment = BODY_OPEN_RE.sub(f"<div{raw_attrs}>", fragment, count=1)
+            fragment = BODY_CLOSE_RE.sub("</div>", fragment, count=1)
+        else:
+            fragment = BODY_OPEN_RE.sub("", fragment, count=1)
+            fragment = BODY_CLOSE_RE.sub("", fragment, count=1)
+    return fragment.strip()
 
 
 def _normalize_html_tag_line_indentation(text: str) -> str:
@@ -330,8 +363,7 @@ def convert_body_to_html_and_plaintext(body: str, *, emit_logs: bool = True) -> 
 
     # Normalize LLM output: decode escape sequences, strip control chars, normalize whitespace
     # This handles cases where LLMs output \u2014 instead of —, \n instead of newlines, etc.
-    normalized_body = normalize_llm_output(body or "")
-    normalized_body = _normalize_newlines(normalized_body)
+    normalized_body = normalize_email_html_fragment(body)
     # Basic observability
     body_length = len(normalized_body)
     body_preview = normalized_body[:200] + ("..." if body_length > 200 else "")

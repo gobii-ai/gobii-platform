@@ -26,7 +26,7 @@ def _parameters_schema(case):
     properties = {}
     for param_name in case.required_param_names:
         properties[param_name] = {
-            "type": "integer" if param_name in {"batch_size", "limit", "min_posts"} else "string"
+            "type": "integer" if param_name in {"batch_size", "limit"} else "string"
         }
     return {
         "type": "object",
@@ -78,14 +78,22 @@ def _create_call(case, *, schema=None, source_code=None, name=None):
         tool_name="create_custom_tool",
         tool_params=params,
         result={"status": "created"},
+        status="complete",
         step=None,
     )
 
 
 def _custom_call(case, *, params=None):
+    representative_values = {
+        "batch_size": 25,
+        "input_table": "raw_signals",
+        "output_table": "normalized_signals",
+        "run_date": "2026-07-10",
+        "status_filter": "pending",
+    }
     call_params = {}
     for param_name in case.required_param_names:
-        call_params[param_name] = 25 if param_name in {"batch_size", "limit", "min_posts"} else "sample"
+        call_params[param_name] = representative_values[param_name]
     if params is not None:
         call_params = params
     return SimpleNamespace(
@@ -103,6 +111,7 @@ def _custom_call(case, *, params=None):
             "do_not_repeat_manually": True,
             "warnings": [],
         },
+        status="complete",
         step=None,
     )
 
@@ -204,10 +213,12 @@ class CustomToolResultContractEvalTests(TestCase):
         schema = {
             "type": "object",
             "properties": {
+                "source_signal_table": {"type": "string"},
+                "dest_signal_table": {"type": "string"},
                 "sync_date": {"type": "string"},
                 "dry_run": {"type": "boolean"},
             },
-            "required": ["sync_date"],
+            "required": ["source_signal_table", "dest_signal_table"],
         }
 
         create_ok, create_reason = CustomToolResultContractScenario._local_create_tool_check(
@@ -217,11 +228,134 @@ class CustomToolResultContractEvalTests(TestCase):
         )
         invoke_ok, invoke_reason = CustomToolResultContractScenario._local_custom_call_check(
             case,
-            _custom_call(case, params={"date_filter": "2026-05-19", "dry_run": False}),
+            _custom_call(
+                case,
+                params={
+                    "source_signal_table": "signals",
+                    "dest_signal_table": "sheet_signals",
+                    "date_filter": "2026-05-19",
+                    "dry_run": False,
+                },
+            ),
         )
 
         self.assertTrue(create_ok, create_reason)
         self.assertTrue(invoke_ok, invoke_reason)
+
+    def test_param_checks_accept_common_destination_and_pending_aliases(self):
+        for case_slug, properties, invocation in (
+            (
+                "dedupe_format_signals",
+                {"source_table": {"type": "string"}, "dest_table": {"type": "string"}},
+                {"source_table": "raw_signals", "dest_table": "formatted_signals"},
+            ),
+            (
+                "sheets_backlog_sync",
+                {
+                    "source_table": {"type": "string"},
+                    "dest_table": {"type": "string"},
+                    "batch_limit": {"type": "integer"},
+                    "pending_value": {"type": "string"},
+                },
+                {
+                    "source_table": "pending_signals",
+                    "dest_table": "sheet_rows",
+                    "batch_limit": 25,
+                    "pending_value": "pending",
+                },
+            ),
+        ):
+            case = _case(case_slug)
+            schema = {"type": "object", "properties": properties, "required": list(properties)}
+            create_ok, create_reason = CustomToolResultContractScenario._local_create_tool_check(
+                case,
+                _create_call(case, schema=schema),
+                CustomToolResultContractScenario._custom_tool_name(case),
+            )
+            invoke_ok, invoke_reason = CustomToolResultContractScenario._local_custom_call_check(
+                case,
+                _custom_call(case, params=invocation),
+            )
+
+            self.assertTrue(create_ok, create_reason)
+            self.assertTrue(invoke_ok, invoke_reason)
+
+    def test_param_checks_accept_case_specific_semantic_groups(self):
+        examples = (
+            (
+                "sheets_final_sync",
+                {
+                    "signal_table": {"type": "string"},
+                    "run_log_table": {"type": "string"},
+                    "signal_worksheet": {"type": "string"},
+                    "run_log_worksheet": {"type": "string"},
+                    "date_from": {"type": "string"},
+                },
+                {
+                    "signal_table": "signals",
+                    "run_log_table": "run_log",
+                    "signal_worksheet": "signals",
+                    "run_log_worksheet": "Run Log",
+                    "date_from": "2026-07-03T00:00:00Z",
+                },
+            ),
+            (
+                "dedupe_format_signals",
+                {"source_table": {"type": "string"}, "result_table": {"type": "string"}},
+                {"source_table": "raw_signals", "result_table": "deduped_signals"},
+            ),
+            (
+                "scrape_url_normalization",
+                {"domains": {"type": "array"}, "result_table": {"type": "string"}},
+                {"domains": ["example.com", "openai.com"], "result_table": "scrape_ready"},
+            ),
+            (
+                "linkedin_post_urls",
+                {"urls": {"type": "array"}, "result_table": {"type": "string"}},
+                {"urls": ["https://linkedin.com/posts/example"], "result_table": "direct_posts"},
+            ),
+        )
+        for case_slug, properties, invocation in examples:
+            with self.subTest(case=case_slug):
+                case = _case(case_slug)
+                schema = json.dumps({"type": "object", "properties": properties})
+                create_ok, create_reason = CustomToolResultContractScenario._local_create_tool_check(
+                    case,
+                    _create_call(case, schema=schema),
+                    CustomToolResultContractScenario._custom_tool_name(case),
+                )
+                invoke_ok, invoke_reason = CustomToolResultContractScenario._local_custom_call_check(
+                    case,
+                    _custom_call(case, params=invocation),
+                )
+                self.assertTrue(create_ok, create_reason)
+                self.assertTrue(invoke_ok, invoke_reason)
+
+    def test_scrape_semantic_inputs_must_be_explicit_and_nonempty(self):
+        case = _case("scrape_url_normalization")
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(
+            case,
+            _custom_call(case, params={"urls": [], "result_table": "scrape_ready"}),
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("input_table", reason)
+
+    def test_case_specific_aliases_do_not_leak_to_unrelated_cases(self):
+        case = _case("dedupe_format_signals")
+        schema = {
+            "type": "object",
+            "properties": {"domains": {"type": "array"}, "result_table": {"type": "string"}},
+        }
+
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, schema=schema),
+            CustomToolResultContractScenario._custom_tool_name(case),
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("input_table", reason)
 
     def test_create_tool_check_accepts_source_written_to_filespace_before_registration(self):
         case = _case("linkedin_post_urls")
@@ -305,6 +439,37 @@ class CustomToolResultContractEvalTests(TestCase):
 
         self.assertFalse(ok)
         self.assertIn("useful runtime params", reason)
+
+    def test_local_create_tool_check_rejects_unrelated_nonempty_params(self):
+        case = _case("scrape_url_normalization")
+        schema = {
+            "type": "object",
+            "properties": {"dry_run": {"type": "boolean"}},
+            "required": ["dry_run"],
+        }
+
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, schema=schema),
+            "custom_scrape_url_normalization",
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("input_table", reason)
+        self.assertIn("output_table", reason)
+
+    def test_local_create_tool_check_allows_optional_schema_fields_when_invocation_is_checked(self):
+        case = _case("sheets_final_sync")
+        schema = _parameters_schema(case)
+        schema["required"] = []
+
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, schema=schema),
+            "custom_sheets_final_sync",
+        )
+
+        self.assertTrue(ok, reason)
 
     def test_local_create_tool_check_catches_missing_result_fields(self):
         case = _case("sheets_final_sync")
@@ -444,6 +609,131 @@ if __name__ == "__main__":
         self.assertFalse(ok)
         self.assertIn("batch_size", reason)
 
+    def test_local_custom_call_check_accepts_semantic_status_default(self):
+        case = _case("chunked_mcp_fanout")
+        schema = _parameters_schema(case)
+        schema["properties"]["status_filter"]["default"] = "pending"
+        schema["required"].remove("status_filter")
+        params = _custom_call(case).tool_params
+        params.pop("status_filter")
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(
+            case,
+            _custom_call(case, params=params),
+            create_call=_create_call(case, schema=schema),
+        )
+
+        self.assertTrue(ok, reason)
+
+    def test_status_default_does_not_replace_required_or_invalid_value(self):
+        case = _case("chunked_mcp_fanout")
+        schema = _parameters_schema(case)
+        schema["properties"]["status_filter"]["default"] = "pending"
+        schema["properties"]["status"] = {"type": "string", "default": "pending"}
+        params = _custom_call(case).tool_params
+        params.pop("status_filter")
+
+        required_ok, required_reason = CustomToolResultContractScenario._local_custom_call_check(
+            case,
+            _custom_call(case, params=params),
+            create_call=_create_call(case, schema=schema),
+        )
+        schema["required"].remove("status_filter")
+        params["status"] = ""
+        invalid_ok, invalid_reason = CustomToolResultContractScenario._local_custom_call_check(
+            case,
+            _custom_call(case, params=params),
+            create_call=_create_call(case, schema=schema),
+        )
+
+        self.assertFalse(required_ok)
+        self.assertIn("status_filter", required_reason)
+        self.assertFalse(invalid_ok)
+        self.assertIn("invalid runtime value", invalid_reason)
+
+    def test_run_date_alias_accepts_iso_datetime(self):
+        case = _case("sheets_final_sync")
+        params = _custom_call(case).tool_params
+        params.pop("run_date")
+        params["since_date"] = "2026-07-03T00:00:00Z"
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(
+            case,
+            _custom_call(case, params=params),
+        )
+
+        self.assertTrue(ok, reason)
+
+    def test_local_custom_call_check_rejects_unrelated_nonempty_params(self):
+        case = _case("dedupe_format_signals")
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(
+            case,
+            _custom_call(case, params={"dry_run": True}),
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("input_table", reason)
+        self.assertIn("output_table", reason)
+
+    def test_local_custom_call_check_rejects_placeholder_or_invalid_values(self):
+        case = _case("scrape_url_normalization")
+        custom_call = _custom_call(
+            case,
+            params={
+                "input_table": "sample",
+                "output_table": "sample",
+            },
+        )
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(case, custom_call)
+
+        self.assertFalse(ok)
+        self.assertIn("invalid runtime value", reason)
+
+    def test_sheet_case_rejects_invalid_generic_output_table_identifier(self):
+        case = _case("sheets_final_sync")
+        params = _custom_call(case).tool_params
+        params["output_table"] = "!!!"
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(
+            case,
+            _custom_call(case, params=params),
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("output_table", reason)
+
+    def test_collection_case_rejects_invalid_generic_input_table_identifier(self):
+        case = _case("scrape_url_normalization")
+        params = _custom_call(case).tool_params
+        params["input_table"] = "!!!"
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(
+            case,
+            _custom_call(case, params=params),
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("input_table", reason)
+
+    def test_tool_call_success_rejects_nonterminal_warning_and_nested_failure(self):
+        complete = _create_call(_case("sheets_final_sync"))
+        self.assertTrue(CustomToolResultContractScenario._tool_call_succeeded(complete))
+
+        for status, result in (
+            ("pending", {"status": "created"}),
+            ("error", {"status": "created"}),
+            ("complete", {"status": "warning"}),
+            ("complete", {"status": "ok", "error": "bad input"}),
+            ("complete", {"status": "ok", "result": {"status": "failed"}}),
+        ):
+            with self.subTest(status=status, result=result):
+                call = _create_call(_case("sheets_final_sync"))
+                call.status = status
+                call.result = result
+                self.assertFalse(CustomToolResultContractScenario._tool_call_succeeded(call))
+
     def test_local_custom_call_check_catches_runtime_error_results(self):
         case = _case("sheets_backlog_sync")
         custom_call = _custom_call(case)
@@ -565,12 +855,22 @@ if __name__ == "__main__":
         self.assertIn("prerequisite local checks failed", judge_records[-1]["observed_summary"])
         self.assertIn("invoke_custom_tool", judge_records[-1]["observed_summary"])
 
-    def test_run_fails_when_create_custom_tool_is_called_more_than_once(self):
+    def test_run_scores_latest_valid_repaired_custom_tool(self):
         case = _case("chunked_mcp_fanout")
         scenario = CustomToolResultContractScenario()
         scenario.case = case
-        first_create = _create_call(case)
-        second_create = _create_call(case)
+        first_create = _create_call(
+            case,
+            source_code=(
+                "from _gobii_ctx import main\n\n"
+                "def run(params, ctx):\n"
+                "    return {'status': 'ok'}\n\n"
+                "main(run)\n"
+            ),
+        )
+        second_create = _create_call(case, source_code=first_create.tool_params["source_code"])
+        final_create = _create_call(case)
+        final_create.tool_params["description"] = "Repaired custom tool with a complete result contract."
         custom_call = _custom_call(case)
         records = []
 
@@ -584,22 +884,126 @@ if __name__ == "__main__":
                 }
             )
 
-        def fail_judge(**kwargs):
-            self.fail("LLM judge should not run after repeated create_custom_tool calls.")
-
         scenario.wait_for_agent_idle = lambda *args, **kwargs: nullcontext()
         scenario.inject_message = lambda *args, **kwargs: SimpleNamespace(timestamp=timezone.now())
-        scenario._tool_calls_for_run = lambda *args, **kwargs: [first_create, second_create, custom_call]
+        scenario._tool_calls_for_run = lambda *args, **kwargs: [first_create, second_create, final_create, custom_call]
         scenario.record_task_result = record_task_result
-        scenario.llm_judge = fail_judge
+        scenario.llm_judge = lambda **kwargs: ("Yes", "The repaired result contract is useful.")
 
         scenario.run(str(uuid.uuid4()), str(uuid.uuid4()))
 
         proposal = [record for record in records if record["task_name"] == "propose_result_contract"][-1]
         invoke = [record for record in records if record["task_name"] == "invoke_custom_tool"][-1]
         judge = [record for record in records if record["task_name"] == "judge_result_helpfulness"][-1]
+        self.assertEqual(proposal["status"], EvalRunTask.Status.PASSED)
+        self.assertEqual(
+            proposal["artifacts"]["create_params"]["description"],
+            "Repaired custom tool with a complete result contract.",
+        )
+        self.assertEqual(proposal["artifacts"]["create_tool_call_count"], 3)
+        self.assertEqual(proposal["artifacts"]["create_tool_repair_count"], 2)
+        self.assertEqual(invoke["status"], EvalRunTask.Status.PASSED)
+        self.assertEqual(judge["status"], EvalRunTask.Status.PASSED)
+
+    def test_run_rejects_more_than_two_create_tool_repairs(self):
+        case = _case("chunked_mcp_fanout")
+        scenario = CustomToolResultContractScenario()
+        scenario.case = case
+        create_calls = [_create_call(case) for _index in range(4)]
+        custom_call = _custom_call(case)
+        records = []
+
+        def record_task_result(run_id, step, status, *, task_name, observed_summary="", **kwargs):
+            records.append(
+                {
+                    "task_name": task_name,
+                    "status": status,
+                    "observed_summary": observed_summary,
+                }
+            )
+
+        scenario.wait_for_agent_idle = lambda *args, **kwargs: nullcontext()
+        scenario.inject_message = lambda *args, **kwargs: SimpleNamespace(timestamp=timezone.now())
+        scenario._tool_calls_for_run = lambda *args, **kwargs: [*create_calls, custom_call]
+        scenario.record_task_result = record_task_result
+        scenario.llm_judge = lambda **kwargs: self.fail("LLM judge should not run after excess repairs.")
+
+        scenario.run(str(uuid.uuid4()), str(uuid.uuid4()))
+
+        proposal = [record for record in records if record["task_name"] == "propose_result_contract"][-1]
+        judge = [record for record in records if record["task_name"] == "judge_result_helpfulness"][-1]
         self.assertEqual(proposal["status"], EvalRunTask.Status.FAILED)
-        self.assertIn("more than once", proposal["observed_summary"])
-        self.assertEqual(proposal["artifacts"]["create_tool_call_count"], 2)
-        self.assertEqual(invoke["status"], EvalRunTask.Status.SKIPPED)
+        self.assertIn("3-attempt repair limit", proposal["observed_summary"])
         self.assertEqual(judge["status"], EvalRunTask.Status.SKIPPED)
+
+    def test_run_does_not_fall_back_past_latest_successful_invalid_definition(self):
+        case = _case("chunked_mcp_fanout")
+        scenario = CustomToolResultContractScenario()
+        scenario.case = case
+        valid_create = _create_call(case)
+        invalid_create = _create_call(
+            case,
+            source_code=(
+                "from _gobii_ctx import main\n\n"
+                "def run(params, ctx):\n"
+                "    return {'status': 'ok'}\n\n"
+                "main(run)\n"
+            ),
+        )
+        invalid_create.tool_params["description"] = "Latest completed but incomplete definition."
+        custom_call = _custom_call(case)
+        records = []
+
+        def record_task_result(run_id, step, status, *, task_name, observed_summary="", **kwargs):
+            records.append(
+                {
+                    "task_name": task_name,
+                    "status": status,
+                    "observed_summary": observed_summary,
+                    "artifacts": kwargs.get("artifacts") or {},
+                }
+            )
+
+        scenario.wait_for_agent_idle = lambda *args, **kwargs: nullcontext()
+        scenario.inject_message = lambda *args, **kwargs: SimpleNamespace(timestamp=timezone.now())
+        scenario._tool_calls_for_run = lambda *args, **kwargs: [valid_create, invalid_create, custom_call]
+        scenario.record_task_result = record_task_result
+        scenario.llm_judge = lambda **kwargs: self.fail("LLM judge should not run after an invalid active definition.")
+
+        scenario.run(str(uuid.uuid4()), str(uuid.uuid4()))
+
+        proposal = [record for record in records if record["task_name"] == "propose_result_contract"][-1]
+        judge = [record for record in records if record["task_name"] == "judge_result_helpfulness"][-1]
+        self.assertEqual(proposal["status"], EvalRunTask.Status.FAILED)
+        self.assertEqual(
+            proposal["artifacts"]["create_params"]["description"],
+            "Latest completed but incomplete definition.",
+        )
+        self.assertEqual(judge["status"], EvalRunTask.Status.SKIPPED)
+
+    def test_run_requires_invocation_after_latest_successful_definition(self):
+        case = _case("sheets_final_sync")
+        scenario = CustomToolResultContractScenario()
+        scenario.case = case
+        first_create = _create_call(case)
+        early_custom_call = _custom_call(case)
+        latest_create = _create_call(case)
+        latest_create.tool_params["description"] = "Latest active definition."
+        records = []
+
+        def record_task_result(run_id, step, status, *, task_name, observed_summary="", **kwargs):
+            records.append({"task_name": task_name, "status": status, "observed_summary": observed_summary})
+
+        scenario.wait_for_agent_idle = lambda *args, **kwargs: nullcontext()
+        scenario.inject_message = lambda *args, **kwargs: SimpleNamespace(timestamp=timezone.now())
+        scenario._tool_calls_for_run = lambda *args, **kwargs: [first_create, early_custom_call, latest_create]
+        scenario.record_task_result = record_task_result
+        scenario.llm_judge = lambda **kwargs: self.fail("LLM judge should not run without a post-definition invocation.")
+
+        scenario.run(str(uuid.uuid4()), str(uuid.uuid4()))
+
+        invoke = [record for record in records if record["task_name"] == "invoke_custom_tool"][-1]
+        judge = [record for record in records if record["task_name"] == "judge_result_helpfulness"][-1]
+        self.assertEqual(invoke["status"], EvalRunTask.Status.FAILED)
+        self.assertIn("did not invoke", invoke["observed_summary"])
+        self.assertEqual(judge["status"], EvalRunTask.Status.FAILED)

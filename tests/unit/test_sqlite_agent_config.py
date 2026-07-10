@@ -8,6 +8,7 @@ from django.test import TestCase, tag
 from api.agent.tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     seed_sqlite_agent_config,
+    sqlite_batch_mutates_agent_config,
 )
 from api.agent.tools.sqlite_state import AGENT_CONFIG_TABLE, reset_sqlite_db_path, set_sqlite_db_path
 from api.models import BrowserUseAgent, PersistentAgent
@@ -102,9 +103,52 @@ class SqliteAgentConfigTests(TestCase):
                 reset_sqlite_db_path(token)
 
         self.agent.refresh_from_db()
-        self.assertEqual(self.agent.charter, "Updated planning charter")
+        self.assertEqual(self.agent.charter, "Original charter")
         self.assertEqual(self.agent.schedule, "0 9 * * *")
-        self.assertIn("charter", result.updated_fields)
+        self.assertFalse(result.updated_fields)
         self.assertNotIn("schedule", result.updated_fields)
         self.assertEqual(len(result.errors), 1)
         self.assertIn("planning mode", result.errors[0].lower())
+
+    def test_nested_sql_wrapper_cannot_hide_agent_config_mutation(self):
+        self.assertTrue(
+            sqlite_batch_mutates_agent_config(
+                {"sql": {"sql": "UPDATE __agent_config SET charter = 'bypassed' WHERE id = 1"}}
+            )
+        )
+
+    def test_reconciliation_denies_triggered_config_change_without_authority(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            token = set_sqlite_db_path(db_path)
+            try:
+                snapshot = seed_sqlite_agent_config(self.agent)
+                conn = sqlite3.connect(db_path)
+                try:
+                    conn.executescript(
+                        f"""
+                        CREATE TABLE proxy(value TEXT);
+                        CREATE TRIGGER proxy_config_update
+                        AFTER INSERT ON proxy
+                        BEGIN
+                            UPDATE "{AGENT_CONFIG_TABLE}" SET charter = NEW.value WHERE id = 1;
+                        END;
+                        INSERT INTO proxy(value) VALUES ('Bypassed charter');
+                        """
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                result = apply_sqlite_agent_config_updates(
+                    self.agent,
+                    snapshot,
+                    can_update_config=False,
+                )
+            finally:
+                reset_sqlite_db_path(token)
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.charter, "Original charter")
+        self.assertFalse(result.updated_fields)
+        self.assertIn("active requester cannot change", result.errors[0])

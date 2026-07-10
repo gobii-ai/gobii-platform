@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -143,6 +143,60 @@ class SourceLocMeasurement:
     file_count: int
 
 
+@dataclass(frozen=True)
+class PromptScenario:
+    name: str
+    is_first_run: bool = False
+    planning: bool = False
+    web_session: bool = False
+    enabled_system_skill_keys: tuple[str, ...] = ()
+    enabled_builtin_tool_names: tuple[str, ...] = ()
+    inbound_message: str = ""
+    expects_billing_catalog: bool = False
+    mature_state: bool = False
+
+
+TOOL_RICH_BUILTIN_COUNT = 7
+PROMPT_SCENARIOS = (
+    PromptScenario(name="normal_explicit_send"),
+    PromptScenario(
+        name="billing_catalog_request",
+        inbound_message="What plans and add-ons are available, and what do they cost?",
+        expects_billing_catalog=True,
+    ),
+    PromptScenario(name="normal_first_run", is_first_run=True),
+    PromptScenario(name="web_chat_implied_send", web_session=True),
+    PromptScenario(name="web_chat_first_run", is_first_run=True, web_session=True),
+    PromptScenario(name="planning_first_run", is_first_run=True, planning=True),
+    PromptScenario(name="planning_continuation", planning=True),
+    PromptScenario(
+        name="enabled_system_skills",
+    ),
+    PromptScenario(
+        name="builtin_tool_rich",
+    ),
+    PromptScenario(name="mature_agent_state", mature_state=True),
+)
+PROMPT_SCENARIO_DESCRIPTIONS = {
+    "billing_catalog_request": "Current unanswered user request asks for the conditional plan/add-on catalog.",
+    "normal_explicit_send": "No active web session; communication requires explicit send tools.",
+    "normal_first_run": "First execution run without an active web session.",
+    "web_chat_implied_send": "Active web-chat session; text replies can use implied send.",
+    "web_chat_first_run": "First execution run with an active web-chat session.",
+    "planning_first_run": "Planning mode on the first run with a verified preferred contact.",
+    "planning_continuation": "Planning mode after the first run.",
+    "enabled_system_skills": "The three largest registered system-skill prompt/tool payloads, selected dynamically.",
+    "builtin_tool_rich": "The seven largest available registered built-ins, selected dynamically.",
+    "mature_agent_state": "Long legacy charter, six-step plan, and many saved skills after sustained use.",
+}
+PROMPT_BYTE_METRICS = (
+    "system_bytes",
+    "user_bytes",
+    "tools_bytes",
+    "total_bytes",
+)
+
+
 class BudgetFailure(RuntimeError):
     """Raised when a measured budget exceeds the committed limit."""
 
@@ -157,7 +211,7 @@ def _run_git(args: list[str]) -> str:
 
 def _git_files() -> list[str]:
     output = subprocess.check_output(
-        ["git", "ls-files", "-z"],
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
         cwd=REPO_ROOT,
     )
     return [
@@ -327,29 +381,161 @@ def _create_agent(*, scenario: str, planning: bool = False):
     return agent, user, endpoint
 
 
+def _configure_prompt_scenario(agent, scenario: PromptScenario) -> None:
+    from api.agent.system_skills.service import enable_system_skills
+    from api.models import PersistentAgentEnabledTool
+
+    if scenario.inbound_message:
+        from api.models import PersistentAgentMessage
+
+        agent_endpoint = agent.comms_endpoints.filter(is_primary=True).first()
+        PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            is_outbound=False,
+            from_endpoint=agent.preferred_contact_endpoint,
+            to_endpoint=agent_endpoint,
+            body=scenario.inbound_message,
+        )
+
+    if scenario.enabled_system_skill_keys:
+        result = enable_system_skills(agent, scenario.enabled_system_skill_keys)
+        if result.get("invalid"):
+            raise BudgetFailure(
+                f"{scenario.name}: failed to enable representative system skills: "
+                + ", ".join(result["invalid"])
+            )
+
+    if scenario.enabled_builtin_tool_names:
+        PersistentAgentEnabledTool.objects.bulk_create(
+            [
+                PersistentAgentEnabledTool(
+                    agent=agent,
+                    tool_full_name=tool_name,
+                    tool_server="builtin",
+                    tool_name=tool_name,
+                    last_used_at=FIXED_PROMPT_NOW,
+                )
+                for tool_name in scenario.enabled_builtin_tool_names
+            ]
+        )
+
+    if scenario.mature_state:
+        from api.models import PersistentAgentKanbanCard, PersistentAgentSkill
+
+        agent.charter = " ".join(
+            f"Durable rule {index}: preserve verified source links, exact filters, and correction {index}."
+            for index in range(70)
+        )
+        agent.save(update_fields=["charter", "updated_at"])
+        for index in range(20):
+            PersistentAgentSkill.objects.create(
+                agent=agent,
+                name=f"mature-skill-{index:02d}",
+                description="Reusable mature-agent workflow.",
+                version=1,
+                tools=["sqlite_batch"],
+                instructions=(
+                    f"Workflow {index}: use a bounded query, retain source URLs, checkpoint progress, "
+                    "and apply later corrections without discarding unrelated constraints."
+                ),
+                last_used_at=FIXED_PROMPT_NOW - timedelta(minutes=index),
+            )
+        PersistentAgentKanbanCard.objects.bulk_create(
+            [
+                PersistentAgentKanbanCard(
+                    assigned_agent=agent,
+                    title=(f"Mature plan step {index}: " + "verify, transform, and checkpoint evidence " * 6)[:255],
+                    status="doing" if index == 0 else "todo",
+                    priority=6 - index,
+                )
+                for index in range(6)
+            ]
+        )
+
+
 def _measure_prompt_scenario(
     *,
-    name: str,
-    is_first_run: bool = False,
-    planning: bool = False,
-    web_session: bool = False,
+    scenario: PromptScenario,
 ) -> dict[str, int]:
     from api.agent.core.prompt_context import build_prompt_context_preview, get_agent_tools
     from api.services.web_sessions import start_web_session
 
-    agent, user, _endpoint = _create_agent(scenario=name, planning=planning)
-    if web_session:
+    agent, user, _endpoint = _create_agent(
+        scenario=scenario.name,
+        planning=scenario.planning,
+    )
+    if scenario.name == "enabled_system_skills":
+        scenario = replace(
+            scenario,
+            enabled_system_skill_keys=_largest_system_skill_keys(agent, limit=3),
+        )
+    elif scenario.name == "builtin_tool_rich":
+        scenario = replace(
+            scenario,
+            enabled_builtin_tool_names=_largest_builtin_tool_names(
+                agent,
+                limit=TOOL_RICH_BUILTIN_COUNT,
+            ),
+        )
+    _configure_prompt_scenario(agent, scenario)
+    if scenario.web_session:
         start_web_session(agent, user)
 
-    messages, fitted_tokens, _metadata = build_prompt_context_preview(
+    messages, _fitted_tokens, _metadata = build_prompt_context_preview(
         agent,
-        is_first_run=is_first_run,
+        is_first_run=scenario.is_first_run,
         daily_credit_state=_daily_credit_state(),
-        prefer_low_latency=web_session,
+        prefer_low_latency=scenario.web_session,
     )
-    system_message = next(message["content"] for message in messages if message["role"] == "system")
-    user_message = next(message["content"] for message in messages if message["role"] == "user")
+    unexpected_roles = sorted({message["role"] for message in messages} - {"system", "user"})
+    if unexpected_roles:
+        raise BudgetFailure(f"{scenario.name}: unmeasured prompt roles: {', '.join(unexpected_roles)}")
+    system_messages = [message["content"] for message in messages if message["role"] == "system"]
+    user_messages = [message["content"] for message in messages if message["role"] == "user"]
+    if not system_messages or not user_messages:
+        raise BudgetFailure(f"{scenario.name}: expected system and user prompt messages")
+    system_message = "".join(system_messages)
+    user_message = "".join(user_messages)
     tools = get_agent_tools(agent)
+
+    missing_skill_keys = [
+        skill_key
+        for skill_key in scenario.enabled_system_skill_keys
+        if f"<skill_{skill_key}>" not in user_message
+    ]
+    if missing_skill_keys:
+        raise BudgetFailure(
+            f"{scenario.name}: expected system skills were not rendered: "
+            + ", ".join(missing_skill_keys)
+        )
+
+    billing_catalog_present = "Available plans:" in user_message and "Available add-ons:" in user_message
+    if billing_catalog_present != scenario.expects_billing_catalog:
+        expectation = "include" if scenario.expects_billing_catalog else "omit"
+        raise BudgetFailure(f"{scenario.name}: expected prompt to {expectation} the conditional billing catalog")
+
+    from api.agent.system_skills.registry import get_system_skill_definition
+
+    rendered_tool_names = {
+        tool.get("function", {}).get("name")
+        for tool in tools
+        if isinstance(tool, dict)
+    }
+    skill_tool_names = {
+        tool_name
+        for skill_key in scenario.enabled_system_skill_keys
+        for definition in [get_system_skill_definition(skill_key)]
+        if definition is not None
+        for tool_name in definition.tools_to_enable()
+    }
+    missing_tool_names = sorted(
+        (set(scenario.enabled_builtin_tool_names) | skill_tool_names) - rendered_tool_names
+    )
+    if missing_tool_names:
+        raise BudgetFailure(
+            f"{scenario.name}: expected associated tools were not rendered: "
+            + ", ".join(missing_tool_names)
+        )
 
     system_bytes = _text_size(system_message)
     user_bytes = _text_size(user_message)
@@ -359,8 +545,48 @@ def _measure_prompt_scenario(
         "user_bytes": user_bytes,
         "tools_bytes": tools_bytes,
         "total_bytes": system_bytes + user_bytes + tools_bytes,
-        "fitted_tokens": int(fitted_tokens),
     }
+
+
+def _largest_system_skill_keys(agent, *, limit: int) -> tuple[str, ...]:
+    from api.agent.system_skills.registry import SYSTEM_SKILL_REGISTRY
+    from api.agent.tools.tool_manager import BUILTIN_TOOL_REGISTRY
+
+    payloads = []
+    for definition in SYSTEM_SKILL_REGISTRY.values():
+        prompt_payload = definition.render_prompt_instructions(agent) + definition.render_prompt_context(agent)
+        tool_definitions = []
+        for tool_name in definition.tools_to_enable():
+            entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+            if entry is None:
+                continue
+            tool_definitions.append(entry["definition"]())
+        payloads.append(
+            (
+                _text_size(prompt_payload) + _json_size(tool_definitions),
+                definition.skill_key,
+            )
+        )
+    payloads.sort(key=lambda item: (-item[0], item[1]))
+    selected = tuple(skill_key for _size, skill_key in payloads[:limit])
+    if len(selected) != limit:
+        raise BudgetFailure(f"Expected at least {limit} registered system skills, found {len(selected)}")
+    return selected
+
+
+def _largest_builtin_tool_names(agent, *, limit: int) -> tuple[str, ...]:
+    from api.agent.tools.tool_manager import BUILTIN_TOOL_REGISTRY, _is_builtin_tool_available
+
+    payloads = [
+        (_json_size(entry["definition"]()), tool_name)
+        for tool_name, entry in BUILTIN_TOOL_REGISTRY.items()
+        if _is_builtin_tool_available(tool_name, agent, include_hidden=True)
+    ]
+    payloads.sort(key=lambda item: (-item[0], item[1]))
+    selected = tuple(tool_name for _size, tool_name in payloads[:limit])
+    if len(selected) != limit:
+        raise BudgetFailure(f"Expected at least {limit} available built-ins, found {len(selected)}")
+    return selected
 
 
 def measure_prompt_sizes() -> dict[str, dict[str, int]]:
@@ -408,16 +634,8 @@ def measure_prompt_sizes() -> dict[str, dict[str, int]]:
                     patches[9],
                 ):
                     return {
-                        "normal_explicit_send": _measure_prompt_scenario(name="normal-explicit-send"),
-                        "web_chat_implied_send": _measure_prompt_scenario(
-                            name="web-chat-implied-send",
-                            web_session=True,
-                        ),
-                        "planning_first_run": _measure_prompt_scenario(
-                            name="planning-first-run",
-                            is_first_run=True,
-                            planning=True,
-                        ),
+                        scenario.name: _measure_prompt_scenario(scenario=scenario)
+                        for scenario in PROMPT_SCENARIOS
                     }
             finally:
                 teardown_databases(test_config, verbosity=0)
@@ -446,7 +664,7 @@ def _budget_metadata(baseline_sha: str) -> dict[str, Any]:
         "baseline_sha": baseline_sha,
         "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
         "source_loc": {
-            "description": "Nonblank lines in tracked core product source files, excluding tests and dedicated eval assets.",
+            "description": "Nonblank lines in tracked and unignored core product source files, excluding tests and dedicated eval assets.",
             "include_roots": list(SOURCE_ROOTS),
             "include_files": sorted(SOURCE_FILES),
             "include_suffixes": sorted(SOURCE_SUFFIXES),
@@ -463,13 +681,35 @@ def _budget_metadata(baseline_sha: str) -> dict[str, Any]:
         "prompt_size": {
             "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
             "unit": "utf8_bytes",
-            "scenarios": {
-                "normal_explicit_send": "No active web session; communication requires explicit send tools.",
-                "web_chat_implied_send": "Active web-chat session; text replies can use implied send.",
-                "planning_first_run": "Planning mode on the first run with a verified preferred contact.",
-            },
+            "limit_policy": (
+                "Hard limits are approved manually. --update-baselines refreshes observed measurements "
+                "but never changes limits."
+            ),
+            "scenarios": dict(PROMPT_SCENARIO_DESCRIPTIONS),
         },
     }
+
+
+def _validate_prompt_scenario_coverage(
+    measurements: dict[str, dict[str, int]],
+    limits: dict[str, dict[str, int]],
+) -> list[str]:
+    failures: list[str] = []
+    measurement_names = set(measurements)
+    limit_names = set(limits)
+    for scenario in sorted(limit_names - measurement_names):
+        failures.append(f"{scenario}: missing current measurement")
+    for scenario in sorted(measurement_names - limit_names):
+        failures.append(f"{scenario}: missing approved limits")
+
+    for scenario in sorted(measurement_names & limit_names):
+        missing_measurements = set(PROMPT_BYTE_METRICS) - set(measurements[scenario])
+        for metric in sorted(missing_measurements):
+            failures.append(f"{scenario}.{metric}: missing current measurement")
+        missing_metrics = set(PROMPT_BYTE_METRICS) - set(limits[scenario])
+        for metric in sorted(missing_metrics):
+            failures.append(f"{scenario}.{metric}: missing approved limit")
+    return failures
 
 
 def update_baselines(*, baseline_sha: str, loc_only: bool, prompt_only: bool) -> dict[str, Any]:
@@ -485,7 +725,20 @@ def update_baselines(*, baseline_sha: str, loc_only: bool, prompt_only: bool) ->
 
     if not loc_only:
         prompt_sizes = measure_prompt_sizes()
-        budget["prompt_size"]["limits"] = prompt_sizes
+        limits = existing.get("prompt_size", {}).get("limits")
+        if not isinstance(limits, dict):
+            raise BudgetFailure(
+                "Approved prompt-size limits are missing. Add reviewed hard limits manually; "
+                "--update-baselines never creates or relaxes them."
+            )
+        coverage_failures = _validate_prompt_scenario_coverage(prompt_sizes, limits)
+        if coverage_failures:
+            raise BudgetFailure(
+                "Prompt-size observations were not updated because approved limit coverage is incomplete: "
+                + "; ".join(coverage_failures)
+            )
+        budget["prompt_size"]["limits"] = limits
+        budget["prompt_size"]["observed"] = prompt_sizes
     elif "prompt_size" in existing:
         budget["prompt_size"] = existing["prompt_size"]
 
@@ -511,15 +764,15 @@ def check_source_loc(budget: dict[str, Any]) -> SourceLocMeasurement:
 def check_prompt_sizes(budget: dict[str, Any]) -> dict[str, dict[str, int]]:
     measurements = measure_prompt_sizes()
     limits = budget["prompt_size"]["limits"]
-    failures: list[str] = []
+    failures = _validate_prompt_scenario_coverage(measurements, limits)
     for scenario, scenario_limits in limits.items():
         current = measurements.get(scenario)
         if current is None:
-            failures.append(f"{scenario}: missing current measurement")
             continue
-        for metric, limit in scenario_limits.items():
-            if metric == "fitted_tokens":
+        for metric in PROMPT_BYTE_METRICS:
+            if metric not in scenario_limits or metric not in current:
                 continue
+            limit = scenario_limits[metric]
             current_value = current[metric]
             if current_value > int(limit):
                 failures.append(
@@ -531,8 +784,7 @@ def check_prompt_sizes(budget: dict[str, Any]) -> dict[str, dict[str, int]]:
         raise BudgetFailure(
             "Prompt-size budget exceeded: "
             f"{failure_text}. Intentional increases require approval and then "
-            "`uv run python scripts/check_complexity_budgets.py --update-baselines "
-            "--baseline-sha $(git rev-parse HEAD)`."
+            "a manual hard-limit change. `--update-baselines` only refreshes observations."
         )
     return measurements
 
@@ -577,7 +829,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--loc-only", action="store_true", help="Check or update only the source LoC budget.")
     mode.add_argument("--prompt-only", action="store_true", help="Check or update only prompt-size budgets.")
-    parser.add_argument("--update-baselines", action="store_true", help="Rewrite budgets to current measurements.")
+    parser.add_argument(
+        "--update-baselines",
+        action="store_true",
+        help="Refresh observations and source LoC; approved prompt limits are never changed.",
+    )
     parser.add_argument("--baseline-sha", help="Baseline SHA to record when updating budgets.")
     return parser.parse_args(argv)
 
@@ -592,7 +848,9 @@ def main(argv: list[str]) -> int:
                 prompt_only=args.prompt_only,
             )
             print(f"Updated {BUDGET_PATH.relative_to(REPO_ROOT)}")
-            _print_success(budget=budget, loc=None, prompt_sizes=None)
+            if not args.loc_only:
+                print("Refreshed prompt observations; approved hard limits were not changed.")
+            print("Run the checker without --update-baselines to verify the approved limits.")
             return 0
 
         budget = _load_budget()

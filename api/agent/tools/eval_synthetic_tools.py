@@ -72,10 +72,8 @@ _GENERIC_BATCH_WORK_SCHEMA = {
     "properties": {
         "batch_size": {"type": "integer"},
         "limit": {"type": "integer"},
-        "status": {"type": "string"},
-        "query": {"type": "string"},
     },
-    "additionalProperties": True,
+    "additionalProperties": False,
 }
 
 _WEB_SEARCH_SCHEMA = {
@@ -222,8 +220,10 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "eval_verify_candidate_batch": {
         "description": (
             "Deterministic eval tool for verifying a bounded batch of sourcing candidates against location, company, "
-            "and tenure constraints. Use this directly; do not call search_tools first. Partial results may include "
-            "remaining_work or next_cursor."
+            "and tenure constraints. This tool owns and returns the queued candidate records even when SQLite and files "
+            "contain none; call it directly instead of looking for the queue elsewhere or asking the user to supply it. "
+            "Do not call search_tools first. One call processes the current batch; after a partial result, preserve its "
+            "next_cursor for later work and report the verified subset instead of repeating the same batch."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },

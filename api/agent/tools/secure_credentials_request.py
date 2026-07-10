@@ -63,10 +63,7 @@ def get_secure_credentials_request_tool() -> dict:
         "function": {
             "name": "secure_credentials_request",
             "description": (
-                "Request credentials only for immediate http_request/API, spawn_web_task login, or sandbox-code use. Do not use for MCP OAuth; call the MCP tool and surface its auth link. "
-                "Use secret_type='credential' with domain_pattern for website placeholders. "
-                "If a custom tool script, python_exec, run_command, or MCP server reads os.environ, ALWAYS set secret_type='env_var' and omit domain_pattern. "
-                "Broad domains are usually better, e.g. *.google.com. Send the returned credential-entry/update URL to the user."
+                "Request a secret for immediate use and send the returned entry URL. Use domain-scoped `credential` for HTTP/browser login, or `env_var` without domain_pattern for sandbox os.environ. MCP OAuth uses its auth link instead."
             ),
             "parameters": {
                 "type": "object",
@@ -83,7 +80,7 @@ def get_secure_credentials_request_tool() -> dict:
                                 "secret_type": {
                                     "type": "string",
                                     "enum": ["credential", "env_var"],
-                                    "description": "credential for domain-scoped secrets; env_var for os.environ in custom tool scripts or sandbox code. If sandbox code reads it, this MUST be env_var.",
+                                    "description": "credential for domain login; env_var for sandbox os.environ.",
                                 },
                             },
                             "required": ["name", "description", "key"]

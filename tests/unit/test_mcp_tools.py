@@ -4132,8 +4132,10 @@ class MCPToolExecutorsTests(TestCase):
         self.assertNotIn("will_continue_work", tool_def["function"]["parameters"]["properties"])
         self.assertEqual(tool_def["function"]["parameters"]["required"], ["query"])
         description = tool_def["function"]["description"]
-        self.assertIn("no enabled tool clearly fits", description)
-        self.assertIn("do not rediscover", description)
+        self.assertIn("Discover/enable integrations", description)
+        self.assertIn("callable nonlegacy tools directly", description)
+        self.assertIn("persistent research/specialist team must start here", description)
+        self.assertIn("never simulate a team with personas", description)
         self.assertNotIn("NOT for web search", description)
         
     @patch('api.agent.tools.search_tools.search_tools')

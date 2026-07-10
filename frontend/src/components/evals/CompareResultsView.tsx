@@ -19,11 +19,6 @@ const formatCurrency = (value: number | null, digits = 4) => {
   return `$${value.toFixed(digits)}`
 }
 
-const formatPercent = (value: number | null) => {
-  if (value == null) return '—'
-  return `${Math.round(value * 100)}%`
-}
-
 const formatTokens = (value: number | null) => {
   if (value == null) return '—'
   return value.toLocaleString()
@@ -228,7 +223,7 @@ function GroupedResultsTable({ groups, groupBy }: { groups: ComparisonGroup[]; g
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Pass Rate</th>
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Avg Cost</th>
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Avg Tokens</th>
-            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tasks</th>
+            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Scenarios</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -269,8 +264,8 @@ function GroupedResultsTable({ groups, groupBy }: { groups: ComparisonGroup[]; g
                 {formatTokens(group.avg_tokens)}
               </td>
               <td className="py-3 px-4 text-center text-slate-600">
-                <span className="text-emerald-600 font-medium">{group.passed_tasks}</span>
-                <span className="text-slate-400">/{group.total_tasks}</span>
+                <span className="text-emerald-600 font-medium">{group.passed_scenarios}</span>
+                <span className="text-slate-400">/{group.total_scenarios}</span>
               </td>
             </tr>
           ))}
@@ -297,7 +292,7 @@ function UngroupedResultsTable({ runs }: { runs: ComparisonRunSummary[] }) {
             <th className="text-left py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Date</th>
             <th className="text-left py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Commit</th>
             <th className="text-left py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Model</th>
-            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Pass Rate</th>
+            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Outcome</th>
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Cost</th>
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Type</th>
           </tr>
@@ -314,7 +309,11 @@ function UngroupedResultsTable({ runs }: { runs: ComparisonRunSummary[] }) {
               <td className="py-3 px-4 text-slate-700 font-medium">{run.primary_model || '—'}</td>
               <td className="py-3 px-4 text-center">
                 <span className="font-semibold text-slate-900">
-                  {run.task_totals?.pass_rate != null ? formatPercent(run.task_totals.pass_rate) : '—'}
+                  {run.scenario_outcome?.status === 'passed'
+                    ? 'Pass'
+                    : run.scenario_outcome?.status === 'failed'
+                      ? 'Fail'
+                      : '—'}
                 </span>
               </td>
               <td className="py-3 px-4 text-center font-mono text-slate-700">{formatCurrency(run.total_cost)}</td>
@@ -354,7 +353,7 @@ function UngroupedSuiteResultsTable({ suiteRuns }: { suiteRuns: SuiteComparisonS
             <th className="text-left py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Date</th>
             <th className="text-left py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Model</th>
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Pass Rate</th>
-            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tasks</th>
+            <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Scenarios</th>
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Cost</th>
             <th className="text-center py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500">Type</th>
           </tr>
@@ -370,8 +369,8 @@ function UngroupedSuiteResultsTable({ suiteRuns }: { suiteRuns: SuiteComparisonS
                 </span>
               </td>
               <td className="py-3 px-4 text-center text-slate-600">
-                <span className="text-emerald-600 font-medium">{suite.passed_tasks}</span>
-                <span className="text-slate-400">/{suite.total_tasks}</span>
+                <span className="text-emerald-600 font-medium">{suite.passed_scenarios}</span>
+                <span className="text-slate-400">/{suite.total_scenarios}</span>
               </td>
               <td className="py-3 px-4 text-center font-mono text-slate-700">{formatCurrency(suite.total_cost)}</td>
               <td className="py-3 px-4 text-center">

@@ -6,10 +6,13 @@ from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.storage import FileSystemStorage
 from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
+from api.agent.core.prompt_context import _get_sqlite_examples
 from api.agent.tools.sqlite_batch import (
+    MAX_RESULT_BYTES,
     execute_sqlite_batch,
     get_sqlite_batch_tool,
     _apply_resource_limits,
@@ -39,8 +42,22 @@ from api.agent.tools.sqlite_query_quality import (
     summarize_sqlite_tool_result_calls,
     summarize_sqlite_tool_result_sql,
 )
-from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
-from api.models import BrowserUseAgent, PersistentAgent
+from api.agent.tools.sqlite_state import (
+    agent_sqlite_db,
+    get_sqlite_digest_prompt,
+    get_sqlite_schema_prompt,
+    reset_sqlite_db_path,
+    set_sqlite_db_path,
+)
+from api.models import (
+    BrowserUseAgent,
+    PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentCronTrigger,
+    PersistentAgentMessage,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
+)
 
 
 @tag("batch_sqlite")
@@ -60,6 +77,25 @@ class SqliteBatchToolTests(TestCase):
             charter="test sqlite batch",
             browser_use_agent=cls.browser_agent,
             created_at=timezone.now(),
+        )
+        cls.agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=cls.agent,
+            channel="email",
+            address="sqlite-agent@example.com",
+            is_primary=True,
+        )
+        cls.external_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="email",
+            address="sqlite-user@example.com",
+        )
+
+    def _create_inbound_message(self, body: str) -> PersistentAgentMessage:
+        return PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.agent_endpoint,
+            is_outbound=False,
+            body=body,
         )
 
     def _with_temp_db(self):
@@ -108,14 +144,161 @@ class SqliteBatchToolTests(TestCase):
             results = out.get("results", [])
             self.assertEqual(len(results), 2)  # stops before failing query
             self.assertIn("Query 2 failed", out.get("message", ""))
+            self.assertIn("rolled back", out.get("message", "").lower())
 
-            # First insert should have committed; later queries not executed
             conn = sqlite3.connect(db_path)
             try:
                 cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) FROM t;")
-                (count,) = cur.fetchone()
-                self.assertEqual(count, 1)
+                cur.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 't';")
+                self.assertIsNone(cur.fetchone())
+            finally:
+                conn.close()
+
+    def test_later_failure_rolls_back_rows_in_existing_table(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE t(a INTEGER PRIMARY KEY)")
+                conn.execute("INSERT INTO t(a) VALUES (10)")
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "INSERT INTO t(a) VALUES (20);"
+                        "UPDATE t SET a = 11 WHERE a = 10;"
+                        "INSERT INTO t(a) VALUES (20);"
+                    )
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error", out.get("message"))
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute("SELECT a FROM t ORDER BY a").fetchall()
+                self.assertEqual(rows, [(10,)])
+            finally:
+                conn.close()
+
+    def test_later_failure_rolls_back_config_and_state_tables(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE __agent_config(id INTEGER PRIMARY KEY, charter TEXT, schedule TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO __agent_config(id, charter, schedule) VALUES (1, 'original charter', NULL)"
+                )
+                conn.execute("CREATE TABLE agent_state(key TEXT PRIMARY KEY, value TEXT)")
+                conn.execute("INSERT INTO agent_state(key, value) VALUES ('mode', 'original')")
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "UPDATE __agent_config SET charter = 'changed charter' WHERE id = 1;"
+                        "UPDATE agent_state SET value = 'changed' WHERE key = 'mode';"
+                        "INSERT INTO agent_state(key, value) VALUES ('mode', 'duplicate');"
+                    )
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error", out.get("message"))
+            conn = sqlite3.connect(db_path)
+            try:
+                charter = conn.execute(
+                    "SELECT charter FROM __agent_config WHERE id = 1"
+                ).fetchone()
+                state = conn.execute(
+                    "SELECT value FROM agent_state WHERE key = 'mode'"
+                ).fetchone()
+                self.assertEqual(charter, ("original charter",))
+                self.assertEqual(state, ("original",))
+            finally:
+                conn.close()
+
+    def test_explicit_transaction_boundaries_do_not_break_batch_atomicity(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            success = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "BEGIN IMMEDIATE;"
+                        "CREATE TABLE committed(id INTEGER PRIMARY KEY);"
+                        "INSERT INTO committed(id) VALUES (1);"
+                        "COMMIT;"
+                        "SAVEPOINT user_checkpoint;"
+                        "INSERT INTO committed(id) VALUES (2);"
+                        "ROLLBACK TO SAVEPOINT user_checkpoint;"
+                        "RELEASE SAVEPOINT user_checkpoint;"
+                        "SELECT id FROM committed;"
+                    )
+                },
+            )
+            self.assertEqual(success.get("status"), "ok", success.get("message"))
+            self.assertEqual(success["results"][-1]["result"], [{"id": 1}])
+
+            failed = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "BEGIN;"
+                        "CREATE TABLE doomed(id INTEGER PRIMARY KEY);"
+                        "INSERT INTO doomed(id) VALUES (1);"
+                        "COMMIT;"
+                        "INSERT INTO doomed(id) VALUES (1);"
+                    )
+                },
+            )
+            self.assertEqual(failed.get("status"), "error", failed.get("message"))
+
+            conn = sqlite3.connect(db_path)
+            try:
+                table = conn.execute(
+                    "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'doomed'"
+                ).fetchone()
+                committed = conn.execute("SELECT id FROM committed").fetchall()
+                self.assertIsNone(table)
+                self.assertEqual(committed, [(1,)])
+            finally:
+                conn.close()
+
+    def test_autocorrected_read_result_survives_response_while_mutations_roll_back(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE hn_comments(comment_id INTEGER PRIMARY KEY, note TEXT)"
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "INSERT INTO hn_comments(comment_id, note) VALUES (1, 'visible in batch');"
+                        "SELECT coment_id FROM hn_comments ORDER BY coment_id;"
+                        "INSERT INTO hn_comments(comment_id, note) VALUES (1, 'duplicate');"
+                    )
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error", out.get("message"))
+            self.assertEqual(out["results"][1]["result"], [{"comment_id": 1}])
+            self.assertIsNotNone(out["results"][1].get("auto_correction"))
+            conn = sqlite3.connect(db_path)
+            try:
+                count = conn.execute("SELECT COUNT(*) FROM hn_comments").fetchone()
+                self.assertEqual(count, (0,))
             finally:
                 conn.close()
 
@@ -245,11 +428,29 @@ class SqliteBatchToolTests(TestCase):
         definition = get_sqlite_batch_tool()
         description = definition["function"]["description"]
 
-        self.assertIn("Query/update structured data you already have", description)
-        self.assertIn("one shaped query with CTEs", description)
-        self.assertIn("from __tool_results", description)
-        self.assertIn("prefer a custom tool writing to SQLite", description)
-        self.assertIn("no ATTACH", description)
+        self.assertIn("durable SQLite", description)
+        self.assertIn("multiple `__tool_results` set-wise", description)
+        self.assertIn("never copy outputs into SQL", description)
+        self.assertIn("Batch SQL", description)
+        self.assertIn("CTEs/IN/joins/aggregates", description)
+        self.assertIn("never synthesize/dedupe from `substr` previews", description)
+        self.assertIn("custom tool for bulk imports/API fan-out", description)
+
+    def test_system_sqlite_contract_lists_custom_helpers_and_string_array_rule(self):
+        contract = _get_sqlite_examples()
+
+        for helper in (
+            "csv_parse",
+            "csv_headers",
+            "parse_number",
+            "parse_date",
+            "grep_context_all",
+            "split_sections",
+        ):
+            with self.subTest(helper=helper):
+                self.assertIn(f"`{helper}`", contract)
+        self.assertIn("A JSON string array puts strings in `ctx.value`", contract)
+        self.assertIn("extract from it only for object elements", contract)
 
     def test_single_tool_result_blob_fetch_returns_efficiency_advisory(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
@@ -272,19 +473,429 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(out.get("advisories", [{}])[0].get("code"), "single_tool_result_blob_fetch")
-            self.assertIn("query the needed rows together", out.get("message", ""))
+            self.assertEqual(out.get("advisories", [{}])[0].get("severity"), "info")
+            self.assertIn("query needed rows together", out.get("message", ""))
 
-            preview = execute_sqlite_batch(
+    def test_bulk_raw_tool_result_projection_returns_shaping_advisory(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT, result_json TEXT)"
+                )
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text, result_json) VALUES (?, ?, ?)",
+                    [
+                        ("r1", "alpha payload", '{"vendor":"Alpha"}'),
+                        ("r2", "beta payload", '{"vendor":"Beta"}'),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
                 self.agent,
                 {
-                    "sql": "SELECT substr(result_text,1,2) AS preview FROM __tool_results WHERE result_id='r1'",
+                    "sql": (
+                        "SELECT result_id, substr(result_text, 1, 5001) AS payload_preview "
+                        "FROM __tool_results ORDER BY result_id"
+                    ),
                     "will_continue_work": True,
                 },
             )
-            self.assertEqual(preview.get("status"), "ok")
-            self.assertNotIn("advisories", preview)
+
+            self.assertEqual(out.get("status"), "warning")
+            advisory = out.get("advisories", [{}])[0]
+            self.assertEqual(advisory.get("code"), "unshaped_multi_result_payload")
+            self.assertEqual(advisory.get("severity"), "warning")
+            self.assertIn("Shape payloads set-wise", advisory.get("message", ""))
+            self.assertIn("json_extract/json_each", advisory.get("message", ""))
+
+    def test_bulk_tool_result_metadata_and_shaped_payload_queries_are_not_warned(self):
+        metadata_advisories = build_tool_result_query_advisories(
+            [
+                "SELECT result_id, tool_name FROM __tool_results ORDER BY result_id",
+                "SELECT COUNT(result_json) AS payload_count FROM __tool_results",
+            ],
+            available_tool_result_rows=3,
+        )
+        shaped_advisories = build_tool_result_query_advisories(
+            [
+                "SELECT result_id, json_extract(result_json, '$.vendor') AS vendor "
+                "FROM __tool_results ORDER BY result_id"
+            ],
+            available_tool_result_rows=3,
+        )
+        bounded_preview_advisories = build_tool_result_query_advisories(
+            [
+                "SELECT result_id, substr(result_text, 1, 2000) AS head "
+                "FROM __tool_results ORDER BY result_id"
+            ],
+            available_tool_result_rows=4,
+        )
+
+        self.assertEqual(metadata_advisories, [])
+        self.assertEqual(shaped_advisories, [])
+        self.assertEqual(bounded_preview_advisories[0].code, "bounded_multi_result_preview")
+        self.assertEqual(bounded_preview_advisories[0].severity, "info")
+        self.assertIn("do not merge preview blobs mentally", bounded_preview_advisories[0].message)
+
+    def test_second_raw_tool_result_projection_is_rejected_across_calls(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT, result_json TEXT)"
+                )
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text, result_json) VALUES (?, ?, ?)",
+                    [
+                        ("r1", "alpha payload", '{"vendor":"Alpha"}'),
+                        ("r2", "beta payload", '{"vendor":"Beta"}'),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            self._create_inbound_message("First analysis task")
+
+            for sql in (
+                "SELECT result_id FROM __tool_results ORDER BY result_id",
+                "SELECT json_extract(result_json, '$.vendor') AS vendor FROM __tool_results",
+            ):
+                shaped = execute_sqlite_batch(
+                    self.agent,
+                    {"sql": sql, "will_continue_work": True},
+                )
+                self.assertEqual(shaped.get("status"), "ok", shaped.get("message"))
+
+            first_preview = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT substr(result_text, 1, 8) AS preview FROM __tool_results WHERE result_id='r1'",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(first_preview.get("status"), "ok", first_preview.get("message"))
+
+            repeated_preview = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT result_id, substr(result_text, 1, 8) AS preview FROM __tool_results",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(repeated_preview.get("status"), "error")
+            self.assertTrue(repeated_preview.get("retryable"))
+            self.assertEqual(
+                repeated_preview.get("error_type"),
+                "repeated_unshaped_tool_result_projection",
+            )
+            self.assertIn("shape the needed rows", repeated_preview.get("message", ""))
+
+            self._create_inbound_message("Second analysis task")
+            next_task_preview = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT substr(result_text, 1, 8) AS preview FROM __tool_results WHERE result_id='r2'",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(next_task_preview.get("status"), "ok", next_task_preview.get("message"))
+
+            next_task_repeat = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT result_text FROM __tool_results WHERE result_id='r2'",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(next_task_repeat.get("status"), "error")
+            self.assertEqual(
+                next_task_repeat.get("error_type"),
+                "repeated_unshaped_tool_result_projection",
+            )
+
+            trigger_step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Scheduled run",
+            )
+            PersistentAgentCronTrigger.objects.create(
+                step=trigger_step,
+                cron_expression="0 9 * * *",
+            )
+            scheduled_preview = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT substr(result_text, 1, 8) AS preview FROM __tool_results WHERE result_id='r1'",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(scheduled_preview.get("status"), "ok", scheduled_preview.get("message"))
+
+            scheduled_repeat = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT result_json FROM __tool_results WHERE result_id='r1'",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(scheduled_repeat.get("status"), "error")
+            self.assertEqual(
+                scheduled_repeat.get("error_type"),
+                "repeated_unshaped_tool_result_projection",
+            )
+
+            proactive_step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Proactive run",
+            )
+            PersistentAgentSystemStep.objects.create(
+                step=proactive_step,
+                code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+            )
+            proactive_preview = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT substr(result_json, 1, 8) AS preview FROM __tool_results WHERE result_id='r2'",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(proactive_preview.get("status"), "ok", proactive_preview.get("message"))
+
+            shaped_after_rejection = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT json_extract(result_json, '$.vendor') AS vendor FROM __tool_results ORDER BY result_id",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(shaped_after_rejection.get("status"), "ok")
+            self.assertNotIn("__runtime_state", get_sqlite_schema_prompt())
+            self.assertNotIn("__runtime_state", get_sqlite_digest_prompt())
+
+    def test_repeated_bounded_tool_result_previews_are_warned(self):
+        sql_values = [
+            "SELECT result_id, substr(result_text, 1, 2000) AS head FROM __tool_results",
+            "SELECT result_id, substr(result_text, 1, 1000) AS head FROM __tool_results",
+        ]
+
+        summary = summarize_sqlite_tool_result_sql(sql_values)
+        advisories = build_tool_result_query_advisories(
+            sql_values,
+            available_tool_result_rows=4,
+        )
+
+        self.assertEqual(summary.aggregate_payload_queries, 2)
+        self.assertEqual(summary.unshaped_multi_result_payload_queries, 2)
+        self.assertEqual(summary.large_unshaped_multi_result_payload_queries, 0)
+        self.assertEqual(advisories[0].code, "unshaped_multi_result_payload")
+
+    def test_raw_projection_guard_survives_sqlite_persistence_lifecycle(self):
+        self._create_inbound_message("Persistent analysis task")
+        with tempfile.TemporaryDirectory() as storage_dir:
+            storage = FileSystemStorage(location=storage_dir)
+            with patch("api.agent.tools.sqlite_state.default_storage", storage):
+                with agent_sqlite_db(str(self.agent.id)) as db_path:
+                    conn = sqlite3.connect(db_path)
+                    try:
+                        conn.execute(
+                            "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)"
+                        )
+                        conn.executemany(
+                            "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                            [("r1", "alpha payload"), ("r2", "beta payload")],
+                        )
+                        conn.commit()
+                    finally:
+                        conn.close()
+                    first = execute_sqlite_batch(
+                        self.agent,
+                        {
+                            "sql": "SELECT substr(result_text, 1, 8) FROM __tool_results WHERE result_id='r1'",
+                            "will_continue_work": True,
+                        },
+                    )
+                    self.assertEqual(first.get("status"), "ok", first.get("message"))
+
+                    for protected_sql in (
+                        'SELECT * FROM "__runtime_state"',
+                        "SELECT * FROM main.'__runtime_state'",
+                        "UPDATE [__runtime_state] SET raw_projection_count = 0",
+                        "DROP TABLE `__runtime_state`",
+                    ):
+                        with self.subTest(sql=protected_sql):
+                            protected = execute_sqlite_batch(
+                                self.agent,
+                                {"sql": protected_sql, "will_continue_work": True},
+                            )
+                            self.assertEqual(protected.get("status"), "error")
+                            self.assertTrue(protected.get("retryable"))
+                            self.assertEqual(protected.get("error_type"), "protected_runtime_state")
+
+                with agent_sqlite_db(str(self.agent.id)) as restored_path:
+                    conn = sqlite3.connect(restored_path)
+                    try:
+                        conn.execute(
+                            "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)"
+                        )
+                        conn.executemany(
+                            "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                            [("r1", "alpha payload"), ("r2", "beta payload")],
+                        )
+                        conn.commit()
+                    finally:
+                        conn.close()
+
+                    repeated = execute_sqlite_batch(
+                        self.agent,
+                        {
+                            "sql": "SELECT substr(result_text, 1, 8) FROM __tool_results WHERE result_id='r2'",
+                            "will_continue_work": True,
+                        },
+                    )
+                    self.assertEqual(repeated.get("status"), "error")
+                    self.assertEqual(
+                        repeated.get("error_type"),
+                        "repeated_unshaped_tool_result_projection",
+                    )
+
+                    self._create_inbound_message("New task after restore")
+                    reset_for_new_task = execute_sqlite_batch(
+                        self.agent,
+                        {
+                            "sql": "SELECT substr(result_text, 1, 8) FROM __tool_results WHERE result_id='r2'",
+                            "will_continue_work": True,
+                        },
+                    )
+                    self.assertEqual(
+                        reset_for_new_task.get("status"),
+                        "ok",
+                        reset_for_new_task.get("message"),
+                    )
+
+    def test_unbounded_bulk_tool_result_projection_is_warned(self):
+        sql_values = [
+            "SELECT result_id, result_json FROM __tool_results ORDER BY result_id"
+        ]
+
+        summary = summarize_sqlite_tool_result_sql(sql_values)
+        advisories = build_tool_result_query_advisories(
+            sql_values,
+            available_tool_result_rows=4,
+        )
+
+        self.assertEqual(summary.aggregate_payload_queries, 1)
+        self.assertEqual(summary.unshaped_multi_result_payload_queries, 1)
+        self.assertEqual(summary.large_unshaped_multi_result_payload_queries, 1)
+        self.assertEqual(advisories[0].code, "unshaped_multi_result_payload")
+
+    def test_values_table_is_not_rejected_due_to_unrelated_tool_results(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [("r1", "alpha"), ("r2", "beta")],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "CREATE TABLE preferences AS SELECT * FROM (VALUES ('compact'), ('dark'));",
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertNotEqual(out.get("status"), "error")
+            conn = sqlite3.connect(db_path)
+            try:
+                preferences = conn.execute("SELECT * FROM preferences ORDER BY 1").fetchall()
+            finally:
+                conn.close()
+            self.assertEqual(preferences, [("compact",), ("dark",)])
+
+    def test_row_producing_ctas_and_cte_insert_report_real_affected_counts(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE queue_resume AS "
+                        "SELECT 12 AS remaining_count, 'offset-4' AS next_cursor; "
+                        "WITH next_state(remaining_count, next_cursor) AS "
+                        "(VALUES (8, 'offset-8')) "
+                        "INSERT INTO queue_resume SELECT * FROM next_state"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(
+                [result["message"] for result in out["results"]],
+                ["Query 0 affected 1 rows.", "Query 1 affected 1 rows."],
+            )
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT remaining_count, next_cursor FROM queue_resume ORDER BY remaining_count DESC"
+                ).fetchall()
+            finally:
+                conn.close()
+            self.assertEqual(rows, [(12, "offset-4"), (8, "offset-8")])
+
+    def test_literal_rowset_copied_from_tool_results_is_rejected_with_repair_path(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            first_url = "https://source.example.test/one"
+            second_url = "https://source.example.test/two"
+            first_claim = "A long supported claim copied from the first tool result"
+            second_claim = "A second long supported claim copied from another tool result"
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT, result_json TEXT)"
+                )
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [
+                        ("r1", f"{first_url} {first_claim}"),
+                        ("r2", f"{second_url} {second_claim}"),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE copied AS "
+                        f"SELECT '{first_url}' AS url, '{first_claim}' AS claim "
+                        f"UNION ALL SELECT '{second_url}', '{second_claim}';"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("error_type"), "manual_tool_result_copy")
+            self.assertTrue(out.get("retryable"))
+            conn = sqlite3.connect(db_path)
+            try:
+                copied_exists = conn.execute(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='copied'"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+            self.assertEqual(copied_exists, 0)
 
     def test_tool_result_quality_detects_smart_queries_and_advisories(self):
         sql = """
@@ -329,7 +940,149 @@ class SqliteBatchToolTests(TestCase):
         )
         self.assertEqual(summary.manual_values_working_tables, 1)
         self.assertEqual(advisories[0].code, "manual_working_table_from_visible_results")
+
+        literal_union = summarize_sqlite_tool_result_sql(
+            [
+                "WITH copied AS ("
+                "SELECT 'https://source.example.test/one' AS url, "
+                "'A long claim copied from the first tool result' AS claim "
+                "UNION ALL SELECT 'https://source.example.test/two', "
+                "'A second long claim copied from another result'"
+                ") SELECT * FROM copied"
+            ]
+        )
+        self.assertEqual(literal_union.manual_literal_rowsets, 1)
+
+        literal_values_cte = summarize_sqlite_tool_result_sql(
+            [
+                "WITH copied(url, claim) AS (VALUES "
+                "('https://source.example.test/one', 'A long claim copied from the first tool result'),"
+                "('https://source.example.test/two', 'A second long claim copied from another result')"
+                ") SELECT * FROM copied"
+            ]
+        )
+        self.assertEqual(literal_values_cte.manual_literal_rowsets, 1)
+
+        repeated_query_literal = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT grep_context_all(result_text, 'Strengths:|Tradeoff:|Best fit:', 200, 5) "
+                "FROM __tool_results WHERE result_id='r1' UNION ALL "
+                "SELECT grep_context_all(result_text, 'Strengths:|Tradeoff:|Best fit:', 200, 5) "
+                "FROM __tool_results WHERE result_id='r2' UNION ALL "
+                "SELECT grep_context_all(result_text, 'Strengths:|Tradeoff:|Best fit:', 200, 5) "
+                "FROM __tool_results WHERE result_id='r3'"
+            ]
+        )
+        self.assertEqual(repeated_query_literal.manual_literal_rowsets, 0)
+
+        disguised = summarize_sqlite_tool_result_sql(
+            ["CREATE TABLE __copied(value TEXT); INSERT INTO __copied VALUES ('manual');"]
+        )
+        self.assertEqual(disguised.manual_values_working_tables, 1)
         self.assertIn("__tool_results", advisories[0].message)
+
+        trivial = summarize_sqlite_tool_result_sql(
+            ["SELECT result_id FROM __tool_results ORDER BY result_id"]
+        )
+        self.assertEqual(trivial.aggregate_tool_result_queries, 1)
+        self.assertEqual(trivial.smart_tool_result_queries, 0)
+
+        raw_distinct = summarize_sqlite_tool_result_sql(
+            ["SELECT DISTINCT result_json FROM __tool_results"]
+        )
+        raw_cte = summarize_sqlite_tool_result_sql(
+            ["WITH copied AS (SELECT result_json FROM __tool_results) SELECT result_json FROM copied"]
+        )
+        raw_working_table = summarize_sqlite_tool_result_sql(
+            [
+                "CREATE TABLE copied AS SELECT result_json FROM __tool_results; "
+                "SELECT result_json FROM copied"
+            ]
+        )
+        self.assertEqual(raw_distinct.smart_tool_result_queries, 0)
+        self.assertEqual(raw_cte.smart_tool_result_queries, 0)
+        self.assertEqual(raw_working_table.creates_working_table, 0)
+
+        for raw_noop in (
+            "SELECT count(result_json) FROM __tool_results",
+            "SELECT result_json FROM __tool_results GROUP BY result_json",
+            "SELECT a.result_json FROM __tool_results a JOIN __tool_results b ON a.result_id=b.result_id",
+            "SELECT substr(result_json, 1, 1) FROM __tool_results",
+        ):
+            with self.subTest(sql=raw_noop):
+                self.assertEqual(
+                    summarize_sqlite_tool_result_sql([raw_noop]).smart_tool_result_queries,
+                    0,
+                )
+
+        aliased_payload = summarize_sqlite_tool_result_sql(
+            [
+                "WITH raw AS (SELECT result_json AS payload FROM __tool_results) "
+                "SELECT json_extract(payload, '$.vendor') FROM raw"
+            ]
+        )
+        wrapped_payload = summarize_sqlite_tool_result_sql(
+            ["SELECT json_extract(CAST(result_json AS TEXT), '$.vendor') FROM __tool_results"]
+        )
+        root_noop = summarize_sqlite_tool_result_sql(
+            ["SELECT json_extract(result_json, '$') FROM __tool_results"]
+        )
+        container_noop = summarize_sqlite_tool_result_sql(
+            ["SELECT json_extract(result_text, '$.results') FROM __tool_results WHERE result_id IN ('r1','r2')"]
+        )
+        unrelated_json_expression = summarize_sqlite_tool_result_sql(
+            ["SELECT result_json, json_extract('{\"x\":1}', '$.x') FROM __tool_results"]
+        )
+        self.assertEqual(aliased_payload.smart_tool_result_queries, 1)
+        self.assertEqual(wrapped_payload.smart_tool_result_queries, 1)
+        self.assertEqual(root_noop.smart_tool_result_queries, 0)
+        self.assertEqual(container_noop.smart_tool_result_queries, 0)
+        self.assertEqual(container_noop.unshaped_multi_result_payload_queries, 1)
+        self.assertEqual(unrelated_json_expression.smart_tool_result_queries, 0)
+
+        offset_loop = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT json_extract(result_json, '$.content') FROM __tool_results "
+                f"ORDER BY created_at LIMIT 1 OFFSET {offset}"
+                for offset in range(4)
+            ]
+        )
+        self.assertEqual(offset_loop.single_row_offset_queries, 4)
+
+        payload_reads = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT result_json FROM main.__tool_results WHERE result_id='r1'",
+                "SELECT CAST(result_text AS TEXT) FROM main.[__tool_results] WHERE result_id='r2'",
+            ]
+        )
+        self.assertEqual(payload_reads.direct_result_text_fetches, 2)
+
+        not_manual = summarize_sqlite_tool_result_sql(
+            ["CREATE TABLE notes(body TEXT); INSERT INTO notes SELECT 'customer values improved';"]
+        )
+        self.assertEqual(not_manual.manual_values_working_tables, 0)
+
+        copied_insert = summarize_sqlite_tool_result_sql(
+            [
+                "INSERT INTO copied(url, claim) VALUES "
+                "('https://source.example.test/one', 'A long copied claim from the first tool result'), "
+                "('https://source.example.test/two', 'A long copied claim from the second tool result'), "
+                "('https://source.example.test/three', 'A long copied claim from the third tool result')"
+            ]
+        )
+        self.assertEqual(copied_insert.manual_literal_rowsets, 1)
+
+        create_as_values = """
+        CREATE TABLE support_vendors AS
+        SELECT * FROM (VALUES ('AxonFlow'), ('CareMesh')) AS source(vendor);
+        """
+        summary = summarize_sqlite_tool_result_sql([create_as_values])
+        advisories = build_tool_result_query_advisories(
+            [create_as_values],
+            available_tool_result_rows=4,
+        )
+        self.assertEqual(summary.manual_values_working_tables, 1)
+        self.assertEqual(advisories[0].code, "manual_working_table_from_visible_results")
 
         calls = [
             SimpleNamespace(
@@ -402,6 +1155,39 @@ class SqliteBatchToolTests(TestCase):
             # Should be truncated to MAX_RESULT_ROWS (100)
             self.assertLessEqual(len(rows), 100)
             self.assertIn("TRUNCATED", results[0].get("message", ""))
+
+    def test_huge_scalar_strings_are_byte_limited_without_dropping_rows(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "WITH ids(id) AS (VALUES (1), (2), (3)) "
+                        "SELECT id, replace(printf('%020000d', 0), '0', char(128293)) AS payload "
+                        "FROM ids ORDER BY id"
+                    )
+                },
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            result = out["results"][0]
+            rows = result["result"]
+            serialized_bytes = len(json.dumps(rows, default=str).encode("utf-8"))
+
+            self.assertEqual([row["id"] for row in rows], [1, 2, 3])
+            self.assertTrue(all(set(row) == {"id", "payload"} for row in rows))
+            self.assertLessEqual(serialized_bytes, MAX_RESULT_BYTES)
+            self.assertGreater(serialized_bytes, MAX_RESULT_BYTES - 100)
+            self.assertTrue(all(row["payload"].endswith("...[truncated]") for row in rows))
+            self.assertTrue(all(len(row["payload"]) > 100 for row in rows))
+            self.assertLessEqual(
+                max(len(row["payload"]) for row in rows)
+                - min(len(row["payload"]) for row in rows),
+                1,
+            )
+            self.assertIn("oversized text cell", result["message"])
+            self.assertIn("preserving rows and columns", result["message"])
+            self.assertIn("json_extract/json_each", result["message"])
 
     def test_result_with_limit_not_warned(self):
         """Queries with explicit LIMIT don't trigger warnings."""
@@ -689,6 +1475,16 @@ class SqliteBatchToolTests(TestCase):
             self.assertTrue(results[2].get("warning"))
             self.assertEqual(results[2].get("warning_code"), "zero_rows_affected")
             self.assertIn("No match", results[2].get("message", ""))
+
+    def test_create_columns_named_updated_or_deleted_are_not_zero_row_warnings(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "CREATE TABLE leads (id INTEGER PRIMARY KEY, updated_at TEXT, deleted_at TEXT)"},
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertNotIn("warning", out["results"][0])
 
     def test_autocorrect_insert_value_keyword(self):
         with self._with_temp_db():
@@ -1252,6 +2048,30 @@ class SqliteBatchToolTests(TestCase):
         self.assertIn("SQLite string literals do not use backslash escaping", hint)
         self.assertIn('"AI Engineer"', hint)
         self.assertIn("O''Brien", hint)
+
+    def test_error_hint_explains_compound_select_ordering(self):
+        hint = _get_error_hint("2nd ORDER BY term does not match any column in the result set")
+
+        self.assertIn("compound SELECT", hint)
+        self.assertIn("SELECT * FROM (...)", hint)
+        self.assertIn("outer query", hint)
+
+    def test_error_hint_explains_nested_json_array_targeting(self):
+        hint = _get_error_hint(
+            "malformed JSON",
+            "SELECT json_extract(ctx.value, '$.id') FROM __tool_results, json_each(result_json) ctx",
+        )
+
+        self.assertIn("json_each over an object emits scalar children", hint)
+        self.assertIn("intended array path", hint)
+        self.assertIn("ctx.type='object'", hint)
+
+    def test_error_hint_explains_distinct_aggregate_separator(self):
+        hint = _get_error_hint("DISTINCT aggregates must have exactly one argument")
+
+        self.assertIn("cannot take a custom separator", hint)
+        self.assertIn("GROUP_CONCAT(DISTINCT value)", hint)
+        self.assertIn("dedupe in a subquery", hint)
 
     def test_fix_unescaped_single_quote_runs(self):
         """Balances odd-length runs of single quotes."""

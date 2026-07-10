@@ -12,11 +12,13 @@ from .peer_dm import execute_send_agent_message
 from .planning import execute_end_planning
 from .request_contact_permission import execute_request_contact_permission
 from .request_human_input import execute_request_human_input
+from .runtime_execution_context import resolve_requester_config_authority
 from .schedule_updater import execute_update_schedule
 from .search_tools import execute_search_tools
 from .secure_credentials_request import execute_secure_credentials_request
 from .sms_sender import execute_send_sms
 from .spawn_web_task import execute_spawn_web_task
+from .sqlite_agent_config import sqlite_batch_mutates_agent_config
 from .static_tools import planning_mode_disallows_tool
 from .tool_manager import execute_enabled_tool
 from .web_chat_sender import execute_send_chat_message
@@ -37,6 +39,16 @@ def execute_runtime_tool_call(
     isolated_mcp: bool = False,
 ) -> tuple[Any, Optional[list[dict]]]:
     updated_tools: Optional[list[dict]] = None
+
+    config_write_requested = tool_name in {"end_planning", "update_charter", "update_schedule"} or (
+        tool_name == "sqlite_batch" and sqlite_batch_mutates_agent_config(exec_params)
+    )
+    if config_write_requested and resolve_requester_config_authority(agent) is False:
+        return {
+            "status": "error",
+            "retryable": False,
+            "message": "Configuration update denied: the active requester cannot change this agent's charter or schedule.",
+        }, updated_tools
 
     if planning_mode_disallows_tool(agent, tool_name):
         return {

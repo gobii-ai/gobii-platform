@@ -51,7 +51,7 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
     area = "agent_behavior"
     tags = ("web_research", "response_quality", "llm_judge", "long_horizon")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_three_sources", assertion_type="llm_judge"),
         ScenarioTask(name="verify_bundled_reply", assertion_type="manual"),
     ]

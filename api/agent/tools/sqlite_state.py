@@ -39,6 +39,7 @@ MESSAGES_TABLE = "__messages"
 FILES_TABLE = "__files"
 CONTACTS_TABLE = "__contacts"
 AGENT_SKILLS_TABLE = "__agent_skills"
+RUNTIME_STATE_TABLE = "__runtime_state"
 EPHEMERAL_TABLES = {
     TOOL_RESULTS_TABLE,
     AGENT_CONFIG_TABLE,
@@ -116,7 +117,10 @@ def get_sqlite_schema_prompt() -> str:
         conn = open_guarded_sqlite_connection(db_path)
         cur = conn.cursor()
         cur.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
-        tables = cur.fetchall()
+        tables = [
+            table for table in cur.fetchall()
+            if table[0] != RUNTIME_STATE_TABLE
+        ]
 
         if not tables:
             return "SQLite database has no user tables yet."

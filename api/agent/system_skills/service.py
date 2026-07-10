@@ -5,7 +5,7 @@ from typing import Iterable, Optional
 from django.db.models import F
 from django.utils import timezone
 
-from api.models import PersistentAgent, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
+from api.models import PersistentAgent, PersistentAgentSystemSkillState
 from api.services.pipedream_apps import enable_pipedream_apps_for_agent
 
 from .registry import SystemSkillDefinition, equivalent_system_skill_keys, get_system_skill_definition, normalize_system_skill_key
@@ -184,6 +184,10 @@ def enable_system_skills(
             continue
 
         tool_names = list(definition.tool_names)
+        eager_tool_names = list(definition.tools_to_enable())
+        if not set(eager_tool_names).issubset(tool_names):
+            invalid.append(skill_key)
+            continue
         app_slugs = list(definition.pipedream_app_slugs)
         app_enabled = False
         tools_enabled = False
@@ -211,19 +215,14 @@ def enable_system_skills(
 
             static_tool_names = _static_system_skill_tool_names(agent)
 
-            dynamic_tool_names = [tool_name for tool_name in tool_names if tool_name not in static_tool_names]
-            enabled_qs = PersistentAgentEnabledTool.objects.filter(
-                agent=agent,
-                tool_full_name__in=dynamic_tool_names,
-            ).values_list("tool_full_name", flat=True)
-            enabled_tool_names = set(enabled_qs)
-            missing_tool_names = [
-                tool_name for tool_name in dynamic_tool_names if tool_name not in enabled_tool_names
-            ]
-            if missing_tool_names:
+            dynamic_tool_names = [tool_name for tool_name in eager_tool_names if tool_name not in static_tool_names]
+            enabled_tool_names: set[str] = set()
+            if dynamic_tool_names:
                 from api.agent.tools.tool_manager import enable_tools
 
-                result = enable_tools(agent, missing_tool_names, include_hidden_builtin=True)
+                # Pass the complete eager surface so LRU enforcement cannot
+                # evict an older required tool while adding a missing one.
+                result = enable_tools(agent, dynamic_tool_names, include_hidden_builtin=True)
                 if result.get("status") != "success" or result.get("invalid"):
                     invalid.append(skill_key)
                     continue
@@ -235,21 +234,29 @@ def enable_system_skills(
                 enabled_tool_names.update(result.get("already_enabled", []))
 
             ready_tool_names = enabled_tool_names | static_tool_names
-            if not set(tool_names).issubset(ready_tool_names):
+            if not set(eager_tool_names).issubset(ready_tool_names):
                 invalid.append(skill_key)
                 continue
 
+        selected_at = timezone.now()
         state, created = PersistentAgentSystemSkillState.objects.get_or_create(
             agent=agent,
             skill_key=skill_key,
-            defaults={"is_enabled": True},
+            defaults={
+                "is_enabled": True,
+                "last_used_at": selected_at,
+                "usage_count": 1,
+            },
         )
         state_was_enabled = (not created) and state.is_enabled
-        if not state.is_enabled:
-            state.is_enabled = True
-            state.save(update_fields=["is_enabled"])
+        if not created:
+            PersistentAgentSystemSkillState.objects.filter(id=state.id).update(
+                is_enabled=True,
+                last_used_at=selected_at,
+                usage_count=F("usage_count") + 1,
+            )
 
-        if not tool_names or app_enabled or tools_enabled or not state_was_enabled:
+        if not eager_tool_names or app_enabled or tools_enabled or not state_was_enabled:
             enabled.append(skill_key)
         else:
             already_enabled.append(skill_key)

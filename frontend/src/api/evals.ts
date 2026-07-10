@@ -9,6 +9,8 @@ export type EvalTask = {
   name: string
   status: string
   assertion_type: string
+  is_scored: boolean
+  is_setup: boolean
   expected_summary: string
   observed_summary: string
   debug_artifacts: Record<string, unknown>
@@ -37,10 +39,33 @@ export type EvalTask = {
 
 export type EvalTaskTotals = {
   total: number
+  scored_total: number
+  setup_total: number
+  diagnostic_total: number
   completed: number
   passed: number
   failed: number
   pass_rate: number | null
+}
+
+export type EvalScenarioOutcome = {
+  status: 'passed' | 'failed' | 'pending' | 'unscored'
+  passed: boolean
+  scored_requirements: number
+  passed_requirements: number
+  failed_requirements: number
+  scoring_schema_version: number
+}
+
+export type EvalScenarioTotals = {
+  total: number
+  completed: number
+  passed: number
+  failed: number
+  pending: number
+  unscored: number
+  pass_rate: number | null
+  scoring_schema_version: number
 }
 
 export type EvalRun = {
@@ -66,6 +91,7 @@ export type EvalRun = {
   }
   tasks?: EvalTask[]
   task_totals?: EvalTaskTotals
+  scenario_outcome?: EvalScenarioOutcome
   prompt_tokens?: number
   completion_tokens?: number
   cached_tokens?: number
@@ -156,6 +182,7 @@ export type EvalSuiteRun = {
   runs?: EvalRun[]
   run_totals?: { total_runs: number; completed: number; errored: number }
   task_totals?: EvalTaskTotals | null
+  scenario_totals?: EvalScenarioTotals | null
   cost_totals?: {
     prompt_tokens: number
     completion_tokens: number
@@ -327,6 +354,7 @@ export type ComparisonRunSummary = {
   primary_model: string
   llm_routing_profile_name: string | null
   task_totals: EvalTaskTotals | null
+  scenario_outcome: EvalScenarioOutcome
   total_cost: number | null
   tokens_used: number | null
   completion_count: number | null
@@ -342,6 +370,8 @@ export type ComparisonGroup = {
   avg_tokens: number
   total_tasks: number
   passed_tasks: number
+  total_scenarios: number
+  passed_scenarios: number
   is_current: boolean
 }
 
@@ -404,6 +434,8 @@ export type SuiteComparisonSummary = {
   total_tokens: number
   passed_tasks: number
   total_tasks: number
+  passed_scenarios: number
+  total_scenarios: number
 }
 
 export type SuiteComparisonResponse = {

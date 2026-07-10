@@ -703,14 +703,22 @@ def _ensure_system_skill_enabled(
         logger.warning("Tool %s references unknown system skill %s", tool_name or "(unknown)", skill_key)
         return None
 
-    state, _created = PersistentAgentSystemSkillState.objects.get_or_create(
+    used_at = datetime.now(UTC)
+    state, created = PersistentAgentSystemSkillState.objects.get_or_create(
         agent=agent,
         skill_key=definition.skill_key,
-        defaults={"is_enabled": True},
+        defaults={
+            "is_enabled": True,
+            "last_used_at": used_at,
+            "usage_count": 1,
+        },
     )
-    if reactivate and not state.is_enabled:
-        state.is_enabled = True
-        state.save(update_fields=["is_enabled"])
+    if not created and reactivate:
+        PersistentAgentSystemSkillState.objects.filter(id=state.id).update(
+            is_enabled=True,
+            last_used_at=used_at,
+            usage_count=F("usage_count") + 1,
+        )
     return definition.skill_key
 
 

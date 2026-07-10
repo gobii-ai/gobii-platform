@@ -151,7 +151,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
     area = "agent_behavior"
     tags = ("smoke", "tool_choice", "weather", "http_request", "llm_judge")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_http_request", assertion_type="llm_judge"),
         ScenarioTask(name="verify_response", assertion_type="manual"),
     ]

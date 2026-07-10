@@ -8,6 +8,31 @@ class ScenarioTask:
     assertion_type: str = "manual"  # manual, exact_match, llm_judge, etc.
     description: str = ""
     expected_output: str = ""
+    is_scored: bool = True
+    is_setup: bool = False
+
+    def __post_init__(self):
+        if self.is_setup and self.is_scored:
+            raise ValueError("Setup eval tasks cannot count toward the scenario score.")
+
+    @classmethod
+    def setup(cls, *, name: str, assertion_type: str = "manual", description: str = ""):
+        return cls(
+            name=name,
+            assertion_type=assertion_type,
+            description=description,
+            is_scored=False,
+            is_setup=True,
+        )
+
+    @classmethod
+    def diagnostic(cls, *, name: str, assertion_type: str = "manual", description: str = ""):
+        return cls(
+            name=name,
+            assertion_type=assertion_type,
+            description=description,
+            is_scored=False,
+        )
 
 @dataclass(frozen=True)
 class ScenarioMetadata:
@@ -59,6 +84,7 @@ class EvalScenario:
     required_fixtures: tuple[str, ...] = ()
     required_secrets: tuple[str, ...] = ()
     requires_personal_agent: bool = False
+    fingerprint_dependencies: tuple[Any, ...] = ()
 
     def get_metadata(self) -> ScenarioMetadata:
         metadata = self.metadata or ScenarioMetadata(

@@ -74,14 +74,9 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create tracked human input; it appears in web chat and does not send email/SMS. "
-                "Use options for concrete decisions; omit options for free-text-only blocking questions. "
-                "Use send_chat_message/send_email/send_sms/send_agent_message for non-blocking questions or capability/status/policy answers. "
-                "Include an Other / I'll explain option when choices are useful but not exhaustive. "
-                "Planning questions should use at most three options. "
-                "Outside Planning Mode, do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose. "
-                "Use it when the user explicitly asks you to ask for targets/scope before setup or missing targets/scope block a recurring monitor. "
-                f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
+                "Create tracked input in web chat for a material decision or blocker; this does not send email/SMS. "
+                "Use concrete options when natural (including an Other choice if needed), otherwise free text. Default reversible preferences instead of surveying. "
+                f"Planning allows at most three questions. Plain text; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
             "parameters": {
                 "type": "object",
@@ -99,7 +94,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "requests": {
                         "type": "array",
                         "items": request_schema,
-                        "description": "Multiple requests with options; omit top-level question/options. Planning Mode: at most three.",
+                        "description": "Batch of questions; omit top-level question/options. Planning: at most three.",
                     },
                     "recipient": {
                         "description": "Optional explicit recipient; omit for the current implicit conversation target.",
@@ -108,7 +103,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED; use true when you will send an email/SMS containing these questions or keep working; false if waiting."
+                            "Required: true if immediate work or mirrored delivery follows; false while waiting."
                         ),
                     },
                 },

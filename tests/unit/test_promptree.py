@@ -2,7 +2,7 @@ import random
 import string
 from django.test import TestCase, tag
 
-from api.agent.core.promptree import Prompt, hmt
+from api.agent.core.promptree import Prompt, PromptBudgetExceededError, hmt
 
 
 def _long_random_text(words: int = 3000) -> str:
@@ -301,8 +301,8 @@ class PromptRenderingTests(TestCase):
 class PromptUnshrinkableTests(TestCase):
     """Test suite for unshrinkable sections in Prompt."""
 
-    def test_basic_unshrinkable_section_not_shrunk(self):
-        """Test that basic unshrinkable sections are never shrunk."""
+    def test_unshrinkable_section_over_budget_fails_closed(self):
+        """Protected content must not silently bypass the prompt budget."""
         def simple_token_estimator(text: str) -> int:
             return len(text.split())
 
@@ -314,15 +314,34 @@ class PromptUnshrinkableTests(TestCase):
         
         # Render with small budget that would normally force shrinking
         budget = 10
-        result = prompt.render(budget)
-        
-        # The unshrinkable section should keep its full content
-        self.assertIn("unshrinkable content", result)
-        # Should not contain truncation markers
-        self.assertNotIn("BYTES TRUNCATED", result)
-        # Tokens after fitting should be close to the original size, not the budget
-        tokens_after = prompt.get_tokens_after_fitting()
-        self.assertGreater(tokens_after, budget)
+        with self.assertRaises(PromptBudgetExceededError) as raised:
+            prompt.render(budget)
+
+        self.assertEqual(raised.exception.budget, budget)
+        self.assertGreater(raised.exception.required, budget)
+
+    def test_exact_protected_budget_with_optional_content_fails_closed(self):
+        prompt = Prompt(token_estimator=len)
+        prompt.section_text("fixed", "x", non_shrinkable=True)
+        prompt.section_text("optional", "extra", shrinker="hmt")
+        exact_fixed_budget = len("<fixed>x</fixed>")
+
+        with self.assertRaises(PromptBudgetExceededError):
+            prompt.render(exact_fixed_budget)
+
+    def test_exact_protected_budget_without_optional_content_fits(self):
+        prompt = Prompt(token_estimator=len)
+        prompt.section_text("fixed", "x", non_shrinkable=True)
+        exact_fixed_budget = len("<fixed>x</fixed>")
+
+        self.assertEqual(prompt.render(exact_fixed_budget), "<fixed>x</fixed>")
+
+    def test_shrinker_cannot_return_output_above_budget(self):
+        prompt = Prompt(token_estimator=len)
+        prompt.section_text("optional", "long optional content", shrinker="hmt")
+
+        with self.assertRaises(PromptBudgetExceededError):
+            prompt.render(1)
 
     def test_mixed_shrinkable_and_unshrinkable_sections(self):
         """Test behavior with both shrinkable and unshrinkable sections."""
@@ -353,7 +372,7 @@ class PromptUnshrinkableTests(TestCase):
         self.assertLessEqual(tokens_after, budget + 5)  # Allow margin for XML tags
 
     def test_unshrinkable_sections_exhaust_budget(self):
-        """Test behavior when unshrinkable sections exceed the available budget."""
+        """Several protected sections also fail closed when they cannot fit."""
         def simple_token_estimator(text: str) -> int:
             return len(text.split())
 
@@ -366,15 +385,11 @@ class PromptUnshrinkableTests(TestCase):
         
         # Budget smaller than combined unshrinkable content
         budget = 30
-        result = prompt.render(budget)
-        
-        # Both critical sections should be preserved
-        self.assertIn("essential info", result)
-        self.assertIn("more essential data", result)
-        
-        # Total tokens should exceed the budget due to unshrinkable sections
-        tokens_after = prompt.get_tokens_after_fitting()
-        self.assertGreater(tokens_after, budget)
+        with self.assertRaisesRegex(
+            PromptBudgetExceededError,
+            "Prompt content requires",
+        ):
+            prompt.render(budget)
 
     def test_unshrinkable_with_weights(self):
         """Test that weights still affect allocation among shrinkable sections when unshrinkable sections are present."""
@@ -416,19 +431,8 @@ class PromptUnshrinkableTests(TestCase):
         prompt.section_text("section3", "content three " * 5, non_shrinkable=True)  # ~10 tokens
         
         budget = 15  # Smaller than total content
-        result = prompt.render(budget)
-        
-        # All sections should be preserved
-        self.assertIn("content one", result)
-        self.assertIn("content two", result)
-        self.assertIn("content three", result)
-        
-        # No truncation markers should be present
-        self.assertNotIn("BYTES TRUNCATED", result)
-        
-        # Total tokens should exceed budget
-        tokens_after = prompt.get_tokens_after_fitting()
-        self.assertGreater(tokens_after, budget)
+        with self.assertRaises(PromptBudgetExceededError):
+            prompt.render(budget)
 
     def test_unshrinkable_nested_in_groups(self):
         """Test unshrinkable sections when nested in groups."""
@@ -496,9 +500,9 @@ class PromptUnshrinkableTests(TestCase):
         self.assertIn("shrinkable", report)
         self.assertIn("unshrinkable", report)
         
-        # Check that total tokens exceed the budget (due to unshrinkable section)
+        # Protected content remains intact while optional content yields to the hard budget.
         tokens_after = prompt.get_tokens_after_fitting()
-        self.assertGreater(tokens_after, budget)
+        self.assertLessEqual(tokens_after, budget)
         
         # The unshrinkable section should preserve "critical info"
         self.assertIn("critical info", result)

@@ -199,10 +199,7 @@ def get_read_file_tool() -> Dict[str, Any]:
         "function": {
             "name": "read_file",
             "description": (
-                "Read an agent-filesystem file as markdown or raw text. "
-                "Do not use this for http:// or https:// URLs; use http_request, scraping, or spawn_web_task for URLs. "
-                "Defaults to raw_text for text and markdown for PDFs, images/OCR, scans, and office files. "
-                "Not for SQLite snapshots; use sqlite_batch on __tool_results, __messages, or __files."
+                "Read a filespace file as raw text or converted markdown. Not for URLs or SQLite snapshots."
             ),
             "parameters": {
                 "type": "object",
@@ -222,9 +219,7 @@ def get_read_file_tool() -> Dict[str, Any]:
                         "type": "string",
                         "enum": [RESPONSE_FORMAT_MARKDOWN, RESPONSE_FORMAT_RAW_TEXT],
                         "description": (
-                            "Optional output format. "
-                            "Defaults to 'raw_text' for plain text files. "
-                            "Defaults to 'markdown' for PDFs/images/office docs and other rich formats."
+                            "Optional; defaults to raw_text for text and markdown for rich files."
                         ),
                     },
                 },

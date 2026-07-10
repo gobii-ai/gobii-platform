@@ -11,6 +11,7 @@ from django.views.decorators.http import require_POST
 
 from api.agent.core.agent_judge import maybe_run_agent_judge
 from api.agent.tools.custom_tools import CUSTOM_TOOL_BRIDGE_TTL_SECONDS, load_custom_tool_bridge_payload, read_custom_tool_source_text
+from api.agent.tools.runtime_execution_context import tool_execution_context
 from api.agent.tools.tracked_runtime import execute_tracked_runtime_tool_call
 from api.models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentStep, PersistentAgentSystemStep
 
@@ -207,12 +208,23 @@ def custom_tool_bridge_execute(request):
             agent=agent,
         ).select_related("completion", "eval_run").first()
 
-    result, _updated_tools = execute_tracked_runtime_tool_call(
-        agent,
-        tool_name=tool_name,
-        exec_params=params,
-        parent_step=parent_step,
-    )
+    if "requester_config_authority" in payload:
+        with tool_execution_context(
+            requester_config_authority=payload.get("requester_config_authority"),
+        ):
+            result, _updated_tools = execute_tracked_runtime_tool_call(
+                agent,
+                tool_name=tool_name,
+                exec_params=params,
+                parent_step=parent_step,
+            )
+    else:
+        result, _updated_tools = execute_tracked_runtime_tool_call(
+            agent,
+            tool_name=tool_name,
+            exec_params=params,
+            parent_step=parent_step,
+        )
     if _is_error_result(result):
         abort = _record_child_tool_failure(
             cache_key=budget_cache_key,

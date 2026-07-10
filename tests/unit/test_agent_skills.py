@@ -422,6 +422,30 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("Use `search_tools` with an exact omitted skill name or key", block)
         self.assertIn("instructions for skill 3", block)
 
+    def test_prompt_block_caps_omitted_skill_names(self):
+        now = timezone.now()
+        for idx in range(15):
+            skill = PersistentAgentSkill.objects.create(
+                agent=self.agent,
+                name=f"bounded-{idx:02d}",
+                description=f"description-{idx}",
+                version=1,
+                tools=["sqlite_batch"],
+                instructions=f"instructions-{idx}",
+            )
+            PersistentAgentSkill.objects.filter(id=skill.id).update(
+                last_used_at=now + timedelta(minutes=idx),
+            )
+
+        block = format_recent_skills_for_prompt(self.agent, limit=1)
+
+        self.assertIn("- bounded-00", block)
+        self.assertIn("- bounded-07", block)
+        self.assertNotIn("- bounded-08", block)
+        self.assertNotIn("- bounded-13", block)
+        self.assertIn("- (6 more omitted)", block)
+        self.assertIn("or describe the needed capability", block)
+
     def test_prompt_block_disambiguates_saved_skill_tag_collisions(self):
         now = timezone.now()
         first = PersistentAgentSkill.objects.create(
@@ -593,7 +617,7 @@ class AgentSkillsPersistenceTests(TestCase):
 
         self.assertIn("System Skill: Custom Tool Development", block)
         self.assertIn(f"Tools: {CREATE_CUSTOM_TOOL_NAME}", block)
-        self.assertIn("Use `create_custom_tool` to create or update sandboxed Python tools", block)
+        self.assertIn("Use `create_custom_tool` for repeated/fan-out calls", block)
         self.assertIn("Current custom-tool state:", block)
         self.assertIn("Custom tools: 1 saved, 1 enabled.", block)
         self.assertIn("custom_alpha", block)

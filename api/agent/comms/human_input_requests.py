@@ -366,17 +366,21 @@ def resolve_human_input_target(agent: PersistentAgent) -> HumanInputTarget | Non
         )
 
     preferred = getattr(agent, "preferred_contact_endpoint", None)
-    if preferred and preferred.channel == CommsChannel.WEB:
-        conversation = agent.owned_conversations.filter(
-            channel=CommsChannel.WEB,
+    if (
+        preferred
+        and preferred.channel in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}
+        and agent.is_recipient_whitelisted(preferred.channel, preferred.address)
+    ):
+        conversation = _get_or_create_human_input_conversation(
+            agent,
+            channel=preferred.channel,
             address=preferred.address,
-        ).first()
-        if conversation:
-            return HumanInputTarget(
-                channel=CommsChannel.WEB,
-                address=preferred.address,
-                conversation=conversation,
-            )
+        )
+        return HumanInputTarget(
+            channel=preferred.channel,
+            address=preferred.address,
+            conversation=conversation,
+        )
 
     latest_web_conversation = agent.owned_conversations.filter(channel=CommsChannel.WEB).order_by("-id").first()
     if latest_web_conversation:

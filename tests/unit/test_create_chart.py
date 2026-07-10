@@ -65,7 +65,7 @@ class CreateChartToolTests(TestCase):
         self.assertIn("type", tool["function"]["parameters"]["properties"])
         self.assertIn("query", tool["function"]["parameters"]["properties"])
         self.assertIn("query", tool["function"]["parameters"]["required"])
-        self.assertIn("not AS values", tool["function"]["description"])
+        self.assertIn("Use safe aliases", tool["function"]["description"])
 
     def test_missing_type_returns_error(self):
         result = execute_create_chart(

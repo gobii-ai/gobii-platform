@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Set, Tuple
+from urllib.parse import urlsplit
 
 from ..tools.context_hints import extract_context_hint, hint_from_unstructured_text
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
@@ -265,6 +266,10 @@ def prepare_tool_results_for_prompt(
                     1 if meta["has_base64"] else 0,
                     1 if meta["is_truncated"] else 0,
                     meta["truncated_bytes"],
+                    meta.get("source_url"),
+                    meta.get("http_method"),
+                    meta.get("http_status_code"),
+                    meta.get("http_headers_json"),
                     stored_json,
                     analysis_json_str,
                     stored_text,
@@ -352,11 +357,15 @@ def _store_tool_results(rows: Sequence[Tuple]) -> None:
                     has_base64,
                     is_truncated,
                     truncated_bytes,
+                    source_url,
+                    http_method,
+                    http_status_code,
+                    http_headers_json,
                     result_json,
                     analysis_json,
                     result_text
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 rows,
@@ -391,6 +400,10 @@ def _ensure_tool_results_table(conn) -> None:
             has_base64 INTEGER,
             is_truncated INTEGER,
             truncated_bytes INTEGER,
+            source_url TEXT,
+            http_method TEXT,
+            http_status_code INTEGER,
+            http_headers_json TEXT,
             result_json TEXT,
             analysis_json TEXT,
             result_text TEXT
@@ -417,6 +430,16 @@ def _ensure_tool_results_columns(conn) -> None:
         conn.execute(
             f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN analysis_json TEXT;'
         )
+    for column_name, column_type in (
+        ("source_url", "TEXT"),
+        ("http_method", "TEXT"),
+        ("http_status_code", "INTEGER"),
+        ("http_headers_json", "TEXT"),
+    ):
+        if column_name not in existing:
+            conn.execute(
+                f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN {column_name} {column_type};'
+            )
 
 
 # CSV auto-loading constants
@@ -566,6 +589,43 @@ def _maybe_auto_load_csv(
         return None
 
 
+def _http_envelope_is_successful(envelope: object) -> bool:
+    if not isinstance(envelope, dict):
+        return False
+    status = str(envelope.get("status") or "").casefold()
+    if status in {"error", "failed", "failure"}:
+        return False
+    status_code = envelope.get("status_code")
+    return not isinstance(status_code, int) or status_code < 400
+
+
+def _external_source_url(envelope: object) -> Optional[str]:
+    """Return a safe top-level web source from a successful tool envelope."""
+    if not _http_envelope_is_successful(envelope):
+        return None
+
+    for key in ("source_url", "url"):
+        value = envelope.get(key)
+        if not isinstance(value, str):
+            continue
+        candidate = value.strip()
+        if not candidate or any(char.isspace() or ord(char) < 32 for char in candidate):
+            continue
+        try:
+            parsed = urlsplit(candidate)
+            hostname = parsed.hostname
+        except ValueError:
+            continue
+        if (
+            parsed.scheme.casefold() in {"http", "https"}
+            and hostname
+            and parsed.username is None
+            and parsed.password is None
+        ):
+            return candidate
+    return None
+
+
 def _summarize_result(
     result_text: str,
     result_id: str,
@@ -576,14 +636,30 @@ def _summarize_result(
     Returns:
         Tuple of (meta dict, result_json for storage, result_text for storage, analysis)
     """
+    # HTTP envelopes are transport metadata; SQLite should expose the useful
+    # structured payload at the root so paths shown to the agent are executable.
+    analysis_source = result_text
+    envelope = None
+    if tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES):
+        try:
+            envelope = json.loads(result_text)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            envelope = None
+    if tool_name == "http_request":
+        if (
+            _http_envelope_is_successful(envelope)
+            and isinstance(envelope.get("content"), (dict, list))
+        ):
+            analysis_source = json.dumps(envelope["content"], ensure_ascii=False)
+
     # Perform rich analysis
     analysis: Optional[ResultAnalysis] = None
     try:
-        analysis = analyze_result(result_text, result_id)
+        analysis = analyze_result(analysis_source, result_id)
     except Exception:
         logger.debug("Failed to analyze tool result", exc_info=True)
 
-    analysis_text = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
+    analysis_text = analysis.prepared_text if analysis and analysis.prepared_text is not None else analysis_source
     encoded = analysis_text.encode("utf-8")
     full_bytes = len(encoded)
     line_count = analysis_text.count("\n") + 1 if analysis_text else 0
@@ -637,7 +713,11 @@ def _summarize_result(
             parsed = json.loads(truncated_text)
             content = None
             if isinstance(parsed, dict):
-                if tool_name == "http_request" and "content" in parsed:
+                if (
+                    tool_name == "http_request"
+                    and _http_envelope_is_successful(parsed)
+                    and "content" in parsed
+                ):
                     content = parsed["content"]
                 elif _is_scrape_as_markdown_tool(tool_name) and "result" in parsed:
                     content = parsed["result"]
@@ -661,6 +741,21 @@ def _summarize_result(
         "is_truncated": is_truncated,
         "truncated_bytes": truncated_bytes,
     }
+    if tool_name == "http_request" and isinstance(envelope, dict):
+        source_url = envelope.get("url")
+        http_method = envelope.get("method")
+        http_status_code = envelope.get("status_code")
+        headers = envelope.get("headers")
+        if isinstance(source_url, str) and source_url:
+            meta["source_url"] = source_url
+        if isinstance(http_method, str) and http_method:
+            meta["http_method"] = http_method.upper()
+        if isinstance(http_status_code, int):
+            meta["http_status_code"] = http_status_code
+        if isinstance(headers, dict):
+            meta["http_headers_json"] = json.dumps(headers, ensure_ascii=False)
+    elif source_url := _external_source_url(envelope):
+        meta["source_url"] = source_url
     if analysis and analysis.decode_info and analysis.decode_info.steps:
         meta["decoded_from"] = "+".join(analysis.decode_info.steps)
         if analysis.decode_info.encoding:
@@ -672,17 +767,10 @@ def _summarize_result(
 
 
 def _wrap_as_sqlite_result(result_text: str, full_bytes: int) -> str:
-    """Wrap result as if it came from a SQLite inspection query.
-
-    This primes the agent's mental model that the inspection step is already
-    done, avoiding a redundant query for reasonable-sized results.
-    """
+    """Mark a complete fresh result as authoritative for the next decision."""
     return (
-        f"[FULL RESULT ({full_bytes} chars) - ONE-TIME VIEW. "
-        f"Use this visible result now. If it answers the request, reply directly in the next message. "
-        f"Do not query __tool_results or sqlite_batch just to reread or parse this small result; "
-        f"use SQL only for real filtering, joining, aggregation, chart input, or truncated/too-large data. "
-        f"Next turn shows only preview]\n"
+        f"[FULL RESULT ({full_bytes} chars) - ONE-TIME VIEW. Use it now; do not re-fetch or verify it unless "
+        f"ambiguous. Transform or persist it only when the task requires that.]\n"
         f"{result_text}"
     )
 
@@ -710,6 +798,8 @@ def _build_prompt_preview(
     # where the result contains essential data (paths) that the agent needs
     # even if many subsequent tool calls push it outside the recency window.
     if full_bytes <= SMALL_RESULT_ALWAYS_INLINE:
+        if is_fresh_tool_call:
+            return _wrap_as_sqlite_result(result_text, full_bytes), True
         return result_text, True
 
     # Determine which tier system to use

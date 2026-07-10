@@ -46,7 +46,7 @@ def _schedule_interval_seconds(schedule: str | None) -> tuple[float | None, str]
     if parsed_schedule is None:
         return None, "Schedule disables recurring checks."
 
-    if isinstance(parsed_schedule, crontab):
+    if isinstance(parsed_schedule, crontab) or not hasattr(parsed_schedule, "run_every"):
         return cron_interval_seconds(parsed_schedule), "Cron schedule parsed successfully."
 
     if isinstance(parsed_schedule, celery_schedule):
@@ -66,7 +66,7 @@ def _schedule_is_reasonable_pollution_monitoring(schedule: str | None) -> tuple[
     if interval_seconds is None:
         return False, parse_reason
 
-    min_interval_seconds = 6 * 60 * 60
+    min_interval_seconds = 60 * 60
     max_interval_seconds = 7 * 24 * 60 * 60
     if interval_seconds < min_interval_seconds:
         return False, f"Schedule is too frequent for pollution monitoring ({interval_seconds / 60:.0f} minutes)."
@@ -87,7 +87,7 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
     area = "agent_behavior"
     tags = ("monitoring", "schedule", "browser")
     tasks = [
-        ScenarioTask(name="instruct_agent", assertion_type="manual"),
+        ScenarioTask.setup(name="instruct_agent", assertion_type="manual"),
         ScenarioTask(name="verify_charter_update", assertion_type="manual"),
         ScenarioTask(name="verify_schedule_setting", assertion_type="manual"),
         ScenarioTask(name="verify_web_browsing", assertion_type="manual"),

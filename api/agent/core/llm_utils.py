@@ -212,27 +212,23 @@ def _wrap_stream_with_first_data_timeout(
     )
 
 
+def _field(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
 def _first_message_from_response(response: Any) -> Any:
-    if response is None:
-        return None
-    choices = getattr(response, "choices", None)
-    if choices is None and isinstance(response, dict):
-        choices = response.get("choices")
+    choices = _field(response, "choices")
     if not choices:
         return None
-    first_choice = choices[0]
-    if isinstance(first_choice, dict):
-        return first_choice.get("message")
-    return getattr(first_choice, "message", None)
+    return _field(choices[0], "message")
 
 
 def _extract_message_content(message: Any) -> str:
     if message is None:
         return ""
-    if isinstance(message, dict):
-        content = message.get("content")
-    else:
-        content = getattr(message, "content", None)
+    content = _field(message, "content")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -273,17 +269,14 @@ def _coerce_tool_calls(raw_tool_calls: Any) -> list[Any]:
 def _message_has_images(message: Any) -> bool:
     if message is None:
         return False
-    images = message.get("images") if isinstance(message, dict) else getattr(message, "images", None)
+    images = _field(message, "images")
     if images:
         return True
 
-    if isinstance(message, dict):
-        content = message.get("content")
-    else:
-        content = getattr(message, "content", None)
+    content = _field(message, "content")
     if isinstance(content, list):
         for part in content:
-            part_type = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+            part_type = _field(part, "type")
             if isinstance(part_type, str) and part_type.lower() in {"image_url", "image", "output_image", "input_image"}:
                 return True
     return False
@@ -292,23 +285,12 @@ def _message_has_images(message: Any) -> bool:
 def _message_has_tool_calls(message: Any) -> bool:
     if message is None:
         return False
-    if isinstance(message, dict):
-        raw_tool_calls = message.get("tool_calls")
-    else:
-        raw_tool_calls = getattr(message, "tool_calls", None)
-    tool_calls = _coerce_tool_calls(raw_tool_calls)
+    tool_calls = _coerce_tool_calls(_field(message, "tool_calls"))
     if tool_calls:
         return True
-    if isinstance(message, dict):
-        function_call = message.get("function_call")
-    else:
-        function_call = getattr(message, "function_call", None)
-    if function_call:
+    if _field(message, "function_call"):
         return True
-    if isinstance(message, dict):
-        content = message.get("content")
-    else:
-        content = getattr(message, "content", None)
+    content = _field(message, "content")
     if isinstance(content, list):
         for part in content:
             if not isinstance(part, dict):
@@ -384,6 +366,60 @@ def raise_if_invalid_litellm_response(
             model=model,
             provider=provider,
         )
+
+
+def raise_if_forced_tool_response_invalid(
+    response: Any,
+    *,
+    tools: list[dict[str, Any]],
+    tool_choice: Any,
+    model: str | None = None,
+    provider: str | None = None,
+) -> None:
+    """Reject unusable forced-tool responses so the normal retry budget can repair them."""
+    if not isinstance(tool_choice, dict) or tool_choice.get("type") != "function":
+        return
+    function_choice = tool_choice.get("function")
+    if not isinstance(function_choice, dict):
+        return
+    function_name = function_choice.get("name")
+    if not isinstance(function_name, str) or not function_name:
+        return
+
+    def invalid(reason: str) -> EmptyLiteLLMResponseError:
+        return EmptyLiteLLMResponseError(reason, model=model, provider=provider)
+
+    message = _first_message_from_response(response)
+    for call in _coerce_tool_calls(_field(message, "tool_calls")):
+        function = _field(call, "function")
+        if _field(function, "name") != function_name:
+            continue
+        raw_arguments = _field(function, "arguments")
+        break
+    else:
+        raise invalid(f"LiteLLM omitted forced tool call {function_name}")
+
+    arguments = raw_arguments
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            arguments = None
+    if not isinstance(arguments, dict):
+        raise invalid(f"LiteLLM returned malformed arguments for forced tool call {function_name}")
+
+    schema = {}
+    for tool in tools:
+        function = _field(tool, "function")
+        if _field(function, "name") == function_name:
+            parameters = _field(function, "parameters")
+            schema = parameters if isinstance(parameters, dict) else {}
+            break
+    raw_required_names = schema.get("required") or []
+    required_names = raw_required_names if isinstance(raw_required_names, (list, tuple)) else []
+    missing_names = [name for name in required_names if isinstance(name, str) and name not in arguments]
+    if missing_names:
+        raise invalid(f"LiteLLM omitted required arguments {missing_names} for forced tool call {function_name}")
 
 
 def sanitize_tools_for_llm(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -539,6 +575,13 @@ def run_completion(
             if not kwargs.get("stream"):
                 raise_if_empty_litellm_response(response, model=model, provider=provider_hint)
                 raise_if_invalid_litellm_response(response, model=model, provider=provider_hint)
+                raise_if_forced_tool_response_invalid(
+                    response,
+                    tools=sanitized_tools or [],
+                    tool_choice=kwargs.get("tool_choice"),
+                    model=model,
+                    provider=provider_hint,
+                )
                 _attach_response_duration(response, duration_ms)
             return response
         except _RETRYABLE_ERRORS as exc:
@@ -605,6 +648,7 @@ __all__ = [
     "InvalidLiteLLMResponseError",
     "is_empty_litellm_response",
     "raise_if_empty_litellm_response",
+    "raise_if_forced_tool_response_invalid",
     "raise_if_invalid_litellm_response",
     "run_completion",
     "sanitize_tools_for_llm",

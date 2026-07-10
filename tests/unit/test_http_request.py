@@ -70,6 +70,8 @@ class HttpRequestJsonParsingTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["status_code"], 200)
+        self.assertEqual(result["method"], "GET")
+        self.assertEqual(result["url"], "https://api.example.com/data")
         # The key assertion: content should be a dict, not a string
         self.assertIsInstance(result["content"], dict)
         self.assertEqual(result["content"], json_data)
@@ -167,6 +169,7 @@ class HttpRequestJsonParsingTests(TestCase):
             422,
             {"error": "Unprocessable Entity", "path": "/api/v1/people/match"},
         )
+        endpoint_guidance = _native_http_error_guidance("apollo", 404, {"error": "Not Found"})
 
         self.assertIn("reconnect Apollo", reconnect_guidance)
         self.assertIn("Stop retrying", plan_guidance)
@@ -174,6 +177,7 @@ class HttpRequestJsonParsingTests(TestCase):
         self.assertIn("master API key", plan_guidance)
         self.assertIn("do not send legacy keys such as `personId`", validation_guidance)
         self.assertIn("row-level misses", validation_guidance)
+        self.assertIn("keep the `api_` segment", endpoint_guidance)
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")

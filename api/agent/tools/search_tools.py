@@ -31,7 +31,11 @@ from ...services.tool_blacklist import get_agent_tool_blacklist
 from ...services.tool_settings import get_tool_settings_for_owner
 from ...evals.execution import get_current_eval_routing_profile
 from ..system_skills import shortlist_system_skills
-from ..system_skills.service import enable_system_skills, get_available_system_skill_tool_names
+from ..system_skills.service import (
+    enable_system_skills,
+    get_available_system_skill_tool_names,
+    get_enabled_system_skill_states,
+)
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from ..core.token_usage import log_agent_completion, set_usage_span_attributes
@@ -55,6 +59,60 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 ToolSearchResult = Dict[str, Any]
+
+_PERSISTENT_TEAM_ACTION_RE = re.compile(
+    r"\b(?:create|build|deploy|launch|make|prototype|set up|configure|maintain)\b\s+"
+    r"(?P<object>[^.!?;]{0,100}?\bteam)\b"
+    r"(?=\s*(?:$|[.!?,;:]|(?:of|with|to|that|for|which|who|whose|where|and|focused|dedicated|"
+    r"responsible|tasked|capable)\b))",
+    re.IGNORECASE,
+)
+_TEAM_NEGATION_RE = re.compile(
+    r"\b(?:never|not|avoid|no|neither|cannot|unable\s+to|[a-z]+n['’]t|"
+    r"(?:do|does|did|can|could|should|would|will|must|is|are|was|were)\s+not)\b",
+    re.IGNORECASE,
+)
+_TEAM_INDIRECT_OBJECT_RE = re.compile(
+    r"(?:^|[,\s])(?:for|about|against|using|from|to|of|with|alongside|around|on|that|which|who|whose|"
+    r"where|comparing|showing|featuring|including|includes|containing|contains|supporting|managing|coordinating)"
+    r"(?=[,\s]|$)",
+    re.IGNORECASE,
+)
+
+
+def is_persistent_team_request(text: str) -> bool:
+    normalized = " ".join(str(text or "").split())
+    for match in _PERSISTENT_TEAM_ACTION_RE.finditer(normalized):
+        clause_prefix = re.split(r"[.!?;]", normalized[:match.start()])[-1]
+        clause_prefix = re.sub(
+            r"\b(?:not only|can(?:not|['’]t) wait to)\b",
+            "",
+            clause_prefix,
+            flags=re.IGNORECASE,
+        )
+        direct_object = re.sub(
+            r"^(?:(?:me|us)\s+)?(?:(?:a|an|the|our|my)\s+)?",
+            "",
+            match.group("object"),
+            flags=re.IGNORECASE,
+        )
+        if (
+            not _TEAM_NEGATION_RE.search(f"{clause_prefix} {direct_object}")
+            and not _TEAM_INDIRECT_OBJECT_RE.search(direct_object)
+        ):
+            return True
+    return False
+
+
+def _route_meta_gobii_team_search(user_text: str, query: str) -> str:
+    return "meta gobii control plane" if is_persistent_team_request(user_text) else query
+
+
+def _preserve_meta_gobii_team_intent(agent: PersistentAgent, query: str) -> str:
+    if not getattr(agent, "pk", None) or get_enabled_system_skill_states(agent).filter(skill_key="meta_gobii").exists():
+        return query
+    user_text = agent.agent_messages.filter(is_outbound=False).order_by("-timestamp", "-seq").values_list("body", flat=True).first()
+    return _route_meta_gobii_team_search(str(user_text or ""), query)
 
 
 def _has_active_pipedream_runtime() -> bool:
@@ -202,6 +260,99 @@ def _fallback_named_selection(query: str, available_names: set[str]) -> list[str
     return selected
 
 
+def _directly_named_system_skill_keys(query: str, system_skills: Iterable[Any]) -> list[str]:
+    """Return system skills explicitly named in the search query."""
+    query_key = _normalize_named_selection_text(query or "")
+    if not query_key:
+        return []
+
+    padded_query = f" {query_key} "
+    selected: list[str] = []
+    for skill in system_skills:
+        skill_key = _tool_attr(skill, "skill_key")
+        if not isinstance(skill_key, str) or not skill_key:
+            continue
+        names = (skill_key, _tool_attr(skill, "name", ""))
+        normalized_names = (
+            _normalize_named_selection_text(str(name or ""))
+            for name in names
+        )
+        if any(
+            normalized and (query_key == normalized or f" {normalized} " in padded_query)
+            for normalized in normalized_names
+        ):
+            selected.append(skill_key)
+    return list(dict.fromkeys(selected))
+
+
+def _direct_enable_result(
+    result: dict[str, Any],
+    *,
+    section: str,
+) -> ToolSearchResult:
+    item_label = section.replace("_", " ")
+    message_lines: list[str] = []
+    _append_section_summary(
+        message_lines,
+        result,
+        enabled_label=f"Enabled {item_label}",
+        already_enabled_label=f"Already enabled {item_label}",
+        evicted_label="Evicted (LRU)",
+        invalid_label=f"Invalid {item_label}",
+    )
+    payload: ToolSearchResult = {
+        "status": str(result.get("status") or "error"),
+        "message": "\n".join(message_lines) or f"No named {item_label.rstrip('s')} could be enabled.",
+        section: _section_payload(
+            enabled=result.get("enabled", []),
+            already_enabled=result.get("already_enabled", []),
+            evicted=result.get("evicted", []),
+            invalid=result.get("invalid", []),
+        ),
+    }
+    if section == "system_skills" and result.get("pipedream_apps"):
+        payload[section]["pipedream_apps"] = result["pipedream_apps"]
+    return payload
+
+
+def _directly_named_hidden_builtin_tools(
+    agent: PersistentAgent,
+    query: str,
+) -> list[str]:
+    query_text = str(query or "").casefold()
+    if not query_text:
+        return []
+    visible_names = set(get_available_builtin_tool_entries(agent))
+    hidden_catalog = get_available_builtin_tool_entries(agent, include_hidden=True)
+    candidates = [
+        (name, entry)
+        for name, entry in hidden_catalog.items()
+        if name not in visible_names
+        and re.search(
+            rf"(?<![a-z0-9_]){re.escape(name.casefold())}(?![a-z0-9_])",
+            query_text,
+        )
+    ]
+    if not candidates:
+        return []
+    candidate_skill_keys = {
+        entry.system_skill_key for _name, entry in candidates if entry.system_skill_key
+    }
+    enabled_skill_keys = set(
+        get_enabled_system_skill_states(agent)
+        .filter(skill_key__in=candidate_skill_keys)
+        .values_list("skill_key", flat=True)
+    )
+    return [
+        name
+        for name, entry in candidates
+        if (
+            not entry.system_skill_key
+            or entry.system_skill_key in enabled_skill_keys
+        )
+    ]
+
+
 def _find_tool_by_suffix(
     available_names: Iterable[str],
     suffix: str,
@@ -316,15 +467,19 @@ def _build_app_lines(
     return lines
 
 
-def _build_global_skill_lines(global_skills: Iterable[Any]) -> list[str]:
+def _build_skill_lines(
+    skills: Iterable[Any],
+    *,
+    use_effective_tools: bool = False,
+) -> list[str]:
     lines: list[str] = []
-    for skill in global_skills:
+    for skill in skills:
         name = _tool_attr(skill, "name")
         if not isinstance(name, str) or not name:
             continue
         description = _strip_description(_tool_attr(skill, "description", "") or "")
         instructions = _strip_description(_tool_attr(skill, "instructions", "") or "")
-        if hasattr(skill, "get_effective_tool_ids"):
+        if use_effective_tools and hasattr(skill, "get_effective_tool_ids"):
             normalized_tools = list(skill.get_effective_tool_ids())
         else:
             normalized_tools = list(normalize_skill_tool_ids(_tool_attr(skill, "tools", []) or []))
@@ -345,30 +500,12 @@ def _build_global_skill_lines(global_skills: Iterable[Any]) -> list[str]:
     return lines
 
 
+def _build_global_skill_lines(global_skills: Iterable[Any]) -> list[str]:
+    return _build_skill_lines(global_skills, use_effective_tools=True)
+
+
 def _build_agent_skill_lines(agent_skills: Iterable[PersistentAgentSkill]) -> list[str]:
-    lines: list[str] = []
-    for skill in agent_skills:
-        name = (skill.name or "").strip()
-        if not name:
-            continue
-        description = _strip_description(skill.description or "")
-        instructions = _strip_description(skill.instructions or "")
-        normalized_tools = list(normalize_skill_tool_ids(skill.tools))
-        use_when = description or instructions
-        tool_text = ", ".join(normalized_tools) if normalized_tools else "(none)"
-        raw_secrets = skill.secrets or []
-        secret_text = ", ".join(
-            format_skill_secret_requirement(secret)
-            for secret in raw_secrets
-            if isinstance(secret, dict)
-        ) or "(none)"
-        line = f"- {name}"
-        if use_when:
-            line += f" | use when: {use_when}"
-        line += f" | enables: {tool_text}"
-        line += f" | secrets: {secret_text}"
-        lines.append(line)
-    return lines
+    return _build_skill_lines(agent_skills)
 
 
 def _filter_agent_skills_for_tool_blacklist(
@@ -408,6 +545,39 @@ def _build_system_skill_lines(system_skills: Iterable[Any]) -> list[str]:
     return lines
 
 
+def _selection_tool_definition(
+    name: str,
+    description: str,
+    selection_key: str,
+    selection_description: str,
+    *,
+    max_items: int = 20,
+    extra_properties: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    properties = {
+        selection_key: {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": max_items,
+            "description": selection_description,
+        },
+        **(extra_properties or {}),
+    }
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": [selection_key],
+            },
+        },
+    }
+
+
 def _build_search_tool_definitions(
     *,
     max_items: int,
@@ -416,155 +586,84 @@ def _build_search_tool_definitions(
     include_system_skills: bool,
     include_app_enablement: bool,
 ) -> list[dict[str, Any]]:
-    tool_defs: list[dict[str, Any]] = [
-        {
-            "type": "function",
-            "function": {
-                "name": "enable_tools",
-                "description": (
-                    "Enable exact tools from the catalog; optionally suggest verified external resources."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "tool_names": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "minItems": 1,
-                            "maxItems": max_items,
-                            "description": "List of full tool names to enable",
-                        },
-                        "external_resources": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {"type": "string", "description": "Resource name"},
-                                    "description": {"type": "string", "description": "Brief description"},
-                                    "url": {"type": "string", "description": "Full URL"},
-                                },
-                                "required": ["name", "description", "url"],
-                            },
-                            "maxItems": 5,
-                            "description": "Public APIs, websites, or datasets with verified URLs",
-                        },
-                    },
-                    "required": ["tool_names"],
-                },
+    external_resources = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Resource name"},
+                "description": {"type": "string", "description": "Brief description"},
+                "url": {"type": "string", "description": "Full URL"},
             },
-        }
+            "required": ["name", "description", "url"],
+        },
+        "maxItems": 5,
+        "description": "Public APIs, websites, or datasets with verified URLs",
+    }
+    tool_defs = [
+        _selection_tool_definition(
+            "enable_tools",
+            "Enable exact tools from the catalog; optionally suggest verified external resources.",
+            "tool_names",
+            "List of full tool names to enable",
+            max_items=max_items,
+            extra_properties={"external_resources": external_resources},
+        )
     ]
-    if include_agent_skills:
-        tool_defs.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": "enable_agent_skills",
-                    "description": (
-                        "Refresh exact saved agent skills and enable their required tools."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "skill_names": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "minItems": 1,
-                                "maxItems": 20,
-                                "description": "List of exact saved agent skill names to refresh",
-                            },
-                        },
-                        "required": ["skill_names"],
-                    },
-                },
-            }
-        )
-    if include_global_skills:
-        tool_defs.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": "enable_global_skills",
-                    "description": (
-                        "Import exact global skills into the agent's local skill history."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "skill_names": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "minItems": 1,
-                                "maxItems": 20,
-                                "description": "List of exact global skill names to enable",
-                            },
-                        },
-                        "required": ["skill_names"],
-                    },
-                },
-            }
-        )
-    if include_system_skills:
-        tool_defs.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": "enable_system_skills",
-                    "description": (
-                        "Enable exact code-defined system skills and their hidden tools."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "skill_keys": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "minItems": 1,
-                                "maxItems": 20,
-                                "description": "List of exact system skill keys to enable",
-                            },
-                        },
-                        "required": ["skill_keys"],
-                    },
-                },
-            }
-        )
-    if include_app_enablement:
-        tool_defs.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": "enable_apps",
-                    "description": (
-                        "Enable exact Pipedream app slugs for named integration connection/use requests before a follow-up tool search."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "app_slugs": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "minItems": 1,
-                                "maxItems": 20,
-                                "description": "List of exact Pipedream app slugs to enable for integration tool discovery",
-                            },
-                        },
-                        "required": ["app_slugs"],
-                    },
-                },
-            }
-        )
+    optional_definitions = (
+        (
+            include_agent_skills,
+            "enable_agent_skills",
+            "Refresh exact saved agent skills and enable their required tools.",
+            "skill_names",
+            "List of exact saved agent skill names to refresh",
+        ),
+        (
+            include_global_skills,
+            "enable_global_skills",
+            "Import exact global skills into the agent's local skill history.",
+            "skill_names",
+            "List of exact global skill names to enable",
+        ),
+        (
+            include_system_skills,
+            "enable_system_skills",
+            "Enable exact code-defined system skills and their hidden tools.",
+            "skill_keys",
+            "List of exact system skill keys to enable",
+        ),
+        (
+            include_app_enablement,
+            "enable_apps",
+            "Enable exact Pipedream app slugs for named integration connection/use requests before a follow-up tool search.",
+            "app_slugs",
+            "List of exact Pipedream app slugs to enable for integration tool discovery",
+        ),
+    )
+    tool_defs.extend(
+        _selection_tool_definition(name, description, key, item_description)
+        for enabled, name, description, key, item_description in optional_definitions
+        if enabled
+    )
     return tool_defs
 
 
 def _parse_search_tool_calls(tool_calls: Iterable[Any], *, provider_name: str) -> dict[str, list[Any]]:
-    requested_tools: list[str] = []
-    requested_agent_skills: list[str] = []
-    requested_skills: list[str] = []
-    requested_system_skills: list[str] = []
-    requested_apps: list[str] = []
+    requested: dict[str, list[Any]] = {
+        "tools": [],
+        "agent_skills": [],
+        "skills": [],
+        "system_skills": [],
+        "apps": [],
+    }
+    selection_specs = {
+        "enable_tools": ("tool_names", "tools"),
+        "enable_agent_skills": ("skill_names", "agent_skills"),
+        "enable_global_skills": ("skill_names", "skills"),
+        "enable_system_skills": ("skill_keys", "system_skills"),
+        "enable_apps": ("app_slugs", "apps"),
+    }
     external_resources: list[dict[str, str]] = []
-
     for tool_call in tool_calls:
         try:
             if not tool_call:
@@ -575,18 +674,19 @@ def _parse_search_tool_calls(tool_calls: Iterable[Any], *, provider_name: str) -
             function_name = getattr(function_block, "name", None) or function_block.get("name")
             raw_args = getattr(function_block, "arguments", None) or function_block.get("arguments") or "{}"
             arguments = json.loads(raw_args)
+            selection_spec = selection_specs.get(function_name)
+            if selection_spec:
+                argument_key, result_key = selection_spec
+                for value in arguments.get(argument_key) or []:
+                    if isinstance(value, str) and value not in requested[result_key]:
+                        requested[result_key].append(value)
             if function_name == "enable_tools":
-                names = arguments.get("tool_names") or []
-                if isinstance(names, list):
-                    for name in names:
-                        if isinstance(name, str) and name not in requested_tools:
-                            requested_tools.append(name)
                 resources = arguments.get("external_resources") or []
                 if isinstance(resources, list):
                     for res in resources:
                         if isinstance(res, dict) and res.get("name") and res.get("url"):
                             url = res.get("url", "")
-                            if url.startswith("http://") or url.startswith("https://"):
+                            if isinstance(url, str) and url.startswith(("http://", "https://")):
                                 external_resources.append(
                                     {
                                         "name": str(res.get("name", ""))[:100],
@@ -594,41 +694,15 @@ def _parse_search_tool_calls(tool_calls: Iterable[Any], *, provider_name: str) -
                                         "url": url[:500],
                                     }
                                 )
-            elif function_name == "enable_global_skills":
-                skill_names = arguments.get("skill_names") or []
-                if isinstance(skill_names, list):
-                    for skill_name in skill_names:
-                        if isinstance(skill_name, str) and skill_name not in requested_skills:
-                            requested_skills.append(skill_name)
-            elif function_name == "enable_agent_skills":
-                skill_names = arguments.get("skill_names") or []
-                if isinstance(skill_names, list):
-                    for skill_name in skill_names:
-                        if isinstance(skill_name, str) and skill_name not in requested_agent_skills:
-                            requested_agent_skills.append(skill_name)
-            elif function_name == "enable_system_skills":
-                skill_keys = arguments.get("skill_keys") or []
-                if isinstance(skill_keys, list):
-                    for skill_key in skill_keys:
-                        if isinstance(skill_key, str) and skill_key not in requested_system_skills:
-                            requested_system_skills.append(skill_key)
-            elif function_name == "enable_apps":
-                app_slugs = arguments.get("app_slugs") or []
-                if isinstance(app_slugs, list):
-                    for app_slug in app_slugs:
-                        if isinstance(app_slug, str) and app_slug not in requested_apps:
-                            requested_apps.append(app_slug)
-        except Exception:  # pragma: no cover - defensive parsing
+        except (  # pragma: no cover - defensive parsing
+            AttributeError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
             logger.exception("search_tools.%s: failed to parse tool call; skipping", provider_name)
-
-    return {
-        "tools": requested_tools,
-        "agent_skills": requested_agent_skills,
-        "skills": requested_skills,
-        "system_skills": requested_system_skills,
-        "apps": requested_apps,
-        "external_resources": external_resources,
-    }
+    requested["external_resources"] = external_resources
+    return requested
 
 
 def _normalize_requested_selection(
@@ -1358,6 +1432,7 @@ def _search_with_llm(
 
 def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     """Search across MCP and builtin tools in a single LLM call."""
+    query = _preserve_meta_gobii_team_intent(agent, query)
     manager = get_mcp_manager()
     if not manager._initialized:
         manager.initialize()
@@ -1401,6 +1476,24 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         query,
         available_tool_names=get_available_system_skill_tool_names(agent),
     )
+    directly_named_hidden_tools = _directly_named_hidden_builtin_tools(agent, query)
+    if directly_named_hidden_tools:
+        return _direct_enable_result(
+            enable_tools(
+                agent,
+                directly_named_hidden_tools,
+                include_hidden_builtin=True,
+            ),
+            section="tools",
+        )
+    directly_named_system_skills = _directly_named_system_skill_keys(query, system_skill_catalog)
+    if directly_named_system_skills:
+        result = enable_system_skills(
+            agent,
+            directly_named_system_skills,
+            available_skills=system_skill_catalog,
+        )
+        return _direct_enable_result(result, section="system_skills")
 
     combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog + eval_synthetic_catalog
     pipedream_app_catalog: list[Any] = []
@@ -1454,19 +1547,14 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "function": {
             "name": "search_tools",
             "description": (
-                "Discover and enable tools and skills for the task, including saved custom tools and hidden system skills. "
-                "Use when no enabled tool clearly fits, including named integration requests. "
-                "Use for control-plane or agent/team-management requests that may require hidden system skills. "
-                "Use it when you need to choose between structured extractors, web search, scraping, browser automation, or a specialized integration. "
-                "Use already-enabled direct tools such as sqlite_batch, create_csv, or a named integration tool; do not rediscover a matching enabled app/tool. "
-                "Call it again when the task changes and you need different capabilities."
+                "Discover/enable integrations, tools, workflows, and hidden skills. Use callable nonlegacy tools directly; named integrations and specialized skills require discovery. Requests to create or launch a persistent research/specialist team must start here; never simulate a team with personas."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Description of what you want to accomplish or what kind of tools and skills you're looking for",
+                        "description": "Task or capability to discover.",
                     }
                 },
                 "required": ["query"],

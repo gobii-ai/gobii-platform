@@ -38,12 +38,12 @@ assert on results        │
 
 ### Fingerprinting Strategy
 
-**AST hashing** - hash the Abstract Syntax Tree of the scenario class.
+**Behavioral hashing** - hash stable scenario data, eval behavior classes in its MRO, and explicitly declared shared dependencies.
 
-Why AST, not source code?
+Why normalized AST inside that payload?
 - Normalizes formatting (whitespace, comments don't affect hash)
-- Captures behavioral equivalence
-- Simple to implement (`ast.parse()` + `ast.dump()`)
+- Captures executable behavior without invalidating comparisons for formatting-only changes
+- Lets data-driven cases and shared scorers participate in the same stable identity
 
 Why not structural fingerprint (just task names/types)?
 - Could miss behavioral changes in `run()` method
@@ -54,7 +54,7 @@ Why not structural fingerprint (just task names/types)?
 ### What We Capture Per Run
 
 ```python
-scenario_fingerprint  # AST hash of scenario class (16 char hex)
+scenario_fingerprint  # Behavioral hash of scenario data/classes/dependencies (16 char hex)
 code_version          # Git commit hash (12 char)
 code_branch           # Git branch name
 primary_model         # LLM model name (e.g., 'claude-sonnet-4')
@@ -102,22 +102,21 @@ We discussed three tiers:
 
 ### Edge Cases
 
-**Scenario imports helper, helper changes:**
-- AST hash of scenario won't change
-- Behavioral difference not captured
-- Mitigation: Keep scenarios self-contained, or accept this limitation
+**Scenario imports a behavior-changing helper:**
+- Declare the helper in `fingerprint_dependencies`
+- The helper's normalized source then participates in the hash
+- Tests reject missing fingerprints for registered scenarios
 
-**Decorator changes:**
-- AST includes decorators
-- `@register_scenario` change would affect hash
-- This is probably correct behavior
+**Data-driven scenarios:**
+- Stable task definitions, metadata, tags, fixtures, policies, and `fingerprint_data` participate in the hash
+- Formatting and comments remain ignored
 
 ## Implementation Plan
 
 ### Phase 1: Data Capture ✅ COMPLETE
 
 1. Create `api/evals/fingerprint.py`:
-   - `compute_scenario_fingerprint(scenario)` - AST hash
+   - `compute_scenario_fingerprint(scenario)` - behavioral hash
    - `get_code_version()` - git commit
    - `get_code_branch()` - git branch
 

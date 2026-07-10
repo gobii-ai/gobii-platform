@@ -386,6 +386,7 @@ class SQLiteDigestor:
             """
             SELECT name FROM sqlite_master
             WHERE type='table' AND name NOT LIKE 'sqlite_%'
+              AND name NOT LIKE '__runtime_%'
             ORDER BY name
         """
         )

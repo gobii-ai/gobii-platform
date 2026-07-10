@@ -1,9 +1,13 @@
+import json
+import re
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from api.agent.system_skills.defaults import RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER, is_eval_synthetic_tool_name
+from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
@@ -48,6 +52,44 @@ SOURCING_TOOL_NAMES = (
     "eval_verify_candidate_batch",
     "create_csv",
 )
+RECRUITMENT_RETRIEVAL_TOOL_NAMES = (
+    "apollo_io-search-contacts",
+    "eval_verify_candidate_batch",
+    "http_request",
+    "mcp_brightdata_search_engine",
+    "mcp_brightdata_web_data_linkedin_company_profile",
+    "mcp_brightdata_web_data_linkedin_job_listings",
+    "mcp_brightdata_web_data_linkedin_people_search",
+    "mcp_brightdata_web_data_linkedin_person_profile",
+)
+
+DEDUPE_QUEUE_ROWS = (
+    ("Harper Nguyen", "https://www.linkedin.com/in/harper-nguyen-eval"),
+    ("Jordan Blake", "https://www.linkedin.com/in/jordan-blake-eval"),
+    ("Riley Chen", "https://www.linkedin.com/in/riley-chen-eval"),
+)
+DEDUPE_LEDGER_ROWS = (
+    ("https://www.linkedin.com/in/jordan-blake-eval", "DUPLICATE", "Delivered in prior batch."),
+    ("https://www.linkedin.com/in/riley-chen-eval", "REJECTED", "Recruiter rejected for wrong segment."),
+)
+SOURCE_FALLBACK_PEOPLE = (
+    {
+        "name": "Carolina Vega",
+        "title": "Legal Recruiter",
+        "company": "NALSC-style boutique legal search firm",
+        "location": "Charlotte, NC",
+        "url": "https://www.linkedin.com/in/carolina-vega-eval",
+        "evidence": "Attorney recruiting profile similar to boutique legal staffing archetypes.",
+    },
+    {
+        "name": "Jordan Kim",
+        "title": "Partner, Attorney Search",
+        "company": "NorthStar Legal Search",
+        "location": "Atlanta, GA",
+        "url": "https://www.linkedin.com/in/jordan-kim-eval",
+        "evidence": "Partner-level attorney search profile at a legal recruiting firm.",
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -63,9 +105,17 @@ class RecruitmentSourcingCase:
     response_term_groups: tuple[tuple[str, ...], ...] = ()
     forbidden_response_terms: tuple[str, ...] = ()
     required_proximate_response_terms: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
+    forbidden_without_proximate_response_terms: tuple[
+        tuple[tuple[str, ...], tuple[str, ...]], ...
+    ] = ()
+    required_candidate_link_pairs: tuple[tuple[str, str], ...] = ()
+    min_candidate_link_pairs: int = 0
     tags: tuple[str, ...] = field(default_factory=tuple)
     max_relevant_tool_calls: int = 10
+    max_retrieval_tool_calls: int = 4
     stop_on_human_input_request: bool = False
+    require_bounded_missing_material_request: bool = False
+    require_partial_resume_state: bool = False
 
     def tool_names_to_enable(self) -> tuple[str, ...]:
         alternative_tool_names = [
@@ -119,15 +169,6 @@ def _linkedin_people_result(items: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _apollo_people_result(items: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "status": "success",
-        "contacts": items,
-        "people": items,
-        "content": {"contacts": items, "people": items, "match_count": len(items)},
-    }
-
-
 def _search_result(items: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "status": "success",
@@ -157,11 +198,12 @@ RECRUITMENT_SOURCING_CASES = (
         forbidden_tool_names=SOURCING_TOOL_NAMES,
         response_term_groups=(
             ("job posting", "requirements", "required skills", "screening criteria", "dealbreakers"),
-            ("provide", "share", "wait", "missing", "more details", "additional details", "questions", "screen"),
         ),
         tags=("intake",),
         max_relevant_tool_calls=3,
+        max_retrieval_tool_calls=0,
         stop_on_human_input_request=True,
+        require_bounded_missing_material_request=True,
     ),
     RecruitmentSourcingCase(
         slug=RECRUITMENT_SOURCING_CRITERIA_FIDELITY,
@@ -173,9 +215,6 @@ RECRUITMENT_SOURCING_CASES = (
             "Superintendents, Directors, and VPs. Return fewer high-quality matches if needed."
         ),
         expected_tool_names=("mcp_brightdata_web_data_linkedin_people_search",),
-        accepted_tool_alternatives={
-            "mcp_brightdata_web_data_linkedin_people_search": ("apollo_io-search-contacts",),
-        },
         mock_config={
             "mcp_brightdata_web_data_linkedin_people_search": _linkedin_people_result(
                 [
@@ -213,55 +252,24 @@ RECRUITMENT_SOURCING_CASES = (
                     },
                 ]
             ),
-            "apollo_io-search-contacts": _apollo_people_result(
-                [
-                    {
-                        "name": "Mina Patel",
-                        "title": "Assistant Project Manager",
-                        "company": "BuildRight GC",
-                        "location": "Columbus, OH",
-                        "linkedin_url": "https://www.linkedin.com/in/mina-patel-eval",
-                        "evidence": "Commercial retail construction project coordination.",
-                    },
-                    {
-                        "name": "Priya Shah",
-                        "title": "Project Manager",
-                        "company": "Summit Retail Builders",
-                        "location": "Nashville, TN",
-                        "linkedin_url": "https://www.linkedin.com/in/priya-shah-eval",
-                        "evidence": "Retail buildout GC-side project delivery.",
-                    },
-                    {
-                        "name": "Evan Brooks",
-                        "title": "Estimator",
-                        "company": "BuildRight GC",
-                        "location": "Indianapolis, IN",
-                        "linkedin_url": "https://www.linkedin.com/in/evan-brooks-eval",
-                        "evidence": "Estimator title is excluded.",
-                    },
-                    {
-                        "name": "Dana Lee",
-                        "title": "Project Manager",
-                        "company": "Summit Retail Builders",
-                        "location": "Charlotte, NC",
-                        "linkedin_url": "https://www.linkedin.com/in/dana-lee-eval",
-                        "evidence": "Outside approved geography.",
-                    },
-                ]
-            ),
         },
         response_term_groups=(
             ("Mina Patel",),
             ("Priya Shah",),
-            ("Estimator", "excluded", "exclude"),
         ),
-        required_proximate_response_terms=(
+        forbidden_response_terms=("evan-brooks-eval", "dana-lee-eval"),
+        forbidden_without_proximate_response_terms=(
             (
-                ("Dana Lee", "dana-lee-eval"),
-                ("outside approved geography", "outside geography", "not approved geography", "outside approved"),
+                ("Evan Brooks",),
+                ("excluded", "exclude", "not qualified", "does not qualify", "ineligible"),
+            ),
+            (
+                ("Dana Lee",),
+                ("excluded", "outside", "not qualified", "does not qualify", "ineligible"),
             ),
         ),
         tags=("criteria",),
+        max_retrieval_tool_calls=4,
     ),
     RecruitmentSourcingCase(
         slug=RECRUITMENT_SOURCING_SOURCE_FALLBACK,
@@ -269,7 +277,7 @@ RECRUITMENT_SOURCING_CASES = (
         prompt=(
             "Apollo is not connected for this agent. Use available web or LinkedIn-style sources to find attorney "
             "recruiters similar to NALSC boutiques and legal staffing firms. The example companies are archetypes, "
-            "not the full target list. Return a small first batch with source links."
+            "not the full target list. Return up to two strong profiles in the first batch with source links."
         ),
         expected_tool_names=("mcp_brightdata_search_engine",),
         accepted_tool_alternatives={
@@ -302,26 +310,7 @@ RECRUITMENT_SOURCING_CASES = (
                     },
                 ]
             ),
-            "mcp_brightdata_web_data_linkedin_people_search": _linkedin_people_result(
-                [
-                    {
-                        "name": "Carolina Vega",
-                        "title": "Legal Recruiter",
-                        "company": "NALSC-style boutique legal search firm",
-                        "location": "Charlotte, NC",
-                        "url": "https://www.linkedin.com/in/carolina-vega-eval",
-                        "evidence": "Attorney recruiting profile similar to boutique legal staffing archetypes.",
-                    },
-                    {
-                        "name": "Jordan Kim",
-                        "title": "Partner, Attorney Search",
-                        "company": "NorthStar Legal Search",
-                        "location": "Atlanta, GA",
-                        "url": "https://www.linkedin.com/in/jordan-kim-eval",
-                        "evidence": "Partner-level attorney search profile at a legal recruiting firm.",
-                    },
-                ]
-            ),
+            "mcp_brightdata_web_data_linkedin_people_search": _linkedin_people_result(list(SOURCE_FALLBACK_PEOPLE)),
             "mcp_brightdata_web_data_linkedin_company_profile": {
                 "status": "success",
                 "result": [
@@ -352,16 +341,19 @@ RECRUITMENT_SOURCING_CASES = (
                     "match_count": 2,
                 },
             },
-            "mcp_brightdata_web_data_linkedin_person_profile": _linkedin_profile_result(
-                {
-                    "name": "Carolina Vega",
-                    "title": "Legal Recruiter",
-                    "company": "NALSC-style boutique legal search firm",
-                    "location": "Charlotte, NC",
-                    "url": "https://www.linkedin.com/in/carolina-vega-eval",
-                    "evidence": "Attorney recruiting profile similar to boutique legal staffing archetypes.",
-                }
-            ),
+            "mcp_brightdata_web_data_linkedin_person_profile": {
+                "rules": [
+                    {
+                        "param_contains": {"url": "carolina-vega-eval"},
+                        "result": _linkedin_profile_result(SOURCE_FALLBACK_PEOPLE[0]),
+                    },
+                    {
+                        "param_contains": {"url": "jordan-kim-eval"},
+                        "result": _linkedin_profile_result(SOURCE_FALLBACK_PEOPLE[1]),
+                    },
+                ],
+                "default": {"status": "error", "message": "No matching mocked LinkedIn profile."},
+            },
             "mcp_brightdata_web_data_linkedin_job_listings": {
                 "status": "success",
                 "result": [
@@ -436,11 +428,17 @@ RECRUITMENT_SOURCING_CASES = (
             },
         },
         response_term_groups=(
-            ("Carolina Vega", "Jordan Kim", "NorthStar"),
+            ("Carolina Vega", "Jordan Kim"),
             ("archetype", "similar", "legal"),
         ),
+        required_candidate_link_pairs=tuple(
+            (str(person["name"]), str(person["url"]))
+            for person in SOURCE_FALLBACK_PEOPLE
+        ),
+        min_candidate_link_pairs=1,
         tags=("fallback",),
         max_relevant_tool_calls=14,
+        max_retrieval_tool_calls=6,
     ),
     RecruitmentSourcingCase(
         slug=RECRUITMENT_SOURCING_DEDUPE_LEDGER,
@@ -456,42 +454,19 @@ RECRUITMENT_SOURCING_CASES = (
             "mcp_brightdata_web_data_linkedin_people_search",
             "apollo_io-search-contacts",
         ),
-        mock_config={
-            "sqlite_batch": {
-                "status": "ok",
-                "results": [
-                    {
-                        "result": [
-                            {
-                                "candidate_name": "Harper Nguyen",
-                                "profile_url": "https://www.linkedin.com/in/harper-nguyen-eval",
-                                "status": "NEW",
-                                "reason": "No prior delivery or rejection in ledger.",
-                            },
-                            {
-                                "candidate_name": "Jordan Blake",
-                                "profile_url": "https://www.linkedin.com/in/jordan-blake-eval",
-                                "status": "DUPLICATE",
-                                "reason": "Delivered in prior batch.",
-                            },
-                            {
-                                "candidate_name": "Riley Chen",
-                                "profile_url": "https://www.linkedin.com/in/riley-chen-eval",
-                                "status": "REJECTED",
-                                "reason": "Recruiter rejected for wrong segment.",
-                            },
-                        ],
-                        "message": "Query returned 3 queued candidate statuses.",
-                    }
-                ],
-            }
-        },
+        mock_config={},
         response_term_groups=(
             ("Harper Nguyen",),
-            ("Jordan Blake", "duplicate"),
-            ("Riley Chen", "rejected"),
+            ("Jordan Blake",),
+            ("Riley Chen",),
+        ),
+        required_proximate_response_terms=(
+            (("Harper Nguyen",), ("new",)),
+            (("Jordan Blake",), ("duplicate",)),
+            (("Riley Chen",), ("rejected",)),
         ),
         tags=("dedupe", "ledger"),
+        max_retrieval_tool_calls=0,
     ),
     RecruitmentSourcingCase(
         slug=RECRUITMENT_SOURCING_PARTIAL_VERIFICATION,
@@ -526,8 +501,8 @@ RECRUITMENT_SOURCING_CASES = (
                 "remaining_work": 13,
                 "next_cursor": "candidate-offset-2",
                 "next_action": (
-                    "Report the verified partial set with the source limitation, then continue bounded verification "
-                    "or preserve the next cursor."
+                    "Report the verified partial set with the source limitation and preserve the next cursor for a later "
+                    "batch; do not rerun the current batch."
                 ),
             }
         },
@@ -537,6 +512,8 @@ RECRUITMENT_SOURCING_CASES = (
             ("partial", "remaining", "source limitation", "could not verify"),
         ),
         tags=("partial", "verification"),
+        max_retrieval_tool_calls=1,
+        require_partial_resume_state=True,
     ),
 )
 
@@ -550,9 +527,87 @@ def _tool_calls_for_run(run_id: str, *, after=None, tool_names: Iterable[str] | 
     return list(queryset.select_related("step").order_by("step__created_at", "step__id"))
 
 
+def _normalize_retrieval_signature_value(value):
+    if isinstance(value, dict):
+        return {
+            key: _normalize_retrieval_signature_value(item)
+            for key, item in sorted(value.items())
+            if key != "will_continue_work"
+        }
+    if isinstance(value, list):
+        normalized_items = [_normalize_retrieval_signature_value(item) for item in value]
+        return sorted(
+            normalized_items,
+            key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"), default=str),
+        )
+    return value
+
+
+def _retrieval_call_signature(call: PersistentAgentToolCall) -> str:
+    normalized_params = _normalize_retrieval_signature_value(call.tool_params or {})
+    params_json = json.dumps(normalized_params, sort_keys=True, separators=(",", ":"), default=str)
+    return f"{call.tool_name}:{params_json}"
+
+
+def _duplicate_retrieval_signatures(calls: Iterable[PersistentAgentToolCall]) -> tuple[str, ...]:
+    seen = set()
+    duplicates = []
+    for call in calls:
+        signature = _retrieval_call_signature(call)
+        if signature in seen and signature not in duplicates:
+            duplicates.append(signature)
+        seen.add(signature)
+    return tuple(duplicates)
+
+
+def _tool_call_has_usable_result(call: PersistentAgentToolCall) -> bool:
+    if str(call.status or "").casefold() != "complete":
+        return False
+    result = call.result
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except json.JSONDecodeError:
+            return bool(result.strip())
+    if not isinstance(result, dict) or result.get("error"):
+        return False
+    failure_statuses = {"error", "failed", "failure", "warning", "pending", "cancelled", "canceled"}
+    payloads = [result]
+    if isinstance(result.get("result"), dict):
+        payloads.append(result["result"])
+    return all(
+        str(payload.get("status") or "").casefold() not in failure_statuses
+        and not payload.get("error")
+        for payload in payloads
+    )
+
+
 def _tool_name_satisfies_expected(call: PersistentAgentToolCall, expected_tool_name: str, case: RecruitmentSourcingCase) -> bool:
     accepted_names = {expected_tool_name, *case.accepted_tool_alternatives.get(expected_tool_name, ())}
-    return call.tool_name in accepted_names and call.status == "complete"
+    return call.tool_name in accepted_names and _tool_call_has_usable_result(call)
+
+
+def _ledger_query_is_substantive(call: PersistentAgentToolCall) -> bool:
+    if call.tool_name != "sqlite_batch" or call.status != "complete":
+        return False
+    params = call.tool_params if isinstance(call.tool_params, dict) else {}
+    sql_value = params.get("sql") or params.get("query") or params.get("queries") or ""
+    if isinstance(sql_value, (list, tuple)):
+        sql = "\n".join(str(value) for value in sql_value)
+    else:
+        sql = str(sql_value)
+    lowered = sql.lower()
+    if not (
+        "candidate_queue" in lowered
+        and "candidate_ledger" in lowered
+        and (" join " in lowered or " exists" in lowered)
+    ):
+        return False
+    result = (call.result or "").lower()
+    return all(
+        term.lower() in result
+        for term in ("Harper Nguyen", "Jordan Blake", "Riley Chen", "NEW", "DUPLICATE", "REJECTED")
+    )
 
 
 def _message_tool_body(call: PersistentAgentToolCall) -> str:
@@ -560,47 +615,275 @@ def _message_tool_body(call: PersistentAgentToolCall) -> str:
     return str(params.get("body") or "")
 
 
+def _human_input_request_body(request: PersistentAgentHumanInputRequest) -> str:
+    """Return all user-visible request text, not only the top-level prompt."""
+    parts = [request.question or ""]
+    for option in request.options_json or ():
+        if not isinstance(option, dict):
+            continue
+        parts.extend((str(option.get("title") or ""), str(option.get("description") or "")))
+    return "\n".join(part for part in parts if part)
+
+
+def _group_human_input_requests(
+    requests: Iterable[PersistentAgentHumanInputRequest],
+) -> list[tuple[object, str, PersistentAgentHumanInputRequest]]:
+    """Combine child questions emitted by one request_human_input tool step."""
+    grouped: dict[tuple[str, object], list[PersistentAgentHumanInputRequest]] = {}
+    for request in requests:
+        originating_step_id = getattr(request, "originating_step_id", None)
+        key = (
+            ("step", originating_step_id)
+            if originating_step_id is not None
+            else ("request", getattr(request, "id", id(request)))
+        )
+        grouped.setdefault(key, []).append(request)
+
+    interactions = []
+    for child_requests in grouped.values():
+        child_requests.sort(key=lambda request: (request.created_at, str(getattr(request, "id", ""))))
+        visible_bodies = list(dict.fromkeys(_human_input_request_body(request) for request in child_requests))
+        interactions.append(
+            (
+                child_requests[0].created_at,
+                "\n".join(body for body in visible_bodies if body),
+                child_requests[0],
+            )
+        )
+    interactions.sort(key=lambda interaction: interaction[0])
+    return interactions
+
+
+def _is_bounded_missing_material_request(
+    body: str,
+    *,
+    response_count: int,
+    tracked_request_count: int,
+) -> bool:
+    normalized = " ".join(str(body or "").casefold().split())
+    mentions_missing_material = any(
+        term in normalized
+        for term in (
+            "job posting",
+            "requirements",
+            "required skills",
+            "screening criteria",
+            "dealbreakers",
+            "intake notes",
+        )
+    )
+    requests_material = bool(
+        "?" in normalized
+        or re.search(
+            r"\b(?:please\s+)?(?:share|send|provide|upload|paste)\b|"
+            r"\b(?:could|can|would|will)\s+you\b",
+            normalized,
+        )
+    )
+    bounded_delivery = (
+        1 <= tracked_request_count <= 3
+        if tracked_request_count
+        else response_count == 1
+    )
+    return mentions_missing_material and requests_material and bounded_delivery
+
+
 def _candidate_response_bodies(run_id: str, agent_id: str, inbound) -> list[tuple[str, object]]:
-    bodies: list[tuple[str, object]] = []
+    candidates: list[tuple[object, int, str, object]] = []
     for message in (
         PersistentAgentMessage.objects
         .filter(owner_agent_id=agent_id, is_outbound=True, timestamp__gt=inbound.timestamp)
         .order_by("seq")
     ):
-        bodies.append((message.body or "", message))
+        candidates.append((message.timestamp, 0, message.body or "", message))
 
     for call in _tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=MESSAGE_TOOL_NAMES):
         body = _message_tool_body(call)
         if body:
-            bodies.append((body, call))
+            candidates.append((call.step.created_at, 1, body, call))
 
-    for request in (
+    human_input_requests = list(
         PersistentAgentHumanInputRequest.objects
         .filter(agent_id=agent_id, originating_step__eval_run_id=run_id, created_at__gt=inbound.timestamp)
         .order_by("created_at", "id")
-    ):
-        bodies.append((request.question or "", request))
+    )
+    for created_at, body, request in _group_human_input_requests(human_input_requests):
+        candidates.append((created_at, 2, body, request))
 
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    bodies: list[tuple[str, object]] = []
+    seen = set()
+    for _timestamp, _rank, body, artifact in candidates:
+        normalized = " ".join(body.split())
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        bodies.append((body, artifact))
     return bodies
 
 
+def _anchor_context_units(body: str, anchor: str) -> list[str]:
+    segments = [
+        segment.strip()
+        for segment in re.split(r"\n+|(?<=[.!?])\s+", body or "")
+        if segment.strip()
+    ]
+    units = []
+    for index, segment in enumerate(segments):
+        if anchor.lower() not in segment.lower():
+            continue
+        unit = segment
+        if len(segment) <= len(anchor) + 20 and index + 1 < len(segments):
+            unit += " " + segments[index + 1]
+        units.append(unit)
+    return units
+
+
 def _contains_proximate_terms(body: str, anchor_terms: tuple[str, ...], context_terms: tuple[str, ...]) -> bool:
-    normalized = body.lower()
-    context_window_chars = 320
     for anchor in anchor_terms:
-        anchor_text = anchor.lower()
-        start = normalized.find(anchor_text)
-        while start != -1:
-            window_start = max(0, start - context_window_chars)
-            window_end = min(len(normalized), start + len(anchor_text) + context_window_chars)
-            window = normalized[window_start:window_end]
-            if any(context.lower() in window for context in context_terms):
+        for unit in _anchor_context_units(body, anchor):
+            if any(context.lower() in unit.lower() for context in context_terms):
                 return True
-            start = normalized.find(anchor_text, start + len(anchor_text))
     return False
 
 
+def _has_anchor_without_proximate_context(
+    body: str,
+    anchor_terms: tuple[str, ...],
+    context_terms: tuple[str, ...],
+) -> bool:
+    """Return true when a disqualified candidate is presented without exclusion context."""
+    positive_recommendation = re.compile(
+        r"\b(?:strong(?:est)?(?:\s+match)?|best\s+match|qualified|recommend(?:ed)?|shortlist(?:ed)?|include[ds]?)\b",
+        re.IGNORECASE,
+    )
+    negated_recommendation = re.compile(
+        r"\b(?:not|isn't|wasn't|do not|don't)\s+(?:qualified|recommend(?:ed)?|shortlist(?:ed)?|include[ds]?)\b",
+        re.IGNORECASE,
+    )
+    for anchor in anchor_terms:
+        for unit in _anchor_context_units(body, anchor):
+            if not any(context.lower() in unit.lower() for context in context_terms) and not any(
+                marker in unit for marker in ("❌", "✗", "✕", "❎")
+            ):
+                return True
+            if positive_recommendation.search(unit) and not negated_recommendation.search(unit):
+                return True
+    return False
+
+
+def _candidate_link_pairs_in_body(
+    body: str,
+    pairs: tuple[tuple[str, str], ...],
+) -> set[str]:
+    matched = set()
+    paragraphs = [part for part in re.split(r"\n\s*\n", body or "") if part.strip()]
+    lines = [line for line in (body or "").splitlines() if line.strip()]
+    candidate_names = tuple(name for name, _url in pairs)
+
+    for name, url in pairs:
+        if any(name.casefold() in line.casefold() and url in line for line in lines):
+            matched.add(name)
+            continue
+
+        for paragraph in paragraphs:
+            lowered = paragraph.casefold()
+            name_start = lowered.find(name.casefold())
+            if name_start < 0:
+                continue
+            later_name_starts = [
+                lowered.find(other_name.casefold(), name_start + len(name))
+                for other_name in candidate_names
+                if other_name != name
+            ]
+            later_name_starts = [index for index in later_name_starts if index >= 0]
+            name_end = min(later_name_starts, default=len(paragraph))
+            if url in paragraph[name_start:name_end]:
+                matched.add(name)
+                break
+    return matched
+
+
+def _partial_response_has_correct_polarity(body: str, *, remaining_work: int) -> bool:
+    normalized = " ".join(str(body or "").casefold().replace("_", " ").split())
+    contradiction_patterns = (
+        r"\bnot (?:a )?partial\b",
+        r"\bno (?:work )?(?:is )?remaining\b",
+        r"\bnothing remains\b",
+        r"\b(?:verification|work) (?:is )?(?:fully )?complete\b",
+        r"\ball 15 (?:candidates? )?(?:were )?verified\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in contradiction_patterns):
+        return False
+    remaining_patterns = (
+        rf"\b{remaining_work}\s+(?:candidates?|profiles?|verifications?|items?|records?|checks?)\s+(?:remain|remaining)\b",
+        rf"\bremaining (?:work|verification|candidates?|profiles?)\D{{0,12}}{remaining_work}\b",
+        rf"\bremaining[\s:*_-]{{1,12}}{remaining_work}\b",
+        rf"\b{remaining_work}\s+(?:candidates?|profiles?|items?)\s+(?:still\s+)?(?:queued|remain(?:ing)?|left|unverified)\b",
+        rf"\b{remaining_work}\D{{0,12}}(?:remaining|left|unverified)\b",
+        r"\b2\s+(?:of|/)\s*15\b",
+    )
+    limitation = bool(
+        re.search(r"\b(?:partial|limitation|block(?:ed|ing))\b", normalized)
+        or any(term in normalized for term in ("could not verify", "unable to verify"))
+    )
+    return limitation and any(re.search(pattern, normalized) for pattern in remaining_patterns)
+
+
+def _partial_resume_state_tables(agent_id: str, *, cursor: str, remaining_work: int) -> list[str]:
+    matched_tables = []
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        connection = sqlite3.connect(db_path)
+        try:
+            table_names = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name NOT GLOB '__*' AND name NOT LIKE 'sqlite_%'"
+                ).fetchall()
+            ]
+            for table_name in table_names:
+                quoted_name = str(table_name).replace('"', '""')
+                try:
+                    rows = connection.execute(f'SELECT * FROM "{quoted_name}" LIMIT 100').fetchall()
+                except sqlite3.Error:
+                    continue
+                if any(
+                    any(str(value) == cursor for value in row)
+                    and any(str(value) == str(remaining_work) for value in row)
+                    for row in rows
+                ):
+                    matched_tables.append(str(table_name))
+        finally:
+            connection.close()
+    return matched_tables
+
+
 class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
+    fingerprint_data = {
+        "dedupe_queue_rows": DEDUPE_QUEUE_ROWS,
+        "dedupe_ledger_rows": DEDUPE_LEDGER_ROWS,
+    }
+    fingerprint_dependencies = (
+        _tool_calls_for_run,
+        _retrieval_call_signature,
+        _duplicate_retrieval_signatures,
+        _tool_call_has_usable_result,
+        _tool_name_satisfies_expected,
+        _ledger_query_is_substantive,
+        _message_tool_body,
+        _human_input_request_body,
+        _group_human_input_requests,
+        _is_bounded_missing_material_request,
+        _candidate_response_bodies,
+        _anchor_context_units,
+        _contains_proximate_terms,
+        _has_anchor_without_proximate_context,
+        _candidate_link_pairs_in_body,
+        _partial_response_has_correct_polarity,
+        _partial_resume_state_tables,
+        response_contains_term,
+    )
     tier = "core"
     category = "recruitment_sourcing"
     expected_runtime = "short"
@@ -609,9 +892,11 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
     area = "system_skills"
     tags = ("recruitment_sourcing", "system_skill", "micro")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_expected_tools", assertion_type="tool_call"),
         ScenarioTask(name="verify_forbidden_tools", assertion_type="tool_call"),
+        ScenarioTask(name="verify_efficient_retrieval", assertion_type="tool_call"),
+        ScenarioTask(name="verify_partial_resume_state", assertion_type="tool_call"),
         ScenarioTask(name="verify_response", assertion_type="exact_match"),
     ]
     case: RecruitmentSourcingCase | None = None
@@ -652,6 +937,31 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
         result = enable_system_skills(agent, [RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY])
         if result.get("invalid"):
             raise ValueError(f"Could not enable Recruitment Sourcing system skill: {result}")
+        if case.slug == RECRUITMENT_SOURCING_DEDUPE_LEDGER:
+            self._seed_candidate_ledger(agent_id)
+
+    @staticmethod
+    def _seed_candidate_ledger(agent_id: str) -> None:
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.executescript(
+                    "DROP TABLE IF EXISTS candidate_queue;"
+                    "DROP TABLE IF EXISTS candidate_ledger;"
+                    "CREATE TABLE candidate_queue(candidate_name TEXT NOT NULL, profile_url TEXT PRIMARY KEY);"
+                    "CREATE TABLE candidate_ledger(profile_url TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT NOT NULL);"
+                )
+                connection.executemany(
+                    "INSERT INTO candidate_queue(candidate_name, profile_url) VALUES (?, ?)",
+                    DEDUPE_QUEUE_ROWS,
+                )
+                connection.executemany(
+                    "INSERT INTO candidate_ledger(profile_url, status, reason) VALUES (?, ?, ?)",
+                    DEDUPE_LEDGER_ROWS,
+                )
+                connection.commit()
+            finally:
+                connection.close()
 
     def _record_expected_tools(self, run_id: str, inbound) -> None:
         case = self._case()
@@ -683,6 +993,11 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
             for tool_name in case.expected_tool_names
             if not any(_tool_name_satisfies_expected(call, tool_name, case) for call in calls)
         ]
+        if (
+            case.slug == RECRUITMENT_SOURCING_DEDUPE_LEDGER
+            and not any(_ledger_query_is_substantive(call) for call in calls)
+        ):
+            missing.append("substantive candidate_queue/candidate_ledger classification query")
         if missing:
             self.record_task_result(
                 run_id,
@@ -734,38 +1049,105 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
             observed_summary="Agent avoided forbidden sourcing tools for this case.",
         )
 
+    def _record_efficient_retrieval(self, run_id: str, inbound) -> None:
+        case = self._case()
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_efficient_retrieval")
+        calls = _tool_calls_for_run(
+            run_id,
+            after=inbound.timestamp,
+            tool_names=RECRUITMENT_RETRIEVAL_TOOL_NAMES,
+        )
+        duplicates = _duplicate_retrieval_signatures(calls)
+        within_cap = len(calls) <= case.max_retrieval_tool_calls
+        if not duplicates and within_cap:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_efficient_retrieval",
+                observed_summary=(
+                    f"Retrieval work was bounded ({len(calls)}/{case.max_retrieval_tool_calls}) "
+                    "with no duplicate call signatures."
+                ),
+                artifacts={"step": calls[0].step} if calls else {},
+            )
+            return
+
+        duplicate_tools = sorted({signature.split(":", 1)[0] for signature in duplicates})
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name="verify_efficient_retrieval",
+            observed_summary=(
+                f"Retrieval work was {len(calls)}/{case.max_retrieval_tool_calls}; "
+                f"duplicate call signatures used for tools {duplicate_tools}."
+            ),
+            artifacts={"step": calls[-1].step} if calls else {},
+        )
+
     def _record_response(self, run_id: str, agent_id: str, inbound) -> None:
         case = self._case()
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_response")
         response_bodies = _candidate_response_bodies(run_id, agent_id, inbound)
-        matched_body = ""
-        matched_artifact = None
-        final_missing_groups = list(case.response_term_groups)
-        final_missing_proximate_groups = list(case.required_proximate_response_terms)
-        final_forbidden_terms: list[str] = []
-        for body, artifact in response_bodies:
-            missing_groups = [
-                terms
-                for terms in case.response_term_groups
-                if not any(response_contains_term(body, term) for term in terms)
-            ]
-            missing_proximate_groups = [
-                terms
-                for terms in case.required_proximate_response_terms
-                if not _contains_proximate_terms(body, terms[0], terms[1])
-            ]
-            forbidden_terms = [term for term in case.forbidden_response_terms if response_contains_term(body, term)]
-            final_missing_groups = missing_groups
-            final_missing_proximate_groups = missing_proximate_groups
-            final_forbidden_terms = forbidden_terms
-            if not missing_groups and not missing_proximate_groups and not forbidden_terms:
-                matched_body = body
-                matched_artifact = artifact
-                break
+        final_body, final_artifact = response_bodies[-1] if response_bodies else ("", None)
+        final_missing_groups = [
+            terms
+            for terms in case.response_term_groups
+            if not any(response_contains_term(final_body, term) for term in terms)
+        ]
+        final_missing_proximate_groups = [
+            terms
+            for terms in case.required_proximate_response_terms
+            if not _contains_proximate_terms(final_body, terms[0], terms[1])
+        ]
+        final_forbidden_terms = [
+            term
+            for term in case.forbidden_response_terms
+            if any(response_contains_term(body, term) for body, _artifact in response_bodies)
+        ]
+        final_misrepresented_groups = [
+            terms
+            for terms in case.forbidden_without_proximate_response_terms
+            if any(
+                _has_anchor_without_proximate_context(body, terms[0], terms[1])
+                for body, _artifact in response_bodies
+            )
+        ]
+        tracked_request_count = sum(
+            isinstance(artifact, PersistentAgentHumanInputRequest)
+            for _body, artifact in response_bodies
+        )
+        missing_bounded_request = bool(
+            case.require_bounded_missing_material_request
+            and not _is_bounded_missing_material_request(
+                final_body,
+                response_count=len(response_bodies),
+                tracked_request_count=tracked_request_count,
+            )
+        )
+        linked_candidate_names = _candidate_link_pairs_in_body(
+            final_body,
+            case.required_candidate_link_pairs,
+        )
+        missing_candidate_links = max(
+            0,
+            case.min_candidate_link_pairs - len(linked_candidate_names),
+        )
+        invalid_partial_polarity = bool(
+            case.require_partial_resume_state
+            and not _partial_response_has_correct_polarity(final_body, remaining_work=13)
+        )
 
-        if final_missing_groups or final_missing_proximate_groups or final_forbidden_terms:
-            latest_body = response_bodies[-1][0] if response_bodies else ""
-            latest_artifact = response_bodies[-1][1] if response_bodies else None
+        if (
+            final_missing_groups
+            or final_missing_proximate_groups
+            or final_forbidden_terms
+            or final_misrepresented_groups
+            or missing_bounded_request
+            or missing_candidate_links
+            or invalid_partial_polarity
+        ):
             self.record_task_result(
                 run_id,
                 None,
@@ -774,9 +1156,14 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
                 observed_summary=(
                     f"Missing expected term group(s) {final_missing_groups}; "
                     f"missing proximate term group(s) {final_missing_proximate_groups}; "
-                    f"forbidden response terms present {final_forbidden_terms}; body={latest_body[:800]!r}."
+                    f"forbidden response terms present {final_forbidden_terms}; body={final_body[:800]!r}."
+                    f" disqualified candidates lacking exclusion context {final_misrepresented_groups}; "
+                    f"missing_bounded_material_request={missing_bounded_request}."
+                    f" linked_candidate_names={sorted(linked_candidate_names)}; "
+                    f"missing_candidate_links={missing_candidate_links}."
+                    f" invalid_partial_polarity={invalid_partial_polarity}."
                 ),
-                artifacts={"response_artifact": latest_artifact} if latest_artifact else {},
+                artifacts={"response_artifact": final_artifact} if final_artifact else {},
             )
             return
 
@@ -786,7 +1173,37 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
             EvalRunTask.Status.PASSED,
             task_name="verify_response",
             observed_summary="Agent response reflected the sourcing guardrail under test.",
-            artifacts={"response_artifact": matched_artifact, "response_preview": matched_body[:800]} if matched_artifact else {},
+            artifacts={"response_artifact": final_artifact, "response_preview": final_body[:800]} if final_artifact else {},
+        )
+
+    def _record_partial_resume_state(self, run_id: str, agent_id: str) -> None:
+        case = self._case()
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_partial_resume_state")
+        if not case.require_partial_resume_state:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_partial_resume_state",
+                observed_summary="No durable partial-resume assertion applies to this case.",
+            )
+            return
+
+        matched_tables = _partial_resume_state_tables(
+            agent_id,
+            cursor="candidate-offset-2",
+            remaining_work=13,
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if matched_tables else EvalRunTask.Status.FAILED,
+            task_name="verify_partial_resume_state",
+            observed_summary=(
+                f"Persisted the exact cursor and remaining-work count in user SQLite table(s): {matched_tables}."
+                if matched_tables
+                else "Partial verification did not persist its exact cursor and remaining-work count in user SQLite."
+            ),
         )
 
     def run(self, run_id: str, agent_id: str) -> None:
@@ -814,6 +1231,8 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
 
         self._record_expected_tools(run_id, inbound)
         self._record_forbidden_tools(run_id, inbound)
+        self._record_efficient_retrieval(run_id, inbound)
+        self._record_partial_resume_state(run_id, agent_id)
         self._record_response(run_id, agent_id, inbound)
 
 

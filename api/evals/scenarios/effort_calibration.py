@@ -1,7 +1,7 @@
 import json
 import re
 from decimal import Decimal
-from typing import Iterable
+from typing import Any, Iterable
 
 from django.db.models import Sum
 
@@ -94,6 +94,9 @@ EFFORT_OVERWORK_TOOL_NAMES = {
     "spawn_agent",
     "update_plan",
 }
+PARTIAL_SOURCE_FORBIDDEN_TOOL_NAMES = (
+    (EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"}) | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES
+)
 WEB_QUERY_PARAM_NAMES = ("query", "keyword", "prompt")
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _SQL_TOOL_RESULT_TEXT_RE = re.compile(
@@ -275,11 +278,39 @@ def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
     if str(call.status or "").lower() != "complete":
         return False
 
-    sql = sqlite_batch_sql(call).lower()
-    if "remaining_work" not in sql or ("next_cursor" not in sql and "cursor" not in sql):
+    sql = sqlite_batch_sql(call)
+    lowered = sql.casefold()
+    if "__agent_config" in lowered or re.search(r"\bcharter\b", lowered):
         return False
 
-    return any(keyword in sql for keyword in ("insert", "update", "replace", "create table"))
+    for raw_statement in split_sql_statements(sql):
+        statement = re.sub(r"/\*.*?\*/|--[^\n]*", " ", raw_statement, flags=re.DOTALL).casefold()
+        has_remaining_count = bool(
+            re.search(
+                r"\b(?:remaining_(?:work|count|items|rows)|pending_count|items_remaining|work_remaining)\b",
+                statement,
+            )
+        )
+        if not has_remaining_count or not re.search(r"\b(?:next_)?cursor\b", statement):
+            continue
+
+        mutation_targets = re.findall(
+            r"\b(?:insert(?:\s+or\s+\w+)?\s+into|replace\s+into|update)\s+"
+            r'["`\[]?([a-z_][\w$]*)',
+            statement,
+            re.IGNORECASE,
+        )
+        mutation_targets.extend(
+            re.findall(
+                r"\bcreate\s+(?:temp(?:orary)?\s+)?table\s+(?:if\s+not\s+exists\s+)?"
+                r'["`\[]?([a-z_][\w$]*)["`\]]?\s+as\s+(?:with\b|select\b|values\b)',
+                statement,
+                re.IGNORECASE,
+            )
+        )
+        if any(not table_name.startswith("__") for table_name in mutation_targets):
+            return True
+    return False
 
 
 def _human_input_requests_for_run(run_id: str, *, after=None):
@@ -312,6 +343,48 @@ def _completion_token_summary(run_id: str) -> dict[str, int]:
 
 
 class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
+    fingerprint_dependencies = (
+        summarize_sqlite_tool_result_calls,
+        _looks_like_routine_progress_message,
+        split_sql_statements,
+        sqlite_batch_is_only_eval_bookkeeping_read,
+        sqlite_batch_is_only_planning_state_mutation,
+        sqlite_batch_is_only_planning_state_read,
+        sqlite_batch_mutates_planning_state,
+        sqlite_batch_sql,
+        _normalize_similarity_text,
+        _token_set,
+        _near_duplicate_text,
+        _find_near_duplicate_texts,
+        _web_query_value,
+        _sqlite_result_text_reads,
+        _hierarchical_report_shape,
+        _source_url_mentioned,
+        _tool_calls_for_run,
+        _relevant_tool_calls_for_run,
+        _outbound_messages_after,
+        _sqlite_call_persists_resume_state,
+        _human_input_requests_for_run,
+        _question_count,
+        _orchestrator_completion_count,
+        _completion_token_summary,
+    )
+    fingerprint_data = {
+        "message_tool_names": MESSAGE_TOOL_NAMES,
+        "stop_tool_names": STOP_TOOL_NAMES,
+        "artifact_tool_names": ARTIFACT_TOOL_NAMES,
+        "research_tool_names": RESEARCH_TOOL_NAMES,
+        "effort_overwork_tool_names": EFFORT_OVERWORK_TOOL_NAMES,
+        "partial_source_forbidden_tool_names": PARTIAL_SOURCE_FORBIDDEN_TOOL_NAMES,
+        "web_query_param_names": WEB_QUERY_PARAM_NAMES,
+        "word_pattern": _WORD_RE.pattern,
+        "sqlite_result_text_pattern": _SQL_TOOL_RESULT_TEXT_RE.pattern,
+        "sqlite_result_id_pattern": _SQL_RESULT_ID_RE.pattern,
+        "heading_pattern": _HEADING_RE.pattern,
+        "list_or_table_pattern": _LIST_OR_TABLE_RE.pattern,
+        "markdown_url_link_pattern": _MARKDOWN_URL_LINK_RE.pattern,
+        "url_pattern": _URL_RE.pattern,
+    }
     tier = "core"
     category = "effort_calibration"
     expected_runtime = "short"
@@ -466,22 +539,28 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         after,
         task_name: str,
         forbidden_tool_names: Iterable[str] = EFFORT_OVERWORK_TOOL_NAMES,
+        max_plan_updates: int = 1,
     ) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         forbidden = set(forbidden_tool_names)
+        relevant = _relevant_tool_calls_for_run(run_id, after=after)
         bad_calls = [
             call
-            for call in _relevant_tool_calls_for_run(run_id, after=after)
+            for call in relevant
             if call.tool_name in forbidden
         ]
-        if bad_calls:
+        plan_calls = [call for call in relevant if call.tool_name == "update_plan"]
+        if bad_calls or len(plan_calls) > max_plan_updates:
+            details = [f"forbidden tool(s): {[call.tool_name for call in bad_calls]}"] if bad_calls else []
+            if len(plan_calls) > max_plan_updates:
+                details.append(f"plan updates {len(plan_calls)}/{max_plan_updates}")
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name=task_name,
-                observed_summary=f"Unexpected overwork/tool call(s): {[call.tool_name for call in bad_calls]}",
-                artifacts={"step": bad_calls[0].step},
+                observed_summary=f"Unexpected overwork: {'; '.join(details)}.",
+                artifacts={"step": (bad_calls or plan_calls)[0].step},
             )
             return False
 
@@ -490,7 +569,10 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             None,
             EvalRunTask.Status.PASSED,
             task_name=task_name,
-            observed_summary="No unnecessary artifact, plan, or human-input tools were used.",
+            observed_summary=(
+                "No unnecessary artifact or human-input tools were used; "
+                f"plan updates={len(plan_calls)}/{max_plan_updates}."
+            ),
         )
         return True
 
@@ -563,8 +645,9 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             EvalRunTask.Status.FAILED,
             task_name=task_name,
             observed_summary=(
-                "Expected a resume schedule or additional bounded work because prior tool results reported "
-                f"remaining_work/next_cursor; schedule is empty and work_calls={len(work_calls)}."
+                "Expected another bounded work call, a valid resume schedule, or a dedicated SQLite resume "
+                "table containing a remaining-work count and cursor. Storing task state in __agent_config/charter does "
+                f"not count; schedule is empty and work_calls={len(work_calls)}."
             ),
             artifacts=artifacts,
         )
@@ -949,7 +1032,7 @@ class EffortTrivialAnswerStopsScenario(EffortCalibrationScenario):
     slug = EFFORT_TRIVIAL_ANSWER_STOPS
     description = "A trivial user request should receive one minimal answer and stop without plans, artifacts, or follow-up questions."
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_single_minimal_reply", assertion_type="manual"),
         ScenarioTask(name="verify_no_unnecessary_tools", assertion_type="manual"),
         ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
@@ -997,7 +1080,7 @@ class EffortSimpleLookupBoundedToolsScenario(EffortCalibrationScenario):
     slug = EFFORT_SIMPLE_LOOKUP_BOUNDED_TOOLS
     description = "A simple exact-URL lookup should use bounded tool breadth and return one concise answer."
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_exact_fetch_once", assertion_type="manual"),
         ScenarioTask(name="verify_bounded_tool_breadth", assertion_type="manual"),
         ScenarioTask(name="verify_single_concise_reply", assertion_type="manual"),
@@ -1121,7 +1204,7 @@ class EffortScheduledBriefingFinishesScenario(EffortCalibrationScenario):
     slug = EFFORT_SCHEDULED_BRIEFING_FINISHES
     description = "A scheduled daily briefing should send one concise sourced report, create no artifacts, ask no follow-up questions, and finish."
     tasks = [
-        ScenarioTask(name="trigger_scheduled_run", assertion_type="manual"),
+        ScenarioTask.setup(name="trigger_scheduled_run", assertion_type="manual"),
         ScenarioTask(name="verify_one_sourced_report", assertion_type="manual"),
         ScenarioTask(name="verify_no_human_input_after_report", assertion_type="manual"),
         ScenarioTask(name="verify_final_message_question_shape", assertion_type="manual"),
@@ -1320,13 +1403,30 @@ class EffortDefaultableResearchNoQuestionBatteryScenario(EffortCalibrationScenar
     slug = EFFORT_DEFAULTABLE_RESEARCH_NO_QUESTION_BATTERY
     description = "A defaultable research request should proceed with reasonable defaults, not ask a multi-question survey."
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_research_bounded", assertion_type="manual"),
         ScenarioTask(name="verify_single_sourced_answer", assertion_type="manual"),
         ScenarioTask(name="verify_no_question_battery", assertion_type="manual"),
         ScenarioTask(name="verify_no_artifacts", assertion_type="manual"),
         ScenarioTask(name="verify_no_config_churn", assertion_type="manual"),
     ]
+
+    @staticmethod
+    def _eval_stop_policy() -> dict[str, Any]:
+        return {
+            "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES),
+            "stop_on_sqlite_agent_config_mutation": True,
+            "max_relevant_tool_calls": 6,
+            "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+        }
+
+    @staticmethod
+    def _research_calls_for_scoring(run_id: str, *, after):
+        return _relevant_tool_calls_for_run(
+            run_id,
+            after=after,
+            ignored_tool_names=MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES,
+        )
 
     def run(self, run_id: str, agent_id: str) -> None:
         self._ready_agent(agent_id)
@@ -1389,12 +1489,7 @@ class EffortDefaultableResearchNoQuestionBatteryScenario(EffortCalibrationScenar
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=mock_config,
-                eval_stop_policy={
-                    "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"}),
-                    "stop_on_sqlite_agent_config_mutation": True,
-                    "max_relevant_tool_calls": 6,
-                    "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
-                },
+                eval_stop_policy=self._eval_stop_policy(),
             )
         self.record_task_result(
             run_id,
@@ -1406,10 +1501,9 @@ class EffortDefaultableResearchNoQuestionBatteryScenario(EffortCalibrationScenar
         )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_research_bounded")
-        relevant = _relevant_tool_calls_for_run(
+        relevant = self._research_calls_for_scoring(
             run_id,
             after=inbound.timestamp,
-            ignored_tool_names=MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES,
         )
         allowed = {"search_tools", "mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"}
         unexpected = [call.tool_name for call in relevant if call.tool_name not in allowed]
@@ -1464,7 +1558,7 @@ class EffortPartialBriefingReportsWithoutSurveyScenario(EffortCalibrationScenari
     slug = EFFORT_PARTIAL_BRIEFING_REPORTS_WITHOUT_SURVEY
     description = "A partial deterministic briefing feed should produce a concise partial report, not a preference survey or human-input request."
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_one_partial_report", assertion_type="manual"),
         ScenarioTask(name="verify_no_question_battery", assertion_type="manual"),
         ScenarioTask(name="verify_no_artifacts_or_extra_research", assertion_type="manual"),
@@ -1570,7 +1664,7 @@ class EffortChartRequestedSingleArtifactScenario(EffortCalibrationScenario):
     slug = EFFORT_CHART_REQUESTED_SINGLE_ARTIFACT
     description = "When a chart is explicitly requested, the agent may create one chart artifact without broadening into extra files or questions."
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_chart_created_once", assertion_type="manual"),
         ScenarioTask(name="verify_bounded_tool_breadth", assertion_type="manual"),
         ScenarioTask(name="verify_no_question_battery", assertion_type="manual"),
@@ -1750,7 +1844,7 @@ class EffortUnscheduledRemainingWorkSetsResumeScenario(EffortCalibrationScenario
         "status and disappear; it should continue bounded work or set a resume schedule."
     )
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_future_work_preserved", assertion_type="manual"),
         ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
         ScenarioTask(name="verify_no_overwork_tools", assertion_type="manual"),
@@ -1780,7 +1874,7 @@ class EffortUnscheduledRemainingWorkSetsResumeScenario(EffortCalibrationScenario
                     "Continue in bounded batches or set a resume schedule before pausing; "
                     "do not abandon the remaining queue."
                 ),
-                "verification": "Read the leads table to verify sent counts before any later batch.",
+                "verification": "The returned sent_count is authoritative for this completed batch.",
             }
         }
 
@@ -1797,7 +1891,7 @@ class EffortUnscheduledRemainingWorkSetsResumeScenario(EffortCalibrationScenario
                 eval_run_id=run_id,
                 mock_config=mock_config,
                 eval_stop_policy={
-                    "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES),
+                    "stop_on_tool_names": list(PARTIAL_SOURCE_FORBIDDEN_TOOL_NAMES),
                     "stop_when_all_seen": [
                         {"tool_name": "eval_send_outreach_batch", "after_execution": True},
                         {
@@ -1809,7 +1903,7 @@ class EffortUnscheduledRemainingWorkSetsResumeScenario(EffortCalibrationScenario
                     "ignore_sqlite_agent_config_mutations": False,
                     "stop_on_human_input_request": True,
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["eval_send_outreach_batch", "sqlite_batch"],
+                    "allowed_tool_names": ["eval_send_outreach_batch", "sqlite_batch", "update_plan"],
                     "max_relevant_tool_calls": 5,
                     "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
                 },
@@ -1841,7 +1935,8 @@ class EffortUnscheduledRemainingWorkSetsResumeScenario(EffortCalibrationScenario
             run_id,
             after=inbound.timestamp,
             task_name="verify_no_overwork_tools",
-            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
+            forbidden_tool_names=PARTIAL_SOURCE_FORBIDDEN_TOOL_NAMES,
+            max_plan_updates=1,
         )
         self._record_no_unscheduled_wait_claim(
             run_id,
@@ -1860,7 +1955,7 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
         "verified partial results and preserve future work instead of looping or stopping permanently."
     )
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_partial_report", assertion_type="manual"),
         ScenarioTask(name="verify_future_work_preserved", assertion_type="manual"),
         ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
@@ -1929,11 +2024,7 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
                 eval_run_id=run_id,
                 mock_config=mock_config,
                 eval_stop_policy={
-                    "stop_on_tool_names": list(
-                        (EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"})
-                        | ARTIFACT_TOOL_NAMES
-                        | RESEARCH_TOOL_NAMES
-                    ),
+                    "stop_on_tool_names": list(PARTIAL_SOURCE_FORBIDDEN_TOOL_NAMES),
                     "stop_on_human_input_request": True,
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
@@ -1976,7 +2067,7 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
             run_id,
             after=inbound.timestamp,
             task_name="verify_no_overwork_tools",
-            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
+            forbidden_tool_names=PARTIAL_SOURCE_FORBIDDEN_TOOL_NAMES,
         )
         self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=6)
 
@@ -1989,7 +2080,7 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
         "the agent should set one or continue bounded work before stopping."
     )
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_future_work_preserved", assertion_type="manual"),
         ScenarioTask(name="verify_no_unscheduled_wait_claim", assertion_type="manual"),
         ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
@@ -2015,7 +2106,7 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
                 "remaining_work": 75,
                 "next_cursor": "lead-025",
                 "next_action": "Wait for next scheduled run; do not repeat manually.",
-                "verification": "Read prepared_batches before sending another batch.",
+                "verification": "The returned counts and cursor are authoritative for this prepared batch.",
             }
         }
 
@@ -2031,7 +2122,7 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
                 eval_run_id=run_id,
                 mock_config=mock_config,
                 eval_stop_policy={
-                    "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES),
+                    "stop_on_tool_names": list(PARTIAL_SOURCE_FORBIDDEN_TOOL_NAMES),
                     "stop_when_all_seen": [
                         {"tool_name": "eval_prepare_next_batch", "after_execution": True},
                         {
@@ -2043,7 +2134,7 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
                     "ignore_sqlite_agent_config_mutations": False,
                     "stop_on_human_input_request": True,
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["eval_prepare_next_batch", "sqlite_batch"],
+                    "allowed_tool_names": ["eval_prepare_next_batch", "sqlite_batch", "update_plan"],
                     "max_relevant_tool_calls": 5,
                     "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
                 },
@@ -2081,7 +2172,8 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
             run_id,
             after=inbound.timestamp,
             task_name="verify_no_overwork_tools",
-            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
+            forbidden_tool_names=PARTIAL_SOURCE_FORBIDDEN_TOOL_NAMES,
+            max_plan_updates=1,
         )
         self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=5)
 
@@ -2095,7 +2187,7 @@ class EffortSimpleCurrentYCBatchReportScenario(EffortCalibrationScenario):
         "a few good sources, one structured report, no progress-only message, charts, or retrieval loops."
     )
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_bounded_research_budget", assertion_type="manual"),
         ScenarioTask(name="verify_single_hierarchical_report", assertion_type="manual"),
         ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
@@ -2381,7 +2473,7 @@ class EffortSimpleCurrentCompanyReportScenario(EffortCalibrationScenario):
         "preventing the YC failure fix from overfitting to one wording."
     )
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_bounded_research_budget", assertion_type="manual"),
         ScenarioTask(name="verify_single_hierarchical_report", assertion_type="manual"),
         ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
@@ -2642,8 +2734,15 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
         "An explicitly deep/exhaustive current-research ask may use a larger source budget and produce "
         "a richer memo, proving bounded mode does not flatten true deep work."
     )
+    prompt = (
+        "Do deep current research on Northstar Robotics in warehouse automation and produce a decision-useful, "
+        "source-backed investment memo. Compare Northstar with at least four meaningful competitors, explain "
+        "the market, thesis, risks, and open diligence questions, cite at least four strong sources, and include "
+        "a compact comparison table. Keep the memo dense and under 4,800 characters, avoid redundant research "
+        "or repeated source reads, and do not create files or charts."
+    )
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_deep_research_budget", assertion_type="manual"),
         ScenarioTask(name="verify_rich_hierarchical_memo", assertion_type="manual"),
         ScenarioTask(name="verify_plan_budget", assertion_type="manual"),
@@ -2843,20 +2942,11 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             "create_file": {"status": "error", "message": "The prompt requested no file artifacts."},
             "create_pdf": {"status": "error", "message": "The prompt requested no file artifacts."},
         }
-        prompt = (
-            "Do deep, exhaustive current research on Northstar Robotics in warehouse automation. "
-            "Build a source-backed investment-style memo comparing Northstar with at least four competitors, "
-            "cite at least four sources, include a compact table, and go deeper than a quick summary. "
-            "Use a finite source plan: one broad discovery search first, then scrape the strongest source pages; "
-            "add another search only if the first result set misses the requested company, competitor, or market "
-            "angles. Keep the memo dense and under 4,800 characters. Do not create files or charts."
-        )
-
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
         if self._is_simulated(run_id):
             inbound = self.inject_message(
                 agent_id,
-                prompt,
+                self.prompt,
                 trigger_processing=False,
                 eval_run_id=run_id,
             )
@@ -2932,7 +3022,7 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             with self.wait_for_agent_idle(agent_id, timeout=240):
                 inbound = self.inject_message(
                     agent_id,
-                    prompt,
+                    self.prompt,
                     trigger_processing=True,
                     eval_run_id=run_id,
                     mock_config=mock_config,

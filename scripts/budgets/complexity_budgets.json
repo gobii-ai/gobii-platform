@@ -1,40 +1,149 @@
 {
-  "baseline_sha": "02ca37078fa554eb11efaede6f2c5b087bb0aa4d",
+  "baseline_sha": "4de5510d080d7f2c001a52b622d9c89222d0f781",
   "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
   "prompt_size": {
     "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
+    "limit_policy": "Hard limits are approved manually. --update-baselines refreshes observed measurements but never changes limits.",
     "limits": {
+      "billing_catalog_request": {
+        "system_bytes": 10500,
+        "tools_bytes": 15000,
+        "total_bytes": 34000,
+        "user_bytes": 8000
+      },
+      "builtin_tool_rich": {
+        "system_bytes": 10500,
+        "tools_bytes": 29000,
+        "total_bytes": 46000,
+        "user_bytes": 7000
+      },
+      "enabled_system_skills": {
+        "system_bytes": 10500,
+        "tools_bytes": 27000,
+        "total_bytes": 50000,
+        "user_bytes": 24000
+      },
+      "mature_agent_state": {
+        "system_bytes": 10500,
+        "tools_bytes": 15000,
+        "total_bytes": 46000,
+        "user_bytes": 22000
+      },
       "normal_explicit_send": {
-        "fitted_tokens": 3434,
-        "system_bytes": 23900,
-        "tools_bytes": 22550,
-        "total_bytes": 62000,
-        "user_bytes": 15850
+        "system_bytes": 10500,
+        "tools_bytes": 15000,
+        "total_bytes": 33000,
+        "user_bytes": 7000
+      },
+      "normal_first_run": {
+        "system_bytes": 11000,
+        "tools_bytes": 15000,
+        "total_bytes": 34000,
+        "user_bytes": 7000
+      },
+      "planning_continuation": {
+        "system_bytes": 3500,
+        "tools_bytes": 5500,
+        "total_bytes": 16000,
+        "user_bytes": 6500
       },
       "planning_first_run": {
-        "fitted_tokens": 3379,
-        "system_bytes": 30850,
-        "tools_bytes": 11760,
-        "total_bytes": 57450,
-        "user_bytes": 15600
+        "system_bytes": 4000,
+        "tools_bytes": 5500,
+        "total_bytes": 16500,
+        "user_bytes": 6500
+      },
+      "web_chat_first_run": {
+        "system_bytes": 11500,
+        "tools_bytes": 15000,
+        "total_bytes": 34500,
+        "user_bytes": 7000
       },
       "web_chat_implied_send": {
-        "fitted_tokens": 3442,
-        "system_bytes": 24350,
-        "tools_bytes": 23600,
-        "total_bytes": 63300,
-        "user_bytes": 15850
+        "system_bytes": 11000,
+        "tools_bytes": 15000,
+        "total_bytes": 33000,
+        "user_bytes": 7000
+      }
+    },
+    "observed": {
+      "billing_catalog_request": {
+        "system_bytes": 9856,
+        "tools_bytes": 14364,
+        "total_bytes": 32183,
+        "user_bytes": 7963
+      },
+      "builtin_tool_rich": {
+        "system_bytes": 9489,
+        "tools_bytes": 25041,
+        "total_bytes": 41479,
+        "user_bytes": 6949
+      },
+      "enabled_system_skills": {
+        "system_bytes": 9489,
+        "tools_bytes": 19552,
+        "total_bytes": 47783,
+        "user_bytes": 18742
+      },
+      "mature_agent_state": {
+        "system_bytes": 9489,
+        "tools_bytes": 14364,
+        "total_bytes": 39433,
+        "user_bytes": 15580
+      },
+      "normal_explicit_send": {
+        "system_bytes": 9489,
+        "tools_bytes": 14364,
+        "total_bytes": 30811,
+        "user_bytes": 6958
+      },
+      "normal_first_run": {
+        "system_bytes": 10030,
+        "tools_bytes": 14364,
+        "total_bytes": 31340,
+        "user_bytes": 6946
+      },
+      "planning_continuation": {
+        "system_bytes": 2561,
+        "tools_bytes": 5319,
+        "total_bytes": 14106,
+        "user_bytes": 6226
+      },
+      "planning_first_run": {
+        "system_bytes": 3055,
+        "tools_bytes": 5319,
+        "total_bytes": 14591,
+        "user_bytes": 6217
+      },
+      "web_chat_first_run": {
+        "system_bytes": 10347,
+        "tools_bytes": 14364,
+        "total_bytes": 31663,
+        "user_bytes": 6952
+      },
+      "web_chat_implied_send": {
+        "system_bytes": 9804,
+        "tools_bytes": 14364,
+        "total_bytes": 31129,
+        "user_bytes": 6961
       }
     },
     "scenarios": {
+      "billing_catalog_request": "Current unanswered user request asks for the conditional plan/add-on catalog.",
+      "builtin_tool_rich": "The seven largest available registered built-ins, selected dynamically.",
+      "enabled_system_skills": "The three largest registered system-skill prompt/tool payloads, selected dynamically.",
+      "mature_agent_state": "Long legacy charter, six-step plan, and many saved skills after sustained use.",
       "normal_explicit_send": "No active web session; communication requires explicit send tools.",
+      "normal_first_run": "First execution run without an active web session.",
+      "planning_continuation": "Planning mode after the first run.",
       "planning_first_run": "Planning mode on the first run with a verified preferred contact.",
+      "web_chat_first_run": "First execution run with an active web-chat session.",
       "web_chat_implied_send": "Active web-chat session; text replies can use implied send."
     },
     "unit": "utf8_bytes"
   },
   "source_loc": {
-    "description": "Nonblank lines in tracked core product source files, excluding tests and dedicated eval assets.",
+    "description": "Nonblank lines in tracked and unignored core product source files, excluding tests and dedicated eval assets.",
     "exclude_eval_files": [
       "api/agent/eval_agents.py",
       "api/agent/tools/eval_synthetic_tools.py",
@@ -109,7 +218,7 @@
       "frontend/src/test/",
       "tests/"
     ],
-    "file_count": 826,
+    "file_count": 859,
     "include_files": [
       "manage.py",
       "pyproject.toml",
@@ -149,6 +258,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 246850
+    "limit": 248021
   }
 }

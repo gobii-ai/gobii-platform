@@ -26,9 +26,9 @@ const formatTs = (value: string | null | undefined) => {
 }
 
 const pluralize = (count: number, word: string) => `${count} ${count === 1 ? word : `${word}s`}`
-const formatPassRate = (taskTotals: EvalSuiteRun['task_totals'] | null | undefined) => {
-  if (!taskTotals || taskTotals.pass_rate == null) return '—'
-  return `${Math.round(taskTotals.pass_rate * 100)}%`
+const formatPassRate = (scenarioTotals: EvalSuiteRun['scenario_totals'] | null | undefined) => {
+  if (!scenarioTotals || scenarioTotals.pass_rate == null) return '—'
+  return `${Math.round(scenarioTotals.pass_rate * 100)}%`
 }
 
 export function EvalsScreen() {
@@ -739,10 +739,10 @@ export function EvalsScreen() {
                       </td>
                       <td className="px-6 py-4 text-slate-700">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-900">{formatPassRate(suite.task_totals || null)}</span>
-                          {suite.task_totals ? (
+                          <span className="text-sm font-semibold text-slate-900">{formatPassRate(suite.scenario_totals || null)}</span>
+                          {suite.scenario_totals ? (
                             <span className="text-xs text-slate-500">
-                              {(suite.task_totals.passed ?? 0)}/{suite.task_totals.completed ?? suite.task_totals.total}
+                              {suite.scenario_totals.passed}/{suite.scenario_totals.completed} scenarios
                             </span>
                           ) : null}
                         </div>

@@ -1584,6 +1584,7 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("pagination", block)
         self.assertIn("API cookbook: Apollo API cookbook", render_native_api_cookbook(" ApOlLo "))
         self.assertEqual("", render_native_api_cookbook("unknown_provider"))
+        self.assertIn("do not stage or restage it in SQLite", render_native_api_cookbook("google_sheets"))
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_google_sheets_prompt_tells_agent_how_to_discover_accessible_spreadsheets(self):

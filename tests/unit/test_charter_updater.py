@@ -44,10 +44,11 @@ class CharterUpdaterToolTests(TestCase):
             "api.agent.tools.charter_updater.maybe_schedule_agent_avatar",
             return_value=True,
         ) as mock_avatar_schedule:
-            response = execute_update_charter(
-                self.agent,
-                {"new_charter": new_charter},
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                response = execute_update_charter(
+                    self.agent,
+                    {"new_charter": new_charter},
+                )
 
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.charter, new_charter)

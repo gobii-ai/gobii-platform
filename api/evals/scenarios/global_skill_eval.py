@@ -27,7 +27,7 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
     tags = ("global_skill", "skill_enablement", "tool_choice", "llm_judge")
     required_secrets = ("selected_global_skill_secrets",)
     tasks = [
-        ScenarioTask(name="inject_skill_task", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_skill_task", assertion_type="manual"),
         ScenarioTask(name="verify_skill_enabled", assertion_type="manual"),
         ScenarioTask(name="verify_skill_tool_usage", assertion_type="manual"),
         ScenarioTask(name="judge_skill_execution", assertion_type="llm_judge"),

@@ -66,7 +66,7 @@ class PlanningTimeoutDirectiveTests(TestCase):
         self.assertIsNotNone(directive)
         self.assertIn("Planning Timeout", directive)
         self.assertIn("more than 1 hour", directive)
-        self.assertIn("Call end_planning(full_plan=...) now", directive)
+        self.assertIn("Call end_planning now", directive)
         self.assertIn("continue with the work after planning ends", directive)
 
     @override_settings(PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS=3600)
@@ -113,7 +113,7 @@ class PlanningTimeoutDirectiveTests(TestCase):
 
         directive = PersistentAgentSystemMessage.objects.get(agent=self.agent)
         self.assertIn("Planning Timeout", directive.body)
-        self.assertIn("Call end_planning(full_plan=...) now", directive.body)
+        self.assertIn("Call end_planning now", directive.body)
         delay_mock.assert_called_once_with(str(self.agent.id))
 
     @override_settings(PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS=3600)

@@ -31,7 +31,7 @@ def _too_frequent_message(min_interval_minutes: int) -> str:
 def _normalize_schedule(value: str | None) -> str | None:
     if value is None:
         return None
-    trimmed = value.strip()
+    trimmed = ScheduleParser.canonicalize(value)
     return trimmed or None
 
 
@@ -65,6 +65,26 @@ def _min_interval_minutes_for_agent(agent) -> int | None:
             exc_info=True,
         )
         return DEFAULT_MIN_CRON_SCHEDULE_MINUTES
+
+
+def validate_schedule_for_agent(agent, schedule: str):
+    schedule_obj = ScheduleParser.parse(schedule)
+    min_interval_minutes = _min_interval_minutes_for_agent(agent)
+    min_interval_seconds = (min_interval_minutes or 0) * 60
+    if not min_interval_minutes:
+        return schedule_obj
+    if isinstance(schedule_obj, crontab) or not hasattr(schedule_obj, "run_every"):
+        if not _cron_satisfies_min_interval(schedule_obj, min_interval_seconds):
+            raise ValueError(_too_frequent_message(min_interval_minutes))
+    elif isinstance(schedule_obj, celery_schedule):
+        interval = (
+            schedule_obj.run_every.total_seconds()
+            if hasattr(schedule_obj.run_every, "total_seconds")
+            else float(schedule_obj.run_every)
+        )
+        if interval < min_interval_seconds:
+            raise ValueError(_too_frequent_message(min_interval_minutes))
+    return schedule_obj
 
 
 def _cron_interval_seconds(schedule_obj: crontab, sample_runs: int = 5) -> float:
@@ -103,20 +123,7 @@ def execute_update_schedule(agent, params: dict) -> dict:
 
     try:
         if new_schedule_str:
-            schedule_obj = ScheduleParser.parse(new_schedule_str)
-            min_interval_minutes = _min_interval_minutes_for_agent(agent)
-            min_interval_seconds = (min_interval_minutes or 0) * 60
-
-            # Validate schedule frequency
-            if min_interval_minutes:
-                if isinstance(schedule_obj, celery_schedule):
-                    interval = schedule_obj.run_every.total_seconds() if hasattr(schedule_obj.run_every, 'total_seconds') else float(schedule_obj.run_every)
-                    if interval < min_interval_seconds:
-                        raise ValueError(_too_frequent_message(min_interval_minutes))
-
-                elif isinstance(schedule_obj, crontab):
-                    if not _cron_satisfies_min_interval(schedule_obj, min_interval_seconds):
-                        raise ValueError(_too_frequent_message(min_interval_minutes))
+            validate_schedule_for_agent(agent, new_schedule_str)
 
         agent.schedule = new_schedule_str
         # Only validate the schedule field using the model's custom clean method

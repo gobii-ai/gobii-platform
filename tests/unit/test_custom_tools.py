@@ -42,6 +42,7 @@ from api.agent.tools.custom_tool_names import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKI
 from api.agent.tools.apply_patch import execute_apply_patch
 from api.agent.tools.create_file import get_create_file_tool
 from api.agent.tools.search_tools import search_tools
+from api.agent.tools.runtime_execution_context import resolve_requester_config_authority
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import (
@@ -194,58 +195,33 @@ class CustomToolsTests(TestCase):
         skill_instructions = CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.prompt_instructions
 
         for text in (
-            "source_path='/tools/my_tool.py'",
+            "`source_path`",
             "source_code",
-            "do not pass only `source_path` unless you already wrote that file",
-            "if rejected, fix every listed issue and retry create_custom_tool, not create_file",
-            "Before the first call, verify",
-            "Exact import `from _gobii_ctx import main`",
-            "`parameters_schema.required` requires real source inputs",
-            "imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`",
-            "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
-            "batch/limit tools return `remaining_work`/`next_cursor`",
-            "exact final line `if __name__ == '__main__': main(run)`",
-            "file_path='/tools/my_tool.py'",
-            "db.row_factory = sqlite3.Row",
-            "after the block exits the DB is closed",
-            "before SELECT/fetchall",
-            "datetime.now(timezone.utc)",
-            "not datetime.timezone",
-            "Every success or error return dict should include `next_action`",
-            "what changed or which outputs are ready",
-            "remaining work",
-            "verification guidance",
-            "direct_post_urls",
-            "scrape_ready_urls",
-            "accepted ready-to-use values",
-            "require source params like `urls`, `domains`, `candidates`, `source_table`, or `input_table`",
+            "fix validation errors and retry",
+            "Saves/enables `custom_*`",
         ):
             self.assertIn(text, create_tool_description)
+        self.assertLess(len(create_tool_description.encode("utf-8")), 800)
 
         for text in (
             "exact import `from _gobii_ctx import main`",
             "exact final line `if __name__ == '__main__': main(run)`",
-            "imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`",
-            "`parameters_schema.required` requires real source inputs",
-            "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
-            "batch/limit tools return `remaining_work`/`next_cursor`",
-            "Do not pass only `source_path` unless that file already exists",
-            "If rejected, fix every listed issue and retry create_custom_tool, not create_file",
+            "import referenced modules",
+            "require real source inputs",
+            "`with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
+            "`remaining_work`/`next_cursor`",
+            "Do not pass only `source_path` unless the file exists",
+            "If rejected, fix every issue and retry create_custom_tool, not create_file",
             "db.row_factory = sqlite3.Row",
-            "later changes do not convert tuples",
-            "not `row.get(...)`",
-            "after the block exits the DB is closed",
-            "target resource ids/names",
-            "source filters/date ranges",
-            "Never invoke a custom tool with empty params",
+            "rows do not support `row.get`",
+            "never call with empty params",
             "validation/dedupe",
-            "Every success or error return dict should include `next_action`",
-            "what changed or which outputs are ready",
-            "remaining work or cursor",
-            "verification guidance",
+            "Every result includes `next_action`",
+            "changed/ready outputs",
+            "remaining work/cursor",
             "direct_post_urls",
             "scrape_ready_urls",
-            "accepted ready-to-use values",
+            "accepted values",
         ):
             self.assertIn(text, skill_instructions)
 
@@ -2240,6 +2216,41 @@ def run(params, ctx):
             exec_params={"value": 1},
             parent_step=None,
         )
+
+    @patch("api.custom_tool_bridge.execute_tracked_runtime_tool_call")
+    def test_custom_tool_bridge_restores_signed_turn_authority(self, mock_execute_tracked_runtime):
+        custom_tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Authority Wrapper",
+            tool_name="custom_authority_wrapper",
+            description="Calls nested tools.",
+            source_path="/tools/authority_wrapper.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+
+        def capture_authority(agent, **_kwargs):
+            return {
+                "status": "ok",
+                "requester_config_authority": resolve_requester_config_authority(agent),
+            }, None
+
+        mock_execute_tracked_runtime.side_effect = capture_authority
+        token = build_custom_tool_bridge_token(
+            self.agent,
+            custom_tool,
+            requester_config_authority=False,
+            bind_requester_config_authority=True,
+        )
+
+        response = self.client.post(
+            reverse("api:custom-tool-bridge-execute"),
+            data=json.dumps({"tool_name": "update_charter", "params": {"new_charter": "denied"}}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["requester_config_authority"], False)
 
     def _create_bridge_custom_tool(
         self,

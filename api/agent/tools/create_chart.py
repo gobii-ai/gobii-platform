@@ -420,11 +420,8 @@ def get_create_chart_tool() -> Dict[str, Any]:
         "function": {
             "name": "create_chart",
             "description": (
-                "Create a chart artifact from a SQL query when the user requests a chart or a visual is materially necessary. "
-                "Do not use this for routine summaries just because numbers are present. The query runs against SQLite; chart parameters reference SELECT result column names. "
-                "Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter. "
-                "Pie/donut: pass labels and values as tool parameters naming existing SELECT columns; use safe SQL aliases like category and lead_count, not AS values. "
-                "Other charts use x+y (y may be list). Returns file/inline/inline_html/attach; paste inline/HTML, do not read chart files."
+                "Create a requested or materially useful chart from a SQLite SELECT. Parameters name returned columns: pie/donut use labels+values; other charts use x+y. "
+                "Use safe aliases and paste returned inline/inline_html without rereading the file."
             ),
             "parameters": {
                 "type": "object",
@@ -436,7 +433,7 @@ def get_create_chart_tool() -> Dict[str, Any]:
                     },
                     "query": {
                         "type": "string",
-                        "description": "SQL SELECT query. Use safe output column names, then reference those names from x/y/values/labels."
+                        "description": "SELECT with output columns referenced by x/y/values/labels."
                     },
                     "x": {
                         "type": "string",
@@ -451,7 +448,7 @@ def get_create_chart_tool() -> Dict[str, Any]:
                     },
                     "values": {
                         "type": "string",
-                        "description": "Existing SELECT column name for numeric values (pie/donut). Avoid SQL aliases named values; use a safe alias like lead_count."
+                        "description": "Numeric SELECT column for pie/donut."
                     },
                     "labels": {
                         "type": "string",

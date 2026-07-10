@@ -14,12 +14,12 @@ from django.db import transaction
 
 from ...models import PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, CommsChannel, DeliveryStatus
 from ..comms.email_threading import get_message_channel, get_message_contact_address, normalize_email_address
+from ..comms.email_content import normalize_email_html_fragment, normalize_email_subject
 from ..comms.outbound_delivery import deliver_agent_email
 from ..comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
 from ..comms.message_service import _ensure_participant, _get_or_create_conversation
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
-from util.text_sanitizer import decode_unicode_escapes, strip_control_chars
 from .agent_variables import substitute_variables_with_filespace
 from ..files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from ..files.filespace_service import broadcast_message_attachment_update
@@ -160,8 +160,7 @@ def get_send_email_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_email",
             "description": (
-                "Send rich body-only HTML email without <html>/<head>/<body>; avoid Markdown. "
-                "For reports/dashboards, avoid bare HTML: use inline style attrs on sections, tables/cells, and highlighted values. Do NOT leave report metrics in plain lists. Do NOT use Markdown pipe tables."
+                "Send body-only HTML email. Keep simple notes simple; make substantial reports visually expressive with inline-styled sections, metric blocks, colored badges, and tables. No Markdown or document wrapper tags."
             ),
             "parameters": {
                 "type": "object",
@@ -175,7 +174,10 @@ def get_send_email_tool() -> Dict[str, Any]:
                         },
                         "description": "Optional CC email addresses."
                     },
-                    "subject": {"type": "string", "description": "Email subject."},
+                    "subject": {
+                        "type": "string",
+                        "description": "Plain-text email subject; use literal characters, not HTML entities.",
+                    },
                     "reply_to_message_id": {
                         "type": "string",
                         "description": (
@@ -185,9 +187,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     "mobile_first_html": {
                         "type": "string",
                         "description": (
-                            "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
-                            "Reports/dashboards should style section headers, tables/cells, key numbers/statuses/changes with visible colors/badges/icons; use styled tables or metric blocks and preserve url/link/listing_url/detail_url item fields as clickable row labels or a Link column; source/feed URLs do not substitute for item links. "
-                            "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
+                            "Body-only HTML with single-quoted inline styles. For reports, visibly highlight sections, metrics, statuses, and changes with color, badges/icons, metric blocks, and styled tables. Preserve item URLs as links. Inline image: attach it and use <img src='cid:filename'>."
                         ),
                     },
                     "attachments": {
@@ -198,8 +198,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. false when this email is the requested final delivery, including 'send this now', reports, dashboards, summaries, outreach, or one-off replies. "
-                            "true only when another immediate user-requested tool action must happen after the email; future scheduled work does not count."
+                            "Required: false for final delivery; true only when another immediate requested action follows."
                         ),
                     },
                 },
@@ -218,10 +217,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             return e.to_tool_response()
 
     to_address = normalize_email_address(params.get("to_address"))
-    subject = params.get("subject")
-    # Decode escape sequences and strip control chars from HTML body
-    mobile_first_html = decode_unicode_escapes(params.get("mobile_first_html"))
-    mobile_first_html = strip_control_chars(mobile_first_html)
+    subject = normalize_email_subject(params.get("subject"))
+    mobile_first_html = normalize_email_html_fragment(params.get("mobile_first_html"))
     # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
     cc_addresses = [normalize_email_address(addr) for addr in params.get("cc_addresses", [])]

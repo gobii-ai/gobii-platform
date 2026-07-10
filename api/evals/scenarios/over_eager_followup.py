@@ -16,7 +16,7 @@ class OverEagerFollowupScenario(EvalScenario, ScenarioExecutionTools):
     area = "agent_behavior"
     tags = ("conversation", "followup", "response_quality", "llm_judge")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_outbound_count", assertion_type="manual"),
         ScenarioTask(name="verify_reply_neediness", assertion_type="llm_judge"),
     ]

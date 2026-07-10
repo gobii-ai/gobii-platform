@@ -49,6 +49,18 @@ def hmt(txt: str, k: float) -> str:
 
 
 # ── data model ─────────────────────────────────────────────────────────────
+class PromptBudgetExceededError(ValueError):
+    """Raised when rendered prompt content cannot fit the input budget."""
+
+    def __init__(self, *, budget: int, required: int):
+        super().__init__(
+            f"Prompt content requires {required} tokens, "
+            f"exceeding the {budget}-token budget."
+        )
+        self.budget = budget
+        self.required = required
+
+
 @dataclass
 class _Node:
     name: str
@@ -218,6 +230,11 @@ class Prompt:
 
         output = _assemble(self.root)
         self._tokens_after_fitting = self._tok(output)
+        if self._tokens_after_fitting > max_tokens:
+            raise PromptBudgetExceededError(
+                budget=max_tokens,
+                required=self._tokens_after_fitting,
+            )
         return output
 
     def report(self) -> str:
@@ -283,9 +300,11 @@ class Prompt:
         if fixed_indices:
             fixed_lengths = {i: lengths[i] for i in fixed_indices}
             fixed_total = sum(fixed_lengths.values())
-            # If non-shrinkable leaves already exhaust the budget, early return.
-            if fixed_total >= budget:
-                return [lengths[i] for i in range(len(leaves))]
+            if fixed_total > budget:
+                raise PromptBudgetExceededError(
+                    budget=budget,
+                    required=fixed_total,
+                )
             budget -= fixed_total  # Remaining budget for shrinkable leaves
             for i in fixed_indices:
                 weights[i] = 0
@@ -353,8 +372,7 @@ class Prompt:
                     break
                 r *= 0.80
             else:
-                n.text = wrapped
-                n.tokens = self._tok(wrapped)
+                self._hard_truncate(n, budget)
         else:
             self._hard_truncate(n, budget)
 
@@ -362,6 +380,10 @@ class Prompt:
 
     def _hard_truncate(self, n: _Node, budget: int):
         """Byte‑level tail‑preserving hard truncate."""
+        if budget <= 0:
+            n.text = ""
+            n.tokens = 0
+            return
         tag_open = f"<{n.name}>"
         tag_close = f"</{n.name}>"
         tag_overhead = self._tok(tag_open + tag_close)

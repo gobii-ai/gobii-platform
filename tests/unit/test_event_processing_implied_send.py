@@ -87,6 +87,591 @@ class ImpliedSendTests(TestCase):
             body=body,
         )
 
+    def _tool_outcome(self, tool_name, result, *, tool_params=None, idx=1):
+        params = tool_params or {}
+        return ep._ToolExecutionOutcome(
+            prepared=ep._PreparedToolExecution(
+                idx=idx,
+                tool_name=tool_name,
+                tool_params=params,
+                exec_params=params,
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id=f"call_{idx}",
+                explicit_continue=ep._coerce_optional_bool(params.get("will_continue_work")),
+                inferred_continue=False,
+                parallel_safe=False,
+                parallel_ineligible_reason=f"unsafe_tool:{tool_name}",
+            ),
+            result=result,
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+    def _seed_pending_resume(self, *, tool_name="eval_send_outreach_batch"):
+        self._add_inbound_web_message("Continue the approved queue in bounded batches.")
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Processed one batch.")
+        return PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name=tool_name,
+            tool_params={"batch_size": 4},
+            result=json.dumps({"status": "ok", "remaining_work": 12, "next_cursor": "offset-4"}),
+            status="complete",
+        )
+
+    def test_remaining_work_requirement_handles_nested_results_without_pagination_false_positive(self):
+        direct = ep._unfinished_work_source_tool(
+            "batch_tool",
+            {"status": "ok", "remaining_work": 12, "next_cursor": "offset-4"},
+        )
+        nested = ep._unfinished_work_source_tool(
+            "custom_batch_tool",
+            {
+                "status": "ok",
+                "result": {
+                    "status": "partial",
+                    "remaining_work": {"count": 3, "next_cursor": "offset-9"},
+                },
+            },
+        )
+
+        self.assertEqual(direct, "batch_tool")
+        self.assertEqual(nested, "custom_batch_tool")
+        for result in (
+            {"status": "ok", "remaining_work": 0, "next_cursor": "offset-4"},
+            {"status": "ok", "remaining_work": "unknown", "next_cursor": "offset-4"},
+            {"status": "error", "remaining_work": 12, "next_cursor": "offset-4"},
+            {"status": "warning", "remaining_work": 12, "next_cursor": "offset-4"},
+            {"status": "ok", "next_cursor": "ordinary-pagination-cursor"},
+            {"status": "ok", "result": {"status": "error", "remaining_work": 12}},
+        ):
+            self.assertIsNone(ep._unfinished_work_source_tool("batch_tool", result))
+
+    def test_resume_state_sql_requires_one_real_semantic_mutation(self):
+        self.assertTrue(
+            ep._sqlite_batch_persists_resume_state(
+                {
+                    "sql": (
+                        "INSERT INTO candidate_resume (remaining_count, next_cursor) "
+                        "VALUES (12, 'offset-4')"
+                    )
+                }
+            )
+        )
+        for sql in (
+            "SELECT 12 AS remaining_work, 'offset-4' AS next_cursor",
+            "CREATE TABLE resume_state (remaining_count INTEGER, next_cursor TEXT)",
+            "UPDATE __agent_config SET charter='remaining_work=12 next_cursor=offset-4' WHERE id=1",
+            "INSERT INTO resume_state (remaining_count) VALUES (12); UPDATE resume_state SET next_cursor='offset-4'",
+            "INSERT INTO __resume_state (remaining_count, next_cursor) VALUES (12, 'offset-4')",
+            "/* INSERT INTO resume_state (remaining_count, next_cursor) VALUES (12, 'offset-4') */ SELECT 1",
+        ):
+            with self.subTest(sql=sql):
+                self.assertFalse(ep._sqlite_batch_persists_resume_state({"sql": sql}))
+
+    def test_sqlite_preview_requires_later_set_wise_transform(self):
+        self._add_inbound_web_message("Compare and deduplicate all fetched sources.")
+
+        def add_sqlite_call(sql, result):
+            step = PersistentAgentStep.objects.create(agent=self.agent, description="SQLite work")
+            return PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name="sqlite_batch",
+                tool_params={"sql": sql},
+                result=json.dumps(result),
+                status="complete",
+            )
+
+        preview_call = add_sqlite_call(
+            "SELECT result_id, substr(result_text, 1, 500) FROM __tool_results",
+            {"status": "ok"},
+        )
+        for code in ("bounded_multi_result_preview", "unshaped_multi_result_payload"):
+            preview_call.result = json.dumps(
+                {"status": "ok", "advisories": [{"code": code}]}
+            )
+            preview_call.save(update_fields=["result"])
+            self.assertTrue(ep._pending_sqlite_shape_followup(self.agent))
+
+        add_sqlite_call("SELECT 1", {"status": "ok"})
+        self.assertTrue(ep._pending_sqlite_shape_followup(self.agent))
+
+        add_sqlite_call(
+            "WITH claims AS (SELECT json_extract(result_json, '$.content.text') AS claim "
+            "FROM __tool_results) SELECT claim, count(*) FROM claims GROUP BY claim",
+            {"status": "ok"},
+        )
+        self.assertFalse(ep._pending_sqlite_shape_followup(self.agent))
+
+    def test_cross_result_filter_requires_current_smart_sqlite_transform(self):
+        self._add_inbound_web_message(
+            "Identify every plan under $900 across these sources and recommend the best."
+        )
+        for index in range(2):
+            step = PersistentAgentStep.objects.create(agent=self.agent, description="Fetched plans")
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name="http_request",
+                tool_params={"url": f"https://example.test/{index}"},
+                result=json.dumps(
+                    {"status": "ok", "content": {"plans": [{"price": 700 + index}]}}
+                ),
+                status="complete",
+            )
+
+        self.assertTrue(ep._pending_sqlite_shape_followup(self.agent))
+
+        unrelated_step = PersistentAgentStep.objects.create(agent=self.agent, description="Unrelated SQL")
+        PersistentAgentToolCall.objects.create(
+            step=unrelated_step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT 1"},
+            result='{"status":"ok"}',
+            status="complete",
+        )
+        self.assertTrue(ep._pending_sqlite_shape_followup(self.agent))
+
+        shaped_step = PersistentAgentStep.objects.create(agent=self.agent, description="Filtered plans")
+        PersistentAgentToolCall.objects.create(
+            step=shaped_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "SELECT json_extract(plan.value, '$.price') AS price FROM __tool_results "
+                    "JOIN json_each(result_json, '$.content.plans') AS plan "
+                    "WHERE json_extract(plan.value, '$.price') < 900 ORDER BY price"
+                )
+            },
+            result='{"status":"ok"}',
+            status="complete",
+        )
+        self.assertFalse(ep._pending_sqlite_shape_followup(self.agent))
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    def test_prepare_blocks_terminal_report_after_only_sqlite_preview(self, _mock_credit):
+        self._add_inbound_web_message("Compare all fetched sources.")
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Previewed sources")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": "SELECT result_id, substr(result_text, 1, 500) FROM __tool_results"
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "advisories": [{"code": "bounded_multi_result_preview", "severity": "info"}],
+                }
+            ),
+            status="complete",
+        )
+
+        batch = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_send",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {"body": "Here is the final comparison.", "will_continue_work": False}
+                        ),
+                    },
+                }
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(batch.followup_required)
+        self.assertEqual(batch.prepared_calls, [])
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="exact comparison/filtering across multiple structured results",
+            ).exists()
+        )
+
+        repeated_preview = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[{
+                "id": "call_repeat_preview",
+                "function": {
+                    "name": "sqlite_batch",
+                    "arguments": json.dumps({
+                        "sql": "SELECT result_id, substr(result_text, 1, 500) FROM __tool_results"
+                    }),
+                },
+            }],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=False,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+        self.assertTrue(repeated_preview.followup_required)
+        self.assertFalse(repeated_preview.prepared_calls)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    def test_prepare_blocks_terminal_report_paired_with_same_batch_preview(self, _mock_credit):
+        self._add_inbound_web_message("Compare all fetched sources.")
+        calls = [
+            {
+                "id": "call_sqlite",
+                "function": {
+                    "name": "sqlite_batch",
+                    "arguments": json.dumps(
+                        {
+                            "sql": "SELECT result_id, substr(result_text, 1, 500) FROM __tool_results",
+                            "will_continue_work": True,
+                        }
+                    ),
+                },
+            },
+            {
+                "id": "call_send",
+                "function": {
+                    "name": "send_chat_message",
+                    "arguments": json.dumps(
+                        {"body": "Here is the final comparison.", "will_continue_work": False}
+                    ),
+                },
+            },
+        ]
+
+        batch = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=calls,
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(batch.followup_required)
+        self.assertEqual([call.tool_name for call in batch.prepared_calls], ["sqlite_batch"])
+
+    def test_finalize_forces_followup_until_resume_state_or_schedule_exists(self):
+        self._add_inbound_web_message("Continue the approved queue in bounded batches.")
+        finalized = ep._finalize_tool_batch(
+            self.agent,
+            [
+                self._tool_outcome(
+                    "eval_send_outreach_batch",
+                    {
+                        "status": "ok",
+                        "remaining_work": 12,
+                        "next_cursor": "offset-4",
+                        "auto_sleep_ok": True,
+                    },
+                    tool_params={"batch_size": 4, "will_continue_work": False},
+                )
+            ],
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.followup_required)
+        self.assertIsNotNone(ep._pending_unscheduled_resume_tool(self.agent))
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="returned positive remaining_work",
+            ).exists()
+        )
+
+        state_step = PersistentAgentStep.objects.create(agent=self.agent, description="Saved resume state.")
+        state_call = PersistentAgentToolCall.objects.create(
+            step=state_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "INSERT INTO queue_resume (remaining_count, next_cursor) "
+                    "VALUES (12, 'offset-4')"
+                )
+            },
+            result=json.dumps({"status": "warning", "message": "No row was persisted."}),
+            status="complete",
+        )
+        self.assertIsNotNone(ep._pending_unscheduled_resume_tool(self.agent))
+
+        state_call.result = json.dumps({
+            "status": "warning",
+            "results": [{"message": "Query 0 affected 1 row."}],
+        })
+        state_call.save(update_fields=["result"])
+        self.assertIsNone(ep._pending_unscheduled_resume_tool(self.agent))
+
+        state_call.tool_params = {
+            "sql": (
+                "UPDATE unrelated_work SET status='done' WHERE id=1; "
+                "UPDATE queue_resume SET remaining_count=12, next_cursor='offset-4' WHERE id=999"
+            )
+        }
+        state_call.result = json.dumps({
+            "status": "warning",
+            "results": [
+                {"message": "Query 0 affected 1 row."},
+                {"message": "Query 1 affected 0 rows."},
+            ],
+        })
+        state_call.save(update_fields=["tool_params", "result"])
+        self.assertIsNotNone(ep._pending_unscheduled_resume_tool(self.agent))
+
+        state_call.result = json.dumps({
+            "status": "ok",
+            "results": [
+                {"message": "Query 0 affected 1 row."},
+                {"message": "Query 1 affected 0 rows."},
+            ],
+        })
+        state_call.save(update_fields=["result"])
+        self.assertIsNotNone(ep._pending_unscheduled_resume_tool(self.agent))
+
+        state_call.result = json.dumps({
+            "status": "warning",
+            "results": [
+                {"message": "Query 0 affected 0 rows."},
+                {"message": "Query 1 affected 1 row."},
+            ],
+        })
+        state_call.save(update_fields=["result"])
+        self.assertIsNone(ep._pending_unscheduled_resume_tool(self.agent))
+
+        state_call.tool_params = {
+            "sql": (
+                "INSERT INTO queue_resume (remaining_count, next_cursor) "
+                "VALUES (8, 'offset-8') RETURNING remaining_count, next_cursor; "
+                "UPDATE unrelated_work SET status='unchanged' WHERE id=999"
+            )
+        }
+        state_call.result = json.dumps({
+            "status": "warning",
+            "results": [
+                {"message": "Query 0 returned 1 rows."},
+                {"message": "Query 1 affected 0 rows."},
+            ],
+        })
+        state_call.save(update_fields=["tool_params", "result"])
+        self.assertIsNone(ep._pending_unscheduled_resume_tool(self.agent))
+
+        state_call.result = json.dumps({"status": "ok"})
+        state_call.save(update_fields=["result"])
+        self.assertIsNone(ep._pending_unscheduled_resume_tool(self.agent))
+
+        state_call.delete()
+        self.agent.schedule = "@daily"
+        self.agent.save(update_fields=["schedule"])
+        self.assertIsNone(ep._pending_unscheduled_resume_tool(self.agent))
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    def test_prepare_blocks_repeat_sleep_and_terminal_until_resume_state(self, _mock_credit):
+        self._seed_pending_resume()
+
+        def prepare(name, params, *, has_non_sleep_calls=True):
+            return ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": f"call_{name}",
+                        "function": {"name": name, "arguments": json.dumps(params)},
+                    }
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=has_non_sleep_calls,
+                has_user_facing_message=name == "send_chat_message",
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        blocked = (
+            prepare("eval_send_outreach_batch", {"batch_size": 4}),
+            prepare("sleep_until_next_trigger", {}, has_non_sleep_calls=False),
+            prepare("request_human_input", {"question": "Should I continue?"}),
+            prepare(
+                "send_chat_message",
+                {"body": "The batch is complete.", "will_continue_work": False},
+            ),
+        )
+        self.assertTrue(all(batch.followup_required and not batch.prepared_calls for batch in blocked))
+        self.assertFalse(blocked[1].all_calls_sleep)
+
+        state_batch = prepare(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "INSERT INTO queue_resume (remaining_count, next_cursor) "
+                    "VALUES (12, 'offset-4')"
+                )
+            },
+        )
+        self.assertEqual([call.tool_name for call in state_batch.prepared_calls], ["sqlite_batch"])
+
+    def test_pending_resume_requires_sqlite_on_next_completion(self):
+        source_call = self._seed_pending_resume()
+        tools = [{
+            "type": "function",
+            "function": {"name": "sqlite_batch", "parameters": {"type": "object"}},
+        }]
+
+        self.assertEqual(ep._required_runtime_tool_name(self.agent, tools), "sqlite_batch")
+        self.assertIsNone(ep._required_runtime_tool_name(self.agent, []))
+
+        newer_step = PersistentAgentStep.objects.create(agent=self.agent, description="Processed a newer batch.")
+        PersistentAgentToolCall.objects.create(
+            step=newer_step,
+            tool_name=source_call.tool_name,
+            tool_params={"batch_size": 4},
+            result=json.dumps({"status": "ok", "remaining_work": 12}),
+            status="complete",
+        )
+        self.assertIsNone(ep._required_runtime_tool_name(self.agent, tools))
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    def test_no_cursor_resume_allows_bounded_retry_and_completion_clears(self, _mock_credit):
+        source_call = self._seed_pending_resume()
+        source_call.result = json.dumps({"status": "ok", "remaining_work": 12})
+        source_call.save(update_fields=["result"])
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[{
+                "id": "call_next_batch",
+                "function": {
+                    "name": "eval_send_outreach_batch",
+                    "arguments": json.dumps({"batch_size": 4}),
+                },
+            }],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=False,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertFalse(prepared.followup_required)
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["eval_send_outreach_batch"])
+
+        final_step = PersistentAgentStep.objects.create(agent=self.agent, description="Processed final batch.")
+        PersistentAgentToolCall.objects.create(
+            step=final_step,
+            tool_name="eval_send_outreach_batch",
+            tool_params={"batch_size": 4},
+            result=json.dumps({"status": "ok", "remaining_work": 0}),
+            status="complete",
+        )
+        self.assertIsNone(ep._pending_unscheduled_resume_tool(self.agent))
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    def test_single_result_lookup_can_share_batch_with_answer(self, _mock_credit):
+        self._add_inbound_web_message("Summarize this one fetched record.")
+        calls = [
+            {
+                "id": "call_sqlite",
+                "function": {
+                    "name": "sqlite_batch",
+                    "arguments": json.dumps({
+                        "sql": "SELECT result_text FROM __tool_results WHERE result_id='r1'"
+                    }),
+                },
+            },
+            {
+                "id": "call_send",
+                "function": {
+                    "name": "send_chat_message",
+                    "arguments": json.dumps({"body": "Here is the summary."}),
+                },
+            },
+        ]
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=calls,
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertFalse(prepared.followup_required)
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["sqlite_batch", "send_chat_message"])
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool")
+    def test_prepare_rejects_sleep_after_work_without_reply(self, mock_credit):
+        self._add_inbound_web_message("Check the latest reading now and tell me the result.")
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Checked reading")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="browser_use",
+            tool_params={"url": "https://example.test"},
+            result='{"status":"ok","value":55}',
+            status="complete",
+        )
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[{
+                "id": "call_sleep",
+                "function": {"name": "sleep_until_next_trigger", "arguments": "{}"},
+            }],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=False,
+            has_user_facing_message=False,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(prepared.followup_required)
+        self.assertFalse(prepared.all_calls_sleep)
+        self.assertFalse(prepared.prepared_calls)
+        mock_credit.assert_not_called()
+        self.assertTrue(PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Tool policy: work completed after the latest human request",
+        ).exists())
+
     def test_eval_mock_result_supports_url_rules(self):
         mock_config = {
             "http_request": {
@@ -205,12 +790,288 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(prepared.followup_required)
         mock_rate_limit.assert_not_called()
         mock_credit.assert_not_called()
-        self.assertEqual(PersistentAgentToolCall.objects.filter(tool_name="http_request").count(), 1)
-        duplicate_step = PersistentAgentStep.objects.get(
-            agent=self.agent,
-            description__startswith="Skipped duplicate http_request",
+        calls = PersistentAgentToolCall.objects.filter(tool_name="http_request").order_by(
+            "step__created_at"
         )
-        self.assertIn("send the final message next", duplicate_step.description)
+        self.assertEqual(calls.count(), 2)
+        duplicate_call = calls.last()
+        duplicate_result = json.loads(duplicate_call.result)
+        self.assertEqual(duplicate_call.status, "skipped")
+        self.assertTrue(duplicate_result["deduplicated"])
+        self.assertIn("do not retry", duplicate_result["message"])
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    def test_prepare_blocks_provider_retry_after_auth_failure(self, mock_credit):
+        self._add_inbound_web_message("Search the connected CRM.")
+        prior_step = PersistentAgentStep.objects.create(agent=self.agent, description="failed CRM request")
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="http_request",
+            tool_params={"method": "POST", "url": "https://api.example.test/search"},
+            result=json.dumps({"status": "error", "status_code": 401, "retryable": False}),
+            status="error",
+        )
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[{
+                "id": "call_retry",
+                "function": {
+                    "name": "http_request",
+                    "arguments": json.dumps({"method": "GET", "url": "https://api.example.test/profile"}),
+                },
+            }],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=False,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertFalse(prepared.prepared_calls)
+        self.assertTrue(prepared.followup_required)
+        mock_credit.assert_not_called()
+        self.assertTrue(PersistentAgentStep.objects.filter(agent=self.agent, description__contains="Do not try another endpoint").exists())
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    def test_prepare_allows_another_endpoint_after_resource_specific_403(self, mock_credit):
+        self._add_inbound_web_message("Read the second spreadsheet after the first denied access.")
+        prior_step = PersistentAgentStep.objects.create(agent=self.agent, description="inaccessible resource")
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="http_request",
+            tool_params={"method": "GET", "url": "https://sheets.googleapis.com/v4/spreadsheets/locked"},
+            result=json.dumps({"status": "error", "status_code": 403, "retryable": False}),
+            status="error",
+        )
+
+        with patch.object(ep, "_enforce_tool_rate_limit", return_value=True):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[{
+                    "id": "call_allowed",
+                    "function": {
+                        "name": "http_request",
+                        "arguments": json.dumps({
+                            "method": "GET",
+                            "url": "https://sheets.googleapis.com/v4/spreadsheets/allowed",
+                        }),
+                    },
+                }],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["http_request"])
+        self.assertFalse(prepared.followup_required)
+        mock_credit.assert_called_once()
+
+    def test_prepare_tool_batch_allows_fresh_get_after_successful_write(self):
+        trigger_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Cron trigger: 0 9 * * *",
+        )
+        PersistentAgentCronTrigger.objects.create(step=trigger_step, cron_expression="0 9 * * *")
+        prior_step = PersistentAgentStep.objects.create(agent=self.agent, description="metadata before write")
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="http_request",
+            tool_params={"method": "GET", "url": "https://api.example.test/resource"},
+            result=json.dumps({"status": "ok", "status_code": 200, "content": {"version": 1}}),
+            status="complete",
+        )
+        write_step = PersistentAgentStep.objects.create(agent=self.agent, description="successful write")
+        PersistentAgentToolCall.objects.create(
+            step=write_step,
+            tool_name="http_request",
+            tool_params={"method": "POST", "url": "https://api.example.test/resource:update"},
+            result=json.dumps({"status": "ok", "status_code": 200, "content": {"version": 2}}),
+            status="complete",
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True),
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}),
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_fresh_read",
+                        "function": {
+                            "name": "http_request",
+                            "arguments": json.dumps(
+                                {"method": "GET", "url": "https://api.example.test/resource"}
+                            ),
+                        },
+                    }
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+
+    def test_unfiltered_get_makes_later_fields_projection_redundant(self):
+        prior = MagicMock(
+            tool_params={
+                "method": "GET",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123",
+            },
+            result=json.dumps({"status": "ok", "status_code": 200, "content": {"sheets": []}}),
+        )
+
+        self.assertTrue(
+            ep._successful_get_makes_request_redundant(
+                prior,
+                {
+                    "method": "GET",
+                    "url": (
+                        "https://sheets.googleapis.com/v4/spreadsheets/sheet-123"
+                        "?fields=sheets.properties,sheets.bandedRanges"
+                    ),
+                },
+            )
+        )
+
+    def test_broader_get_dedupe_preserves_repeated_query_values(self):
+        prior = MagicMock(
+            tool_params={
+                "method": "GET",
+                "url": "https://api.example.test/items?tag=a&tag=b",
+            },
+            result=json.dumps({"status": "ok", "status_code": 200, "content": {}}),
+        )
+
+        self.assertFalse(
+            ep._successful_get_makes_request_redundant(
+                prior,
+                {
+                    "method": "GET",
+                    "url": "https://api.example.test/items?tag=c&tag=b&fields=id,name",
+                },
+            )
+        )
+        self.assertTrue(
+            ep._successful_get_makes_request_redundant(
+                prior,
+                {
+                    "method": "GET",
+                    "url": "https://api.example.test/items?tag=b&tag=a&fields=id,name",
+                },
+            )
+        )
+
+    def test_broader_get_does_not_cover_different_headers_or_provider(self):
+        prior = MagicMock(
+            tool_params={
+                "method": "GET",
+                "url": "https://api.example.test/items",
+                "headers": {"Accept-Language": "en"},
+                "native_provider": "provider-a",
+            },
+            result=json.dumps({"status": "ok", "status_code": 200, "content": {}}),
+        )
+
+        self.assertFalse(
+            ep._successful_get_makes_request_redundant(
+                prior,
+                {
+                    "method": "GET",
+                    "url": "https://api.example.test/items?fields=id,name",
+                    "headers": {"Accept-Language": "fr"},
+                    "native_provider": "provider-a",
+                },
+            )
+        )
+        self.assertFalse(
+            ep._successful_get_makes_request_redundant(
+                prior,
+                {
+                    "method": "GET",
+                    "url": "https://api.example.test/items?fields=id,name",
+                    "headers": {"Accept-Language": "en"},
+                    "native_provider": "provider-b",
+                },
+            )
+        )
+
+    def test_sheets_range_dedupe_preserves_render_options(self):
+        prior = MagicMock(
+            tool_params={
+                "method": "GET",
+                "url": (
+                    "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Leads"
+                    "?valueRenderOption=FORMATTED_VALUE"
+                ),
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "status_code": 200,
+                    "content": {"range": "Leads!A1:D10", "values": []},
+                }
+            ),
+        )
+
+        self.assertFalse(
+            ep._successful_get_makes_request_redundant(
+                prior,
+                {
+                    "method": "GET",
+                    "url": (
+                        "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Leads!A1:D10"
+                        "?valueRenderOption=UNFORMATTED_VALUE"
+                    ),
+                },
+            )
+        )
+
+    def test_returned_sheets_range_makes_explicit_range_reread_redundant(self):
+        prior = MagicMock(
+            tool_params={
+                "method": "GET",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Leads",
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "status_code": 200,
+                    "content": {"range": "Leads!A1:D10", "values": []},
+                }
+            ),
+        )
+
+        self.assertTrue(
+            ep._successful_get_makes_request_redundant(
+                prior,
+                {
+                    "method": "GET",
+                    "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Leads!A1:D10",
+                },
+            )
+        )
 
     def test_prepare_tool_batch_keeps_http_request_when_prior_result_failed(self):
         trigger_step = PersistentAgentStep.objects.create(
@@ -462,47 +1323,6 @@ class ImpliedSendTests(TestCase):
             0,
         )
 
-    def test_planning_chat_question_stays_chat_without_auto_conversion(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
-        prepared = ep._prepare_tool_batch(
-            self.agent,
-            tool_calls=[
-                {
-                    "id": "call_chat",
-                    "function": {
-                        "name": "send_chat_message",
-                        "arguments": json.dumps(
-                            {
-                                "body": (
-                                    "One quick thing though - I need to know what industry or space "
-                                    "you're looking at. Got a target company, product category, or industry for me?"
-                                ),
-                                "will_continue_work": False,
-                            }
-                        ),
-                    },
-                },
-            ],
-            budget_ctx=None,
-            eval_run_id=None,
-            heartbeat=None,
-            lock_extender=None,
-            credit_snapshot={},
-            allow_inferred_message_continue=True,
-            has_non_sleep_calls=True,
-            has_user_facing_message=True,
-            attach_completion=lambda step_kwargs: None,
-            attach_prompt_archive=lambda step: None,
-        )
-
-        self.assertEqual(len(prepared.prepared_calls), 1)
-        routed = prepared.prepared_calls[0]
-        self.assertEqual(routed.tool_name, "send_chat_message")
-        self.assertIn("target company", routed.tool_params["body"])
-        self.assertFalse(routed.tool_params["will_continue_work"])
-
     def test_clarify_chat_question_stays_chat_outside_planning(self):
         prepared = ep._prepare_tool_batch(
             self.agent,
@@ -701,6 +1521,340 @@ class ImpliedSendTests(TestCase):
             ep._looks_like_defaultable_setup_question(
                 "What details do you have? Specifically, I need to know:"
             )
+        )
+
+    def test_recurring_setup_detector_excludes_explicit_opt_out(self):
+        one_off_prompts = (
+            "Research this once; do not keep monitoring it afterward.",
+            "Remove the schedule for this monitor.",
+            "If source access only verifies a partial set, report it and keep the remaining verification resumable.",
+            "Create the Apollo contact. Keep the request bounded and report the created contact id.",
+            "Send the report below. Setup: paper trading is active. Report all supplied metrics.",
+        )
+        for prompt in one_off_prompts:
+            with self.subTest(prompt=prompt):
+                self.assertFalse(ep._looks_like_defaultable_recurring_setup_request(prompt))
+
+    def test_terminal_recurring_setup_reply_requires_persisted_config(self):
+        self._add_inbound_web_message(
+            "Be my ongoing competitive-intelligence partner and keep me ahead of meaningful changes."
+        )
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": "Done — I'll keep you updated.",
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="recurring setup cannot finish",
+            ).exists()
+        )
+
+    def test_recurring_setup_defers_confirmation_until_config_succeeds(self):
+        self._add_inbound_web_message(
+            "Set a daily 9am ET schedule for a competitor pricing digest."
+        )
+        sql = (
+            "UPDATE __agent_config SET charter='Monitor competitor pricing', "
+            "schedule='CRON_TZ=America/New_York 0 9 * * *' WHERE id=1"
+        )
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_config",
+                    "function": {
+                        "name": "sqlite_batch",
+                        "arguments": json.dumps(
+                            {"sql": sql, "will_continue_work": True}
+                        ),
+                    },
+                },
+                {
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": "Scheduled for 9 AM Eastern each day.",
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(prepared.followup_required)
+        self.assertEqual(
+            [call.tool_name for call in prepared.prepared_calls],
+            ["sqlite_batch"],
+        )
+
+    def test_recurring_setup_allows_confirmation_after_successful_config_call(self):
+        self._add_inbound_web_message(
+            "Set a daily 9am ET schedule for a competitor pricing digest."
+        )
+        config_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Saved recurring configuration.",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=config_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "UPDATE __agent_config SET charter='Monitor competitor pricing', "
+                    "schedule='CRON_TZ=America/New_York 0 9 * * *' WHERE id=1"
+                )
+            },
+            result=json.dumps({"status": "ok", "message": "1 row affected"}),
+            status="complete",
+        )
+        self.agent.charter = "Monitor competitor pricing"
+        self.agent.schedule = "CRON_TZ=America/New_York 0 9 * * *"
+        self.agent.save(update_fields=["charter", "schedule"])
+
+        self.assertFalse(
+            ep._terminal_recurring_setup_needs_config(
+                self.agent,
+                "send_chat_message",
+                {
+                    "body": "Scheduled for 9 AM Eastern each day.",
+                    "will_continue_work": False,
+                },
+                can_update_config=True,
+            )
+        )
+
+    def test_recurring_setup_rejects_warning_or_later_config_error(self):
+        self._add_inbound_web_message(
+            "Set a daily 9am ET schedule for a competitor pricing digest."
+        )
+        self.agent.charter = "Monitor competitor pricing"
+        self.agent.schedule = "CRON_TZ=America/New_York 0 9 * * *"
+        self.agent.save(update_fields=["charter", "schedule"])
+        config_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Attempted recurring configuration.",
+        )
+        call = PersistentAgentToolCall.objects.create(
+            step=config_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": "UPDATE __agent_config SET schedule='@daily' WHERE id=2"
+            },
+            result=json.dumps({"status": "warning", "message": "0 rows affected"}),
+            status="complete",
+        )
+
+        self.assertFalse(ep._completed_agent_config_mutation_since_latest_inbound(self.agent))
+
+        call.result = json.dumps({"status": "ok", "message": "1 row affected"})
+        call.save(update_fields=["result"])
+        PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Agent config update failed: invalid schedule",
+        )
+        self.assertFalse(ep._completed_agent_config_mutation_since_latest_inbound(self.agent))
+
+    def test_recurring_setup_requires_nonempty_persisted_schedule(self):
+        self._add_inbound_web_message("Set up a weekly competitor monitor.")
+        config_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Attempted recurring configuration.",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=config_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": "UPDATE __agent_config SET charter='Monitor competitors' WHERE id=1"
+            },
+            result=json.dumps({"status": "ok", "message": "1 row affected"}),
+            status="complete",
+        )
+        self.agent.charter = "Monitor competitors"
+        self.agent.schedule = None
+        self.agent.save(update_fields=["charter", "schedule"])
+
+        self.assertFalse(ep._completed_agent_config_mutation_since_latest_inbound(self.agent))
+
+    def test_recurring_setup_detector_ignores_delivery_of_existing_report(self):
+        prompt = (
+            "Send me the report below in this chat. Report type: weekly price monitor log. "
+            "Use only these facts. Next run: regular 9 AM ET scan resumes Monday morning. "
+            "Send the report now."
+        )
+
+        self.assertFalse(ep._looks_like_defaultable_recurring_setup_request(prompt))
+        self.assertTrue(
+            ep._looks_like_defaultable_recurring_setup_request(
+                "Set up a weekly price monitor and send me a digest every Monday."
+            )
+        )
+        self.assertTrue(
+            ep._looks_like_defaultable_recurring_setup_request(
+                "Send me a weekly report in this chat starting now."
+            )
+        )
+        self.assertFalse(
+            ep._looks_like_defaultable_recurring_setup_request(
+                "Start the report analysis and summarize the supplied figures."
+            )
+        )
+
+    def test_recurring_setup_blocks_external_work_until_config_is_persisted(self):
+        self._add_inbound_web_message(
+            "Set up a weekly competitor monitor and check the supplied URL now."
+        )
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_browser",
+                    "function": {
+                        "name": "spawn_web_task",
+                        "arguments": json.dumps(
+                            {
+                                "prompt": "Inspect https://example.test/pricing",
+                                "will_continue_work": True,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=False,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="before external research",
+            ).exists()
+        )
+
+    def test_persistent_team_request_blocks_domain_research_but_not_meta_setup(self):
+        self._add_inbound_web_message("Create a team of specialist agents to research NYC events.")
+
+        self.assertTrue(ep._team_request_blocks_external_work(self.agent, "mcp_brightdata_search_engine"))
+        self.assertFalse(ep._team_request_blocks_external_work(self.agent, "search_tools"))
+        self.assertFalse(ep._team_request_blocks_external_work(self.agent, "meta_gobii_request_agent_creation"))
+
+    def test_unadvertised_model_tool_call_is_rejected(self):
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_hallucinated",
+                    "function": {
+                        "name": "run_command",
+                        "arguments": json.dumps({"command": "echo should-not-run"}),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=False,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+            advertised_tool_names={"create_custom_tool"},
+        )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="was not advertised for this completion",
+            ).exists()
+        )
+
+    def test_runtime_implied_send_is_allowed_without_advertised_send_tool(self):
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "implied_send",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {"body": "Completed.", "will_continue_work": False}
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+            advertised_tool_names=set(),
+            allow_runtime_implied_send=True,
+        )
+
+        self.assertEqual(
+            [call.tool_name for call in prepared.prepared_calls],
+            ["send_chat_message"],
         )
 
     def test_defaultable_setup_guard_allows_planning_questions_in_planning_mode(self):
@@ -1009,6 +2163,32 @@ class ImpliedSendTests(TestCase):
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
 
+    def test_terminal_reply_to_nonconfiguring_requester_preserves_planning(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        finalized = ep._FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=True,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=False,
+            terminal_message_delivery_ok=True,
+        )
+
+        with patch.object(ep, "get_active_requester_config_authority", return_value=False):
+            self.assertFalse(
+                ep._should_skip_stale_planning_mode_after_terminal_delivery(
+                    self.agent,
+                    finalized,
+                    followup_required=False,
+                )
+            )
+            self.assertTrue(ep._skip_stale_planning_mode_after_terminal_delivery(self.agent))
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
+
     def test_prepare_tool_batch_skips_one_off_config_churn_before_terminal_message(self):
         self._add_inbound_web_message("What's the latest Bitcoin price right now?")
 
@@ -1166,6 +2346,157 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(ep._user_text_has_durable_config_intent("For this answer, prefer bullets."))
         self.assertTrue(ep._looks_like_one_off_user_task("Tell me the latest funding news for Acme."))
 
+    def test_durable_feedback_blocks_discovery_or_reply_before_config_patch(self):
+        cases = (
+            (
+                "I prefer comparison tables and bullet takeaways. The narrative format is hard to scan.",
+                "send_chat_message",
+                {"body": "Noted; I'll remember that preference."},
+            ),
+            (
+                "Going forward, make the vendor risk monitor specific: track security incidents and SLA outages.",
+                "search_tools",
+                {"query": "vendor risk monitoring security incidents SLA outages"},
+            ),
+        )
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            inbound = self._add_inbound_web_message(cases[0][0])
+            for index, (body, tool_name, arguments) in enumerate(cases):
+                with self.subTest(tool_name=tool_name):
+                    if index:
+                        inbound.body = body
+                        inbound.save(update_fields=["body"])
+                    prepared = ep._prepare_tool_batch(
+                        self.agent,
+                        tool_calls=[{"id": "call", "function": {"name": tool_name, "arguments": json.dumps(arguments)}}],
+                        budget_ctx=None,
+                        eval_run_id=None,
+                        heartbeat=None,
+                        lock_extender=None,
+                        credit_snapshot={},
+                        allow_inferred_message_continue=True,
+                        has_non_sleep_calls=True,
+                        has_user_facing_message=tool_name == "send_chat_message",
+                        attach_completion=lambda step_kwargs: None,
+                        attach_prompt_archive=lambda step: None,
+                    )
+                    self.assertEqual(prepared.prepared_calls, [])
+                    self.assertTrue(prepared.followup_required)
+
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertEqual(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Tool policy: save the authorized durable preference",
+            ).count(),
+            2,
+        )
+
+    def test_durable_feedback_gate_clears_after_successful_config_patch(self):
+        self._add_inbound_web_message("I prefer comparison tables and bullet takeaways going forward.")
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Saved preference.")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "UPDATE __agent_config SET charter = charter || ' Prefer tables and bullets.' WHERE id=1"},
+            result=json.dumps({"status": "ok", "message": "1 row affected"}),
+            status="complete",
+        )
+
+        self.assertTrue(
+            ep._completed_agent_config_mutation_since_latest_inbound(
+                self.agent,
+                require_schedule=False,
+            )
+        )
+        self.assertFalse(ep._completed_agent_config_mutation_since_latest_inbound(self.agent))
+
+    def test_read_only_config_question_does_not_require_mutation(self):
+        self._add_inbound_web_message("What is your charter and schedule going forward?")
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True),
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}),
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[{
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps({"body": "My charter is Test charter; no schedule is configured."}),
+                    },
+                }],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=True,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["send_chat_message"])
+        self.assertFalse(prepared.followup_required)
+
+    def test_imperative_always_is_durable_but_a_question_is_not(self):
+        for correction in (
+            "Always use compact tables for future briefs.",
+            "Going forward, always use compact tables.",
+            "For reports, always use compact tables.",
+            "Could you always use compact tables?",
+        ):
+            with self.subTest(correction=correction):
+                self.assertIsNotNone(ep.DURABLE_CONFIG_CHANGE_RE.search(correction))
+        for question in (
+            "Do you always use compact tables?",
+            "Do we always use markdown?",
+            "Should we always include citations?",
+            "Why do agents always use tables?",
+            "Going forward, do you always use compact tables?",
+            "Going forward, do reports always include citations?",
+            "From now on, do employees always use this format?",
+        ):
+            with self.subTest(question=question):
+                self.assertIsNone(ep.DURABLE_CONFIG_CHANGE_RE.search(question))
+
+    def test_obsolete_apollo_people_search_path_is_rejected_before_execution(self):
+        self._add_inbound_web_message("Search Apollo for people in Texas.")
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[{
+                "id": "call",
+                "function": {
+                    "name": "http_request",
+                    "arguments": json.dumps({
+                        "method": "POST",
+                        "url": "https://api.apollo.io/api/v1/mixed_people/search",
+                        "body": {},
+                    }),
+                },
+            }],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=False,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        self.assertTrue(PersistentAgentStep.objects.filter(description__contains="mixed_people/api_search").exists())
+
     def test_planning_execute_now_search_tools_first_gets_runtime_correction(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
@@ -1251,11 +2582,11 @@ class ImpliedSendTests(TestCase):
         mock_rate_limit.assert_called_once()
         mock_credit.assert_called_once()
 
-    def test_planning_ready_chat_without_end_planning_gets_runtime_correction(self):
+    def test_planning_chat_question_without_gate_gets_runtime_correction(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
         self._add_inbound_web_message(
-            "Set up a daily 9 AM ET SEC enforcement RSS digest in web chat."
+            "Do not ask questions. Just execute now: research five competitors and email me the findings."
         )
 
         with (
@@ -1271,8 +2602,8 @@ class ImpliedSendTests(TestCase):
                             "name": "send_chat_message",
                             "arguments": json.dumps(
                                 {
-                                    "body": "The plan's clear. Let's lock it in and get this rolling.",
-                                    "will_continue_work": True,
+                                    "body": "What industry or product are these competitors for?",
+                                    "will_continue_work": False,
                                 }
                             ),
                         },
@@ -1297,9 +2628,48 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(
             PersistentAgentStep.objects.filter(
                 agent=self.agent,
-                description__startswith="Planning Mode is active and the plan appears clear",
+                description__startswith="Planning Mode is active.",
             ).exists()
         )
+
+    def test_planning_email_without_gate_gets_runtime_correction(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message("Plan the research workflow; do not send the deliverable yet.")
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[{
+                    "id": "call_email",
+                    "function": {
+                        "name": "send_email",
+                        "arguments": json.dumps({
+                            "to_address": "owner@example.com",
+                            "subject": "Research results",
+                            "mobile_first_html": "<p>Here are the results.</p>",
+                        }),
+                    },
+                }],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=True,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
 
     def test_planning_ready_chat_with_end_planning_is_allowed(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -2272,7 +3642,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_with_tool_followup_continues_without_canonical_phrase(
+    def test_private_preamble_with_tool_followup_is_not_delivered(
         self,
         mock_completion,
         mock_build_prompt,
@@ -2335,7 +3705,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertTrue(mock_send_chat.called)
+        mock_send_chat.assert_not_called()
         self.assertEqual(mock_completion.call_count, 2)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})

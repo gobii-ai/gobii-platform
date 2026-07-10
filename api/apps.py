@@ -7,6 +7,10 @@ class ApiConfig(AppConfig):
 
     def ready(self):
         """Import webhooks so event handlers get registered."""
+        from api.services.redbeat_timezone import install_redbeat_timezone_serialization
+
+        install_redbeat_timezone_serialization()
+
         try:
             from . import webhooks  # noqa: F401  # pragma: no cover
         except ImportError as e:  # pragma: no cover - optional dependency

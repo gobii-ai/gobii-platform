@@ -27,6 +27,7 @@ from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_con
 from .sqlite_state import AGENT_SKILLS_TABLE, get_sqlite_db_path
 
 logger = logging.getLogger(__name__)
+MAX_OMITTED_SKILL_NAMES_IN_PROMPT = 8
 
 
 @dataclass(frozen=True)
@@ -595,11 +596,21 @@ def format_recent_skills_for_prompt(agent, limit: int = 3) -> str:
     rendered_blocks = _render_wrapped_prompt_skill_entries(included_entries)
     omitted = [entry.omitted_name for entry in omitted_entries]
     if omitted:
+        visible_omitted = omitted[:MAX_OMITTED_SKILL_NAMES_IN_PROMPT]
         omitted_lines = [
             "Omitted skills due to prompt limit:",
-            *[f"- {name}" for name in omitted],
-            "Use `search_tools` with an exact omitted skill name or key if you need that skill again.",
+            *[f"- {name}" for name in visible_omitted],
         ]
+        hidden_count = len(omitted) - len(visible_omitted)
+        if hidden_count:
+            omitted_lines.append(f"- ({hidden_count} more omitted)")
+            omitted_lines.append(
+                "Use `search_tools` with a listed exact name/key or describe the needed capability."
+            )
+        else:
+            omitted_lines.append(
+                "Use `search_tools` with an exact omitted skill name or key if you need that skill again."
+            )
         rendered_blocks.append("\n".join(omitted_lines))
     return "\n\n".join(rendered_blocks)
 

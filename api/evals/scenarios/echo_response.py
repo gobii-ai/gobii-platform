@@ -17,7 +17,7 @@ class EchoResponseScenario(EvalScenario, ScenarioExecutionTools):
     area = "agent_behavior"
     tags = ("smoke", "conversation", "reply")
     tasks = [
-        ScenarioTask(name="send_message", assertion_type="manual"),
+        ScenarioTask.setup(name="send_message", assertion_type="manual"),
         ScenarioTask(name="verify_response", assertion_type="manual"),
     ]
 

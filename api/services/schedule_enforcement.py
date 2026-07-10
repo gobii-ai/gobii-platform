@@ -120,26 +120,26 @@ def normalize_schedule(schedule_str: Optional[str], min_interval_minutes: Option
     if schedule_obj is None:
         return NormalizedSchedule(None, False, None)
 
-    if isinstance(schedule_obj, celery_schedule):
-        interval_seconds = schedule_obj.run_every.total_seconds() if hasattr(schedule_obj.run_every, "total_seconds") else float(schedule_obj.run_every)
-        if interval_seconds >= min_interval_seconds:
-            return NormalizedSchedule(schedule_str, False, None)
-        normalized = f"@every {min_interval_minutes}m"
-        return NormalizedSchedule(normalized, True, "interval_clamped")
-
-    if isinstance(schedule_obj, crontab):
+    if isinstance(schedule_obj, crontab) or not hasattr(schedule_obj, "run_every"):
         if cron_satisfies_min_interval(schedule_obj, min_interval_seconds):
             return NormalizedSchedule(schedule_str, False, None)
 
-        parts = schedule_str.split()
-        if len(parts) == 5:
+        timezone_prefix = ""
+        cron_schedule_str = schedule_str
+        timezone_match = ScheduleParser.TIMEZONE_REGEX.match(schedule_str)
+        if timezone_match:
+            timezone_prefix = schedule_str[:timezone_match.start("schedule")]
+            cron_schedule_str = timezone_match.group("schedule")
+
+        parts = cron_schedule_str.split()
+        if len(parts) == 5 and isinstance(schedule_obj, crontab):
             minute_values = sorted(list(schedule_obj.minute))
             hour_values = sorted(list(schedule_obj.hour))
             first_minute = minute_values[0] if minute_values else 0
             first_hour = hour_values[0] if hour_values else 0
 
             # 1) Reduce minutes to a single value, keep other fields intact
-            reduced_minute = f"{first_minute} {parts[1]} {parts[2]} {parts[3]} {parts[4]}"
+            reduced_minute = timezone_prefix + f"{first_minute} {parts[1]} {parts[2]} {parts[3]} {parts[4]}"
             try:
                 reduced_obj = ScheduleParser.parse(reduced_minute)
                 if cron_satisfies_min_interval(reduced_obj, min_interval_seconds):
@@ -150,7 +150,7 @@ def normalize_schedule(schedule_str: Optional[str], min_interval_minutes: Option
             # 2) If min is hour-aligned and hours are wild-carded, widen the hour step
             if parts[1] == "*" and min_interval_minutes % 60 == 0:
                 hour_step = max(int(math.ceil(min_interval_minutes / 60)), 1)
-                stepped_hours = f"{first_minute} */{hour_step} {parts[2]} {parts[3]} {parts[4]}"
+                stepped_hours = timezone_prefix + f"{first_minute} */{hour_step} {parts[2]} {parts[3]} {parts[4]}"
                 try:
                     stepped_obj = ScheduleParser.parse(stepped_hours)
                     if cron_satisfies_min_interval(stepped_obj, min_interval_seconds):
@@ -159,7 +159,7 @@ def normalize_schedule(schedule_str: Optional[str], min_interval_minutes: Option
                     pass
 
             # 3) Reduce hours to the first value (worst-case daily)
-            reduced_hour = f"{first_minute} {first_hour} {parts[2]} {parts[3]} {parts[4]}"
+            reduced_hour = timezone_prefix + f"{first_minute} {first_hour} {parts[2]} {parts[3]} {parts[4]}"
             try:
                 reduced_hour_obj = ScheduleParser.parse(reduced_hour)
                 if cron_satisfies_min_interval(reduced_hour_obj, min_interval_seconds):
@@ -169,6 +169,13 @@ def normalize_schedule(schedule_str: Optional[str], min_interval_minutes: Option
 
         normalized = f"@every {min_interval_minutes}m"
         return NormalizedSchedule(normalized, True, "interval_fallback")
+
+    if isinstance(schedule_obj, celery_schedule):
+        interval_seconds = schedule_obj.run_every.total_seconds() if hasattr(schedule_obj.run_every, "total_seconds") else float(schedule_obj.run_every)
+        if interval_seconds >= min_interval_seconds:
+            return NormalizedSchedule(schedule_str, False, None)
+        normalized = f"@every {min_interval_minutes}m"
+        return NormalizedSchedule(normalized, True, "interval_clamped")
 
     return NormalizedSchedule(schedule_str, False, None)
 

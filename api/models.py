@@ -7531,11 +7531,14 @@ class PersistentAgent(models.Model):
         try:
             schedule_obj = ScheduleParser.parse(self.schedule)
             if schedule_obj:
+                from api.services.redbeat_timezone import redbeat_options_for_schedule
+
                 entry = RedBeatSchedulerEntry(
                     name=task_name,
                     task="api.agent.tasks.process_agent_cron_trigger",
                     schedule=schedule_obj,
                     args=[str(self.id), self.schedule],  # Pass both agent ID and cron expression
+                    options=redbeat_options_for_schedule(schedule_obj),
                     app=app,
                 )
                 entry.save()
@@ -13318,7 +13321,7 @@ class EvalRun(models.Model):
         max_length=16,
         blank=True,
         db_index=True,
-        help_text="AST hash of scenario code for comparability tracking.",
+        help_text="Hash of scenario data and shared eval behavior for comparability tracking.",
     )
     agent = models.ForeignKey(PersistentAgent, on_delete=models.CASCADE)
     initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
@@ -13402,6 +13405,14 @@ class EvalRunTask(models.Model):
     name = models.CharField(max_length=200)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     assertion_type = models.CharField(max_length=50)
+    is_scored = models.BooleanField(
+        default=True,
+        help_text="Whether this requirement contributes to the scenario outcome.",
+    )
+    is_setup = models.BooleanField(
+        default=False,
+        help_text="Whether this row records scenario setup rather than evaluated behavior.",
+    )
     
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)

@@ -5,6 +5,7 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 from api.models import EvalRun, EvalRunTask, EvalSuiteRun
+from api.evals.scoring import evaluate_run
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ def _serialize_task(task: EvalRunTask) -> dict:
         "name": task.name,
         "status": task.status,
         "assertion_type": task.assertion_type,
+        "is_scored": task.is_scored,
+        "is_setup": task.is_setup,
         "expected_summary": task.expected_summary,
         "observed_summary": task.observed_summary,
         "started_at": task.started_at.isoformat() if task.started_at else None,
@@ -67,6 +70,7 @@ def _serialize_run(run: EvalRun, *, include_tasks: bool = False, tasks: Optional
         "credits_cost": float(run.credits_cost),
         "completion_count": run.completion_count,
         "step_count": run.step_count,
+        "scenario_outcome": evaluate_run(run).as_dict(),
     }
 
     if include_tasks:

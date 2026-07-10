@@ -1,14 +1,16 @@
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any
 
-from api.agent.tools.custom_tools import normalize_custom_tool_name
+from api.agent.tools.custom_tools import normalize_custom_tool_name, normalize_custom_tool_parameters_schema
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
 from api.models import EvalRunTask, PersistentAgent, PersistentAgentToolCall
 
 CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG = "custom_tool_result_contract"
+MAX_CREATE_TOOL_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -20,15 +22,6 @@ class CustomToolResultContractCase:
     custom_tool_job: str
     required_result_traits: tuple[str, ...]
     required_param_names: tuple[str, ...]
-    required_fields: tuple[str, ...] = field(
-        default=(
-            "status",
-            "summary",
-            "side_effects",
-            "source",
-            "verification",
-        )
-    )
     requires_batching: bool = False
 
     @property
@@ -50,13 +43,13 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "worksheets, and report exactly what was written."
         ),
         required_result_traits=(
-            "states that the Sheets append side effects are complete",
-            "names the spreadsheet and worksheets",
-            "reports per-worksheet rows appended",
+            "distinguishes completed writes from remaining work",
+            "names the simulated destination tables or spreadsheet worksheets",
+            "reports rows written per destination",
             "reports source table filters or run_date used",
             "makes read-only verification/follow-up clear",
         ),
-        required_param_names=("run_date",),
+        required_param_names=("input_table", "output_table", "run_date"),
     ),
     CustomToolResultContractCase(
         slug="sheets_backlog_sync",
@@ -78,7 +71,7 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "reports skipped duplicates",
             "explains whether another write invocation is needed",
         ),
-        required_param_names=("batch_size", "status_filter"),
+        required_param_names=("input_table", "output_table", "batch_size", "status_filter"),
         requires_batching=True,
     ),
     CustomToolResultContractCase(
@@ -101,7 +94,7 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "makes clear that no external write happened yet",
             "states the verification or follow-up step",
         ),
-        required_param_names=("input_table", "output_table", "run_date"),
+        required_param_names=("input_table", "output_table"),
     ),
     CustomToolResultContractCase(
         slug="scrape_url_normalization",
@@ -121,7 +114,7 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "reports destination table or file",
             "makes clear only accepted scrape-ready URLs should be used downstream",
         ),
-        required_param_names=("input_table", "output_table", "default_scheme"),
+        required_param_names=("input_table", "output_table"),
     ),
     CustomToolResultContractCase(
         slug="linkedin_post_urls",
@@ -139,10 +132,8 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "reports accepted direct post URLs",
             "reports rejected profile/activity/feed URLs",
             "explains the URL rule used",
-            "states whether enough post URLs were found",
-            "recommends targeted search if more direct post URLs are needed",
         ),
-        required_param_names=("input_table", "output_table", "min_posts"),
+        required_param_names=("input_table", "output_table"),
     ),
     CustomToolResultContractCase(
         slug="chunked_mcp_fanout",
@@ -163,7 +154,7 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "returns next_cursor or remaining count",
             "states whether rerunning the custom tool is appropriate",
         ),
-        required_param_names=("batch_size", "status_filter", "next_cursor"),
+        required_param_names=("input_table", "output_table", "batch_size", "status_filter"),
         requires_batching=True,
     ),
 )
@@ -174,19 +165,44 @@ CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS = [
 
 PARAM_NAME_ALIASES = {
     "batch_size": ("batch_size", "batch_limit", "limit", "max_items", "max_rows", "row_limit"),
-    "default_scheme": ("default_scheme", "scheme", "url_scheme", "fallback_scheme"),
     "input_table": ("input_table", "source_table", "input_source", "source"),
-    "min_posts": ("min_posts", "minimum_posts", "min_post_count", "target_post_count"),
-    "next_cursor": ("next_cursor", "cursor", "page_cursor", "resume_cursor", "offset"),
-    "output_table": ("output_table", "destination_table", "output_destination", "destination"),
+    "output_table": ("output_table", "dest_table", "destination_table", "output_destination", "destination"),
     "run_date": ("run_date", "sync_date", "date_filter", "date", "created_date", "since_date"),
-    "status_filter": ("status_filter", "status", "sync_status", "filter_status"),
+    "status_filter": ("status_filter", "status", "sync_status", "filter_status", "pending_value"),
 }
+_SHEET_INPUT_ALIASES = ("signal_table", "signals_table", "run_log_table")
+_SHEET_OUTPUT_ALIASES = (
+    "sheet", "sheet_name", "sheet_names", "worksheet", "worksheet_name", "worksheet_names",
+    "output_sheet", "destination_sheet", "target_sheet",
+    "signal_sheet", "signals_sheet", "run_log_sheet", "signal_worksheet", "signals_worksheet", "run_log_worksheet",
+    "signal_sheet_name", "signals_sheet_name", "run_log_sheet_name",
+    "signal_worksheet_name", "signals_worksheet_name", "run_log_worksheet_name",
+)
+CASE_PARAM_ALIASES = {
+    "sheets_final_sync": {
+        "input_table": _SHEET_INPUT_ALIASES,
+        "output_table": _SHEET_OUTPUT_ALIASES,
+        "run_date": ("date_from",),
+    },
+    "sheets_backlog_sync": {"input_table": _SHEET_INPUT_ALIASES, "output_table": _SHEET_OUTPUT_ALIASES},
+    "dedupe_format_signals": {"output_table": ("result_table",)},
+    "scrape_url_normalization": {
+        "input_table": ("inputs", "urls", "domains", "input_urls", "input_domains", "candidate_urls", "candidate_domains"),
+        "output_table": ("result_table",),
+    },
+    "linkedin_post_urls": {
+        "input_table": ("inputs", "urls", "input_urls", "candidate_urls"),
+        "output_table": ("result_table",),
+    },
+    "chunked_mcp_fanout": {"output_table": ("result_table",)},
+}
+COLLECTION_INPUT_CASES = {"scrape_url_normalization", "linkedin_post_urls"}
+SHEET_CASES = {"sheets_final_sync", "sheets_backlog_sync"}
 
 
 class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
     description = "Evaluates whether custom tools are designed to return helpful side-effect summaries."
-    tier = "core"
+    tier = "contract"
     category = "custom_tools"
     expected_runtime = "medium"
     cost_class = "low"
@@ -194,7 +210,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
     area = "custom_tools"
     tags = ("custom_tools", "result_contract", "llm_judge", "micro", "agent_processing")
     tasks = [
-        ScenarioTask(
+        ScenarioTask.setup(
             name="inject_prompt",
             assertion_type="agent_processing",
             description="Injects the custom-tool task into the real agent event loop.",
@@ -282,66 +298,27 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             )
             return
 
-        if len(create_calls) > 1:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.FAILED,
-                task_name="propose_result_contract",
-                observed_summary=(
-                    "Agent called create_custom_tool more than once "
-                    f"({len(create_calls)} calls). Custom tool creation must succeed on the first attempt."
-                ),
-                artifacts={
-                    "create_tool_call_count": len(create_calls),
-                    "create_tool_results": [
-                        {
-                            "status": getattr(call, "status", ""),
-                            "result": call.result,
-                            "tool_params": call.tool_params,
-                        }
-                        for call in create_calls
-                    ],
-                },
-            )
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.SKIPPED,
-                task_name="invoke_custom_tool",
-                observed_summary="Skipped because create_custom_tool was called more than once.",
-            )
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.SKIPPED,
-                task_name="judge_result_helpfulness",
-                observed_summary="Skipped because repeated create_custom_tool calls fail the eval.",
-            )
-            return
-
-        create_call = create_calls[-1]
+        successful_create_calls = [
+            call for call in create_calls if self._tool_call_succeeded(call)
+        ]
+        create_call = successful_create_calls[-1] if successful_create_calls else create_calls[-1]
         create_source_code = self._source_code_for_create_call(tool_calls, create_call)
-        local_pass, local_reason = self._local_create_tool_check(
-            case,
-            create_call,
-            custom_tool_name,
-            source_code_override=create_source_code,
-        )
-        for candidate_call in reversed(create_calls):
-            candidate_source_code = self._source_code_for_create_call(tool_calls, candidate_call)
-            candidate_pass, candidate_reason = self._local_create_tool_check(
-                case,
-                candidate_call,
-                custom_tool_name,
-                source_code_override=candidate_source_code,
+        if len(create_calls) > MAX_CREATE_TOOL_ATTEMPTS:
+            local_pass = False
+            local_reason = (
+                f"create_custom_tool exceeded the {MAX_CREATE_TOOL_ATTEMPTS}-attempt repair limit "
+                f"with {len(create_calls)} calls."
             )
-            if candidate_pass:
-                create_call = candidate_call
-                create_source_code = candidate_source_code
-                local_pass = candidate_pass
-                local_reason = candidate_reason
-                break
+        elif successful_create_calls:
+            local_pass, local_reason = self._local_create_tool_check(
+                case,
+                create_call,
+                custom_tool_name,
+                source_code_override=create_source_code,
+            )
+        else:
+            local_pass = False
+            local_reason = "No create_custom_tool call completed successfully."
 
         proposal_status = EvalRunTask.Status.PASSED if local_pass else EvalRunTask.Status.FAILED
         self.record_task_result(
@@ -354,6 +331,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 "step": create_call.step,
                 "create_params": create_call.tool_params,
                 "create_tool_call_count": len(create_calls),
+                "create_tool_repair_count": max(0, len(create_calls) - 1),
                 "source_code_origin": self._source_code_origin(create_call, create_source_code),
             },
         )
@@ -365,7 +343,17 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             task_name="invoke_custom_tool",
             expected_summary="Agent should invoke the custom tool with useful runtime params.",
         )
-        custom_call = next((call for call in reversed(tool_calls) if call.tool_name == custom_tool_name), None)
+        create_index = next(
+            index for index, call in enumerate(tool_calls) if call is create_call
+        )
+        custom_call = next(
+            (
+                call
+                for index, call in reversed(list(enumerate(tool_calls)))
+                if index > create_index and call.tool_name == custom_tool_name
+            ),
+            None,
+        )
         if custom_call is None:
             self.record_task_result(
                 run_id,
@@ -383,7 +371,9 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             )
             return
         else:
-            call_pass, call_reason = self._local_custom_call_check(case, custom_call)
+            call_pass, call_reason = self._local_custom_call_check(
+                case, custom_call, create_call=create_call
+            )
             self.record_task_result(
                 run_id,
                 None,
@@ -508,15 +498,23 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _schema_properties(parameters_schema: Any) -> dict[str, Any]:
-        if not isinstance(parameters_schema, dict):
+        normalized = normalize_custom_tool_parameters_schema(parameters_schema)
+        if normalized is None:
             return {}
-        properties = parameters_schema.get("properties") or {}
+        properties = normalized.get("properties") or {}
         return properties if isinstance(properties, dict) else {}
 
     @staticmethod
-    def _matching_param_names(param_name: str, available: set[str]) -> set[str]:
-        aliases = PARAM_NAME_ALIASES.get(param_name, (param_name,))
-        return {alias for alias in aliases if alias in available}
+    def _matching_param_names(case: CustomToolResultContractCase, param_name: str, available: set[str]) -> set[str]:
+        aliases = (*PARAM_NAME_ALIASES.get(param_name, (param_name,)), *CASE_PARAM_ALIASES.get(case.slug, {}).get(param_name, ()))
+        table_prefixes = {
+            "input_table": ("input_", "source_"),
+            "output_table": ("output_", "dest_", "destination_", "target_"),
+        }.get(param_name, ())
+        return {
+            name for name in available
+            if name in aliases or (table_prefixes and name.endswith("_table") and name.startswith(table_prefixes))
+        }
 
     @staticmethod
     def _decoded_tool_result(value: Any) -> Any:
@@ -528,6 +526,31 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             except json.JSONDecodeError:
                 return value
         return value
+
+    @classmethod
+    def _tool_call_succeeded(cls, call: PersistentAgentToolCall) -> bool:
+        if str(getattr(call, "status", "") or "").casefold() != "complete":
+            return False
+        decoded_result = cls._decoded_tool_result(getattr(call, "result", None))
+        if not isinstance(decoded_result, dict) or decoded_result.get("error"):
+            return False
+        failed_statuses = {
+            "error",
+            "failed",
+            "failure",
+            "warning",
+            "pending",
+            "cancelled",
+            "canceled",
+        }
+        payloads = [decoded_result]
+        if isinstance(decoded_result.get("result"), dict):
+            payloads.append(decoded_result["result"])
+        return all(
+            str(payload.get("status") or "").casefold() not in failed_statuses
+            and not payload.get("error")
+            for payload in payloads
+        )
 
     @staticmethod
     def _source_code_origin(create_call: PersistentAgentToolCall, source_code: str | None) -> str:
@@ -670,7 +693,18 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
         if not properties:
             return False, "create_custom_tool parameters_schema should expose useful runtime params."
 
-        if case.requires_batching and not cls._matching_param_names("batch_size", set(properties)):
+        missing_param_concepts = [
+            param_name
+            for param_name in case.required_param_names
+            if not cls._matching_param_names(case, param_name, set(properties))
+        ]
+        if missing_param_concepts:
+            return False, (
+                "create_custom_tool parameters_schema is missing runtime parameter concept(s): "
+                f"{missing_param_concepts}."
+            )
+
+        if case.requires_batching and not cls._matching_param_names(case, "batch_size", set(properties)):
             return False, "batching-required tool schema must expose a batch_size or equivalent limit param."
 
         source_path = params.get("source_path")
@@ -767,30 +801,118 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             failures.append(f"invoke_custom_tool: {invoke_reason}")
         return "; ".join(failures)
 
-    @staticmethod
+    @classmethod
     def _local_custom_call_check(
+        cls,
         case: CustomToolResultContractCase,
         custom_call: PersistentAgentToolCall,
+        *,
+        create_call: PersistentAgentToolCall | None = None,
     ) -> tuple[bool, str]:
         params = custom_call.tool_params or {}
-        decoded_result = CustomToolResultContractScenario._decoded_tool_result(custom_call.result)
+        raw_schema = (create_call.tool_params or {}).get("parameters_schema") if create_call else None
+        normalized_schema = normalize_custom_tool_parameters_schema(raw_schema) or {}
+        schema = normalized_schema.get("properties") or {}
+        required_schema_names = set(normalized_schema.get("required") or ())
+        defaults = {
+            name: spec["default"]
+            for name, spec in schema.items()
+            if isinstance(spec, dict) and "default" in spec and name not in required_schema_names
+        }
+        decoded_result = cls._decoded_tool_result(custom_call.result)
         result = decoded_result if isinstance(decoded_result, dict) else {}
-        if str(getattr(custom_call, "status", "") or "").lower() == "error":
-            return False, f"custom tool invocation errored: {result.get('message') or 'unknown error'}"
-        if str(result.get("status") or "").lower() == "error":
+        if not cls._tool_call_succeeded(custom_call):
             return False, f"custom tool invocation errored: {result.get('message') or 'unknown error'}"
 
         param_names = set(params)
         if not param_names:
             return False, "custom tool invocation should pass useful runtime params."
+        missing_schema_params = required_schema_names - param_names
+        if missing_schema_params:
+            return False, f"custom tool invocation omitted schema-required param(s): {sorted(missing_schema_params)}."
 
-        if case.requires_batching and not CustomToolResultContractScenario._matching_param_names(
+        missing_param_concepts = [
+            param_name
+            for param_name in case.required_param_names
+            if not cls._matching_param_names(case, param_name, param_names)
+            and not (
+                param_name == "status_filter"
+                and cls._runtime_param_is_semantic(case, param_name, defaults)
+            )
+        ]
+        if missing_param_concepts:
+            return False, (
+                "custom tool invocation is missing runtime parameter concept(s): "
+                f"{missing_param_concepts}."
+            )
+
+        invalid_param_concepts = []
+        for param_name in case.required_param_names:
+            explicit_names = cls._matching_param_names(case, param_name, param_names)
+            values = {name: params[name] for name in explicit_names} if explicit_names else defaults
+            if not cls._runtime_param_is_semantic(case, param_name, values):
+                invalid_param_concepts.append(param_name)
+        if invalid_param_concepts:
+            return False, (
+                "custom tool invocation has empty, placeholder, or invalid runtime value(s) for: "
+                f"{invalid_param_concepts}."
+            )
+
+        input_names = cls._matching_param_names(case, "input_table", param_names)
+        output_names = cls._matching_param_names(case, "output_table", param_names) - set(_SHEET_OUTPUT_ALIASES)
+        if any(params[input_name] == params[output_name] for input_name in input_names for output_name in output_names):
+            return False, "custom tool invocation must use distinct input and output tables."
+
+        if case.requires_batching and not cls._matching_param_names(
+            case,
             "batch_size",
             param_names,
         ):
             return False, "batching-required custom tool invocation must include batch_size or limit."
 
         return True, "Agent invoked the custom tool with useful runtime params."
+
+    @classmethod
+    def _runtime_param_is_semantic(cls, case: CustomToolResultContractCase, param_name: str, params: dict[str, Any]) -> bool:
+        placeholder_values = {"sample", "example", "test", "todo", "n/a", "none", "null"}
+        for name in cls._matching_param_names(case, param_name, set(params)):
+            value = params[name]
+            values = value.values() if isinstance(value, dict) else value if isinstance(value, (list, tuple, set)) else (value,)
+            texts = [str(item).strip() for item in values if item is not None and not isinstance(item, bool)]
+            if not texts or not any(text and text.casefold() not in placeholder_values for text in texts):
+                continue
+            if param_name == "batch_size":
+                if isinstance(value, int) and 1 <= value <= 1000:
+                    return True
+                continue
+            case_aliases = CASE_PARAM_ALIASES.get(case.slug, {}).get(param_name, ())
+            if (
+                param_name == "input_table"
+                and case.slug in COLLECTION_INPUT_CASES
+                and name in case_aliases
+            ):
+                return True
+            if (
+                param_name == "output_table"
+                and case.slug in SHEET_CASES
+                and name in _SHEET_OUTPUT_ALIASES
+            ):
+                return True
+            text = str(value).strip()
+            if param_name in {"input_table", "output_table"}:
+                if text.replace("_", "").isalnum() and not text[0].isdigit():
+                    return True
+                continue
+            if param_name == "run_date":
+                try:
+                    date.fromisoformat(text)
+                except ValueError:
+                    try:
+                        datetime.fromisoformat(text.replace("Z", "+00:00"))
+                    except ValueError:
+                        continue
+            return True
+        return False
 
     @staticmethod
     def _custom_result_payload(result: dict[str, Any]) -> dict[str, Any]:

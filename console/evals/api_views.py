@@ -6,6 +6,7 @@ from uuid import UUID
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import models
+from django.db.models import prefetch_related_objects
 from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -27,6 +28,7 @@ from api.evals.owner import ensure_eval_runner_user_and_owner
 from api.evals.realtime import broadcast_run_update, broadcast_suite_update
 from api.evals.registry import ScenarioRegistry
 from api.evals.runner import _update_suite_state
+from api.evals.scoring import evaluate_run, summarize_runs
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import gc_eval_runs_task, run_eval_task
 from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, GlobalAgentSkill, PersistentAgent
@@ -61,6 +63,8 @@ def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:
         "name": task.name,
         "status": task.status,
         "assertion_type": task.assertion_type,
+        "is_scored": task.is_scored,
+        "is_setup": task.is_setup,
         "expected_summary": task.expected_summary,
         "observed_summary": task.observed_summary,
         "debug_artifacts": task.debug_artifacts or {},
@@ -86,12 +90,22 @@ def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:
 def _task_counts(tasks: list[EvalRunTask]) -> dict[str, int | float | None]:
     totals: dict[str, int | float | None] = {
         "total": len(tasks),
+        "scored_total": 0,
+        "setup_total": 0,
+        "diagnostic_total": 0,
         "completed": 0,
         "passed": 0,
         "failed": 0,
         "pass_rate": None,
     }
     for task in tasks:
+        if task.is_setup:
+            totals["setup_total"] += 1
+        elif not task.is_scored:
+            totals["diagnostic_total"] += 1
+        if not task.is_scored:
+            continue
+        totals["scored_total"] += 1
         if task.status == EvalRunTask.Status.PASSED:
             totals["passed"] += 1
             totals["completed"] += 1
@@ -138,6 +152,7 @@ def _serialize_eval_run(run: EvalRun, *, include_tasks: bool = False) -> dict[st
         "credits_cost": float(run.credits_cost),
         "completion_count": run.completion_count,
         "step_count": run.step_count,
+        "scenario_outcome": evaluate_run(run).as_dict(),
     }
 
     if include_tasks:
@@ -179,6 +194,8 @@ def _create_eval_ephemeral_agent(
 
 def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, include_tasks: bool = False) -> dict[str, Any]:
     runs = list(suite.runs.all()) if include_runs else []
+    if runs:
+        prefetch_related_objects(runs, "tasks")
     runs_payload = [_serialize_eval_run(run, include_tasks=include_tasks) for run in runs] if include_runs else []
 
     suite_task_totals = None
@@ -247,6 +264,7 @@ def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, inc
         "finished_at": suite.finished_at.isoformat() if suite.finished_at else None,
         "runs": runs_payload if include_runs else None,
         "run_totals": aggregate_counts if include_runs else None,
+        "scenario_totals": summarize_runs(runs) if include_runs else None,
         "task_totals": suite_task_totals if include_runs else None,
         "cost_totals": cost_totals if include_runs else None,
         "llm_routing_profile": llm_routing_profile,
@@ -890,14 +908,10 @@ class EvalRunCompareAPIView(SystemAdminAPIView):
                 group_value = g[group_field]
                 group_runs = qs.filter(**{group_field: group_value}).prefetch_related("tasks")
 
-                # Calculate pass rate across all runs in group
-                total_passed = 0
-                total_tasks = 0
-                for gr in group_runs:
-                    for task in gr.tasks.all():
-                        total_tasks += 1
-                        if task.status == "passed":
-                            total_passed += 1
+                scenario_totals = summarize_runs(group_runs)
+                pass_rate = scenario_totals["pass_rate"]
+                group_tasks = [task for group_run in group_runs for task in group_run.tasks.all()]
+                passed_tasks = sum(task.status == EvalRunTask.Status.PASSED for task in group_tasks)
 
                 groups_list.append({
                     "group_by": group_by,
@@ -905,9 +919,11 @@ class EvalRunCompareAPIView(SystemAdminAPIView):
                     "run_count": g["run_count"],
                     "avg_cost": float(g["avg_cost"]) if g["avg_cost"] else 0,
                     "avg_tokens": float(g["avg_tokens"]) if g["avg_tokens"] else 0,
-                    "pass_rate": (total_passed / total_tasks * 100) if total_tasks > 0 else 0,
-                    "total_tasks": total_tasks,
-                    "passed_tasks": total_passed,
+                    "pass_rate": pass_rate * 100 if pass_rate is not None else 0,
+                    "total_tasks": len(group_tasks),
+                    "passed_tasks": passed_tasks,
+                    "total_scenarios": scenario_totals["total"],
+                    "passed_scenarios": scenario_totals["passed"],
                     "is_current": group_value == getattr(run, group_field),
                 })
 
@@ -1056,23 +1072,23 @@ class EvalSuiteRunCompareAPIView(SystemAdminAPIView):
         # Helper to calculate suite stats
         def calc_suite_stats(suite: EvalSuiteRun) -> dict:
             runs = list(suite.runs.all())
-            total_passed = 0
-            total_tasks = 0
+            scenario_totals = summarize_runs(runs)
+            tasks = [task for run in runs for task in run.tasks.all()]
             total_cost = 0.0
             total_tokens = 0
 
             for run in runs:
                 total_cost += float(run.total_cost or 0)
                 total_tokens += run.tokens_used or 0
-                for task in run.tasks.all():
-                    total_tasks += 1
-                    if task.status == "passed":
-                        total_passed += 1
-
             return {
-                "passed": total_passed,
-                "total": total_tasks,
-                "pass_rate": (total_passed / total_tasks * 100) if total_tasks > 0 else 0,
+                "passed_tasks": sum(task.status == EvalRunTask.Status.PASSED for task in tasks),
+                "total_tasks": len(tasks),
+                "pass_rate": (
+                    scenario_totals["pass_rate"] * 100
+                    if scenario_totals["pass_rate"] is not None
+                    else 0
+                ),
+                "scenario_totals": scenario_totals,
                 "total_cost": total_cost,
                 "total_tokens": total_tokens,
                 "primary_model": runs[0].primary_model if runs else None,
@@ -1103,8 +1119,20 @@ class EvalSuiteRunCompareAPIView(SystemAdminAPIView):
             # Aggregate stats per group
             groups_list = []
             for key, items in groups_map.items():
-                total_passed = sum(i["stats"]["passed"] for i in items)
-                total_tasks = sum(i["stats"]["total"] for i in items)
+                passed_tasks = sum(i["stats"]["passed_tasks"] for i in items)
+                total_tasks = sum(i["stats"]["total_tasks"] for i in items)
+                passed_scenarios = sum(
+                    i["stats"]["scenario_totals"]["passed"]
+                    for i in items
+                )
+                completed_scenarios = sum(
+                    i["stats"]["scenario_totals"]["completed"]
+                    for i in items
+                )
+                total_scenarios = sum(
+                    i["stats"]["scenario_totals"]["total"]
+                    for i in items
+                )
                 total_cost = sum(i["stats"]["total_cost"] for i in items)
                 total_tokens = sum(i["stats"]["total_tokens"] for i in items)
                 suite_count = len(items)
@@ -1124,9 +1152,15 @@ class EvalSuiteRunCompareAPIView(SystemAdminAPIView):
                     "run_count": suite_count,  # For compatibility with frontend
                     "avg_cost": total_cost / suite_count if suite_count > 0 else 0,
                     "avg_tokens": total_tokens / suite_count if suite_count > 0 else 0,
-                    "pass_rate": (total_passed / total_tasks * 100) if total_tasks > 0 else 0,
+                    "pass_rate": (
+                        passed_scenarios / completed_scenarios * 100
+                        if completed_scenarios > 0
+                        else 0
+                    ),
                     "total_tasks": total_tasks,
-                    "passed_tasks": total_passed,
+                    "passed_tasks": passed_tasks,
+                    "total_scenarios": total_scenarios,
+                    "passed_scenarios": passed_scenarios,
                     "is_current": is_current,
                 })
 
@@ -1163,8 +1197,10 @@ class EvalSuiteRunCompareAPIView(SystemAdminAPIView):
                 "pass_rate": stats["pass_rate"],
                 "total_cost": stats["total_cost"],
                 "total_tokens": stats["total_tokens"],
-                "passed_tasks": stats["passed"],
-                "total_tasks": stats["total"],
+                "passed_tasks": stats["passed_tasks"],
+                "total_tasks": stats["total_tasks"],
+                "passed_scenarios": stats["scenario_totals"]["passed"],
+                "total_scenarios": stats["scenario_totals"]["total"],
             })
 
         return JsonResponse({

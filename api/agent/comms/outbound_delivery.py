@@ -23,11 +23,11 @@ from django.template.loader import render_to_string
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.integrations import postmark_status
-from util.text_sanitizer import decode_unicode_escapes, normalize_llm_output
+from util.text_sanitizer import normalize_llm_output
 
 from .cid_references import CID_SRC_REFERENCE_RE
 from .chat_email_display_cache import merge_chat_body_html_cache
-from .email_content import convert_body_to_html_and_plaintext
+from .email_content import convert_body_to_html_and_plaintext, normalize_email_subject
 from .email_footer_service import append_footer_if_needed
 from .email_threading import build_reply_headers, get_message_raw_payload, get_message_rfc_message_id
 from .smtp_transport import EmailAttachmentPayload, SmtpTransport
@@ -311,12 +311,9 @@ def _build_from_header(
 
 
 def _normalized_email_subject(message: PersistentAgentMessage) -> str:
-    """Return subject with escaped unicode sequences decoded for delivery."""
+    """Return a normalized plain-text subject for delivery."""
     raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
-    raw_subject = raw_payload.get("subject", "")
-    if raw_subject is None:
-        return ""
-    return decode_unicode_escapes(str(raw_subject))
+    return normalize_email_subject(raw_payload.get("subject"))
 
 
 def _get_email_primary_recipient(message: PersistentAgentMessage) -> str:

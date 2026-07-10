@@ -61,7 +61,7 @@ def _apollo_http_error_guidance(status_code: int, content: Any) -> str:
             "Native Apollo auth was applied, but Apollo denied access. Stop retrying the same request; explain "
             "that the connected Apollo account may lack the required plan, master API key access, or scopes for "
             "this endpoint; before asking for credentials, make sure people search uses POST "
-            "https://api.apollo.io/api/v1/mixed_people/api_search with `q_organization_domains_list`."
+            "https://api.apollo.io/api/v1/mixed_people/api_search (keep the `api_` segment)."
         )
     if status_code == 422:
         if "people/match" in content_lower or "bulk_match" in content_lower:
@@ -79,7 +79,7 @@ def _apollo_http_error_guidance(status_code: int, content: Any) -> str:
         return (
             "Native Apollo auth was applied. Check the Apollo endpoint and required scopes before asking "
             "for credentials. For people search, use POST https://api.apollo.io/api/v1/mixed_people/api_search "
-            "with `q_organization_domains_list`."
+            "(keep the `api_` segment)."
         )
     return "Check the Apollo endpoint, request body, and rate-limit headers before retrying."
 
@@ -95,7 +95,7 @@ def _google_drive_http_error_guidance(status_code: int, content: Any) -> str:
     if "chart" in content_lower or "series" in content_lower:
         return (
             "For Google Sheets charts, send a full chart spec with valid domain and series ranges. Do not include "
-            "fields on updateChartSpec, and set hiddenDimensionStrategy to SHOW_ALL when helper data is hidden."
+            "fields on updateChartSpec. Set spec.hiddenDimensionStrategy to SHOW_ALL beside basicChart when helper data is hidden."
         )
     if status_code in {401, 403, 404}:
         return (
@@ -723,6 +723,8 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     response = {
         "status": "ok",
         "status_code": resp.status_code,
+        "method": method,
+        "url": url,
         "headers": dict(resp.headers),
         "content": content_str,
     }

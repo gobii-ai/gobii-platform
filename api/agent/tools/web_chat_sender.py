@@ -255,9 +255,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send a user-facing web chat message for free-text questions, context, config changes, capability/status/policy answers, findings, or finals. "
-                "Do not use this to simulate or confirm an email/SMS delivery; if the user asked to email or text and the send_email/send_sms tool is available, call that tool instead. "
-                "Do not narrate what you will do next or send progress-only notes about tool sequencing, plan mechanics, or internal reasoning."
+                "Send non-blocking web-chat questions, findings, config updates, or final work. Use request_human_input for a blocker that must resume. Never substitute it for requested email/SMS or narrate progress."
             ),
             "parameters": {
                 "type": "object",
@@ -265,9 +263,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "User-facing chat text. For reports, use Markdown sections, bullets/tables, status labels, tasteful emoji labels; "
-                            "preserve url/link/listing_url/detail_url item fields as clickable row labels or a Link column; source/feed URLs do not substitute for item links. "
-                            "Do not pass placeholders or tool-call/XML syntax; it is sent literally."
+                            "Markdown chat text. For substantial reports, use titled sections, metric/status blocks, compact tables, and tasteful emoji or status labels when they improve scanning. Preserve item URLs as clickable labels or a Link column."
                         ),
                     },
                     "to_address": {
@@ -283,7 +279,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true=another immediate tool call follows in this turn; false=current turn is done, even if future scheduled work remains, and no current plan items remain unfinished. Never send a message solely to justify continuing work.",
+                        "description": "Required: true only if immediate work follows; false when this turn is complete.",
                     },
                 },
                 "required": ["body", "will_continue_work"],

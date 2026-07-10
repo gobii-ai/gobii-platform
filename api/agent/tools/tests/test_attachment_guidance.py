@@ -76,16 +76,15 @@ class AttachmentGuidanceTests(SimpleTestCase):
         chat_guidance = _get_web_chat_formatting_guidance()
 
         self.assertIn("reports/dashboards", email_guidance)
-        self.assertIn("Do NOT leave report metrics in plain lists", email_tool["function"]["description"])
-        self.assertIn("styled tables or metric blocks", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
-        self.assertIn("false when this email is the requested final delivery", email_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"])
-        self.assertIn("Do not use this to simulate or confirm an email/SMS delivery", chat_tool["function"]["description"])
-        self.assertIn("status labels", chat_guidance)
-        self.assertIn("compact operating update", chat_guidance)
-        self.assertIn("small table or metric block", chat_guidance)
+        self.assertIn("visually expressive", email_tool["function"]["description"])
+        self.assertIn("metric blocks", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
+        self.assertIn("false for final delivery", email_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"])
+        self.assertIn("Never substitute it for requested email/SMS", chat_tool["function"]["description"])
+        self.assertIn("tasteful emoji/status labels", chat_guidance)
+        self.assertIn("compact tables or metric blocks", chat_guidance)
         self.assertIn("Address known recipients naturally once", chat_guidance)
         self.assertIn("agent-name self-intros", chat_guidance)
-        self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
+        self.assertIn("tasteful emoji or status labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()

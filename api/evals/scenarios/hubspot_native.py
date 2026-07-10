@@ -34,14 +34,21 @@ class HubSpotHttpRequestExpectation(HttpRequestExpectation):
         url_terms: tuple[str, ...],
         method: str = "POST",
         body_terms: tuple[str, ...] = (),
+        body_object_subsets: tuple[dict[str, Any], ...] = (),
         allowed_statuses: tuple[str, ...] = ("complete",),
+        min_calls: int = 1,
+        max_calls: int | None = 1,
     ):
         super().__init__(
             name=name,
             url_terms=url_terms,
             method=method,
             body_terms=body_terms,
+            body_object_subsets=body_object_subsets,
+            exact_path=f"/{url_terms[0].split('/', 1)[1]}",
             allowed_statuses=allowed_statuses,
+            min_calls=min_calls,
+            max_calls=max_calls,
         )
 
 
@@ -95,6 +102,7 @@ HUBSPOT_NATIVE_CASES = (
                 name="contact_search",
                 url_terms=("api.hubapi.com/crm/v3/objects/contacts/search",),
                 body_terms=("example.test", "limit"),
+                body_object_subsets=({"propertyName": "email"},),
             ),
         ),
         response_term_groups=(("Mina", "mina@example.test"),),
@@ -128,7 +136,11 @@ HUBSPOT_NATIVE_CASES = (
             HubSpotHttpRequestExpectation(
                 name="company_search",
                 url_terms=("api.hubapi.com/crm/v3/objects/companies/search",),
-                body_terms=("austin", "customer", "limit"),
+                body_terms=("limit",),
+                body_object_subsets=(
+                    {"propertyName": "city", "value": "Austin"},
+                    {"propertyName": "lifecyclestage", "value": "customer"},
+                ),
             ),
         ),
         response_term_groups=(("CipherLake",), ("Austin",)),
@@ -138,14 +150,14 @@ HUBSPOT_NATIVE_CASES = (
         slug=HUBSPOT_NATIVE_DEAL_UPDATE,
         description="Update one HubSpot deal through the native HubSpot REST API after a clear write request.",
         prompt=(
-            "Use native HubSpot to update deal deal_123 amount to 25000. This exact update is approved; "
+            "Use native HubSpot to update deal ID 123 amount to 25000. This exact update is approved; "
             "report the updated amount."
         ),
         http_rules=(
             _hubspot_rule(
-                "objects/deals/deal_123",
+                "objects/deals/123",
                 {
-                    "id": "deal_123",
+                    "id": "123",
                     "properties": {
                         "dealname": "Expansion Deal",
                         "amount": "25000",
@@ -156,12 +168,12 @@ HUBSPOT_NATIVE_CASES = (
         expected_http_requests=(
             HubSpotHttpRequestExpectation(
                 name="deal_update",
-                url_terms=("api.hubapi.com/crm/v3/objects/deals/deal_123",),
+                url_terms=("api.hubapi.com/crm/v3/objects/deals/123",),
                 method="PATCH",
-                body_terms=("amount", "25000"),
+                body_object_subsets=({"amount": "25000"},),
             ),
         ),
-        response_term_groups=(("deal_123",), ("25000",)),
+        response_term_groups=(("123",), ("25000",)),
         tags=("deal_write",),
     ),
     HubSpotNativeCase(
@@ -173,7 +185,7 @@ HUBSPOT_NATIVE_CASES = (
         ),
         http_rules=(
             {
-                "url_contains": ("api.hubapi.com", "objects/contacts/search"),
+                "url_contains": ("api.hubapi.com",),
                 "result": {
                     "status": "error",
                     "status_code": 401,
@@ -187,16 +199,22 @@ HUBSPOT_NATIVE_CASES = (
             },
         ),
         expected_http_requests=(
-            HubSpotHttpRequestExpectation(
-                name="hubspot_search_attempt",
-                url_terms=("api.hubapi.com/crm/v3/objects/contacts/search",),
+            HttpRequestExpectation(
+                name="hubspot_api_attempt",
+                url_terms=("api.hubapi.com/crm/v3/",),
+                allowed_methods=("GET", "POST"),
                 allowed_statuses=("error",),
             ),
         ),
         response_term_groups=(
             ("HubSpot",),
-            ("/app/integrations", "Integrations page", "Integrations section", "Agent Settings"),
-            ("connect", "connected"),
+            (
+                "/app/integrations",
+                "Integrations page",
+                "Integrations section",
+                "integration settings",
+            ),
+            ("not connected", "reconnect", "connect HubSpot"),
         ),
         tags=("missing_connection",),
     ),
@@ -225,7 +243,13 @@ HUBSPOT_NATIVE_CASES = (
             HubSpotHttpRequestExpectation(
                 name="create_contact",
                 url_terms=("api.hubapi.com/crm/v3/objects/contacts",),
-                body_terms=("alex", "morgan", "alex@example.test"),
+                body_object_subsets=(
+                    {
+                        "email": "alex@example.test",
+                        "firstname": "Alex",
+                        "lastname": "Morgan",
+                    },
+                ),
             ),
         ),
         response_term_groups=(("contact_002",), ("Alex", "created")),
@@ -245,7 +269,7 @@ class HubSpotNativeScenario(NativeHttpScenarioBase):
     area = "system_skills"
     tags = ("hubspot_native", "system_skill", "micro", "http_request")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_expected_http_requests", assertion_type="tool_call"),
         ScenarioTask(name="verify_no_forbidden_tools", assertion_type="tool_call"),
         ScenarioTask(name="verify_response", assertion_type="exact_match"),

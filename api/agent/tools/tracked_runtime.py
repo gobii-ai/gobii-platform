@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from api.agent.comms.human_input_requests import attach_originating_step_from_result, track_human_input_request_created
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
 
-from .runtime_execution_context import tool_execution_context
+from .runtime_execution_context import resolve_requester_config_authority, tool_execution_context
 from .tool_runtime import execute_runtime_tool_call
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ def execute_tracked_runtime_tool_call(
         _persist_tool_call_step,
     )
 
+    requester_config_authority = resolve_requester_config_authority(agent)
     attach_completion = _build_attach_completion(parent_step)
     parent_tool_call = _parent_tool_call_from_step(parent_step)
 
@@ -100,7 +101,10 @@ def execute_tracked_runtime_tool_call(
     try:
         started_at = time.monotonic()
         context_step_id = str(pending_step.id) if pending_step is not None else None
-        with tool_execution_context(step_id=context_step_id):
+        with tool_execution_context(
+            step_id=context_step_id,
+            requester_config_authority=requester_config_authority,
+        ):
             result, updated_tools = execute_runtime_tool_call(
                 agent,
                 tool_name=tool_name,

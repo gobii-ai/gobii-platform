@@ -308,7 +308,7 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "schedule": {
                     "type": ["string", "null"],
                     "description": (
-                        "Optional cron-like schedule, @daily, or @every interval. Omit unless the user explicitly "
+                        "Optional cron-like schedule, `CRON_TZ=Area/City` cron, @daily, or @every interval. Omit unless the user "
                         "asked for recurring, scheduled, ongoing, proactive, digest, watch, check-in, or cadence-based "
                         "behavior and the approval scope includes that schedule."
                     ),
@@ -770,18 +770,68 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
 }
 
 
+_COMPACT_PARAMETER_DESCRIPTIONS = {
+    ("meta_gobii_create_agent", "schedule"): "Approved cadence; omit to keep unscheduled.",
+    ("meta_gobii_create_agent", "daily_credit_limit"): "Soft daily target; null means unlimited.",
+    ("meta_gobii_request_agent_creation", "will_continue_work"): "True only if immediate work remains after opening the approval request.",
+    ("meta_gobii_update_agent", "schedule"): "Approved cadence; null or empty clears it.",
+    ("meta_gobii_update_agent", "daily_credit_limit"): "Soft daily target; null means unlimited.",
+    ("meta_gobii_send_agent_message", "attachment_file_paths"): "Paths already in the target Gobii's filespace.",
+    ("meta_gobii_send_agent_message", "trigger_processing"): "True queues the target Gobii; false only stores the message.",
+    ("meta_gobii_get_agent_timeline", "after_cursor"): "Exclusive durable cursor; forces newer direction.",
+    ("meta_gobii_get_agent_timeline", "cursor"): "Page cursor used with direction.",
+    ("meta_gobii_get_agent_timeline", "direction"): "Initial page, or rows older/newer than cursor.",
+    ("meta_gobii_wait_for_agent_event", "after_cursor"): "Exclusive durable cursor; wait for newer events.",
+    ("meta_gobii_upload_agent_file", "path"): "Target filespace path.",
+    ("meta_gobii_upload_agent_file", "content_base64"): "Base64 file content; maximum decoded size 5 MiB.",
+    ("meta_gobii_add_contact", "can_configure"): "Grant charter/schedule authority only with owner approval.",
+    ("meta_gobii_approve_pending_contact", "can_configure"): "Grant charter/schedule authority only with owner approval.",
+    ("meta_gobii_set_preferred_contact_endpoint", "endpoint_id"): "Use endpoint_id or channel, never both.",
+    ("meta_gobii_set_preferred_contact_endpoint", "channel"): "Resolve a safe owner endpoint by channel; do not combine with endpoint_id.",
+    ("meta_gobii_set_preferred_contact_endpoint", "clear"): "True clears routing and ignores endpoint_id/channel.",
+}
+
+
+_MUTATING_TOOL_NAMES = frozenset(
+    name
+    for name, metadata in TOOL_DEFINITIONS.items()
+    if "user_confirmed" in metadata["parameters"].get("properties", {})
+)
+
+
+def _compact_prompt_schema(value: Any) -> Any:
+    """Remove prose duplicated by the enabled Meta Gobii system skill."""
+    if isinstance(value, dict):
+        return {
+            key: _compact_prompt_schema(item)
+            for key, item in value.items()
+            if key != "description"
+        }
+    if isinstance(value, list):
+        return [_compact_prompt_schema(item) for item in value]
+    return value
+
+
 def is_meta_gobii_available_for_agent(agent: PersistentAgent | None) -> bool:
     return agent is not None
 
 
 def get_meta_gobii_tool_definition(tool_name: str) -> dict[str, Any]:
     definition = TOOL_DEFINITIONS[tool_name]
+    parameters = _compact_prompt_schema(definition["parameters"])
+    properties = parameters.get("properties", {})
+    if "user_confirmed" in properties:
+        properties["user_confirmed"]["description"] = "True only after explicit human approval."
+    for (schema_tool_name, property_name), description in _COMPACT_PARAMETER_DESCRIPTIONS.items():
+        if schema_tool_name == tool_name:
+            properties[property_name]["description"] = description
+    description = definition["description"].split(". ", 1)[0].rstrip(".") + "."
     return {
         "type": "function",
         "function": {
             "name": tool_name,
-            "description": definition["description"],
-            "parameters": definition["parameters"],
+            "description": description,
+            "parameters": parameters,
         },
     }
 
@@ -797,6 +847,15 @@ def execute_meta_gobii_tool(agent: PersistentAgent, tool_name: str, params: dict
                 f"{META_GOBII_SYSTEM_SKILL_KEY} system skill for this agent."
             ),
         }
+    if tool_name in _MUTATING_TOOL_NAMES:
+        from api.agent.tools.runtime_execution_context import resolve_requester_config_authority
+
+        if resolve_requester_config_authority(agent) is False:
+            return {
+                "status": "error",
+                "retryable": False,
+                "message": "Control-plane update denied: the active requester cannot change or act as owner of this agent's managed Gobiis.",
+            }
 
     handler = _HANDLERS[tool_name]
     try:
@@ -1138,6 +1197,7 @@ def _tool_get_agent_config_options(invoking_agent: PersistentAgent, params: dict
                 "null_behavior": "unscheduled",
                 "accepted_formats": [
                     "cron-like schedule expressions accepted by Gobii's ScheduleParser",
+                    "CRON_TZ=Area/City five-field cron",
                     "@daily",
                     "@every interval",
                 ],

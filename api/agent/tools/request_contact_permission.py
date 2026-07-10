@@ -23,13 +23,8 @@ def get_request_contact_permission_tool() -> dict:
         "function": {
             "name": "request_contact_permission",
             "description": (
-                "Request approval before emailing/texting a specific contact not in your allowlist. "
-                "Use this instead of request_human_input for email/SMS contact approval. "
-                "Returns a URL you MUST send so the user can approve. "
-                "Check allowed contacts first; if the user just gave a specific email/phone not already allowed, request before reading files, searching, drafting, or non-blocking follow-up. "
-                "For setup-only recurring work where the user explicitly says not to send the first email/SMS now, "
-                "do not request contact permission during setup; record the recipient and request only when an actual outbound send is needed. "
-                "Use only user-provided or public contact details; do not guess."
+                "Request approval for a user-provided/public email or phone not already allowed; use this instead of request_human_input and send the returned approval URL. "
+                "For future recurring delivery, wait until a send is due. Never guess contact details."
             ),
             "parameters": {
                 "type": "object",

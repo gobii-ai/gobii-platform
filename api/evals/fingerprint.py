@@ -6,16 +6,109 @@ for comparison and reproducibility tracking.
 """
 
 import ast
+from dataclasses import fields, is_dataclass
+from functools import lru_cache
 import hashlib
 import inspect
+import json
 import subprocess
 import textwrap
 from pathlib import Path
+from typing import Any
+
+
+def _stable_value(value: Any) -> Any:
+    """Return a deterministic JSON-compatible representation of eval data."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _stable_value(getattr(value, field.name))
+            for field in fields(value)
+        }
+    if isinstance(value, dict):
+        return {
+            str(key): _stable_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_stable_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        items = [_stable_value(item) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True, default=str))
+    return {"type": f"{value.__class__.__module__}.{value.__class__.__qualname__}"}
+
+
+@lru_cache(maxsize=None)
+def _normalized_source(obj: Any) -> str:
+    """Normalize one explicitly relevant class or helper without hashing its whole module."""
+    try:
+        source = textwrap.dedent(inspect.getsource(obj))
+        return ast.dump(ast.parse(source), annotate_fields=False)
+    except (OSError, TypeError, SyntaxError):
+        module = getattr(obj, "__module__", obj.__class__.__module__)
+        qualname = getattr(obj, "__qualname__", obj.__class__.__qualname__)
+        return f"{module}.{qualname}"
+
+
+def _source_identity(obj: Any) -> str:
+    module = getattr(obj, "__module__", obj.__class__.__module__)
+    qualname = getattr(obj, "__qualname__", obj.__class__.__qualname__)
+    return f"{module}.{qualname}"
+
+
+def _fingerprint_dependencies(cls: type) -> list[Any]:
+    dependencies = []
+    seen = set()
+    for base in reversed(cls.__mro__):
+        for dependency in base.__dict__.get("fingerprint_dependencies", ()):
+            identity = _source_identity(dependency)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            dependencies.append(dependency)
+    return dependencies
+
+
+def _scenario_definition(scenario: Any, cls: type) -> dict[str, Any]:
+    definition: dict[str, Any] = {
+        "class": f"{cls.__module__}.{cls.__qualname__}",
+    }
+    for name in (
+        "slug",
+        "version",
+        "description",
+        "tasks",
+        "metadata",
+        "tags",
+        "tier",
+        "category",
+        "expected_runtime",
+        "cost_class",
+        "owner",
+        "area",
+        "supports_simulation",
+        "required_fixtures",
+        "required_secrets",
+        "requires_personal_agent",
+        "system_skill_key",
+        "system_skill_name",
+        "native_provider_key",
+        "forbidden_tool_names",
+        "forbidden_tool_prefixes",
+        "allowed_tool_names",
+        "max_relevant_tool_calls",
+        "fingerprint_data",
+        "case",
+    ):
+        if hasattr(scenario, name):
+            definition[name] = _stable_value(getattr(scenario, name))
+    return definition
 
 
 def compute_scenario_fingerprint(scenario) -> str:
     """
-    Compute a fingerprint for a scenario class using AST hashing.
+    Compute a fingerprint for a scenario definition and its shared behavior.
 
     This captures the behavioral identity of the scenario - if the code
     changes in any meaningful way, the fingerprint changes.
@@ -31,22 +124,27 @@ def compute_scenario_fingerprint(scenario) -> str:
     Returns:
         16-character hex string fingerprint
     """
-    # Get the class if we were passed an instance
     cls = scenario if isinstance(scenario, type) else scenario.__class__
-
-    try:
-        source = inspect.getsource(cls)
-        # Dedent to handle classes defined inside functions/methods
-        source = textwrap.dedent(source)
-        tree = ast.parse(source)
-        # ast.dump with no annotations gives a normalized representation
-        normalized = ast.dump(tree, annotate_fields=False)
-        return hashlib.sha256(normalized.encode()).hexdigest()[:16]
-    except (OSError, TypeError, SyntaxError):
-        # Fallback if source unavailable (e.g., dynamically generated)
-        # Use class name + module as degraded fingerprint
-        fallback = f"{cls.__module__}.{cls.__name__}"
-        return hashlib.sha256(fallback.encode()).hexdigest()[:16]
+    scenario_definition = scenario if not isinstance(scenario, type) else cls
+    behavior_classes = [
+        base
+        for base in cls.__mro__
+        if base.__module__.startswith("api.evals")
+    ]
+    dependencies = _fingerprint_dependencies(cls)
+    payload = {
+        "definition": _scenario_definition(scenario_definition, cls),
+        "behavior_classes": {
+            _source_identity(base): _normalized_source(base)
+            for base in behavior_classes
+        },
+        "shared_dependencies": {
+            _source_identity(dependency): _normalized_source(dependency)
+            for dependency in dependencies
+        },
+    }
+    normalized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
 
 def get_code_version() -> str:

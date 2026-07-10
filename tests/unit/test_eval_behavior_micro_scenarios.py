@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -12,11 +13,15 @@ from api.agent.core import event_processing as ep
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS, EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.mcp_manager import MCPToolInfo
 from api.agent.tools.search_tools import search_tools
+from api.agent.tools.sqlite_state import agent_sqlite_db
+from api.agent.tools.static_tools import get_static_tool_definitions
 from api.agent.tools.tool_manager import execute_enabled_tool, get_enabled_tool_definitions
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.bitcoin_price_multiturn import (
     bitcoin_response_has_unnecessary_followup_question,
+    bitcoin_tool_calls_include_supported_finance_lookup,
     bitcoin_tool_calls_include_supported_price_api,
+    is_greeting_response,
     is_supported_bitcoin_price_api_url,
 )
 from api.evals.scenarios.behavior_micro import (
@@ -30,6 +35,10 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
+    CHARTER_PATCHES_SUBTLE_CORRECTION_PRESERVING_GUIDANCE,
+    CHARTER_APPLIES_TWO_SEPARATE_CORRECTIONS,
+    CHARTER_REJECTS_NONCONFIGURING_CONTACT_CORRECTION,
+    CharterRejectsNonconfiguringContactCorrectionScenario,
     CommonUseCaseEvalDefinition,
     CommonUseCaseToolChoiceScenario,
     COMMON_USE_CASE_EVAL_CASES,
@@ -38,21 +47,27 @@ from api.evals.scenarios.behavior_micro import (
     IGNORED_FIRST_ACTION_TOOL_NAMES,
     PLANNING_MICRO_SCENARIO_SLUGS,
     PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
+    PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES,
+    PlanningOneOffResearchReportEndsPlanningFirstScenario,
+    TOOL_CHOICE_MISSING_RECIPIENT_USES_HUMAN_INPUT,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
+    ProactiveRoleInfersSensibleScheduleScenario,
+    OneOffResearchPreservesNoScheduleScenario,
     UPDATE_PLAN_POLICIES,
     UPDATE_PLAN_POLICY_EXPECT,
     UPDATE_PLAN_POLICY_OPTIONAL,
-    all_requests_have_options,
+    requests_have_valid_shapes,
+    charter_is_compact_and_nonduplicative,
+    charter_preserves_email_prohibition,
     get_agent_config_mutation_calls_for_run,
     get_forbidden_calls_before_end_planning,
     get_common_use_case_tool_calls_for_run,
     get_first_common_use_case_tool_call,
     get_first_relevant_tool_call,
+    get_first_successful_tool_call,
     get_plan_activity_calls_for_run,
     get_pending_human_input_requests,
     get_planning_mutation_calls_before_end_planning,
-    _delivered_tool_result,
-    _is_bounded_planning_chat_question,
     tool_call_is_plan_activity,
 )
 from api.evals.scenarios.effort_calibration import _hierarchical_report_shape
@@ -116,13 +131,204 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn(CHARTER_IGNORES_ONE_OFF_PREFERENCE, charter_memory_suite.scenario_slugs)
         self.assertIn(CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION, charter_memory_suite.scenario_slugs)
         self.assertIn(CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_PATCHES_SUBTLE_CORRECTION_PRESERVING_GUIDANCE, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_APPLIES_TWO_SEPARATE_CORRECTIONS, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_REJECTS_NONCONFIGURING_CONTACT_CORRECTION, charter_memory_suite.scenario_slugs)
+
+    def test_schedule_intent_pair_distinguishes_ongoing_role_from_one_off(self):
+        proactive_prompt = ProactiveRoleInfersSensibleScheduleScenario.prompt.lower()
+        one_off_prompt = OneOffResearchPreservesNoScheduleScenario.prompt.lower()
+
+        self.assertIn("ongoing", proactive_prompt)
+        self.assertIn("proactively", proactive_prompt)
+        self.assertNotIn("daily", proactive_prompt)
+        self.assertNotIn("weekly", proactive_prompt)
+        self.assertIn("one time only", one_off_prompt)
+        self.assertIn("do not keep monitoring", one_off_prompt)
+        self.assertTrue(ProactiveRoleInfersSensibleScheduleScenario._schedule_is_sensible("0 13 * * 1"))
+        self.assertTrue(ProactiveRoleInfersSensibleScheduleScenario._schedule_is_sensible("30 9 * * 1-5"))
+        self.assertTrue(ProactiveRoleInfersSensibleScheduleScenario._schedule_is_sensible("@daily"))
+        self.assertTrue(ProactiveRoleInfersSensibleScheduleScenario._schedule_is_sensible("@weekly"))
+        self.assertTrue(ProactiveRoleInfersSensibleScheduleScenario._schedule_is_sensible("@every 12h"))
+        self.assertFalse(ProactiveRoleInfersSensibleScheduleScenario._schedule_is_sensible("* * * * *"))
+        self.assertFalse(ProactiveRoleInfersSensibleScheduleScenario._schedule_is_sensible("0 * * * *"))
+        self.assertFalse(ProactiveRoleInfersSensibleScheduleScenario._schedule_is_sensible("*/5 9 * * *"))
+
+    def test_proactive_config_requires_one_atomic_sqlite_mutation(self):
+        atomic = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": "UPDATE __agent_config SET charter = 'Monitor pricing', schedule = '0 9 * * 1' WHERE id = 1"
+            },
+        )
+        separate = [
+            SimpleNamespace(
+                tool_name="sqlite_batch",
+                tool_params={"sql": "UPDATE __agent_config SET charter = 'Monitor pricing' WHERE id = 1"},
+            ),
+            SimpleNamespace(
+                tool_name="sqlite_batch",
+                tool_params={"sql": "UPDATE __agent_config SET schedule = '0 9 * * 1' WHERE id = 1"},
+            ),
+        ]
+
+        self.assertTrue(
+            ProactiveRoleInfersSensibleScheduleScenario._config_is_atomic(
+                [atomic],
+                persisted_schedule="0 9 * * 1",
+            )
+        )
+        self.assertFalse(
+            ProactiveRoleInfersSensibleScheduleScenario._config_is_atomic(
+                [atomic],
+                persisted_schedule=None,
+            )
+        )
+        self.assertFalse(
+            ProactiveRoleInfersSensibleScheduleScenario._config_is_atomic(
+                separate,
+                persisted_schedule="0 9 * * 1",
+            )
+        )
+
+    def test_nonconfiguring_charter_eval_allows_one_runtime_denial_then_requires_refusal(self):
+        scenario = CharterRejectsNonconfiguringContactCorrectionScenario()
+        policy = scenario._eval_stop_policy()
+        denied_call = SimpleNamespace(
+            result=json.dumps(
+                {
+                    "status": "error",
+                    "retryable": False,
+                    "message": (
+                        "Configuration update denied: the active requester cannot change "
+                        "this agent's charter or schedule."
+                    ),
+                }
+            )
+        )
+
+        self.assertNotIn("stop_on_sqlite_agent_config_mutation", policy)
+        self.assertEqual(policy["stop_on_tool_names_after_execution"], ["send_chat_message"])
+        self.assertTrue(scenario._attempt_was_authority_denied(denied_call))
+        self.assertFalse(scenario._attempt_was_authority_denied(SimpleNamespace(result='{"status":"ok"}')))
+        self.assertTrue(
+            scenario._is_concise_refusal(
+                "I can't update the charter because this contact does not have configuration permission."
+            )
+        )
+        self.assertTrue(
+            scenario._is_concise_refusal(
+                "I can't make that change because this requester doesn't have permission."
+            )
+        )
+        self.assertFalse(
+            scenario._is_concise_refusal(
+                "I've updated the charter successfully. This contact lacks configuration authority."
+            )
+        )
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_nonconfiguring_correction",
+                "verify_nonconfiguring_contact_preserved_config",
+                "verify_nonconfiguring_contact_refusal",
+            ],
+        )
+        self.assertFalse(ProactiveRoleInfersSensibleScheduleScenario._schedule_is_sensible("@monthly"))
+
+    def test_proactive_charter_scope_fidelity_is_compact_and_complete(self):
+        self.assertEqual(ProactiveRoleInfersSensibleScheduleScenario.max_charter_chars, 600)
+        self.assertTrue(
+            ProactiveRoleInfersSensibleScheduleScenario._charter_is_scope_faithful(
+                "Monitor competitor pricing and packaging changes and proactively brief me on meaningful moves."
+            )
+        )
+        self.assertFalse(
+            ProactiveRoleInfersSensibleScheduleScenario._charter_is_scope_faithful(
+                "Monitor competitor pricing changes and brief me."
+            )
+        )
+        self.assertFalse(
+            ProactiveRoleInfersSensibleScheduleScenario._charter_is_scope_faithful(
+                "Monitor competitor pricing and packaging changes proactively. "
+                + ("Unrequested operating detail. " * 50)
+            )
+        )
+
+    def test_charter_patch_evals_require_one_compact_mutation(self):
+        additive = ScenarioRegistry.get(CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING)
+        additive_agent = SimpleNamespace(
+            charter=(
+                "Monitor AI funding news weekly. Prefer concise section titles in reports. "
+                "Use concise bullets for status updates."
+            )
+        )
+        self.assertTrue(additive._charter_check(additive_agent, [object()])[0])
+        self.assertFalse(additive._charter_check(additive_agent, [object(), object()])[0])
+
+        narrowing = ScenarioRegistry.get(CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE)
+        narrowed_agent = SimpleNamespace(
+            charter=(
+                "Monitor competitor pricing for enterprise plans only. "
+                "Use concise bullets. Send routine updates in Slack."
+            )
+        )
+        self.assertTrue(narrowing._charter_check(narrowed_agent, [object()])[0])
+        self.assertFalse(narrowing._charter_check(narrowed_agent, [object(), object()])[0])
+
+        policy = additive._eval_stop_policy()
+        self.assertEqual(
+            policy["stop_when_all_seen"],
+            [{"tool_name": "sqlite_batch", "agent_config_field": "charter", "after_execution": True}],
+        )
+        self.assertEqual(policy["max_relevant_tool_calls"], 4)
+
+    def test_charter_patch_quality_is_semantic_not_sql_spelling(self):
+        compact = "Track competitor pricing weekly. Use Watch for medium-risk items. Send concise Slack bullets."
+        duplicated = "Track competitor pricing weekly. Track competitor pricing weekly. Send concise Slack bullets."
+
+        self.assertTrue(charter_is_compact_and_nonduplicative(compact))
+        self.assertFalse(charter_is_compact_and_nonduplicative(duplicated))
+        self.assertFalse(charter_is_compact_and_nonduplicative("x" * 601))
+
+    def test_charter_patch_eval_rejects_unrequested_work(self):
+        scenario = ScenarioRegistry.get(CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING)
+        self.assertTrue(
+            scenario._call_is_config_only(
+                SimpleNamespace(
+                    tool_name="sqlite_batch",
+                    tool_params={"sql": "SELECT charter FROM __agent_config WHERE id=1"},
+                )
+            )
+        )
+        self.assertTrue(
+            scenario._call_is_config_only(
+                SimpleNamespace(tool_name="send_chat_message", tool_params={})
+            )
+        )
+        self.assertFalse(
+            scenario._call_is_config_only(
+                SimpleNamespace(tool_name="search_tools", tool_params={"query": "AI funding"})
+            )
+        )
+        self.assertFalse(
+            scenario._call_is_config_only(
+                SimpleNamespace(tool_name="request_human_input", tool_params={})
+            )
+        )
+
+    def test_planning_no_direct_config_scenario_requires_bounded_exit(self):
+        scenario = ScenarioRegistry.get(PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES)
+
+        self.assertIn("verify_bounded_planning_exit", [task.name for task in scenario.tasks])
+        self.assertLessEqual(scenario.max_orchestrator_completions, 4)
 
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
 
-        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 134)
-        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 134)
-        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 134)
+        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 117)
+        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 117)
+        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 117)
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
 
@@ -164,10 +370,17 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         google_sheets_tools = {
             tool_name
             for case in COMMON_USE_CASE_EVAL_CASES
-            for tool_name in [*case.expected_tools, *case.forbidden_tools]
+            for tool_name in [
+                *case.expected_tools,
+                *[
+                    alternative
+                    for alternatives in case.accepted_tool_alternatives.values()
+                    for alternative in alternatives
+                ],
+            ]
             if tool_name.startswith("google_sheets-")
         }
-        self.assertTrue(google_sheets_tools.issubset(EVAL_SYNTHETIC_TOOL_DEFINITIONS))
+        self.assertEqual(google_sheets_tools, set())
 
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
@@ -199,29 +412,29 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(by_slug["common_use_case_038_apollo_enrich_person"].allowed_preamble_tools, ("search_tools", "enable_system_skills"))
         self.assertEqual(
             by_slug["common_use_case_036_apollo_contacts"].accepted_tool_alternatives,
-            {"http_request": ("apollo_io-search-contacts",)},
+            {},
         )
         self.assertEqual(
             by_slug["common_use_case_037_apollo_accounts"].accepted_tool_alternatives,
-            {"http_request": ("apollo_io-search-accounts",)},
+            {},
         )
         self.assertEqual(
             by_slug["common_use_case_038_apollo_enrich_person"].accepted_tool_alternatives,
-            {"http_request": ("apollo_io-people-enrichment",)},
+            {},
         )
         self.assertEqual(
             by_slug["common_use_case_036_apollo_contacts"].eval_synthetic_tools,
-            ("apollo_io-search-contacts",),
+            (),
         )
         self.assertEqual(
             by_slug["common_use_case_037_apollo_accounts"].eval_synthetic_tools,
-            ("apollo_io-search-accounts",),
+            (),
         )
         self.assertEqual(
             by_slug["common_use_case_038_apollo_enrich_person"].eval_synthetic_tools,
-            ("apollo_io-people-enrichment",),
+            (),
         )
-        self.assertIn("sheet-123", by_slug["common_use_case_051_sheets_update_row"].prompt)
+        self.assertIn("apollo_io-search-contacts", by_slug["common_use_case_036_apollo_contacts"].forbidden_tools)
         self.assertEqual(by_slug["common_use_case_077_create_bar_chart"].allowed_preamble_tools, ("sqlite_batch",))
         self.assertIn("Jan 120", by_slug["common_use_case_079_create_report_with_chart"].prompt)
         self.assertIn("already has accounts and contacts", by_slug["common_use_case_085_sqlite_join_tables"].prompt)
@@ -250,7 +463,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("HR leaders", by_slug["common_use_case_102_linkedin_hr_leaders"].prompt)
         self.assertEqual(
             by_slug["common_use_case_103_apollo_logistics_leads"].eval_synthetic_tools,
-            ("apollo_io-search-contacts",),
+            (),
         )
         self.assertIn("VC funding", by_slug["common_use_case_104_recent_vc_funding_research"].prompt)
         self.assertIn("market timestamp", by_slug["common_use_case_105_current_finance_snapshot"].prompt)
@@ -268,13 +481,11 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 (111, "prior_results_sqlite_rank"),
                 (112, "file_json_dedupe_report"),
                 (113, "file_pipeline_sqlite_summary"),
-                (115, "sheets_read_sqlite_rank"),
                 (116, "maps_default_city_reviews"),
                 (117, "linkedin_default_company_jobs"),
                 (118, "apollo_dedupe_contacts_sqlite"),
                 (119, "http_nested_json_recover"),
                 (120, "scrape_noisy_extract_sqlite"),
-                (121, "sheets_direct_add_no_question"),
                 (122, "custom_tool_bulk_api_sqlite"),
                 (123, "custom_tool_partial_retry"),
                 (124, "tool_results_cte_dedupe_urls"),
@@ -285,13 +496,12 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 (129, "reddit_posts_sqlite_sentiment"),
                 (130, "yahoo_finance_sqlite_calc"),
                 (131, "vendor_default_assumption"),
-                (132, "sheets_blank_due_bulk_update"),
                 (133, "http_sqlite_dedupe_report"),
                 (134, "file_support_group_report"),
                 (135, "search_scrape_two_sources"),
             ]
         }
-        self.assertEqual(len(new_intelligent_work_slugs), 26)
+        self.assertEqual(len(new_intelligent_work_slugs), 23)
         self.assertTrue(new_intelligent_work_slugs.issubset(by_slug))
         self.assertEqual(
             len({by_slug[slug].prompt for slug in new_intelligent_work_slugs}),
@@ -320,7 +530,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                     self.assertIn(marker, by_slug[slug].prompt)
         self.assertGreaterEqual(
             sum("sqlite_batch" in by_slug[slug].expected_tools for slug in new_intelligent_work_slugs),
-            18,
+            17,
         )
         self.assertEqual(
             by_slug["common_use_case_118_apollo_dedupe_contacts_sqlite"].expected_tools,
@@ -328,7 +538,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         )
         self.assertEqual(
             by_slug["common_use_case_118_apollo_dedupe_contacts_sqlite"].accepted_tool_alternatives,
-            {"http_request": ("apollo_io-search-contacts",)},
+            {},
         )
         self.assertEqual(
             by_slug["common_use_case_122_custom_tool_bulk_api_sqlite"].expected_tools,
@@ -342,17 +552,19 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         scenario = CommonUseCaseToolChoiceScenario()
         scenario.case = workflow_case
         read_mock = scenario._mock_for_tool("read_file")
-        self.assertIn("call sqlite_batch next", read_mock["message"])
+        self.assertIn("Acme Inc", read_mock["content"])
+        self.assertNotIn("next", read_mock["message"].lower())
         structured_workflow_case = by_slug["common_use_case_109_http_json_dedupe_domains"]
         scenario.case = structured_workflow_case
         http_mock = scenario._mock_for_tool("http_request")
-        self.assertEqual(http_mock["content"]["next_step"], "http_request succeeded; call sqlite_batch next to continue the requested workflow.")
+        self.assertIn("rules", http_mock)
+        self.assertNotIn("next_step", str(http_mock))
         scrape_sqlite_case = by_slug["common_use_case_127_search_scrape_sqlite_extract"]
         scenario.case = scrape_sqlite_case
         scrape_mock = scenario._mock_for_tool("mcp_brightdata_scrape_as_markdown")
-        self.assertIn("call sqlite_batch next", scrape_mock["message"])
+        self.assertNotIn("next", scrape_mock["message"].lower())
         self.assertIn("ExamplePay Pricing", scrape_mock["result"])
-        self.assertIn("__tool_results.result_text", scrape_mock["result"])
+        self.assertNotIn("__tool_results", scrape_mock["result"])
         self.assertEqual(
             by_slug["common_use_case_020_search_reddit_mentions"].accepted_tool_alternatives,
             {"mcp_brightdata_web_data_reddit_posts": ("mcp_brightdata_search_engine",)},
@@ -366,36 +578,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             ("sqlite_batch",),
         )
         self.assertEqual(by_slug["common_use_case_094_update_agent_charter"].expected_tools, ("sqlite_batch",))
-        self.assertIn(
-            "google_sheets-get-spreadsheet-by-id",
-            by_slug["common_use_case_048_sheets_add_single_row"].allowed_preamble_tool_names(),
-        )
-        self.assertEqual(
-            by_slug["common_use_case_046_sheets_read_range"].accepted_tool_alternatives,
-            {"google_sheets-get-values-in-range": ("google_sheets-read-rows",)},
-        )
-        self.assertEqual(
-            by_slug["common_use_case_057_sheets_read_rows"].accepted_tool_alternatives,
-            {"google_sheets-read-rows": ("google_sheets-get-values-in-range",)},
-        )
-        self.assertEqual(
-            by_slug["common_use_case_058_sheets_get_by_id"].accepted_tool_alternatives,
-            {"google_sheets-get-spreadsheet-by-id": ("google_sheets-get-spreadsheet-info",)},
-        )
-        self.assertEqual(
-            by_slug["common_use_case_132_sheets_blank_due_bulk_update"].accepted_tool_alternatives,
-            {"google_sheets-read-rows": ("google_sheets-get-values-in-range",)},
-        )
-        self.assertEqual(
-            by_slug["common_use_case_060_sheets_append_rows"].accepted_tool_alternatives,
-            {"google_sheets-add-rows": ("google_sheets-add-multiple-rows",)},
-        )
-        self.assertIn("company Vanta", by_slug["common_use_case_060_sheets_append_rows"].prompt)
-        sheets_mock = CommonUseCaseToolChoiceScenario._google_sheets_mock_success("google_sheets-list-worksheets")
-        self.assertIn("use the requested Google Sheets tool next", sheets_mock["message"])
-        self.assertNotIn("mutation tool", sheets_mock["message"])
-        self.assertIn("Tasks", sheets_mock["content"]["worksheets"])
-        self.assertNotIn("worksheets", CommonUseCaseToolChoiceScenario._google_sheets_mock_success("google_sheets-get-spreadsheet-by-id")["content"])
+        self.assertFalse(any(case.category == "sheets" for case in COMMON_USE_CASE_EVAL_CASES))
         self.assertIn(
             "mcp_brightdata_search_engine",
             by_slug["common_use_case_096_schedule_price_alert"].allowed_preamble_tool_names(),
@@ -591,6 +774,35 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             )
         )
 
+    def test_bitcoin_finance_verifier_accepts_btc_lookup_not_unrelated_quote(self):
+        self.assertTrue(
+            bitcoin_tool_calls_include_supported_finance_lookup(
+                [
+                    SimpleNamespace(
+                        tool_name="mcp_brightdata_web_data_yahoo_finance_business",
+                        tool_params={"keyword": "BTC-USD", "query": "Bitcoin USD price"},
+                        status="complete",
+                    )
+                ]
+            )
+        )
+        self.assertFalse(
+            bitcoin_tool_calls_include_supported_finance_lookup(
+                [
+                    SimpleNamespace(
+                        tool_name="mcp_brightdata_web_data_yahoo_finance_business",
+                        tool_params={"keyword": "MSFT"},
+                        status="complete",
+                    )
+                ]
+            )
+        )
+
+    def test_bitcoin_greeting_verifier_accepts_natural_greeting_variants(self):
+        self.assertTrue(is_greeting_response("Hey there! 👋"))
+        self.assertTrue(is_greeting_response("Hi — ready when you are."))
+        self.assertFalse(is_greeting_response("Ready when you are."))
+
     def test_bitcoin_response_followup_check_ignores_url_query_strings(self):
         self.assertFalse(
             bitcoin_response_has_unnecessary_followup_question(
@@ -623,8 +835,20 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         schedule_ok, schedule_reason = _schedule_is_reasonable_pollution_monitoring("0 9 * * *")
         self.assertTrue(schedule_ok, schedule_reason)
 
+        hourly_ok, hourly_reason = _schedule_is_reasonable_pollution_monitoring("0 * * * *")
+        self.assertTrue(hourly_ok, hourly_reason)
+
         too_frequent_ok, too_frequent_reason = _schedule_is_reasonable_pollution_monitoring("* * * * *")
         self.assertFalse(too_frequent_ok, too_frequent_reason)
+
+        sub_hour_ok, sub_hour_reason = _schedule_is_reasonable_pollution_monitoring("*/30 * * * *")
+        self.assertFalse(sub_hour_ok, sub_hour_reason)
+
+        weekly_ok, weekly_reason = _schedule_is_reasonable_pollution_monitoring("0 9 * * 1")
+        self.assertTrue(weekly_ok, weekly_reason)
+
+        too_slow_ok, too_slow_reason = _schedule_is_reasonable_pollution_monitoring("@every 8d")
+        self.assertFalse(too_slow_ok, too_slow_reason)
 
 
 @tag("batch_eval_fingerprint")
@@ -714,12 +938,21 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(row.tool_name, "apollo_io-search-accounts")
         self.assertIn("apollo_io-search-accounts", self._tool_definition_names(self.agent))
 
-    def test_common_use_case_stop_policy_allows_tool_discovery_for_eval_synthetic_tools(self):
-        scenario = ScenarioRegistry.get("common_use_case_046_sheets_read_range")
+    def test_common_apollo_case_allows_native_skill_discovery_without_legacy_reward(self):
+        for slug, legacy_tool in (
+            ("common_use_case_036_apollo_contacts", "apollo_io-search-contacts"),
+            ("common_use_case_037_apollo_accounts", "apollo_io-search-accounts"),
+            ("common_use_case_038_apollo_enrich_person", "apollo_io-people-enrichment"),
+            ("common_use_case_118_apollo_dedupe_contacts_sqlite", "apollo_io-search-contacts"),
+        ):
+            with self.subTest(slug=slug):
+                scenario = ScenarioRegistry.get(slug)
+                policy = scenario._build_eval_stop_policy()
 
-        policy = scenario._build_eval_stop_policy()
-
-        self.assertIn("search_tools", policy["allowed_tool_names"])
+                self.assertIn("search_tools", policy["allowed_tool_names"])
+                self.assertNotIn(legacy_tool, scenario.case.accepted_tool_alternatives)
+                self.assertNotIn(legacy_tool, scenario._tool_names_to_enable())
+                self.assertIn(legacy_tool, policy["stop_on_tool_names"])
 
     def test_outbound_contact_lookup_cases_allow_sqlite_preamble(self):
         for slug, expected_tool in (
@@ -740,6 +973,33 @@ class BehaviorMicroHelperTests(TestCase):
                 self.assertIn(expected_tool, policy["allowed_tool_names"])
                 self.assertNotIn("sqlite_batch", mock_config)
                 self.assertIn("sqlite_batch", scenario._tool_names_to_enable())
+
+    def test_common_use_case_sqlite_uses_real_database_and_seeded_fixture(self):
+        scenario = ScenarioRegistry.get("common_use_case_086_sqlite_export_query_csv")
+        mock_config = scenario._build_mock_config()
+
+        self.assertNotIn("sqlite_batch", mock_config)
+        scenario._seed_sqlite_fixture(self.agent.id)
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute(
+                    "SELECT company, email, priority, status FROM leads ORDER BY company"
+                ).fetchall()
+            finally:
+                connection.close()
+        self.assertEqual(rows, [
+            ("Acme", "a@example.test", "high", "open"),
+            ("Globex", "b@example.test", "medium", "open"),
+            ("Initech", "c@example.test", "low", "closed"),
+        ])
+
+    def test_common_use_case_stop_policy_has_loop_backstop(self):
+        scenario = ScenarioRegistry.get("common_use_case_100_schedule_daily_email_digest")
+
+        policy = scenario._build_eval_stop_policy()
+
+        self.assertEqual(policy["max_relevant_tool_calls"], 12)
 
     def test_outbound_contact_lookup_seeds_real_email_allowlist_rows(self):
         for slug, address in (
@@ -798,6 +1058,44 @@ class BehaviorMicroHelperTests(TestCase):
                 self.assertFalse(
                     CommsAllowlistEntry.objects.filter(agent=self.agent, channel=CommsChannel.SMS).exists()
                 )
+
+    def test_sms_cases_expose_safely_mocked_capability_without_allowlisting_target(self):
+        self.agent.sms_disabled = True
+        self.agent.save(update_fields=["sms_disabled"])
+        scenario = ScenarioRegistry.get("common_use_case_065_send_status_sms")
+
+        scenario._prepare_sms_capability(self.agent.id)
+        self.agent.refresh_from_db()
+
+        self.assertFalse(self.agent.sms_disabled)
+        static_tool_names = {
+            definition["function"]["name"]
+            for definition in get_static_tool_definitions(self.agent)
+        }
+        self.assertIn("send_sms", static_tool_names)
+        self.assertIn("send_sms", scenario._build_mock_config())
+        self.assertFalse(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                channel=CommsChannel.SMS,
+                address="+15555550123",
+            ).exists()
+        )
+
+    def test_non_sms_case_does_not_override_disabled_capability(self):
+        self.agent.sms_disabled = True
+        self.agent.save(update_fields=["sms_disabled"])
+        scenario = ScenarioRegistry.get("common_use_case_061_send_summary_email")
+
+        scenario._prepare_sms_capability(self.agent.id)
+        self.agent.refresh_from_db()
+
+        self.assertTrue(self.agent.sms_disabled)
+        static_tool_names = {
+            definition["function"]["name"]
+            for definition in get_static_tool_definitions(self.agent)
+        }
+        self.assertNotIn("send_sms", static_tool_names)
 
     def test_outbound_contact_lookup_sqlite_preamble_does_not_stop_eval(self):
         scenario = ScenarioRegistry.get("common_use_case_066_send_meeting_sms")
@@ -871,16 +1169,24 @@ class BehaviorMicroHelperTests(TestCase):
             self.assertIn(tool_name, EVAL_SYNTHETIC_TOOL_DEFINITIONS)
             self.assertIn("do not call search_tools first", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
 
-    def test_revenue_chart_eval_sqlite_mock_returns_revenue_rows(self):
+    def test_revenue_chart_eval_seeds_real_sqlite_rows(self):
         scenario = ScenarioRegistry.get("common_use_case_079_create_report_with_chart")
 
         mock_config = scenario._build_mock_config()
-
-        sqlite_mock = mock_config["sqlite_batch"]
-        self.assertIn("revenue_data", sqlite_mock["content"]["tables"])
-        self.assertEqual(sqlite_mock["content"]["columns"], ["month", "revenue"])
-        self.assertEqual(sqlite_mock["content"]["rows"][0], {"month": "Jan", "revenue": 120})
-        self.assertIn("call create_chart next", sqlite_mock["content"]["next_step"])
+        self.assertNotIn("sqlite_batch", mock_config)
+        scenario._seed_sqlite_fixture(self.agent.id)
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute(
+                    "SELECT month, revenue FROM revenue_data ORDER BY rowid"
+                ).fetchall()
+            finally:
+                connection.close()
+        self.assertEqual(rows, [
+            ("Jan", 120), ("Feb", 135), ("Mar", 150),
+            ("Apr", 142), ("May", 165), ("Jun", 180),
+        ])
 
     def test_reddit_eval_fixture_has_terminal_structured_data(self):
         scenario = ScenarioRegistry.get("common_use_case_020_search_reddit_mentions")
@@ -988,7 +1294,7 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertIn("not available", result["message"])
 
     def test_seed_completed_process_run_disables_first_run_once(self):
-        scenario = ScenarioRegistry.get("common_use_case_046_sheets_read_range")
+        scenario = ScenarioRegistry.get("common_use_case_001_fetch_inventory_json")
 
         scenario._seed_completed_process_run(self.agent.id)
         scenario._seed_completed_process_run(self.agent.id)
@@ -1006,7 +1312,7 @@ class BehaviorMicroHelperTests(TestCase):
     @patch("api.agent.tools.search_tools.get_mcp_manager")
     @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
     @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
-    def test_search_tools_catalog_includes_eval_synthetic_tools(
+    def test_search_tools_explicit_apollo_query_enables_native_skill_without_catalog_llm(
         self,
         _mock_sandbox_compute_enabled,
         mock_get_config,
@@ -1035,8 +1341,8 @@ class BehaviorMicroHelperTests(TestCase):
         result = search_tools(self.agent, "Apollo company search")
 
         self.assertEqual(result["status"], "success")
-        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
-        self.assertIn("apollo_io-search-accounts", user_message)
+        self.assertEqual(result["system_skills"]["enabled"], ["apollo_native"])
+        mock_run_completion.assert_not_called()
         mock_enable_tools.assert_not_called()
 
     @patch("api.agent.tools.search_tools._has_active_pipedream_runtime", return_value=True)
@@ -1087,9 +1393,8 @@ class BehaviorMicroHelperTests(TestCase):
         result = search_tools(self.agent, "Google Sheets project status")
 
         self.assertEqual(result["status"], "success")
-        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
-        self.assertNotIn("google_sheets-list-spreadsheets", user_message)
-        self.assertIn("google_sheets-read-rows", user_message)
+        self.assertEqual(result["system_skills"]["enabled"], ["google_sheets_native"])
+        mock_run_completion.assert_not_called()
         mock_search_apps.assert_not_called()
         mock_get_effective_pipedream_app_slugs_for_agent.assert_not_called()
         mock_enable_tools.assert_not_called()
@@ -1262,26 +1567,6 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(expected_url_result["status"], "ok")
         self.assertEqual(expected_url_result["content"], {"ok": True})
 
-    def test_planning_first_turn_accepts_bounded_chat_clarification(self):
-        call = self._add_tool_call(
-            "send_chat_message",
-            {
-                "body": (
-                    "A couple things would help me scope competitor monitoring:\n\n"
-                    "1. What industry or space are you in?\n"
-                    "2. What kinds of updates matter most?"
-                )
-            },
-        )
-        call.result = '{"status": "ok"}'
-
-        self.assertTrue(_is_bounded_planning_chat_question(call))
-
-    def test_delivered_tool_result_accepts_preparsed_dict_payload(self):
-        call = SimpleNamespace(result={"status": "sent"})
-
-        self.assertTrue(_delivered_tool_result(call))
-
     def test_attachment_email_case_seeds_real_filespace_file(self):
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         scenario = CommonUseCaseToolChoiceScenario()
@@ -1298,20 +1583,6 @@ class BehaviorMicroHelperTests(TestCase):
                 size_bytes__gt=0,
             ).exists()
         )
-
-    def test_planning_first_turn_rejects_unbounded_chat_clarification(self):
-        call = self._add_tool_call(
-            "send_chat_message",
-            {
-                "body": (
-                    "What industry are you in? Which competitors? Which geographies? "
-                    "Which update types? What format? What cadence?"
-                )
-            },
-        )
-        call.result = '{"status": "ok"}'
-
-        self.assertFalse(_is_bounded_planning_chat_question(call))
 
     def test_plan_activity_only_includes_update_plan(self):
         read = self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM __agent_config"})
@@ -1407,6 +1678,95 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(should_stop)
         self.assertIn("all terminal expected", reason)
 
+    def test_common_use_case_stop_policy_waits_for_expected_and_plan_execution(self):
+        scenario = CommonUseCaseToolChoiceScenario()
+        scenario.case = CommonUseCaseEvalDefinition.from_mapping(
+            {
+                "slug": "pending_execution_race",
+                "category": "api_lookup",
+                "prompt": "Fetch the current status and track the work.",
+                "expected_tools": ["http_request"],
+                "plan_expected": True,
+            }
+        )
+        policy = scenario._build_eval_stop_policy()
+        conditions = {condition["tool_name"]: condition for condition in policy["stop_when_all_seen"]}
+
+        self.assertTrue(conditions["update_plan"]["after_execution"])
+        self.assertTrue(conditions["http_request"]["after_execution"])
+
+        plan_call = self._add_tool_call("update_plan", status="pending")
+        expected_call = self._add_tool_call("http_request", status="pending")
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+        self.assertFalse(should_stop)
+
+        expected_call.status = "complete"
+        expected_call.save(update_fields=["status"])
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+        self.assertFalse(should_stop)
+
+        plan_call.status = "complete"
+        plan_call.save(update_fields=["status"])
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
+
+    def test_common_use_case_stop_policy_waits_for_warning_repair(self):
+        warning_call = self._add_tool_call("sqlite_batch", {"sql": "SELECT result_text FROM __tool_results"})
+        warning_call.result = json.dumps({"status": "warning", "advisories": [{"code": "unshaped_payload"}]})
+        warning_call.save(update_fields=["result"])
+        policy = {
+            "stop_when_all_seen": [{"tool_name": "sqlite_batch", "after_execution": True}],
+            "ignore_sqlite_eval_bookkeeping_reads": False,
+        }
+
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+        self.assertFalse(should_stop)
+
+        repaired_call = self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "SELECT json_extract(result_json, '$.content') FROM __tool_results"},
+        )
+        repaired_call.result = json.dumps({"status": "ok", "results": []})
+        repaired_call.save(update_fields=["result"])
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
+
+    def test_common_use_case_stop_policy_waits_for_nested_failure_repair(self):
+        policy = {
+            "stop_when_all_seen": [{"tool_name": "custom_sync", "after_execution": True}],
+        }
+
+        failure_results = {
+            "error_status": {"status": "error"},
+            "warning_status": {"status": "warning"},
+            "error_detail": {"status": "success", "error": "upstream failed"},
+        }
+        for failure_kind, nested_result in failure_results.items():
+            with self.subTest(failure_kind=failure_kind):
+                failed_call = self._add_tool_call("custom_sync")
+                failed_call.result = json.dumps(
+                    {"status": "ok", "result": nested_result}
+                )
+                failed_call.save(update_fields=["result"])
+
+                should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+                self.assertFalse(should_stop)
+
+                repaired_call = self._add_tool_call("custom_sync")
+                repaired_call.result = json.dumps(
+                    {"status": "ok", "result": {"status": "success"}}
+                )
+                repaired_call.save(update_fields=["result"])
+
+                should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
+                self.assertTrue(should_stop)
+                self.assertIn("all terminal expected", reason)
+
+                PersistentAgentStep.objects.filter(eval_run=self.run).delete()
+
     def test_eval_stop_policy_can_wait_for_required_param_any(self):
         self._add_tool_call("custom_sync", {"mode": "status"}, status="complete")
         policy = {
@@ -1426,6 +1786,25 @@ class BehaviorMicroHelperTests(TestCase):
         self._add_tool_call("custom_sync", {"mode": "sync", "batch_size": 10}, status="complete")
         should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
 
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
+
+    def test_eval_stop_policy_ignores_skipped_expected_execution_until_repaired(self):
+        policy = {
+            "stop_when_all_seen": [{"tool_name": "custom_sync", "after_execution": True}],
+        }
+        skipped_call = self._add_tool_call("custom_sync")
+        skipped_call.result = json.dumps({"status": "ok", "skipped": True})
+        skipped_call.save(update_fields=["result"])
+
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+        self.assertFalse(should_stop)
+
+        repaired_call = self._add_tool_call("custom_sync")
+        repaired_call.result = json.dumps({"status": "ok"})
+        repaired_call.save(update_fields=["result"])
+
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
         self.assertTrue(should_stop)
         self.assertIn("all terminal expected", reason)
 
@@ -1674,6 +2053,35 @@ class BehaviorMicroHelperTests(TestCase):
 
         self.assertEqual(calls, [before])
 
+    def test_successful_end_planning_helpers_skip_failed_attempt(self):
+        failed_end = self._add_tool_call("end_planning", status="error")
+        forbidden = self._add_tool_call("http_request")
+        delivered = self._add_tool_call("send_chat_message", {"body": "Answer before the valid gate."})
+        successful_end = self._add_tool_call("end_planning", status="complete")
+
+        self.assertIsNot(failed_end, successful_end)
+        self.assertEqual(
+            get_first_successful_tool_call(self.run.id, tool_names={"end_planning"}),
+            successful_end,
+        )
+        self.assertEqual(
+            get_forbidden_calls_before_end_planning(
+                self.run.id,
+                forbidden_tool_names={"http_request"},
+            ),
+            [forbidden],
+        )
+
+        scenario = PlanningOneOffResearchReportEndsPlanningFirstScenario()
+        self.assertEqual(
+            scenario._delivered_message_calls_before_end_planning(self.run.id, after=None),
+            [delivered],
+        )
+        self.assertEqual(
+            scenario._first_end_planning_call(self.run.id, after=None),
+            successful_end,
+        )
+
     def test_record_forbidden_before_end_handles_tool_call_primary_key(self):
         EvalRunTask.objects.create(
             run=self.run,
@@ -1767,18 +2175,26 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).exists())
         mock_delay.assert_not_called()
 
-    def test_all_requests_have_options_requires_nonempty_options(self):
+    def test_tracked_request_shapes_allow_natural_free_text_and_validate_supplied_options(self):
+        free_text = SimpleNamespace(question="Which competitors should I monitor?", options_json=[])
         with_options = SimpleNamespace(
-            options_json=[{"key": "yes", "title": "Yes", "description": "Proceed with yes."}]
+            question="Which cadence should I use?",
+            options_json=[{"key": "weekly", "title": "Weekly", "description": "Send one weekly digest."}],
         )
-        without_options = SimpleNamespace(options_json=[])
-        missing_description = SimpleNamespace(options_json=[{"key": "yes", "title": "Yes"}])
-        blank_title = SimpleNamespace(options_json=[{"key": "yes", "title": " ", "description": "Proceed."}])
+        invalid_options = SimpleNamespace(
+            question="Which cadence should I use?",
+            options_json=[{"key": "weekly", "title": "Weekly"}],
+        )
 
-        self.assertTrue(all_requests_have_options([with_options]))
-        self.assertFalse(all_requests_have_options([with_options, without_options]))
-        self.assertFalse(all_requests_have_options([missing_description]))
-        self.assertFalse(all_requests_have_options([blank_title]))
+        self.assertTrue(requests_have_valid_shapes([free_text, with_options]))
+        self.assertFalse(requests_have_valid_shapes([]))
+        self.assertFalse(requests_have_valid_shapes([invalid_options]))
+
+    def test_charter_email_prohibition_check_preserves_polarity(self):
+        self.assertTrue(charter_preserves_email_prohibition("Send updates in Slack; do not send email."))
+        self.assertTrue(charter_preserves_email_prohibition("Use Teams, never email."))
+        self.assertFalse(charter_preserves_email_prohibition("Send concise Slack and email updates."))
+        self.assertFalse(charter_preserves_email_prohibition("Email updates are preferred."))
 
     def test_request_human_input_eval_tool_check_accepts_valid_options_or_free_text(self):
         valid_single = SimpleNamespace(
@@ -1819,3 +2235,69 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(invalid_single))
         self.assertTrue(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(valid_batch))
         self.assertFalse(CommonUseCaseToolChoiceScenario._request_human_input_call_has_options(invalid_batch))
+
+    def test_monitoring_scope_eval_accepts_equivalent_blocking_chat_questions(self):
+        scenario = ScenarioRegistry.get("common_use_case_099_request_monitoring_scope")
+        good_chat = SimpleNamespace(
+            tool_name="send_chat_message",
+            status="complete",
+            result=json.dumps({"status": "sent"}),
+            tool_params={
+                "body": (
+                    "Which competitors should I monitor, and what types of updates or changes matter to you?"
+                )
+            },
+        )
+        vague_chat = SimpleNamespace(
+            tool_name="send_chat_message",
+            status="complete",
+            result=json.dumps({"status": "sent"}),
+            tool_params={"body": "What should I do?"},
+        )
+
+        self.assertIn(
+            "send_chat_message",
+            scenario.case.accepted_tool_names_for_expected_tool("request_human_input"),
+        )
+        self.assertTrue(scenario._call_satisfies_expected_tool(good_chat, "request_human_input"))
+        self.assertFalse(scenario._call_satisfies_expected_tool(vague_chat, "request_human_input"))
+
+    def test_common_use_case_expected_tool_rejects_incomplete_or_failed_calls(self):
+        scenario = ScenarioRegistry.get("common_use_case_001_fetch_inventory_json")
+        base = {
+            "tool_name": "http_request",
+            "tool_params": {"url": "https://api.example.test/inventory/widget-123.json"},
+        }
+
+        for status, result in (
+            ("pending", {"status": "ok"}),
+            ("error", {"status": "ok"}),
+            ("complete", {"status": "error"}),
+            ("complete", {"status": "warning"}),
+            ("complete", {"status": "ok", "error": "upstream failed"}),
+        ):
+            with self.subTest(status=status, result=result):
+                call = SimpleNamespace(**base, status=status, result=json.dumps(result))
+                self.assertFalse(scenario._call_satisfies_expected_tool(call, "http_request"))
+
+        successful = SimpleNamespace(
+            **base,
+            status="complete",
+            result=json.dumps({"status": "ok"}),
+        )
+        self.assertTrue(scenario._call_satisfies_expected_tool(successful, "http_request"))
+
+    def test_missing_recipient_eval_accepts_bounded_blocking_chat(self):
+        scenario = ScenarioRegistry.get(TOOL_CHOICE_MISSING_RECIPIENT_USES_HUMAN_INPUT)
+
+        self.assertTrue(
+            scenario._blocking_chat_requests_missing_email_details(
+                "Who is the client and what email address should I use? "
+                "Where can I find the latest project status?"
+            )
+        )
+        self.assertFalse(
+            scenario._blocking_chat_requests_missing_email_details(
+                "Could you share more information?"
+            )
+        )

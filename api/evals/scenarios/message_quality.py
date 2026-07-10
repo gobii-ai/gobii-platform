@@ -6,6 +6,7 @@ from uuid import UUID
 
 from django.utils import timezone
 
+from api.agent.comms.email_content import normalize_email_html_fragment, normalize_email_subject
 from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
@@ -197,7 +198,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     area = "agent_behavior"
     tags = ("message_quality", "response_quality", "llm_judge", "send_email", "send_chat_message")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_expected_send_tool", assertion_type="manual"),
         ScenarioTask(name="verify_formatting_basics", assertion_type="manual"),
         ScenarioTask(name="judge_message_quality", assertion_type="llm_judge"),
@@ -330,6 +331,16 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
 
         if len(expected_calls) == 1 and not unexpected_calls:
             sent_message = self._sent_message_for_call(expected_calls[0])
+            if not self._delivery_succeeded(expected_calls[0], sent_message):
+                self.record_task_result(
+                    run_id,
+                    None,
+                    EvalRunTask.Status.FAILED,
+                    task_name="verify_expected_send_tool",
+                    observed_summary=f"{case.expected_tool} did not complete a persisted delivery.",
+                    artifacts=self._task_artifacts(expected_calls[0], sent_message),
+                )
+                return None
             confirmation_count = len(self._allowed_confirmation_calls(case, send_calls))
             confirmation_note = (
                 f" with {confirmation_count} web chat confirmation call(s)"
@@ -501,7 +512,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     def _judge_question(case: MessageQualityCase) -> str:
         if case.quality_target == "simple_email":
             return (
-                "Does this email fit a simple professional cold outreach use case? Pass only if it is "
+                "Does this email accurately serve the stated recipient and use only the supplied facts? Fail for "
+                "invented claims, a wrong audience, or a material contradiction or omission. Pass only if it is "
                 "body-only HTML that stays restrained: a greeting, one to three short paragraphs, a clear "
                 "reason and ask, and an optional simple signoff. Fail if it looks like a report, newsletter, "
                 "or marketing landing page; uses tables, metric blocks, status badges, emoji section labels, "
@@ -509,16 +521,22 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             )
         if case.channel == "email":
             return (
-                "Does this email meet a high bar for formatting quality? Pass only if it is body-only HTML "
+                "Does this email accurately serve the stated audience and preserve the supplied facts? Fail for "
+                "invented claims, a wrong audience, or material factual contradictions or omissions. Then apply "
+                "a high bar for formatting quality: pass only if it is body-only HTML "
                 "that would look polished in an inbox: clear hierarchy, good spacing, visually distinct "
                 "report sections, tables or metric blocks where useful, and visible inline color for "
                 "accents/status/table styling. Prefer tasteful emoji, icons, badges, or other status markers "
-                "for section labels and important values. Fail if it is plain, cramped, Markdown-like, "
+                "for section labels and important values. Treat colored rounded inline spans as badges and "
+                "emoji section labels as icons or status markers; decorative images are not required. "
+                "Keep factual completeness and readability strict. Fail if it is plain, cramped, Markdown-like, "
                 "mostly generic headings/lists, lacks visual status/value encoding, or does not feel like a "
                 "rich report."
             )
         return (
-            "Does this web chat message meet a high bar for report formatting quality? Pass only if it has "
+            "Does this web chat report accurately serve the stated audience and preserve the supplied facts? Fail "
+            "for invented claims, a wrong audience, or material factual contradictions or omissions. Then apply a "
+            "high bar for report formatting quality: pass only if it has "
             "clear Markdown hierarchy, tasteful emoji or status labels, useful tables or metric blocks, bullets, "
             "and good spacing. Fail if it is plain prose, cramped, hard to scan, or not report-like."
         )
@@ -552,7 +570,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     def _message_body(self, case: MessageQualityCase, send_call: PersistentAgentToolCall) -> str:
         params = self._tool_params(send_call)
         if case.channel == "email":
-            return str(params.get("mobile_first_html") or "")
+            return normalize_email_html_fragment(params.get("mobile_first_html"))
         return str(params.get("body") or "")
 
     @staticmethod
@@ -567,6 +585,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 return None
         if not isinstance(result, dict):
             return None
+        if str(result.get("status") or "").lower() not in {"ok", "success", "sent", "delivered"}:
+            return None
         message_id = result.get("message_id")
         if not message_id:
             return None
@@ -579,14 +599,27 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         return PersistentAgentMessage.objects.filter(id=message_id).first()
 
     @staticmethod
+    def _delivery_succeeded(
+        send_call: PersistentAgentToolCall,
+        sent_message: PersistentAgentMessage | None,
+    ) -> bool:
+        if str(getattr(send_call, "status", "") or "").lower() != "complete":
+            return False
+        result = MessageQualityScenario._tool_result(send_call)
+        return bool(
+            str(result.get("status") or "").lower() in {"ok", "success", "sent", "delivered"}
+            and sent_message is not None
+        )
+
+    @staticmethod
     def _persist_mocked_email_message(
         send_call: PersistentAgentToolCall,
         result: dict[str, Any],
     ) -> PersistentAgentMessage | None:
         params = MessageQualityScenario._tool_params(send_call)
         to_address = str(params.get("to_address") or "").strip().lower()
-        subject = str(params.get("subject") or "").strip()
-        body = str(params.get("mobile_first_html") or "").strip()
+        subject = normalize_email_subject(params.get("subject"))
+        body = normalize_email_html_fragment(params.get("mobile_first_html"))
         if not to_address or not subject or not body:
             return None
 
@@ -682,9 +715,10 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         if case.channel == "email":
             if params.get("to_address") != case.recipient:
                 failures.append(f"send_email.to_address should be {case.recipient}.")
-            if not params.get("subject"):
-                failures.append("send_email.subject is missing.")
-            if re.search(r"</?(?:html|head|body)\b", body, re.IGNORECASE):
+            if normalize_email_subject(params.get("subject")) != case.subject:
+                failures.append(f"send_email.subject should be {case.subject!r}.")
+            normalized_body = normalize_email_html_fragment(body)
+            if re.search(r"</?(?:html|head|body)\b", normalized_body, re.IGNORECASE):
                 failures.append("Email body should not include html/head/body wrapper tags.")
             if re.search(r"^\s*\|.+\|\s*$", body, re.MULTILINE):
                 failures.append("Email body should use HTML tables, not Markdown pipe tables.")
@@ -707,6 +741,14 @@ def _scenario_class(case: MessageQualityCase):
     _MessageQualityCaseScenario.case = case
     _MessageQualityCaseScenario.__name__ = "".join(part.title() for part in case.slug.split("_")) + "Scenario"
     return _MessageQualityCaseScenario
+
+
+MessageQualityScenario.fingerprint_dependencies = (
+    MessageQualityScenario._judge_question,
+    MessageQualityScenario._formatting_failures,
+    MessageQualityScenario._record_expected_send_tool,
+    MessageQualityScenario._delivery_succeeded,
+)
 
 
 for message_quality_case in MESSAGE_QUALITY_CASES:

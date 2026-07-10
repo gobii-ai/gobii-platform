@@ -739,6 +739,29 @@ class HumanInputRequestTests(TestCase):
         self.assertNotEqual(request_obj.conversation_id, self.conversation.id)
         self.assertIsNone(request_obj.requested_message_id)
 
+    def test_execute_request_human_input_uses_preferred_email_without_inbound(self):
+        self.latest_inbound.delete()
+        preferred = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        self.agent.preferred_contact_endpoint = preferred
+        self.agent.save(update_fields=["preferred_contact_endpoint", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which launch window should I plan around?",
+                "options": [],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["target_channel"], CommsChannel.EMAIL)
+        self.assertEqual(result["target_address"], self.user.email)
+        self.assertEqual(result["next_message_suggestion"]["send_tool"], "send_email")
+
     def test_execute_request_human_input_batch_applies_top_level_recipient(self):
         result = execute_request_human_input(
             self.agent,

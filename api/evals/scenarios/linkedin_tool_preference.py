@@ -35,7 +35,7 @@ class LinkedInToolPreferenceScenario(EvalScenario, ScenarioExecutionTools):
     area = "agent_behavior"
     tags = ("tool_choice", "linkedin", "brightdata", "browser_avoidance")
     tasks = [
-        ScenarioTask(name="inject_linkedin_prompt", assertion_type="manual"),
+        ScenarioTask.setup(name="inject_linkedin_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_linkedin_tool_usage", assertion_type="manual"),
         ScenarioTask(name="verify_no_browser_tasks_before_linkedin", assertion_type="manual"),
         ScenarioTask(name="verify_no_browser_tasks", assertion_type="manual"),
@@ -202,7 +202,7 @@ class LinkedInToolPreferenceScenario(EvalScenario, ScenarioExecutionTools):
         required_bits = [
             "will",
             "gobii",
-            "cancer survivor",
+            "senior software engineer",
             "germantown",
         ]
         if response and all(bit in body_text.lower() for bit in required_bits):
@@ -239,7 +239,8 @@ class LinkedInToolPreferenceScenario(EvalScenario, ScenarioExecutionTools):
                 "results": [
                     {
                         "name": "Will Bonde",
-                        "headline": "AI @ Gobii. Cancer survivor. Hoping to make the world better w/software.",
+                        "headline": "AI at Gobii · Building useful software",
+                        "title": "Senior Software Engineer",
                         "location": "Germantown, Maryland, United States",
                         "url": "https://www.linkedin.com/in/willbonde",
                     }
@@ -248,7 +249,7 @@ class LinkedInToolPreferenceScenario(EvalScenario, ScenarioExecutionTools):
             "mcp_brightdata_web_data_linkedin_person_profile": {
                 "status": "ok",
                 "name": "Will Bonde",
-                "headline": "AI @ Gobii. Cancer survivor. Hoping to make the world better w/software.",
+                "headline": "AI at Gobii · Building useful software",
                 "location": "Germantown, Maryland, United States",
                 "summary": "Senior Software Engineer at Gobii, passionate about leveraging AI to solve real-world problems.",
             },

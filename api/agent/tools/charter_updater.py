@@ -5,7 +5,10 @@ This module provides functionality for agents to update their own charter/instru
 """
 
 import logging
+from functools import partial
 from typing import Dict, Any
+
+from django.db import transaction
 
 from ...models import PersistentAgent
 from ..avatar import maybe_schedule_agent_avatar
@@ -49,10 +52,16 @@ def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         routing_profile = get_current_eval_routing_profile()
         routing_profile_id = str(routing_profile.id) if routing_profile else None
 
-        maybe_schedule_short_description(agent, routing_profile_id=routing_profile_id)
-        maybe_schedule_mini_description(agent, routing_profile_id=routing_profile_id)
-        maybe_schedule_agent_tags(agent, routing_profile_id=routing_profile_id)
-        maybe_schedule_agent_avatar(agent, routing_profile_id=routing_profile_id)
+        for scheduler in (
+            maybe_schedule_short_description,
+            maybe_schedule_mini_description,
+            maybe_schedule_agent_tags,
+            maybe_schedule_agent_avatar,
+        ):
+            transaction.on_commit(
+                partial(scheduler, agent, routing_profile_id=routing_profile_id),
+                robust=True,
+            )
         return {
             "status": "ok",
             "message": "Charter updated successfully.",

@@ -138,6 +138,8 @@ class EvalRunner:
                     sequence=i,
                     name=task_def.name,
                     assertion_type=task_def.assertion_type,
+                    is_scored=task_def.is_scored,
+                    is_setup=task_def.is_setup,
                     status=EvalRunTask.Status.PENDING
                 )
 

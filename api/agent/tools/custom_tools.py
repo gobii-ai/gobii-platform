@@ -898,6 +898,8 @@ def build_custom_tool_bridge_token(
     tool: PersistentAgentCustomTool,
     *,
     parent_step_id: Optional[str] = None,
+    requester_config_authority: Optional[bool] = None,
+    bind_requester_config_authority: bool = False,
 ) -> str:
     payload = {
         "agent_id": str(agent.id),
@@ -906,6 +908,8 @@ def build_custom_tool_bridge_token(
     }
     if parent_step_id:
         payload["parent_step_id"] = str(parent_step_id)
+    if bind_requester_config_authority:
+        payload["requester_config_authority"] = requester_config_authority
     return signing.dumps(
         payload,
         salt=CUSTOM_TOOL_BRIDGE_SALT,
@@ -967,59 +971,41 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
         "function": {
             "name": CREATE_CUSTOM_TOOL_NAME,
             "description": (
-                "Create/update a sandboxed Python custom tool. "
-                "Use for 3+ repeated steps, API/MCP fan-out, pagination, sync/import, transforms, validation/dedupe, or bulk SQLite writes; err early. "
-                "Before the first call, verify: Exact import `from _gobii_ctx import main`; exact final line `if __name__ == '__main__': main(run)`; imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`; `parameters_schema.required` requires real source inputs plus destinations/filters/limits/dates; SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`; batch/limit tools return `remaining_work`/`next_cursor`. "
-                "Use PEP 723 for third-party deps such as `# dependencies = [\"requests[socks]\"]`; never list stdlib deps. "
-                "For one-shot creation call create_custom_tool with source_path='/tools/my_tool.py' + source_code; do not pass only `source_path` unless you already wrote that file; if rejected, fix every listed issue and retry create_custom_tool, not create_file. "
-                "For tool-to-tool calls use ctx.call_tool(name, params). Write durable data to the agent SQLite DB; do not ATTACH sandbox file paths. "
-                "Keep DB work inside the `with ctx.sqlite() as db:` block; after the block exits the DB is closed. Use cursor.rowcount/SELECT changes(); set db.row_factory = sqlite3.Row before SELECT/fetchall because later changes do not convert tuples and rows are not row.get(...). "
-                "For UTC timestamps use datetime.now(timezone.utc), not datetime.timezone. Expose runtime params for tables, filters, URLs, limits, cursors, or destinations; do not invoke custom_* with empty params unless it intentionally reads verified state. "
-                "Avoid manual MCP/tool/API loops. Slow batches should be chunkable: include `limit`/`batch_size`, filters, progress, and patch for smaller resumable batches. "
-                "Every success or error return dict should include `next_action`; keep returns concise with status, summary, what changed or which outputs are ready, counts/side effects, skipped duplicates, remaining work, and verification guidance. "
-                "Name ready outputs specifically (`direct_post_urls`, `scrape_ready_urls`, `rows_written`, `records_to_sync`). Validators return accepted ready-to-use values and rejected reasons; require source params like `urls`, `domains`, `candidates`, `source_table`, or `input_table`. "
-                "Secrets are in os.environ; if missing, request `secret_type='env_var'`, not a domain-scoped credential. "
-                "Network code needs SOCKS5 proxy support: use requests[socks]/httpx[socks], declare `dependencies = [\"requests[socks]\"]`, read ALL_PROXY/HTTP_PROXY/HTTPS_PROXY/NO_PROXY, and prefer ctx.requests_proxies() or ctx.proxy_url(); not bare `requests`/`httpx` or direct HTTPS tunneling. "
-                "Filespace paths like `/tools/my_tool.py` and `/exports/report.txt` are Gobii tool args; if using create_file first, pass file_path='/tools/my_tool.py' and content=<python source>. "
-                "Latest workspace edits are synced automatically; use apply_patch on the same file instead of creating near-duplicates. "
-                "Saved tool id like `custom_my_tool`; enabled by default."
+                "Build/update a compact sandboxed Python tool for repeated or bulk work. Provide `source_path` + "
+                "`source_code`. Results name destinations and completed side effects, split attempted/succeeded/"
+                "failed/skipped counts, and return remaining_work/cursor for batches; progress tracking is not an "
+                "output destination. Fix validation errors and retry. Saves/enables `custom_*`."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Short tool name. The canonical tool id is derived from this name.",
+                        "description": "Short name; the canonical id is derived from it.",
                     },
                     "description": {
                         "type": "string",
-                        "description": "What the custom tool does and when to use it.",
+                        "description": "Purpose and use case.",
                     },
                     "source_path": {
                         "type": "string",
-                        "description": (
-                            "Required filespace path to the Python source file, for example `/tools/my_tool.py`. "
-                            "Still required when source_code is provided."
-                        ),
+                        "description": "Required filespace path, e.g. `/tools/my_tool.py`.",
                     },
                     "source_code": {
                         "type": "string",
-                        "description": (
-                            "Optional full Python source. Preferred for one-step creation: provide this together with "
-                            "source_path so the file is written and registered in one create_custom_tool call."
-                        ),
+                        "description": "Full Python source for one-step creation.",
                     },
                     "parameters_schema": {
                         "type": "object",
-                        "description": "JSON schema for tool input params. Use {\"type\": \"object\", \"properties\": {}} if no params needed.",
+                        "description": "JSON Schema for runtime params.",
                     },
                     "timeout_seconds": {
                         "type": "integer",
-                        "description": "Optional sandbox timeout in seconds for this tool (default 300, max 900).",
+                        "description": "Sandbox timeout seconds (default 300, max 900).",
                     },
                     "enable": {
                         "type": "boolean",
-                        "description": "When true (default), enable the saved custom tool immediately.",
+                        "description": "Enable immediately (default true).",
                     },
                 },
                 "required": ["name", "description", "source_path", "parameters_schema"],
@@ -1217,10 +1203,16 @@ def execute_custom_tool(
     execution_context = get_tool_execution_context()
     parent_step_id = execution_context.step_id if execution_context is not None else None
     bridge_url = f"{base_url}{reverse('api:custom-tool-bridge-execute')}"
+    bridge_token_kwargs = {"parent_step_id": parent_step_id}
+    if execution_context is not None and execution_context.requester_config_authority_bound:
+        bridge_token_kwargs.update(
+            requester_config_authority=execution_context.requester_config_authority,
+            bind_requester_config_authority=True,
+        )
     env = {
         _PARAMS_ENV_KEY: _encode_env_json(params or {}),
         _BRIDGE_URL_ENV_KEY: bridge_url,
-        _TOKEN_ENV_KEY: build_custom_tool_bridge_token(agent, tool, parent_step_id=parent_step_id),
+        _TOKEN_ENV_KEY: build_custom_tool_bridge_token(agent, tool, **bridge_token_kwargs),
         _TOOL_NAME_ENV_KEY: tool.tool_name,
         _SOURCE_PATH_ENV_KEY: tool.source_path,
     }

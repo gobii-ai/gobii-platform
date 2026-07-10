@@ -17,6 +17,7 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task, gc_eval_runs_task
 from api.evals.runner import _update_suite_state
+from api.evals.scoring import summarize_runs
 from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, LLMRoutingProfile, PersistentAgent
 from api.evals.llm_routing_profile_snapshot import create_eval_profile_snapshot
 
@@ -70,6 +71,22 @@ def build_eval_execution_plan(
             and not sync_mode
             and requested_max_concurrency != 1
         ),
+    )
+
+
+def enforce_required_pass(scenario_totals) -> None:
+    if scenario_totals.get("total", 0) and not (
+        scenario_totals["failed"]
+        or scenario_totals["pending"]
+        or scenario_totals["unscored"]
+    ):
+        return
+    raise CommandError(
+        "Eval requirements did not all pass: "
+        f"failed={scenario_totals['failed']}, "
+        f"pending={scenario_totals['pending']}, "
+        f"unscored={scenario_totals['unscored']}, "
+        f"total={scenario_totals.get('total', 0)}."
     )
 
 
@@ -233,6 +250,14 @@ class Command(BaseCommand):
             help=(
                 "Run scenario-provided deterministic simulations through the canonical runner. "
                 "This is not a live model eval."
+            ),
+        )
+        parser.add_argument(
+            "--require-pass",
+            action="store_true",
+            help=(
+                "Return a nonzero exit status unless every completed scenario passes all scored requirements. "
+                "Without this flag, eval results remain inspectable without making the command fatal."
             ),
         )
         parser.add_argument(
@@ -425,6 +450,7 @@ class Command(BaseCommand):
         routing_profile_refs = self._routing_profile_refs(options.get("routing_profile"))
         catalog_filters = self._build_catalog_filters(options)
         simulated = bool(options.get("simulated"))
+        require_pass = bool(options.get("require_pass"))
         delay_between_runs = max(0, float(options.get("delay_between_runs_seconds") or 0))
         max_concurrency = max(0, int(options.get("max_concurrency") or 0))
         max_runs_total = max(0, int(options.get("max_runs_total") or 0))
@@ -807,9 +833,13 @@ class Command(BaseCommand):
 
         # Final summary
         self.stdout.write("\n--- Final Summary ---")
-        for run in run_ids:
-            run.refresh_from_db()
+        completed_runs = list(
+            EvalRun.objects.filter(id__in=[run.id for run in run_ids]).prefetch_related("tasks")
+        )
+        for run in completed_runs:
             for task in run.tasks.all():
+                if not task.is_scored:
+                    continue
                 total_tasks_all += 1
                 if task.status == EvalRunTask.Status.PASSED:
                     passed_tasks_all += 1
@@ -821,9 +851,27 @@ class Command(BaseCommand):
                 if pass_rate == 100
                 else (self.style.WARNING if pass_rate > 50 else self.style.ERROR)
             )
-            self.stdout.write(color(f"\nTotal Pass Rate: {pass_rate:.1f}% ({passed_tasks_all}/{total_tasks_all} tasks)"))
+            self.stdout.write(
+                color(
+                    f"\nScored Requirement Pass Rate: {pass_rate:.1f}% "
+                    f"({passed_tasks_all}/{total_tasks_all})"
+                )
+            )
         else:
-            self.stdout.write("No tasks executed.")
+            self.stdout.write("No scored requirements executed.")
+
+        scenario_totals = summarize_runs(completed_runs)
+        scenario_pass_rate = scenario_totals["pass_rate"]
+        scenario_rate_text = (
+            f"{scenario_pass_rate * 100:.1f}%"
+            if scenario_pass_rate is not None
+            else "n/a"
+        )
+        self.stdout.write(
+            f"Scenario Pass Rate: {scenario_rate_text} "
+            f"({scenario_totals['passed']}/{scenario_totals['completed']}); "
+            f"pending={scenario_totals['pending']}, unscored={scenario_totals['unscored']}"
+        )
 
         for suite_run in suite_runs:
             suite_run.refresh_from_db()
@@ -837,3 +885,6 @@ class Command(BaseCommand):
             gc_eval_runs_task.delay()
         except Exception:
             self.stdout.write(self.style.WARNING("Unable to enqueue eval GC task."))
+
+        if require_pass:
+            enforce_required_pass(scenario_totals)

@@ -6,6 +6,7 @@ when eval code changes (or doesn't change) for comparison tracking.
 """
 
 from django.test import TestCase, tag
+from dataclasses import dataclass
 from unittest.mock import patch, MagicMock
 
 from api.evals.fingerprint import (
@@ -116,6 +117,116 @@ class ScenarioFingerprintTests(TestCase):
 
         self.assertEqual(fp_class, fp_instance)
 
+    def test_dynamic_scenario_case_data_affects_fingerprint(self):
+        @dataclass(frozen=True)
+        class Case:
+            prompt: str
+            expected_tool: str
+
+        class DynamicScenario(EvalScenario):
+            slug = "dynamic"
+
+            def run(self, run_id, agent_id):
+                pass
+
+        first = DynamicScenario()
+        first.case = Case(prompt="Fetch inventory", expected_tool="http_request")
+        second = DynamicScenario()
+        second.case = Case(prompt="Create a CSV", expected_tool="create_csv")
+
+        self.assertNotEqual(
+            compute_scenario_fingerprint(first),
+            compute_scenario_fingerprint(second),
+        )
+
+    def test_shared_base_behavior_affects_fingerprint(self):
+        class FirstBase(EvalScenario):
+            def run(self, run_id, agent_id):
+                return "first"
+
+        class SecondBase(EvalScenario):
+            def run(self, run_id, agent_id):
+                return "second"
+
+        class FirstScenario(FirstBase):
+            slug = "same"
+
+        class SecondScenario(SecondBase):
+            slug = "same"
+
+        self.assertNotEqual(
+            compute_scenario_fingerprint(FirstScenario),
+            compute_scenario_fingerprint(SecondScenario),
+        )
+
+    def test_explicit_shared_dependency_affects_fingerprint(self):
+        def first_scorer(value):
+            return value == "first"
+
+        def second_scorer(value):
+            return value == "second"
+
+        class DependencyScenario(EvalScenario):
+            slug = "same_dependency_case"
+            fingerprint_dependencies = (first_scorer,)
+
+            def run(self, run_id, agent_id):
+                pass
+
+        first_fingerprint = compute_scenario_fingerprint(DependencyScenario)
+        DependencyScenario.fingerprint_dependencies = (second_scorer,)
+
+        self.assertNotEqual(
+            first_fingerprint,
+            compute_scenario_fingerprint(DependencyScenario),
+        )
+
+    def test_explicit_fixture_data_affects_fingerprint(self):
+        class FixtureScenario(EvalScenario):
+            slug = "fixture_case"
+            fingerprint_data = {"rows": [{"id": 1, "value": "first"}]}
+
+            def run(self, run_id, agent_id):
+                pass
+
+        first_fingerprint = compute_scenario_fingerprint(FixtureScenario)
+        FixtureScenario.fingerprint_data = {"rows": [{"id": 1, "value": "changed"}]}
+
+        self.assertNotEqual(first_fingerprint, compute_scenario_fingerprint(FixtureScenario))
+
+    def test_changing_one_dynamic_case_does_not_invalidate_sibling(self):
+        @dataclass(frozen=True)
+        class Case:
+            prompt: str
+            expected: str
+
+        class DynamicScenario(EvalScenario):
+            def run(self, run_id, agent_id):
+                pass
+
+        first = DynamicScenario()
+        first.slug = "dynamic_first"
+        first.case = Case("First prompt", "first")
+        sibling = DynamicScenario()
+        sibling.slug = "dynamic_sibling"
+        sibling.case = Case("Sibling prompt", "sibling")
+        sibling_before = compute_scenario_fingerprint(sibling)
+
+        first.case = Case("Changed first prompt", "changed")
+
+        self.assertEqual(compute_scenario_fingerprint(sibling), sibling_before)
+
+    def test_native_system_skill_configuration_affects_fingerprint(self):
+        import api.evals.loader  # noqa: F401 - triggers scenario registration
+        from api.evals.registry import ScenarioRegistry
+        from api.evals.scenarios.google_sheets_native import GOOGLE_SHEETS_NATIVE_LIST_TABS
+
+        scenario = ScenarioRegistry.get(GOOGLE_SHEETS_NATIVE_LIST_TABS)
+        before = compute_scenario_fingerprint(scenario)
+
+        with patch.object(type(scenario), "system_skill_key", "changed_google_sheets_skill"):
+            self.assertNotEqual(before, compute_scenario_fingerprint(scenario))
+
     def test_fingerprint_format(self):
         """Fingerprint should be a 16-char hex string."""
 
@@ -138,10 +249,14 @@ class ScenarioFingerprintTests(TestCase):
         scenarios = ScenarioRegistry.list_all()
         self.assertGreater(len(scenarios), 0, "Should have registered scenarios")
 
+        fingerprints = set()
         for slug in scenarios:
             scenario = ScenarioRegistry.get(slug)
             fp = compute_scenario_fingerprint(scenario)
             self.assertEqual(len(fp), 16, f"Fingerprint for {slug} should be 16 chars")
+            fingerprints.add(fp)
+
+        self.assertEqual(len(fingerprints), len(scenarios))
 
 
 @tag("batch_eval_fingerprint")
@@ -475,4 +590,8 @@ class EvalComparisonAPITests(TestCase):
         self.assertIsNotNone(commit1_group)
         self.assertIsNotNone(commit2_group)
         self.assertEqual(commit1_group["pass_rate"], 100.0)  # 2/2 passed
-        self.assertEqual(commit2_group["pass_rate"], 50.0)   # 1/2 passed
+        self.assertEqual(commit2_group["pass_rate"], 0.0)    # One failed requirement fails the scenario
+        self.assertEqual((commit1_group["passed_tasks"], commit1_group["total_tasks"]), (2, 2))
+        self.assertEqual((commit2_group["passed_tasks"], commit2_group["total_tasks"]), (1, 2))
+        self.assertEqual((commit1_group["passed_scenarios"], commit1_group["total_scenarios"]), (1, 1))
+        self.assertEqual((commit2_group["passed_scenarios"], commit2_group["total_scenarios"]), (0, 1))

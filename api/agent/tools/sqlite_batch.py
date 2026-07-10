@@ -12,12 +12,18 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import sqlparse
+from django.db import DatabaseError
+from django.db.models import Q
 from sqlparse import tokens as sql_tokens
 from sqlparse.sql import Statement
 from .sqlite_guardrails import clear_guarded_connection, get_blocked_statement_reason, open_guarded_sqlite_connection, start_query_timer, stop_query_timer
 from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
-from .sqlite_query_quality import build_tool_result_query_advisories
-from .sqlite_state import EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
+from .sqlite_query_quality import (
+    build_tool_result_query_advisories,
+    manual_literal_rowset_literals,
+    summarize_sqlite_tool_result_sql,
+)
+from .sqlite_state import EPHEMERAL_TABLES, RUNTIME_STATE_TABLE, _sqlite_db_path_var  # type: ignore
 
 if TYPE_CHECKING:
     from ...models import PersistentAgent
@@ -30,8 +36,22 @@ MAX_AUTO_CORRECTION_CANDIDATES = 20
 
 logger = logging.getLogger(__name__)
 PROTECTED_TABLE_NAMES = frozenset(
-    {name.lower() for name in EPHEMERAL_TABLES} | {"sqlite_master", "sqlite_schema"}
+    {name.lower() for name in EPHEMERAL_TABLES}
+    | {RUNTIME_STATE_TABLE, "sqlite_master", "sqlite_schema"}
 )
+_RUNTIME_STATE_REFERENCE_RE = re.compile(
+    rf'(?<!\w)(?:["\'`\[]?main["\'`\]]?\s*\.\s*)?["\'`\[]?{re.escape(RUNTIME_STATE_TABLE)}["\'`\]]?(?!\w)',
+    re.IGNORECASE,
+)
+_CREATE_TABLE_AS_RE = re.compile(
+    r'^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?'
+    r'(?:(?:"|`|\[)([A-Za-z_]\w*)(?:"|`|\])|([A-Za-z_]\w*))\s+AS\b',
+    re.IGNORECASE,
+)
+
+
+def _retryable_error(error_type: str, message: str) -> Dict[str, Any]:
+    return {"status": "error", "retryable": True, "error_type": error_type, "message": message}
 
 try:
     import resource
@@ -89,37 +109,19 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
-def _coerce_str(value: Any, default: str) -> str:
-    if value is None:
-        return default
-    try:
-        return str(value)
-    except Exception:
-        return default
-
-
 def _resolve_sqlite_batch_limits() -> _SqliteBatchLimits:
-    wall_timeout = _coerce_float(
-        _get_setting_value("SQLITE_BATCH_WALL_TIMEOUT_SECONDS"),
-        DEFAULT_SQLITE_BATCH_WALL_TIMEOUT_SECONDS,
-    )
-    wall_timeout = max(0.0, wall_timeout)
-    query_timeout = _coerce_float(
-        _get_setting_value("SQLITE_BATCH_QUERY_TIMEOUT_SECONDS"),
-        wall_timeout,
-    )
-    query_timeout = max(0.0, query_timeout)
-    cpu_seconds = _coerce_int(
-        _get_setting_value("SQLITE_BATCH_CPU_SECONDS"),
-        DEFAULT_SQLITE_BATCH_CPU_SECONDS,
-    )
-    cpu_seconds = max(0, cpu_seconds)
-    memory_mb = _coerce_int(
-        _get_setting_value("SQLITE_BATCH_MEMORY_MB"),
-        DEFAULT_SQLITE_BATCH_MEMORY_MB,
-    )
-    memory_mb = max(0, memory_mb)
-
+    wall_timeout = max(0.0, _coerce_float(
+        _get_setting_value("SQLITE_BATCH_WALL_TIMEOUT_SECONDS"), DEFAULT_SQLITE_BATCH_WALL_TIMEOUT_SECONDS,
+    ))
+    query_timeout = max(0.0, _coerce_float(
+        _get_setting_value("SQLITE_BATCH_QUERY_TIMEOUT_SECONDS"), wall_timeout,
+    ))
+    cpu_seconds = max(0, _coerce_int(
+        _get_setting_value("SQLITE_BATCH_CPU_SECONDS"), DEFAULT_SQLITE_BATCH_CPU_SECONDS,
+    ))
+    memory_mb = max(0, _coerce_int(
+        _get_setting_value("SQLITE_BATCH_MEMORY_MB"), DEFAULT_SQLITE_BATCH_MEMORY_MB,
+    ))
     return _SqliteBatchLimits(
         wall_timeout_seconds=wall_timeout,
         cpu_seconds=cpu_seconds,
@@ -182,16 +184,12 @@ def _get_db_size_mb(db_path: str) -> float:
 
 def _extract_cte_names(sql: str) -> list[str]:
     """Extract CTE names from WITH clauses."""
-    # Match: WITH name AS, WITH RECURSIVE name AS, or , name AS (for multiple CTEs)
     pattern = r'(?:WITH(?:\s+RECURSIVE)?|,)\s+(\w+)\s+AS\s*\('
     return re.findall(pattern, sql, re.IGNORECASE)
 
 
 def _strip_trailing_tool_params(sql: str) -> tuple[str, str | None]:
-    """Strip trailing tool call parameters that LLMs mistakenly include in SQL.
-
-    Example: '...ORDER BY price", will_continue_work=true' -> '...ORDER BY price'
-    """
+    """Strip tool parameters that models mistakenly append to SQL."""
     patterns = [
         r'"\s*,\s*will_continue_work\s*=\s*(true|false)\s*[}"\']?\s*$',
         r'"\s*,\s*"will_continue_work"\s*:\s*(true|false)\s*}\s*$',
@@ -207,10 +205,7 @@ def _strip_trailing_tool_params(sql: str) -> tuple[str, str | None]:
 
 
 def _strip_markdown_fences(sql: str) -> tuple[str, str | None]:
-    """Strip markdown code fences from SQL.
-
-    Example: '```sql\nSELECT * FROM t\n```' -> 'SELECT * FROM t'
-    """
+    """Strip Markdown code fences from SQL."""
     original = sql
     sql = re.sub(r'^```(?:sql)?\s*\n?', '', sql, flags=re.IGNORECASE)
     sql = re.sub(r'\n?```\s*$', '', sql)
@@ -220,10 +215,7 @@ def _strip_markdown_fences(sql: str) -> tuple[str, str | None]:
 
 
 def _fix_escaped_quotes(sql: str) -> tuple[str, str | None]:
-    r"""Fix escaped quotes that LLMs sometimes produce.
-
-    Example: 'WHERE name = \"John\"' -> "WHERE name = 'John'"
-    """
+    r"""Fix backslash-escaped quotes that models sometimes produce."""
     original = sql
     result: list[str] = []
     in_single_quote = False
@@ -275,10 +267,7 @@ def _sqlite_quote_escape_hint() -> str:
 
 
 def _fix_unescaped_single_quote_runs(sql: str) -> tuple[str, str | None]:
-    """Balance odd-length runs of single quotes.
-
-    Example: REPLACE(text, '&#x27;', ''') -> REPLACE(text, '&#x27;', '''')
-    """
+    """Balance odd-length runs of single quotes."""
     original = sql
 
     def _balance(match: re.Match[str]) -> str:
@@ -571,53 +560,24 @@ def _fix_json_key_vs_alias(sql: str, error_msg: str) -> tuple[str, str | None]:
 def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]:
     """Apply all SQL fixes and return (fixed_sql, list_of_corrections)."""
     corrections = []
-
-    # Pre-execution cleanups (always apply)
-    sql, fix = _strip_trailing_tool_params(sql)
-    if fix:
-        corrections.append(fix)
-
-    sql, fix = _strip_markdown_fences(sql)
-    if fix:
-        corrections.append(fix)
-
-    sql, fix = _fix_escaped_quotes(sql)
-    if fix:
-        corrections.append(fix)
-    sql, fix = _fix_unescaped_single_quote_runs(sql)
-    if fix:
-        corrections.append(fix)
-
-    sql, fix = _fix_python_operators(sql)
-    if fix:
-        corrections.append(fix)
-
-    sql, fix = _fix_dialect_functions(sql)
-    if fix:
-        corrections.append(fix)
-
-    sql, fix = _fix_dialect_syntax(sql)
-    if fix:
-        corrections.append(fix)
-
-    sql, fix = _fix_trailing_commas(sql)
-    if fix:
-        corrections.append(fix)
-
-    # Error-driven fixes (only if we have an error message)
+    for fixer in (
+        _strip_trailing_tool_params,
+        _strip_markdown_fences,
+        _fix_escaped_quotes,
+        _fix_unescaped_single_quote_runs,
+        _fix_python_operators,
+        _fix_dialect_functions,
+        _fix_dialect_syntax,
+        _fix_trailing_commas,
+    ):
+        sql, fix = fixer(sql)
+        if fix:
+            corrections.append(fix)
     if error_msg:
-        sql, fix = _fix_singular_plural_tables(sql, error_msg)
-        if fix:
-            corrections.append(fix)
-
-        sql, fix = _fix_singular_plural_columns(sql, error_msg)
-        if fix:
-            corrections.append(fix)
-
-        sql, fix = _fix_json_key_vs_alias(sql, error_msg)
-        if fix:
-            corrections.append(fix)
-
+        for fixer in (_fix_singular_plural_tables, _fix_singular_plural_columns, _fix_json_key_vs_alias):
+            sql, fix = fixer(sql, error_msg)
+            if fix:
+                corrections.append(fix)
     return sql, corrections
 
 
@@ -628,37 +588,23 @@ def _extract_select_aliases(sql: str) -> list[str]:
 
 
 def _extract_table_refs(sql: str) -> list[tuple[str, str]]:
-    """Extract table references from FROM/JOIN clauses.
-
-    Returns list of (table_name, alias) tuples.
-    If no alias, alias equals table_name.
-    """
+    """Extract ``(table_name, alias)`` pairs from the main FROM/JOIN clause."""
     refs = []
-
-    # Find ALL FROM clauses in the SQL (there may be multiple due to CTEs/subqueries)
-    # Take the last one as the "main" query's FROM clause
     from_matches = re.findall(
         r'\bFROM\s+(.+?)(?:\s+WHERE\b|\s+GROUP\b|\s+ORDER\b|\s+LIMIT\b|\s+UNION\b|;|$)',
         sql, re.IGNORECASE | re.DOTALL
     )
-
     if not from_matches:
         return refs
-
-    # Use the last FROM clause (main query, not CTE subqueries)
-    from_clause = from_matches[-1]
-
-    # Handle comma-separated tables: "table1, table2 t2, table3 AS t3"
-    # Also handle JOINs inline
-    parts = re.split(r'\s+(?:LEFT\s+|RIGHT\s+|INNER\s+|OUTER\s+|CROSS\s+)?JOIN\s+', from_clause, flags=re.IGNORECASE)
+    parts = re.split(
+        r'\s+(?:LEFT\s+|RIGHT\s+|INNER\s+|OUTER\s+|CROSS\s+)?JOIN\s+',
+        from_matches[-1],
+        flags=re.IGNORECASE,
+    )
     for part in parts:
-        # Each part could be "table alias" or "table, table2 alias2"
-        tables = [t.strip() for t in part.split(',')]
-        for table_str in tables:
-            table_str = table_str.strip()
+        for table_str in map(str.strip, part.split(',')):
             if not table_str:
                 continue
-            # Parse "table [AS] alias" or just "table"
             match = re.match(r'^(\w+)(?:\s+AS\s+(\w+)|\s+(\w+))?', table_str, re.IGNORECASE)
             if match:
                 table_name = match.group(1)
@@ -952,33 +898,16 @@ def _autocorrect_missing_column_with_json_paths(
 
 def _get_schema_tables(conn: sqlite3.Connection) -> list[str]:
     tables: list[str] = []
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT name FROM sqlite_master WHERE type IN ('table','view') "
-            "AND name NOT LIKE 'sqlite_%' ORDER BY name;"
-        )
-        tables.extend([row[0] for row in cur.fetchall()])
-    except Exception:
-        pass
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT name FROM sqlite_temp_master WHERE type IN ('table','view') "
-            "AND name NOT LIKE 'sqlite_%' ORDER BY name;"
-        )
-        tables.extend([row[0] for row in cur.fetchall()])
-    except Exception:
-        pass
-
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for name in tables:
-        if name in seen:
+    for catalog in ("sqlite_master", "sqlite_temp_master"):
+        try:
+            rows = conn.execute(
+                f"SELECT name FROM {catalog} WHERE type IN ('table','view') "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name;"
+            )
+            tables.extend(row[0] for row in rows)
+        except sqlite3.Error:
             continue
-        seen.add(name)
-        deduped.append(name)
-    return deduped
+    return list(dict.fromkeys(name for name in tables if name.lower() != RUNTIME_STATE_TABLE))
 
 
 def _table_has_column(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
@@ -1075,6 +1004,52 @@ def _table_row_count(conn: sqlite3.Connection, table_name: str) -> int:
         return int(row[0] or 0) if row else 0
     except sqlite3.Error:
         return 0
+
+
+def _manual_literals_copied_from_tool_results(
+    conn: sqlite3.Connection,
+    sql_values: List[str],
+) -> bool:
+    literals = manual_literal_rowset_literals(sql_values)
+    if len(literals) < 3:
+        return False
+    columns = set(_get_schema_columns(conn, "__tool_results"))
+    payload_columns = [name for name in ("result_text", "result_json") if name in columns]
+    if not payload_columns:
+        return False
+    projection = ", ".join(f'"{name}"' for name in payload_columns)
+    try:
+        rows = conn.execute(f'SELECT {projection} FROM "__tool_results" LIMIT 20').fetchall()
+    except sqlite3.Error:
+        return False
+    payload = "\n".join(str(value or "") for row in rows for value in row)
+    normalized_payload = re.sub(r"\s+", " ", payload).casefold()
+    matches = {
+        literal
+        for literal in literals
+        if re.sub(r"\s+", " ", literal).casefold() in normalized_payload
+    }
+    return len(matches) >= 3 and sum(len(value) for value in matches) >= 100
+
+
+def _runtime_raw_projection_count(
+    conn: sqlite3.Connection,
+    task_boundary: str,
+) -> int:
+    conn.execute(
+        f'CREATE TABLE IF NOT EXISTS "{RUNTIME_STATE_TABLE}" '
+        "(id INTEGER PRIMARY KEY CHECK (id = 1), task_boundary TEXT NOT NULL, "
+        "raw_projection_count INTEGER NOT NULL CHECK (raw_projection_count >= 0));"
+    )
+    row = conn.execute(
+        f'INSERT INTO "{RUNTIME_STATE_TABLE}" (id, task_boundary, raw_projection_count) VALUES (1, ?, 0) '
+        "ON CONFLICT(id) DO UPDATE SET raw_projection_count = CASE "
+        "WHEN task_boundary = excluded.task_boundary THEN raw_projection_count ELSE 0 END, "
+        "task_boundary = excluded.task_boundary RETURNING raw_projection_count;",
+        (task_boundary,),
+    ).fetchone()
+    conn.commit()
+    return int(row[0])
 
 
 def _autocorrect_missing_table_with_schema(
@@ -1350,7 +1325,17 @@ def _execute_with_autocorrections(
     while queue_items and attempts < MAX_AUTO_CORRECTION_ATTEMPTS:
         current_query, corrections = queue_items.popleft()
         attempts += 1
+        savepoint_name = f"gobii_sqlite_statement_{idx}_{attempts}"
+        savepoint_active = False
         try:
+            cur.execute(f'SAVEPOINT "{savepoint_name}";')
+            savepoint_active = True
+            changes_before = conn.total_changes
+            create_as_match = _CREATE_TABLE_AS_RE.match(current_query)
+            create_as_table = next((name for name in create_as_match.groups() if name), "") if create_as_match else ""
+            create_as_preexisting = bool(create_as_table and conn.execute(
+                "SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (create_as_table,)
+            ).fetchone())
             start_query_timer(conn)
             cur.execute(current_query)
             if cur.description is not None:
@@ -1367,12 +1352,18 @@ def _execute_with_autocorrections(
                     result_entry["reporting_note"] = reporting_note.strip()
             else:
                 affected = cur.rowcount if cur.rowcount is not None else 0
+                if affected < 0:
+                    affected = conn.total_changes - changes_before
+                    if create_as_table and not create_as_preexisting:
+                        affected = _table_row_count(conn, create_as_table)
                 msg = f"Query {idx} affected {max(0, affected)} rows."
                 zero_rows_warning = False
-                query_upper = current_query.upper()
-                if affected <= 0 and "WITH" in query_upper and "INSERT" in query_upper:
+                parsed_statements = sqlparse.parse(current_query)
+                statement_type = parsed_statements[0].get_type().upper() if parsed_statements else "UNKNOWN"
+                is_cte_insert = statement_type == "INSERT" and current_query.lstrip().upper().startswith("WITH")
+                if affected <= 0 and is_cte_insert:
                     msg += " (Normal for CTE INSERT - check sqlite_schema for actual row count)"
-                elif affected == 0 and ("UPDATE" in query_upper or "DELETE" in query_upper):
+                elif affected == 0 and statement_type in {"UPDATE", "DELETE"}:
                     zero_rows_warning = True
                     msg += (
                         " (No match—verify WHERE values against ground truth: "
@@ -1382,11 +1373,23 @@ def _execute_with_autocorrections(
                 if zero_rows_warning:
                     result_entry["warning"] = True
                     result_entry["warning_code"] = "zero_rows_affected"
+            cur.execute(f'RELEASE SAVEPOINT "{savepoint_name}";')
+            savepoint_active = False
             return result_entry, current_query, corrections, None
         except Exception as orig_exc:
             last_error_message = str(orig_exc)
             last_error_query = current_query
-            conn.rollback()
+            if savepoint_active:
+                try:
+                    cur.execute(f'ROLLBACK TO SAVEPOINT "{savepoint_name}";')
+                    cur.execute(f'RELEASE SAVEPOINT "{savepoint_name}";')
+                except sqlite3.Error as restore_exc:
+                    return (
+                        None,
+                        last_error_query,
+                        base_corrections,
+                        f"{last_error_message} (failed to restore statement savepoint: {restore_exc})",
+                    )
             for updated_sql, fixes in _build_autocorrection_candidates(current_query, last_error_message, conn):
                 if updated_sql in seen:
                     continue
@@ -1402,9 +1405,72 @@ def _execute_with_autocorrections(
     return None, last_error_query, base_corrections, last_error_message
 
 
+_EXPLICIT_TRANSACTION_SAVEPOINT = "gobii_sqlite_explicit_transaction"
+_TRANSACTION_CONTROL_PATTERNS = (
+    ("begin", r"BEGIN(?:\s+(?:DEFERRED|IMMEDIATE|EXCLUSIVE))?(?:\s+TRANSACTION)?"),
+    ("commit", r"(?:COMMIT|END)(?:\s+TRANSACTION)?"),
+    ("rollback", r"ROLLBACK(?:\s+TRANSACTION)?"),
+    ("passthrough", r"(?:SAVEPOINT\s+.+|RELEASE(?:\s+SAVEPOINT)?\s+.+|ROLLBACK(?:\s+TRANSACTION)?\s+TO(?:\s+SAVEPOINT)?\s+.+)"),
+)
+
+
+def _transaction_control_action(sql: str) -> str | None:
+    normalized = sqlparse.format(sql, strip_comments=True).strip().rstrip(";").strip()
+    return next(
+        (action for action, pattern in _TRANSACTION_CONTROL_PATTERNS if re.fullmatch(pattern, normalized, re.I)),
+        None,
+    )
+
+
+def _execute_transaction_control(
+    conn: sqlite3.Connection,
+    cur: sqlite3.Cursor,
+    query: str,
+    idx: int,
+    action: str,
+    explicit_transaction_active: bool,
+) -> tuple[Dict[str, Any] | None, bool, str | None]:
+    try:
+        start_query_timer(conn)
+        statements = []
+        if action == "begin":
+            if explicit_transaction_active:
+                return None, explicit_transaction_active, "cannot start a transaction within a transaction"
+            statements.append(f'SAVEPOINT "{_EXPLICIT_TRANSACTION_SAVEPOINT}";')
+            explicit_transaction_active = True
+        elif action == "commit":
+            if explicit_transaction_active:
+                statements.append(f'RELEASE SAVEPOINT "{_EXPLICIT_TRANSACTION_SAVEPOINT}";')
+            explicit_transaction_active = False
+        elif action == "rollback":
+            if explicit_transaction_active:
+                statements.extend((
+                    f'ROLLBACK TO SAVEPOINT "{_EXPLICIT_TRANSACTION_SAVEPOINT}";',
+                    f'RELEASE SAVEPOINT "{_EXPLICIT_TRANSACTION_SAVEPOINT}";',
+                ))
+                explicit_transaction_active = False
+            else:
+                conn.rollback()
+                conn.execute("BEGIN;")
+        else:
+            statements.append(query)
+        for statement in statements:
+            cur.execute(statement)
+        result = {"message": f"Query {idx} applied transaction control within the atomic batch."}
+        return result, explicit_transaction_active, None
+    except sqlite3.Error as exc:
+        return None, explicit_transaction_active, str(exc)
+    finally:
+        stop_query_timer(conn)
+
+
 def _get_error_hint(error_msg: str, sql: str = "") -> str:
     """Return a helpful hint for common SQLite errors."""
     error_lower = error_msg.lower()
+    if "order by term does not match any column in the result set" in error_lower:
+        return " FIX: A compound SELECT can order only by output columns. Wrap the UNION query in SELECT * FROM (...) and apply ORDER BY in the outer query."
+    if "distinct aggregates must have exactly one argument" in error_lower:
+        return " FIX: SQLite DISTINCT aggregates cannot take a custom separator. Use GROUP_CONCAT(DISTINCT value), or dedupe in a subquery before GROUP_CONCAT(value, separator)."
     if _has_backslash_quote_issue(error_msg, sql):
         return _sqlite_quote_escape_hint()
     if "union" in error_lower and "column" in error_lower:
@@ -1441,11 +1507,12 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
     if "unique constraint" in error_lower:
         return " FIX: Use INSERT OR REPLACE or INSERT OR IGNORE to handle duplicate keys."
     if "malformed json" in error_lower:
-        # Check if they're misusing grep_context_all or similar functions
         if "grep_context" in sql.lower():
             return " FIX: grep_context_all returns array of STRINGS, not objects. Use: SELECT ctx.value FROM json_each(grep_context_all(...)) ctx"
         if "split_sections" in sql.lower():
             return " FIX: split_sections returns array of STRINGS. Use: SELECT s.value FROM json_each(split_sections(...)) s"
+        if "json_each" in sql.lower() and "json_extract" in sql.lower():
+            return " FIX: json_each over an object emits scalar children too. Point it at the intended array path, then json_extract(ctx.value, ...) only when ctx.type='object'."
         return " FIX: json_extract requires valid JSON. Check that the column/expression contains JSON, not plain text."
     return ""
 
@@ -1455,7 +1522,7 @@ def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List
 
     Returns (limited_rows, warning_message).
     """
-    warning = ""
+    warnings = []
     total_rows = len(rows)
 
     # Check if query already has LIMIT
@@ -1465,24 +1532,81 @@ def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List
     # Hard cap on rows
     if total_rows > MAX_RESULT_ROWS:
         rows = rows[:MAX_RESULT_ROWS]
-        warning = f" [!] TRUNCATED: {total_rows} rows -> {MAX_RESULT_ROWS}. Add LIMIT to your query."
+        warnings.append(
+            f"TRUNCATED: {total_rows} rows -> {MAX_RESULT_ROWS}. Add LIMIT to your query."
+        )
 
     # Check byte size
     try:
-        result_bytes = len(json.dumps(rows, default=str).encode('utf-8'))
+        result_bytes = _serialized_result_bytes(rows)
         if result_bytes > MAX_RESULT_BYTES:
-            # Progressively reduce until under limit
-            while len(rows) > 10 and len(json.dumps(rows, default=str).encode('utf-8')) > MAX_RESULT_BYTES:
-                rows = rows[:len(rows) // 2]
-            warning = f" [!] TRUNCATED to {len(rows)} rows (size limit). Use LIMIT and specific columns."
+            original_byte_limited_rows = len(rows)
+            if len(rows) > 10:
+                while len(rows) > 10 and _serialized_result_bytes(rows) > MAX_RESULT_BYTES:
+                    rows = rows[:max(10, len(rows) // 2)]
+            if len(rows) < original_byte_limited_rows:
+                warnings.append(
+                    f"TRUNCATED to {len(rows)} rows (size limit). Use LIMIT and specific columns."
+                )
+
+            if _serialized_result_bytes(rows) > MAX_RESULT_BYTES:
+                rows, truncated_cells = _truncate_scalar_strings_to_limit(rows)
+                if truncated_cells:
+                    warnings.append(
+                        f"TRUNCATED {truncated_cells} oversized text cell(s) to keep the serialized result near "
+                        f"{MAX_RESULT_BYTES} bytes while preserving rows and columns. Select only needed columns; "
+                        "use substr() for text or json_extract/json_each for JSON payloads."
+                    )
+                if _serialized_result_bytes(rows) > MAX_RESULT_BYTES:
+                    warnings.append(
+                        f"Result metadata still exceeds {MAX_RESULT_BYTES} bytes after text truncation; "
+                        "project fewer columns."
+                    )
     except Exception:
         pass
 
     # Warn about missing LIMIT even if not truncated
-    if not warning and total_rows > WARN_RESULT_ROWS and not has_limit:
-        warning = f" [!] Large result ({total_rows} rows). Consider adding LIMIT for efficiency."
+    if not warnings and total_rows > WARN_RESULT_ROWS and not has_limit:
+        warnings.append(f"Large result ({total_rows} rows). Consider adding LIMIT for efficiency.")
 
+    warning = f" [!] {' '.join(warnings)}" if warnings else ""
     return rows, warning
+
+
+def _serialized_result_bytes(rows: List[Dict[str, Any]]) -> int:
+    return len(json.dumps(rows, default=str).encode("utf-8"))
+
+
+def _truncate_scalar_strings_to_limit(
+    rows: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], int]:
+    """Fairly trim string cells while preserving every row, column, and scalar."""
+    marker = "...[truncated]"
+    marker_bytes = len(json.dumps(marker).encode("utf-8"))
+    candidates: list[tuple[int, str, str]] = []
+    for row_index, row in enumerate(rows):
+        for column, value in row.items():
+            if isinstance(value, str) and len(json.dumps(value).encode("utf-8")) > marker_bytes:
+                candidates.append((row_index, column, value))
+    if not candidates:
+        return rows, 0
+
+    def render(prefix_chars: int) -> List[Dict[str, Any]]:
+        rendered = [dict(row) for row in rows]
+        for row_index, column, value in candidates:
+            rendered[row_index][column] = value[:min(prefix_chars, len(value) - 1)] + marker
+        return rendered
+
+    low, high = 0, max(len(value) - 1 for _, _, value in candidates)
+    limited_rows = render(0)
+    while low <= high:
+        prefix_chars = (low + high) // 2
+        candidate_rows = render(prefix_chars)
+        if _serialized_result_bytes(candidate_rows) <= MAX_RESULT_BYTES:
+            limited_rows, low = candidate_rows, prefix_chars + 1
+        else:
+            high = prefix_chars - 1
+    return limited_rows, len(candidates)
 
 
 _ITEM_URL_FIELD_NAMES = {"url", "link", "listing_url", "detail_url", "item_url"}
@@ -1619,6 +1743,7 @@ def _run_sqlite_batch_in_subprocess(
     agent_id: str,
     params: Dict[str, Any],
     db_path: str,
+    task_boundary: str,
     limits: _SqliteBatchLimits,
 ) -> Dict[str, Any]:
     """Run SQLite batch in a subprocess using subprocess.Popen.
@@ -1630,6 +1755,7 @@ def _run_sqlite_batch_in_subprocess(
         "agent_id": agent_id,
         "params": params,
         "db_path": db_path,
+        "task_boundary": task_boundary,
         "limits": {
             "wall_timeout_seconds": limits.wall_timeout_seconds,
             "cpu_seconds": limits.cpu_seconds,
@@ -1700,6 +1826,7 @@ def _execute_sqlite_batch_inner(
     agent_id: str,
     params: Dict[str, Any],
     db_path: str,
+    task_boundary: str,
     query_timeout_seconds: float,
 ) -> Dict[str, Any]:
     """Execute one or more SQL queries against the agent's SQLite DB."""
@@ -1709,16 +1836,17 @@ def _execute_sqlite_batch_inner(
             "status": "error",
             "message": "Provide `sql` as a SQL string (semicolon-separated for multiple statements).",
         }
+    if any(_RUNTIME_STATE_REFERENCE_RE.search(query) for query in queries):
+        return _retryable_error(
+            "protected_runtime_state",
+            "Internal SQLite runtime state is protected; remove that table reference and retry.",
+        )
 
     will_continue_work_raw = params.get("will_continue_work", None)
-    if will_continue_work_raw is None:
-        will_continue_work = None
-    elif isinstance(will_continue_work_raw, bool):
-        will_continue_work = will_continue_work_raw
-    elif isinstance(will_continue_work_raw, str):
+    if isinstance(will_continue_work_raw, str):
         will_continue_work = will_continue_work_raw.lower() == "true"
     else:
-        will_continue_work = None
+        will_continue_work = will_continue_work_raw if isinstance(will_continue_work_raw, bool) else None
 
     conn: Optional[sqlite3.Connection] = None
     results: List[Dict[str, Any]] = []
@@ -1726,6 +1854,7 @@ def _execute_sqlite_batch_inner(
     had_warning = False
     error_message = ""
     all_corrections: List[str] = []
+    explicit_transaction_active = False
 
     try:
         conn = open_guarded_sqlite_connection(db_path, timeout_seconds=query_timeout_seconds)
@@ -1734,6 +1863,28 @@ def _execute_sqlite_batch_inner(
             cur.execute("PRAGMA busy_timeout = 2000;")
         except Exception:
             pass
+
+        if _manual_literals_copied_from_tool_results(conn, queries):
+            return _retryable_error(
+                "manual_tool_result_copy",
+                "Copied tool-result facts in a literal SQL rowset were rejected. Query result_json/result_text "
+                "from __tool_results directly, using the root fields and one shaped query.",
+            )
+
+        quality_summary = summarize_sqlite_tool_result_sql(queries)
+        raw_projection_count = quality_summary.unshaped_result_payload_queries
+        if (
+            raw_projection_count
+            and _runtime_raw_projection_count(conn, task_boundary) + raw_projection_count > 1
+        ):
+            return _retryable_error(
+                "repeated_unshaped_tool_result_projection",
+                "Repeated raw __tool_results payload projection was rejected. One bounded preview is allowed "
+                "per task; now shape the needed rows with json_extract/json_each, grep_context_all, joins, "
+                "filters, or aggregates.",
+            )
+
+        conn.execute("BEGIN;")
 
         preview = [q.strip()[:160] for q in queries[:5]]
         logger.info("Agent %s executing sqlite_batch: %s queries (preview=%s)", agent_id, len(queries), preview)
@@ -1757,6 +1908,27 @@ def _execute_sqlite_batch_inner(
                 had_error = True
                 error_message = f"Query {idx} blocked: {block_reason}"
                 break
+
+            transaction_action = _transaction_control_action(query)
+            if transaction_action is not None:
+                result_entry, explicit_transaction_active, failure_message = _execute_transaction_control(
+                    conn,
+                    cur,
+                    query,
+                    idx,
+                    transaction_action,
+                    explicit_transaction_active,
+                )
+                if failure_message:
+                    had_error = True
+                    error_message = f"Query {idx} failed: {failure_message}"
+                    break
+                if result_entry is None:
+                    had_error = True
+                    error_message = f"Query {idx} failed: no result produced."
+                    break
+                results.append(result_entry)
+                continue
 
             query = _apply_tool_results_result_id_compat(query, conn)
             result_entry, final_query, applied_corrections, failure_message = _execute_with_autocorrections(
@@ -1788,6 +1960,24 @@ def _execute_sqlite_batch_inner(
                 }
                 all_corrections.extend(applied_corrections)
             results.append(result_entry)
+
+        if not had_error and explicit_transaction_active:
+            try:
+                cur.execute(f'RELEASE SAVEPOINT "{_EXPLICIT_TRANSACTION_SAVEPOINT}";')
+                explicit_transaction_active = False
+            except sqlite3.Error as exc:
+                had_error = True
+                error_message = f"Failed to close explicit transaction: {exc}"
+
+        if had_error:
+            conn.rollback()
+        else:
+            if raw_projection_count:
+                conn.execute(
+                    f'UPDATE "{RUNTIME_STATE_TABLE}" '
+                    "SET raw_projection_count = raw_projection_count + ? WHERE id = 1",
+                    (raw_projection_count,),
+                )
             conn.commit()
 
         db_size_mb = _get_db_size_mb(db_path)
@@ -1801,12 +1991,15 @@ def _execute_sqlite_batch_inner(
                 queries,
                 available_tool_result_rows=_table_row_count(conn, "__tool_results"),
             )
-            if advisories:
+            if any(
+                getattr(advisory, "severity", "warning") == "warning"
+                for advisory in advisories
+            ):
                 had_warning = True
 
         # Build success message with any auto-corrections noted
         if had_error:
-            msg = error_message
+            msg = f"{error_message} All changes from this sqlite_batch call were rolled back."
         else:
             msg = f"Executed {len(results)} queries. Database size: {db_size_mb:.2f} MB.{size_warning}"
             if all_corrections:
@@ -1832,12 +2025,21 @@ def _execute_sqlite_batch_inner(
             response["auto_sleep_ok"] = True
         if advisories:
             response["advisories"] = [
-                {"code": advisory.code, "message": advisory.message}
+                {
+                    "code": advisory.code,
+                    "message": advisory.message,
+                    "severity": getattr(advisory, "severity", "warning"),
+                }
                 for advisory in advisories
             ]
 
         return response
     except Exception as outer:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
         return {"status": "error", "message": f"SQLite batch failed: {outer}"}
     finally:
         if conn is not None:
@@ -1846,6 +2048,38 @@ def _execute_sqlite_batch_inner(
                 conn.close()
             except Exception:
                 pass
+
+
+def _current_sqlite_task_boundary(agent: "PersistentAgent") -> str:
+    try:
+        inbound = (
+            agent.agent_messages.filter(is_outbound=False)
+            .order_by("-timestamp", "-seq")
+            .values_list("id", "seq", "timestamp")
+            .first()
+        )
+        trigger = (
+            agent.steps.filter(
+                Q(cron_trigger__isnull=False)
+                | Q(system_step__code="PROACTIVE_TRIGGER")
+            )
+            .order_by("-created_at", "-id")
+            .values_list("id", "created_at", "cron_trigger__cron_expression")
+            .first()
+        )
+    except DatabaseError:
+        logger.warning("Could not resolve SQLite task boundary for agent %s", agent.id, exc_info=True)
+        return "task:unavailable"
+
+    candidates = []
+    if inbound:
+        message_id, seq, timestamp = inbound
+        candidates.append((timestamp, f"inbound:{message_id}:{seq}:{timestamp.isoformat()}"))
+    if trigger:
+        step_id, created_at, cron_expression = trigger
+        kind = "cron" if cron_expression is not None else "proactive"
+        candidates.append((created_at, f"{kind}:{step_id}:{created_at.isoformat()}"))
+    return max(candidates, key=lambda candidate: (candidate[0], candidate[1]))[1] if candidates else "task:none"
 
 
 def execute_sqlite_batch(agent: "PersistentAgent", params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1859,6 +2093,7 @@ def execute_sqlite_batch(agent: "PersistentAgent", params: Dict[str, Any]) -> Di
         agent_id=str(agent.id),
         params=params,
         db_path=db_path,
+        task_boundary=_current_sqlite_task_boundary(agent),
         limits=limits,
     )
 
@@ -1870,12 +2105,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Durable SQLite memory for structured data. "
-                "Query/update structured data you already have. "
-                "For multiple outputs, use one shaped query with CTEs/IN/json_extract/json_each/joins/aggregation; persist extracts from __tool_results with CREATE TABLE ... AS SELECT, not hand-entered VALUES. "
-                "For repetitive imports, API fan-out, or large writes, prefer a custom tool writing to SQLite; query those tables here, no ATTACH. "
-                "`sql` is one semicolon-separated string. Escape quotes by doubling: 'O''Brien'. "
-                "grep_context_all/split_sections return string arrays: json_each(...), then ctx.value directly, not json_extract. "
+                "Query/update durable SQLite. Shape multiple `__tool_results` set-wise with CTEs/IN/joins/aggregates and JSON helpers; never synthesize/dedupe from `substr` previews. Batch SQL; never copy outputs into SQL. Create tables only for reuse; use a custom tool for bulk imports/API fan-out."
             ),
             "parameters": {
                 "type": "object",
@@ -1886,7 +2116,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true if another action/reply follows; false if this completes the turn.",
+                        "description": "Required: true if immediate work follows; false if complete.",
                     },
                 },
                 "required": ["sql", "will_continue_work"],
@@ -1932,6 +2162,7 @@ def _subprocess_worker_main() -> None:
             agent_id=payload.get("agent_id", "unknown"),
             params=payload.get("params", {}),
             db_path=payload.get("db_path", ""),
+            task_boundary=payload.get("task_boundary", "task:none"),
             query_timeout_seconds=limits.query_timeout_seconds,
         )
     except Exception as exc:

@@ -8,7 +8,7 @@ from api.agent.core.llm_utils import EmptyLiteLLMResponseError
 from api.agent.system_skills import shortlist_system_skills
 from api.agent.tools.meta_gobii_names import META_GOBII_TOOL_NAMES
 from api.agent.tools.search_tools import get_search_tools_tool
-from api.evals.meta_gobii import _planned_extra_scope_items
+from api.evals.meta_gobii import _planned_extra_scope_items, _response_requests_approval
 from api.evals.meta_gobii import META_GOBII_EVAL_CASES
 from api.evals.meta_gobii import META_GOBII_EVAL_SUITE_SLUG
 from api.evals.meta_gobii import score_meta_gobii_case
@@ -122,7 +122,39 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
 
         self.assertEqual(extra_scope_items, ["Add a weekly market digest schedule"])
 
-    def test_skill_discovery_uses_deterministic_fallback_for_retryable_llm_error(self):
+    def test_extra_scope_filter_ignores_read_only_preflight_but_not_mutations(self):
+        extra_scope_items = _planned_extra_scope_items(
+            [
+                "Read-only roster and config inspection before proposing the team",
+                "Inspect current Gobii settings",
+                "Create an unrequested analytics Gobii",
+            ],
+            user_prompt="Create a weekly competitor digest Gobii.",
+        )
+
+        self.assertEqual(extra_scope_items, ["Create an unrequested analytics Gobii"])
+
+    def test_approval_detection_respects_negation(self):
+        self.assertFalse(
+            _response_requests_approval({
+                "response_text": "No approval is needed; I will make the changes now.",
+                "asks_for_approval": True,
+            })
+        )
+        self.assertFalse(
+            _response_requests_approval({
+                "response_text": "Approval is not required for this update.",
+                "asks_for_approval": False,
+            })
+        )
+        self.assertTrue(
+            _response_requests_approval({
+                "response_text": "Please approve this exact plan before I create anything.",
+                "asks_for_approval": False,
+            })
+        )
+
+    def test_live_skill_discovery_surfaces_retryable_llm_error(self):
         case = next(
             eval_case
             for eval_case in META_GOBII_EVAL_CASES
@@ -135,13 +167,8 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
 
         scenario._run_tool_completion = fail_completion
 
-        calls = scenario._run_skill_discovery(case, simulated=False)
-
-        self.assertEqual(
-            [call["name"] for call in calls],
-            [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME],
-        )
-        self.assertEqual(calls[1]["arguments"]["skill_keys"], [META_GOBII_SYSTEM_SKILL_KEY])
+        with self.assertRaises(EmptyLiteLLMResponseError):
+            scenario._run_skill_discovery(case, simulated=False)
 
     def test_implicit_research_team_real_harness_scenario_is_registered(self):
         scenario = ScenarioRegistry.get(META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS)
@@ -176,8 +203,10 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
     def test_search_tools_surface_mentions_hidden_system_skills_for_agent_teams(self):
         description = get_search_tools_tool()["function"]["description"].lower()
 
-        self.assertIn("hidden system skills", description)
-        self.assertIn("agent/team-management", description)
+        self.assertIn("hidden skills", description)
+        self.assertIn("persistent research/specialist team must start here", description)
+        self.assertIn("never simulate a team with personas", description)
+        self.assertIn("named integrations", description)
 
     def test_implicit_research_team_shortlists_meta_gobii_system_skill(self):
         matches = shortlist_system_skills(
@@ -326,7 +355,7 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
 
         self.assertFalse(scores["schedule_scope"][0])
 
-    def test_skill_discovery_uses_deterministic_fallback_after_missing_expected_search(self):
+    def test_live_skill_discovery_keeps_missing_expected_search_as_failure_signal(self):
         case = next(
             eval_case
             for eval_case in META_GOBII_EVAL_CASES
@@ -338,7 +367,4 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
 
         calls = scenario._run_skill_discovery(case, simulated=False)
 
-        self.assertEqual(
-            [call["name"] for call in calls],
-            [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME],
-        )
+        self.assertEqual(calls, [])

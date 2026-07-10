@@ -109,10 +109,11 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         properties = tool["function"]["parameters"]["properties"]
 
         self.assertIn("body-only HTML", description)
-        self.assertIn("inline style attrs", description)
-        self.assertIn("tables/cells", description)
-        self.assertIn("Do NOT leave report metrics in plain lists", description)
-        self.assertIn("Do NOT use Markdown pipe tables", description)
+        self.assertIn("inline-styled sections", description)
+        self.assertIn("metric blocks", description)
+        self.assertIn("colored badges", description)
+        self.assertIn("tables", description)
+        self.assertIn("No Markdown", description)
         self.assertIn("reply_to_message_id", properties)
 
     def test_execute_send_email_retries_on_operational_error(self):
@@ -172,10 +173,10 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertEqual(result.get("status"), "ok")
         self.assertTrue(result.get("message_id"))
 
-    def test_execute_send_email_strips_control_characters(self):
+    def test_execute_send_email_normalizes_authored_content(self):
         params = {
             "to_address": self.user.email,
-            "subject": "Hello Team",
+            "subject": "Daily Meme &amp; Viral Trends Summary",
             "mobile_first_html": "<p>It\u0019s great to chat</p>",
             "cc_addresses": [self.user.email],
         }
@@ -193,7 +194,7 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertEqual(str(message.id), result.get("message_id"))
         self.assertNotIn("\u0019", message.body)
         self.assertIn("It's", message.body)
-        self.assertEqual(message.raw_payload.get("subject", ""), params["subject"])
+        self.assertEqual(message.raw_payload.get("subject", ""), "Daily Meme & Viral Trends Summary")
         self.assertIsNone(message.to_endpoint_id)
         self.assertEqual(message.conversation.address, params["to_address"])
         self.assertIsNone(message.parent_id)

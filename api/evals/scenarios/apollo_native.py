@@ -34,14 +34,29 @@ class ApolloHttpRequestExpectation(HttpRequestExpectation):
         url_terms: tuple[str, ...],
         method: str = "POST",
         body_terms: tuple[str, ...] = (),
+        body_term_groups: tuple[tuple[str, ...], ...] = (),
+        body_object_subsets: tuple[dict[str, Any], ...] = (),
+        body_array_fields: tuple[str, ...] = (),
+        body_string_fields: tuple[str, ...] = (),
+        forbidden_body_fields: tuple[str, ...] = (),
         allowed_statuses: tuple[str, ...] = ("complete",),
+        min_calls: int = 1,
+        max_calls: int | None = 1,
     ):
         super().__init__(
             name=name,
             url_terms=url_terms,
             method=method,
             body_terms=body_terms,
+            body_term_groups=body_term_groups,
+            body_object_subsets=body_object_subsets,
+            body_array_fields=body_array_fields,
+            body_string_fields=body_string_fields,
+            forbidden_body_fields=forbidden_body_fields,
+            exact_path=f"/{url_terms[0].split('/', 1)[1]}",
             allowed_statuses=allowed_statuses,
+            min_calls=min_calls,
+            max_calls=max_calls,
         )
 
 
@@ -69,8 +84,8 @@ APOLLO_NATIVE_CASES = (
         slug=APOLLO_NATIVE_PEOPLE_SEARCH,
         description="Search Apollo people through the native Apollo REST API.",
         prompt=(
-            "Use the native Apollo integration to search the first page of VP Sales contacts at healthcare "
-            "SaaS companies in Boston. Return the matches Apollo returns."
+            "Use the native Apollo integration to search the first page for VP Sales contacts who live in Boston "
+            "and work at healthcare SaaS companies. Return the matches Apollo returns."
         ),
         http_rules=(
             _apollo_rule(
@@ -92,6 +107,23 @@ APOLLO_NATIVE_CASES = (
             ApolloHttpRequestExpectation(
                 name="people_search",
                 url_terms=("api.apollo.io/api/v1/mixed_people/api_search",),
+                body_terms=("healthcare",),
+                body_term_groups=(("saas", "software as a service"),),
+                body_object_subsets=(
+                    {"page": 1},
+                    {"person_titles": ("VP Sales",)},
+                    {"person_locations": ("Boston",)},
+                ),
+                body_array_fields=("person_titles", "person_locations"),
+                body_string_fields=("q_keywords",),
+                forbidden_body_fields=(
+                    "organization_location",
+                    "organization_location_raw",
+                    "q_organization_industry",
+                    "organization_industry",
+                    "organization_industry_tag_ids",
+                    "organization_keywords",
+                ),
             ),
         ),
         response_term_groups=(("Mina", "CareFlow"), ("VP Sales",)),
@@ -124,6 +156,7 @@ APOLLO_NATIVE_CASES = (
             ApolloHttpRequestExpectation(
                 name="organization_search",
                 url_terms=("api.apollo.io/api/v1/mixed_companies/search",),
+                body_object_subsets=({"page": 1},),
             ),
         ),
         response_term_groups=(("CipherLake",), ("Austin",)),
@@ -151,6 +184,7 @@ APOLLO_NATIVE_CASES = (
             ApolloHttpRequestExpectation(
                 name="person_enrichment",
                 url_terms=("api.apollo.io/api/v1/people/match",),
+                body_object_subsets=({"email": "pat@example.test"},),
             ),
         ),
         response_term_groups=(("Pat", "Revenue"), ("Northstar Logistics",)),
@@ -187,8 +221,8 @@ APOLLO_NATIVE_CASES = (
         ),
         response_term_groups=(
             ("Apollo",),
-            ("/app/integrations", "Integrations page", "Integrations section"),
-            ("connect", "connected"),
+            ("/app/integrations", "Integrations page", "Integrations section", "integration settings", "agent settings"),
+            ("not connected", "reconnect", "connect Apollo"),
         ),
         tags=("missing_connection",),
     ),
@@ -216,7 +250,13 @@ APOLLO_NATIVE_CASES = (
             ApolloHttpRequestExpectation(
                 name="create_contact",
                 url_terms=("api.apollo.io/api/v1/contacts",),
-                body_terms=("alex", "morgan", "alex@example.test"),
+                body_object_subsets=(
+                    {
+                        "first_name": "Alex",
+                        "last_name": "Morgan",
+                        "email": "alex@example.test",
+                    },
+                ),
             ),
         ),
         response_term_groups=(("contact_001",), ("Alex", "created")),
@@ -236,7 +276,7 @@ class ApolloNativeScenario(NativeHttpScenarioBase):
     area = "system_skills"
     tags = ("apollo_native", "system_skill", "micro", "http_request")
     tasks = [
-        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask.setup(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_expected_http_requests", assertion_type="tool_call"),
         ScenarioTask(name="verify_no_forbidden_tools", assertion_type="tool_call"),
         ScenarioTask(name="verify_response", assertion_type="exact_match"),
