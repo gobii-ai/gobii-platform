@@ -3098,6 +3098,67 @@ class ConsoleViewsTest(TestCase):
         self.assertIn('webhooks', payload)
 
     @tag("batch_console_agents_management")
+    def test_agent_settings_saves_name_longer_than_legacy_browser_limit(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Legacy Limit Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Legacy Limit Agent",
+            charter="Coordinate operations",
+            browser_use_agent=browser_agent,
+        )
+        long_name = "Long Agent Name " + ("A" * 70)
+
+        response = self.client.post(
+            reverse("console_agent_settings", kwargs={"agent_id": agent.id}),
+            {
+                "name": long_name,
+                "charter": agent.charter,
+                "is_active": "on",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        agent.refresh_from_db()
+        browser_agent.refresh_from_db()
+        self.assertEqual(agent.name, long_name)
+        self.assertEqual(browser_agent.name, long_name)
+
+    @tag("batch_console_agents_management")
+    def test_agent_settings_formats_validation_errors(self):
+        from django.core.exceptions import ValidationError
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Validation Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Validation Agent",
+            charter="Coordinate operations",
+            browser_use_agent=browser_agent,
+        )
+
+        with patch.object(BrowserUseAgent, "save", side_effect=ValidationError({"name": ["Friendly validation message."]})):
+            response = self.client.post(
+                reverse("console_agent_settings", kwargs={"agent_id": agent.id}),
+                {
+                    "name": "Validation Agent Updated",
+                    "charter": agent.charter,
+                    "is_active": "on",
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Friendly validation message.")
+        self.assertNotIn("{", response.json()["error"])
+        agent.refresh_from_db()
+        browser_agent.refresh_from_db()
+        self.assertEqual(agent.name, "Validation Agent")
+        self.assertEqual(browser_agent.name, "Validation Browser")
+
+    @tag("batch_console_agents_management")
     def test_agent_settings_saves_manual_mini_description_at_80_character_limit(self):
         from api.models import PersistentAgent, BrowserUseAgent
 

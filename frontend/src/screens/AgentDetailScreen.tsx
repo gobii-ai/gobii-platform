@@ -1919,6 +1919,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                   id="agent-name"
                   name="name"
                   type="text"
+                  maxLength={255}
                   value={formState.name}
                   onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
                   className="py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500"

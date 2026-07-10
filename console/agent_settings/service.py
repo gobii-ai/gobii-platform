@@ -1,5 +1,6 @@
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.db import DatabaseError, IntegrityError
 from django.http import HttpRequest, JsonResponse
 from django.views.generic import DetailView
@@ -1616,6 +1617,9 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         if not new_name:
             return _general_error("Agent name cannot be empty.")
+        agent_name_max_length = PersistentAgent._meta.get_field("name").max_length
+        if agent_name_max_length and len(new_name) > agent_name_max_length:
+            return _general_error(f"Agent name must be {agent_name_max_length} characters or fewer.")
 
         if not new_charter:
             return _general_error("Agent assignment cannot be empty.")
@@ -1987,6 +1991,12 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                         transaction.on_commit(lambda name=old_avatar_name: default_storage.delete(name))
                     if old_avatar_thumbnail_name:
                         transaction.on_commit(lambda name=old_avatar_thumbnail_name: default_storage.delete(name))
+        except ValidationError as e:
+            message = _format_validation_error(e)
+            if is_ajax:
+                return JsonResponse({'success': False, 'error': message}, status=400)
+            messages.error(request, message)
+            return redirect(_agent_settings_app_path(agent))
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'success': False, 'error': f"Error updating agent: {e}"}, status=500)

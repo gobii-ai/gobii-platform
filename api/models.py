@@ -2315,7 +2315,7 @@ class BrowserUseAgent(models.Model):
         on_delete=models.CASCADE,
         related_name="agents"
     )
-    name = models.CharField(max_length=64)
+    name = models.CharField(max_length=255)
     preferred_proxy = models.ForeignKey(
         'ProxyServer',
         on_delete=models.SET_NULL,
