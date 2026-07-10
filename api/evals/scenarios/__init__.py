@@ -67,3 +67,4 @@ from .google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS, GOOGLE_SH
 from .apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG, ApolloNativeScenario
 from .recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG, RecruitmentSourcingScenario
 from .hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG, HubSpotNativeScenario
+from .image_generation import IMAGE_GENERATION_SCENARIO_SLUGS, IMAGE_GENERATION_SUITE_SLUG, ImageGenerationScenario

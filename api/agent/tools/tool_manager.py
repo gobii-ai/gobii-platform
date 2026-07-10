@@ -45,11 +45,13 @@ from .meta_ads import get_meta_ads_tool, execute_meta_ads
 from .discord_channel_subscriptions import get_discord_channel_subscriptions_tool, execute_discord_channel_subscriptions
 from .send_discord_message import get_send_discord_message_tool, execute_send_discord_message
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
+from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from .meta_gobii import execute_meta_gobii_tool, get_meta_gobii_tool_definition, is_meta_gobii_available_for_agent
 from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
 from .static_tools import get_static_tool_names, planning_mode_disallows_tool
+
 logger = logging.getLogger(__name__)
 
 SQLITE_TOOL_NAME = "sqlite_batch"
@@ -206,6 +208,7 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_create_image_tool,
         "executor": execute_create_image,
         "is_available": is_image_generation_available_for_agent,
+        "system_skill_key": IMAGE_GENERATION_SYSTEM_SKILL_KEY,
     },
     CREATE_VIDEO_TOOL_NAME: {
         "definition": get_create_video_tool,
@@ -504,6 +507,7 @@ def _build_available_tool_index(
             tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
             tool_name=tool_name,
             server_config_id=None,
+            system_skill_key=str(metadata.get("system_skill_key") or ""),
         )
 
     return catalog
@@ -682,7 +686,13 @@ def _apply_tool_metadata(row: PersistentAgentEnabledTool, entry: Optional[ToolCa
     return updates
 
 
-def _ensure_system_skill_enabled(agent: PersistentAgent, skill_key: str, *, tool_name: str = "") -> Optional[str]:
+def _ensure_system_skill_enabled(
+    agent: PersistentAgent,
+    skill_key: str,
+    *,
+    tool_name: str = "",
+    reactivate: bool = True,
+) -> Optional[str]:
     if not skill_key:
         return None
 
@@ -698,7 +708,7 @@ def _ensure_system_skill_enabled(agent: PersistentAgent, skill_key: str, *, tool
         skill_key=definition.skill_key,
         defaults={"is_enabled": True},
     )
-    if not state.is_enabled:
+    if reactivate and not state.is_enabled:
         state.is_enabled = True
         state.save(update_fields=["is_enabled"])
     return definition.skill_key
@@ -714,7 +724,12 @@ def _ensure_system_skill_enabled_for_tool(agent: PersistentAgent, entry: Optiona
     )
 
 
-def _ensure_system_skill_enabled_for_builtin_tool_name(agent: PersistentAgent, tool_name: str) -> Optional[str]:
+def _ensure_system_skill_enabled_for_builtin_tool_name(
+    agent: PersistentAgent,
+    tool_name: str,
+    *,
+    reactivate: bool = True,
+) -> Optional[str]:
     registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
     if not registry_entry:
         return None
@@ -722,6 +737,7 @@ def _ensure_system_skill_enabled_for_builtin_tool_name(agent: PersistentAgent, t
         agent,
         str(registry_entry.get("system_skill_key") or ""),
         tool_name=tool_name,
+        reactivate=reactivate,
     )
 
 
@@ -1136,6 +1152,13 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
         if not registry_entry:
             continue
+        # Tool rows can predate their associated system skill. Create only a
+        # missing state here so loading tools never overrides an explicit disable.
+        _ensure_system_skill_enabled_for_builtin_tool_name(
+            agent,
+            row.tool_full_name,
+            reactivate=False,
+        )
         if not _is_builtin_tool_available(row.tool_full_name, agent, include_hidden=True):
             continue
         tool_def = _build_builtin_tool_definition(row.tool_full_name, registry_entry)

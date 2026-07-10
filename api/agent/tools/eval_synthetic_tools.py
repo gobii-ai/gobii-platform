@@ -7,6 +7,8 @@ integration catalog state such as Pipedream app selection or OAuth setup.
 from typing import Any, Dict
 
 from api.agent.eval_agents import is_eval_agent
+from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
+from api.agent.tools.create_image import get_create_image_tool
 from api.models import PersistentAgent
 
 EVAL_SYNTHETIC_TOOL_SERVER = "eval"
@@ -136,7 +138,14 @@ _GOOGLE_SHEETS_TOOL_DESCRIPTIONS = {
     "google_sheets-add-rows": "Append rows to a Google Sheets worksheet.",
 }
 
+_CREATE_IMAGE_FUNCTION = get_create_image_tool()["function"]
+
 EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
+    "create_image": {
+        "description": _CREATE_IMAGE_FUNCTION["description"],
+        "parameters": _CREATE_IMAGE_FUNCTION["parameters"],
+        "system_skill_key": IMAGE_GENERATION_SYSTEM_SKILL_KEY,
+    },
     "apollo_io-search-contacts": {
         "description": "Search Apollo.io for people and contacts matching lead criteria.",
         "parameters": _APOLLO_CONTACT_SEARCH_SCHEMA,
@@ -277,6 +286,19 @@ def get_eval_synthetic_tool_fallback_result(tool_name: str, params: Dict[str, An
     params = params or {}
     content: Dict[str, Any] = {"fixture_configured": False}
 
+    if tool_name == "create_image":
+        file_path = str(params.get("file_path") or "/exports/eval-image.png")
+        file_ref = f"$[{file_path}]"
+        source_images = params.get("source_images") or []
+        return {
+            "status": "ok",
+            "file": file_ref,
+            "inline": f"![Generated image]({file_ref})",
+            "inline_html": f"<img src='{file_ref}' alt='Generated image' />",
+            "attach": file_ref,
+            "source_image_count": 1 if isinstance(source_images, str) else len(source_images),
+            "eval_fixture": True,
+        }
     if tool_name.startswith("google_sheets-"):
         content.update(
             {
