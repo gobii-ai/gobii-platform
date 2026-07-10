@@ -218,7 +218,7 @@
       "frontend/src/test/",
       "tests/"
     ],
-    "file_count": 859,
+    "file_count": 860,
     "include_files": [
       "manage.py",
       "pyproject.toml",

@@ -1754,8 +1754,8 @@ class EffortCalibrationHarnessTests(TestCase):
             tool_params={
                 "sql": (
                     "CREATE TABLE IF NOT EXISTS candidate_verification_state "
-                    "(next_cursor TEXT, remaining_count INTEGER); "
-                    "INSERT INTO candidate_verification_state (next_cursor, remaining_count) "
+                    "(next_cursor TEXT, remaining INTEGER); "
+                    "INSERT INTO candidate_verification_state (next_cursor, remaining) "
                     "VALUES ('candidate-offset-3', 12);"
                 )
             },

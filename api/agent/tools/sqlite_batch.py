@@ -1880,8 +1880,9 @@ def _execute_sqlite_batch_inner(
             return _retryable_error(
                 "repeated_unshaped_tool_result_projection",
                 "Repeated raw __tool_results payload projection was rejected. One bounded preview is allowed "
-                "per task; now shape the needed rows with json_extract/json_each, grep_context_all, joins, "
-                "filters, or aggregates.",
+                "per task. Selecting a whole payload, including json_extract(..., '$.result') or substr(...), "
+                "is still raw; now shape the needed rows with scalar leaf paths, json_each, targeted "
+                "grep_context_all, joins, filters, or aggregates.",
             )
 
         conn.execute("BEGIN;")

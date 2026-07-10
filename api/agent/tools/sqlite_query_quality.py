@@ -30,9 +30,10 @@ PAYLOAD_ALIAS_RE = re.compile(
     r'\b(?:[a-z_]\w*\.)?["`\[]?result_(?:json|text)["`\]]?\s+as\s+["`\[]?(?P<alias>[a-z_]\w*)["`\]]?', re.I,
 )
 SHAPING_FUNCTION_NAMES = frozenset({
-    "csv_headers", "csv_parse", "grep_context_all", "json_each",
-    "json_extract", "parse_date", "parse_number", "split_sections",
+    "cast", "csv_headers", "csv_parse", "grep_context_all", "json_each",
+    "json_extract", "parse_date", "parse_number", "split_sections", "substr", "substring",
 })
+SCALAR_CAST_TYPES = frozenset({"decimal", "double", "float", "int", "integer", "numeric", "real"})
 SQL_STRING_LITERAL_RE = re.compile(r"'((?:''|[^'])*)'")
 LIMIT_ONE_OFFSET_RE = re.compile(r"\blimit\s+1\s+offset\s+(?:\d+|\?)", re.I)
 MAX_BOUNDED_PAYLOAD_PREVIEW_CHARS = 4000
@@ -243,6 +244,14 @@ def _has_structured_payload_shaping(statement: str) -> bool:
             path = args[1].strip().strip("'\"") if len(args) >= 2 else "$"
             if path == "$" or JSON_CONTAINER_PATH_RE.fullmatch(path):
                 continue
+        elif function_name == "cast":
+            cast_match = re.fullmatch(r".+\s+as\s+([a-z]+)(?:\s*\([^)]*\))?", args[0], re.I | re.S)
+            if not cast_match or cast_match.group(1).casefold() not in SCALAR_CAST_TYPES:
+                continue
+        elif function_name in {"substr", "substring"} and not any(
+            re.search(r"\binstr\s*\(", arg, re.I) for arg in args[1:]
+        ):
+            continue
         return True
 
     return any(

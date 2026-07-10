@@ -189,11 +189,16 @@ MESSAGE_TOOL_BODY_KEYS = {
 SQLITE_MUTATION_RE = re.compile(r"\b(?:insert|update|delete|replace|alter|drop|create)\b", re.IGNORECASE)
 AGENT_CONFIG_TABLE_RE = re.compile(r"\b__agent_config\b", re.IGNORECASE)
 RESUME_COUNT_RE = re.compile(
-    r"\b(?:remaining_(?:work|count|items|rows)|pending_count|items_remaining|work_remaining)\b",
+    r"\b(?:remaining(?:_(?:work|count|items|rows))?|pending_count|items_remaining|work_remaining)\b",
     re.IGNORECASE,
 )
 RESUME_CURSOR_RE = re.compile(r"\b(?:next_)?cursor\b", re.IGNORECASE)
 SQLITE_SHAPE_FOLLOWUP_ADVISORIES = {"bounded_multi_result_preview", "unshaped_multi_result_payload"}
+SQLITE_SHAPE_CORRECTION = (
+    "Tool policy: exact comparison/filtering across multiple structured results needs a current set-wise SQLite "
+    "transform. Extract needed scalar fields across every relevant result; for JSON arrays use json_each, and for "
+    "text/CSV use the matching helpers. Then group/join/deduplicate; never fetch one result_text or whole containers."
+)
 CROSS_RESULT_SQLITE_INTENT_RE = re.compile(
     r"\b(?:compare|rank|recommend|best|deduplicat\w*|distinct|unique)\b|"
     r"\b(?:find|identify|list|which)\b.{0,160}\b(?:all|every|each|under|over|less than|more than|at least|at most|within)\b",
@@ -2414,15 +2419,7 @@ def _tool_call_has_unshaped_sqlite_preview(call: Any, *, multi_result_only: bool
 
 
 def _record_sqlite_shape_correction(agent, attach_completion, attach_prompt_archive) -> None:
-    _record_agent_step(
-        agent,
-        "Tool policy: exact comparison/filtering across multiple structured results needs a current set-wise "
-        "SQLite transform. Extract needed scalar fields across every relevant result; for JSON arrays use json_each, "
-        "and for text/CSV use the matching helpers. Then group/join/deduplicate; never fetch one result_text or "
-        "whole containers.",
-        attach_completion,
-        attach_prompt_archive,
-    )
+    _record_agent_step(agent, SQLITE_SHAPE_CORRECTION, attach_completion, attach_prompt_archive)
 
 
 def _unfinished_work_source_tool(tool_name: str, result: Any) -> Optional[str]:
@@ -2541,9 +2538,24 @@ def _record_resume_state_correction(
 def _required_runtime_tool_name(agent: PersistentAgent, tools: list[dict]) -> Optional[str]:
     if "sqlite_batch" not in _tool_definition_names_for_completion(tools):
         return None
-    if _pending_unscheduled_resume_tool(agent, require_cursor=True):
+    if (
+        _pending_unscheduled_resume_tool(agent, require_cursor=True)
+        or (_pending_sqlite_shape_followup(agent) and _sqlite_shape_correction_is_current(agent))
+    ):
         return "sqlite_batch"
     return None
+
+
+def _sqlite_shape_correction_is_current(agent: PersistentAgent) -> bool:
+    boundary = _current_task_boundary(agent)
+    if boundary is None:
+        return False
+    latest_tool_at = (PersistentAgentToolCall.objects.filter(step__agent=agent, step__created_at__gte=boundary,
+                                                             status="complete").order_by("-step__created_at", "-step__id")
+                      .values_list("step__created_at", flat=True).first())
+    return bool(latest_tool_at and PersistentAgentStep.objects.filter(
+        agent=agent, created_at__gt=latest_tool_at, description=SQLITE_SHAPE_CORRECTION,
+    ).exists())
 
 
 def _completed_agent_config_mutation_since_latest_inbound(agent: PersistentAgent, *, require_schedule: bool = True) -> bool:
@@ -3268,13 +3280,7 @@ def _prepare_tool_batch(
                 _record_resume_state_correction(agent, pending_resume_tool, attach_completion, attach_prompt_archive)
                 followup_required = True
                 break
-            if pending_sqlite_shape and (
-                _message_tool_is_terminal(tool_name, tool_params)
-                or (
-                    pending_sqlite_shape_followup
-                    and _tool_call_has_unshaped_sqlite_preview(call)
-                )
-            ):
+            if pending_sqlite_shape and _message_tool_is_terminal(tool_name, tool_params):
                 _record_sqlite_shape_correction(agent, attach_completion, attach_prompt_archive)
                 followup_required = True
                 break

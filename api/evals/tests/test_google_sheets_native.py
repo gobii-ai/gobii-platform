@@ -92,6 +92,11 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         self.assertIn("formatted", first_group)
         self.assertIn("styled", first_group)
 
+    def test_missing_file_response_accepts_natural_no_files_wording(self):
+        case = next(case for case in GOOGLE_SHEETS_NATIVE_CASES if case.slug == GOOGLE_SHEETS_NATIVE_MISSING_SELECTED_FILE)
+
+        self.assertIn("no files", case.response_term_groups[1])
+
     def test_format_mock_reports_banding_only_when_requested(self):
         case = next(
             case for case in GOOGLE_SHEETS_NATIVE_CASES

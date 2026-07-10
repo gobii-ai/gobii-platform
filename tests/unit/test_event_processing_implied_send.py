@@ -160,6 +160,11 @@ class ImpliedSendTests(TestCase):
                 }
             )
         )
+        self.assertTrue(
+            ep._sqlite_batch_persists_resume_state(
+                {"sql": "INSERT INTO batch_state (remaining, cursor) VALUES (12, 'offset-4')"}
+            )
+        )
         for sql in (
             "SELECT 12 AS remaining_work, 'offset-4' AS next_cursor",
             "CREATE TABLE resume_state (remaining_count INTEGER, next_cursor TEXT)",
@@ -209,6 +214,12 @@ class ImpliedSendTests(TestCase):
         self._add_inbound_web_message(
             "Identify every plan under $900 across these sources and recommend the best."
         )
+        tools = [
+            {
+                "type": "function",
+                "function": {"name": "sqlite_batch", "parameters": {"type": "object"}},
+            }
+        ]
         for index in range(2):
             step = PersistentAgentStep.objects.create(agent=self.agent, description="Fetched plans")
             PersistentAgentToolCall.objects.create(
@@ -222,6 +233,9 @@ class ImpliedSendTests(TestCase):
             )
 
         self.assertTrue(ep._pending_sqlite_shape_followup(self.agent))
+        self.assertIsNone(ep._required_runtime_tool_name(self.agent, tools))
+        PersistentAgentStep.objects.create(agent=self.agent, description=ep.SQLITE_SHAPE_CORRECTION)
+        self.assertEqual(ep._required_runtime_tool_name(self.agent, tools), "sqlite_batch")
 
         unrelated_step = PersistentAgentStep.objects.create(agent=self.agent, description="Unrelated SQL")
         PersistentAgentToolCall.objects.create(
@@ -232,6 +246,9 @@ class ImpliedSendTests(TestCase):
             status="complete",
         )
         self.assertTrue(ep._pending_sqlite_shape_followup(self.agent))
+        self.assertIsNone(ep._required_runtime_tool_name(self.agent, tools))
+        PersistentAgentStep.objects.create(agent=self.agent, description=ep.SQLITE_SHAPE_CORRECTION)
+        self.assertEqual(ep._required_runtime_tool_name(self.agent, tools), "sqlite_batch")
 
         shaped_step = PersistentAgentStep.objects.create(agent=self.agent, description="Filtered plans")
         PersistentAgentToolCall.objects.create(
@@ -248,6 +265,7 @@ class ImpliedSendTests(TestCase):
             status="complete",
         )
         self.assertFalse(ep._pending_sqlite_shape_followup(self.agent))
+        self.assertIsNone(ep._required_runtime_tool_name(self.agent, tools))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     def test_prepare_blocks_terminal_report_after_only_sqlite_preview(self, _mock_credit):
@@ -324,8 +342,8 @@ class ImpliedSendTests(TestCase):
             attach_completion=lambda step_kwargs: None,
             attach_prompt_archive=lambda step: None,
         )
-        self.assertTrue(repeated_preview.followup_required)
-        self.assertFalse(repeated_preview.prepared_calls)
+        self.assertFalse(repeated_preview.followup_required)
+        self.assertEqual([call.tool_name for call in repeated_preview.prepared_calls], ["sqlite_batch"])
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     def test_prepare_blocks_terminal_report_paired_with_same_batch_preview(self, _mock_credit):

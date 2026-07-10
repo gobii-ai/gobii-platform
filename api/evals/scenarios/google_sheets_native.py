@@ -795,7 +795,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         forbidden_url_terms=(("sheets.googleapis.com/v4/spreadsheets/",),),
         response_term_groups=(
             ("Google Drive", "integration"),
-            ("not found", "couldn't find", "could not find", "no matching", "no results", "not visible", "can't see", "could not locate", "empty", "zero files", "wasn't able to find"),
+            ("not found", "couldn't find", "could not find", "no matching", "no results", "no files", "not visible", "can't see", "could not locate", "empty", "zero files", "wasn't able to find"),
             ("choose", "select", "connect", "share"),
             ("spreadsheet", "sheet"),
         ),

@@ -68,6 +68,10 @@ jobs:
         run: |
           uv sync --all-extras --dev
 
+      - name: Check migration graph
+        run: |
+          uv run python scripts/check_migration_graph.py
+
       - name: Check prompt-size budgets
         run: |
           uv run python scripts/check_complexity_budgets.py --prompt-only

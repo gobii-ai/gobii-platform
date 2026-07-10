@@ -287,7 +287,7 @@ def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
         statement = re.sub(r"/\*.*?\*/|--[^\n]*", " ", raw_statement, flags=re.DOTALL).casefold()
         has_remaining_count = bool(
             re.search(
-                r"\b(?:remaining_(?:work|count|items|rows)|pending_count|items_remaining|work_remaining)\b",
+                r"\b(?:remaining(?:_(?:work|count|items|rows))?|pending_count|items_remaining|work_remaining)\b",
                 statement,
             )
         )

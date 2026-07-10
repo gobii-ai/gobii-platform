@@ -596,6 +596,7 @@ class SqliteBatchToolTests(TestCase):
                 "repeated_unshaped_tool_result_projection",
             )
             self.assertIn("shape the needed rows", repeated_preview.get("message", ""))
+            self.assertIn("$.result", repeated_preview.get("message", ""))
 
             self._create_inbound_message("Second analysis task")
             next_task_preview = execute_sqlite_batch(
@@ -1099,6 +1100,35 @@ class SqliteBatchToolTests(TestCase):
         self.assertEqual(summary.sqlite_call_count, 1)
         self.assertEqual(summary.statement_count, 2)
         self.assertEqual(summary.smart_tool_result_queries, 1)
+
+    def test_tool_result_quality_accepts_scalar_text_extraction_but_not_bounded_previews(self):
+        ranking = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT "
+                "substr(result_text, 1, instr(result_text, ':') - 1) AS vendor, "
+                "CAST(REPLACE(substr(result_text, instr(result_text, '$') + 1, "
+                "instr(result_text, ' for') - instr(result_text, '$') - 1), ',', '') "
+                "AS INTEGER) AS annual_cost "
+                "FROM __tool_results ORDER BY annual_cost"
+            ]
+        )
+        delimited = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT substr(result_text, instr(result_text, 'Vendor:') + 7, "
+                "instr(result_text, 'Best fit:') - instr(result_text, 'Vendor:') - 7) AS vendor "
+                "FROM __tool_results"
+            ]
+        )
+        bounded_preview = summarize_sqlite_tool_result_sql(
+            ["SELECT substr(result_text, 1, 2000) AS preview FROM __tool_results"]
+        )
+
+        self.assertEqual(ranking.smart_tool_result_queries, 1)
+        self.assertEqual(ranking.unshaped_multi_result_payload_queries, 0)
+        self.assertEqual(delimited.smart_tool_result_queries, 1)
+        self.assertEqual(delimited.unshaped_multi_result_payload_queries, 0)
+        self.assertEqual(bounded_preview.smart_tool_result_queries, 0)
+        self.assertEqual(bounded_preview.unshaped_multi_result_payload_queries, 1)
 
     def test_attach_database_is_blocked(self):
         with self._with_temp_db() as (_db_path, _token, tmp):
