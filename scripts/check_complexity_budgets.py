@@ -665,6 +665,7 @@ def _budget_metadata(baseline_sha: str) -> dict[str, Any]:
         "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
         "source_loc": {
             "description": "Nonblank lines in tracked and unignored core product source files, excluding tests and dedicated eval assets.",
+            "limit_policy": "Advance the absolute limit only for approved upstream growth; branch changes use remaining headroom.",
             "include_roots": list(SOURCE_ROOTS),
             "include_files": sorted(SOURCE_FILES),
             "include_suffixes": sorted(SOURCE_SUFFIXES),
