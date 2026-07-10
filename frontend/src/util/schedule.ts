@@ -365,8 +365,11 @@ function parseCronWeekdayIndexes(value: string | undefined): Set<number> | null 
 }
 
 function parseWeekdayIndex(value: string | undefined): number | null {
-  if (!value) return null
-  const name = resolveWeekdayName(value)
+  const token = value?.trim()
+  if (!token) return null
+  const numeric = parseCronNumber(token)
+  if (numeric !== null) return numeric >= 0 && numeric <= 7 ? normalizeWeekday(numeric) : null
+  const name = resolveWeekdayName(token)
   if (!name) return null
   const index = WEEKDAY_NAMES.indexOf(name)
   return index >= 0 ? index : null

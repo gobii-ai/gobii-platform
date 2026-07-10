@@ -35,7 +35,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
   const scheduleTimeZone = useAppSelector(selectImmersiveShellViewer).timeZone
   const transformed = useMemo(
     () => {
-      const base = transformToolCluster(cluster, { suppressedThinkingCursor })
+      const base = transformToolCluster(cluster, { suppressedThinkingCursor, timeZone: scheduleTimeZone ?? undefined })
       if (!cluster.visibleDisplayEntryIds?.length) {
         return base
       }

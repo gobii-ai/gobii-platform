@@ -1899,7 +1899,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                                 )
                         try:
                             maybe_schedule_mini_description(agent)
-                        except DatabaseError:
+                        except Exception:
                             logger.exception(
                                 "Failed to schedule mini description generation after settings update for agent %s",
                                 agent.id,

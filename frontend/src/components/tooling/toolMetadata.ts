@@ -553,9 +553,9 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconBgClass: 'bg-sky-100',
     iconColorClass: 'text-sky-600',
     detailKind: 'updateSchedule',
-    derive(_, parameters) {
+    derive(_, parameters, options) {
       const scheduleValue = coerceString(parameters?.new_schedule)
-      const summary = summarizeSchedule(scheduleValue)
+      const summary = summarizeSchedule(scheduleValue, { timeZone: options?.timeZone })
       return {
         caption: summary ?? (scheduleValue ? truncate(scheduleValue, 40) : 'Disabled'),
         separateFromPreview: true,

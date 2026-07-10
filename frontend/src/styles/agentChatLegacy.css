@@ -5799,7 +5799,7 @@
     letter-spacing: 0.06em;
 }
 .agent-roster-item {
-    --roster-item-gap: 0;
+    --roster-item-gap: 0.75rem;
     --roster-item-padding: 0.625rem 0.5rem;
     --roster-item-radius: 0.5rem;
     --roster-item-color: rgba(255, 255, 255, 0.7);
@@ -5853,6 +5853,9 @@
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+.agent-roster-item[data-variant='sidebar'] {
+    --roster-item-gap: 0;
 }
 .agent-roster-item[data-variant='drawer'] {
     --roster-item-gap: 0.875rem;

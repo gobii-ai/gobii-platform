@@ -59,6 +59,8 @@ export type ToolDetailProps = {
   entry: ToolEntryDisplay
 }
 
+export type ToolDisplayOptions = { timeZone?: string }
+
 export type ToolClusterTransform = ToolClusterDisplay & {
   skippedCount: number
 }
@@ -90,5 +92,5 @@ export type ToolDescriptor = {
   iconColorClass: string
   detailComponent: ToolDetailComponent
   skip?: boolean
-  derive?(entry: ToolCallEntry, parameters: Record<string, unknown> | null): ToolDescriptorTransform | void
+  derive?(entry: ToolCallEntry, parameters: Record<string, unknown> | null, options?: ToolDisplayOptions): ToolDescriptorTransform | void
 }
