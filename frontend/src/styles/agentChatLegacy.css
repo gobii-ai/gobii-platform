@@ -6049,6 +6049,10 @@
     color: var(--roster-favorite-active-color);
     background: var(--roster-favorite-active-bg);
 }
+.agent-roster-item[data-variant='sidebar'] .agent-roster-item__favorite[data-active='true']:is(:hover, :focus-visible) {
+    color: var(--roster-favorite-hover-color);
+    background: var(--roster-favorite-hover-bg);
+}
 .agent-roster-item[data-variant='sidebar'] .agent-roster-item__favorite[data-active] {
     opacity: 0;
     pointer-events: none;
