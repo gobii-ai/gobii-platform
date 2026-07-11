@@ -201,7 +201,19 @@ export function ProductAnnouncementBell({ variant = 'sidebar' }: ProductAnnounce
   const [selectedAnnouncementId, setSelectedAnnouncementId] = useState<string | null>(null)
   const desktopTriggerRef = useRef<HTMLButtonElement | null>(null)
   const desktopPopoverRef = useRef<HTMLElement | null>(null)
-  const announcementsQuery = useProductAnnouncements()
+  const [idleLoadReady, setIdleLoadReady] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      const idleId = window.requestIdleCallback(() => setIdleLoadReady(true), { timeout: 3_000 })
+      return () => window.cancelIdleCallback(idleId)
+    }
+    const timeout = globalThis.setTimeout(() => setIdleLoadReady(true), 1_500)
+    return () => globalThis.clearTimeout(timeout)
+  }, [])
+  const announcementsQuery = useProductAnnouncements(idleLoadReady || mobileOpen || desktopOpen)
   const markReadMutation = useMarkProductAnnouncementsRead()
   const announcements = announcementsQuery.data?.announcements ?? []
   const unreadCount = announcementsQuery.data?.unreadCount ?? 0

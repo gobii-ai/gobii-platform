@@ -5,19 +5,17 @@ import { fetchAgentRoster } from '../api/agents'
 type UseAgentRosterOptions = {
   enabled?: boolean
   contextKey?: string
-  forAgentId?: string
   refetchIntervalMs?: number | false
 }
 
 export function useAgentRoster(options?: UseAgentRosterOptions) {
   const enabled = options?.enabled ?? true
   const contextKey = options?.contextKey ?? 'default'
-  const forAgentId = options?.forAgentId
   const refetchIntervalMs = options?.refetchIntervalMs ?? false
 
   return useQuery({
-    queryKey: ['agent-roster', contextKey, forAgentId ?? null] as const,
-    queryFn: () => fetchAgentRoster({ forAgentId }),
+    queryKey: ['agent-roster', contextKey] as const,
+    queryFn: () => fetchAgentRoster(),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
     refetchOnWindowFocus: false,

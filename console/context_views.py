@@ -47,6 +47,7 @@ class SwitchContextView(LoginRequiredMixin, View):
     def get(self, request):
         override = get_context_override(request)
         for_agent_id = (request.GET.get("for_agent") or "").strip()
+        requested_agent_status = None
         if for_agent_id:
             override, error_code = resolve_context_override_for_agent(
                 request.user,
@@ -54,9 +55,11 @@ class SwitchContextView(LoginRequiredMixin, View):
                 include_deleted=True,
             )
             if error_code == "not_found":
-                return JsonResponse({"error": "Agent not found"}, status=404)
+                requested_agent_status = "missing"
             if error_code == "forbidden":
                 return JsonResponse({"error": "Not permitted"}, status=403)
+            if error_code == "deleted":
+                requested_agent_status = "deleted"
         if override:
             try:
                 resolved = resolve_console_context(request.user, request.session, override=override)
@@ -114,6 +117,7 @@ class SwitchContextView(LoginRequiredMixin, View):
                 "personal": {"id": str(request.user.id), "name": personal_name},
                 "organizations": organizations,
                 "organizations_enabled": organizations_enabled,
+                "requested_agent_status": requested_agent_status,
             }
         )
 

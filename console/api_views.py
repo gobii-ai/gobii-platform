@@ -213,7 +213,13 @@ from console.support_requests import SupportRequestConfigurationError, clean_sup
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
 from console.agent_settings import build_agent_settings_payload, handle_agent_settings_mutation
 from console.views import build_llm_intelligence_props
-from console.agent_addons import _build_billing_status_payload, build_account_pause_payload, build_agent_addons_payload, update_contact_pack_quantities, update_task_pack_quantities
+from console.agent_addons import (
+    _build_billing_status_payload,
+    build_account_pause_payload,
+    build_agent_addons_payload,
+    update_contact_pack_quantities,
+    update_task_pack_quantities,
+)
 from console.daily_credit import parse_daily_credit_limit
 from console.agent_creation import (
     AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
@@ -299,7 +305,7 @@ def _can_manage_contact_packs(request: HttpRequest, agent: PersistentAgent, plan
         return False
 
     if not agent.organization_id:
-        return True
+        return bool(agent.user_id == request.user.id or request.user.is_staff or request.user.is_superuser)
 
     owner = agent.organization or agent.user
     subscription = get_active_subscription(owner, preferred_plan_id=(plan_payload or {}).get("id"))
@@ -319,7 +325,7 @@ def _can_manage_contact_packs(request: HttpRequest, agent: PersistentAgent, plan
 
 def _can_open_agent_billing(request: HttpRequest, agent: PersistentAgent) -> bool:
     if not agent.organization_id:
-        return True
+        return bool(agent.user_id == request.user.id or request.user.is_staff or request.user.is_superuser)
 
     membership = OrganizationMembership.objects.filter(
         user=request.user,
@@ -2965,6 +2971,131 @@ def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = 
     return Analytics.with_org_properties(payload, organization=getattr(agent, "organization", None))
 
 
+def _serialize_agent_profile_payload(
+    request: HttpRequest,
+    agent: PersistentAgent,
+    *,
+    owner=None,
+    is_collaborator: bool | None = None,
+    processing_active: bool | None = None,
+    pending_action_count: int | None = None,
+    message_read_state: dict | None = None,
+    org_ids: set | None = None,
+    admin_org_ids: set | None = None,
+    is_admin_user: bool | None = None,
+    enrich: bool = False,
+) -> dict[str, Any]:
+    user = request.user
+    if enrich:
+        enrich_agents_for_card_surface([agent], owner or agent.organization or agent.user)
+    if is_collaborator is None:
+        is_collaborator = user_is_collaborator(user, agent)
+    if processing_active is None:
+        processing_active = build_processing_activity_map([agent]).get(str(agent.id), False)
+    if pending_action_count is None:
+        pending_action_count = count_pending_action_requests_for_agents([agent], user).get(str(agent.id), 0)
+    if message_read_state is None:
+        message_read_state = build_latest_agent_message_read_state([agent.id], user).get(str(agent.id), {})
+    if org_ids is None or admin_org_ids is None:
+        memberships = OrganizationMembership.objects.filter(
+            user=user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        if org_ids is None:
+            org_ids = set(memberships.values_list("org_id", flat=True))
+        if admin_org_ids is None:
+            admin_org_ids = set(
+                memberships.filter(role__in=BILLING_MANAGE_ROLES).values_list("org_id", flat=True)
+            )
+    if is_admin_user is None:
+        is_admin_user = bool(user.is_staff or user.is_superuser)
+
+    card_payload = serialize_agent_card_payload(
+        request,
+        agent,
+        avatar_variant="thumbnail",
+        is_staff=is_admin_user,
+        is_shared=is_collaborator,
+    )
+    enabled_skill_states = getattr(agent, "enabled_system_skill_states_for_roster", None)
+    if enabled_skill_states is None:
+        enabled_skill_states = agent.system_skill_states.filter(is_enabled=True).order_by("skill_key")
+
+    return {
+        "id": str(agent.id),
+        "name": agent.name or "",
+        "avatar_url": card_payload["avatarUrl"],
+        "is_active": bool(agent.is_active),
+        "processing_active": bool(processing_active),
+        "mini_description": agent.mini_description or "",
+        "short_description": agent.short_description or "",
+        "listing_description": card_payload["listingDescription"],
+        "listing_description_source": card_payload["listingDescriptionSource"],
+        "display_tags": card_payload["displayTags"],
+        "detail_url": card_payload["detailUrl"],
+        "daily_credit_remaining": card_payload["dailyCreditRemaining"],
+        "daily_credit_low": card_payload["dailyCreditLow"],
+        "last_24h_credit_burn": card_payload["last24hCreditBurn"],
+        "is_org_owned": agent.organization_id is not None,
+        "is_collaborator": bool(is_collaborator),
+        "can_manage_agent": bool(
+            is_admin_user
+            or agent.user_id == user.id
+            or (agent.organization_id and agent.organization_id in org_ids)
+        ),
+        "can_manage_collaborators": bool(
+            is_admin_user
+            or agent.user_id == user.id
+            or (agent.organization_id and agent.organization_id in admin_org_ids)
+        ),
+        "audit_url": card_payload["auditUrl"],
+        "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
+        "email": card_payload["primaryEmail"],
+        "sms": card_payload["primarySms"],
+        "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
+        "signup_preview_state": agent.signup_preview_state,
+        "planning_state": agent.planning_state,
+        "pending_action_request_count": pending_action_count,
+        "enabled_system_skills": [
+            state.skill_key
+            for state in enabled_skill_states
+            if state.skill_key
+        ],
+        **serialize_latest_agent_message_read_state(message_read_state),
+    }
+
+
+def _build_agent_critical_status_payload(request: HttpRequest, agent: PersistentAgent) -> dict[str, Any]:
+    owner = agent.organization or agent.user
+    quick_settings = build_agent_quick_settings_payload(agent, owner)
+    quick_meta = quick_settings.get("meta") or {}
+    quick_plan = quick_meta.get("plan") or {}
+    plan_payload = (
+        get_organization_plan(agent.organization)
+        if agent.organization_id
+        else reconcile_user_plan_from_stripe(agent.user)
+    )
+    addons = build_agent_addons_payload(
+        agent,
+        owner,
+        can_open_billing=_can_open_agent_billing(request, agent),
+    )
+    status = addons["status"]
+    return {
+        "billing": status["billing"],
+        "accountPause": status["accountPause"],
+        "dailyCredits": (quick_settings.get("status") or {}).get("dailyCredits"),
+        "contactCap": addons["contactCap"],
+        "contactCapStatus": status["contactCap"],
+        "hardLimit": {
+            "showUpsell": bool(quick_plan.get("isFree")),
+            "upgradeUrl": quick_meta.get("upgradeUrl"),
+        },
+        "canManageAddons": _can_manage_contact_packs(request, agent, plan_payload),
+        "manageBillingUrl": addons["manageBillingUrl"],
+    }
+
+
 def _serialize_roster_transfer_invite(invite: AgentTransferInvite) -> dict[str, Any]:
     agent = invite.agent
     initiator = invite.initiated_by
@@ -3178,58 +3309,19 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         payload = []
         for agent in agents:
             is_collaborator = agent.id in collaborators_by_agent_id
-            card_payload = serialize_agent_card_payload(
-                request,
-                agent,
-                avatar_variant="thumbnail",
-                is_staff=is_admin_user,
-                is_shared=is_collaborator,
-            )
             payload.append(
-                {
-                    "id": str(agent.id),
-                    "name": agent.name or "",
-                    "avatar_url": card_payload["avatarUrl"],
-                    "is_active": bool(agent.is_active),
-                    "processing_active": processing_activity_by_agent_id.get(str(agent.id), False),
-                    "mini_description": agent.mini_description or "",
-                    "short_description": agent.short_description or "",
-                    "listing_description": card_payload["listingDescription"],
-                    "listing_description_source": card_payload["listingDescriptionSource"],
-                    "display_tags": card_payload["displayTags"],
-                    "detail_url": card_payload["detailUrl"],
-                    "daily_credit_remaining": card_payload["dailyCreditRemaining"],
-                    "daily_credit_low": card_payload["dailyCreditLow"],
-                    "last_24h_credit_burn": card_payload["last24hCreditBurn"],
-                    "is_org_owned": agent.organization_id is not None,
-                    "is_collaborator": is_collaborator,
-                    "can_manage_agent": (
-                        is_admin_user
-                        or agent.user_id == user.id
-                        or (agent.organization_id and agent.organization_id in org_ids)
-                    ),
-                    "can_manage_collaborators": (
-                        is_admin_user
-                        or agent.user_id == user.id
-                        or (agent.organization_id and agent.organization_id in admin_org_ids)
-                    ),
-                    "audit_url": card_payload["auditUrl"],
-                    "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
-                    "email": card_payload["primaryEmail"],
-                    "sms": card_payload["primarySms"],
-                    "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
-                    "signup_preview_state": agent.signup_preview_state,
-                    "planning_state": agent.planning_state,
-                    "pending_action_request_count": pending_action_counts_by_agent_id.get(str(agent.id), 0),
-                    "enabled_system_skills": [
-                        state.skill_key
-                        for state in getattr(agent, "enabled_system_skill_states_for_roster", [])
-                        if state.skill_key
-                    ],
-                    **serialize_latest_agent_message_read_state(
-                        message_read_state_by_agent_id.get(str(agent.id), {})
-                    ),
-                }
+                _serialize_agent_profile_payload(
+                    request,
+                    agent,
+                    owner=owner,
+                    is_collaborator=is_collaborator,
+                    processing_active=processing_activity_by_agent_id.get(str(agent.id), False),
+                    pending_action_count=pending_action_counts_by_agent_id.get(str(agent.id), 0),
+                    message_read_state=message_read_state_by_agent_id.get(str(agent.id), {}),
+                    org_ids=org_ids,
+                    admin_org_ids=admin_org_ids,
+                    is_admin_user=is_admin_user,
+                )
             )
         return JsonResponse(
             {
@@ -3255,6 +3347,25 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "transfer_invites": _pending_roster_transfer_invites_for_user(request),
                 "llmIntelligence": llm_intelligence,
             }
+        )
+
+
+class AgentProfileAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        return JsonResponse(
+            _serialize_agent_profile_payload(
+                request,
+                agent,
+                enrich=True,
+            )
         )
 
 
@@ -3401,11 +3512,18 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
         if agent_email_endpoint:
             agent_email = agent_email_endpoint.address
 
+        agent_profile = _serialize_agent_profile_payload(
+            request,
+            result.agent,
+            enrich=True,
+        )
+
         return JsonResponse({
             "agent_id": str(result.agent.id),
             "agent_name": result.agent.name,
             "agent_email": agent_email,
             "planning_state": result.agent.planning_state,
+            "agent": agent_profile,
         })
 
 
@@ -3842,6 +3960,8 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             **serialize_agent_schedule(agent),
             **_pending_action_payload(agent, request.user),
         }
+        if direction == "initial":
+            payload["critical_status"] = _build_agent_critical_status_payload(request, agent)
         return JsonResponse(payload)
 
 @method_decorator(csrf_exempt, name="dispatch")

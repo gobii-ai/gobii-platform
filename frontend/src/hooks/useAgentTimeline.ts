@@ -107,5 +107,8 @@ export function getInitialPageResponse(data: InfiniteData<TimelinePage> | undefi
   // The initial page is the first page fetched (middle of pages array after prepending older pages)
   // But for metadata, the most recent fetch is most authoritative — use the last page
   const lastPage = data.pages[data.pages.length - 1]
-  return lastPage?.raw ?? null
+  const criticalStatus = data.pages.find((page) => page.raw.critical_status)?.raw.critical_status
+  return criticalStatus && !lastPage.raw.critical_status
+    ? { ...lastPage.raw, critical_status: criticalStatus }
+    : lastPage.raw
 }

@@ -11,6 +11,8 @@ import type {
 } from '../types/agentChat'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { InsightsResponse } from '../types/insight'
+import type { AccountPauseInfo, BillingStatusInfo, ContactCapInfo, ContactCapStatus } from '../types/agentAddons'
+import type { DailyCreditsStatus } from '../types/dailyCredits'
 import { jsonFetch, jsonRequest } from './http'
 
 export type TimelineDirection = 'initial' | 'older' | 'newer'
@@ -40,6 +42,19 @@ export type TimelineResponse = {
   pending_human_input_requests?: PendingHumanInputRequest[]
   pending_action_requests?: PendingActionRequest[]
   current_plan?: PlanSnapshot | null
+  critical_status?: {
+    billing?: BillingStatusInfo | null
+    accountPause?: AccountPauseInfo | null
+    dailyCredits?: DailyCreditsStatus | null
+    contactCap?: ContactCapInfo | null
+    contactCapStatus?: ContactCapStatus | null
+    hardLimit?: {
+      showUpsell?: boolean
+      upgradeUrl?: string | null
+    } | null
+    canManageAddons?: boolean
+    manageBillingUrl?: string | null
+  } | null
 }
 
 export type AgentMessageReadStatePayload = {

@@ -221,6 +221,9 @@ class AgentChatAPITests(TestCase):
         payload = response.json()
 
         created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        self.assertEqual(payload["agent"]["id"], str(created_agent.id))
+        self.assertEqual(payload["agent"]["name"], created_agent.name)
+        self.assertIn("processing_active", payload["agent"])
         self.assertIsNotNone(created_agent.preferred_contact_endpoint)
         self.assertEqual(created_agent.preferred_contact_endpoint.channel, CommsChannel.WEB)
 
@@ -966,6 +969,26 @@ class AgentChatAPITests(TestCase):
         self.assertIn("active", snapshot)
         self.assertIn("webTasks", snapshot)
         self.assertIsInstance(snapshot.get("webTasks"), list)
+        critical_status = payload.get("critical_status")
+        self.assertIsInstance(critical_status, dict)
+        self.assertIn("billing", critical_status)
+        self.assertIn("accountPause", critical_status)
+        self.assertIn("dailyCredits", critical_status)
+        self.assertIn("contactCapStatus", critical_status)
+
+    @tag("batch_agent_chat")
+    def test_agent_profile_endpoint_returns_lightweight_roster_entry(self):
+        response = self.client.get(
+            reverse("console_agent_profile", kwargs={"agent_id": self.agent.id}),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["id"], str(self.agent.id))
+        self.assertEqual(payload["name"], self.agent.name)
+        self.assertIn("avatar_url", payload)
+        self.assertIn("processing_active", payload)
+        self.assertIn("enabled_system_skills", payload)
 
     @tag("batch_agent_chat")
     @override_settings(GOBII_RELEASE_ENV="staging")

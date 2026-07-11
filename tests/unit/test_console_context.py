@@ -807,6 +807,7 @@ class ConsoleContextTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload.get("context", {}).get("type"), "organization")
         self.assertEqual(payload.get("context", {}).get("id"), str(self.org.id))
+        self.assertIsNone(payload.get("requested_agent_status"))
 
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
@@ -825,6 +826,7 @@ class ConsoleContextTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload.get("context", {}).get("type"), "organization")
         self.assertEqual(payload.get("context", {}).get("id"), str(self.org.id))
+        self.assertIsNone(payload.get("requested_agent_status"))
 
     def test_switch_context_for_agent_forbidden_without_access(self):
         self.client.logout()
@@ -923,10 +925,25 @@ class ConsoleContextTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload.get("context", {}).get("type"), "organization")
         self.assertEqual(payload.get("context", {}).get("id"), str(self.org.id))
+        self.assertEqual(payload.get("requested_agent_status"), "deleted")
 
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
+
+    def test_switch_context_for_missing_agent_returns_current_context_status(self):
+        self._set_personal_context()
+
+        resp = self.client.get(
+            reverse("switch_context"),
+            {"for_agent": str(uuid.uuid4())},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload.get("requested_agent_status"), "missing")
+        self.assertEqual(payload.get("context", {}).get("type"), "personal")
+        self.assertEqual(payload.get("context", {}).get("id"), str(self.owner.id))
 
     def test_switch_context_for_org_agent_allows_collaborator_without_membership(self):
         AgentCollaborator.objects.create(agent=self.org_agent, user=self.stranger)

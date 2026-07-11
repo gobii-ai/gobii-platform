@@ -740,10 +740,10 @@ export function AgentChatLayout({
   const resolvedOpenTaskPacks = useMemo(
     () =>
       onOpenTaskPacks ??
-      (taskPackCanManageBilling && taskPackOptions.length > 0
+      (taskPackCanManageBilling
         ? () => handleAddonsOpen('tasks')
         : undefined),
-    [handleAddonsOpen, onOpenTaskPacks, taskPackCanManageBilling, taskPackOptions.length],
+    [handleAddonsOpen, onOpenTaskPacks, taskPackCanManageBilling],
   )
 
   useEffect(() => {
@@ -1499,7 +1499,7 @@ export function AgentChatLayout({
           <div className="agent-chat-workspace-main">
           <AgentTimelinePane
             composerDisabled={composerDisabled}
-            contactCapOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0 ? () => handleAddonsOpen('contacts') : undefined}
+            contactCapOpenPacks={contactPackCanManageBilling ? () => handleAddonsOpen('contacts') : undefined}
             contactCapShowUpgrade={contactPackShowUpgrade}
             events={timelineRenderEvents}
             hardLimitShowUpsell={hardLimitShowUpsell}
@@ -1522,7 +1522,7 @@ export function AgentChatLayout({
             onRetryMessage={onRetryMessage}
             onStarterPromptSelect={handleStarterPromptSelect}
             onTaskCreditsDismiss={handleTaskCreditsDismiss}
-            onTaskCreditsOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0 ? () => handleAddonsOpen('tasks') : undefined}
+            onTaskCreditsOpenPacks={taskPackCanManageBilling ? () => handleAddonsOpen('tasks') : undefined}
             onTemplateRecommendationCreate={onTemplateRecommendationCreate}
             quickIncreaseBusy={quickIncreaseBusy}
             quickIncreaseLabel={quickIncreaseLabel ?? undefined}
