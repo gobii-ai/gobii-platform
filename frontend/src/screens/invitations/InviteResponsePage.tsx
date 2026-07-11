@@ -36,6 +36,17 @@ export function InviteResponsePage<TPayload extends InviteResponsePayload>({
   onNavigate: (path: string) => void
   config: InviteResponseConfig<TPayload>
 }) {
+  const {
+    eyebrow,
+    successStatus,
+    request,
+    title,
+    message,
+    actionPath,
+    actionLabel,
+    errorMessage: configErrorMessage,
+    onSuccess,
+  } = config
   const [status, setStatus] = useState<InviteStatus>('loading')
   const [payload, setPayload] = useState<TPayload | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -49,22 +60,22 @@ export function InviteResponsePage<TPayload extends InviteResponsePayload>({
       setPayload(null)
       setErrorMessage(null)
       try {
-        const result = await config.request(token)
+        const result = await request(token)
         if (cancelled) return
         setPayload(result)
         if (!result.ok) {
           setStatus('issue')
           return
         }
-        setStatus(config.successStatus)
-        config.onSuccess?.(result)
+        setStatus(successStatus)
+        onSuccess?.(result)
         if (result.redirectUrl) {
           redirectTimer = window.setTimeout(() => onNavigate(result.redirectUrl as string), 650)
         }
       } catch (error) {
         if (cancelled) return
         setStatus('error')
-        setErrorMessage(error instanceof Error ? error.message : config.errorMessage)
+        setErrorMessage(error instanceof Error ? error.message : configErrorMessage)
       }
     }
 
@@ -73,7 +84,7 @@ export function InviteResponsePage<TPayload extends InviteResponsePayload>({
       cancelled = true
       if (redirectTimer) window.clearTimeout(redirectTimer)
     }
-  }, [config, onNavigate, token])
+  }, [configErrorMessage, onNavigate, onSuccess, request, successStatus, token])
 
   const icon = useMemo(() => {
     if (status === 'loading') {
@@ -89,16 +100,16 @@ export function InviteResponsePage<TPayload extends InviteResponsePayload>({
     <section className="immersive-invite-page">
       <div className={`immersive-invite-card immersive-invite-card--${status}`}>
         <div className="immersive-invite-card__icon">{icon}</div>
-        <p className="immersive-invite-card__eyebrow">{config.eyebrow}</p>
-        <h1 className="immersive-invite-card__title">{config.title(context)}</h1>
-        <p className="immersive-invite-card__message">{config.message(context)}</p>
+        <p className="immersive-invite-card__eyebrow">{eyebrow}</p>
+        <h1 className="immersive-invite-card__title">{title(context)}</h1>
+        <p className="immersive-invite-card__message">{message(context)}</p>
         {status !== 'loading' ? (
           <button
             type="button"
             className="immersive-invite-card__button"
-            onClick={() => onNavigate(config.actionPath(context))}
+            onClick={() => onNavigate(actionPath(context))}
           >
-            <span>{config.actionLabel(context)}</span>
+            <span>{actionLabel(context)}</span>
             <ArrowRight className="h-4 w-4" />
           </button>
         ) : null}
