@@ -168,14 +168,14 @@ class TestParallelToolCallsExecution(TestCase):
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
-    def test_brightdata_tool_batch_falls_back_to_serial(self, mock_execute_enabled, _mock_credit):
+    def test_native_brightdata_tool_batch_executes_in_parallel(self, mock_execute_enabled, _mock_credit):
         active = 0
         max_active = 0
         lock = threading.Lock()
 
         def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
             nonlocal active, max_active
-            self.assertFalse(isolated_mcp)
+            self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
             with lock:
                 active += 1
@@ -196,7 +196,7 @@ class TestParallelToolCallsExecution(TestCase):
         )
 
         self.assertEqual(mock_execute_enabled.call_count, 3)
-        self.assertEqual(max_active, 1)
+        self.assertGreaterEqual(max_active, 2)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")

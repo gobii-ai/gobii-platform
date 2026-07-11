@@ -189,9 +189,9 @@ def _parse_cursor(cursor: Any) -> tuple[Optional[int], Optional[dict[str, Any]]]
         return 0, None
     if not isinstance(cursor, str):
         return None, _error("Bright Data search cursor must be a string page number.")
-    match = re.match(r"^\s*([+-]?\d+)", cursor)
+    match = re.match(r"^\s*(\d+)", cursor)
     if not match:
-        return None, _error("Bright Data search cursor must begin with a page number.")
+        return None, _error("Bright Data search cursor must begin with a non-negative page number.")
     return int(match.group(1)), None
 
 
@@ -498,9 +498,13 @@ def _validate_scrape_url(value: Any) -> Optional[dict[str, Any]]:
 
 
 def _validate_linkedin_person_profile_url(value: Any) -> Optional[dict[str, Any]]:
-    if _parse_http_url(value):
-        return None
-    return _error("Bright Data LinkedIn person profile requires a valid HTTP or HTTPS URL.")
+    parsed = _parse_http_url(value)
+    if not parsed:
+        return _error("Bright Data LinkedIn person profile requires a valid HTTP or HTTPS URL.")
+    domain = parsed.hostname.lower() if parsed.hostname else ""
+    if domain != "linkedin.com" and not domain.endswith(".linkedin.com"):
+        return _error("Bright Data LinkedIn person profile requires a valid LinkedIn URL.")
+    return None
 
 
 def execute_brightdata_scrape_as_markdown(_agent: Any, params: dict[str, Any]) -> dict[str, Any]:
@@ -541,7 +545,7 @@ def execute_brightdata_linkedin_person_profile(_agent: Any, params: dict[str, An
             "format": "json",
             "include_errors": True,
         },
-        payload=[{"url": url}],
+        payload={"input": [{"url": url}]},
     )
     if request_error:
         return request_error

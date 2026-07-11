@@ -130,7 +130,10 @@ class BrightDataNativeToolTests(SimpleTestCase):
                 "include_errors": True,
             },
         )
-        self.assertEqual(call.kwargs["json"], [{"url": "https://www.linkedin.com/in/ada-lovelace"}])
+        self.assertEqual(
+            call.kwargs["json"],
+            {"input": [{"url": "https://www.linkedin.com/in/ada-lovelace"}]},
+        )
         self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer test-token")
         self.assertEqual(call.kwargs["timeout"], 42.0)
 
@@ -148,6 +151,18 @@ class BrightDataNativeToolTests(SimpleTestCase):
         result = execute_brightdata_linkedin_person_profile(None, {"url": "linkedin.com/in/ada"})
 
         self.assertEqual(result["status"], "error")
+        self.assertFalse(result["retryable"])
+        mock_post.assert_not_called()
+
+    @patch("api.agent.tools.brightdata.requests.post")
+    def test_linkedin_person_profile_rejects_non_linkedin_url_before_request(self, mock_post):
+        result = execute_brightdata_linkedin_person_profile(
+            None,
+            {"url": "https://example.com/in/ada"},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("valid LinkedIn URL", result["message"])
         self.assertFalse(result["retryable"])
         mock_post.assert_not_called()
 
@@ -548,9 +563,12 @@ class BrightDataNativeToolTests(SimpleTestCase):
 
     def test_rejects_invalid_cursor_and_geo_location(self):
         cursor_result = execute_brightdata_search_engine(None, {"query": "cats", "cursor": "next"})
+        negative_cursor_result = execute_brightdata_search_engine(None, {"query": "cats", "cursor": "-1"})
         geo_result = execute_brightdata_search_engine(None, {"query": "cats", "geo_location": "usa"})
 
         self.assertEqual(cursor_result["status"], "error")
+        self.assertEqual(negative_cursor_result["status"], "error")
+        self.assertIn("non-negative", negative_cursor_result["message"])
         self.assertEqual(geo_result["status"], "error")
 
 
