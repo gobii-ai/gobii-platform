@@ -2280,16 +2280,9 @@ def _recent_contact_records_for_prompt(
 
 
 def _allowed_communication_channels(
-    agent: PersistentAgent,
     agent_endpoints: Sequence[PersistentAgentCommsEndpoint],
 ) -> list[str]:
-    channels = {
-        endpoint.channel
-        for endpoint in agent_endpoints
-        if endpoint.channel and not (
-            endpoint.channel == CommsChannel.SMS and agent.sms_disabled
-        )
-    }
+    channels = {endpoint.channel for endpoint in agent_endpoints if endpoint.channel}
     return sorted(channels)
 
 
@@ -2327,11 +2320,14 @@ def _build_contacts_block(
             non_shrinkable=True,
         )
 
-    # Agent endpoints (all, highlight primary)
-    agent_eps = (
+    # Agent endpoints currently available for outbound communication (highlight primary)
+    agent_eps_qs = (
         PersistentAgentCommsEndpoint.objects.filter(owner_agent=agent)
         .order_by("channel", "address")
     )
+    if agent.sms_disabled:
+        agent_eps_qs = agent_eps_qs.exclude(channel=CommsChannel.SMS)
+    agent_eps = list(agent_eps_qs)
     if agent_eps:
         agent_lines = ["As the agent, these are *YOUR* endpoints, i.e. the addresses you are sending messages *FROM*."]
         for ep in agent_eps:
@@ -2651,7 +2647,7 @@ def _build_contacts_block(
     )
     
     # Explicitly list allowed communication channels
-    allowed_channels = _allowed_communication_channels(agent, agent_eps)
+    allowed_channels = _allowed_communication_channels(agent_eps)
 
     if allowed_channels:
         contacts_group.section_text(

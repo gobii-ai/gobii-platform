@@ -9,7 +9,11 @@ from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
 from api.agent.tools.planning import execute_end_planning
 from api.agent.tools.schedule_updater import execute_update_schedule
-from api.agent.tools.static_tools import PLANNING_MODE_DISABLED_TOOL_NAMES, get_static_tool_definitions
+from api.agent.tools.static_tools import (
+    PLANNING_MODE_DISABLED_TOOL_NAMES,
+    _agent_has_sms_endpoint,
+    get_static_tool_definitions,
+)
 from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from api.models import (
     BrowserUseAgent,
@@ -123,6 +127,18 @@ class PersistentAgentPlanningModeTests(TestCase):
         names = _tool_names(get_static_tool_definitions(self.agent))
 
         self.assertIn("send_sms", names)
+
+    def test_sms_endpoint_check_is_cached_on_agent_instance(self):
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550123",
+            is_primary=True,
+        )
+
+        with self.assertNumQueries(1):
+            self.assertTrue(_agent_has_sms_endpoint(self.agent))
+            self.assertTrue(_agent_has_sms_endpoint(self.agent))
 
     def test_sms_disabled_agents_with_sms_endpoint_do_not_receive_send_sms_tool(self):
         PersistentAgentCommsEndpoint.objects.create(

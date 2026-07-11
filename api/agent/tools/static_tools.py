@@ -64,6 +64,17 @@ def _get_sleep_tool() -> Dict[str, object]:
     }
 
 
+def _agent_has_sms_endpoint(agent: Optional[PersistentAgent]) -> bool:
+    if not agent or agent.sms_disabled:
+        return False
+
+    has_sms_endpoint = getattr(agent, "_has_sms_endpoint", None)
+    if has_sms_endpoint is None:
+        has_sms_endpoint = agent.comms_endpoints.filter(channel=CommsChannel.SMS).exists()
+        agent._has_sms_endpoint = has_sms_endpoint
+    return has_sms_endpoint
+
+
 def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     """Return static (always-present) tool definitions for an agent."""
     from .apply_patch import get_apply_patch_tool
@@ -85,11 +96,7 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
         get_update_plan_tool(),
         get_send_email_tool(),
     ]
-    if (
-        agent
-        and not agent.sms_disabled
-        and agent.comms_endpoints.filter(channel=CommsChannel.SMS).exists()
-    ):
+    if _agent_has_sms_endpoint(agent):
         static_tools.append(get_send_sms_tool())
     static_tools.extend([
         get_send_chat_tool(),

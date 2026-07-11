@@ -214,20 +214,34 @@ class PromptContextContactsGuidanceTests(TestCase):
             address="+15555550124",
         )
 
-        self.assertEqual(
-            prompt_context._allowed_communication_channels(
-                self.agent,
-                list(self.agent.comms_endpoints.all()),
-            ),
-            [CommsChannel.EMAIL, CommsChannel.SMS],
+        config_authority = prompt_context._ConfigAuthorityResolver(self.agent)
+        contact_records = prompt_context.build_contacts_snapshot_records(
+            self.agent,
+            display_name_for_user=prompt_context._build_user_display_name,
+            user_can_configure=config_authority.user_can_configure,
         )
+        collector = _PromptSectionCollector()
+        prompt_context._build_contacts_block(
+            self.agent,
+            collector,
+            _NoopSpan(),
+            config_authority,
+            contact_records,
+        )
+
+        self.assertIn("- sms: +15555550124", collector.sections["agent_endpoints"])
+        self.assertIn("You can communicate via: email, sms.", collector.sections["allowed_channels"])
 
         self.agent.sms_disabled = True
-
-        self.assertEqual(
-            prompt_context._allowed_communication_channels(
-                self.agent,
-                list(self.agent.comms_endpoints.all()),
-            ),
-            [CommsChannel.EMAIL],
+        collector = _PromptSectionCollector()
+        prompt_context._build_contacts_block(
+            self.agent,
+            collector,
+            _NoopSpan(),
+            config_authority,
+            contact_records,
         )
+
+        self.assertNotIn("sms", collector.sections["agent_endpoints"])
+        self.assertIn("You can communicate via: email.", collector.sections["allowed_channels"])
+        self.assertNotIn("sms", collector.sections["allowed_channels"])
