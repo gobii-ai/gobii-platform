@@ -13,7 +13,10 @@ from django.utils.html import format_html
 from agents.services import PretrainedWorkerTemplateService
 from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation, _save_attachments
 from api.agent.files.filespace_service import import_message_attachments_to_filespace
-from api.agent.tasks import process_agent_events_task
+from api.agent.tasks import (
+    enqueue_interactive_process_agent_events,
+    process_agent_events_task,
+)
 from api.agent.tools.custom_tools import CUSTOM_TOOL_PREFIX
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.core.llm_config import AgentLLMTier, resolve_intelligence_tier_for_owner
@@ -504,12 +507,20 @@ def create_persistent_agent_from_charter(
                     initial_message_id,
                 )
             finally:
-                process_agent_events_task.delay(str(persistent_agent.id))
+                enqueue_interactive_process_agent_events(
+                    str(persistent_agent.id),
+                    prefer_low_latency=True,
+                )
 
         if has_initial_attachments:
             transaction.on_commit(_import_initial_attachments_then_process)
         else:
-            transaction.on_commit(lambda: process_agent_events_task.delay(str(persistent_agent.id)))
+            transaction.on_commit(
+                lambda: enqueue_interactive_process_agent_events(
+                    str(persistent_agent.id),
+                    prefer_low_latency=True,
+                )
+            )
 
         for key in (
             "agent_charter",

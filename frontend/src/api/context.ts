@@ -27,6 +27,7 @@ type ConsoleContextResponsePayload = {
   personal: { id: string; name: string }
   organizations: { id: string; name: string; role: string | null; canCreateAgents?: boolean }[]
   organizations_enabled: boolean
+  requested_agent_status?: 'deleted' | 'missing' | null
 }
 
 type SwitchContextResponsePayload = {
@@ -45,6 +46,7 @@ export type ConsoleContextData = {
   personal: ConsoleContext
   organizations: ConsoleContextOption[]
   organizationsEnabled: boolean
+  requestedAgentStatus?: 'deleted' | 'missing' | null
 }
 
 export async function fetchConsoleContext(options: { forAgentId?: string } = {}): Promise<ConsoleContextData> {
@@ -68,6 +70,7 @@ export async function fetchConsoleContext(options: { forAgentId?: string } = {})
       canCreateAgents: org.canCreateAgents,
     })),
     organizationsEnabled: payload.organizations_enabled,
+    requestedAgentStatus: payload.requested_agent_status ?? null,
   }
 }
 

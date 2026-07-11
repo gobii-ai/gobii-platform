@@ -26,6 +26,11 @@ const {
   updateAgentMock,
   fetchAgentSpawnIntentMock,
   updateUserPreferencesMock,
+  useQuickSettingsMock,
+  useAddonsMock,
+  quickSettingsRefetchMock,
+  addonsRefetchMock,
+  panelRequestsState,
   rosterContext,
   rosterState,
   llmIntelligence,
@@ -37,6 +42,11 @@ const {
   updateAgentMock: vi.fn(),
   fetchAgentSpawnIntentMock: vi.fn(),
   updateUserPreferencesMock: vi.fn(),
+  useQuickSettingsMock: vi.fn(),
+  useAddonsMock: vi.fn(),
+  quickSettingsRefetchMock: vi.fn(),
+  addonsRefetchMock: vi.fn(),
+  panelRequestsState: { allow: true },
   rosterContext: {
     type: 'personal',
     id: 'user-1',
@@ -109,7 +119,8 @@ const {
   },
 }))
 
-vi.mock('../api/agents', () => ({
+vi.mock('../api/agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/agents')>()),
   createAgent: createAgentMock,
   updateAgent: updateAgentMock,
 }))
@@ -169,6 +180,8 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       agentId,
       sidebar,
       onOpenFullSettings,
+      onRefreshDailyCredits,
+      onRefreshAddons,
       events,
       templateRecommendations,
       onTemplateRecommendationCreate,
@@ -187,6 +200,8 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
         }
       }
       onOpenFullSettings?: () => void
+      onRefreshDailyCredits?: () => void
+      onRefreshAddons?: () => void
       events?: Array<{
         kind: string
         message?: {
@@ -281,6 +296,12 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <button type="button" data-testid="open-full-settings" onClick={() => onOpenFullSettings?.()}>
             Open full settings
           </button>
+          <button type="button" data-testid="open-quick-settings" onClick={() => onRefreshDailyCredits?.()}>
+            Open quick settings
+          </button>
+          <button type="button" data-testid="open-addons" onClick={() => onRefreshAddons?.()}>
+            Open addons
+          </button>
           <button
             type="button"
             onClick={() => sidebar?.settings?.onNotificationsEnabledChange?.(!Boolean(sidebarNotificationsEnabled))}
@@ -344,6 +365,10 @@ vi.mock('../hooks/useAgentWebSession', () => ({
   useAgentWebSession: vi.fn(() => ({ status: 'connected', error: null })),
 }))
 
+vi.mock('../hooks/useCreatedAgentProfileRefresh', () => ({
+  useCreatedAgentProfileRefresh: vi.fn(),
+}))
+
 vi.mock('../hooks/useAgentRoster', () => ({
   useAgentRoster: vi.fn(() => ({
     data: {
@@ -369,23 +394,29 @@ vi.mock('../hooks/useAgentRoster', () => ({
 }))
 
 vi.mock('../hooks/useAgentQuickSettings', () => ({
-  useAgentQuickSettings: vi.fn(() => ({
-    data: null,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-    updateQuickSettings: vi.fn(),
-    updating: false,
-  })),
+  useAgentQuickSettings: (...args: unknown[]) => {
+    useQuickSettingsMock(...args)
+    return {
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: quickSettingsRefetchMock,
+      updateQuickSettings: vi.fn(),
+      updating: false,
+    }
+  },
 }))
 
 vi.mock('../hooks/useAgentAddons', () => ({
-  useAgentAddons: vi.fn(() => ({
-    data: null,
-    refetch: vi.fn(),
-    updateAddons: vi.fn(),
-    updating: false,
-  })),
+  useAgentAddons: (...args: unknown[]) => {
+    useAddonsMock(...args)
+    return {
+      data: null,
+      refetch: addonsRefetchMock,
+      updateAddons: vi.fn(),
+      updating: false,
+    }
+  },
 }))
 
 vi.mock('../hooks/useAgentInsights', () => ({
@@ -399,7 +430,7 @@ vi.mock('../hooks/useAgentInsights', () => ({
 
 vi.mock('../hooks/useAgentPanelRequestsEnabled', () => ({
   useAgentPanelRequestsEnabled: vi.fn(() => ({
-    allowAgentPanelRequests: false,
+    allowAgentPanelRequests: panelRequestsState.allow,
   })),
 }))
 
@@ -535,11 +566,40 @@ describe('AgentChatPage trial onboarding', () => {
       agent_id: 'agent-1',
       agent_name: 'Test Agent',
       agent_email: 'agent@example.com',
+      agent: {
+        id: 'agent-1',
+        name: 'Test Agent',
+        avatar_url: null,
+        is_active: true,
+        processing_active: false,
+        mini_description: '',
+        short_description: '',
+        listing_description: '',
+        listing_description_source: null,
+        display_tags: [],
+        detail_url: '/app/agents/agent-1/settings',
+        daily_credit_remaining: null,
+        daily_credit_low: false,
+        last_24h_credit_burn: null,
+        is_org_owned: false,
+        is_collaborator: false,
+        can_manage_agent: true,
+        can_manage_collaborators: true,
+        preferred_llm_tier: 'standard',
+        email: 'agent@example.com',
+        sms: null,
+        last_interaction_at: null,
+      },
     })
     updateAgentMock.mockReset()
     fetchAgentSpawnIntentMock.mockReset()
     updateUserPreferencesMock.mockReset()
     updateUserPreferencesMock.mockResolvedValue({ preferences: {} })
+    useQuickSettingsMock.mockClear()
+    useAddonsMock.mockClear()
+    quickSettingsRefetchMock.mockReset()
+    addonsRefetchMock.mockReset()
+    panelRequestsState.allow = true
     queryClient = createTestQueryClient()
     appStore = createTestAppStore({ queryClient })
     seedSubscriptionState(appStore, buildInitialSubscriptionState())
@@ -594,6 +654,7 @@ describe('AgentChatPage trial onboarding', () => {
   })
 
   it('skips the modal and auto-submits the spawn charter when plan selection is not required', async () => {
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
     fetchAgentSpawnIntentMock.mockResolvedValue({
       charter: 'Build me an agent',
       charter_override: null,
@@ -617,6 +678,9 @@ describe('AgentChatPage trial onboarding', () => {
       )
     })
     expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument()
+    expect(invalidateQueries).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['agent-roster'] }),
+    )
   })
 
   it('keeps the pricing modal closed during signup preview auto-submit', async () => {
@@ -721,6 +785,28 @@ describe('AgentChatPage trial onboarding', () => {
     const createButton = await screen.findByRole('button', { name: /create your first agent/i })
     expect(createButton).not.toHaveAttribute('aria-disabled')
     expect(screen.queryByText(/finish signup to create another agent/i)).not.toBeInTheDocument()
+  })
+
+  it('defers quick settings and add-ons until their panels are requested', async () => {
+    window.history.pushState({}, '', '/app/agents/agent-1')
+    rosterState.agents = [buildRosterAgent('agent-1', 'Test Agent')]
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(useQuickSettingsMock).toHaveBeenLastCalledWith('agent-1', { enabled: false })
+      expect(useAddonsMock).toHaveBeenLastCalledWith('agent-1', { enabled: false })
+    })
+
+    fireEvent.click(screen.getByTestId('open-quick-settings'))
+    fireEvent.click(screen.getByTestId('open-addons'))
+
+    await waitFor(() => {
+      expect(useQuickSettingsMock).toHaveBeenLastCalledWith('agent-1', { enabled: true })
+      expect(useAddonsMock).toHaveBeenLastCalledWith('agent-1', { enabled: true })
+    })
+    expect(quickSettingsRefetchMock).toHaveBeenCalled()
+    expect(addonsRefetchMock).toHaveBeenCalled()
   })
 
   it('keeps empty-state preview creation blocked when an active preview already exists', async () => {

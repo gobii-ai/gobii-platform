@@ -474,8 +474,9 @@ class NewAgentTemplateRecommendationTests(TestCase):
         mock_recommendations.assert_called_once()
 
     @tag("batch_public_templates")
+    @patch("console.api_views._serialize_agent_profile_payload", return_value={})
     @patch("console.agent_creation.create_persistent_agent_from_charter")
-    def test_quick_create_from_template_code_uses_template_charter(self, mock_create):
+    def test_quick_create_from_template_code_uses_template_charter(self, mock_create, _mock_profile):
         class EmptyEndpointQuery:
             def filter(self, **kwargs):
                 return self
@@ -523,8 +524,9 @@ class NewAgentTemplateRecommendationTests(TestCase):
         self.assertEqual(self.client.session.get("agent_template_source"), "public_template")
 
     @tag("batch_public_templates")
+    @patch("console.api_views._serialize_agent_profile_payload", return_value={})
     @patch("console.agent_creation.create_persistent_agent_from_charter")
-    def test_quick_create_from_org_template_id_uses_template_charter(self, mock_create):
+    def test_quick_create_from_org_template_id_uses_template_charter(self, mock_create, _mock_profile):
         class EmptyEndpointQuery:
             def filter(self, **kwargs):
                 return self

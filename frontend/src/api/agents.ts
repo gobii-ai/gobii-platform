@@ -30,6 +30,41 @@ export type CreateAgentResponse = {
   agent_name: string
   agent_email?: string | null
   planning_state?: PlanningState | null
+  agent: AgentProfilePayload
+}
+
+export type AgentProfilePayload = {
+  id: string
+  name: string
+  avatar_url: string | null
+  is_active: boolean
+  processing_active: boolean
+  mini_description: string
+  short_description: string
+  listing_description: string
+  listing_description_source: string | null
+  display_tags: string[]
+  detail_url: string | null
+  daily_credit_remaining: number | null
+  daily_credit_low: boolean
+  last_24h_credit_burn: number | null
+  is_org_owned: boolean
+  is_collaborator: boolean
+  can_manage_agent: boolean
+  can_manage_collaborators: boolean
+  audit_url?: string | null
+  preferred_llm_tier: string | null
+  email: string | null
+  sms: string | null
+  last_interaction_at: string | null
+  signup_preview_state?: SignupPreviewState | null
+  planning_state?: PlanningState | null
+  pending_action_request_count?: number
+  has_unread_agent_message?: boolean
+  latest_agent_message_id?: string | null
+  latest_agent_message_at?: string | null
+  latest_agent_message_read_at?: string | null
+  enabled_system_skills?: string[]
 }
 
 type AgentRosterPayload = {
@@ -44,60 +79,11 @@ type AgentRosterPayload = {
   accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
   transfer_invites?: AgentTransferInvite[]
-  agents: {
-    id: string
-    name: string
-    avatar_url: string | null
-    is_active: boolean
-    processing_active: boolean
-    mini_description: string
-    short_description: string
-    listing_description: string
-    listing_description_source: string | null
-    display_tags: string[]
-    detail_url: string | null
-    daily_credit_remaining: number | null
-    daily_credit_low: boolean
-    last_24h_credit_burn: number | null
-    is_org_owned: boolean
-    is_collaborator: boolean
-    can_manage_agent: boolean
-    can_manage_collaborators: boolean
-    audit_url?: string | null
-    preferred_llm_tier: string | null
-    email: string | null
-    sms: string | null
-    last_interaction_at: string | null
-    signup_preview_state?: SignupPreviewState | null
-    planning_state?: PlanningState | null
-    pending_action_request_count?: number
-    has_unread_agent_message?: boolean
-    latest_agent_message_id?: string | null
-    latest_agent_message_at?: string | null
-    latest_agent_message_read_at?: string | null
-    enabled_system_skills?: string[]
-  }[]
+  agents: AgentProfilePayload[]
 }
 
-export async function fetchAgentRoster(
-  options: { forAgentId?: string } = {},
-): Promise<{
-  context: ConsoleContext
-  agents: AgentRosterEntry[]
-  transferInvites: AgentTransferInvite[]
-  agentRosterSortMode: AgentRosterSortMode
-  favoriteAgentIds: string[]
-  mutedAgentIds: string[]
-  insightsPanelExpanded: boolean | null
-  agentChatNotificationsEnabled: boolean
-  requestedAgentStatus?: 'deleted' | 'missing' | null
-  billingStatus?: BillingStatusInfo | null
-  accountPause?: AccountPauseInfo | null
-  llmIntelligence?: LlmIntelligenceConfig | null
-}> {
-  const query = options.forAgentId ? `?for_agent=${encodeURIComponent(options.forAgentId)}` : ''
-  const payload = await jsonFetch<AgentRosterPayload>(`/console/api/agents/roster/${query}`)
-  const agents = payload.agents.map((agent) => ({
+export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): AgentRosterEntry {
+  return {
     id: agent.id,
     name: agent.name,
     avatarUrl: agent.avatar_url,
@@ -131,7 +117,32 @@ export async function fetchAgentRoster(
     enabledSystemSkills: Array.isArray(agent.enabled_system_skills)
       ? agent.enabled_system_skills.filter((value): value is string => typeof value === 'string')
       : [],
-  }))
+  }
+}
+
+export async function fetchAgentRoster(
+  options: { forAgentId?: string; context?: ConsoleContext } = {},
+): Promise<{
+  context: ConsoleContext
+  agents: AgentRosterEntry[]
+  transferInvites: AgentTransferInvite[]
+  agentRosterSortMode: AgentRosterSortMode
+  favoriteAgentIds: string[]
+  mutedAgentIds: string[]
+  insightsPanelExpanded: boolean | null
+  agentChatNotificationsEnabled: boolean
+  requestedAgentStatus?: 'deleted' | 'missing' | null
+  billingStatus?: BillingStatusInfo | null
+  accountPause?: AccountPauseInfo | null
+  llmIntelligence?: LlmIntelligenceConfig | null
+}> {
+  const query = options.forAgentId ? `?for_agent=${encodeURIComponent(options.forAgentId)}` : ''
+  const headers = options.context ? {
+    'X-Gobii-Context-Type': options.context.type,
+    'X-Gobii-Context-Id': options.context.id,
+  } : undefined
+  const payload = await jsonFetch<AgentRosterPayload>(`/console/api/agents/roster/${query}`, { headers })
+  const agents = payload.agents.map(agentProfilePayloadToRosterEntry)
   return {
     context: payload.context,
     agents,
@@ -150,6 +161,11 @@ export async function fetchAgentRoster(
     accountPause: payload.accountPause ?? null,
     llmIntelligence: payload.llmIntelligence,
   }
+}
+
+export async function fetchAgentProfile(agentId: string): Promise<AgentRosterEntry> {
+  const payload = await jsonFetch<AgentProfilePayload>(`/console/api/agents/${agentId}/profile/`)
+  return agentProfilePayloadToRosterEntry(payload)
 }
 
 export type AgentTransferInviteActionResponse = {

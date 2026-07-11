@@ -312,7 +312,8 @@ class RemoteMCPViewTests(TestCase):
             patch("api.services.persistent_agents.maybe_schedule_mini_description"),
             patch("api.services.persistent_agents.maybe_schedule_agent_tags"),
             patch("api.services.persistent_agents.maybe_schedule_agent_avatar"),
-            patch("api.agent.tasks.process_agent_events_task.delay"),
+            patch("api.agent.tasks.enqueue_interactive_process_agent_events"),
+            patch("api.serializers.can_user_use_personal_agents_and_api", return_value=True),
             self.captureOnCommitCallbacks(execute=True),
         ):
             user_response = self._call_tool(
@@ -336,7 +337,7 @@ class RemoteMCPViewTests(TestCase):
 
         self.assertEqual(user_response.status_code, 200)
         user_content = self._structured_content(user_response)
-        self.assertFalse(user_response.json()["result"]["isError"])
+        self.assertFalse(user_response.json()["result"]["isError"], user_response.content)
         user_agent = PersistentAgent.objects.get(id=user_content["agent"]["id"])
         self.assertEqual(user_agent.user_id, self.other_user.id)
         self.assertIsNone(user_agent.organization_id)
@@ -344,7 +345,7 @@ class RemoteMCPViewTests(TestCase):
 
         self.assertEqual(org_response.status_code, 200)
         org_content = self._structured_content(org_response)
-        self.assertFalse(org_response.json()["result"]["isError"])
+        self.assertFalse(org_response.json()["result"]["isError"], org_response.content)
         org_agent = PersistentAgent.objects.get(id=org_content["agent"]["id"])
         self.assertEqual(org_agent.organization_id, org.id)
         self.assertEqual(org_agent.user_id, self.other_user.id)

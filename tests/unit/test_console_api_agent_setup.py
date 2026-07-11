@@ -349,7 +349,7 @@ class AgentSetupApiTests(TestCase):
         self.assertEqual(agent.preferred_contact_endpoint.channel, CommsChannel.SMS)
         self.assertEqual(agent.preferred_contact_endpoint.address, pending_phone.phone_number)
 
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     @patch("console.agent_creation.sms.send_sms")
     @patch("console.agent_creation.find_unused_number")
     def test_agent_sms_enable(self, mock_find_unused_number, _mock_send_sms, _mock_task_delay):

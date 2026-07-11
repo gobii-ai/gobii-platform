@@ -221,6 +221,9 @@ class AgentChatAPITests(TestCase):
         payload = response.json()
 
         created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        self.assertEqual(payload["agent"]["id"], str(created_agent.id))
+        self.assertEqual(payload["agent"]["name"], created_agent.name)
+        self.assertIn("processing_active", payload["agent"])
         self.assertIsNotNone(created_agent.preferred_contact_endpoint)
         self.assertEqual(created_agent.preferred_contact_endpoint.channel, CommsChannel.WEB)
 
@@ -242,7 +245,7 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(seeded_message.conversation.address, expected_sender)
 
     @tag("batch_agent_chat")
-    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
     def test_quick_create_accepts_initial_attachment(self, mock_delay):
         message_text = "Use this screenshot to create the agent"
         attachment = SimpleUploadedFile("screenshot.png", b"fake-image-bytes", content_type="image/png")
@@ -267,7 +270,10 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(attachment_row.content_type, "image/png")
         self.assertIsNotNone(attachment_row.filespace_node)
         self.assertEqual(attachment_row.filespace_node.name, "screenshot.png")
-        mock_delay.assert_called_once_with(str(created_agent.id))
+        mock_delay.assert_called_once_with(
+            str(created_agent.id),
+            prefer_low_latency=True,
+        )
 
     @tag("batch_agent_chat")
     def test_quick_create_ignores_files_not_named_attachments(self):
@@ -296,7 +302,7 @@ class AgentChatAPITests(TestCase):
         with patch(
             "console.agent_creation.import_message_attachments_to_filespace",
             side_effect=RuntimeError("storage offline"),
-        ) as mock_import, patch("console.agent_creation.process_agent_events_task.delay") as mock_delay:
+        ) as mock_import, patch("console.agent_creation.enqueue_interactive_process_agent_events") as mock_delay:
             with self.captureOnCommitCallbacks(execute=True):
                 response = self.client.post(
                     "/console/api/agents/create/",
@@ -312,7 +318,10 @@ class AgentChatAPITests(TestCase):
         seeded_message = PersistentAgentMessage.objects.get(owner_agent=created_agent, body=message_text)
         self.assertEqual(seeded_message.attachments.count(), 1)
         mock_import.assert_called_once_with(str(seeded_message.id))
-        mock_delay.assert_called_once_with(str(created_agent.id))
+        mock_delay.assert_called_once_with(
+            str(created_agent.id),
+            prefer_low_latency=True,
+        )
 
     @override_settings(MAX_FILE_SIZE=5)
     @tag("batch_agent_chat")
@@ -554,7 +563,7 @@ class AgentChatAPITests(TestCase):
             override_flag("personal_agent_signup_preview_processing_limit", active=True),
             patch("console.agent_creation.can_user_use_personal_agents_and_api", return_value=False),
             patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
-            patch("console.agent_creation.process_agent_events_task.delay"),
+            patch("console.agent_creation.enqueue_interactive_process_agent_events"),
         ):
             with self.captureOnCommitCallbacks(execute=True):
                 response = preview_client.post(
@@ -604,7 +613,7 @@ class AgentChatAPITests(TestCase):
             override_flag("personal_agent_signup_preview_processing_limit", active=True),
             patch("console.agent_creation.can_user_use_personal_agents_and_api", return_value=False),
             patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
-            patch("console.agent_creation.process_agent_events_task.delay"),
+            patch("console.agent_creation.enqueue_interactive_process_agent_events"),
         ):
             with self.captureOnCommitCallbacks(execute=True):
                 response = preview_client.post(
@@ -960,6 +969,26 @@ class AgentChatAPITests(TestCase):
         self.assertIn("active", snapshot)
         self.assertIn("webTasks", snapshot)
         self.assertIsInstance(snapshot.get("webTasks"), list)
+        critical_status = payload.get("critical_status")
+        self.assertIsInstance(critical_status, dict)
+        self.assertIn("billing", critical_status)
+        self.assertIn("accountPause", critical_status)
+        self.assertIn("dailyCredits", critical_status)
+        self.assertIn("contactCapStatus", critical_status)
+
+    @tag("batch_agent_chat")
+    def test_agent_profile_endpoint_returns_lightweight_roster_entry(self):
+        response = self.client.get(
+            reverse("console_agent_profile", kwargs={"agent_id": self.agent.id}),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["id"], str(self.agent.id))
+        self.assertEqual(payload["name"], self.agent.name)
+        self.assertIn("avatar_url", payload)
+        self.assertIn("processing_active", payload)
+        self.assertIn("enabled_system_skills", payload)
 
     @tag("batch_agent_chat")
     @override_settings(GOBII_RELEASE_ENV="staging")

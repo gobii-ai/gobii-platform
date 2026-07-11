@@ -3,7 +3,7 @@ import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-que
 import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
-import { createAgent, respondToAgentTransferInvite, type CreateAgentTemplateOptions } from '../api/agents'
+import { agentProfilePayloadToRosterEntry, createAgent, respondToAgentTransferInvite, type CreateAgentTemplateOptions } from '../api/agents'
 import { currentOrganizationTemplatesQueryKey, fetchCurrentOrganizationTemplates, launchOrganizationTemplate, type OrganizationTemplate } from '../api/organization'
 import {
   stopAgentProcessing,
@@ -52,6 +52,7 @@ import { useRecentAgentSubscriptions } from '../hooks/useRecentAgentSubscription
 import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useCreateAgentWorkflow } from '../hooks/useCreateAgentWorkflow'
+import { useCreatedAgentProfileRefresh } from '../hooks/useCreatedAgentProfileRefresh'
 import { useImmersiveShellBridge } from '../hooks/useImmersiveShellBridge'
 import { usePendingActionsBridge } from '../hooks/usePendingActionsBridge'
 import { useRosterPreferencesBridge } from '../hooks/useRosterPreferencesBridge'
@@ -109,8 +110,6 @@ import { appendReturnTo } from '../util/returnTo'
 
 const LOW_CREDIT_DAY_THRESHOLD = 2
 const ROSTER_REFRESH_INTERVAL_MS = 20_000
-const ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS = 4_000
-const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 
@@ -189,8 +188,6 @@ type IntelligenceGateState = {
 }
 
 type TrialOnboardingTarget = Exclude<AgentSpawnIntent['onboarding_target'], null>
-
-type PendingAvatarTracking = Record<string, number>
 
 function normalizeAvatarUrl(value: string | null | undefined): string | null {
   if (typeof value !== 'string') {
@@ -442,12 +439,47 @@ function buildCreateAgentError(err: unknown, isProprietaryMode: boolean): Create
   }
 }
 
-function mergeRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentRosterEntry): AgentRosterEntry[] {
+function insertRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentRosterEntry): AgentRosterEntry[] {
   const roster = agents ?? []
   if (roster.some((agent) => agent.id === entry.id)) {
     return roster
   }
   return [...roster, entry]
+}
+
+function mergeCreatedAgentProfile(
+  agents: AgentRosterEntry[],
+  profile: AgentRosterEntry,
+): AgentRosterEntry[] {
+  let changed = false
+  const nextAgents = agents.map((agent) => {
+    if (agent.id !== profile.id) {
+      return agent
+    }
+    const hasNewProfileData = Boolean(
+      (!agent.avatarUrl && profile.avatarUrl)
+      || (!agent.miniDescription && profile.miniDescription)
+      || (!agent.shortDescription && profile.shortDescription)
+      || (!agent.listingDescription && profile.listingDescription)
+      || (!agent.listingDescriptionSource && profile.listingDescriptionSource)
+      || (agent.displayTags.length === 0 && profile.displayTags.length > 0),
+    )
+    if (!hasNewProfileData) {
+      return agent
+    }
+    changed = true
+    const next = {
+      ...agent,
+      avatarUrl: agent.avatarUrl || profile.avatarUrl,
+      miniDescription: agent.miniDescription || profile.miniDescription,
+      shortDescription: agent.shortDescription || profile.shortDescription,
+      listingDescription: agent.listingDescription || profile.listingDescription,
+      listingDescriptionSource: agent.listingDescriptionSource || profile.listingDescriptionSource,
+      displayTags: agent.displayTags.length > 0 ? agent.displayTags : profile.displayTags,
+    }
+    return next
+  })
+  return changed ? nextAgents : agents
 }
 
 function touchRosterEntryLastInteraction(
@@ -514,42 +546,6 @@ function applyRosterMessageReadState(
   })
 
   return changed ? { ...current, agents: nextAgents } : current
-}
-
-function prunePendingAvatarTracking(
-  pending: PendingAvatarTracking,
-  rosterAgents: AgentRosterEntry[],
-  nowMs = Date.now(),
-): PendingAvatarTracking {
-  const pendingEntries = Object.entries(pending)
-  if (pendingEntries.length === 0) {
-    return pending
-  }
-
-  const rosterById = new Map<string, AgentRosterEntry>()
-  for (const agent of rosterAgents) {
-    rosterById.set(agent.id, agent)
-  }
-
-  let changed = false
-  const next: PendingAvatarTracking = {}
-
-  for (const [agentId, expiresAt] of pendingEntries) {
-    if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) {
-      changed = true
-      continue
-    }
-
-    const rosterEntry = rosterById.get(agentId)
-    if (!rosterEntry || normalizeAvatarUrl(rosterEntry.avatarUrl)) {
-      changed = true
-      continue
-    }
-
-    next[agentId] = expiresAt
-  }
-
-  return changed ? next : pending
 }
 
 type AgentRosterQueryData = {
@@ -1226,17 +1222,7 @@ export function AgentChatPage({
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
   const [publicShareOpen, setPublicShareOpen] = useState(false)
   const [supportDialogOpen, setSupportDialogOpen] = useState(false)
-  const [pendingAvatarTracking, setPendingAvatarTracking] = useState<PendingAvatarTracking>({})
-  const trackPendingAvatarRefresh = useCallback((agentId: string) => {
-    const expiresAt = Date.now() + ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS
-    setPendingAvatarTracking((current) => {
-      const currentExpiry = current[agentId]
-      if (currentExpiry && currentExpiry >= expiresAt) {
-        return current
-      }
-      return { ...current, [agentId]: expiresAt }
-    })
-  }, [])
+  const [pendingCreatedProfileId, setPendingCreatedProfileId] = useState<string | null>(null)
 
   const handleCreditEvent = useCallback(() => {
     if (activeAgentId) {
@@ -1281,14 +1267,7 @@ export function AgentChatPage({
       if (hasAvatar) {
         const avatarFromEvent = typeof rawPayload.agent_avatar_url === 'string' ? rawPayload.agent_avatar_url : null
         if (normalizeAvatarUrl(avatarFromEvent)) {
-          setPendingAvatarTracking((current) => {
-            if (!current[agentIdFromEvent]) {
-              return current
-            }
-            const next = { ...current }
-            delete next[agentIdFromEvent]
-            return next
-          })
+          setPendingCreatedProfileId((current) => (current === agentIdFromEvent ? null : current))
         }
       }
 
@@ -1397,17 +1376,42 @@ export function AgentChatPage({
     keepAliveWhenHidden: Boolean(timelineProcessingActive || timelineAwaitingResponse),
   })
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
-  const rosterQueryAgentId = contextLookupAgentId
-  const hasPendingAvatarTracking = Object.keys(pendingAvatarTracking).length > 0
-  const rosterRefreshIntervalMs = hasPendingAvatarTracking
-    ? ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS
-    : ROSTER_REFRESH_INTERVAL_MS
   const rosterQuery = useAgentRoster({
     enabled: contextReady,
+    context: effectiveContext,
     contextKey: rosterContextKey,
-    forAgentId: rosterQueryAgentId,
-    refetchIntervalMs: rosterRefreshIntervalMs,
+    refetchIntervalMs: ROSTER_REFRESH_INTERVAL_MS,
   })
+  const applyCreatedAgentProfile = useCallback((profile: AgentRosterEntry) => {
+    queryClient.setQueriesData<AgentRosterQueryData>(
+      { queryKey: ['agent-roster'] },
+      (current) => {
+        if (!isAgentRosterQueryData(current) || !current.agents.some((agent) => agent.id === profile.id)) {
+          return current
+        }
+        return {
+          ...current,
+          agents: mergeCreatedAgentProfile(current.agents, profile),
+        }
+      },
+    )
+    if (profile.avatarUrl) {
+      setPendingCreatedProfileId((current) => (current === profile.id ? null : current))
+    }
+  }, [queryClient])
+  const pendingCreatedProfile = rosterQuery.data?.agents.find(
+    (agent) => agent.id === pendingCreatedProfileId,
+  )
+  useCreatedAgentProfileRefresh({
+    agentId: pendingCreatedProfileId === activeAgentId ? pendingCreatedProfileId : null,
+    avatarUrl: pendingCreatedProfile?.avatarUrl,
+    onProfile: applyCreatedAgentProfile,
+  })
+  useEffect(() => {
+    if (pendingCreatedProfileId && activeAgentId && pendingCreatedProfileId !== activeAgentId) {
+      setPendingCreatedProfileId(null)
+    }
+  }, [activeAgentId, pendingCreatedProfileId])
   const effectiveOrganizationId = effectiveContext?.type === 'organization' ? effectiveContext.id : null
   const currentOrganizationTemplateQueryKey = useMemo(
     () => currentOrganizationTemplatesQueryKey(effectiveOrganizationId),
@@ -1455,31 +1459,6 @@ export function AgentChatPage({
     },
     [dispatch],
   )
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-    const expiryValues = Object.values(pendingAvatarTracking)
-    if (expiryValues.length === 0) {
-      return
-    }
-    const nextExpiry = Math.min(...expiryValues)
-    const delayMs = Math.max(0, nextExpiry - Date.now()) + 25
-    const timeout = window.setTimeout(() => {
-      setPendingAvatarTracking((current) => {
-        return prunePendingAvatarTracking(current, rosterQuery.data?.agents ?? [], Date.now())
-      })
-    }, delayMs)
-    return () => window.clearTimeout(timeout)
-  }, [pendingAvatarTracking, rosterQuery.data?.agents])
-
-  useEffect(() => {
-    if (!rosterQuery.data?.agents) {
-      return
-    }
-    setPendingAvatarTracking((current) => prunePendingAvatarTracking(current, rosterQuery.data.agents))
-  }, [rosterQuery.data?.agents])
 
   useEffect(() => {
     resumeBackfillRunIdRef.current += 1
@@ -1934,6 +1913,8 @@ export function AgentChatPage({
   const sendMessageError = activeChatSession.workflow.sendMessageError
   const [idleInsightsAgentId, setIdleInsightsAgentId] = useState<string | null>(null)
   const [idleInsightsPending, setIdleInsightsPending] = useState(false)
+  const [quickSettingsDemanded, setQuickSettingsDemanded] = useState(false)
+  const [addonsDemanded, setAddonsDemanded] = useState(false)
   const latestPlanSnapshot = useMemo(
     () => getLatestPlanSnapshot(timelineEvents, initialPageResponse?.current_plan ?? null),
     [timelineEvents, initialPageResponse?.current_plan],
@@ -1959,19 +1940,35 @@ export function AgentChatPage({
     refetch: refetchQuickSettings,
     updateQuickSettings,
     updating: queryQuickSettingsUpdating,
-  } = useAgentQuickSettings(activeAgentId, { enabled: allowDeferredAgentPanelRequests })
+  } = useAgentQuickSettings(activeAgentId, {
+    enabled: allowDeferredAgentPanelRequests && quickSettingsDemanded,
+  })
   const {
     data: queryAddonsPayload,
     refetch: refetchAddons,
     updateAddons,
     updating: queryAddonsUpdating,
-  } = useAgentAddons(activeAgentId, { enabled: allowDeferredAgentPanelRequests })
+  } = useAgentAddons(activeAgentId, {
+    enabled: allowDeferredAgentPanelRequests && addonsDemanded,
+  })
   const quickSettingsPayload = queryQuickSettingsPayload
   const addonsPayload = queryAddonsPayload
   const quickSettingsLoading = queryQuickSettingsLoading
   const quickSettingsError = queryQuickSettingsError
   const quickSettingsUpdating = queryQuickSettingsUpdating
   const addonsUpdating = queryAddonsUpdating
+  useEffect(() => {
+    setQuickSettingsDemanded(false)
+    setAddonsDemanded(false)
+  }, [activeAgentId])
+  const demandQuickSettings = useCallback(() => {
+    setQuickSettingsDemanded(true)
+    void refetchQuickSettings()
+  }, [refetchQuickSettings])
+  const demandAddons = useCallback(() => {
+    setAddonsDemanded(true)
+    void refetchAddons()
+  }, [refetchAddons])
   const contextSwitcher = useMemo(() => {
     if (!showContextSwitcher) {
       return null
@@ -2256,13 +2253,18 @@ export function AgentChatPage({
   const requestedAgentDeleted = Boolean(
     routeAgentId
       && activeAgentId === routeAgentId
-      && rosterQuery.data?.requestedAgentStatus === 'deleted',
+      && contextData?.requestedAgentStatus === 'deleted',
+  )
+  const requestedAgentUnavailable = Boolean(
+    routeAgentId
+      && activeAgentId === routeAgentId
+      && (contextData?.requestedAgentStatus === 'deleted' || contextData?.requestedAgentStatus === 'missing'),
   )
   const agentNotFound = useMemo(() => {
     if (!contextReady) return false
     // Not applicable for new agent creation
     if (isNewAgent) return false
-    if (requestedAgentDeleted) return true
+    if (requestedAgentUnavailable) return true
     // Wait for both roster and initial load to complete
     if (rosterQuery.isLoading || initialLoading || rosterContextMismatch) return false
     // Check if agent exists in roster
@@ -2279,7 +2281,7 @@ export function AgentChatPage({
     timelineQuery.error,
     initialLoading,
     isNewAgent,
-    requestedAgentDeleted,
+    requestedAgentUnavailable,
     rosterAgents,
     rosterContextMismatch,
     rosterQuery.isLoading,
@@ -2295,8 +2297,9 @@ export function AgentChatPage({
     }
   }, [initialLoading, switchingAgentId])
 
-  const selectedAgentBillingStatus = addonsPayload?.status?.billing ?? null
-  const selectedAgentAccountPause = addonsPayload?.status?.accountPause ?? null
+  const criticalStatus = initialPageResponse?.critical_status ?? null
+  const selectedAgentBillingStatus = addonsPayload?.status?.billing ?? criticalStatus?.billing ?? null
+  const selectedAgentAccountPause = addonsPayload?.status?.accountPause ?? criticalStatus?.accountPause ?? null
   const currentContextBillingStatus = rosterQuery.data?.billingStatus ?? null
   const currentContextAccountPause = rosterQuery.data?.accountPause ?? null
   const preferSelectedAgentBilling = effectiveContext?.type !== 'organization'
@@ -2605,38 +2608,22 @@ export function AgentChatPage({
           attachments,
           template,
         )
-        const createdAgentName = result.agent_name?.trim() || 'Agent'
+        const createdAgentEntry = agentProfilePayloadToRosterEntry(result.agent)
+        const createdAgentName = createdAgentEntry.name?.trim() || result.agent_name?.trim() || 'Agent'
         setTransientBannerAgentName(createdAgentName)
-        const createdAgentEmail = result.agent_email?.trim() || null
-        const createdPlanningState = normalizePlanningState(result.planning_state)
-        const createdAgentEntry: AgentRosterEntry = {
-          id: result.agent_id,
-          name: createdAgentName,
-          avatarUrl: null,
-          isActive: true,
-          processingActive: false,
-          lastInteractionAt: new Date().toISOString(),
-          miniDescription: '',
-          shortDescription: '',
-          listingDescription: '',
-          listingDescriptionSource: null,
-          displayTags: [],
-          detailUrl: `/app/agents/${result.agent_id}/settings`,
-          dailyCreditRemaining: null,
-          dailyCreditLow: false,
-          last24hCreditBurn: null,
-          email: createdAgentEmail,
-          signupPreviewState: personalSignupPreviewAvailable ? 'awaiting_first_reply_pause' : 'none',
-          planningState: createdPlanningState,
-          pendingActionRequestCount: 0,
-        }
+        const createdAgentEmail = createdAgentEntry.email?.trim() || result.agent_email?.trim() || null
+        const createdPlanningState = normalizePlanningState(
+          createdAgentEntry.planningState ?? result.planning_state,
+        )
         pendingAgentMetaRef.current = {
           agentId: result.agent_id,
           agentName: createdAgentName,
           signupPreviewState: personalSignupPreviewAvailable ? 'awaiting_first_reply_pause' : 'none',
           planningState: createdPlanningState,
         }
-        trackPendingAvatarRefresh(result.agent_id)
+        if (!createdAgentEntry.avatarUrl) {
+          setPendingCreatedProfileId(result.agent_id)
+        }
         if (createdAgentEmail) {
           setPendingAgentEmails((current) => ({ ...current, [result.agent_id]: createdAgentEmail }))
         }
@@ -2649,7 +2636,7 @@ export function AgentChatPage({
             if (effectiveContext && !sameConsoleContext(current.context, effectiveContext)) {
               return current
             }
-            const nextAgents = mergeRosterEntry(current.agents, createdAgentEntry)
+            const nextAgents = insertRosterEntry(current.agents, createdAgentEntry)
             if (nextAgents === current.agents) {
               return current
             }
@@ -2659,7 +2646,6 @@ export function AgentChatPage({
             }
           },
         )
-        void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
         onAgentCreated?.(result.agent_id)
       } catch (err) {
         setTransientBannerAgentName(null)
@@ -2684,7 +2670,6 @@ export function AgentChatPage({
       queryClient,
       setPendingAgentEmails,
       spawnFlow,
-      trackPendingAvatarRefresh,
     ],
   )
 
@@ -2919,7 +2904,9 @@ export function AgentChatPage({
     const handleTimeout = () => {
       finalizeStreaming()
       if (timelineStreaming.reasoning && !timelineStreaming.content && activeAgentId) {
-        void refreshTimelineLatestInCache(queryClient, activeAgentId)
+        void refreshTimelineLatestInCache(queryClient, activeAgentId, {
+          minimumUpdatedAt: streamingLastUpdatedAt,
+        })
       }
     }
     if (timeoutMs === 0) {
@@ -2940,19 +2927,29 @@ export function AgentChatPage({
 
   const canManageDailyCredits = Boolean(activeAgentId && !isNewAgent)
   const dailyCreditsInfo = canManageDailyCredits ? quickSettingsPayload?.settings?.dailyCredits ?? null : null
-  const dailyCreditsStatus = canManageDailyCredits ? quickSettingsPayload?.status?.dailyCredits ?? null : null
-  const contactCap = addonsPayload?.contactCap ?? null
-  const contactCapStatus = addonsPayload?.status?.contactCap ?? null
+  const dailyCreditsStatus = canManageDailyCredits
+    ? quickSettingsPayload?.status?.dailyCredits ?? criticalStatus?.dailyCredits ?? null
+    : null
+  const contactCap = addonsPayload?.contactCap ?? criticalStatus?.contactCap ?? null
+  const contactCapStatus = addonsPayload?.status?.contactCap ?? criticalStatus?.contactCapStatus ?? null
   const contactPackOptions = addonsPayload?.contactPacks?.options ?? []
-  const contactPackCanManageBilling = Boolean(addonsPayload?.contactPacks?.canManageBilling)
+  const contactPackCanManageBilling = Boolean(
+    addonsPayload?.contactPacks?.canManageBilling ?? criticalStatus?.canManageAddons,
+  )
   const taskPackOptions = addonsPayload?.taskPacks?.options ?? []
-  const taskPackCanManageBilling = Boolean(addonsPayload?.taskPacks?.canManageBilling)
+  const taskPackCanManageBilling = Boolean(
+    addonsPayload?.taskPacks?.canManageBilling ?? criticalStatus?.canManageAddons,
+  )
   const addonsTrial = addonsPayload?.trial ?? null
   const contactPackShowUpgrade = true
   const taskPackShowUpgrade = true
-  const contactPackManageUrl = addonsPayload?.manageBillingUrl ?? null
-  const hardLimitUpsell = Boolean(quickSettingsPayload?.meta?.plan?.isFree)
-  const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl ?? null
+  const contactPackManageUrl = addonsPayload?.manageBillingUrl ?? criticalStatus?.manageBillingUrl ?? null
+  const hardLimitUpsell = Boolean(
+    quickSettingsPayload?.meta?.plan?.isFree ?? criticalStatus?.hardLimit?.showUpsell,
+  )
+  const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl
+    ?? criticalStatus?.hardLimit?.upgradeUrl
+    ?? null
   const dailyCreditsErrorMessage = quickSettingsError instanceof Error
     ? quickSettingsError.message
     : quickSettingsError
@@ -4146,7 +4143,7 @@ export function AgentChatPage({
         dailyCreditsStatus={dailyCreditsStatus}
         dailyCreditsLoading={canManageDailyCredits ? quickSettingsLoading : false}
         dailyCreditsError={canManageDailyCredits ? dailyCreditsErrorMessage : null}
-        onRefreshDailyCredits={canManageDailyCredits ? refetchQuickSettings : undefined}
+        onRefreshDailyCredits={canManageDailyCredits ? demandQuickSettings : undefined}
         onUpdateDailyCredits={canManageDailyCredits ? handleUpdateDailyCredits : undefined}
         dailyCreditsUpdating={canManageDailyCredits ? quickSettingsUpdating : false}
         onOpenFullSettings={handleOpenFullSettings}
@@ -4171,7 +4168,7 @@ export function AgentChatPage({
         showTaskCreditsUpgrade={taskPackShowUpgrade}
         taskCreditsDismissKey={taskCreditsDismissKey}
         highPriorityBanner={highPriorityBanner}
-        onRefreshAddons={refetchAddons}
+        onRefreshAddons={demandAddons}
         contactPackManageUrl={contactPackManageUrl}
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
         onPublicShare={canSharePublicTemplate ? handleOpenPublicShare : undefined}

@@ -18,6 +18,7 @@ export type RefreshTimelineMode = 'fast' | 'contiguous'
 export type RefreshTimelineOptions = {
   mode?: RefreshTimelineMode
   maxNewerPages?: number
+  minimumUpdatedAt?: number | null
 }
 
 export type RefreshTimelineResult = {
@@ -509,7 +510,7 @@ function mergeNewerPageIntoTail(
       newestCursor: nextNewestCursor,
       oldestCursor: nextOldestCursor,
       hasMoreNewer: newerPage.hasMoreNewer,
-      raw: newerPage.raw,
+      raw: { ...newerPage.raw, critical_status: newerPage.raw.critical_status ?? lastPage.raw.critical_status },
     }
 
     return {
@@ -525,7 +526,9 @@ function mergeNewerPageIntoTail(
  * Refresh the latest timeline slice from the server and merge it into the cache tail.
  * This avoids infinite-query refetch drift when older pages are currently loaded.
  */
-export async function refreshTimelineLatestInCache(
+const timelineRefreshesInFlight = new Map<string, { mode: RefreshTimelineMode; promise: Promise<RefreshTimelineResult> }>()
+
+async function performTimelineLatestRefresh(
   queryClient: QueryClient,
   agentId: string,
   options?: RefreshTimelineOptions,
@@ -533,6 +536,13 @@ export async function refreshTimelineLatestInCache(
   const mode = options?.mode ?? 'fast'
   const maxNewerPages = Math.max(1, options?.maxNewerPages ?? DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES)
   const key = timelineQueryKey(agentId)
+  const queryState = queryClient.getQueryState(key)
+  if (
+    queryState?.fetchStatus === 'fetching'
+    || (options?.minimumUpdatedAt && queryState?.dataUpdatedAt && queryState.dataUpdatedAt >= options.minimumUpdatedAt)
+  ) {
+    return { newerPagesFetched: 0, remainingNewerGap: false }
+  }
   let newerPagesFetched = 0
   let remainingNewerGap = false
 
@@ -578,4 +588,27 @@ export async function refreshTimelineLatestInCache(
       remainingNewerGap: true,
     }
   }
+}
+
+export async function refreshTimelineLatestInCache(
+  queryClient: QueryClient,
+  agentId: string,
+  options?: RefreshTimelineOptions,
+): Promise<RefreshTimelineResult> {
+  const existing = timelineRefreshesInFlight.get(agentId)
+  if (existing) {
+    const result = await existing.promise
+    if (options?.mode !== 'contiguous' || existing.mode === 'contiguous' || !result.remainingNewerGap) {
+      return result
+    }
+  }
+
+  const promise = performTimelineLatestRefresh(queryClient, agentId, options)
+  timelineRefreshesInFlight.set(agentId, { mode: options?.mode ?? 'fast', promise })
+  return promise.finally(() => {
+    const current = timelineRefreshesInFlight.get(agentId)
+    if (current?.promise === promise) {
+      timelineRefreshesInFlight.delete(agentId)
+    }
+  })
 }

@@ -175,6 +175,7 @@ def enqueue_interactive_process_agent_events(
     *,
     inbound_generation: int | str | None = None,
     eval_run_id: str | None = None,
+    prefer_low_latency: bool | None = None,
 ) -> None:
     """Queue interactive agent processing on the low-latency queue."""
     kwargs: dict[str, Any] = {}
@@ -182,6 +183,8 @@ def enqueue_interactive_process_agent_events(
         kwargs["inbound_generation"] = inbound_generation
     if eval_run_id is not None:
         kwargs["eval_run_id"] = eval_run_id
+    if prefer_low_latency is not None:
+        kwargs["prefer_low_latency"] = prefer_low_latency
     process_agent_events_task.apply_async(
         args=[str(persistent_agent_id)],
         kwargs=kwargs,
@@ -210,6 +213,7 @@ def process_agent_events_task(
     max_loop_iterations: int | None = None,
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
+    prefer_low_latency: bool | None = None,
     _queued_at_ts: float | int | str | None = None,
     _queued_queue: str | None = None,
 ) -> None:  # noqa: D401, ANN001
@@ -343,6 +347,7 @@ def process_agent_events_task(
             eval_stop_policy=eval_stop_policy,
             burn_follow_up_token=burn_follow_up_token,
             inbound_generation=inbound_generation,
+            prefer_low_latency=prefer_low_latency,
             max_loop_iterations=max_loop_iterations,
             max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
             max_iterations_followup_queue=max_iterations_followup_queue,
