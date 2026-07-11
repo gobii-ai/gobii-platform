@@ -121,7 +121,7 @@ export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): Ag
 }
 
 export async function fetchAgentRoster(
-  options: { forAgentId?: string } = {},
+  options: { forAgentId?: string; context?: ConsoleContext } = {},
 ): Promise<{
   context: ConsoleContext
   agents: AgentRosterEntry[]
@@ -137,7 +137,11 @@ export async function fetchAgentRoster(
   llmIntelligence?: LlmIntelligenceConfig | null
 }> {
   const query = options.forAgentId ? `?for_agent=${encodeURIComponent(options.forAgentId)}` : ''
-  const payload = await jsonFetch<AgentRosterPayload>(`/console/api/agents/roster/${query}`)
+  const headers = options.context ? {
+    'X-Gobii-Context-Type': options.context.type,
+    'X-Gobii-Context-Id': options.context.id,
+  } : undefined
+  const payload = await jsonFetch<AgentRosterPayload>(`/console/api/agents/roster/${query}`, { headers })
   const agents = payload.agents.map(agentProfilePayloadToRosterEntry)
   return {
     context: payload.context,

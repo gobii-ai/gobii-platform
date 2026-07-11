@@ -542,6 +542,9 @@ class PersistentAgentAPITests(TestCase):
         self._delay_patcher = patch('api.agent.tasks.enqueue_interactive_process_agent_events')
         self.process_events_mock = self._delay_patcher.start()
         self.addCleanup(self._delay_patcher.stop)
+        self._standard_delay_patcher = patch('api.agent.tasks.process_agent_events_task.delay')
+        self.standard_process_events_mock = self._standard_delay_patcher.start()
+        self.addCleanup(self._standard_delay_patcher.stop)
         self._on_commit_patcher = patch('api.serializers.transaction.on_commit', side_effect=lambda fn: fn())
         self.on_commit_mock = self._on_commit_patcher.start()
         self.addCleanup(self._on_commit_patcher.stop)
@@ -687,21 +690,26 @@ class PersistentAgentAPITests(TestCase):
         agent_id = payload['id']
         agent = PersistentAgent.objects.get(id=agent_id)
         self.process_events_mock.reset_mock()
+        self.standard_process_events_mock.reset_mock()
         # Ensure target tier exists in lean test fixtures.
         from api.models import IntelligenceTier
 
-        if not IntelligenceTier.objects.filter(key="premium").exists():
+        premium_tier = IntelligenceTier.objects.filter(key="premium").first()
+        if premium_tier is None:
             next_rank = (
                 IntelligenceTier.objects.order_by("-rank").values_list("rank", flat=True).first() or 0
             ) + 1
-            IntelligenceTier.objects.create(
+            premium_tier = IntelligenceTier.objects.create(
                 key="premium",
                 display_name="Premium",
                 rank=next_rank,
                 credit_multiplier="1.50",
             )
 
-        with self.captureOnCommitCallbacks(execute=True):
+        with (
+            patch('api.serializers.resolve_intelligence_tier_for_owner', return_value=premium_tier),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
             update_response = self.client.patch(
                 f'{PERSISTENT_AGENT_BASE_URL}{agent_id}/',
                 data=json.dumps({'preferred_llm_tier': 'premium'}),
@@ -711,7 +719,7 @@ class PersistentAgentAPITests(TestCase):
 
         agent.refresh_from_db()
         self.assertEqual(getattr(agent.preferred_llm_tier, "key", None), 'premium')
-        self.process_events_mock.assert_called_once_with(str(agent.id))
+        self.standard_process_events_mock.assert_called_once_with(str(agent.id))
 
         latest_system_step = (
             PersistentAgentSystemStep.objects

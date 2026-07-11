@@ -456,6 +456,18 @@ function mergeCreatedAgentProfile(
     if (agent.id !== profile.id) {
       return agent
     }
+    const hasNewProfileData = Boolean(
+      (!agent.avatarUrl && profile.avatarUrl)
+      || (!agent.miniDescription && profile.miniDescription)
+      || (!agent.shortDescription && profile.shortDescription)
+      || (!agent.listingDescription && profile.listingDescription)
+      || (!agent.listingDescriptionSource && profile.listingDescriptionSource)
+      || (agent.displayTags.length === 0 && profile.displayTags.length > 0),
+    )
+    if (!hasNewProfileData) {
+      return agent
+    }
+    changed = true
     const next = {
       ...agent,
       avatarUrl: agent.avatarUrl || profile.avatarUrl,
@@ -465,10 +477,7 @@ function mergeCreatedAgentProfile(
       listingDescriptionSource: agent.listingDescriptionSource || profile.listingDescriptionSource,
       displayTags: agent.displayTags.length > 0 ? agent.displayTags : profile.displayTags,
     }
-    changed = Object.entries(next).some(
-      ([key, value]) => value !== agent[key as keyof AgentRosterEntry],
-    )
-    return changed ? next : agent
+    return next
   })
   return changed ? nextAgents : agents
 }
@@ -1369,6 +1378,7 @@ export function AgentChatPage({
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
   const rosterQuery = useAgentRoster({
     enabled: contextReady,
+    context: effectiveContext,
     contextKey: rosterContextKey,
     refetchIntervalMs: ROSTER_REFRESH_INTERVAL_MS,
   })

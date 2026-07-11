@@ -3,6 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import type { PropsWithChildren, ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ConsoleContext } from '../api/context'
 import { useAgentRoster } from './useAgentRoster'
 
 const { fetchAgentRosterMock } = vi.hoisted(() => ({
@@ -28,18 +29,24 @@ describe('useAgentRoster', () => {
   })
 
   it('reuses the roster within a context and fetches once when the context changes', async () => {
+    const personalContext: ConsoleContext = { type: 'personal', id: 'user-1', name: 'User' }
+    const organizationContext: ConsoleContext = { type: 'organization', id: 'org-1', name: 'Org' }
     const { rerender } = renderHook(
-      ({ contextKey }) => useAgentRoster({ contextKey }),
-      { initialProps: { contextKey: 'personal:user-1' }, wrapper },
+      ({ context }) => useAgentRoster({ context, contextKey: `${context.type}:${context.id}` }),
+      { initialProps: { context: personalContext }, wrapper },
     )
 
     await waitFor(() => expect(fetchAgentRosterMock).toHaveBeenCalledTimes(1))
-    rerender({ contextKey: 'personal:user-1' })
+    rerender({ context: personalContext })
     expect(fetchAgentRosterMock).toHaveBeenCalledTimes(1)
 
-    rerender({ contextKey: 'organization:org-1' })
+    rerender({ context: organizationContext })
     await waitFor(() => expect(fetchAgentRosterMock).toHaveBeenCalledTimes(2))
-    expect(fetchAgentRosterMock).toHaveBeenNthCalledWith(1)
-    expect(fetchAgentRosterMock).toHaveBeenNthCalledWith(2)
+    expect(fetchAgentRosterMock).toHaveBeenNthCalledWith(1, {
+      context: { type: 'personal', id: 'user-1', name: 'User' },
+    })
+    expect(fetchAgentRosterMock).toHaveBeenNthCalledWith(2, {
+      context: { type: 'organization', id: 'org-1', name: 'Org' },
+    })
   })
 })
