@@ -29,6 +29,17 @@ from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
+from .brightdata import (
+    BRIGHTDATA_LINKEDIN_PERSON_PROFILE_TOOL_NAME,
+    BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME,
+    BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME,
+    execute_brightdata_linkedin_person_profile,
+    execute_brightdata_scrape_as_markdown,
+    execute_brightdata_search_engine,
+    get_brightdata_linkedin_person_profile_tool,
+    get_brightdata_scrape_as_markdown_tool,
+    get_brightdata_search_engine_tool,
+)
 from .read_file import get_read_file_tool, execute_read_file
 from .create_file import get_create_file_tool, execute_create_file
 from .create_csv import get_create_csv_tool, execute_create_csv
@@ -69,7 +80,13 @@ META_ADS_TOOL_NAME = "meta_ads"
 DISCORD_CHANNEL_SUBSCRIPTIONS_TOOL_NAME = "discord_channel_subscriptions"
 DISCORD_SEND_MESSAGE_TOOL_NAME = "send_discord_message"
 PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
-DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
+DEFAULT_BUILTIN_TOOLS = {
+    READ_FILE_TOOL_NAME,
+    SQLITE_TOOL_NAME,
+    CREATE_CHART_TOOL_NAME,
+    BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME,
+    BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME,
+}
 
 
 def _coerce_params_to_schema(params: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -174,6 +191,21 @@ BUILTIN_TOOL_REGISTRY = {
     HTTP_REQUEST_TOOL_NAME: {
         "definition": get_http_request_tool,
         "executor": execute_http_request,
+        "parallel_safe": True,
+    },
+    BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME: {
+        "definition": get_brightdata_search_engine_tool,
+        "executor": execute_brightdata_search_engine,
+        "parallel_safe": True,
+    },
+    BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME: {
+        "definition": get_brightdata_scrape_as_markdown_tool,
+        "executor": execute_brightdata_scrape_as_markdown,
+        "parallel_safe": True,
+    },
+    BRIGHTDATA_LINKEDIN_PERSON_PROFILE_TOOL_NAME: {
+        "definition": get_brightdata_linkedin_person_profile_tool,
+        "executor": execute_brightdata_linkedin_person_profile,
         "parallel_safe": True,
     },
     READ_FILE_TOOL_NAME: {
@@ -1021,40 +1053,14 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
 
 def ensure_default_tools_enabled(
     agent: PersistentAgent,
-    *,
-    allowed_server_names: Optional[Iterable[str]] = None,
 ) -> None:
     """Ensure the default tool set is enabled for new agents."""
-    manager = _get_manager()
-
     enabled_tools = set(
         PersistentAgentEnabledTool.objects.filter(agent=agent).values_list("tool_full_name", flat=True)
     )
-    default_tools = set(MCPToolManager.DEFAULT_ENABLED_TOOLS)
-    missing_mcp = default_tools - enabled_tools
     missing_builtin = DEFAULT_BUILTIN_TOOLS - enabled_tools
-    if not missing_mcp and not missing_builtin:
+    if not missing_builtin:
         return
-
-    available = set()
-    if missing_mcp:
-        available = {
-            tool.full_name
-            for tool in manager.get_tools_for_agent(agent, allowed_server_names=allowed_server_names)
-        }
-
-    for tool_name in missing_mcp:
-        if is_tool_blacklisted_for_agent(agent, tool_name):
-            logger.warning("Default tool '%s' is tier-blacklisted, skipping", tool_name)
-            continue
-        if manager.is_tool_blacklisted(tool_name):
-            logger.warning("Default tool '%s' is blacklisted, skipping", tool_name)
-            continue
-        if tool_name not in available:
-            logger.warning("Default tool '%s' not found in available tools", tool_name)
-            continue
-        enable_mcp_tool(agent, tool_name)
-        logger.info("Enabled default tool '%s' for agent %s", tool_name, agent.id)
 
     for tool_name in missing_builtin:
         if is_tool_blacklisted_for_agent(agent, tool_name):
@@ -1541,8 +1547,6 @@ def execute_enabled_tool(
 
 def is_parallel_safe_tool_name(tool_name: str) -> bool:
     """Return whether the tool name is on the explicit parallel-safe allowlist."""
-    if isinstance(tool_name, str) and tool_name.startswith("mcp_brightdata_"):
-        return False
     entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
     return bool(entry and entry.get("parallel_safe"))
 

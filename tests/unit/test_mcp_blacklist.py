@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import asyncio
 from django.test import TestCase, tag
 
-from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo, MCPServerRuntime
+from api.agent.tools.mcp_manager import MCPToolManager, MCPServerRuntime
 from api.models import PersistentAgent, BrowserUseAgent
 
 
@@ -29,12 +29,18 @@ class TestMCPToolBlacklist(TestCase):
             self.manager._is_tool_blacklisted("mcp_brightdata_scraping_browser_go_back")
         )
         
-        # Test non-matching patterns
-        self.assertFalse(
+        self.assertTrue(
             self.manager._is_tool_blacklisted("mcp_brightdata_scrape_as_markdown")
         )
-        self.assertFalse(
+        self.assertTrue(
             self.manager._is_tool_blacklisted("mcp_brightdata_search_engine")
+        )
+        self.assertTrue(
+            self.manager._is_tool_blacklisted("mcp_brightdata_web_data_linkedin_person_profile")
+        )
+        # Other Bright Data MCP tools remain available.
+        self.assertFalse(
+            self.manager._is_tool_blacklisted("mcp_brightdata_search_engine_batch")
         )
         self.assertFalse(
             self.manager._is_tool_blacklisted("mcp_other_scraping_browser_tool")
@@ -54,6 +60,8 @@ class TestMCPToolBlacklist(TestCase):
             MockTool('scraping_browser_click', 'Click element', {}),
             MockTool('scrape_as_markdown', 'Scrape as markdown', {}),
             MockTool('search_engine', 'Search engine', {}),
+            MockTool('web_data_linkedin_person_profile', 'LinkedIn person profile', {}),
+            MockTool('search_engine_batch', 'Search engine batch', {}),
         ]
         
         # Create a mock async function that returns tools
@@ -100,10 +108,12 @@ class TestMCPToolBlacklist(TestCase):
             loop.close()
         
         # Verify only non-blacklisted tools are returned
-        self.assertEqual(len(tools), 2)
+        self.assertEqual(len(tools), 1)
         tool_names = [tool.full_name for tool in tools]
-        self.assertIn("mcp_brightdata_scrape_as_markdown", tool_names)
-        self.assertIn("mcp_brightdata_search_engine", tool_names)
+        self.assertIn("mcp_brightdata_search_engine_batch", tool_names)
+        self.assertNotIn("mcp_brightdata_scrape_as_markdown", tool_names)
+        self.assertNotIn("mcp_brightdata_search_engine", tool_names)
+        self.assertNotIn("mcp_brightdata_web_data_linkedin_person_profile", tool_names)
         self.assertNotIn("mcp_brightdata_scraping_browser_navigate", tool_names)
         self.assertNotIn("mcp_brightdata_scraping_browser_click", tool_names)
     
@@ -126,7 +136,6 @@ class TestMCPToolBlacklist(TestCase):
         # Should return an error
         self.assertEqual(result["status"], "error")
         self.assertIn("blacklisted", result["message"].lower())
-    
     def test_enable_mcp_tool_blocks_blacklisted(self):
         """Test that enable_mcp_tool blocks blacklisted tools."""
         from api.agent.tools.tool_manager import enable_mcp_tool
@@ -146,44 +155,3 @@ class TestMCPToolBlacklist(TestCase):
         # Should return an error
         self.assertEqual(result["status"], "error")
         self.assertIn("blacklisted", result["message"].lower())
-    
-    def test_ensure_default_tools_skips_blacklisted(self):
-        """Test that ensure_default_tools_enabled skips blacklisted default tools."""
-        from api.agent.tools.tool_manager import ensure_default_tools_enabled
-        from api.agent.tools.mcp_manager import MCPToolManager, _mcp_manager
-        
-        # Temporarily add a blacklisted tool to defaults for testing
-        original_defaults = MCPToolManager.DEFAULT_ENABLED_TOOLS.copy()
-        MCPToolManager.DEFAULT_ENABLED_TOOLS.append("mcp_brightdata_scraping_browser_navigate")
-        
-        try:
-            # Create a real agent
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            user = User.objects.create_user(username='blk3@example.com')
-            browser_agent = BrowserUseAgent.objects.create(user=user, name="blk3-browser")
-            agent = PersistentAgent.objects.create(user=user, name="blk3-agent", charter="T", browser_use_agent=browser_agent)
-            
-            # Mock the global manager instance and available tools
-            with patch.object(_mcp_manager, '_initialized', True):
-                with patch.object(_mcp_manager, 'get_tools_for_agent') as mock_get_tools:
-                    mock_get_tools.return_value = [
-                        MCPToolInfo(
-                            "11111111-1111-1111-1111-111111111114",
-                            full_name="mcp_brightdata_scrape_as_markdown",
-                            server_name="brightdata",
-                            tool_name="scrape_as_markdown",
-                            description="Scrape",
-                            parameters={}
-                        )
-                    ]
-                    
-                    with patch('api.agent.tools.tool_manager.enable_mcp_tool') as mock_enable:
-                        ensure_default_tools_enabled(agent)
-                        
-                        # Should only enable non-blacklisted tools
-                        mock_enable.assert_called_once_with(agent, "mcp_brightdata_scrape_as_markdown")
-        
-        finally:
-            # Restore original defaults
-            MCPToolManager.DEFAULT_ENABLED_TOOLS = original_defaults

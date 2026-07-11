@@ -44,7 +44,6 @@ from api.agent.core.llm_config import AgentLLMTier
 from tests.utils.llm_seed import get_intelligence_tier
 from constants.plans import PlanNames
 from api.agent.tools.mcp_manager import (
-    BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY,
     MCPToolManager,
     MCPToolInfo,
     MCPServerRuntime,
@@ -1174,11 +1173,6 @@ class MCPToolManagerTests(TestCase):
         mock_post.assert_not_called()
         self.assertEqual(runtime.oauth_access_token, "valid-token")
         self.assertEqual(runtime.oauth_token_type, "Bearer")
-        
-    def test_default_enabled_tools_defined(self):
-        """Test that default enabled tools list is defined."""
-        self.assertIn("mcp_brightdata_scrape_as_markdown", MCPToolManager.DEFAULT_ENABLED_TOOLS)
-        self.assertIsInstance(MCPToolManager.DEFAULT_ENABLED_TOOLS, list)
         
     @patch('api.agent.tools.mcp_manager.asyncio.get_running_loop')
     def test_ensure_event_loop_reuses_existing(self, mock_get_loop):
@@ -4076,37 +4070,6 @@ class MCPToolFunctionsTests(TestCase):
         connected_names = self._tool_def_names(connected_definitions)
         self.assertIn("slack-send-message", connected_names)
 
-    @patch('api.agent.tools.tool_manager.enable_mcp_tool')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_ensure_default_tools_enabled(self, mock_init, mock_get_tools, mock_enable):
-        """Test ensuring default tools are enabled."""
-        mock_get_tools.return_value = [
-            MCPToolInfo(self.config_id, "mcp_brightdata_scrape_as_markdown", "brightdata", "scrape_as_markdown", "Scrape", {})
-        ]
-        
-        ensure_default_tools_enabled(self.agent)
-        
-        mock_enable.assert_called_once_with(self.agent, "mcp_brightdata_scrape_as_markdown")
-        
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    @patch('api.agent.tools.tool_manager.enable_mcp_tool')
-    def test_ensure_default_tools_already_enabled(self, mock_enable, mock_init, mock_get_tools):
-        """Test ensuring defaults when already enabled."""
-        # Pre-enable default tool directly in table
-        PersistentAgentEnabledTool.objects.create(
-            agent=self.agent, tool_full_name="mcp_brightdata_scrape_as_markdown"
-        )
-        mock_get_tools.return_value = [
-            MCPToolInfo(self.config_id, "mcp_brightdata_scrape_as_markdown", "brightdata", "scrape_as_markdown", "Scrape", {})
-        ]
-        
-        ensure_default_tools_enabled(self.agent)
-        
-        mock_enable.assert_not_called()
-
-
 @tag("batch_mcp_tools")
 class MCPToolExecutorsTests(TestCase):
     """Test tool executor functions."""
@@ -4296,22 +4259,6 @@ class MCPToolIntegrationTests(TestCase):
         self.assertIn("mcp_test_tool10", enabled_now)
         self.assertNotIn("mcp_test_tool0", enabled_now)
         self.assertIn("mcp_test_tool40", enabled_now)
-        
-    @patch('api.agent.tools.tool_manager.enable_mcp_tool')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_default_tools_initialization(self, mock_init, mock_get_tools, mock_enable):
-        """Test that default tools are properly initialized."""
-        default_tool = "mcp_brightdata_scrape_as_markdown"
-        mock_get_tools.return_value = [
-            MCPToolInfo(self.config_id, default_tool, "brightdata", "scrape_as_markdown", "Scrape", {})
-        ]
-        
-        # Ensure defaults are enabled
-        ensure_default_tools_enabled(self.agent)
-        
-        # Should enable the default tool
-        mock_enable.assert_called_once_with(self.agent, default_tool)
         
     def test_tool_usage_tracking(self):
         """Test that tool usage is properly tracked."""
@@ -4697,20 +4644,20 @@ class ToolNameNormalizationTests(TestCase):
         from api.agent.tools.tool_manager import _normalize_mcp_tool_name, ToolCatalogEntry
 
         catalog = {
-            "mcp_brightdata_scrape_as_markdown": ToolCatalogEntry(
+            "mcp_brightdata_search_engine_batch": ToolCatalogEntry(
                 provider="mcp",
-                full_name="mcp_brightdata_scrape_as_markdown",
-                description="Scrape",
+                full_name="mcp_brightdata_search_engine_batch",
+                description="Batch search",
                 parameters={},
                 tool_server="brightdata",
-                tool_name="scrape_as_markdown",
+                tool_name="search_engine_batch",
                 server_config_id=self.config_id,
             )
         }
 
         # Test the variation with underscore in server name
-        result = _normalize_mcp_tool_name("mcp_bright_data_scrape_as_markdown", catalog)
-        self.assertEqual(result, "mcp_brightdata_scrape_as_markdown")
+        result = _normalize_mcp_tool_name("mcp_bright_data_search_engine_batch", catalog)
+        self.assertEqual(result, "mcp_brightdata_search_engine_batch")
 
     def test_normalize_mcp_tool_name_no_match_returns_none(self):
         """If no matching tool in catalog, normalization returns None."""
@@ -4768,19 +4715,19 @@ class ToolNameNormalizationTests(TestCase):
         mock_get_tools.return_value = [
             MCPToolInfo(
                 self.config_id,
-                "mcp_brightdata_scrape_as_markdown",
+                "mcp_brightdata_search_engine_batch",
                 "brightdata",
-                "scrape_as_markdown",
-                "Scrape pages",
+                "search_engine_batch",
+                "Batch search",
                 {"type": "object", "properties": {}},
             ),
         ]
 
         # Look for the tool with underscore variation
-        entry = resolve_tool_entry(self.agent, "mcp_bright_data_scrape_as_markdown")
+        entry = resolve_tool_entry(self.agent, "mcp_bright_data_search_engine_batch")
 
         self.assertIsNotNone(entry)
-        self.assertEqual(entry.full_name, "mcp_brightdata_scrape_as_markdown")
+        self.assertEqual(entry.full_name, "mcp_brightdata_search_engine_batch")
 
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager._initialized', True)
@@ -4791,20 +4738,20 @@ class ToolNameNormalizationTests(TestCase):
         mock_get_tools.return_value = [
             MCPToolInfo(
                 self.config_id,
-                "mcp_brightdata_scrape_as_markdown",
+                "mcp_brightdata_search_engine_batch",
                 "brightdata",
-                "scrape_as_markdown",
-                "Scrape pages",
-                {"type": "object", "properties": {"url": {"type": "string"}}},
+                "search_engine_batch",
+                "Batch search",
+                {"type": "object", "properties": {"queries": {"type": "array"}}},
             ),
         ]
 
         # Pre-enable the tool with the correct name
         PersistentAgentEnabledTool.objects.create(
             agent=self.agent,
-            tool_full_name="mcp_brightdata_scrape_as_markdown",
+            tool_full_name="mcp_brightdata_search_engine_batch",
             tool_server="brightdata",
-            tool_name="scrape_as_markdown",
+            tool_name="search_engine_batch",
             server_config=self.server_config,
         )
 
@@ -4814,14 +4761,14 @@ class ToolNameNormalizationTests(TestCase):
 
             result = execute_enabled_tool(
                 self.agent,
-                "mcp_bright_data_scrape_as_markdown",
-                {"url": "https://example.com"}
+                "mcp_bright_data_search_engine_batch",
+                {"queries": [{"query": "example"}]}
             )
 
             # Should have called execute_mcp_tool with the CORRECT (normalized) name
             mock_execute.assert_called_once()
             call_args = mock_execute.call_args
-            self.assertEqual(call_args[0][1], "mcp_brightdata_scrape_as_markdown")
+            self.assertEqual(call_args[0][1], "mcp_brightdata_search_engine_batch")
             self.assertEqual(result["status"], "success")
 
 
@@ -4866,11 +4813,11 @@ class MCPIsolatedExecutionTests(TestCase):
         )
         self.tool_info = MCPToolInfo(
             self.config_id,
-            "mcp_brightdata_search_engine",
+            "mcp_brightdata_search_engine_batch",
             self.server_config.name,
-            "search_engine",
-            "Search the web",
-            {"type": "object", "properties": {"query": {"type": "string"}}},
+            "search_engine_batch",
+            "Search the web in a batch",
+            {"type": "object", "properties": {"queries": {"type": "array"}}},
         )
         self.manager._server_cache[self.config_id] = self.runtime
         self.manager._tools_cache["test-slot"] = [self.tool_info]
@@ -4881,156 +4828,6 @@ class MCPIsolatedExecutionTests(TestCase):
             tool_name=self.tool_info.tool_name,
             server_config=self.server_config,
         )
-
-    def _brightdata_runtime_with_fallback_metadata(self, *, primary_zone: str = "", fallback_zone: str = ""):
-        env = {}
-        if primary_zone:
-            env["WEB_UNLOCKER_ZONE"] = primary_zone
-        if fallback_zone:
-            env["WEB_UNLOCKER_ZONE_FALLBACK"] = fallback_zone
-        return MCPServerRuntime(
-            config_id=self.config_id,
-            name="brightdata",
-            display_name="BrightData",
-            description="",
-            command="npx",
-            args=["-y", "@brightdata/mcp"],
-            url=None,
-            auth_method=MCPServerConfig.AuthMethod.NONE,
-            env=env,
-            headers={},
-            prefetch_apps=[],
-            scope=MCPServerConfig.Scope.PLATFORM,
-            organization_id=None,
-            user_id=None,
-            updated_at=self.server_config.updated_at,
-            metadata={BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY: "WEB_UNLOCKER_ZONE_FALLBACK"},
-        )
-
-    def test_brightdata_google_search_returns_error_without_fallback_zone(self):
-        run_once = MagicMock(
-            return_value={"status": "success", "result": "<html>rate limited</html>"}
-        )
-
-        result = self.manager._execute_with_brightdata_search_fallback(
-            run_once,
-            "brightdata",
-            "search_engine",
-            {"query": "openai"},
-            runtime=self._brightdata_runtime_with_fallback_metadata(),
-        )
-
-        self.assertEqual(result["status"], "error")
-        self.assertIn("no fallback zone is configured", result["message"])
-        run_once.assert_called_once_with({"query": "openai"})
-
-    def test_brightdata_google_search_ignores_process_env_without_runtime_fallback_zone(self):
-        run_once = MagicMock(return_value={"status": "success", "result": "<html>rate limited</html>"})
-        run_fallback = MagicMock(return_value={"status": "success", "result": json.dumps({"organic": []})})
-
-        with patch.dict(os.environ, {"WEB_UNLOCKER_ZONE_FALLBACK": "fallback-zone"}):
-            result = self.manager._execute_with_brightdata_search_fallback(
-                run_once,
-                "brightdata",
-                "search_engine",
-                {"query": "openai"},
-                runtime=self._brightdata_runtime_with_fallback_metadata(),
-                run_fallback=run_fallback,
-            )
-
-        self.assertEqual(result["status"], "error")
-        self.assertIn("no fallback zone is configured", result["message"])
-        run_once.assert_called_once_with({"query": "openai"})
-        run_fallback.assert_not_called()
-
-    def test_brightdata_google_search_uses_configured_fallback_zone_once(self):
-        run_once = MagicMock(return_value={"status": "success", "result": "<html>rate limited</html>"})
-        run_fallback = MagicMock(return_value={"status": "success", "result": json.dumps({"organic": []})})
-        runtime = self._brightdata_runtime_with_fallback_metadata(
-            primary_zone="primary-zone",
-            fallback_zone="fallback-zone",
-        )
-
-        result = self.manager._execute_with_brightdata_search_fallback(
-            run_once,
-            "brightdata",
-            "search_engine",
-            {"query": "openai"},
-            runtime=runtime,
-            run_fallback=run_fallback,
-        )
-
-        self.assertEqual(
-            result,
-            {"status": "success", "result": json.dumps({"organic": []})},
-        )
-        run_once.assert_called_once_with({"query": "openai"})
-        run_fallback.assert_called_once_with(
-            {"query": "openai"},
-            {"WEB_UNLOCKER_ZONE": "fallback-zone"},
-        )
-
-    def test_brightdata_google_search_skips_fallback_zone_when_same_as_primary(self):
-        run_once = MagicMock(return_value={"status": "success", "result": "<html>rate limited</html>"})
-        run_fallback = MagicMock(return_value={"status": "success", "result": json.dumps({"organic": []})})
-        runtime = self._brightdata_runtime_with_fallback_metadata(
-            primary_zone="same-zone",
-            fallback_zone="same-zone",
-        )
-
-        result = self.manager._execute_with_brightdata_search_fallback(
-            run_once,
-            "brightdata",
-            "search_engine",
-            {"query": "openai"},
-            runtime=runtime,
-            run_fallback=run_fallback,
-        )
-
-        self.assertEqual(result["status"], "error")
-        self.assertIn("no fallback zone is configured", result["message"])
-        run_once.assert_called_once_with({"query": "openai"})
-        run_fallback.assert_not_called()
-
-    def test_transient_fallback_client_does_not_mutate_runtime_env_or_client_cache(self):
-        runtime = self._brightdata_runtime_with_fallback_metadata(primary_zone="primary-zone")
-        fallback_client = MagicMock(name="fallback-client")
-        fallback_client.close = AsyncMock()
-        self.manager._clients[runtime.config_id] = MagicMock(name="primary-client")
-
-        def run_coroutine(coroutine):
-            return asyncio.run(coroutine)
-
-        with patch.object(
-            self.manager,
-            "_build_client_for_runtime",
-            return_value=fallback_client,
-        ) as mock_build, patch.object(
-            self.manager,
-            "_execute_async",
-            new=AsyncMock(return_value={"status": "success", "result": "{}"}),
-        ) as mock_execute, patch.object(
-            self.manager,
-            "_run_coroutine_sync",
-            side_effect=run_coroutine,
-        ):
-            result = self.manager._execute_with_transient_stdio_env(
-                runtime,
-                "search_engine",
-                {"query": "openai"},
-                timeout_seconds=30,
-                proxy_url="http://proxy.example:8080",
-                env_overrides={"WEB_UNLOCKER_ZONE": "fallback-zone"},
-            )
-
-        self.assertEqual(result, {"status": "success", "result": "{}"})
-        self.assertEqual(runtime.env["WEB_UNLOCKER_ZONE"], "primary-zone")
-        self.assertIsNot(self.manager._clients[runtime.config_id], fallback_client)
-        env_overrides = mock_build.call_args.kwargs["env_overrides"]
-        self.assertEqual(env_overrides["WEB_UNLOCKER_ZONE"], "fallback-zone")
-        self.assertEqual(env_overrides["HTTP_PROXY"], "http://proxy.example:8080")
-        mock_execute.assert_awaited_once()
-        fallback_client.close.assert_awaited_once()
 
     def test_execute_mcp_tool_isolated_does_not_reuse_shared_loop_or_client_cache(self):
         shared_client = MagicMock(name="shared-client")
@@ -5058,7 +4855,7 @@ class MCPIsolatedExecutionTests(TestCase):
             result = self.manager.execute_mcp_tool_isolated(
                 self.agent,
                 self.tool_info.full_name,
-                {"query": "openai"},
+                {"queries": [{"query": "openai"}]},
             )
 
         self.assertEqual(result["status"], "success")
@@ -5073,7 +4870,7 @@ class MCPIsolatedExecutionTests(TestCase):
         fake_result = SimpleNamespace(is_error=False, data={"ok": True}, content=None)
 
         async def fake_execute_async(_client, _tool_name, params, timeout_seconds):
-            self.assertEqual(params, {"query": "openai"})
+            self.assertEqual(params, {"queries": [{"query": "openai"}]})
             self.assertEqual(timeout_seconds, self.manager._get_timeout_for_runtime(self.runtime))
             return fake_result
 
@@ -5101,7 +4898,7 @@ class MCPIsolatedExecutionTests(TestCase):
             result = self.manager.execute_mcp_tool_isolated(
                 self.agent,
                 self.tool_info.full_name,
-                {"query": "openai", "will_continue_work": False},
+                {"queries": [{"query": "openai"}], "will_continue_work": False},
             )
 
         self.assertEqual(result["status"], "success")
@@ -5110,7 +4907,7 @@ class MCPIsolatedExecutionTests(TestCase):
         mock_validate.assert_called_once_with(
             self.server_config.name,
             self.tool_info.tool_name,
-            {"query": "openai"},
+            {"queries": [{"query": "openai"}]},
             self.agent.user,
         )
         self.assertEqual(mock_execute_async.call_count, 1)
@@ -5151,7 +4948,7 @@ class MCPIsolatedExecutionTests(TestCase):
             result = self.manager.execute_mcp_tool_isolated(
                 self.agent,
                 self.tool_info.full_name,
-                {"query": "openai"},
+                {"queries": [{"query": "openai"}]},
             )
 
         self.assertEqual(result["status"], "success")

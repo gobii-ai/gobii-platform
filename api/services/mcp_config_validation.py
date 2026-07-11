@@ -71,10 +71,4 @@ def validate_mcp_metadata_environment_references(metadata: Mapping[Any, Any]) ->
                     f"{format_invalid_environment_variable_names(invalid_fallback_env_names)}"
                 )
 
-    fallback_zone_env = metadata.get("brightdata_search_fallback_zone_env")
-    if fallback_zone_env is not None and not is_valid_environment_variable_name(fallback_zone_env):
-        errors.append(
-            "brightdata_search_fallback_zone_env must be an environment variable name like "
-            "WEB_UNLOCKER_ZONE_FALLBACK."
-        )
     return errors

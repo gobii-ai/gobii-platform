@@ -1,6 +1,5 @@
 import logging
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 from django.db import DatabaseError
 
@@ -22,50 +21,6 @@ class MCPToolParamGuard:
 
     def validate(self, params: Dict[str, Any], owner: Any) -> Optional[Dict[str, str]]:
         """Return an error payload if params should be rejected."""
-        return None
-
-
-def _extract_candidate_urls(params: Dict[str, Any]) -> List[str]:
-    if not isinstance(params, dict):
-        return []
-    urls: List[str] = []
-    string_keys = {"url", "link", "page", "target_url"}
-    list_keys = {"urls", "links", "pages", "targets", "target_urls"}
-    for key, value in params.items():
-        if key in string_keys and isinstance(value, str):
-            urls.append(value)
-        elif key in list_keys and isinstance(value, list):
-            urls.extend([v for v in value if isinstance(v, str)])
-    return urls
-
-
-def _is_pdf_url(url: str) -> bool:
-    if not isinstance(url, str):
-        return False
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    return parsed.path.lower().endswith(".pdf")
-
-
-class BrightDataPdfGuard(MCPToolParamGuard):
-    """Reject Bright Data scrape calls for PDF URLs."""
-
-    server_name = "brightdata"
-
-    def matches(self, server_name: str, tool_name: str) -> bool:
-        if not super().matches(server_name, tool_name):
-            return False
-        return tool_name in {"scrape_as_markdown", "scrape_as_html"}
-
-    def validate(self, params: Dict[str, Any], owner: Any) -> Optional[Dict[str, str]]:
-        urls = _extract_candidate_urls(params)
-        if any(_is_pdf_url(u) for u in urls):
-            return {
-                "status": "error",
-                "message": "PDF scraping is not supported for Bright Data snapshots. Use spawn_web_task to read PDFs instead.",
-            }
         return None
 
 
@@ -108,7 +63,6 @@ class MCPParamGuardRegistry:
     def default(cls) -> "MCPParamGuardRegistry":
         return cls(
             guards=[
-                BrightDataPdfGuard(),
                 BrightDataSearchEngineBatchGuard(),
             ]
         )
