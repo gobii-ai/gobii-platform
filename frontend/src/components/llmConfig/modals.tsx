@@ -1,9 +1,10 @@
-import { AlertCircle, Loader2, Plus, X } from 'lucide-react'
+import { AlertCircle, Loader2, Plus } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 
 import * as llmApi from '../../api/llmConfig'
 import { HttpError } from '../../api/http'
 import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
+import { Modal } from '../common/Modal'
 import { ModalForm } from '../common/ModalForm'
 import { button, type ConfirmDialogConfig, formatNullableNumber, type Tier, type TierScope } from './shared'
 
@@ -51,56 +52,13 @@ export function AddEndpointModal({
     }
   }
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Add endpoint to {tier.name}</h3>
-          <button onClick={onClose} className={button.icon}>
-            <X className="size-5" />
-          </button>
-        </div>
-        <div className="mt-4">
-          {endpoints.length === 0 ? (
-            <p className="text-sm text-slate-500">No endpoints available for this tier.</p>
-          ) : (
-            <>
-              <label className="text-sm font-medium text-slate-700">Endpoint</label>
-              <select
-                className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                value={selected}
-                onChange={(event) => setSelected(event.target.value)}
-              >
-                {endpoints.map((endpoint) => (
-                  <option key={endpoint.id} value={endpoint.id}>
-                    {endpoint.label || endpoint.model}
-                  </option>
-                ))}
-              </select>
-              {scope === 'browser' ? (
-                <div className="mt-4 space-y-1">
-                  <label className="text-sm font-medium text-slate-700">Extraction endpoint (optional)</label>
-                  <select
-                    className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                    value={extractionSelected}
-                    onChange={(event) => setExtractionSelected(event.target.value)}
-                  >
-                    <option value="">No separate extraction model</option>
-                    {endpoints.map((endpoint) => (
-                      <option key={endpoint.id} value={endpoint.id}>
-                        {endpoint.label || endpoint.model}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-slate-500">If set, page extraction uses this endpoint; otherwise it falls back to the primary model.</p>
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-        <div className="mt-6 flex justify-end gap-3">
-          <button type="button" className={button.secondary} onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </button>
+    <Modal
+      title={`Add endpoint to ${tier.name}`}
+      onClose={onClose}
+      icon={null}
+      widthClass="sm:max-w-md"
+      footer={(
+        <>
           <button
             type="button"
             className={button.primary}
@@ -109,9 +67,49 @@ export function AddEndpointModal({
           >
             {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add endpoint
           </button>
-        </div>
-      </div>
-    </div>
+          <button type="button" className={button.secondary} onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </button>
+        </>
+      )}
+    >
+      {endpoints.length === 0 ? (
+        <p className="text-sm text-slate-500">No endpoints available for this tier.</p>
+      ) : (
+        <>
+          <label className="text-sm font-medium text-slate-700">Endpoint</label>
+          <select
+            className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            value={selected}
+            onChange={(event) => setSelected(event.target.value)}
+          >
+            {endpoints.map((endpoint) => (
+              <option key={endpoint.id} value={endpoint.id}>
+                {endpoint.label || endpoint.model}
+              </option>
+            ))}
+          </select>
+          {scope === 'browser' ? (
+            <div className="mt-4 space-y-1">
+              <label className="text-sm font-medium text-slate-700">Extraction endpoint (optional)</label>
+              <select
+                className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                value={extractionSelected}
+                onChange={(event) => setExtractionSelected(event.target.value)}
+              >
+                <option value="">No separate extraction model</option>
+                {endpoints.map((endpoint) => (
+                  <option key={endpoint.id} value={endpoint.id}>
+                    {endpoint.label || endpoint.model}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500">If set, page extraction uses this endpoint; otherwise it falls back to the primary model.</p>
+            </div>
+          ) : null}
+        </>
+      )}
+    </Modal>
   )
 }
 

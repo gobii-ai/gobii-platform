@@ -9,7 +9,7 @@ import { actionKey, button } from './shared'
 import type { LlmConfigController } from './useLlmConfigController'
 
 export function LlmConfigView({ controller }: { controller: LlmConfigController }) {
-  const { data, feedback, modal, showModal, closeModal, statsCards, provider: providerState, routing } = controller
+  const { data, feedback, modal, showModal, statsCards, provider: providerState, routing } = controller
   const selectedProfile = data.selectedProfile
   const selectedProfileId = data.selectedProfileId
 
@@ -181,7 +181,6 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                 isBusy={feedback.isBusy}
                 testStatuses={providerState.endpointTestStatuses}
                 showModal={showModal}
-                closeModal={closeModal}
                 handlers={providerState.providerHandlers}
               />
             ))}

@@ -1,10 +1,10 @@
-import { ChevronDown, Copy, KeyRound, Loader2, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
+import { ChevronDown, Copy, KeyRound, Loader2, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { Button as AriaButton, Dialog, DialogTrigger, ListBox, ListBoxItem, Popover, type Key, type Selection } from 'react-aria-components'
 
 import * as llmApi from '../../api/llmConfig'
 import { CheckboxField, FormField, SelectInput, TextInput } from '../common/FormControls'
+import { Modal } from '../common/Modal'
 import { actionKey, addEndpointOptions, button, type EndpointFormValues, type EndpointTestStatus, type ProviderCardData, type ProviderEndpointCard, reasoningEffortOptions } from './shared'
 
 export type ProviderCardHandlers = {
@@ -17,7 +17,7 @@ export type ProviderCardHandlers = {
   onTestEndpoint: (endpoint: ProviderEndpointCard) => Promise<void>
 }
 
-export function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, closeModal }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean; testStatuses: Record<string, EndpointTestStatus | undefined>; showModal: (renderer: (onClose: () => void) => ReactNode) => void; closeModal: () => void }) {
+export function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean; testStatuses: Record<string, EndpointTestStatus | undefined>; showModal: (renderer: (onClose: () => void) => ReactNode) => void }) {
   const [activeTab, setActiveTab] = useState<'endpoints' | 'settings'>('endpoints')
   const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null)
   const rotateBusy = isBusy(actionKey('provider', provider.id, 'rotate'))
@@ -35,12 +35,12 @@ export function ProviderCard({ provider, handlers, isBusy, testStatuses, showMod
   }
 
   const openAddEndpointModal = (type: llmApi.ProviderEndpoint['type'], sourceEndpoint?: ProviderEndpointCard) => {
-    showModal((onClose) => createPortal(
+    showModal((onClose) => (
       <ProviderEndpointModal
         mode="create"
         providerName={provider.name}
         type={type}
-        sourceEndpoint={sourceEndpoint}
+        endpoint={sourceEndpoint}
         busy={creatingEndpoint}
         onClose={onClose}
         onSubmit={async (values) => {
@@ -51,8 +51,7 @@ export function ProviderCard({ provider, handlers, isBusy, testStatuses, showMod
             // feedback already shown
           }
         }}
-      />,
-      document.body,
+      />
     ))
   }
 
@@ -67,68 +66,29 @@ export function ProviderCard({ provider, handlers, isBusy, testStatuses, showMod
   }
 
   const openEndpointEditor = (endpoint: ProviderEndpointCard) => {
-    const isEditing = editingEndpointId === endpoint.id
-    if (isEditing) {
+    const closeEditor = (onClose: () => void) => {
       setEditingEndpointId(null)
-      closeModal()
-      return
+      onClose()
     }
     setEditingEndpointId(endpoint.id)
-    showModal((onClose) =>
-      createPortal(
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
-          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">
-                {endpoint.type === 'persistent'
-                  ? 'Edit persistent endpoint'
-                  : endpoint.type === 'browser'
-                    ? 'Edit browser endpoint'
-                    : endpoint.type === 'file_handler'
-                      ? 'Edit file handler endpoint'
-                      : endpoint.type === 'image_generation'
-                        ? 'Edit image generation endpoint'
-                        : endpoint.type === 'video_generation'
-                          ? 'Edit video generation endpoint'
-                        : 'Edit embedding endpoint'}
-              </h3>
-              <button
-                onClick={() => {
-                  setEditingEndpointId(null)
-                  onClose()
-                }}
-                className={button.icon}
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-            <p className="text-sm text-slate-500 mt-1">{provider.name}</p>
-            <div className="mt-4">
-              <ProviderEndpointForm
-                mode="edit"
-                endpoint={endpoint}
-                type={endpoint.type}
-                saving={isBusy(actionKey('endpoint', endpoint.id, 'update'))}
-                onCancel={() => {
-                  setEditingEndpointId(null)
-                  onClose()
-                }}
-                onSave={async (values) => {
-                  try {
-                    await handlers.onSaveEndpoint(endpoint, values)
-                    setEditingEndpointId(null)
-                    onClose()
-                  } catch {
-                    // feedback already shown
-                  }
-                }}
-              />
-            </div>
-          </div>
-        </div>,
-        document.body,
-      ),
-    )
+    showModal((onClose) => (
+      <ProviderEndpointModal
+        mode="edit"
+        providerName={provider.name}
+        type={endpoint.type}
+        endpoint={endpoint}
+        busy={isBusy(actionKey('endpoint', endpoint.id, 'update'))}
+        onClose={() => closeEditor(onClose)}
+        onSave={async (values) => {
+          try {
+            await handlers.onSaveEndpoint(endpoint, values)
+            closeEditor(onClose)
+          } catch {
+            // feedback already shown
+          }
+        }}
+      />
+    ))
   }
 
   return (
@@ -522,40 +482,36 @@ function ProviderEndpointForm({
 }
 
 type ProviderEndpointModalProps = {
-  mode: 'create'
+  mode: ProviderEndpointFormMode
   providerName: string
   type: llmApi.ProviderEndpoint['type']
-  sourceEndpoint?: ProviderEndpointCard
+  endpoint?: ProviderEndpointCard
   busy?: boolean
-  onSubmit: (values: EndpointFormValues & { key?: string }) => Promise<void> | void
+  onSubmit?: (values: EndpointFormValues & { key?: string }) => Promise<void> | void
+  onSave?: (values: EndpointFormValues) => Promise<void> | void
   onClose: () => void
 }
 
-function ProviderEndpointModal({ providerName, type, sourceEndpoint, onSubmit, onClose, busy }: ProviderEndpointModalProps) {
-  const title = sourceEndpoint ? `Clone ${endpointTypeLabels[type]} endpoint` : `Add ${endpointTypeLabels[type]} endpoint`
+function ProviderEndpointModal({ mode, providerName, type, endpoint, onSubmit, onSave, onClose, busy }: ProviderEndpointModalProps) {
+  const title = mode === 'edit'
+    ? `Edit ${endpointTypeLabels[type]} endpoint`
+    : endpoint
+      ? `Clone ${endpointTypeLabels[type]} endpoint`
+      : `Add ${endpointTypeLabels[type]} endpoint`
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
-      <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <button onClick={onClose} className={button.icon}>
-            <X className="size-5" />
-          </button>
-        </div>
-        <p className="text-sm text-slate-500 mt-1">{providerName}</p>
-        <div className="mt-4 space-y-3">
-          <ProviderEndpointForm
-            mode="create"
-            type={type}
-            endpoint={sourceEndpoint}
-            saving={busy}
-            submitLabel={sourceEndpoint ? 'Clone endpoint' : 'Add endpoint'}
-            onClose={onClose}
-            onSubmit={onSubmit}
-          />
-        </div>
-      </div>
-    </div>
+    <Modal title={title} subtitle={providerName} onClose={onClose} icon={null} widthClass="sm:max-w-xl">
+      <ProviderEndpointForm
+        mode={mode}
+        type={type}
+        endpoint={endpoint}
+        saving={busy}
+        submitLabel={endpoint ? 'Clone endpoint' : 'Add endpoint'}
+        onClose={onClose}
+        onCancel={onClose}
+        onSubmit={onSubmit}
+        onSave={onSave}
+      />
+    </Modal>
   )
 }

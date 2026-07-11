@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
-import { createPortal } from 'react-dom'
 
 import * as llmApi from '../../api/llmConfig'
 import { AddEndpointModal, CreateProfileModal, EditProfileModal } from './modals'
@@ -421,7 +420,7 @@ export function useRoutingTierActions({
     const useProfile = Boolean(
       selectedProfile && scope !== 'file_handler' && scope !== 'image_generation' && scope !== 'video_generation',
     )
-    showModal((onClose) => createPortal(
+    showModal((onClose) => (
       <AddEndpointModal
         tier={tier}
         scope={scope}
@@ -429,8 +428,7 @@ export function useRoutingTierActions({
         busy={isBusy(actionKey(useProfile ? 'profile' : scope, scope, tier.id, 'attach-endpoint'))}
         onAdd={(selection) => (useProfile ? submitProfileTierEndpoint(tier, scope, selection) : submitTierEndpoint(tier, scope, selection))}
         onClose={onClose}
-      />,
-      document.body,
+      />
     ))
   }
   
