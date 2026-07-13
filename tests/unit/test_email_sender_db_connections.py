@@ -109,6 +109,7 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         properties = tool["function"]["parameters"]["properties"]
 
         self.assertIn("body-only HTML", description)
+        self.assertIn("Do not use <style> blocks or CSS classes", description)
         self.assertIn("inline style attrs", description)
         self.assertIn("tables/cells", description)
         self.assertIn("Do NOT leave report metrics in plain lists", description)

@@ -161,6 +161,7 @@ def get_send_email_tool() -> Dict[str, Any]:
             "name": "send_email",
             "description": (
                 "Send rich body-only HTML email without <html>/<head>/<body>; avoid Markdown. "
+                "Do not use <style> blocks or CSS classes; put CSS directly on each element with inline style attrs. "
                 "For reports/dashboards, avoid bare HTML: use inline style attrs on sections, tables/cells, and highlighted values. Do NOT leave report metrics in plain lists. Do NOT use Markdown pipe tables."
             ),
             "parameters": {
