@@ -5,8 +5,8 @@ import { resendEmailVerification } from '../../api/agentSetup'
 import type { PhoneState } from '../../api/agentSetup'
 import { HttpError } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
-import { updateUserCustomInstructions, updateUserProfile } from '../../api/userProfile'
-import type { UserProfileFormState, UserProfilePayload } from '../../api/userProfile'
+import { cancelUserEmailChange, changeUserEmail, updateUserCustomInstructions, updateUserProfile } from '../../api/userProfile'
+import type { EmailVerificationState, UserProfileFormState, UserProfilePayload } from '../../api/userProfile'
 import { PhoneNumberInput, type SupportedPhoneRegion } from '../../components/common/PhoneNumberInput'
 import { CustomInstructionsSection } from '../../components/settings/CustomInstructionsSection'
 import { useUserPhoneVerification } from '../../hooks/useUserPhoneVerification'
@@ -15,7 +15,7 @@ type ProfileScreenProps = {
   initialData: UserProfilePayload
 }
 
-type ProfileFieldErrors = Partial<Record<keyof UserProfileFormState | 'profile' | 'customInstructions' | 'nonFieldErrors', string[]>>
+type ProfileFieldErrors = Partial<Record<keyof UserProfileFormState | 'profile' | 'email' | 'customInstructions' | 'nonFieldErrors', string[]>>
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null
@@ -63,33 +63,74 @@ function formatDateTime(value: string | null): string | null {
   }).format(parsed)
 }
 
-function EmailVerificationSection({
-  email,
-  isVerified,
-  onVerifiedChange,
+function EmailAddressSection({
+  emailVerification,
+  onChange,
 }: {
-  email: string
-  isVerified: boolean
-  onVerifiedChange: (verified: boolean) => void
+  emailVerification: EmailVerificationState
+  onChange: (state: EmailVerificationState) => void
 }) {
-  const [sending, setSending] = useState(false)
+  const [emailDraft, setEmailDraft] = useState('')
+  const [busyAction, setBusyAction] = useState<'change' | 'resend' | 'cancel' | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [fieldError, setFieldError] = useState<string | null>(null)
 
-  const handleResend = useCallback(async () => {
-    setSending(true)
+  const resetFeedback = useCallback(() => {
     setMessage(null)
     setError(null)
+    setFieldError(null)
+  }, [])
+
+  const handleChange = useCallback(async () => {
+    setBusyAction('change')
+    resetFeedback()
+    try {
+      const result = await changeUserEmail(emailDraft)
+      onChange(result.emailVerification)
+      setEmailDraft('')
+      setMessage(result.message)
+    } catch (err) {
+      const fieldErrors = extractProfileErrors(err)
+      const emailError = firstError(fieldErrors, 'email')
+      setFieldError(emailError)
+      setError(firstError(fieldErrors, 'nonFieldErrors') || (emailError ? null : safeErrorMessage(err)))
+    } finally {
+      setBusyAction(null)
+    }
+  }, [emailDraft, onChange, resetFeedback])
+
+  const handleResend = useCallback(async () => {
+    setBusyAction('resend')
+    resetFeedback()
     try {
       const result = await resendEmailVerification()
-      onVerifiedChange(result.verified)
+      if (result.emailVerification) {
+        onChange(result.emailVerification)
+      }
       setMessage(result.message)
     } catch (err) {
       setError(safeErrorMessage(err))
     } finally {
-      setSending(false)
+      setBusyAction(null)
     }
-  }, [onVerifiedChange])
+  }, [onChange, resetFeedback])
+
+  const handleCancel = useCallback(async () => {
+    setBusyAction('cancel')
+    resetFeedback()
+    try {
+      const result = await cancelUserEmailChange()
+      onChange(result.emailVerification)
+      setMessage(result.message)
+    } catch (err) {
+      setError(safeErrorMessage(err))
+    } finally {
+      setBusyAction(null)
+    }
+  }, [onChange, resetFeedback])
+
+  const pendingEmail = emailVerification.pendingEmail
 
   return (
     <section className="profile-screen__section">
@@ -98,12 +139,23 @@ function EmailVerificationSection({
           <Mail className="h-4 w-4" />
         </div>
         <div>
-          <h2>Email Verification</h2>
-          <p>{email || 'No email address on file'}</p>
+          <h2>Email Address</h2>
+          <p>Used to sign in and receive account notifications.</p>
         </div>
       </div>
+      <div className="profile-screen__form-grid">
+        <label className="profile-screen__field profile-screen__field--wide">
+          <span>Current Email</span>
+          <input
+            value={emailVerification.email}
+            placeholder="No email address on file"
+            readOnly
+            aria-label="Current email address"
+          />
+        </label>
+      </div>
       <div className="profile-screen__status-row">
-        {isVerified ? (
+        {emailVerification.isVerified ? (
           <span className="profile-screen__status profile-screen__status--success">
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
             Verified
@@ -114,18 +166,81 @@ function EmailVerificationSection({
             Unverified
           </span>
         )}
-        {!isVerified ? (
+        {!emailVerification.isVerified && !pendingEmail && emailVerification.email ? (
           <button
             type="button"
             className="profile-screen__button profile-screen__button--secondary"
             onClick={handleResend}
-            disabled={sending}
+            disabled={busyAction !== null}
           >
             <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-            {sending ? 'Sending...' : 'Resend'}
+            {busyAction === 'resend' ? 'Sending...' : 'Resend Verification'}
           </button>
         ) : null}
       </div>
+
+      {pendingEmail ? (
+        <div className="profile-screen__verify-form">
+          <label className="profile-screen__field">
+            <span>Changing To</span>
+            <input value={pendingEmail} readOnly aria-label="Pending email address" />
+          </label>
+          <p className="profile-screen__muted">
+            Your current email remains active until this address is verified.
+          </p>
+          <div className="profile-screen__button-row">
+            <button
+              type="button"
+              className="profile-screen__button profile-screen__button--secondary"
+              onClick={handleResend}
+              disabled={busyAction !== null}
+            >
+              <RefreshCcw className="h-4 w-4" aria-hidden="true" />
+              {busyAction === 'resend' ? 'Sending...' : 'Resend Verification'}
+            </button>
+            <button
+              type="button"
+              className="profile-screen__button profile-screen__button--secondary"
+              onClick={handleCancel}
+              disabled={busyAction !== null}
+            >
+              {busyAction === 'cancel' ? 'Canceling...' : 'Cancel Change'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form
+          className="profile-screen__inline-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void handleChange()
+          }}
+        >
+          <label className="profile-screen__field">
+            <span>New Email</span>
+            <input
+              type="email"
+              value={emailDraft}
+              onChange={(event) => {
+                setEmailDraft(event.target.value)
+                resetFeedback()
+              }}
+              autoComplete="email"
+              placeholder="name@example.com"
+              disabled={busyAction !== null}
+            />
+            {fieldError ? <em>{fieldError}</em> : null}
+          </label>
+          <button
+            type="submit"
+            className="profile-screen__button profile-screen__button--primary"
+            disabled={busyAction !== null || !emailDraft.trim()}
+          >
+            <Mail className="h-4 w-4" aria-hidden="true" />
+            {busyAction === 'change' ? 'Sending...' : 'Change Email'}
+          </button>
+        </form>
+      )}
       {message ? <p className="profile-screen__feedback profile-screen__feedback--success">{message}</p> : null}
       {error ? <p className="profile-screen__feedback profile-screen__feedback--error">{error}</p> : null}
     </section>
@@ -460,17 +575,10 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
         {copyMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{copyMessage}</p> : null}
       </section>
 
-      <EmailVerificationSection
-        email={data.emailVerification.email}
-        isVerified={data.emailVerification.isVerified}
-        onVerifiedChange={(verified) => {
-          setData((current) => ({
-            ...current,
-            emailVerification: {
-              ...current.emailVerification,
-              isVerified: verified,
-            },
-          }))
+      <EmailAddressSection
+        emailVerification={data.emailVerification}
+        onChange={(emailVerification) => {
+          setData((current) => ({ ...current, emailVerification }))
         }}
       />
 

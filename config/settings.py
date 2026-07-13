@@ -706,6 +706,9 @@ ACCOUNT_EMAIL_VERIFICATION = env(
     "ACCOUNT_EMAIL_VERIFICATION",
     default="optional" if GOBII_PROPRIETARY_MODE and MAILGUN_API_KEY else "none",
 )
+ACCOUNT_CHANGE_EMAIL = True
+ACCOUNT_MAX_EMAIL_ADDRESSES = 2
+ACCOUNT_EMAIL_NOTIFICATIONS = True
 ACCOUNT_LOGOUT_ON_GET = True
 ACCOUNT_ADAPTER = "config.allauth_adapter.GobiiAccountAdapter"
 SOCIALACCOUNT_ADAPTER = "config.socialaccount_adapter.GobiiSocialAccountAdapter"
