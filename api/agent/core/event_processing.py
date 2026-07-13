@@ -435,6 +435,7 @@ def _infer_retryable_from_text(message: str) -> bool:
             "connection reset",
             "connection aborted",
             "connection refused",
+            "tunnel error",
             "server session was closed",
             "client failed to connect",
             "service unavailable",

@@ -636,6 +636,20 @@ class PeerMessageToolHandlingTests(SimpleTestCase):
             )
         )
 
+    def test_proxy_tunnel_errors_are_retryable(self):
+        result = _normalize_error_result(
+            {
+                "status": "error",
+                "message": "Caused by: tunnel error: unsuccessful",
+                "detail": (
+                    "Failed to fetch: `https://pypi.org/simple/python-docx/`\n"
+                    "Caused by: tunnel error: unsuccessful"
+                ),
+            }
+        )
+
+        self.assertTrue(result["retryable"])
+
     def test_debounced_and_throttled_results_require_followup(self):
         self.assertTrue(_is_warning_status({"status": "debounced"}))
         self.assertTrue(_is_warning_status({"status": "throttled"}))
