@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
+import redis
 from django.test import SimpleTestCase, tag, override_settings
 from django.utils import timezone
 from pydantic import BaseModel
@@ -143,6 +144,15 @@ class MCPToolCacheTests(SimpleTestCase):
                 self.assertFalse(second)
         with mcp_catalog_discovery_locks("cache-test-id", [fingerprint], timeout=0.1) as third:
             self.assertTrue(third)
+
+    @patch("api.services.mcp_tool_cache.Redlock")
+    def test_discovery_continues_when_redis_locking_fails(self, redlock):
+        redlock.return_value.acquire.side_effect = redis.exceptions.ConnectionError("unavailable")
+
+        with mcp_catalog_discovery_locks("cache-test-id", ["redis-down"], timeout=0.1) as acquired:
+            self.assertTrue(acquired)
+
+        self.assertTrue(redlock.call_args.kwargs["raise_on_redis_errors"])
 
     def test_fingerprint_changes_with_env_and_headers(self):
         manager = MCPToolManager()

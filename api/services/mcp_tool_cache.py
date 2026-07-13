@@ -127,6 +127,7 @@ def mcp_catalog_discovery_locks(
             lock = Redlock(
                 key=_discovery_lock_key(config_id, fingerprint),
                 masters={redis_client},
+                raise_on_redis_errors=True,
                 auto_release_time=DISCOVERY_LOCK_TTL_SECONDS,
             )
             if not lock.acquire(timeout=max(deadline - time.monotonic(), 0)):

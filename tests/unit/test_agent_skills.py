@@ -852,6 +852,27 @@ class AgentSkillToolEnablementTests(TestCase):
         self.assertEqual(result["already_enabled"], ["slack-send-message"])
         self.assertFalse(result["invalid"])
 
+    @patch("api.agent.tools.tool_manager.agent_accessible_server_configs", return_value=[])
+    @patch("api.agent.tools.tool_manager._get_manager", side_effect=AssertionError("MCP discovery"))
+    def test_existing_metadata_less_mcp_tool_remains_authoritative(
+        self, _mock_manager, _mock_configs
+    ):
+        tool_name = "mcp_legacy_lookup"
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="legacy-tool",
+            description="Use an existing legacy tool",
+            version=1,
+            tools=[tool_name],
+            instructions="Look up the record.",
+        )
+        PersistentAgentEnabledTool.objects.create(agent=self.agent, tool_full_name=tool_name)
+
+        result = ensure_skill_tools_enabled(self.agent)
+
+        self.assertEqual(result["already_enabled"], [tool_name])
+        self.assertFalse(result["invalid"])
+
     @patch(
         "api.agent.tools.tool_manager.agent_accessible_server_configs",
         side_effect=AssertionError("MCP config load"),
