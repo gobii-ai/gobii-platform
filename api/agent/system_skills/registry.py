@@ -42,6 +42,9 @@ class SystemSkillDefinition:
     enables: tuple[str, ...] = ()
     use_when: tuple[str, ...] = ()
     query_aliases: tuple[str, ...] = ()
+    discovery_triggers: tuple[str, ...] = ()
+    discovery_query: str = ""
+    discovery_precedes: str = "generic execution tools"
     pipedream_app_slugs: tuple[str, ...] = ()
     prompt_instructions: str = ""
     prompt_instructions_renderer: Optional[Callable[[object], str]] = None

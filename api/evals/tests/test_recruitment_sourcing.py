@@ -11,20 +11,22 @@ from api.evals.scenarios.recruitment_sourcing import (
     RECRUITMENT_SOURCING_INTAKE_GATES_SOURCING,
     RECRUITMENT_SOURCING_PARTIAL_VERIFICATION,
     RECRUITMENT_SOURCING_SCENARIO_SLUGS,
+    RECRUITMENT_SOURCING_SKILL_DISCOVERY,
     RECRUITMENT_SOURCING_SOURCE_FALLBACK,
     RECRUITMENT_SOURCING_SUITE_SLUG,
+    _contains_unseparated_decoy,
 )
 from api.evals.suites import SuiteRegistry
 
 
 @tag("batch_recruitment_sourcing", "eval_sim")
 class RecruitmentSourcingScenarioTests(SimpleTestCase):
-    def test_recruitment_sourcing_suite_contains_five_scenarios(self):
+    def test_recruitment_sourcing_suite_contains_six_scenarios(self):
         suite = SuiteRegistry.get(RECRUITMENT_SOURCING_SUITE_SLUG)
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), RECRUITMENT_SOURCING_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 5)
+        self.assertEqual(len(suite.scenario_slugs), 6)
 
     def test_generated_scenarios_have_expected_metadata(self):
         registered = ScenarioRegistry.list_all()
@@ -49,6 +51,9 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
         self.assertIn("If a specific source is unavailable or blocked", instructions)
         self.assertIn("Dedupe by profile URL first", instructions)
         self.assertIn("Quality and criteria fidelity beat volume", instructions)
+        self.assertIn("equivalent constraints as gates", instructions)
+        self.assertIn("Return fewer or zero qualified candidates", instructions)
+        self.assertIn("never label them as qualified", instructions)
         self.assertIn("Do not treat phrases like 'start today'", instructions)
         self.assertIn("Those phrases only express urgency", instructions)
         self.assertIn("the failed question attempt is not a user answer", instructions)
@@ -58,6 +63,7 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
         self.assertEqual(
             {case.slug for case in RECRUITMENT_SOURCING_CASES},
             {
+                RECRUITMENT_SOURCING_SKILL_DISCOVERY,
                 RECRUITMENT_SOURCING_INTAKE_GATES_SOURCING,
                 RECRUITMENT_SOURCING_CRITERIA_FIDELITY,
                 RECRUITMENT_SOURCING_SOURCE_FALLBACK,
@@ -65,6 +71,15 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
                 RECRUITMENT_SOURCING_PARTIAL_VERIFICATION,
             },
         )
+
+    def test_discovery_case_starts_without_skill_and_stops_after_search(self):
+        case = next(case for case in RECRUITMENT_SOURCING_CASES if case.slug == RECRUITMENT_SOURCING_SKILL_DISCOVERY)
+        policy = case.eval_stop_policy()
+
+        self.assertFalse(case.pre_enable_system_skill)
+        self.assertTrue(case.expect_skill_discovery)
+        self.assertEqual(case.expected_tool_names, ("search_tools",))
+        self.assertEqual(policy["stop_on_tool_names_after_execution"], ["search_tools"])
 
     def test_intake_case_forbids_sourcing_tools_before_requirements(self):
         case = next(case for case in RECRUITMENT_SOURCING_CASES if case.slug == RECRUITMENT_SOURCING_INTAKE_GATES_SOURCING)
@@ -93,15 +108,41 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
         self.assertIn("Dana Lee", names)
         self.assertEqual(names, apollo_names)
         self.assertIn(("Estimator", "excluded", "exclude"), case.response_term_groups)
+        self.assertIn(("2 qualified", "two qualified", "only 2", "only two", "two candidates meet"), case.response_term_groups)
         self.assertEqual(case.forbidden_response_terms, ())
+        self.assertEqual(case.required_proximate_response_terms, ())
         self.assertEqual(
-            case.required_proximate_response_terms,
+            case.excluded_or_separated_response_terms,
             (
+                (
+                    ("Evan Brooks", "evan-brooks-eval"),
+                    ("excluded", "not qualified", "does not meet", "fails"),
+                ),
                 (
                     ("Dana Lee", "dana-lee-eval"),
                     ("outside approved geography", "outside geography", "not approved geography", "outside approved"),
                 ),
             ),
+        )
+
+    def test_decoy_assertion_allows_omission_or_clear_separation(self):
+        anchors = ("Evan Brooks", "evan-brooks-eval")
+        failed_gate_terms = ("excluded", "not qualified", "does not meet", "fails")
+
+        self.assertFalse(_contains_unseparated_decoy("Only Mina and Priya qualify.", anchors, failed_gate_terms))
+        self.assertFalse(
+            _contains_unseparated_decoy(
+                "Near matches: Evan Brooks is excluded because his Estimator title fails the title gate.",
+                anchors,
+                failed_gate_terms,
+            )
+        )
+        self.assertTrue(
+            _contains_unseparated_decoy(
+                "Qualified candidates include Mina Patel, Priya Shah, and Evan Brooks.",
+                anchors,
+                failed_gate_terms,
+            )
         )
 
     def test_source_fallback_blocks_apollo_paths(self):
