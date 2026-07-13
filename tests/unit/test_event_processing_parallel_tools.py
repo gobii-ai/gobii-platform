@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError
 from django.test import TestCase, tag
 
 from api.agent.tools.agent_variables import clear_variables, get_agent_variable, set_agent_variable
@@ -18,6 +19,8 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
+    PersistentAgentToolCall,
     UserQuota,
 )
 
@@ -142,7 +145,14 @@ class TestParallelToolCallsExecution(TestCase):
         max_active = 0
         lock = threading.Lock()
 
-        def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
+        def side_effect(
+            _agent,
+            _tool_name,
+            _params,
+            isolated_mcp=False,
+            current_sqlite_db_path=None,
+            resolved_entry=None,
+        ):
             nonlocal active, max_active
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
@@ -166,6 +176,129 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertEqual(mock_execute_enabled.call_count, 2)
         self.assertGreaterEqual(max_active, 2)
 
+    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True})
+    def test_parallel_preparation_batches_rate_limits_and_persists_pending_rows(
+        self,
+        mock_execute_enabled,
+    ):
+        from api.agent.core import event_processing as ep
+
+        rate_limit_batch = ep._ToolRateLimitBatch(
+            limits={},
+            recent_counts={},
+            checked_names={
+                "mcp_brightdata_search_engine",
+                "mcp_brightdata_scrape_as_markdown",
+                "read_file",
+            },
+        )
+        with patch(
+            "api.agent.core.event_processing._should_abort_processing",
+            return_value=False,
+        ) as mock_abort, patch(
+            "api.agent.core.event_processing._build_tool_rate_limit_batch",
+            return_value=rate_limit_batch,
+        ) as mock_rate_limits, patch(
+            "api.agent.core.event_processing._ensure_credit_for_tool",
+            return_value={"cost": None, "credit": None},
+        ) as mock_credit:
+            self._run_single_iteration(
+                [
+                    _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
+                    _tool_call("mcp_brightdata_scrape_as_markdown", '{"url": "https://example.com"}'),
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                ]
+            )
+
+        preparation_contexts = [
+            call.kwargs.get("check_context")
+            for call in mock_abort.call_args_list
+        ]
+        self.assertEqual(preparation_contexts.count("tool_batch"), 3)
+        mock_rate_limits.assert_called_once()
+        self.assertEqual(mock_credit.call_count, 3)
+        self.assertEqual(mock_execute_enabled.call_count, 3)
+        self.assertEqual(PersistentAgentToolCall.objects.filter(step__agent=self.agent).count(), 3)
+
+    def test_batch_rate_limit_counts_calls_admitted_in_same_batch(self):
+        from api.agent.core import event_processing as ep
+
+        tool_settings = SimpleNamespace(
+            hourly_limit_for_tool=lambda tool_name: 1 if tool_name == "read_file" else None
+        )
+        with patch(
+            "api.agent.core.event_processing.get_tool_settings_for_owner",
+            return_value=tool_settings,
+        ) as mock_settings:
+            rate_limit_batch = ep._build_tool_rate_limit_batch(
+                self.agent,
+                ["read_file", "read_file"],
+            )
+
+        mock_settings.assert_called_once_with(self.user)
+        self.assertTrue(
+            ep._enforce_tool_rate_limit(
+                self.agent,
+                "read_file",
+                rate_limit_batch=rate_limit_batch,
+            )
+        )
+        self.assertFalse(
+            ep._enforce_tool_rate_limit(
+                self.agent,
+                "read_file",
+                rate_limit_batch=rate_limit_batch,
+            )
+        )
+        self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                code=PersistentAgentSystemStep.Code.RATE_LIMIT,
+            ).exists()
+        )
+
+    def test_batch_rate_limit_settings_failure_does_not_retry_per_call(self):
+        from api.agent.core import event_processing as ep
+
+        with patch(
+            "api.agent.core.event_processing.get_tool_settings_for_owner",
+            side_effect=DatabaseError("offline"),
+        ), patch.object(ep, "_resolve_tool_hourly_limit") as fallback:
+            batch = ep._build_tool_rate_limit_batch(self.agent, ["read_file"])
+            self.assertTrue(
+                ep._enforce_tool_rate_limit(
+                    self.agent,
+                    "read_file",
+                    rate_limit_batch=batch,
+                )
+            )
+
+        self.assertEqual(batch.checked_names, {"read_file"})
+        fallback.assert_not_called()
+
+    def test_batch_rate_limit_count_failure_does_not_retry_per_call(self):
+        from api.agent.core import event_processing as ep
+
+        tool_settings = SimpleNamespace(hourly_limit_for_tool=lambda _name: 1)
+        with patch(
+            "api.agent.core.event_processing.get_tool_settings_for_owner",
+            return_value=tool_settings,
+        ), patch(
+            "api.agent.core.event_processing.PersistentAgentToolCall.objects.filter",
+            side_effect=DatabaseError("offline"),
+        ), patch.object(ep, "_resolve_tool_hourly_limit") as fallback:
+            batch = ep._build_tool_rate_limit_batch(self.agent, ["read_file"])
+            self.assertTrue(
+                ep._enforce_tool_rate_limit(
+                    self.agent,
+                    "read_file",
+                    rate_limit_batch=batch,
+                )
+            )
+
+        self.assertEqual(batch.checked_names, {"read_file"})
+        fallback.assert_not_called()
+
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
     def test_native_brightdata_tool_batch_executes_in_parallel(self, mock_execute_enabled, _mock_credit):
@@ -173,7 +306,14 @@ class TestParallelToolCallsExecution(TestCase):
         max_active = 0
         lock = threading.Lock()
 
-        def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
+        def side_effect(
+            _agent,
+            _tool_name,
+            _params,
+            isolated_mcp=False,
+            current_sqlite_db_path=None,
+            resolved_entry=None,
+        ):
             nonlocal active, max_active
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
@@ -205,7 +345,14 @@ class TestParallelToolCallsExecution(TestCase):
         max_active = 0
         lock = threading.Lock()
 
-        def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
+        def side_effect(
+            _agent,
+            _tool_name,
+            _params,
+            isolated_mcp=False,
+            current_sqlite_db_path=None,
+            resolved_entry=None,
+        ):
             nonlocal active, max_active
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
@@ -403,7 +550,14 @@ class TestParallelToolCallsExecution(TestCase):
     ):
         captured_paths = []
 
-        def side_effect(_agent, tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
+        def side_effect(
+            _agent,
+            tool_name,
+            _params,
+            isolated_mcp=False,
+            current_sqlite_db_path=None,
+            resolved_entry=None,
+        ):
             from api.agent.tools.sqlite_state import get_sqlite_db_path
 
             self.assertTrue(isolated_mcp)

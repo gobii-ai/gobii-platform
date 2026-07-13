@@ -14,7 +14,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
 from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
@@ -30,6 +30,7 @@ from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
 from django.apps import apps
 from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
+from django.db.models import Count
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 
@@ -101,7 +102,7 @@ from ..tools.request_contact_permission import execute_request_contact_permissio
 from ..tools.request_human_input import execute_request_human_input
 from ..tools.search_tools import execute_search_tools
 from ..tools.static_tools import planning_mode_disallows_tool
-from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
+from ..tools.tool_manager import ToolCatalogEntry, execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 from ..tools.web_chat_sender import execute_send_chat_message
 from ..tools.peer_dm import execute_send_agent_message
@@ -1680,6 +1681,7 @@ class _PreparedToolExecution:
     inferred_continue: bool
     parallel_safe: bool
     parallel_ineligible_reason: Optional[str]
+    resolved_entry: Optional[ToolCatalogEntry] = None
 
 
 @dataclass
@@ -1698,6 +1700,14 @@ class _PreparedToolBatch:
     all_calls_sleep: bool
     abort_after_execution: bool
     parallel_ineligible_reason: Optional[str]
+
+
+@dataclass
+class _ToolRateLimitBatch:
+    limits: dict[str, int]
+    recent_counts: dict[str, int]
+    checked_names: set[str] = field(default_factory=set)
+    admitted_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -2187,9 +2197,16 @@ def _record_irrelevant_agent_config_mutation_skip(
     attach_prompt_archive(step)
 
 
-def _normalize_tool_name_for_execution(agent: PersistentAgent, tool_name: str) -> str:
-    entry = resolve_tool_entry(agent, tool_name) if isinstance(tool_name, str) and tool_name.startswith("mcp_") else None
-    return entry.full_name if entry else tool_name
+def _resolve_tool_for_execution(
+    agent: PersistentAgent,
+    tool_name: str,
+) -> tuple[str, Optional[ToolCatalogEntry]]:
+    entry = (
+        resolve_tool_entry(agent, tool_name)
+        if isinstance(tool_name, str) and tool_name.startswith("mcp_")
+        else None
+    )
+    return (entry.full_name, entry) if entry else (tool_name, None)
 
 
 def _http_request_dedupe_signature(tool_params: Dict[str, Any]) -> Optional[str]:
@@ -2328,6 +2345,7 @@ def _execute_tool_call_runtime(
     budget_ctx: Optional[BudgetContext],
     eval_run_id: Optional[str],
     parallel_safe: bool = False,
+    resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
     mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
@@ -2354,6 +2372,7 @@ def _execute_tool_call_runtime(
             exec_params,
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
+            resolved_entry=resolved_entry,
         ), updated_tools
     resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
     if resolve_executor:
@@ -2368,6 +2387,7 @@ def _execute_tool_call_runtime(
         tool_name,
         exec_params,
         current_sqlite_db_path=get_sqlite_db_path(),
+        resolved_entry=resolved_entry,
     ), updated_tools
 
 
@@ -2433,6 +2453,7 @@ def _execute_prepared_tool_call(
                 budget_ctx=budget_ctx,
                 eval_run_id=eval_run_id,
                 parallel_safe=parallel_safe,
+                resolved_entry=prepared.resolved_entry,
             )
             if _tool_result_is_success(result) and not parallel_safe:
                 refresh_skills_for_tool(agent, prepared.tool_name)
@@ -2459,7 +2480,7 @@ def _execute_prepared_tool_call(
     )
 
 
-def _prepare_tool_batch(
+def _prepare_tool_batch_impl(
     agent: PersistentAgent,
     *,
     tool_calls: list[Any],
@@ -2473,6 +2494,7 @@ def _prepare_tool_batch(
     has_user_facing_message: bool,
     attach_completion: Any,
     attach_prompt_archive: Any,
+    rate_limit_batch: Optional[_ToolRateLimitBatch] = None,
 ) -> _PreparedToolBatch:
     prepared_calls: list[_PreparedToolExecution] = []
     followup_required = False
@@ -2728,7 +2750,8 @@ def _prepare_tool_batch(
                         followup_required = True
                         break
                     continue
-            if (normalized_tool_name := _normalize_tool_name_for_execution(agent, tool_name)) != tool_name:
+            normalized_tool_name, resolved_entry = _resolve_tool_for_execution(agent, tool_name)
+            if normalized_tool_name != tool_name:
                 logger.info("Agent %s: normalized tool call %s -> %s", agent.id, tool_name, normalized_tool_name)
                 tool_name = normalized_tool_name
             tool_params = _normalize_tool_params(tool_name, tool_params)
@@ -2783,14 +2806,6 @@ def _prepare_tool_batch(
                         )
                 explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
 
-            tool_span.set_attribute("tool.params", json.dumps(tool_params))
-            logger.info(
-                "Agent %s: %s params=%s",
-                agent.id,
-                tool_name,
-                json.dumps(tool_params)[:ARG_LOG_MAX_CHARS],
-            )
-
             if should_skip_auto_substitution(tool_name):
                 exec_params = tool_params
             else:
@@ -2828,6 +2843,7 @@ def _prepare_tool_batch(
                 span=tool_span,
                 attach_completion=attach_completion,
                 attach_prompt_archive=attach_prompt_archive,
+                rate_limit_batch=rate_limit_batch,
             ):
                 followup_required = True
                 continue
@@ -2870,6 +2886,7 @@ def _prepare_tool_batch(
                     inferred_continue=inferred_continue,
                     parallel_safe=parallel_ineligible_reason is None,
                     parallel_ineligible_reason=parallel_ineligible_reason,
+                    resolved_entry=resolved_entry,
                 )
             )
 
@@ -2881,6 +2898,44 @@ def _prepare_tool_batch(
         ),
         abort_after_execution=abort_after_execution,
         parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
+    )
+
+
+def _prepare_tool_batch(
+    agent: PersistentAgent,
+    *,
+    tool_calls: list[Any],
+    budget_ctx: Optional[BudgetContext],
+    eval_run_id: Optional[str],
+    heartbeat: Any,
+    lock_extender: Any,
+    credit_snapshot: Any,
+    allow_inferred_message_continue: bool,
+    has_non_sleep_calls: bool,
+    has_user_facing_message: bool,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> _PreparedToolBatch:
+    rate_limit_batch = None
+    if len(tool_calls) > 1:
+        rate_limit_batch = _build_tool_rate_limit_batch(
+            agent,
+            [name for call in tool_calls if (name := _get_tool_call_name(call))],
+        )
+    return _prepare_tool_batch_impl(
+        agent,
+        tool_calls=tool_calls,
+        budget_ctx=budget_ctx,
+        eval_run_id=eval_run_id,
+        heartbeat=heartbeat,
+        lock_extender=lock_extender,
+        credit_snapshot=credit_snapshot,
+        allow_inferred_message_continue=allow_inferred_message_continue,
+        has_non_sleep_calls=has_non_sleep_calls,
+        has_user_facing_message=has_user_facing_message,
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+        rate_limit_batch=rate_limit_batch,
     )
 
 
@@ -4045,37 +4100,112 @@ def _resolve_tool_hourly_limit(agent: PersistentAgent, tool_name: str) -> Option
         return None
 
 
+def _build_tool_rate_limit_batch(
+    agent: PersistentAgent,
+    tool_names: list[str],
+) -> _ToolRateLimitBatch:
+    checked_names = set(tool_names)
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    if owner is None:
+        return _ToolRateLimitBatch(limits={}, recent_counts={}, checked_names=checked_names)
+
+    try:
+        tool_settings = get_tool_settings_for_owner(owner)
+    except DatabaseError:
+        logger.error(
+            "Failed to load batch tool rate limits for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return _ToolRateLimitBatch(limits={}, recent_counts={}, checked_names=checked_names)
+
+    limits = {
+        tool_name: limit
+        for tool_name in dict.fromkeys(tool_names)
+        if tool_settings is not None
+        and (limit := tool_settings.hourly_limit_for_tool(tool_name)) is not None
+    }
+    if not limits:
+        return _ToolRateLimitBatch(limits={}, recent_counts={}, checked_names=checked_names)
+
+    cutoff = dj_timezone.now() - timedelta(hours=1)
+    try:
+        rows = (
+            PersistentAgentToolCall.objects.filter(
+                step__agent=agent,
+                tool_name__in=limits,
+                step__created_at__gte=cutoff,
+            )
+            .values("tool_name")
+            .annotate(recent_count=Count("step_id"))
+        )
+        recent_counts = {
+            row["tool_name"]: int(row["recent_count"])
+            for row in rows
+        }
+    except DatabaseError:
+        logger.error(
+            "Failed to evaluate batch tool rate limits for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return _ToolRateLimitBatch(limits={}, recent_counts={}, checked_names=checked_names)
+
+    return _ToolRateLimitBatch(
+        limits=limits,
+        recent_counts=recent_counts,
+        checked_names=checked_names,
+    )
+
 def _enforce_tool_rate_limit(
     agent: PersistentAgent,
     tool_name: str,
     span=None,
     attach_completion=None,
     attach_prompt_archive=None,
+    rate_limit_batch: Optional[_ToolRateLimitBatch] = None,
 ) -> bool:
     """Enforce per-agent hourly rate limits; returns True if execution may proceed."""
-    limit = _resolve_tool_hourly_limit(agent, tool_name)
+    use_batch_snapshot = (
+        rate_limit_batch is not None
+        and tool_name in rate_limit_batch.checked_names
+    )
+    if not use_batch_snapshot:
+        limit = _resolve_tool_hourly_limit(agent, tool_name)
+    else:
+        limit = rate_limit_batch.limits.get(tool_name)
     if limit is None:
         return True
 
-    cutoff = dj_timezone.now() - timedelta(hours=1)
-    try:
+    if not use_batch_snapshot:
+        cutoff = dj_timezone.now() - timedelta(hours=1)
+        try:
+            recent_count = (
+                PersistentAgentToolCall.objects.filter(
+                    step__agent=agent,
+                    tool_name=tool_name,
+                    step__created_at__gte=cutoff,
+                ).count()
+            )
+        except DatabaseError:
+            logger.error(
+                "Failed to evaluate rate limit for agent %s tool %s",
+                getattr(agent, "id", None),
+                tool_name,
+                exc_info=True,
+            )
+            return True
+    else:
         recent_count = (
-            PersistentAgentToolCall.objects.filter(
-                step__agent=agent,
-                tool_name=tool_name,
-                step__created_at__gte=cutoff,
-            ).count()
+            rate_limit_batch.recent_counts.get(tool_name, 0)
+            + rate_limit_batch.admitted_counts.get(tool_name, 0)
         )
-    except DatabaseError:
-        logger.error(
-            "Failed to evaluate rate limit for agent %s tool %s",
-            getattr(agent, "id", None),
-            tool_name,
-            exc_info=True,
-        )
-        return True
 
     if recent_count < limit:
+        if use_batch_snapshot:
+            rate_limit_batch.admitted_counts[tool_name] = (
+                rate_limit_batch.admitted_counts.get(tool_name, 0) + 1
+            )
         return True
 
     limit_display = limit
@@ -4569,7 +4699,7 @@ def _ensure_credit_for_tool(
     try:
         with transaction.atomic():
             consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
-            consumed_credit = consumed.get("credit") if consumed else None
+        consumed_credit = consumed.get("credit") if consumed else None
     except Exception as e:
         log_credit_failure(
             agent,
@@ -6143,17 +6273,13 @@ def _run_agent_loop(
                     for idx, call in enumerate(list(tool_calls) or [], start=1):
                         try:
                             fn_name = _get_tool_call_name(call)
-                            raw_args = _get_tool_call_arguments(call) or ""
                             call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
-                            arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
                             logger.info(
-                                "Agent %s: tool_call %d: id=%s name=%s args=%s%s",
+                                "Agent %s: tool_call %d: id=%s name=%s",
                                 agent.id,
                                 idx,
                                 call_id or "<none>",
                                 fn_name or "<unknown>",
-                                arg_preview,
-                                "…" if raw_args and len(raw_args) > len(arg_preview) else "",
                             )
                         except Exception:
                             logger.info("Agent %s: failed to log one tool_call entry", agent.id)

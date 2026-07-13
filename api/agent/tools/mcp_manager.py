@@ -66,6 +66,11 @@ from ...services.mcp_tool_cache import (
     release_mcp_catalog_refresh,
     set_cached_mcp_tool_definitions,
 )
+from ...services.mcp_oauth import (
+    OAUTH_REFRESH_SAFETY_MARGIN,
+    MCPOAuthStatus,
+    ensure_mcp_oauth_credential,
+)
 from ...services.pipedream_apps import (
     get_effective_pipedream_app_slugs_for_agent,
     get_platform_pipedream_app_slugs,
@@ -348,9 +353,6 @@ class MCPToolManager:
         # Add more blacklist patterns here as needed
     ]
 
-    # Buffer window before expiry where we will proactively refresh OAuth tokens
-    OAUTH_REFRESH_SAFETY_MARGIN = timedelta(minutes=2)
-    OAUTH_REFRESH_TIMEOUT_SECONDS = 15
     TOOL_CACHE_MAX_SLOTS = 128
 
     def __init__(self):
@@ -580,40 +582,6 @@ class MCPToolManager:
 
         self._server_cache = new_cache
         self._last_refresh_marker = latest_seen or timezone.now()
-
-    def _refresh_servers_by_name(self, server_names: set[str], *, scope: Optional[str] = None) -> bool:
-        if not server_names:
-            return True
-        try:
-            configs = list(
-                MCPServerConfig.objects.filter(
-                    is_active=True,
-                    name__in=list(server_names),
-                    **({"scope": scope} if scope else {}),
-                ).select_related("oauth_credential")
-            )
-        except DatabaseError:
-            logger.exception("Failed to refresh MCP servers for names: %s", sorted(server_names))
-            return False
-        stale_ids = {
-            config_id for config_id, runtime in self._server_cache.items()
-            if runtime.name.lower() in server_names and (scope is None or runtime.scope == scope)
-        }
-        return self._apply_server_subset(configs, stale_ids, update_global_marker=True)
-
-    def _refresh_servers_by_config_id(self, config_ids: set[str]) -> bool:
-        """Refresh only the specified MCP server configs without touching others."""
-        if not config_ids:
-            return True
-
-        try:
-            configs = list(MCPServerConfig.objects.filter(
-                is_active=True, id__in=list(config_ids)
-            ).select_related("oauth_credential"))
-        except DatabaseError:
-            logger.exception("Failed to refresh MCP servers for ids: %s", sorted(config_ids))
-            return False
-        return self._apply_server_subset(configs, config_ids, update_global_marker=False)
 
     def _apply_server_subset(self, configs, stale_ids: set[str], *, update_global_marker: bool) -> bool:
         refreshed_ids: set[str] = set()
@@ -1061,7 +1029,6 @@ class MCPToolManager:
             credential = None
 
         if credential:
-            credential = self._maybe_refresh_oauth_credential(cfg, credential)
             token_value = (credential.access_token or "").strip()
             token_type_value = (credential.token_type or "").strip()
             oauth_access_token = token_value or None
@@ -1100,130 +1067,6 @@ class MCPToolManager:
             metadata=dict(metadata) if isinstance(metadata, dict) else {},
         )
 
-    def _maybe_refresh_oauth_credential(
-        self,
-        cfg: MCPServerConfig,
-        credential: MCPServerOAuthCredential | None,
-    ) -> MCPServerOAuthCredential | None:
-        """Refresh an OAuth credential when the stored access token is expired or near expiry."""
-
-        if not credential or cfg.auth_method != MCPServerConfig.AuthMethod.OAUTH2:
-            return credential
-
-        refresh_token = (credential.refresh_token or "").strip()
-        if not refresh_token:
-            return credential
-
-        expires_at = credential.expires_at
-        now = timezone.now()
-        if expires_at and expires_at > now + self.OAUTH_REFRESH_SAFETY_MARGIN:
-            return credential
-
-        metadata = credential.metadata if isinstance(credential.metadata, dict) else {}
-        cfg_metadata = cfg.metadata if isinstance(cfg.metadata, dict) else {}
-        token_endpoint = (metadata.get("token_endpoint") or cfg_metadata.get("token_endpoint") or "").strip()
-        if not token_endpoint:
-            logger.warning(
-                "OAuth credential for MCP server %s lacks a token endpoint; skipping refresh",
-                cfg.id,
-            )
-            return credential
-
-        request_data = {
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        }
-
-        client_id = (credential.client_id or cfg_metadata.get("client_id") or "").strip()
-        if client_id:
-            request_data["client_id"] = client_id
-
-        client_secret = (credential.client_secret or cfg_metadata.get("client_secret") or "").strip()
-        if client_secret:
-            request_data["client_secret"] = client_secret
-
-        try:
-            response = requests.post(
-                token_endpoint,
-                data=request_data,
-                timeout=self.OAUTH_REFRESH_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-        except Exception as exc:
-            logger.error(
-                "Failed to refresh OAuth token for MCP server %s: %s",
-                cfg.id,
-                exc,
-            )
-            return credential
-
-        try:
-            token_payload = response.json()
-        except ValueError:
-            logger.error(
-                "Token refresh response for MCP server %s was not valid JSON",
-                cfg.id,
-            )
-            return credential
-
-        new_access_token = (token_payload.get("access_token") or "").strip()
-        if not new_access_token:
-            logger.error(
-                "Token refresh for MCP server %s did not return an access token",
-                cfg.id,
-            )
-            return credential
-
-        update_fields = ["access_token_encrypted"]
-        credential.access_token = new_access_token
-
-        new_refresh_token = (token_payload.get("refresh_token") or "").strip()
-        if new_refresh_token:
-            credential.refresh_token = new_refresh_token
-            update_fields.append("refresh_token_encrypted")
-
-        new_id_token = (token_payload.get("id_token") or "").strip()
-        if new_id_token:
-            credential.id_token = new_id_token
-            update_fields.append("id_token_encrypted")
-
-        token_type = (token_payload.get("token_type") or "").strip()
-        if token_type:
-            credential.token_type = token_type
-            update_fields.append("token_type")
-
-        scope = (token_payload.get("scope") or "").strip()
-        if scope:
-            credential.scope = scope
-            update_fields.append("scope")
-
-        expires_in_raw = token_payload.get("expires_in")
-        if expires_in_raw is not None:
-            try:
-                expires_seconds = int(expires_in_raw)
-                credential.expires_at = now + timedelta(seconds=max(expires_seconds, 0))
-            except (TypeError, ValueError):
-                credential.expires_at = None
-            update_fields.append("expires_at")
-
-        metadata_update = dict(metadata)
-        metadata_update["last_refresh_response"] = {
-            key: value
-            for key, value in token_payload.items()
-            if key not in {"access_token", "refresh_token", "id_token"}
-        }
-        credential.metadata = metadata_update
-        update_fields.append("metadata")
-
-        credential.save(update_fields=list(dict.fromkeys(update_fields)))
-        credential.refresh_from_db()
-        logger.info(
-            "Refreshed OAuth token for MCP server %s (credential updated at %s)",
-            cfg.id,
-            credential.updated_at,
-        )
-        return credential
-
     def _build_httpx_client_factory(self):
         def factory(
             headers: Optional[dict[str, str]] = None,
@@ -1251,6 +1094,58 @@ class MCPToolManager:
             return httpx.AsyncClient(**client_kwargs)
 
         return factory
+
+    def _ensure_runtime_oauth(
+        self,
+        server: MCPServerRuntime,
+    ) -> tuple[MCPServerRuntime, Optional[Dict[str, Any]]]:
+        if server.auth_method != MCPServerConfig.AuthMethod.OAUTH2:
+            return server, None
+        if server.oauth_access_token and (
+            server.oauth_expires_at is None
+            or server.oauth_expires_at > timezone.now() + OAUTH_REFRESH_SAFETY_MARGIN
+        ):
+            return server, None
+
+        result = ensure_mcp_oauth_credential(server.config_id)
+        credential = result.credential
+        if result.status != MCPOAuthStatus.USABLE or credential is None:
+            if (
+                result.status == MCPOAuthStatus.TEMPORARILY_UNAVAILABLE
+                and server.oauth_access_token
+                and server.oauth_expires_at is not None
+                and server.oauth_expires_at > timezone.now()
+            ):
+                logger.warning(
+                    "Using still-valid OAuth token for MCP server %s while refresh is unavailable",
+                    server.config_id,
+                )
+                return server, None
+            message = result.message or "This MCP integration is unavailable."
+            if result.status == MCPOAuthStatus.RECONNECT_REQUIRED:
+                return server, {
+                    "status": "action_required",
+                    "result": message,
+                    "message": message,
+                }
+            return server, {
+                "status": "error",
+                "message": message,
+                "retryable": result.status == MCPOAuthStatus.TEMPORARILY_UNAVAILABLE,
+            }
+
+        access_token = (credential.access_token or "").strip() or None
+        if (
+            server.oauth_updated_at != credential.updated_at
+            or server.oauth_access_token != access_token
+        ):
+            self._discard_client(server.config_id)
+        server.oauth_access_token = access_token
+        server.oauth_token_type = (credential.token_type or "").strip() or None
+        server.oauth_expires_at = credential.expires_at
+        server.oauth_updated_at = credential.updated_at
+        self._server_cache[server.config_id] = server
+        return server, None
 
     def _build_auth_headers(self, server: MCPServerRuntime) -> Dict[str, str]:
         headers: Dict[str, str] = {}
@@ -1434,7 +1329,6 @@ class MCPToolManager:
             }
 
         updated_at = server.updated_at.isoformat() if server.updated_at else ""
-        oauth_updated_at = server.oauth_updated_at.isoformat() if server.oauth_updated_at else ""
         prefetch_apps = self._effective_prefetch_apps(server, pipedream_context)
 
         return {
@@ -1446,7 +1340,6 @@ class MCPToolManager:
             "args": [str(arg) for arg in (server.args or [])],
             "auth_method": server.auth_method,
             "updated_at": updated_at,
-            "oauth_updated_at": oauth_updated_at,
             "prefetch_apps": prefetch_apps,
             "sandbox_agent_cache_key": (
                 sandbox_context.agent_cache_key
@@ -1689,6 +1582,15 @@ class MCPToolManager:
                 return
             # Force-local execution requires an active local client even when tools are cached.
         if sandbox_mode:
+            server, auth_error = self._ensure_runtime_oauth(server)
+            if auth_error:
+                logger.info(
+                    "Skipping sandbox MCP discovery: server=%s config=%s auth_status=%s",
+                    server.name,
+                    server.config_id,
+                    auth_error.get("status"),
+                )
+                return
             if not _sandbox_mcp_fallback_enabled():
                 logger.info(
                     "No cached MCP tools for '%s' (%s); scheduling sandbox discovery",
@@ -1737,6 +1639,16 @@ class MCPToolManager:
             if not os.environ.get("BRIGHTDATA_API_KEY") and not server.env.get("API_TOKEN"):
                  logger.warning("Skipping BrightData MCP registration: API_TOKEN/BRIGHTDATA_API_KEY missing.")
                  return
+
+        server, auth_error = self._ensure_runtime_oauth(server)
+        if auth_error:
+            logger.info(
+                "Skipping MCP network preparation: server=%s config=%s auth_status=%s",
+                server.name,
+                server.config_id,
+                auth_error.get("status"),
+            )
+            return
 
         discovery_proxy_url = self._select_discovery_proxy_url(server)
         stdio_env_overrides = (
@@ -1962,16 +1874,6 @@ class MCPToolManager:
             )
         return tools
     
-    def get_all_available_tools(self) -> List[MCPToolInfo]:
-        """Get all available MCP tools from all servers."""
-        if not self._initialized:
-            self.initialize()
-            
-        all_tools = []
-        for server_tools in self._tools_cache.values():
-            all_tools.extend(server_tools)
-        return all_tools
-
     def get_tools_for_agent(
         self,
         agent: PersistentAgent,
@@ -1982,8 +1884,6 @@ class MCPToolManager:
     ) -> List[MCPToolInfo]:
         """Return MCP tools that the given agent may access."""
 
-        needs_refresh = (not self._initialized) or self._needs_refresh()
-        missing_names: set[str] = set()
         allowed_set = None
         allowed_config_set = None
         if allowed_server_names is not None:
@@ -2003,42 +1903,27 @@ class MCPToolManager:
             if not allowed_config_set:
                 return []
 
-        if allowed_config_set is not None:
-            current_ids = set(self._server_cache.keys())
-            missing_ids = allowed_config_set - current_ids
-            if needs_refresh or missing_ids:
-                if not self._refresh_servers_by_config_id(allowed_config_set):
-                    return []
-        if allowed_set is not None:
-            current_names = {runtime.name.lower() for runtime in self._server_cache.values()}
-            missing_names = allowed_set - current_names
-            if needs_refresh or missing_names:
-                if not self._refresh_servers_by_name(allowed_set):
-                    return []
         if allowed_config_set is None and allowed_set is None:
-            if needs_refresh and not self.initialize():
+            if ((not self._initialized) or self._needs_refresh()) and not self.initialize():
                 return []
 
-        configs = agent_accessible_server_configs(agent)
-        if allowed_config_set is not None and allowed_set is not None:
-            configs = [
-                cfg
-                for cfg in configs
-                if str(cfg.id) in allowed_config_set or str(cfg.name).lower() in allowed_set
-            ]
-        elif allowed_config_set is not None:
-            configs = [cfg for cfg in configs if str(cfg.id) in allowed_config_set]
-        elif allowed_set is not None:
-            configs = [cfg for cfg in configs if str(cfg.name).lower() in allowed_set]
-
+        configs = agent_accessible_server_configs(
+            agent,
+            allowed_config_ids=allowed_config_set,
+            allowed_server_names=allowed_set,
+        )
         desired_ids = {str(cfg.id) for cfg in configs}
 
         if not desired_ids:
             return []
 
+        if allowed_config_set is not None or allowed_set is not None:
+            if not self._apply_server_subset(configs, desired_ids, update_global_marker=False):
+                return []
+
         missing_ids = [config_id for config_id in desired_ids if config_id not in self._server_cache]
         if missing_ids:
-            if allowed_set is None:
+            if allowed_set is None and allowed_config_set is None:
                 logger.info("Refreshing MCP server cache to include missing configs: %s", missing_ids)
                 if not self.initialize(force=True):
                     return []
@@ -2082,32 +1967,211 @@ class MCPToolManager:
 
     def find_tool_by_name(self, full_name: str) -> Optional[MCPToolInfo]:
         """Find a discovered MCP tool by its full name (exact match)."""
-        if not self._initialized:
-            self.initialize()
         for tools in self._tools_cache.values():
             for t in tools:
                 if t.full_name == full_name:
                     return t
         return None
 
-    def has_tool(self, full_name: str) -> bool:
-        """Return True if a discovered MCP tool with this full name exists."""
-        return self.find_tool_by_name(full_name) is not None
+    @staticmethod
+    def _backfill_enabled_tool_metadata(
+        enabled_row: PersistentAgentEnabledTool,
+        info: MCPToolInfo,
+    ) -> None:
+        update_fields: list[str] = []
+        if enabled_row.tool_server != info.server_name:
+            enabled_row.tool_server = info.server_name
+            update_fields.append("tool_server")
+        if enabled_row.tool_name != info.tool_name:
+            enabled_row.tool_name = info.tool_name
+            update_fields.append("tool_name")
+        if str(enabled_row.server_config_id or "") != info.config_id:
+            enabled_row.server_config_id = info.config_id
+            update_fields.append("server_config")
+        if not update_fields:
+            return
+        try:
+            enabled_row.save(update_fields=update_fields)
+        except DatabaseError:
+            logger.exception("Failed to backfill MCP tool metadata for %s", info.full_name)
+
+    def prepare_tool_for_agent(
+        self,
+        agent: PersistentAgent,
+        tool_name: str,
+        *,
+        require_enabled: bool = True,
+    ) -> Optional[MCPToolInfo]:
+        """Load only the runtime/catalog shard needed to resolve one tool."""
+        started_at = monotonic()
+        try:
+            enabled_row = (
+                PersistentAgentEnabledTool.objects.filter(
+                    agent=agent,
+                    tool_full_name=tool_name,
+                )
+                .only("id", "tool_full_name", "tool_server", "tool_name", "server_config_id")
+                .first()
+            )
+        except DatabaseError:
+            logger.exception("Failed to load enabled tool metadata for agent %s", agent.id)
+            return None
+        if require_enabled and enabled_row is None:
+            return None
+
+        cached = self.find_tool_by_name(tool_name)
+        cached_matches_row = bool(
+            cached
+            and enabled_row
+            and enabled_row.server_config_id
+            and str(enabled_row.server_config_id) == cached.config_id
+        )
+        if cached and cached_matches_row and cached.config_id in self._server_cache:
+            return cached
+
+        allowed_config_ids: set[str] = set()
+        allowed_server_names: set[str] = set()
+        app_slugs: set[str] = set()
+        if enabled_row and enabled_row.server_config_id:
+            allowed_config_ids.add(str(enabled_row.server_config_id))
+        if (
+            not allowed_config_ids
+            and enabled_row
+            and enabled_row.tool_server not in {"", "builtin", "custom", "eval"}
+        ):
+            allowed_server_names.add(enabled_row.tool_server)
+
+        app_slug = pipedream_app_slug_for_tool_name(tool_name)
+        if app_slug:
+            app_slugs.add(app_slug)
+            if not allowed_config_ids:
+                allowed_server_names.add(self.PIPEDREAM_RUNTIME_NAME)
+        elif not allowed_config_ids and not allowed_server_names and tool_name.startswith("mcp_"):
+            parts = tool_name.split("_", 2)
+            if len(parts) == 3 and parts[1]:
+                allowed_server_names.add(parts[1])
+
+        if not allowed_config_ids and not allowed_server_names:
+            return None
+
+        tools: List[MCPToolInfo] = []
+        if allowed_config_ids:
+            tools.extend(
+                self.get_tools_for_agent(
+                    agent,
+                    allowed_config_ids=allowed_config_ids,
+                    pipedream_app_slugs=app_slugs or None,
+                )
+            )
+        if allowed_server_names:
+            seen = {tool.full_name for tool in tools}
+            tools.extend(
+                tool
+                for tool in self.get_tools_for_agent(
+                    agent,
+                    allowed_server_names=allowed_server_names,
+                    pipedream_app_slugs=app_slugs or None,
+                )
+                if tool.full_name not in seen
+            )
+
+        info = next((tool for tool in tools if tool.full_name == tool_name), None)
+        if info is None:
+            collapsed = tool_name.replace("_", "").lower()
+            info = next(
+                (
+                    tool
+                    for tool in tools
+                    if tool.full_name.replace("_", "").lower() == collapsed
+                ),
+                None,
+            )
+        if info is None:
+            candidate_runtimes = [
+                runtime
+                for runtime in self._server_cache.values()
+                if runtime.config_id in allowed_config_ids
+                or runtime.name.lower() in allowed_server_names
+            ]
+            if tool_name.startswith("mcp_"):
+                parts = tool_name.split("_", 2)
+                actual_name = enabled_row.tool_name if enabled_row else ""
+                if len(parts) == 3:
+                    actual_name = actual_name or parts[2]
+                runtime = next(
+                    (
+                        candidate
+                        for candidate in candidate_runtimes
+                        if not allowed_server_names
+                        or candidate.name.lower() in allowed_server_names
+                    ),
+                    None,
+                )
+                if runtime and actual_name:
+                    info = MCPToolInfo(
+                        config_id=runtime.config_id,
+                        full_name=tool_name,
+                        server_name=runtime.name,
+                        tool_name=actual_name,
+                        description=f"{actual_name} via {runtime.display_name}",
+                        parameters={"type": "object", "properties": {}},
+                    )
+            elif app_slug:
+                runtime = next(
+                    (
+                        candidate
+                        for candidate in candidate_runtimes
+                        if candidate.name == self.PIPEDREAM_RUNTIME_NAME
+                    ),
+                    None,
+                )
+                if runtime:
+                    info = MCPToolInfo(
+                        config_id=runtime.config_id,
+                        full_name=tool_name,
+                        server_name=runtime.name,
+                        tool_name=(
+                            enabled_row.tool_name
+                            if enabled_row and enabled_row.tool_name
+                            else tool_name
+                        ),
+                        description=f"{tool_name} via {runtime.display_name}",
+                        parameters={"type": "object", "properties": {}},
+                    )
+
+        if info and enabled_row:
+            self._backfill_enabled_tool_metadata(enabled_row, info)
+
+        logger.info(
+            "MCP targeted preparation: agent=%s tool=%s configs=%d servers=%d found=%s duration_ms=%d",
+            agent.id,
+            tool_name,
+            len(allowed_config_ids),
+            len(allowed_server_names),
+            bool(info),
+            round((monotonic() - started_at) * 1000),
+        )
+        return info
     
     def get_enabled_tools_definitions(self, agent: PersistentAgent) -> List[Dict[str, Any]]:
         """Get OpenAI-format tool definitions for enabled MCP tools."""
         enabled_rows = list(
             PersistentAgentEnabledTool.objects.filter(agent=agent)
-            .only("tool_full_name", "tool_server", "server_config_id")
+            .only("tool_full_name", "tool_server", "tool_name", "server_config_id")
         )
 
         enabled_names: list[str] = []
+        enabled_rows_by_name = {row.tool_full_name: row for row in enabled_rows}
         allowed_config_ids: set[str] = set()
         allowed_server_names: set[str] = set()
+        pipedream_app_slugs: set[str] = set()
         for row in enabled_rows:
             tool_name = row.tool_full_name
             tool_server = (row.tool_server or "").strip()
             server_config_id = str(row.server_config_id) if row.server_config_id else ""
+            app_slug = pipedream_app_slug_for_tool_name(tool_name)
+            if app_slug:
+                pipedream_app_slugs.add(app_slug)
 
             if server_config_id:
                 enabled_names.append(tool_name)
@@ -2117,6 +2181,11 @@ class MCPToolManager:
             if tool_server and tool_server not in {"builtin", "custom", "eval"}:
                 enabled_names.append(tool_name)
                 allowed_server_names.add(tool_server)
+                continue
+
+            if app_slug:
+                enabled_names.append(tool_name)
+                allowed_server_names.add(self.PIPEDREAM_RUNTIME_NAME)
                 continue
 
             # Older MCP rows may not have denormalized metadata. Only infer the
@@ -2134,7 +2203,11 @@ class MCPToolManager:
         definitions: List[Dict[str, Any]] = []
         enabled_set = set(enabled_names)
         tools = (
-            self.get_tools_for_agent(agent, allowed_config_ids=allowed_config_ids)
+            self.get_tools_for_agent(
+                agent,
+                allowed_config_ids=allowed_config_ids,
+                pipedream_app_slugs=pipedream_app_slugs or None,
+            )
             if allowed_config_ids
             else []
         )
@@ -2142,11 +2215,19 @@ class MCPToolManager:
             seen_tool_names = {tool.full_name for tool in tools}
             tools.extend(
                 tool
-                for tool in self.get_tools_for_agent(agent, allowed_server_names=allowed_server_names)
+                for tool in self.get_tools_for_agent(
+                    agent,
+                    allowed_server_names=allowed_server_names,
+                    pipedream_app_slugs=pipedream_app_slugs or None,
+                )
                 if tool.full_name not in seen_tool_names
             )
         for tool_info in tools:
             if tool_info.full_name in enabled_set:
+                self._backfill_enabled_tool_metadata(
+                    enabled_rows_by_name[tool_info.full_name],
+                    tool_info,
+                )
                 parameters = tool_info.parameters
                 if tool_info.tool_name in MCP_WILL_CONTINUE_TOOL_NAMES:
                     parameters = _inject_will_continue_work_param(parameters)
@@ -2267,103 +2348,6 @@ class MCPToolManager:
             use_success_sentinel=use_success_sentinel,
         )
 
-    def execute_platform_tool(self, server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a platform-scoped MCP tool without an agent context."""
-        normalized_server = (server_name or "").strip().lower()
-        if not normalized_server or not tool_name:
-            return {"status": "error", "message": "Server name and tool name are required"}
-
-        allowed = {normalized_server}
-        needs_refresh = (not self._initialized) or self._needs_refresh()
-        current_names = {runtime.name.lower() for runtime in self._server_cache.values()}
-        if needs_refresh or normalized_server not in current_names:
-            if not self._refresh_servers_by_name(allowed, scope=MCPServerConfig.Scope.PLATFORM):
-                return {"status": "error", "message": f"MCP server '{server_name}' is not available"}
-
-        runtime = next(
-            (
-                rt
-                for rt in self._server_cache.values()
-                if rt.name.lower() == normalized_server and rt.scope == MCPServerConfig.Scope.PLATFORM
-            ),
-            None,
-        )
-        if not runtime:
-            return {"status": "error", "message": f"MCP server '{server_name}' is not available"}
-
-        if runtime.name == self.PIPEDREAM_RUNTIME_NAME:
-            return {"status": "error", "message": "Pipedream MCP requires an agent context"}
-
-        info = self._resolve_tool_info(tool_name)
-        if not info or info.server_name.lower() != normalized_server:
-            return {"status": "error", "message": f"MCP tool '{tool_name}' not found for server '{server_name}'"}
-
-        if self._is_tool_blacklisted(tool_name):
-            return {
-                "status": "error",
-                "message": f"Tool '{tool_name}' is blacklisted and cannot be executed",
-            }
-
-        param_error = self._param_guards.validate(runtime.name, info.tool_name, params, owner=None)
-        if param_error:
-            return param_error
-
-        if not self._ensure_runtime_registered(runtime, force_local=True, require_client=True):
-            return {"status": "error", "message": f"MCP server '{runtime.name}' is not available"}
-
-        try:
-            proxy_url = None
-            if runtime.url or self._is_stdio_runtime(runtime):
-                try:
-                    proxy_url = self._select_discovery_proxy_url(runtime)
-                except Exception as exc:
-                    return {"status": "error", "message": str(exc)}
-
-            if self._is_stdio_runtime(runtime) and proxy_url:
-                client = self._get_scoped_stdio_proxy_client(
-                    runtime,
-                    scope_key="platform",
-                    proxy_url=proxy_url,
-                )
-            else:
-                client = self._clients.get(info.config_id)
-            if not client:
-                return {"status": "error", "message": f"MCP server '{info.server_name}' not available"}
-
-            timeout_seconds = self._get_timeout_for_runtime(runtime)
-            http_timeout_seconds = timeout_seconds if runtime.url else None
-            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
-                result = self._run_coroutine_sync(
-                    self._execute_async(
-                        client,
-                        info.tool_name,
-                        params,
-                        timeout_seconds=timeout_seconds,
-                    )
-                )
-            with mcp_result_owner_context(None):
-                result = self._adapt_tool_result(runtime.name, info.tool_name, result)
-
-            response = self._finalize_mcp_result(
-                runtime.name,
-                info.tool_name,
-                result,
-                use_success_sentinel=False,
-            )
-            return self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=True,
-            )
-        except Exception as exc:
-            logger.error("Failed to execute platform MCP tool %s/%s: %s", server_name, tool_name, exc)
-            response = {"status": "error", "message": str(exc)}
-            return self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=True,
-            )
-
     def _dispatch_sandbox_mcp_request(
         self,
         *,
@@ -2419,6 +2403,7 @@ class MCPToolManager:
         params: Dict[str, Any],
         *,
         force_local: bool = False,
+        tool_info: Optional[MCPToolInfo] = None,
     ) -> Dict[str, Any]:
         """Execute an MCP tool if it's enabled for the agent."""
         # Check if tool is blacklisted
@@ -2446,13 +2431,18 @@ class MCPToolManager:
         except Exception:
             logger.exception("Failed to update usage for tool %s", tool_name)
         
-        info = self._resolve_tool_info(tool_name)
+        info = tool_info or self._resolve_tool_info(tool_name)
         if not info:
             return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
 
         server_name = info.server_name
         actual_tool_name = info.tool_name
         runtime = self._server_cache.get(info.config_id)
+
+        if runtime:
+            runtime, auth_error = self._ensure_runtime_oauth(runtime)
+            if auth_error:
+                return auth_error
 
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
 
@@ -2715,6 +2705,8 @@ class MCPToolManager:
         agent: PersistentAgent,
         tool_name: str,
         params: Dict[str, Any],
+        *,
+        tool_info: Optional[MCPToolInfo] = None,
     ) -> Dict[str, Any]:
         """Execute an MCP tool without shared loop/client state."""
         if self._is_tool_blacklisted(tool_name):
@@ -2740,13 +2732,17 @@ class MCPToolManager:
         except Exception:
             logger.exception("Failed to update isolated usage for tool %s", tool_name)
 
-        info = self._resolve_tool_info(tool_name)
+        info = tool_info or self._resolve_tool_info(tool_name)
         if not info:
             return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
 
         runtime = self._server_cache.get(info.config_id)
         if not runtime:
             return {"status": "error", "message": f"MCP server '{info.server_name}' is not available"}
+
+        runtime, auth_error = self._ensure_runtime_oauth(runtime)
+        if auth_error:
+            return auth_error
 
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
         actual_tool_name = info.tool_name
@@ -2848,16 +2844,11 @@ class MCPToolManager:
         self._initialized = False
 
     def _resolve_tool_info(self, tool_name: str) -> Optional[MCPToolInfo]:
-        """Resolve tool metadata, refreshing cache on demand."""
+        """Resolve tool metadata from runtimes already loaded for this process."""
 
         info = self.find_tool_by_name(tool_name)
         if info:
             return info
-
-        if self.initialize(force=True):
-            info = self.find_tool_by_name(tool_name)
-            if info:
-                return info
 
         if tool_name.startswith("mcp_"):
             parts = tool_name.split("_", 2)
@@ -2886,10 +2877,6 @@ class MCPToolManager:
             )
 
         return None
-
-    def resolve_tool_info(self, tool_name: str) -> Optional[MCPToolInfo]:
-        """Public wrapper to resolve tool metadata."""
-        return self._resolve_tool_info(tool_name)
 
     def is_tool_blacklisted(self, tool_name: str) -> bool:
         """Expose blacklist checks for external managers."""
@@ -3043,22 +3030,46 @@ def execute_mcp_tool(
     params: Dict[str, Any],
     *,
     force_local: bool = False,
+    tool_info: Optional[MCPToolInfo] = None,
 ) -> Dict[str, Any]:
     """Execute any enabled MCP tool via the shared manager."""
-    if not _mcp_manager._initialized:
-        _mcp_manager.initialize()
-    return _mcp_manager.execute_mcp_tool(agent, tool_name, params, force_local=force_local)
+    tool_info = tool_info or _mcp_manager.prepare_tool_for_agent(
+        agent,
+        tool_name,
+        require_enabled=True,
+    )
+    if tool_info is None:
+        return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
+    return _mcp_manager.execute_mcp_tool(
+        agent,
+        tool_info.full_name,
+        params,
+        force_local=force_local,
+        tool_info=tool_info,
+    )
 
 
 def execute_mcp_tool_isolated(
     agent: PersistentAgent,
     tool_name: str,
     params: Dict[str, Any],
+    *,
+    tool_info: Optional[MCPToolInfo] = None,
 ) -> Dict[str, Any]:
     """Execute any enabled MCP tool without shared runtime state."""
-    if not _mcp_manager._initialized:
-        _mcp_manager.initialize()
-    return _mcp_manager.execute_mcp_tool_isolated(agent, tool_name, params)
+    tool_info = tool_info or _mcp_manager.prepare_tool_for_agent(
+        agent,
+        tool_name,
+        require_enabled=True,
+    )
+    if tool_info is None:
+        return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
+    return _mcp_manager.execute_mcp_tool_isolated(
+        agent,
+        tool_info.full_name,
+        params,
+        tool_info=tool_info,
+    )
 
 
 def get_mcp_manager() -> MCPToolManager:

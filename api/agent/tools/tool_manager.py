@@ -34,7 +34,7 @@ from ...services.pipedream_apps import (
 from ...services.tool_blacklist import get_agent_tool_blacklist, is_tool_blacklisted_for_agent, tool_blacklist_error
 from ...utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
-from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
+from .mcp_manager import MCPToolInfo, MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
 from .brightdata import (
@@ -404,6 +404,7 @@ class ToolCatalogEntry:
     tool_name: str = ""
     server_config_id: Optional[str] = None
     system_skill_key: str = ""
+    mcp_info: Optional[MCPToolInfo] = None
 
 
 def _custom_tool_parameters_for_llm(parameters_schema: Any) -> Dict[str, Any]:
@@ -460,11 +461,8 @@ def get_available_custom_tool_entries(
 
 
 def _get_manager() -> MCPToolManager:
-    """Ensure the global MCP manager is ready before use."""
-    manager = get_mcp_manager()
-    if not manager._initialized:
-        manager.initialize()
-    return manager
+    """Return the process manager without triggering global MCP discovery."""
+    return get_mcp_manager()
 
 
 def _normalize_tool_limit(
@@ -505,31 +503,34 @@ def _build_available_tool_index(
     agent: PersistentAgent,
     *,
     include_hidden_builtin: bool = False,
+    include_mcp: bool = True,
 ) -> Dict[str, ToolCatalogEntry]:
     """Build an index of enableable tools across all providers."""
-    manager = _get_manager()
     catalog: Dict[str, ToolCatalogEntry] = {}
     blacklisted_tools = get_agent_tool_blacklist(agent)
 
-    hide_pipedream_tools = is_eval_agent(agent)
-    visible_mcp_tools = filter_deprecated_pipedream_tools_for_agent(
-        agent,
-        manager.get_tools_for_agent(agent),
-    )
-    for info in visible_mcp_tools:
-        if info.full_name in blacklisted_tools:
-            continue
-        if hide_pipedream_tools and info.server_name == PIPEDREAM_TOOL_SERVER_NAME:
-            continue
-        catalog[info.full_name] = ToolCatalogEntry(
-            provider="mcp",
-            full_name=info.full_name,
-            description=info.description,
-            parameters=info.parameters,
-            tool_server=info.server_name,
-            tool_name=info.tool_name,
-            server_config_id=info.config_id,
+    if include_mcp:
+        manager = _get_manager()
+        hide_pipedream_tools = is_eval_agent(agent)
+        visible_mcp_tools = filter_deprecated_pipedream_tools_for_agent(
+            agent,
+            manager.get_tools_for_agent(agent),
         )
+        for info in visible_mcp_tools:
+            if info.full_name in blacklisted_tools:
+                continue
+            if hide_pipedream_tools and info.server_name == PIPEDREAM_TOOL_SERVER_NAME:
+                continue
+            catalog[info.full_name] = ToolCatalogEntry(
+                provider="mcp",
+                full_name=info.full_name,
+                description=info.description,
+                parameters=info.parameters,
+                tool_server=info.server_name,
+                tool_name=info.tool_name,
+                server_config_id=info.config_id,
+                mcp_info=info,
+            )
 
     catalog.update(get_available_builtin_tool_entries(agent, include_hidden=include_hidden_builtin))
     catalog.update(get_available_custom_tool_entries(agent))
@@ -1033,27 +1034,6 @@ def _auto_enable_tool_for_execution(agent: PersistentAgent, entry: ToolCatalogEn
     }
 
 
-def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
-    if is_tool_blacklisted_for_agent(agent, tool_name):
-        return tool_blacklist_error(tool_name)
-    if _is_mcp_tool_blacklisted(tool_name):
-        return {"status": "error", "message": f"Tool '{tool_name}' is blacklisted"}
-    result = enable_tools(agent, [tool_name])
-    if result["invalid"]:
-        return {"status": "error", "message": f"Tool '{tool_name}' does not exist"}
-
-    if result["already_enabled"]:
-        row = PersistentAgentEnabledTool.objects.get(agent=agent, tool_full_name=tool_name)
-        row.last_used_at = datetime.now(UTC)
-        row.usage_count = (row.usage_count or 0) + 1
-        row.save(update_fields=["last_used_at", "usage_count"])
-        message = f"Tool '{tool_name}' is already enabled"
-    else:
-        message = f"Successfully enabled tool '{tool_name}'"
-    disabled = result["evicted"][0] if result["evicted"] else None
-    return {"status": "success", "message": message, "enabled": tool_name, "disabled": disabled}
-
-
 def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     """
     Trust a tool name and ensure it is marked enabled without refreshing the MCP catalog.
@@ -1280,49 +1260,50 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
     if is_tool_blacklisted_for_agent(agent, tool_name):
         return None
 
-    catalog = _build_available_tool_index(agent, include_hidden_builtin=True)
+    local_catalog = _build_available_tool_index(
+        agent,
+        include_hidden_builtin=True,
+        include_mcp=False,
+    )
 
-    # Try exact match first
-    entry = catalog.get(tool_name)
+    entry = local_catalog.get(tool_name)
     if entry:
         return entry
 
-    # Try fuzzy matching for MCP tools
+    candidates = [tool_name]
     if tool_name.startswith("mcp_"):
-        normalized_name = _normalize_mcp_tool_name(tool_name, catalog)
-        if normalized_name:
-            if is_tool_blacklisted_for_agent(agent, normalized_name):
-                return None
-            logger.info(
-                "Normalized MCP tool name '%s' -> '%s'",
-                tool_name, normalized_name
-            )
-            return catalog.get(normalized_name)
-    if tool_name.startswith("mcp_"):
-        # Last resort: try MCP manager's resolve_tool_info which can discover tools
-        manager = _get_manager()
-        info = manager.resolve_tool_info(tool_name)
-        if info:
-            if is_tool_blacklisted_for_agent(agent, info.full_name):
-                return None
-            if (
-                info.server_name == PIPEDREAM_TOOL_SERVER_NAME
-                and not is_pipedream_tool_visible_to_agent(agent, info.tool_name)
-            ):
-                return None
-            logger.info(
-                "Resolved MCP tool '%s' via manager discovery (server=%s)",
-                tool_name, info.server_name
-            )
-            return ToolCatalogEntry(
-                provider="mcp",
-                full_name=info.full_name,
-                description=info.description,
-                parameters=info.parameters,
-                tool_server=info.server_name,
-                tool_name=info.tool_name,
-                server_config_id=info.config_id,
-            )
+        normalized = tool_name.replace("mcp_bright_data_", "mcp_brightdata_")
+        legacy_brightdata = normalized.replace(
+            "mcp_brightdata_linkedin_",
+            "mcp_brightdata_web_data_linkedin_",
+            1,
+        )
+        candidates.extend(name for name in (normalized, legacy_brightdata) if name not in candidates)
+
+    manager = _get_manager()
+    for candidate in candidates:
+        info = manager.prepare_tool_for_agent(agent, candidate, require_enabled=False)
+        if not info:
+            continue
+        if is_tool_blacklisted_for_agent(agent, info.full_name):
+            return None
+        if (
+            info.server_name == PIPEDREAM_TOOL_SERVER_NAME
+            and not is_pipedream_tool_visible_to_agent(agent, info.tool_name)
+        ):
+            return None
+        if candidate != tool_name:
+            logger.info("Normalized MCP tool name '%s' -> '%s'", tool_name, info.full_name)
+        return ToolCatalogEntry(
+            provider="mcp",
+            full_name=info.full_name,
+            description=info.description,
+            parameters=info.parameters,
+            tool_server=info.server_name,
+            tool_name=info.tool_name,
+            server_config_id=info.config_id,
+            mcp_info=info,
+        )
 
     return None
 
@@ -1438,9 +1419,10 @@ def execute_enabled_tool(
     *,
     isolated_mcp: bool = False,
     current_sqlite_db_path: Optional[str] = None,
+    resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> Dict[str, Any]:
     """Execute an enabled tool, routing to the appropriate provider."""
-    entry = resolve_tool_entry(agent, tool_name)
+    entry = resolved_entry or resolve_tool_entry(agent, tool_name)
     if not entry:
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}
 
@@ -1474,9 +1456,19 @@ def execute_enabled_tool(
 
     if entry.provider == "mcp":
         if _should_execute_mcp_tool_isolated(entry):
-            result = execute_mcp_tool_isolated(agent, resolved_name, params)
+            result = execute_mcp_tool_isolated(
+                agent,
+                resolved_name,
+                params,
+                tool_info=entry.mcp_info,
+            )
         else:
-            result = execute_mcp_tool(agent, resolved_name, params)
+            result = execute_mcp_tool(
+                agent,
+                resolved_name,
+                params,
+                tool_info=entry.mcp_info,
+            )
         return result
 
     if entry.provider == "eval":
