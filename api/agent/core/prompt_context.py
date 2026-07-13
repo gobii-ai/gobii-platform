@@ -1430,11 +1430,6 @@ def _render_prompt_context_once(
         system_directive_block=system_directive_block,
     )
     system_prompt = _append_agent_owner_custom_instructions(system_prompt, agent)
-    discovery_prompt, discovery_keys = format_system_skill_discovery_prompt(agent)
-    span.set_attribute("system_skill.discovery_suggested_count", len(discovery_keys))
-    span.set_attribute("system_skill.discovery_suggested_keys", ",".join(discovery_keys))
-    if discovery_prompt:
-        system_prompt = f"{system_prompt}\n\n{discovery_prompt}"
 
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
@@ -1814,6 +1809,17 @@ def _render_prompt_context_once(
                 weight=3,
                 non_shrinkable=True,
             )
+
+    discovery_prompt, discovery_keys = format_system_skill_discovery_prompt(agent)
+    span.set_attribute("system_skill.discovery_suggested_count", len(discovery_keys))
+    span.set_attribute("system_skill.discovery_suggested_keys", ",".join(discovery_keys))
+    if discovery_prompt:
+        critical_group.section_text(
+            "capability_discovery_guidance",
+            discovery_prompt,
+            weight=10,
+            non_shrinkable=True,
+        )
 
     if agent.preferred_contact_endpoint:
         span.set_attribute("persistent_agent.preferred_contact_endpoint.channel",

@@ -224,17 +224,39 @@ class SystemSkillDiscoveryTests(TestCase):
             ).exists()
         )
 
-    def test_rendered_system_prompt_includes_discovery_hint_and_rule_exception(self):
+    def test_rendered_user_prompt_includes_discovery_hint_and_system_prompt_stays_stable(self):
+        self._inbound("Please summarize our current research priorities.")
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            messages_without_hint, _tokens, _metadata = build_prompt_context_preview(self.agent)
+
         self._inbound("Please source candidates for this role.")
 
         with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
             "api.agent.core.prompt_context.ensure_comms_compacted"
         ):
-            messages, _tokens, _metadata = build_prompt_context_preview(self.agent)
+            messages_with_hint, _tokens, _metadata = build_prompt_context_preview(self.agent)
 
-        system_prompt = next(message["content"] for message in messages if message["role"] == "system")
-        self.assertIn("## Suggested Capability Discovery", system_prompt)
-        self.assertIn("unless a capability-discovery hint says a system skill may apply", system_prompt)
+        system_prompt_without_hint = next(
+            message["content"] for message in messages_without_hint if message["role"] == "system"
+        )
+        system_prompt_with_hint = next(
+            message["content"] for message in messages_with_hint if message["role"] == "system"
+        )
+        user_prompt_without_hint = next(
+            message["content"] for message in messages_without_hint if message["role"] == "user"
+        )
+        user_prompt_with_hint = next(
+            message["content"] for message in messages_with_hint if message["role"] == "user"
+        )
+
+        self.assertEqual(system_prompt_with_hint, system_prompt_without_hint)
+        self.assertNotIn("## Suggested Capability Discovery", system_prompt_with_hint)
+        self.assertNotIn("## Suggested Capability Discovery", user_prompt_without_hint)
+        self.assertIn("## Suggested Capability Discovery", user_prompt_with_hint)
+        self.assertIn("unless a capability-discovery hint says a system skill may apply", system_prompt_with_hint)
         self.assertFalse(
             PersistentAgentSystemSkillState.objects.filter(
                 agent=self.agent,
