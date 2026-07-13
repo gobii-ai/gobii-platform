@@ -3249,6 +3249,9 @@
     font-size: 0.875rem;
     table-layout: auto;
 }
+.chat-html-content table.chat-html-table--compact {
+    width: 100%;
+}
 .chat-html-table-scroll table {
     margin: 0;
 }
@@ -3257,6 +3260,18 @@
     overflow-wrap: normal;
     word-break: normal;
     white-space: normal;
+}
+.chat-html-content .chat-html-table--compact th,
+.chat-html-content .chat-html-table--compact td {
+    min-width: 0;
+}
+.chat-html-content .chat-html-table--2-cols tr > :first-child:not([colspan]) {
+    width: clamp(8rem, 24%, 11rem);
+    min-width: 8rem;
+    overflow-wrap: normal;
+}
+.chat-html-content .chat-html-table--2-cols tr > :not(:first-child) {
+    overflow-wrap: anywhere;
 }
 .chat-bubble--user .chat-content {
     color: #334155;
