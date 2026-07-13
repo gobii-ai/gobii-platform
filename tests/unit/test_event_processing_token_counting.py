@@ -10,11 +10,13 @@ from unittest import mock
 from unittest.mock import patch, MagicMock
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from api.agent.core.event_processing import _run_agent_loop, build_prompt_context
+from api.agent.core import prompt_context
 from api.agent.core.llm_config import get_llm_config_with_failover
 from tests.utils.llm_seed import seed_persistent_basic
-from api.models import PersistentAgent, BrowserUseAgent, UserQuota
+from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentPromptArchive, UserQuota
 
 
 @tag("batch_event_processing")
@@ -150,6 +152,57 @@ class TestEventProcessingTokenCounting(TestCase):
                 self.assertEqual(len(messages), 2)  # system + user messages
                 self.assertIsInstance(fitted_token_count, int)
                 self.assertGreater(fitted_token_count, 0)
+
+    def test_previous_prompt_size_seeds_routing_and_stable_render_is_reused(self):
+        PersistentAgentPromptArchive.objects.create(
+            agent=self.test_agent,
+            rendered_at=timezone.now(),
+            storage_key="",
+            raw_bytes=1,
+            compressed_bytes=1,
+            tokens_before=13_000,
+            tokens_after=12_345,
+            tokens_saved=655,
+        )
+        failover = [("anthropic", "anthropic/claude-sonnet-4-20250514", {"allow_implied_send": True})]
+
+        with patch(
+            "api.agent.core.prompt_context.get_llm_config_with_failover",
+            return_value=failover,
+        ) as route_mock, patch(
+            "api.agent.core.prompt_context._render_prompt_context_once",
+            wraps=prompt_context._render_prompt_context_once,
+        ) as render_mock:
+            build_prompt_context(self.test_agent)
+
+        self.assertEqual(route_mock.call_args_list[0].kwargs["token_count"], 12_345)
+        self.assertEqual(render_mock.call_count, 1)
+
+    def test_same_routing_range_reuses_selected_model_without_rerouting(self):
+        first_route = [
+            (
+                "anthropic",
+                "anthropic/claude-sonnet-4-20250514",
+                {
+                    "allow_implied_send": True,
+                    "routing_token_range": "small",
+                    "routing_token_min": 0,
+                    "routing_token_max": 1_000_000,
+                },
+            )
+        ]
+
+        with patch(
+            "api.agent.core.prompt_context.get_llm_config_with_failover",
+            return_value=first_route,
+        ) as route_mock, patch(
+            "api.agent.core.prompt_context._render_prompt_context_once",
+            wraps=prompt_context._render_prompt_context_once,
+        ) as render_mock:
+            build_prompt_context(self.test_agent)
+
+        self.assertEqual(route_mock.call_count, 1)
+        self.assertEqual(render_mock.call_count, 1)
 
     def test_get_llm_config_with_failover_small_range(self):
         """Test that small token ranges use token-based tier selection (GPT-5 not available without key)."""

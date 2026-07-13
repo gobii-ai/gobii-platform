@@ -130,18 +130,6 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
     return bool(raw)
 
 
-def _latest_inbound_timestamp(agent: PersistentAgent):
-    latest_inbound = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
-        .order_by("-timestamp")
-        .values_list("timestamp", flat=True)
-        .first()
-    )
-    return latest_inbound
-
-
-
-
 def _looks_like_routine_progress_message(body: str) -> bool:
     text = " ".join((body or "").split())
     if not text:

@@ -603,54 +603,6 @@ class LLMNotConfiguredError(RuntimeError):
 _LLM_BOOTSTRAP_CACHE_KEY = "llm_bootstrap_required:v1"
 _LLM_BOOTSTRAP_CACHE_TTL = 30  # seconds
 
-# MODEL TESTING NOTES FOR PERSISTENT AGENTS:
-# - GLM-4.5 (OpenRouter): PASSED manual testing - works well with persistent agents
-# - Qwen3-235B (Fireworks): NOT WORKING GREAT - performance issues with persistent agents
-# - DeepSeek V3.1 (Fireworks): NOT WORKING WELL - issues with persistent agents
-# - GPT-OSS-120B (Fireworks): WORKING WELL - good performance with persistent agents
-# - Kimi K2 Instruct (Fireworks): NOT GOOD - too loopy behavior, not suitable for persistent agents
-# - Add other model test results here as we validate them...
-
-# Provider configuration mapping provider names to environment variables and models
-PROVIDER_CONFIG: Dict[str, Dict[str, str]] = {
-    "anthropic": {
-        "env_var": "ANTHROPIC_API_KEY",
-        "model": "anthropic/claude-sonnet-4-20250514"
-    },
-    "google": {
-        "env_var": "GOOGLE_API_KEY", 
-        "model": "vertex_ai/gemini-2.5-pro"
-    },
-    "openai": {
-        "env_var": "OPENAI_API_KEY",
-        "model": "openai/gpt-4.1"
-    },
-    "openai_gpt5": {
-        "env_var": "OPENAI_API_KEY",
-        "model": "openai/gpt-5"
-    },
-    "openrouter_glm": {
-        "env_var": "OPENROUTER_API_KEY",
-        "model": "openrouter/z-ai/glm-4.5"
-    },
-    "fireworks_qwen3_235b_a22b": {
-        "env_var": "FIREWORKS_AI_API_KEY",
-        "model": "fireworks_ai/accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
-    },
-    "fireworks_deepseek_v31": {
-        "env_var": "FIREWORKS_AI_API_KEY",
-        "model": "fireworks_ai/accounts/fireworks/models/deepseek-v3p1"
-    },
-    "fireworks_gpt_oss_120b": {
-        "env_var": "FIREWORKS_AI_API_KEY",
-        "model": "fireworks_ai/accounts/fireworks/models/gpt-oss-120b"
-    },
-    "fireworks_kimi_k2_instruct": {
-        "env_var": "FIREWORKS_AI_API_KEY",
-        "model": "fireworks_ai/accounts/fireworks/models/kimi-k2-instruct"
-    }
-}
-
 # Reference model for consistent token counting before a model is selected
 REFERENCE_TOKENIZER_MODEL = "openai/gpt-4o"
 
@@ -686,56 +638,11 @@ def get_llm_config() -> Tuple[str, dict]:
             "supports_reasoning",
             "reasoning_effort",
             "low_latency",
+            "routing_token_range",
+            "routing_token_min",
+            "routing_token_max",
         )
     }
-    return model, params
-
-
-def get_provider_config(provider: str) -> Tuple[str, dict]:
-    """
-    Get the model name and parameters for a specific provider.
-    
-    Args:
-        provider: Provider name (anthropic, google, openai, openrouter)
-        
-    Returns:
-        Tuple of (model_name, litellm_params)
-        
-    Raises:
-        ValueError: If provider is unknown or API key is missing
-    """
-    if provider not in PROVIDER_CONFIG:
-        raise ValueError(f"Unknown provider: {provider}")
-    
-    config = PROVIDER_CONFIG[provider]
-    env_var = config["env_var"]
-    model = config["model"]
-    
-    api_key = os.getenv(env_var)
-    if not api_key:
-        raise ValueError(f"Missing API key for {provider}. Set {env_var}")
-    
-    params = {"temperature": 0.1}
-    
-    # Add provider-specific parameters
-    if "google" in provider:
-        params.update({
-            "vertex_project": os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714"),
-            "vertex_location": os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4"),
-        })
-    elif provider == "openrouter_glm":
-        headers = get_attribution_headers()
-        if headers:
-            params["extra_headers"] = headers
-    elif provider == "openai_gpt5":
-        # GPT-5 specific parameters
-        # Note: GPT-5 only supports temperature=1
-        params.update({
-            "temperature": 1,  # GPT-5 only supports temperature=1
-        })
-
-    _apply_required_temperature(model, params)
-
     return model, params
 
 
@@ -847,6 +754,8 @@ def _collect_failover_configs(
     tiers,
     *,
     token_range_name: str,
+    token_range_min: int,
+    token_range_max: int | None,
     prefer_low_latency: bool = False,
 ) -> List[Tuple[str, str, dict]]:
     """Build failover configurations from the provided tier queryset."""
@@ -932,6 +841,10 @@ def _collect_failover_configs(
             )
         )
 
+    for _provider, _model, params in failover_configs:
+        params["routing_token_range"] = token_range_name
+        params["routing_token_min"] = token_range_min
+        params["routing_token_max"] = token_range_max
     return failover_configs
 
 
@@ -1106,6 +1019,8 @@ def _get_failover_configs_from_profile(
         return _collect_failover_configs(
             tiers,
             token_range_name=f"{profile_name}:{token_range.name}",
+            token_range_min=token_range.min_tokens,
+            token_range_max=token_range.max_tokens,
             prefer_low_latency=prefer_low_latency,
         )
 
@@ -1190,6 +1105,8 @@ def _get_failover_configs_from_legacy(
     return _collect_failover_configs(
         tiers,
         token_range_name=token_range.name,
+        token_range_min=token_range.min_tokens,
+        token_range_max=token_range.max_tokens,
         prefer_low_latency=prefer_low_latency,
     )
 
@@ -1319,6 +1236,9 @@ def _prepare_summarization_params(model: str, params_with_hints: Dict[str, Any])
             "supports_reasoning",
             "reasoning_effort",
             "low_latency",
+            "routing_token_range",
+            "routing_token_min",
+            "routing_token_max",
         )
     }
 
@@ -1471,6 +1391,8 @@ def _get_highest_regular_agent_llm_configs_from_profile(
         return _collect_failover_configs(
             tiers,
             token_range_name=f"{profile_name}:{token_range.name}",
+            token_range_min=token_range.min_tokens,
+            token_range_max=token_range.max_tokens,
             prefer_low_latency=False,
         )
     except DatabaseError:
@@ -1517,6 +1439,8 @@ def _get_highest_regular_agent_llm_configs_from_legacy(
         return _collect_failover_configs(
             tiers,
             token_range_name=token_range.name,
+            token_range_min=token_range.min_tokens,
+            token_range_max=token_range.max_tokens,
             prefer_low_latency=False,
         )
     except DatabaseError:

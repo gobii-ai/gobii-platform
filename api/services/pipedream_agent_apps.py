@@ -68,7 +68,6 @@ def _owner_state(owner: PipedreamOwnerContext):
 
 def _refresh_owner_cache(owner: PipedreamOwnerContext, app_slugs: list[str]) -> None:
     manager = get_mcp_manager()
-    manager.invalidate_pipedream_owner_cache(owner.scope, owner.id)
     manager.prewarm_pipedream_owner_cache(owner.scope, owner.id, app_slugs=app_slugs)
 
 

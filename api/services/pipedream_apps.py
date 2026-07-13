@@ -410,7 +410,6 @@ def disable_pipedream_apps_for_owner(
             from api.agent.tools.mcp_manager import get_mcp_manager
 
             manager = get_mcp_manager()
-            manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
             manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected)
 
         transaction.on_commit(refresh_owner_cache)
@@ -535,7 +534,6 @@ def enable_pipedream_apps_for_agent(
         from api.agent.tools.mcp_manager import get_mcp_manager
 
         manager = get_mcp_manager()
-        manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
         manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected)
 
     state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)

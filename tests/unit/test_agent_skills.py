@@ -29,10 +29,12 @@ from api.agent.tools.tool_manager import (
     ensure_skill_tools_enabled,
     get_available_tool_ids,
 )
+from api.agent.tools.mcp_manager import MCPToolInfo
 from api.models import (
     BrowserUseAgent,
     GlobalAgentSkill,
     GlobalSecret,
+    MCPServerConfig,
     PersistentAgent,
     PersistentAgentCustomTool,
     PersistentAgentEnabledTool,
@@ -825,6 +827,141 @@ class AgentSkillToolEnablementTests(TestCase):
             name="Skills Tool Agent",
             charter="Enforce skill tools",
             browser_use_agent=browser_agent,
+        )
+
+    @patch("api.agent.tools.tool_manager._build_available_tool_index", side_effect=AssertionError("broad catalog load"))
+    @patch("api.agent.tools.tool_manager._get_manager", side_effect=AssertionError("MCP discovery"))
+    def test_existing_required_dynamic_tool_does_not_load_catalog(self, _mock_manager, _mock_catalog):
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="existing-pipedream-tool",
+            description="Use an already enabled tool",
+            version=1,
+            tools=["slack-send-message"],
+            instructions="Send the update.",
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="slack-send-message",
+            tool_server="pipedream",
+            tool_name="slack-send-message",
+        )
+
+        result = ensure_skill_tools_enabled(self.agent)
+
+        self.assertEqual(result["already_enabled"], ["slack-send-message"])
+        self.assertFalse(result["invalid"])
+
+    @patch("api.agent.tools.tool_manager.agent_accessible_server_configs", return_value=[])
+    @patch("api.agent.tools.tool_manager._get_manager", side_effect=AssertionError("MCP discovery"))
+    def test_existing_metadata_less_mcp_tool_remains_authoritative(
+        self, _mock_manager, _mock_configs
+    ):
+        tool_name = "mcp_legacy_lookup"
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="legacy-tool",
+            description="Use an existing legacy tool",
+            version=1,
+            tools=[tool_name],
+            instructions="Look up the record.",
+        )
+        PersistentAgentEnabledTool.objects.create(agent=self.agent, tool_full_name=tool_name)
+
+        result = ensure_skill_tools_enabled(self.agent)
+
+        self.assertEqual(result["already_enabled"], [tool_name])
+        self.assertFalse(result["invalid"])
+
+    @patch(
+        "api.agent.tools.tool_manager.agent_accessible_server_configs",
+        side_effect=AssertionError("MCP config load"),
+    )
+    @patch("api.agent.tools.tool_manager._get_manager", side_effect=AssertionError("MCP discovery"))
+    def test_builtin_mcp_named_skill_tool_stays_local(self, _mock_manager, _mock_configs):
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="builtin-search",
+            description="Use built-in search",
+            version=1,
+            tools=["mcp_brightdata_search_engine"],
+            instructions="Search the web.",
+        )
+
+        result = ensure_skill_tools_enabled(self.agent)
+
+        self.assertEqual(result["enabled"], ["mcp_brightdata_search_engine"])
+        self.assertFalse(result["invalid"])
+
+    @patch("api.agent.tools.tool_manager._build_available_tool_index", side_effect=AssertionError("broad catalog load"))
+    @patch("api.agent.tools.tool_manager._get_manager")
+    def test_missing_pipedream_tool_discovers_only_inferred_app(self, mock_get_manager, _mock_catalog):
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="missing-pipedream-tool",
+            description="Use a targeted tool",
+            version=1,
+            tools=["slack-send-message"],
+            instructions="Send the update.",
+        )
+        manager = mock_get_manager.return_value
+        manager.is_tool_blacklisted.return_value = False
+        manager.get_tools_for_agent.return_value = [
+            MCPToolInfo(
+                config_id=None,
+                full_name="slack-send-message",
+                server_name="pipedream",
+                tool_name="slack-send-message",
+                description="Send a Slack message",
+                parameters={},
+            )
+        ]
+
+        result = ensure_skill_tools_enabled(self.agent)
+
+        self.assertEqual(result["enabled"], ["slack-send-message"])
+        manager.get_tools_for_agent.assert_called_once_with(
+            self.agent,
+            allowed_server_names={"pipedream"},
+            pipedream_app_slugs={"slack"},
+        )
+
+    @patch("api.agent.tools.tool_manager._get_manager")
+    def test_missing_canonical_mcp_tool_discovers_only_inferred_server(self, mock_get_manager):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="targeted",
+            display_name="Targeted",
+            command="targeted-mcp",
+            command_args=[],
+        )
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="missing-canonical-tool",
+            description="Use a targeted MCP tool",
+            version=1,
+            tools=["mcp_targeted_lookup"],
+            instructions="Look up the record.",
+        )
+        manager = mock_get_manager.return_value
+        manager.is_tool_blacklisted.return_value = False
+        manager.get_tools_for_agent.return_value = [
+            MCPToolInfo(
+                config_id=str(server.id),
+                full_name="mcp_targeted_lookup",
+                server_name="targeted",
+                tool_name="lookup",
+                description="Look up a record",
+                parameters={},
+            )
+        ]
+
+        result = ensure_skill_tools_enabled(self.agent)
+
+        self.assertEqual(result["enabled"], ["mcp_targeted_lookup"])
+        manager.get_tools_for_agent.assert_called_once_with(
+            self.agent,
+            allowed_config_ids={str(server.id)},
         )
 
     @patch("api.agent.tools.tool_manager._build_available_tool_index", return_value={})

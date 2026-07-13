@@ -5454,6 +5454,7 @@ def _run_agent_loop(
             return cumulative_token_usage
 
     reasoning_only_streak = 0
+    routing_token_seed: Optional[int] = None
     inferred_message_continue_streak = 0
     pending_reply_after_progress = False
     continuation_notice: Optional[str] = None
@@ -5585,6 +5586,7 @@ def _run_agent_loop(
                         prefer_low_latency=prefer_low_latency,
                         include_metadata=True,
                         system_directive_block=stale_prompt_system_directive_block,
+                        routing_token_seed=routing_token_seed,
                     )
                 except Exception as exc:
                     log_prompt_construction_error(
@@ -5610,6 +5612,7 @@ def _run_agent_loop(
                 else:
                     history, fitted_token_count, prompt_archive_id = prompt_context_result
                     prompt_metadata = {}
+                routing_token_seed = fitted_token_count
                 prompt_allows_implied_send = bool(prompt_metadata.get("prompt_allows_implied_send", True))
                 prompt_archive_attached = False
                 latest_human_generation = _current_human_inbound_generation()

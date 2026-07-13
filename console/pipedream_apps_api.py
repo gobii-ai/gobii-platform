@@ -85,7 +85,6 @@ class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
 
         manager = get_mcp_manager()
         owner_id = str(owner_org.id) if owner_scope == MCPServerConfig.Scope.ORGANIZATION else str(owner_user.id)
-        manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
         manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected)
 
         state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)

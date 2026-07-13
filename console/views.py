@@ -565,8 +565,6 @@ def _mcp_server_event_properties(
     }
 
 
-
-
 def _pop_overage_detach_session(request, org_id: str) -> dict | None:
     """Remove and return any stored detach info for the org."""
     key = str(org_id)
@@ -637,8 +635,6 @@ def _reattach_overage_from_session(request, org_id: str) -> bool:
     subscription_id = info.get("subscription_id")
     price_id = info.get("price_id")
     return _reattach_org_overage_subscription(subscription_id, price_id)
-
-
 
 
 class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):

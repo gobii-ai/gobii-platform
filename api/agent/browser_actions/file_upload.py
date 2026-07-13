@@ -92,8 +92,6 @@ def _agent_has_filespace_access(agent_id: str, filespace_id: str) -> bool:
         return False
 
 
-
-
 def _create_temp_file_from_node(node: AgentFsNode, span) -> str:
     """Create a temporary file from a node's content.
 

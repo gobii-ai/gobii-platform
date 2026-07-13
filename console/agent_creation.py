@@ -150,7 +150,6 @@ def _apply_pending_pipedream_app_selections(
 
     def _refresh_owner_cache() -> None:
         manager = get_mcp_manager()
-        manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
         manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected_slugs)
 
     transaction.on_commit(_refresh_owner_cache)

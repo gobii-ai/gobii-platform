@@ -1205,7 +1205,6 @@ class PipedreamAppsAPITests(TestCase):
         selection = PipedreamAppSelection.objects.get(user=self.user)
         self.assertEqual(selection.selected_app_slugs, ["trello", "slack"])
         manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_called_once_with("user", str(self.user.id))
         manager.prewarm_pipedream_owner_cache.assert_called_once_with(
             "user",
             str(self.user.id),
@@ -1354,7 +1353,6 @@ class PipedreamAppsAPITests(TestCase):
         selection = PipedreamAppSelection.objects.get(organization=org)
         self.assertEqual(selection.selected_app_slugs, ["hubspot"])
         manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_called_once_with("organization", str(org.id))
         manager.prewarm_pipedream_owner_cache.assert_called_once_with(
             "organization",
             str(org.id),
@@ -1602,7 +1600,6 @@ class PipedreamAppsAPITests(TestCase):
         selection = PipedreamAppSelection.objects.get(user=self.user)
         self.assertEqual(selection.selected_app_slugs, ["trello"])
         manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_called_once_with("user", str(self.user.id))
         manager.prewarm_pipedream_owner_cache.assert_called_once_with(
             "user",
             str(self.user.id),
@@ -1694,7 +1691,6 @@ class PipedreamAppsAPITests(TestCase):
         self.assertTrue(response.json()["removed"])
         self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
         manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_called_once_with("user", str(self.user.id))
         manager.prewarm_pipedream_owner_cache.assert_called_once_with(
             "user",
             str(self.user.id),
@@ -1745,7 +1741,6 @@ class PipedreamAppEnablementServiceTests(TestCase):
         selection = PipedreamAppSelection.objects.get(user=self.user)
         self.assertEqual(selection.selected_app_slugs, ["slack"])
         manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_called_once_with("user", str(self.user.id))
         manager.prewarm_pipedream_owner_cache.assert_called_once_with(
             "user",
             str(self.user.id),
@@ -1773,7 +1768,6 @@ class PipedreamAppEnablementServiceTests(TestCase):
         selection = PipedreamAppSelection.objects.get(organization=org)
         self.assertEqual(selection.selected_app_slugs, ["hubspot"])
         manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_called_once_with("organization", str(org.id))
         manager.prewarm_pipedream_owner_cache.assert_called_once_with(
             "organization",
             str(org.id),
@@ -1797,7 +1791,6 @@ class PipedreamAppEnablementServiceTests(TestCase):
         selection = PipedreamAppSelection.objects.get(user=self.user)
         self.assertEqual(selection.selected_app_slugs, ["slack"])
         manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_not_called()
         manager.prewarm_pipedream_owner_cache.assert_not_called()
 
     @patch("api.agent.tools.mcp_manager.get_mcp_manager")
@@ -1816,7 +1809,6 @@ class PipedreamAppEnablementServiceTests(TestCase):
         self.assertEqual(result["effective_apps"], ["google_sheets", "google_docs"])
         self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
         manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_not_called()
         manager.prewarm_pipedream_owner_cache.assert_not_called()
 
     @patch("api.services.pipedream_apps.get_connected_pipedream_app_slugs_for_agent", return_value=set())
@@ -1840,7 +1832,6 @@ class PipedreamAppEnablementServiceTests(TestCase):
         self.assertEqual(result["invalid"], ["slack"])
         self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
         manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_not_called()
         manager.prewarm_pipedream_owner_cache.assert_not_called()
 
 @tag("batch_console_mcp_servers")
