@@ -3910,7 +3910,11 @@ def _get_system_instruction(
         if welcome_target is not None:
             return base_prompt + "\n\n" + _get_signup_preview_handoff_prompt_block(welcome_target)
 
-    if is_first_run and not _has_first_run_welcome_contact(agent):
+    first_run_guidance_eligible = (
+        is_first_run
+        or agent.planning_state == PersistentAgent.PlanningState.COMPLETED
+    )
+    if first_run_guidance_eligible and not _has_first_run_welcome_contact(agent):
         welcome_target = _get_first_run_welcome_target(agent)
         if planning_mode_active:
             if welcome_target is not None:
