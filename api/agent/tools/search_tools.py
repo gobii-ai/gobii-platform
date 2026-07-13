@@ -1454,7 +1454,7 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "function": {
             "name": "search_tools",
             "description": (
-                "Discover and enable tools and skills for the task, including saved custom tools and hidden system skills. "
+                "Discover and enable tools and skills for the task; follow capability-discovery hints even when generic tools are enabled. "
                 "Use when no enabled tool clearly fits, including named integration requests. "
                 "Use for control-plane or agent/team-management requests that may require hidden system skills. "
                 "Use it when you need to choose between structured extractors, web search, scraping, browser automation, or a specialized integration. "

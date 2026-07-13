@@ -545,6 +545,17 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "linkedin sourcing",
         "apollo sourcing",
     ),
+    discovery_triggers=(
+        "recruitment sourcing",
+        "candidate sourcing",
+        "talent sourcing",
+        "find candidates",
+        "source candidates",
+        "screen candidates",
+        "shortlist candidates",
+        "qualified candidate prospects",
+        "talent scout",
+    ),
     prompt_instructions=(
         "Recruitment sourcing means finding candidates worth recruiter review, not filling a quota with keyword "
         "matches. Treat the user's hiring criteria as the source of truth and preserve the difference between hard "
@@ -581,6 +592,11 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "credentials, and exclusion terms. Expand from examples by archetype when the user says examples are not "
         "the complete list. Do not overfit to a single company list, title spelling, or source if adjacent profiles "
         "would satisfy the role.\n"
+        "Treat explicit terms such as 'must', 'required', 'only', 'non-negotiable', and equivalent constraints as "
+        "gates. Never relax them merely to reach a requested candidate count. Return fewer or zero qualified "
+        "candidates when necessary. If partial matches are useful, put them in a clearly separate screening-leads "
+        "or near-matches section, identify every failed or unknown gate, and never label them as qualified or as "
+        "satisfying the request.\n"
         "Verify each recommended candidate against the hard requirements before delivery. At minimum, check current "
         "or recent title, company, location/work setup, role-relevant experience, source URL, and any explicit "
         "dealbreakers. Apply conservative judgment: exclude or mark low confidence when evidence is weak, stale, "

@@ -16,6 +16,7 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
@@ -23,6 +24,7 @@ from api.models import (
 
 RECRUITMENT_SOURCING_SUITE_SLUG = "recruitment_sourcing"
 
+RECRUITMENT_SOURCING_SKILL_DISCOVERY = "recruitment_sourcing_skill_discovery"
 RECRUITMENT_SOURCING_INTAKE_GATES_SOURCING = "recruitment_sourcing_intake_gates_sourcing"
 RECRUITMENT_SOURCING_CRITERIA_FIDELITY = "recruitment_sourcing_criteria_fidelity"
 RECRUITMENT_SOURCING_SOURCE_FALLBACK = "recruitment_sourcing_source_fallback"
@@ -30,6 +32,7 @@ RECRUITMENT_SOURCING_DEDUPE_LEDGER = "recruitment_sourcing_dedupe_ledger"
 RECRUITMENT_SOURCING_PARTIAL_VERIFICATION = "recruitment_sourcing_partial_verification"
 
 RECRUITMENT_SOURCING_SCENARIO_SLUGS = (
+    RECRUITMENT_SOURCING_SKILL_DISCOVERY,
     RECRUITMENT_SOURCING_INTAKE_GATES_SOURCING,
     RECRUITMENT_SOURCING_CRITERIA_FIDELITY,
     RECRUITMENT_SOURCING_SOURCE_FALLBACK,
@@ -63,9 +66,13 @@ class RecruitmentSourcingCase:
     response_term_groups: tuple[tuple[str, ...], ...] = ()
     forbidden_response_terms: tuple[str, ...] = ()
     required_proximate_response_terms: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
+    excluded_or_separated_response_terms: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
     tags: tuple[str, ...] = field(default_factory=tuple)
     max_relevant_tool_calls: int = 10
     stop_on_human_input_request: bool = False
+    pre_enable_system_skill: bool = True
+    expect_skill_discovery: bool = False
+    stop_after_expected_tool: bool = False
 
     def tool_names_to_enable(self) -> tuple[str, ...]:
         alternative_tool_names = [
@@ -97,7 +104,7 @@ class RecruitmentSourcingCase:
         if not self.expected_tool_names:
             allowed.discard("search_tools")
 
-        return {
+        policy = {
             "allowed_tool_names": sorted(allowed),
             "ignored_tool_names": ["sleep_until_next_trigger", "update_plan"],
             "stop_on_tool_names": list(self.forbidden_tool_names),
@@ -109,6 +116,9 @@ class RecruitmentSourcingCase:
             },
             "stop_on_human_input_request": self.stop_on_human_input_request,
         }
+        if self.stop_after_expected_tool:
+            policy["stop_on_tool_names_after_execution"] = list(self.expected_tool_names)
+        return policy
 
 
 def _linkedin_people_result(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -146,6 +156,22 @@ def _linkedin_profile_result(profile: dict[str, Any]) -> dict[str, Any]:
 
 RECRUITMENT_SOURCING_CASES = (
     RecruitmentSourcingCase(
+        slug=RECRUITMENT_SOURCING_SKILL_DISCOVERY,
+        description="Discover Recruitment Sourcing before using already-enabled generic sourcing tools.",
+        prompt=(
+            "Source 10 candidates for a backend engineering role. Candidates must currently live in Chicago, "
+            "must have 7+ years of backend experience, and must have recent Python experience. "
+            "These requirements are non-negotiable."
+        ),
+        expected_tool_names=("search_tools",),
+        mock_config={},
+        tags=("discovery",),
+        max_relevant_tool_calls=2,
+        pre_enable_system_skill=False,
+        expect_skill_discovery=True,
+        stop_after_expected_tool=True,
+    ),
+    RecruitmentSourcingCase(
         slug=RECRUITMENT_SOURCING_INTAKE_GATES_SOURCING,
         description="Ask for missing role-specific screening material instead of sourcing from a thin brief.",
         prompt=(
@@ -168,9 +194,10 @@ RECRUITMENT_SOURCING_CASES = (
         description="Source a bounded batch and preserve hard requirements over tempting near matches.",
         prompt=(
             "Source a first pass of Assistant Project Manager or Project Manager candidates for a commercial "
-            "retail construction GC role. Hard requirements: currently at BuildRight GC or Summit Retail Builders, "
+            "retail construction GC role and return 8 qualified candidates. These requirements are non-negotiable: "
+            "candidates must currently be at BuildRight GC or Summit Retail Builders, "
             "located in OH, IN, KY, western PA, or Nashville TN, and exclude Estimators, Project Engineers, "
-            "Superintendents, Directors, and VPs. Return fewer high-quality matches if needed."
+            "Superintendents, Directors, and VPs. Return fewer or zero qualified matches rather than relaxing any gate."
         ),
         expected_tool_names=("mcp_brightdata_web_data_linkedin_people_search",),
         accepted_tool_alternatives={
@@ -253,9 +280,13 @@ RECRUITMENT_SOURCING_CASES = (
         response_term_groups=(
             ("Mina Patel",),
             ("Priya Shah",),
-            ("Estimator", "excluded", "exclude"),
+            ("2 qualified", "two qualified", "only 2", "only two", "two candidates meet"),
         ),
-        required_proximate_response_terms=(
+        excluded_or_separated_response_terms=(
+            (
+                ("Evan Brooks", "evan-brooks-eval"),
+                ("excluded", "not qualified", "does not meet", "fails"),
+            ),
             (
                 ("Dana Lee", "dana-lee-eval"),
                 ("outside approved geography", "outside geography", "not approved geography", "outside approved"),
@@ -600,6 +631,17 @@ def _contains_proximate_terms(body: str, anchor_terms: tuple[str, ...], context_
     return False
 
 
+def _contains_unseparated_decoy(
+    body: str,
+    anchor_terms: tuple[str, ...],
+    context_terms: tuple[str, ...],
+) -> bool:
+    return (
+        any(response_contains_term(body, anchor) for anchor in anchor_terms)
+        and not _contains_proximate_terms(body, anchor_terms, context_terms)
+    )
+
+
 class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
     tier = "core"
     category = "recruitment_sourcing"
@@ -649,9 +691,10 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
         case = self._case()
         self._enable_tools(agent_id, case.tool_names_to_enable())
         agent = PersistentAgent.objects.get(id=agent_id)
-        result = enable_system_skills(agent, [RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY])
-        if result.get("invalid"):
-            raise ValueError(f"Could not enable Recruitment Sourcing system skill: {result}")
+        if case.pre_enable_system_skill:
+            result = enable_system_skills(agent, [RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY])
+            if result.get("invalid"):
+                raise ValueError(f"Could not enable Recruitment Sourcing system skill: {result}")
 
     def _record_expected_tools(self, run_id: str, inbound) -> None:
         case = self._case()
@@ -693,6 +736,33 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
                 artifacts={"step": calls[0].step} if calls else {},
             )
             return
+
+        if case.expect_skill_discovery:
+            relevant_calls = [call for call in calls if call.tool_name in SOURCING_TOOL_NAMES]
+            if not relevant_calls or relevant_calls[0].tool_name != "search_tools":
+                self.record_task_result(
+                    run_id,
+                    None,
+                    EvalRunTask.Status.FAILED,
+                    task_name="verify_expected_tools",
+                    observed_summary="The first relevant sourcing action was not search_tools.",
+                    artifacts={"step": relevant_calls[0].step} if relevant_calls else {},
+                )
+                return
+            if not PersistentAgentSystemSkillState.objects.filter(
+                agent_id=inbound.owner_agent_id,
+                skill_key=RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists():
+                self.record_task_result(
+                    run_id,
+                    None,
+                    EvalRunTask.Status.FAILED,
+                    task_name="verify_expected_tools",
+                    observed_summary="search_tools did not enable Recruitment Sourcing.",
+                    artifacts={"step": relevant_calls[0].step},
+                )
+                return
 
         expected_summary = ", ".join(
             (
@@ -742,6 +812,7 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
         matched_artifact = None
         final_missing_groups = list(case.response_term_groups)
         final_missing_proximate_groups = list(case.required_proximate_response_terms)
+        final_misclassified_groups: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
         final_forbidden_terms: list[str] = []
         for body, artifact in response_bodies:
             missing_groups = [
@@ -754,16 +825,22 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
                 for terms in case.required_proximate_response_terms
                 if not _contains_proximate_terms(body, terms[0], terms[1])
             ]
+            misclassified_groups = [
+                terms
+                for terms in case.excluded_or_separated_response_terms
+                if _contains_unseparated_decoy(body, terms[0], terms[1])
+            ]
             forbidden_terms = [term for term in case.forbidden_response_terms if response_contains_term(body, term)]
             final_missing_groups = missing_groups
             final_missing_proximate_groups = missing_proximate_groups
+            final_misclassified_groups = misclassified_groups
             final_forbidden_terms = forbidden_terms
-            if not missing_groups and not missing_proximate_groups and not forbidden_terms:
+            if not missing_groups and not missing_proximate_groups and not misclassified_groups and not forbidden_terms:
                 matched_body = body
                 matched_artifact = artifact
                 break
 
-        if final_missing_groups or final_missing_proximate_groups or final_forbidden_terms:
+        if final_missing_groups or final_missing_proximate_groups or final_misclassified_groups or final_forbidden_terms:
             latest_body = response_bodies[-1][0] if response_bodies else ""
             latest_artifact = response_bodies[-1][1] if response_bodies else None
             self.record_task_result(
@@ -774,6 +851,7 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
                 observed_summary=(
                     f"Missing expected term group(s) {final_missing_groups}; "
                     f"missing proximate term group(s) {final_missing_proximate_groups}; "
+                    f"decoys presented without failed-gate context {final_misclassified_groups}; "
                     f"forbidden response terms present {final_forbidden_terms}; body={latest_body[:800]!r}."
                 ),
                 artifacts={"response_artifact": latest_artifact} if latest_artifact else {},
