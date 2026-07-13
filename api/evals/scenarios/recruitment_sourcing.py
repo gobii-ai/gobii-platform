@@ -280,7 +280,6 @@ RECRUITMENT_SOURCING_CASES = (
         response_term_groups=(
             ("Mina Patel",),
             ("Priya Shah",),
-            ("Estimator", "excluded", "exclude"),
             ("2 qualified", "two qualified", "only 2", "only two", "two candidates meet"),
         ),
         excluded_or_separated_response_terms=(

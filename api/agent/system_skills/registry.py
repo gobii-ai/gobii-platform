@@ -1,5 +1,6 @@
 """Code-defined system skill definitions and search-time matching."""
 
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Mapping, Optional
 
@@ -43,8 +44,6 @@ class SystemSkillDefinition:
     use_when: tuple[str, ...] = ()
     query_aliases: tuple[str, ...] = ()
     discovery_triggers: tuple[str, ...] = ()
-    discovery_query: str = ""
-    discovery_precedes: str = "generic execution tools"
     pipedream_app_slugs: tuple[str, ...] = ()
     prompt_instructions: str = ""
     prompt_instructions_renderer: Optional[Callable[[object], str]] = None
@@ -125,14 +124,32 @@ def get_system_skill_definition(skill_key: str) -> Optional[SystemSkillDefinitio
     return SYSTEM_SKILL_REGISTRY.get(normalized)
 
 
-def _score_definition(query: str, definition: SystemSkillDefinition) -> int:
+def _score_definition(
+    query: str,
+    definition: SystemSkillDefinition,
+    *,
+    discovery_only: bool = False,
+) -> int:
     text = str(query or "").strip().lower()
     if not text:
         return 0
 
+    terms = definition.discovery_triggers if discovery_only else definition.search_terms()
+    if discovery_only:
+        text = " ".join(
+            token
+            for token in re.sub(r"[^a-z0-9]+", " ", text).split()
+            if not token.isdigit()
+        )
+
     score = 0
-    for term in definition.search_terms():
+    for term in terms:
         if not term:
+            continue
+        if discovery_only:
+            normalized_term = re.sub(r"[^a-z0-9]+", " ", term.lower()).strip()
+            if normalized_term and f" {normalized_term} " in f" {text} ":
+                score = max(score, len(normalized_term) + 10)
             continue
         if term in text:
             score = max(score, len(term) + 10)
@@ -150,6 +167,7 @@ def shortlist_system_skills(
     *,
     available_tool_names: set[str],
     limit: int = 5,
+    discovery_only: bool = False,
 ) -> list[SystemSkillDefinition]:
     if limit <= 0 or not SYSTEM_SKILL_REGISTRY:
         return []
@@ -160,7 +178,7 @@ def shortlist_system_skills(
             continue
         if not set(definition.tool_names).issubset(available_tool_names):
             continue
-        score = _score_definition(query, definition)
+        score = _score_definition(query, definition, discovery_only=discovery_only)
         if score <= 0:
             continue
         scored.append((score, definition.skill_key, definition))

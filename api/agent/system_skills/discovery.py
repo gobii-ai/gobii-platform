@@ -1,8 +1,5 @@
 """Prompt-time discovery hints for disabled system skills."""
 
-import re
-from dataclasses import dataclass
-
 from api.models import (
     PersistentAgent,
     PersistentAgentMessage,
@@ -10,81 +7,14 @@ from api.models import (
     PersistentAgentToolCall,
 )
 
-from .registry import SYSTEM_SKILL_REGISTRY, SystemSkillDefinition
+from .registry import SYSTEM_SKILL_REGISTRY, normalize_system_skill_key, shortlist_system_skills
 from .service import get_available_system_skill_tool_names
 
 
 SYSTEM_SKILL_DISCOVERY_LIMIT = 2
-_NON_ALPHANUMERIC_RE = re.compile(r"[^a-z0-9]+")
-_COUNT_TOKENS = frozenset(
-    {
-        "a",
-        "an",
-        "one",
-        "two",
-        "three",
-        "four",
-        "five",
-        "six",
-        "seven",
-        "eight",
-        "nine",
-        "ten",
-        "dozen",
-        "dozens",
-        "few",
-        "several",
-    }
-)
 
 
-@dataclass(frozen=True)
-class SystemSkillDiscoverySuggestion:
-    skill_key: str
-    name: str
-    search_query: str
-    precedes: str
-
-
-def normalize_discovery_text(value: object) -> str:
-    """Normalize prose so discovery phrases match across punctuation and spacing."""
-    return _NON_ALPHANUMERIC_RE.sub(" ", str(value or "").casefold()).strip()
-
-
-def _without_count_tokens(normalized_text: str) -> str:
-    return " ".join(
-        token
-        for token in normalized_text.split()
-        if not token.isdigit() and token not in _COUNT_TOKENS
-    )
-
-
-def _contains_discovery_trigger(normalized_text: str, trigger: str) -> bool:
-    comparable_text = _without_count_tokens(normalized_text)
-    comparable_trigger = _without_count_tokens(normalize_discovery_text(trigger))
-    if not comparable_text or not comparable_trigger:
-        return False
-    return f" {comparable_trigger} " in f" {comparable_text} "
-
-
-def matching_system_skill_definitions(text: object) -> list[SystemSkillDefinition]:
-    """Return skills with an explicit high-confidence discovery trigger in text."""
-    normalized_text = normalize_discovery_text(text)
-    if not normalized_text:
-        return []
-
-    return [
-        definition
-        for definition in SYSTEM_SKILL_REGISTRY.values()
-        if definition.discovery_triggers
-        and any(
-            _contains_discovery_trigger(normalized_text, trigger)
-            for trigger in definition.discovery_triggers
-        )
-    ]
-
-
-def _recent_discovery_context(agent: PersistentAgent) -> tuple[str, object | None]:
+def _recent_discovery_context(agent: PersistentAgent):
     messages = list(
         PersistentAgentMessage.objects.filter(
             owner_agent=agent,
@@ -95,79 +25,66 @@ def _recent_discovery_context(agent: PersistentAgent) -> tuple[str, object | Non
     return " ".join(part for part in parts if part), messages[0].timestamp if messages else None
 
 
-def _searched_for_definition_since(
-    agent: PersistentAgent,
-    definition: SystemSkillDefinition,
-    since,
-) -> bool:
-    if since is None:
-        return False
-
-    calls = PersistentAgentToolCall.objects.filter(
-        step__agent=agent,
-        tool_name="search_tools",
-        step__created_at__gte=since,
-    )
-
-    expected_query = normalize_discovery_text(definition.discovery_query or definition.name)
-    expected_key = normalize_discovery_text(definition.skill_key)
-    for params in calls.values_list("tool_params", flat=True):
-        query = normalize_discovery_text(params.get("query")) if isinstance(params, dict) else ""
-        if query and (expected_query in query or expected_key in query):
-            return True
-    return False
-
-
 def get_system_skill_discovery_suggestions(
     agent: PersistentAgent,
     *,
     limit: int = SYSTEM_SKILL_DISCOVERY_LIMIT,
-) -> list[SystemSkillDiscoverySuggestion]:
-    """Suggest matching disabled skills without changing agent state."""
+):
+    """Return relevant disabled skills without changing agent state."""
     if limit <= 0:
         return []
 
     context_text, latest_inbound_at = _recent_discovery_context(agent)
-    definitions = matching_system_skill_definitions(context_text)
+    available_tool_names = get_available_system_skill_tool_names(agent)
+    definitions = shortlist_system_skills(
+        context_text,
+        available_tool_names=available_tool_names,
+        limit=len(SYSTEM_SKILL_REGISTRY),
+        discovery_only=True,
+    )
     if not definitions:
         return []
 
-    enabled_keys = set(
-        PersistentAgentSystemSkillState.objects.filter(
+    enabled_keys = {
+        normalize_system_skill_key(skill_key)
+        for skill_key in PersistentAgentSystemSkillState.objects.filter(
             agent=agent,
             is_enabled=True,
         ).values_list("skill_key", flat=True)
-    )
-    available_tool_names = get_available_system_skill_tool_names(agent)
-
-    suggestions: list[SystemSkillDiscoverySuggestion] = []
-    for definition in definitions:
-        if definition.skill_key in enabled_keys:
-            continue
-        if not definition.should_render_prompt(agent):
-            continue
-        if not set(definition.tool_names).issubset(available_tool_names):
-            continue
-        if _searched_for_definition_since(agent, definition, latest_inbound_at):
-            continue
-        suggestions.append(
-            SystemSkillDiscoverySuggestion(
-                skill_key=definition.skill_key,
-                name=definition.name,
-                search_query=definition.discovery_query or definition.name.casefold(),
-                precedes=definition.discovery_precedes,
+    }
+    searched_keys: set[str] = set()
+    if latest_inbound_at is not None:
+        tool_params = PersistentAgentToolCall.objects.filter(
+            step__agent=agent,
+            tool_name="search_tools",
+            step__created_at__gte=latest_inbound_at,
+        ).values_list("tool_params", flat=True)
+        for params in tool_params:
+            query = params.get("query") if isinstance(params, dict) else ""
+            searched_keys.update(
+                definition.skill_key
+                for definition in shortlist_system_skills(
+                    query,
+                    available_tool_names=available_tool_names,
+                    limit=len(SYSTEM_SKILL_REGISTRY),
+                    discovery_only=True,
+                )
             )
-        )
-        if len(suggestions) >= limit:
-            break
 
-    return suggestions
+    return [
+        definition
+        for definition in definitions
+        if not definition.default_enabled
+        and definition.skill_key not in enabled_keys
+        and definition.skill_key not in searched_keys
+        and definition.should_render_prompt(agent)
+    ][:limit]
 
 
 def format_system_skill_discovery_prompt(
     agent: PersistentAgent,
 ) -> tuple[str, tuple[str, ...]]:
-    """Render an internal system-prompt hint for matching disabled skills."""
+    """Render internal capability guidance for the dynamic user prompt."""
     suggestions = get_system_skill_discovery_suggestions(agent)
     if not suggestions:
         return "", ()
@@ -177,11 +94,12 @@ def format_system_skill_discovery_prompt(
         "",
         "The current work strongly matches system-skill guidance that is not enabled:",
     ]
-    for suggestion in suggestions:
+    for definition in suggestions:
+        query = definition.name.casefold()
         lines.append(
-            f'- {suggestion.name} (`{suggestion.skill_key}`): REQUIRED NEXT RELEVANT ACTION: call '
-            f'`search_tools("{suggestion.search_query}")` before using {suggestion.precedes} for this work. '
-            "Use that exact discovery query by itself; do not replace or expand it with task details."
+            f'- {definition.name} (`{definition.skill_key}`): REQUIRED NEXT RELEVANT ACTION: call '
+            f'`search_tools("{query}")` before using other task tools. Use that exact discovery query by itself; '
+            "do not replace or expand it with task details."
         )
     lines.extend(
         [
@@ -190,4 +108,4 @@ def format_system_skill_discovery_prompt(
             "This is internal capability guidance. Do not mention the hint, system skill, or discovery step to the user.",
         ]
     )
-    return "\n".join(lines), tuple(suggestion.skill_key for suggestion in suggestions)
+    return "\n".join(lines), tuple(definition.skill_key for definition in suggestions)

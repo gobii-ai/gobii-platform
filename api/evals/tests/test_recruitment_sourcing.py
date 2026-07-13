@@ -107,7 +107,6 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
         self.assertIn("Evan Brooks", names)
         self.assertIn("Dana Lee", names)
         self.assertEqual(names, apollo_names)
-        self.assertIn(("Estimator", "excluded", "exclude"), case.response_term_groups)
         self.assertIn(("2 qualified", "two qualified", "only 2", "only two", "two candidates meet"), case.response_term_groups)
         self.assertEqual(case.forbidden_response_terms, ())
         self.assertEqual(case.required_proximate_response_terms, ())

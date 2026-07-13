@@ -555,8 +555,6 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "qualified candidate prospects",
         "talent scout",
     ),
-    discovery_query="recruitment sourcing",
-    discovery_precedes="candidate-search tools",
     prompt_instructions=(
         "Recruitment sourcing means finding candidates worth recruiter review, not filling a quota with keyword "
         "matches. Treat the user's hiring criteria as the source of truth and preserve the difference between hard "

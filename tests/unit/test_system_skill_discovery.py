@@ -10,9 +10,13 @@ from api.agent.system_skills.defaults import RECRUITMENT_SOURCING_SYSTEM_SKILL_K
 from api.agent.system_skills.discovery import (
     format_system_skill_discovery_prompt,
     get_system_skill_discovery_suggestions,
-    matching_system_skill_definitions,
 )
-from api.agent.system_skills.registry import SYSTEM_SKILL_REGISTRY, SystemSkillDefinition
+from api.agent.system_skills.registry import (
+    SYSTEM_SKILL_KEY_ALIASES,
+    SYSTEM_SKILL_REGISTRY,
+    SystemSkillDefinition,
+    shortlist_system_skills,
+)
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
@@ -32,6 +36,15 @@ COUNTED_CANDIDATE_PROMPT = (
     "must have 7+ years of backend experience, and must have recent Python experience. "
     "These requirements are non-negotiable."
 )
+
+
+def _matching_definitions(text: str):
+    return shortlist_system_skills(
+        text,
+        available_tool_names={"search_tools"},
+        limit=len(SYSTEM_SKILL_REGISTRY),
+        discovery_only=True,
+    )
 
 
 @tag("batch_mcp_tools")
@@ -90,14 +103,14 @@ class SystemSkillDiscoveryTests(TestCase):
 
         for text in examples:
             with self.subTest(text=text):
-                matches = matching_system_skill_definitions(text)
+                matches = _matching_definitions(text)
                 self.assertIn(
                     RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
                     {definition.skill_key for definition in matches},
                 )
 
     def test_matching_normalizes_case_punctuation_and_spacing(self):
-        matches = matching_system_skill_definitions("CANDIDATE---SOURCING for a new role")
+        matches = _matching_definitions("CANDIDATE---SOURCING for a new role")
 
         self.assertIn(
             RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
@@ -105,7 +118,7 @@ class SystemSkillDiscoveryTests(TestCase):
         )
 
     def test_matching_ignores_requested_count_between_action_and_candidates(self):
-        matches = matching_system_skill_definitions(COUNTED_CANDIDATE_PROMPT)
+        matches = _matching_definitions(COUNTED_CANDIDATE_PROMPT)
 
         self.assertIn(
             RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
@@ -113,7 +126,7 @@ class SystemSkillDiscoveryTests(TestCase):
         )
 
     def test_unrelated_research_does_not_match(self):
-        matches = matching_system_skill_definitions(
+        matches = _matching_definitions(
             "Research the candidates in the upcoming municipal election and summarize their platforms."
         )
 
@@ -132,7 +145,7 @@ class SystemSkillDiscoveryTests(TestCase):
             [suggestion.skill_key for suggestion in suggestions],
             [RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY],
         )
-        self.assertEqual(suggestions[0].search_query, "recruitment sourcing")
+        self.assertEqual(suggestions[0].name, "Recruitment Sourcing")
 
     def test_suggestion_uses_only_three_latest_inbound_messages(self):
         self._inbound("Please source candidates for this role.")
@@ -148,16 +161,18 @@ class SystemSkillDiscoveryTests(TestCase):
             [RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY],
         )
 
-    @patch("api.agent.system_skills.discovery.get_available_system_skill_tool_names", return_value=set())
+    @patch(
+        "api.agent.system_skills.discovery.get_available_system_skill_tool_names",
+        return_value={"search_tools"},
+    )
     def test_suggestions_are_capped_at_two(self, _mock_available_tools):
         definitions = {
             f"test_discovery_{index}": SystemSkillDefinition(
                 skill_key=f"test_discovery_{index}",
                 name=f"Test Discovery {index}",
                 search_summary="Test-only discovery skill.",
-                tool_names=(),
+                tool_names=("search_tools",),
                 discovery_triggers=("specialized workflow",),
-                discovery_query=f"test discovery {index}",
             )
             for index in range(3)
         }
@@ -179,19 +194,53 @@ class SystemSkillDiscoveryTests(TestCase):
         self.assertEqual(get_system_skill_discovery_suggestions(self.agent), [])
         self.assertEqual(format_system_skill_discovery_prompt(self.agent), ("", ()))
 
+    def test_default_enabled_skill_is_not_suggested_without_state_mutation(self):
+        definition = SystemSkillDefinition(
+            skill_key="test_default_discovery",
+            name="Test Default Discovery",
+            search_summary="Test-only default skill.",
+            tool_names=("search_tools",),
+            discovery_triggers=("specialized workflow",),
+            default_enabled=True,
+        )
+        self._inbound("Run this specialized workflow.")
+
+        with patch.dict(SYSTEM_SKILL_REGISTRY, {definition.skill_key: definition}), patch(
+            "api.agent.system_skills.discovery.get_available_system_skill_tool_names",
+            return_value={"search_tools"},
+        ):
+            suggestions = get_system_skill_discovery_suggestions(self.agent)
+
+        self.assertEqual(suggestions, [])
+        self.assertFalse(PersistentAgentSystemSkillState.objects.filter(agent=self.agent).exists())
+
+    def test_enabled_legacy_alias_suppresses_canonical_skill(self):
+        self._inbound("Source candidates for this role.")
+        legacy_key = "legacy_recruitment_sourcing"
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key=legacy_key,
+            is_enabled=True,
+        )
+
+        with patch.dict(SYSTEM_SKILL_KEY_ALIASES, {legacy_key: RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY}):
+            suggestions = get_system_skill_discovery_suggestions(self.agent)
+
+        self.assertEqual(suggestions, [])
+
     @patch("api.agent.system_skills.discovery.get_available_system_skill_tool_names", return_value=set())
     def test_unavailable_skill_is_not_suggested(self, _mock_available_tools):
         self._inbound("Source candidates for this role.")
 
         self.assertEqual(get_system_skill_discovery_suggestions(self.agent), [])
 
-    def test_matching_search_tools_attempt_suppresses_current_request_hint(self):
+    def test_relevant_search_tools_attempt_suppresses_current_request_hint(self):
         inbound = self._inbound("Source candidates for this role.")
         step = PersistentAgentStep.objects.create(agent=self.agent, description="Discover sourcing guidance")
         PersistentAgentToolCall.objects.create(
             step=step,
             tool_name="search_tools",
-            tool_params={"query": "recruitment sourcing"},
+            tool_params={"query": "candidate sourcing for this role"},
             result='{"status":"success"}',
         )
 
@@ -228,7 +277,7 @@ class SystemSkillDiscoveryTests(TestCase):
         self.assertIn("## Suggested Capability Discovery", block)
         self.assertIn('`search_tools("recruitment sourcing")`', block)
         self.assertIn("do not replace or expand it with task details", block)
-        self.assertIn("before using candidate-search tools", block)
+        self.assertIn("before using other task tools", block)
         self.assertIn("even when an enabled web, search, data, or integration tool", block)
         self.assertFalse(
             PersistentAgentSystemSkillState.objects.filter(

@@ -58,7 +58,7 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
     compat_fields = (
         (BrowserUseAgentTask, ("filespace_artifacts",)),
         (EvalRunTask, ("debug_artifacts",)),
-        (PersistentAgent, ("sms_disabled", "mini_description_mode")),
+        (PersistentAgent, ("sms_disabled",)),
         (AgentAllowlistInvite, sms_contact_fields),
         (CommsAllowlistEntry, sms_contact_fields),
         (CommsAllowlistRequest, sms_contact_fields),
