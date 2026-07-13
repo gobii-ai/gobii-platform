@@ -1810,7 +1810,10 @@ def _render_prompt_context_once(
                 non_shrinkable=True,
             )
 
-    discovery_prompt, discovery_keys = format_system_skill_discovery_prompt(agent)
+    if is_daily_hard_limit_message_only_mode(daily_credit_state):
+        discovery_prompt, discovery_keys = "", ()
+    else:
+        discovery_prompt, discovery_keys = format_system_skill_discovery_prompt(agent)
     span.set_attribute("system_skill.discovery_suggested_count", len(discovery_keys))
     span.set_attribute("system_skill.discovery_suggested_keys", ",".join(discovery_keys))
     if discovery_prompt:

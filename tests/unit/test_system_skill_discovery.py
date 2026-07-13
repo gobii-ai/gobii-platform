@@ -99,6 +99,7 @@ class SystemSkillDiscoveryTests(TestCase):
             "You are a recruiting sourcing agent that finds qualified candidate prospects.",
             "Source & screen candidates for this open role.",
             "Please source candidates for the engineering team.",
+            "Find 10 candidates for this role.",
         )
 
         for text in examples:
@@ -325,3 +326,24 @@ class SystemSkillDiscoveryTests(TestCase):
                 skill_key=RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
             ).exists()
         )
+
+    def test_daily_hard_limit_mode_omits_discovery_hint(self):
+        self._inbound("Find 10 candidates for this role.")
+        daily_credit_state = {
+            "hard_limit": 2,
+            "hard_limit_remaining": 0,
+            "soft_target": 2,
+            "used": 2,
+        }
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            messages, _tokens, _metadata = build_prompt_context_preview(
+                self.agent,
+                daily_credit_state=daily_credit_state,
+            )
+
+        user_prompt = next(message["content"] for message in messages if message["role"] == "user")
+        self.assertIn("DAILY HARD LIMIT MODE", user_prompt)
+        self.assertNotIn("## Suggested Capability Discovery", user_prompt)

@@ -549,6 +549,7 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "recruitment sourcing",
         "candidate sourcing",
         "talent sourcing",
+        "find candidates",
         "source candidates",
         "screen candidates",
         "shortlist candidates",
