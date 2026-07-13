@@ -73,17 +73,3 @@ export function disableAgentSms(agentId: string): Promise<EnableSmsResponse> {
     includeCsrf: true,
   })
 }
-
-export type ResendEmailVerificationResponse = {
-  verified: boolean
-  message: string
-  error?: string
-}
-
-export function resendEmailVerification(): Promise<ResendEmailVerificationResponse> {
-  return jsonRequest<ResendEmailVerificationResponse>('/console/api/user/email/resend-verification/', {
-    method: 'POST',
-    json: {},
-    includeCsrf: true,
-  })
-}

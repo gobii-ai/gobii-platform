@@ -1,4 +1,5 @@
 import json
+import re
 from unittest import skipUnless
 from unittest.mock import patch
 
@@ -75,7 +76,11 @@ class ConsoleUserProfileApiTests(TestCase):
         self.assertIn("/?ref=", payload["referralLink"])
         self.assertEqual(
             payload["emailVerification"],
-            {"email": "profile-owner@example.com", "isVerified": True},
+            {
+                "email": "profile-owner@example.com",
+                "isVerified": True,
+                "pendingEmail": None,
+            },
         )
         self.assertEqual(payload["phone"]["number"], "+15551234567")
         self.assertTrue(payload["phone"]["isVerified"])
@@ -203,6 +208,265 @@ class ConsoleUserProfileApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("timezone", response.json()["errors"])
+
+
+@tag("batch_console_api")
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class ConsoleUserEmailApiTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="email-change-owner",
+            email="email-change-owner@example.com",
+            password="password123",
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        self.client.force_login(self.user)
+        self.url = reverse("console_user_email")
+
+    def test_requires_authentication(self):
+        response = self.client_class().post(
+            self.url,
+            data=json.dumps({"email": "new-owner@example.com"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_rejects_non_object_json(self):
+        for payload in ([], "new-owner@example.com"):
+            with self.subTest(payload=payload):
+                response = self.client.post(
+                    self.url,
+                    data=json.dumps(payload),
+                    content_type="application/json",
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.content, b"JSON object expected")
+
+    def test_change_keeps_verified_current_email_until_confirmation(self):
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"email": "New-Owner@Example.com"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "email-change-owner@example.com")
+        current = EmailAddress.objects.get(user=self.user, email=self.user.email)
+        pending = EmailAddress.objects.get(user=self.user, email="new-owner@example.com")
+        self.assertTrue(current.primary)
+        self.assertTrue(current.verified)
+        self.assertFalse(pending.primary)
+        self.assertFalse(pending.verified)
+        self.assertEqual(
+            response.json()["emailVerification"],
+            {
+                "email": "email-change-owner@example.com",
+                "isVerified": True,
+                "pendingEmail": "new-owner@example.com",
+            },
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["new-owner@example.com"])
+        self.assertIn("next=%2Fapp%2Fprofile", mail.outbox[0].body)
+
+    def test_confirming_pending_email_switches_account_and_notifies_old_address(self):
+        self.client.post(
+            self.url,
+            data=json.dumps({"email": "confirmed-owner@example.com"}),
+            content_type="application/json",
+        )
+        confirmation_url = re.search(
+            r"https?://[^\s]+/accounts/confirm-email/[^\s]+",
+            mail.outbox[0].body,
+        )
+        self.assertIsNotNone(confirmation_url)
+
+        response = self.client.get(confirmation_url.group(0))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/app/profile")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "confirmed-owner@example.com")
+        addresses = list(EmailAddress.objects.filter(user=self.user))
+        self.assertEqual(len(addresses), 1)
+        self.assertEqual(addresses[0].email, "confirmed-owner@example.com")
+        self.assertTrue(addresses[0].verified)
+        self.assertTrue(addresses[0].primary)
+        self.assertTrue(any(message.to == ["email-change-owner@example.com"] for message in mail.outbox[1:]))
+
+        profile_response = self.client.get(reverse("console_user_profile"))
+        self.assertEqual(
+            profile_response.json()["emailVerification"],
+            {
+                "email": "confirmed-owner@example.com",
+                "isVerified": True,
+                "pendingEmail": None,
+            },
+        )
+
+    def test_new_change_replaces_previous_pending_address(self):
+        for email in ("first-pending@example.com", "second-pending@example.com"):
+            response = self.client.post(
+                self.url,
+                data=json.dumps({"email": email}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 200)
+
+        self.assertFalse(
+            EmailAddress.objects.filter(user=self.user, email="first-pending@example.com").exists()
+        )
+        self.assertTrue(
+            EmailAddress.objects.filter(user=self.user, email="second-pending@example.com").exists()
+        )
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "email-change-owner@example.com")
+
+    def test_cancel_removes_only_pending_address(self):
+        self.client.post(
+            self.url,
+            data=json.dumps({"email": "cancel-me@example.com"}),
+            content_type="application/json",
+        )
+
+        response = self.client.delete(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["emailVerification"]["pendingEmail"])
+        self.assertFalse(
+            EmailAddress.objects.filter(user=self.user, email="cancel-me@example.com").exists()
+        )
+        current = EmailAddress.objects.get(user=self.user, email="email-change-owner@example.com")
+        self.assertTrue(current.verified)
+        self.assertTrue(current.primary)
+
+    def test_rejects_invalid_duplicate_and_blocked_addresses(self):
+        other_user = get_user_model().objects.create_user(
+            username="other-email-owner",
+            email="already-used@example.com",
+            password="password123",
+        )
+        EmailAddress.objects.create(
+            user=other_user,
+            email=other_user.email,
+            verified=True,
+            primary=True,
+        )
+
+        for email in (
+            "not-an-email",
+            self.user.email,
+            "already-used@example.com",
+            "blocked@mailslurp.biz",
+        ):
+            with self.subTest(email=email):
+                response = self.client.post(
+                    self.url,
+                    data=json.dumps({"email": email}),
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("email", response.json()["errors"])
+
+        self.assertEqual(EmailAddress.objects.filter(user=self.user).count(), 1)
+
+    @patch("api.services.email_verification.send_email_verification", side_effect=OSError("smtp.internal.local"))
+    def test_send_failure_restores_previous_pending_address(self, mock_send_email_verification):
+        EmailAddress.objects.create(
+            user=self.user,
+            email="previous-pending@example.com",
+            verified=False,
+        )
+        with patch("console.api_views.logger.exception") as mock_logger_exception:
+            response = self.client.post(
+                self.url,
+                data=json.dumps({"email": "send-failure@example.com"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {"error": "Failed to send verification email. Please try again later."},
+        )
+        self.assertFalse(
+            EmailAddress.objects.filter(user=self.user, email="send-failure@example.com").exists()
+        )
+        self.assertTrue(
+            EmailAddress.objects.filter(user=self.user, email="previous-pending@example.com").exists()
+        )
+        mock_send_email_verification.assert_called_once()
+        mock_logger_exception.assert_called_once()
+
+    def test_change_replaces_unverified_email_when_no_verified_identity_exists(self):
+        EmailAddress.objects.filter(user=self.user).update(verified=False)
+
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"email": "corrected-owner@example.com"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "corrected-owner@example.com")
+        address = EmailAddress.objects.get(user=self.user)
+        self.assertEqual(address.email, "corrected-owner@example.com")
+        self.assertTrue(address.primary)
+        self.assertFalse(address.verified)
+        self.assertEqual(
+            response.json()["emailVerification"],
+            {
+                "email": "corrected-owner@example.com",
+                "isVerified": False,
+                "pendingEmail": None,
+            },
+        )
+
+    def test_change_replaces_unverified_current_email_without_discarding_verified_history(self):
+        EmailAddress.objects.filter(user=self.user).update(verified=False)
+        EmailAddress.objects.create(
+            user=self.user,
+            email="old-verified@example.com",
+            verified=True,
+        )
+
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"email": "corrected-owner@example.com"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "corrected-owner@example.com")
+        corrected = EmailAddress.objects.get(user=self.user, email=self.user.email)
+        self.assertTrue(corrected.primary)
+        self.assertFalse(corrected.verified)
+        self.assertTrue(
+            EmailAddress.objects.filter(
+                user=self.user,
+                email="old-verified@example.com",
+                verified=True,
+            ).exists()
+        )
+        self.assertEqual(
+            response.json()["emailVerification"],
+            {
+                "email": "corrected-owner@example.com",
+                "isVerified": False,
+                "pendingEmail": None,
+            },
+        )
 
 
 @tag("batch_console_api")
@@ -339,7 +603,7 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
             password="password123",
         )
         self.client.force_login(self.user)
-        self.url = reverse("console_user_email_resend_verification")
+        self.url = reverse("console_user_email")
 
     def test_resend_sends_verification_email_for_unverified_primary_address(self):
         EmailAddress.objects.create(
@@ -349,18 +613,24 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
             primary=True,
         )
 
-        response = self.client.post(self.url)
+        response = self.client.put(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
-            {"verified": False, "message": "Verification email sent."},
+            {
+                "emailVerification": {
+                    "email": "resend-owner@example.com",
+                    "isVerified": False,
+                    "pendingEmail": None,
+                },
+            },
         )
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, [self.user.email])
         self.assertIn("/accounts/confirm-email/", mail.outbox[0].body)
 
-    @patch("api.services.email_verification.send_email_verification", return_value=False)
+    @patch("console.api_views.send_email_verification", return_value=False)
     def test_resend_reports_when_email_was_recently_sent(self, mock_send_email_verification):
         EmailAddress.objects.create(
             user=self.user,
@@ -369,19 +639,22 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
             primary=True,
         )
 
-        response = self.client.post(self.url)
+        response = self.client.put(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
             {
-                "verified": False,
-                "message": "A verification email was already sent recently. Please check your inbox or try again later.",
+                "emailVerification": {
+                    "email": "resend-owner@example.com",
+                    "isVerified": False,
+                    "pendingEmail": None,
+                },
             },
         )
         mock_send_email_verification.assert_called_once()
 
-    @patch("api.services.email_verification.send_email_verification", side_effect=OSError("smtp.internal.local"))
+    @patch("console.api_views.send_email_verification", side_effect=OSError("smtp.internal.local"))
     def test_resend_returns_generic_error_when_email_send_fails(self, mock_send_email_verification):
         EmailAddress.objects.create(
             user=self.user,
@@ -391,7 +664,7 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
         )
 
         with patch("console.api_views.logger.exception") as mock_logger_exception:
-            response = self.client.post(self.url)
+            response = self.client.put(self.url)
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(
@@ -410,11 +683,44 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
             primary=True,
         )
 
-        response = self.client.post(self.url)
+        response = self.client.put(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
-            {"verified": True, "message": "Email already verified."},
+            {
+                "emailVerification": {
+                    "email": "resend-owner@example.com",
+                    "isVerified": True,
+                    "pendingEmail": None,
+                },
+            },
         )
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_resend_targets_pending_change_before_verified_current_address(self):
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email="pending-resend@example.com",
+            verified=False,
+            primary=False,
+        )
+
+        response = self.client.put(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mail.outbox[0].to, ["pending-resend@example.com"])
+        self.assertEqual(
+            response.json()["emailVerification"],
+            {
+                "email": "resend-owner@example.com",
+                "isVerified": True,
+                "pendingEmail": "pending-resend@example.com",
+            },
+        )

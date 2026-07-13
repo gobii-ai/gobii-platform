@@ -5,10 +5,16 @@ Provides helpers to check whether a user has verified their email address,
 used to gate external communications (email, SMS, webhooks) until verified.
 """
 
+from allauth.account import signals
+from allauth.account.forms import AddEmailForm
+from allauth.account.internal.flows.manage_email import email_already_exists
 from allauth.account.models import EmailAddress
+from django.core.exceptions import ValidationError
+from django.db import transaction
 
 
 EMAIL_VERIFICATION_REDIRECT_URL_SESSION_KEY = "email_verification_redirect_url"
+EMAIL_CHANGE_REDIRECT_URL = "/app/profile"
 
 
 class EmailVerificationError(Exception):
@@ -93,6 +99,61 @@ def get_user_email_address_for_verification(user) -> EmailAddress | None:
         verified=False,
         primary=not primary_exists,
     )
+
+
+def get_pending_email_change(user) -> EmailAddress | None:
+    pending = EmailAddress.objects.get_new(user)
+    current_email = str(user.email or "").strip().casefold()
+    return pending if pending and pending.email.casefold() != current_email else None
+
+
+def serialize_email_verification(user) -> dict[str, str | bool | None]:
+    current_email = str(user.email or "").strip()
+    pending = get_pending_email_change(user)
+    return {
+        "email": current_email,
+        "isVerified": bool(current_email and EmailAddress.objects.filter(
+            user=user, email__iexact=current_email, verified=True
+        ).exists()),
+        "pendingEmail": pending.email if pending else None,
+    }
+
+
+def validate_email_change(user, email) -> tuple[AddEmailForm, str | None]:
+    form = AddEmailForm(data={"email": email}, user=user)
+    if form.is_valid():
+        try:
+            email_already_exists(form.cleaned_data["email"], user=user, always_raise=True)
+        except ValidationError as exc:
+            form.add_error("email", exc)
+    return form, form.cleaned_data.get("email") if not form.errors else None
+
+
+def start_email_change(request, email: str) -> dict[str, str | bool | None]:
+    user = request.user
+    current_email_is_verified = EmailAddress.objects.filter(user=user, email__iexact=user.email, verified=True).exists()
+
+    # Keep allauth's canonical pending-address replacement, but send inside the
+    # transaction so provider failures restore the previous address.
+    with transaction.atomic():
+        new_address = EmailAddress.objects.add_new_email(request, user, email, send_verification=False)
+        send_email_verification(request, new_address, redirect_url=EMAIL_CHANGE_REDIRECT_URL)
+        if not current_email_is_verified:
+            new_address.set_as_primary()
+
+    signals.email_added.send(sender=EmailAddress, request=request, user=user, email_address=new_address)
+    return serialize_email_verification(user)
+
+
+def cancel_email_change(user) -> dict[str, str | bool | None]:
+    pending = get_pending_email_change(user)
+    if pending:
+        pending.remove()
+    return serialize_email_verification(user)
+
+
+def get_email_verification_target(user) -> EmailAddress | None:
+    return get_pending_email_change(user) or get_user_email_address_for_verification(user)
 
 
 def send_email_verification(

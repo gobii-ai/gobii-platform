@@ -4,7 +4,8 @@ import { motion } from 'framer-motion'
 import { ArrowRight, Brain, Check, CheckCircle2, Copy, Mail, MessageSquare, Pencil, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, InsightEvent } from '../../../types/insight'
-import { disableAgentSms, enableAgentSms, resendEmailVerification } from '../../../api/agentSetup'
+import { disableAgentSms, enableAgentSms } from '../../../api/agentSetup'
+import { updateUserEmail } from '../../../api/userProfile'
 import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
 import { getReturnToPath } from '../../../util/returnTo'
@@ -192,7 +193,7 @@ export function AgentSetupInsight({
     setEmailResendState('sending')
     setEmailResendError(null)
     try {
-      await resendEmailVerification()
+      await updateUserEmail('resend')
       setEmailResendState('sent')
     } catch (error) {
       setEmailResendState('error')
