@@ -6,6 +6,7 @@ These helpers live outside the MCP manager so multiple providers can share the
 same persistence logic.
 """
 
+import fnmatch
 import logging
 import uuid
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from datetime import datetime, UTC
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from django.conf import settings
+from django.db import DatabaseError
 from django.db.models import F
 
 from util.text_sanitizer import decode_unicode_escapes
@@ -22,7 +24,13 @@ from api.agent.eval_agents import is_eval_agent
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
 from ...services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, sandbox_compute_enabled_for_agent, track_sandbox_unavailable
 from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
-from ...services.pipedream_apps import filter_deprecated_pipedream_tools_for_agent, get_pipedream_app_visibility_for_agent, is_pipedream_tool_visible_to_agent
+from ...services.mcp_servers import agent_accessible_server_configs
+from ...services.pipedream_apps import (
+    filter_deprecated_pipedream_tools_for_agent,
+    get_pipedream_app_visibility_for_agent,
+    is_pipedream_tool_visible_to_agent,
+    pipedream_app_slug_for_tool_name,
+)
 from ...services.tool_blacklist import get_agent_tool_blacklist, is_tool_blacklisted_for_agent, tool_blacklist_error
 from ...utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
@@ -590,6 +598,128 @@ def _evict_surplus_tools(
     return evicted_names
 
 
+def _existing_skill_tool_entry(
+    agent: PersistentAgent,
+    row: PersistentAgentEnabledTool,
+) -> Optional[ToolCatalogEntry]:
+    """Build metadata for an enabled tool without loading any remote catalog."""
+    registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
+    if registry_entry:
+        return _build_builtin_catalog_entry(row.tool_full_name, registry_entry)
+
+    custom_entry = get_available_custom_tool_entries(agent).get(row.tool_full_name)
+    if custom_entry:
+        return custom_entry
+
+    if row.tool_server:
+        return ToolCatalogEntry(
+            provider="mcp" if row.tool_server not in {"builtin", "custom"} else row.tool_server,
+            full_name=row.tool_full_name,
+            description="",
+            parameters={},
+            tool_server=row.tool_server,
+            tool_name=row.tool_name or row.tool_full_name,
+            server_config_id=str(row.server_config_id) if row.server_config_id else None,
+        )
+
+    return _infer_canonical_mcp_entry(agent, row.tool_full_name)
+
+
+def _is_mcp_tool_blacklisted(tool_name: str) -> bool:
+    return any(fnmatch.fnmatch(tool_name, pattern) for pattern in MCPToolManager.TOOL_BLACKLIST)
+
+
+def _infer_canonical_mcp_entry(
+    agent: PersistentAgent,
+    tool_name: str,
+) -> Optional[ToolCatalogEntry]:
+    if not tool_name.startswith("mcp_"):
+        return None
+
+    matching_configs = []
+    try:
+        for config in agent_accessible_server_configs(agent):
+            prefix = f"mcp_{config.name}_"
+            if tool_name.startswith(prefix):
+                matching_configs.append((len(prefix), config, tool_name[len(prefix):]))
+    except DatabaseError:
+        logger.debug("Failed to infer MCP server for skill tool %s", tool_name, exc_info=True)
+        return None
+
+    if not matching_configs:
+        return None
+    _prefix_length, config, raw_tool_name = max(matching_configs, key=lambda item: item[0])
+    return ToolCatalogEntry(
+        provider="mcp",
+        full_name=tool_name,
+        description="",
+        parameters={},
+        tool_server=config.name,
+        tool_name=raw_tool_name,
+        server_config_id=str(config.id),
+    )
+
+
+def _resolve_missing_skill_tool(
+    agent: PersistentAgent,
+    tool_name: str,
+) -> Optional[ToolCatalogEntry]:
+    """Resolve one missing requirement using only its local or inferred provider."""
+    registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+    if registry_entry and _is_builtin_tool_available(tool_name, agent, include_hidden=True):
+        return _build_builtin_catalog_entry(tool_name, registry_entry)
+
+    custom_entry = get_available_custom_tool_entries(agent).get(tool_name)
+    if custom_entry:
+        return custom_entry
+
+    if tool_name in EVAL_SYNTHETIC_TOOL_DEFINITIONS:
+        tool_def = get_eval_synthetic_tool_definition(agent, tool_name)
+        if tool_def:
+            metadata = EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]
+            return ToolCatalogEntry(
+                provider="eval",
+                full_name=tool_name,
+                description=metadata["description"],
+                parameters=metadata["parameters"],
+                tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+                tool_name=tool_name,
+                system_skill_key=str(metadata.get("system_skill_key") or ""),
+            )
+
+    inferred_entry = _infer_canonical_mcp_entry(agent, tool_name)
+    app_slug = pipedream_app_slug_for_tool_name(tool_name)
+    if not inferred_entry and not app_slug:
+        return None
+
+    manager = _get_manager()
+    if manager.is_tool_blacklisted(tool_name):
+        return None
+    if inferred_entry:
+        discovered = manager.get_tools_for_agent(
+            agent,
+            allowed_config_ids={inferred_entry.server_config_id},
+        )
+    else:
+        discovered = manager.get_tools_for_agent(
+            agent,
+            allowed_server_names={PIPEDREAM_TOOL_SERVER_NAME},
+            pipedream_app_slugs={app_slug},
+        )
+    for info in discovered:
+        if info.full_name == tool_name:
+            return ToolCatalogEntry(
+                provider="mcp",
+                full_name=info.full_name,
+                description=info.description,
+                parameters=info.parameters,
+                tool_server=info.server_name,
+                tool_name=info.tool_name,
+                server_config_id=info.config_id,
+            )
+    return None
+
+
 def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
     """Ensure all tools required by latest persisted skills are enabled."""
     required = sorted(get_required_skill_tool_ids(agent))
@@ -622,18 +752,34 @@ def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
             continue
         dynamic_required.append(tool_name)
 
-    catalog: Dict[str, ToolCatalogEntry] = {}
-    manager: Optional[MCPToolManager] = None
-    if dynamic_required:
-        catalog = _build_available_tool_index(agent)
-        manager = _get_manager()
+    existing_rows = {
+        row.tool_full_name: row
+        for row in PersistentAgentEnabledTool.objects.filter(
+            agent=agent,
+            tool_full_name__in=dynamic_required,
+        )
+    }
+    tier_blacklist = get_agent_tool_blacklist(agent)
     for tool_name in dynamic_required:
-        entry = catalog.get(tool_name)
-        if not entry:
+        if tool_name in tier_blacklist:
             invalid.append(tool_name)
             continue
 
-        if entry.provider == "mcp" and manager and manager.is_tool_blacklisted(tool_name):
+        existing_row = existing_rows.get(tool_name)
+        if existing_row:
+            entry = _existing_skill_tool_entry(agent, existing_row)
+            if entry and entry.provider == "mcp" and _is_mcp_tool_blacklisted(tool_name):
+                invalid.append(tool_name)
+                continue
+            metadata_updates = _apply_tool_metadata(existing_row, entry)
+            if metadata_updates:
+                existing_row.save(update_fields=metadata_updates)
+            _ensure_system_skill_enabled_for_tool(agent, entry)
+            already_enabled.append(tool_name)
+            continue
+
+        entry = _resolve_missing_skill_tool(agent, tool_name)
+        if not entry:
             invalid.append(tool_name)
             continue
 
@@ -642,7 +788,7 @@ def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
                 agent=agent,
                 tool_full_name=tool_name,
             )
-        except Exception:
+        except DatabaseError:
             logger.exception("Failed to ensure skill tool '%s' for agent %s", tool_name, agent.id)
             invalid.append(tool_name)
             continue

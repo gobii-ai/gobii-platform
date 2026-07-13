@@ -932,6 +932,8 @@ def _collect_failover_configs(
             )
         )
 
+    for _provider, _model, params in failover_configs:
+        params["routing_token_range"] = token_range_name
     return failover_configs
 
 

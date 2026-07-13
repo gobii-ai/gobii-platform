@@ -20,8 +20,10 @@ from api.agent.tools.mcp_manager import (
 )
 from api.agent.tools.tool_manager import ToolCatalogEntry, execute_enabled_tool
 from api.services.mcp_tool_cache import (
+    acquire_mcp_catalog_discovery_lock,
     get_cached_mcp_tool_definitions,
     invalidate_mcp_tool_cache,
+    release_mcp_catalog_discovery_lock,
     set_cached_mcp_tool_definitions,
 )
 
@@ -74,12 +76,65 @@ class MCPToolCacheTests(SimpleTestCase):
         set_cached_mcp_tool_definitions(runtime.config_id, fingerprint, payload)
         cached_payload = get_cached_mcp_tool_definitions(runtime.config_id, fingerprint)
 
-        self.assertEqual(payload, cached_payload)
-        hydrated = manager._deserialize_tools_from_cache(runtime, cached_payload or [])
+        self.assertIsNotNone(cached_payload)
+        self.assertEqual(payload, cached_payload.tools)
+        self.assertEqual("fresh", cached_payload.freshness)
+        hydrated = manager._deserialize_tools_from_cache(runtime, cached_payload.tools)
         self.assertEqual(
             [tool.full_name for tool in tools],
             [tool.full_name for tool in hydrated],
         )
+
+    def test_cache_soft_stale_and_hard_expiration(self):
+        manager = MCPToolManager()
+        runtime = self._runtime()
+        fingerprint = manager._build_tool_cache_fingerprint(runtime)
+        payload = manager._serialize_tools_for_cache(
+            [self._tool(runtime.config_id, "mcp_example_first")]
+        )
+
+        with patch("api.services.mcp_tool_cache.time.time", return_value=100.0):
+            set_cached_mcp_tool_definitions(runtime.config_id, fingerprint, payload)
+        with patch("api.services.mcp_tool_cache.time.time", return_value=3_701.0):
+            stale = get_cached_mcp_tool_definitions(runtime.config_id, fingerprint)
+        with patch("api.services.mcp_tool_cache.time.time", return_value=604_901.0):
+            expired = get_cached_mcp_tool_definitions(runtime.config_id, fingerprint)
+
+        self.assertIsNotNone(stale)
+        self.assertTrue(stale.is_stale)
+        self.assertIsNone(expired)
+
+    def test_soft_stale_cache_returns_and_schedules_refresh(self):
+        manager = MCPToolManager()
+        runtime = self._runtime()
+        fingerprint = manager._build_tool_cache_fingerprint(runtime)
+        payload = manager._serialize_tools_for_cache(
+            [self._tool(runtime.config_id, "mcp_example_first")]
+        )
+
+        with patch("api.services.mcp_tool_cache.time.time", return_value=100.0):
+            set_cached_mcp_tool_definitions(runtime.config_id, fingerprint, payload)
+        with patch("api.services.mcp_tool_cache.time.time", return_value=3_701.0), patch.object(
+            manager,
+            "_schedule_catalog_refresh",
+        ) as schedule_refresh:
+            loaded = manager._load_cached_tools(runtime, fingerprint)
+
+        self.assertTrue(loaded)
+        schedule_refresh.assert_called_once_with(runtime, [("", fingerprint)])
+
+    def test_discovery_lock_is_single_flight_and_token_safe(self):
+        fingerprint = "single-flight"
+        first = acquire_mcp_catalog_discovery_lock("cache-test-id", fingerprint)
+
+        self.assertIsNotNone(first)
+        self.assertIsNone(acquire_mcp_catalog_discovery_lock("cache-test-id", fingerprint))
+        release_mcp_catalog_discovery_lock("cache-test-id", fingerprint, "not-the-owner")
+        self.assertIsNone(acquire_mcp_catalog_discovery_lock("cache-test-id", fingerprint))
+        release_mcp_catalog_discovery_lock("cache-test-id", fingerprint, first)
+        second = acquire_mcp_catalog_discovery_lock("cache-test-id", fingerprint)
+        self.assertIsNotNone(second)
+        release_mcp_catalog_discovery_lock("cache-test-id", fingerprint, second)
 
     def test_fingerprint_changes_with_env_and_headers(self):
         manager = MCPToolManager()
@@ -116,7 +171,7 @@ class MCPToolCacheTests(SimpleTestCase):
 
         self.assertNotEqual(fallback_fingerprint, custom_fingerprint)
 
-    def test_pipedream_fingerprint_is_owner_scoped(self):
+    def test_pipedream_fingerprint_is_shared_across_owners(self):
         manager = MCPToolManager()
         runtime = replace(self._runtime(), name="pipedream")
 
@@ -129,7 +184,17 @@ class MCPToolCacheTests(SimpleTestCase):
             PipedreamToolCacheContext(owner_cache_key="user:two", effective_app_slugs=["trello"]),
         )
 
-        self.assertNotEqual(first, second)
+        self.assertEqual(first, second)
+        self.assertEqual(
+            manager._tool_cache_slot_key(
+                runtime,
+                PipedreamToolCacheContext(owner_cache_key="user:one", effective_app_slugs=["trello"]),
+            ),
+            manager._tool_cache_slot_key(
+                runtime,
+                PipedreamToolCacheContext(owner_cache_key="user:two", effective_app_slugs=["trello"]),
+            ),
+        )
 
     def test_sandbox_stdio_fingerprint_is_agent_scoped(self):
         manager = MCPToolManager()
@@ -367,16 +432,17 @@ class MCPToolCacheTests(SimpleTestCase):
             self.assertTrue(manager._ensure_runtime_registered(runtime, pipedream_context=updated_context))
 
         register_mock.assert_called_once()
+        updated_slot_key = manager._tool_cache_slot_key(runtime, updated_context)
         self.assertEqual(
-            [tool.full_name for tool in manager._tools_cache[slot_key]],
+            [tool.full_name for tool in manager._tools_cache[updated_slot_key]],
             ["slack-send-message"],
         )
         self.assertEqual(
-            manager._tool_cache_fingerprints[slot_key],
+            manager._tool_cache_fingerprints[updated_slot_key],
             manager._build_tool_cache_fingerprint(runtime, updated_context),
         )
 
-    def test_invalidate_pipedream_owner_cache_removes_only_matching_slot(self):
+    def test_invalidate_pipedream_owner_cache_preserves_shared_app_shards(self):
         manager = MCPToolManager()
         runtime = replace(self._runtime(), name="pipedream", config_id="pd-config")
         keep_context = PipedreamToolCacheContext(owner_cache_key="user:keep", effective_app_slugs=["slack"])
@@ -391,7 +457,39 @@ class MCPToolCacheTests(SimpleTestCase):
         manager.invalidate_pipedream_owner_cache("user", "drop")
 
         self.assertIn(keep_key, manager._tools_cache)
-        self.assertNotIn(drop_key, manager._tools_cache)
+        self.assertIn(drop_key, manager._tools_cache)
+
+    def test_pipedream_tools_are_partitioned_and_composed_by_app(self):
+        manager = MCPToolManager()
+        runtime = replace(self._runtime(), name="pipedream", config_id="cache-test-id")
+        context = PipedreamToolCacheContext(
+            owner_cache_key="user:one",
+            effective_app_slugs=["slack", "trello"],
+        )
+        tools = [
+            MCPToolInfo(runtime.config_id, "slack-send-message", "pipedream", "slack-send-message", "", {}),
+            MCPToolInfo(runtime.config_id, "trello-create-card", "pipedream", "trello-create-card", "", {}),
+        ]
+
+        manager._store_discovered_tools(
+            runtime,
+            tools,
+            manager._build_tool_cache_fingerprint(runtime, context),
+            context,
+        )
+
+        self.assertTrue(
+            manager._load_cached_tools(
+                runtime,
+                manager._build_tool_cache_fingerprint(runtime, context),
+                pipedream_context=context,
+            )
+        )
+        composed = manager._tools_cache[manager._tool_cache_slot_key(runtime, context)]
+        self.assertEqual(
+            {tool.full_name for tool in composed},
+            {"slack-send-message", "trello-create-card"},
+        )
 
     def test_fetch_server_tools_lists_pipedream_once_for_prefetched_apps(self):
         manager = MCPToolManager()

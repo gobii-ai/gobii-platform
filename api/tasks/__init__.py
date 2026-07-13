@@ -48,6 +48,7 @@ from .trial_activation import assess_trial_user_activation_task  # noqa: F401
 
 # Avatar backfill scheduler
 from .avatar_backfill import schedule_agent_avatar_backfill_task  # noqa: F401
+from .mcp_catalogs import refresh_mcp_catalog  # noqa: F401
 
 # Ensure persistent-agent task modules (IMAP polling, event processing) are imported
 # so Celery autodiscovery picks them up when it imports api.tasks.
