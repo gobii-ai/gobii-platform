@@ -167,6 +167,11 @@ class MCPOAuthRefreshTests(TestCase):
 
         self.assertEqual(result.status, MCPOAuthStatus.USABLE)
         self.assertEqual(result.credential.access_token, "new-access")
+        stored = MCPServerOAuthCredential.objects.get(id=result.credential.id)
+        self.assertEqual(stored.access_token, "new-access")
+        self.assertNotEqual(bytes(stored.access_token_encrypted), b"new-access")
+        self.assertEqual(stored.refresh_token, "new-refresh")
+        self.assertNotEqual(bytes(stored.refresh_token_encrypted), b"new-refresh")
         mock_post.assert_called_once()
 
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")

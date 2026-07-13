@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError
 from django.test import TestCase, tag
 
 from api.agent.tools.agent_variables import clear_variables, get_agent_variable, set_agent_variable
@@ -255,6 +256,48 @@ class TestParallelToolCallsExecution(TestCase):
                 code=PersistentAgentSystemStep.Code.RATE_LIMIT,
             ).exists()
         )
+
+    def test_batch_rate_limit_settings_failure_does_not_retry_per_call(self):
+        from api.agent.core import event_processing as ep
+
+        with patch(
+            "api.agent.core.event_processing.get_tool_settings_for_owner",
+            side_effect=DatabaseError("offline"),
+        ), patch.object(ep, "_resolve_tool_hourly_limit") as fallback:
+            batch = ep._build_tool_rate_limit_batch(self.agent, ["read_file"])
+            self.assertTrue(
+                ep._enforce_tool_rate_limit(
+                    self.agent,
+                    "read_file",
+                    rate_limit_batch=batch,
+                )
+            )
+
+        self.assertEqual(batch.checked_names, {"read_file"})
+        fallback.assert_not_called()
+
+    def test_batch_rate_limit_count_failure_does_not_retry_per_call(self):
+        from api.agent.core import event_processing as ep
+
+        tool_settings = SimpleNamespace(hourly_limit_for_tool=lambda _name: 1)
+        with patch(
+            "api.agent.core.event_processing.get_tool_settings_for_owner",
+            return_value=tool_settings,
+        ), patch(
+            "api.agent.core.event_processing.PersistentAgentToolCall.objects.filter",
+            side_effect=DatabaseError("offline"),
+        ), patch.object(ep, "_resolve_tool_hourly_limit") as fallback:
+            batch = ep._build_tool_rate_limit_batch(self.agent, ["read_file"])
+            self.assertTrue(
+                ep._enforce_tool_rate_limit(
+                    self.agent,
+                    "read_file",
+                    rate_limit_batch=batch,
+                )
+            )
+
+        self.assertEqual(batch.checked_names, {"read_file"})
+        fallback.assert_not_called()
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")

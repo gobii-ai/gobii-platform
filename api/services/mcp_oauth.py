@@ -206,6 +206,7 @@ def _refresh_credential(
     }
     updates.update(metadata=metadata, updated_at=now)
     try:
+        # Values are encrypted explicitly; update() avoids reconnect-driven catalog invalidation.
         updated = MCPServerOAuthCredential.objects.filter(id=credential.id).update(**updates)
     except DatabaseError:
         logger.exception("Failed to persist refreshed MCP OAuth credential %s", credential.id)

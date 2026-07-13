@@ -2365,7 +2365,6 @@ def _execute_tool_call_runtime(
             eval_run_id,
         )
         return mock_result, updated_tools
-    resolved_kwargs = {"resolved_entry": resolved_entry} if resolved_entry is not None else {}
     if parallel_safe:
         return execute_enabled_tool(
             agent,
@@ -2373,7 +2372,7 @@ def _execute_tool_call_runtime(
             exec_params,
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
-            **resolved_kwargs,
+            resolved_entry=resolved_entry,
         ), updated_tools
     resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
     if resolve_executor:
@@ -2388,7 +2387,7 @@ def _execute_tool_call_runtime(
         tool_name,
         exec_params,
         current_sqlite_db_path=get_sqlite_db_path(),
-        **resolved_kwargs,
+        resolved_entry=resolved_entry,
     ), updated_tools
 
 
@@ -4118,7 +4117,7 @@ def _build_tool_rate_limit_batch(
             getattr(agent, "id", None),
             exc_info=True,
         )
-        return _ToolRateLimitBatch(limits={}, recent_counts={})
+        return _ToolRateLimitBatch(limits={}, recent_counts={}, checked_names=checked_names)
 
     limits = {
         tool_name: limit
@@ -4150,7 +4149,7 @@ def _build_tool_rate_limit_batch(
             getattr(agent, "id", None),
             exc_info=True,
         )
-        return _ToolRateLimitBatch(limits={}, recent_counts={})
+        return _ToolRateLimitBatch(limits={}, recent_counts={}, checked_names=checked_names)
 
     return _ToolRateLimitBatch(
         limits=limits,

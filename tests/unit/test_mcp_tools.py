@@ -1360,6 +1360,58 @@ class MCPToolManagerTests(TestCase):
             allowed_config_ids={self.config_id},
             pipedream_app_slugs=None,
         )
+
+    @tag("batch_mcp_tools")
+    def test_resolution_does_not_reuse_cached_tool_from_inaccessible_config(self):
+        user = get_user_model().objects.create_user(username=f"resolver-{uuid.uuid4().hex[:8]}")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Resolver agent",
+            charter="Test",
+            browser_use_agent=create_test_browser_agent(user),
+        )
+        other_user = get_user_model().objects.create_user(username=f"other-{uuid.uuid4().hex[:8]}")
+        other_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=other_user,
+            name="shared",
+            display_name="Inaccessible",
+            command="other",
+        )
+        wrong = MCPToolInfo(
+            str(other_config.id),
+            "mcp_shared_lookup",
+            other_config.name,
+            "lookup",
+            "Wrong",
+            {},
+        )
+        expected = MCPToolInfo(
+            self.config_id,
+            wrong.full_name,
+            self.server_name,
+            "lookup",
+            "Expected",
+            {},
+        )
+        self.manager._server_cache[str(other_config.id)] = self.manager._build_runtime_from_config(
+            other_config
+        )
+        self.manager._tools_cache[str(other_config.id)] = [wrong]
+
+        with patch.object(self.manager, "get_tools_for_agent", return_value=[expected]) as get_tools:
+            result = self.manager.prepare_tool_for_agent(
+                agent,
+                expected.full_name,
+                require_enabled=False,
+            )
+
+        self.assertIs(result, expected)
+        get_tools.assert_called_once_with(
+            agent,
+            allowed_server_names={"shared"},
+            pipedream_app_slugs=None,
+        )
         
     @patch('api.agent.tools.mcp_manager.asyncio.get_running_loop')
     def test_ensure_event_loop_reuses_existing(self, mock_get_loop):
