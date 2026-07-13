@@ -2,12 +2,13 @@
 "use no memo"
 import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { type Column, type ColumnDef, type SortingState, flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from '@tanstack/react-table'
+import { type Column, type ColumnDef, type SortingState, getCoreRowModel, getSortedRowModel, useReactTable } from '@tanstack/react-table'
 
 import type { DateRangeValue, UsageAgentLeaderboardQueryInput, UsageAgentLeaderboardResponse } from './types'
 import { fetchUsageAgentLeaderboard } from './api'
 import { handleAppAnchorClick } from '../../util/appNavigation'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
+import { TanStackTableShell, type TanStackTableBodyMessage } from '../common/TanStackTableShell'
 
 const API_AGENT_ID = 'api'
 const DEFAULT_VISIBLE_ROWS = 5
@@ -300,6 +301,22 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
   const emptyCellClassName = 'px-3 md:px-6 py-4 text-center text-sm text-slate-400'
   const errorCellClassName = 'px-3 md:px-6 py-4 text-center text-sm text-rose-300'
   const toggleClassName = 'text-sm font-semibold text-sky-300 hover:text-sky-200'
+  const bodyState: TanStackTableBodyMessage | null = !queryInput
+    ? {
+        content: 'Select a date range to view agent and API performance.',
+        cellClassName: emptyCellClassName,
+      }
+    : isPending
+      ? {
+          content: 'Loading agent and API activity…',
+          cellClassName: emptyCellClassName,
+        }
+      : isError
+        ? {
+            content: error?.message || 'Unable to load agent and API leaderboard right now.',
+            cellClassName: errorCellClassName,
+          }
+        : null
 
   return (
     <section className={sectionClassName}>
@@ -311,70 +328,32 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
       </header>
 
       <div className="overflow-x-auto">
-        <table className={tableClassName}>
-          <thead className={tableHeadClassName}>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const sortState = header.column.getIsSorted()
-                  const ariaSort = sortState === 'asc' ? 'ascending' : sortState === 'desc' ? 'descending' : 'none'
-                  return (
-                    <th
-                      key={header.id}
-                      scope="col"
-                      aria-sort={ariaSort}
-                      className={`${header.column.id === 'name' ? 'text-left' : 'text-right'} px-3 md:px-6 py-3`}
-                    >
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(header.column.columnDef.header, header.getContext())}
-                    </th>
-                  )
-                })}
-              </tr>
-            ))}
-          </thead>
-          <tbody className={tableBodyClassName}>
-            {!queryInput ? (
-              <tr>
-                <td className={emptyCellClassName} colSpan={columns.length}>
-                  Select a date range to view agent and API performance.
-                </td>
-              </tr>
-            ) : isPending ? (
-              <tr>
-                <td className={emptyCellClassName} colSpan={columns.length}>
-                  Loading agent and API activity…
-                </td>
-              </tr>
-            ) : isError ? (
-              <tr>
-                <td className={errorCellClassName} colSpan={columns.length}>
-                  {error?.message || 'Unable to load agent and API leaderboard right now.'}
-                </td>
-              </tr>
-            ) : rows.length === 0 ? (
-              <tr>
-                <td className={emptyCellClassName} colSpan={columns.length}>
-                  No agent or API activity yet.
-                </td>
-              </tr>
-            ) : (
-              visibleRows.map((row) => (
-                <tr key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
-                    <td
-                      key={cell.id}
-                      className={`${cell.column.id === 'name' ? 'text-left' : 'text-right'} px-3 md:px-6 py-4 align-middle`}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+        <TanStackTableShell
+          table={table}
+          rows={visibleRows}
+          bodyState={bodyState}
+          emptyState={{
+            content: 'No agent or API activity yet.',
+            cellClassName: emptyCellClassName,
+          }}
+          tableClassName={tableClassName}
+          headClassName={tableHeadClassName}
+          headerRowClassName=""
+          headerCellClassName="px-3 md:px-6 py-3"
+          bodyClassName={tableBodyClassName}
+          rowClassName=""
+          cellClassName="px-3 md:px-6 py-4 align-middle"
+          getHeaderCellProps={(header) => {
+            const sortState = header.column.getIsSorted()
+            return {
+              'aria-sort': sortState === 'asc' ? 'ascending' : sortState === 'desc' ? 'descending' : 'none',
+              className: header.column.id === 'name' ? 'text-left' : 'text-right',
+            }
+          }}
+          getCellProps={(cell) => ({
+            className: cell.column.id === 'name' ? 'text-left' : 'text-right',
+          })}
+        />
       </div>
       {hasOverflowRows ? (
         <div className="border-t border-slate-200/10 px-6 py-4">

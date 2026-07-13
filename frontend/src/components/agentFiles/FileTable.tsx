@@ -1,9 +1,10 @@
 import { useCallback, useMemo } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 
-import { type ColumnDef, type OnChangeFn, type RowSelectionState, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
+import { type ColumnDef, type OnChangeFn, type RowSelectionState, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { ArrowDownToLine, ArrowUp, ChevronRight, FileText, Folder, Trash2, UploadCloud } from 'lucide-react'
 
+import { TanStackTableShell, type TanStackTableBodyMessage } from '../common/TanStackTableShell'
 import type { FileDragAndDropHandlers } from './useFileDragAndDrop'
 import type { AgentFsNode } from './types'
 import { formatBytes, formatTimestamp } from './utils'
@@ -253,108 +254,85 @@ export function FileTable({
     getRowId: (row) => row.id,
     enableRowSelection: canManage,
   })
+  const bodyState: TanStackTableBodyMessage | null = isLoading
+    ? {
+        content: 'Loading files...',
+        cellClassName: 'px-4 py-6 text-center text-sm text-slate-400',
+      }
+    : errorMessage
+      ? {
+          content: errorMessage,
+          cellClassName: 'px-4 py-6 text-center text-sm text-rose-300',
+        }
+      : null
 
   return (
     <div className="overflow-x-auto" onDragOver={dragAndDrop.onCurrentFolderDragOver} onDrop={dragAndDrop.onCurrentFolderDrop}>
-      <table className="w-full border-collapse">
-        <thead className="bg-slate-900/40">
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <th key={header.id} scope="col" className="px-4 py-3 text-left">
-                  {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                </th>
-              ))}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {isLoading ? (
-            <tr>
-              <td colSpan={columns.length} className="px-4 py-6 text-center text-sm text-slate-400">
-                Loading files...
+      <TanStackTableShell
+        table={table}
+        bodyState={bodyState}
+        emptyState={{
+          content: 'This folder is empty. Upload files or create a folder to get started.',
+          cellClassName: 'px-4 py-6 text-center text-sm text-slate-400',
+        }}
+        tableClassName="w-full border-collapse"
+        headClassName="bg-slate-900/40"
+        headerRowClassName=""
+        headerCellClassName="px-4 py-3 text-left"
+        bodyClassName=""
+        rowClassName="border-b border-slate-200/15"
+        cellClassName="px-4 py-4 align-middle"
+        leadingRows={(columnCount) => currentFolderId ? (
+          <tr
+            className={[
+              'cursor-pointer',
+              'border-b border-slate-200/15 bg-slate-900/30',
+              dragAndDrop.dragOverNodeId === dragAndDrop.parentDropKey ? 'bg-blue-950/30' : '',
+            ].join(' ')}
+            onClick={onNavigateToParent}
+            onDragOver={dragAndDrop.onParentDragOver}
+            onDragEnter={dragAndDrop.onParentDragEnter}
+            onDragLeave={dragAndDrop.onParentDragLeave}
+            onDrop={dragAndDrop.onParentDrop}
+          >
+            {showSelection && (
+              <td className="px-4 py-3 align-middle">
+                <input
+                  type="checkbox"
+                  disabled
+                  className={`${selectionInputClassName} opacity-50`}
+                  aria-label="Parent folder selection disabled"
+                />
               </td>
-            </tr>
-          ) : errorMessage ? (
-            <tr>
-              <td colSpan={columns.length} className="px-4 py-6 text-center text-sm text-rose-300">
-                {errorMessage}
-              </td>
-            </tr>
-          ) : (
-            <>
-              {currentFolderId ? (
-                <tr
-                  className={[
-                    'cursor-pointer',
-                    'border-b border-slate-200/15 bg-slate-900/30',
-                    dragAndDrop.dragOverNodeId === dragAndDrop.parentDropKey ? 'bg-blue-950/30' : '',
-                  ].join(' ')}
-                  onClick={onNavigateToParent}
-                  onDragOver={dragAndDrop.onParentDragOver}
-                  onDragEnter={dragAndDrop.onParentDragEnter}
-                  onDragLeave={dragAndDrop.onParentDragLeave}
-                  onDrop={dragAndDrop.onParentDrop}
-                >
-                  {showSelection && (
-                    <td className="px-4 py-3 align-middle">
-                      <input
-                        type="checkbox"
-                        disabled
-                        className={`${selectionInputClassName} opacity-50`}
-                        aria-label="Parent folder selection disabled"
-                      />
-                    </td>
-                  )}
-                  <td colSpan={columns.length - (showSelection ? 1 : 0)} className="px-4 py-3">
-                    <div className="flex items-center gap-3 text-sm text-slate-300">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-300/20 bg-blue-950/30 text-blue-200">
-                        <ArrowUp className="h-4 w-4" aria-hidden="true" />
-                      </span>
-                      <div className="flex flex-col">
-                        <span className="text-sm font-semibold text-slate-100">Parent folder</span>
-                        <span className="text-xs text-slate-400">{parentFolderPath}</span>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              ) : null}
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={columns.length} className="px-4 py-6 text-center text-sm text-slate-400">
-                    This folder is empty. Upload files or create a folder to get started.
-                  </td>
-                </tr>
-              ) : (
-                table.getRowModel().rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className={[
-                      row.getIsSelected() ? 'bg-blue-950/20' : '',
-                      dragAndDrop.dragOverNodeId === row.original.id ? 'bg-blue-950/30' : '',
-                      'border-b border-slate-200/15',
-                    ].join(' ')}
-                    draggable={canManage && !isBusy}
-                    onDoubleClick={(event) => handleRowDoubleClick(row.original, event)}
-                    onDragStart={(event) => dragAndDrop.onRowDragStart(row.original, event)}
-                    onDragEnd={dragAndDrop.onRowDragEnd}
-                    onDragOver={(event) => dragAndDrop.onFolderDragOver(row.original, event)}
-                    onDragEnter={(event) => dragAndDrop.onFolderDragEnter(row.original, event)}
-                    onDragLeave={(event) => dragAndDrop.onFolderDragLeave(row.original, event)}
-                    onDrop={(event) => dragAndDrop.onFolderDrop(row.original, event)}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-4 py-4 align-middle">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </>
-          )}
-        </tbody>
-      </table>
+            )}
+            <td colSpan={columnCount - (showSelection ? 1 : 0)} className="px-4 py-3">
+              <div className="flex items-center gap-3 text-sm text-slate-300">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-300/20 bg-blue-950/30 text-blue-200">
+                  <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <div className="flex flex-col">
+                  <span className="text-sm font-semibold text-slate-100">Parent folder</span>
+                  <span className="text-xs text-slate-400">{parentFolderPath}</span>
+                </div>
+              </div>
+            </td>
+          </tr>
+        ) : null}
+        getRowProps={(row) => ({
+          className: [
+            row.getIsSelected() ? 'bg-blue-950/20' : '',
+            dragAndDrop.dragOverNodeId === row.original.id ? 'bg-blue-950/30' : '',
+          ].join(' '),
+          draggable: canManage && !isBusy,
+          onDoubleClick: (event) => handleRowDoubleClick(row.original, event),
+          onDragStart: (event) => dragAndDrop.onRowDragStart(row.original, event),
+          onDragEnd: dragAndDrop.onRowDragEnd,
+          onDragOver: (event) => dragAndDrop.onFolderDragOver(row.original, event),
+          onDragEnter: (event) => dragAndDrop.onFolderDragEnter(row.original, event),
+          onDragLeave: (event) => dragAndDrop.onFolderDragLeave(row.original, event),
+          onDrop: (event) => dragAndDrop.onFolderDrop(row.original, event),
+        })}
+      />
     </div>
   )
 }

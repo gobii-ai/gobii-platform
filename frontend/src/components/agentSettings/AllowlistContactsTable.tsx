@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table'
-import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
+import { getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { ArrowDownToLine, ArrowUpFromLine, Mail, Phone, Trash2 } from 'lucide-react'
 
 import type { AllowlistTableRow } from './contactTypes'
+import { TanStackTableShell } from '../common/TanStackTableShell'
 import {
   EmbeddedRemoveButton,
   EmbeddedStatusBadge,
@@ -11,8 +12,6 @@ import {
   EmbeddedTableHeader,
   embeddedBulkBannerClassName,
   embeddedBulkButtonClassName,
-  embeddedTableBodyClassName,
-  embeddedTableHeadClassName,
 } from './embeddedTablePrimitives'
 
 type AllowlistContactsTableProps = {
@@ -191,45 +190,18 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
       )}
 
       <EmbeddedTableFrame>
-          <table className="min-w-full border-collapse">
-            <thead className={embeddedTableHeadClassName}>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id} className="border-b border-slate-200/15">
-                  {headerGroup.headers.map((header) => (
-                    <th key={header.id} scope="col" className="px-4 py-3 text-left align-middle">
-                      {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody className={embeddedTableBodyClassName}>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={columns.length} className="px-4 py-10 text-center text-sm text-slate-300">
-                    No additional contacts configured yet.
-                  </td>
-                </tr>
-              ) : (
-                table.getRowModel().rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className={[
-                      'border-b border-slate-200/10 last:border-b-0',
-                      row.getIsSelected() ? 'bg-sky-950/35' : '',
-                      row.original.pendingType === 'remove' || row.original.pendingType === 'cancel_invite' ? 'opacity-60' : '',
-                    ].join(' ')}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-4 py-4 align-middle">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <TanStackTableShell
+          table={table}
+          emptyState={{ content: 'No additional contacts configured yet.' }}
+          getRowProps={(row) => ({
+            className: [
+              row.getIsSelected() ? 'bg-sky-950/35' : '',
+              row.original.pendingType === 'remove' || row.original.pendingType === 'cancel_invite'
+                ? 'opacity-60'
+                : '',
+            ].join(' '),
+          })}
+        />
       </EmbeddedTableFrame>
     </div>
   )
