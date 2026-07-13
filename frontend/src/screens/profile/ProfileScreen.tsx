@@ -151,7 +151,7 @@ function EmailAddressSection({
       ) : (
         <form className="profile-screen__inline-form" onSubmit={(event) => {
             event.preventDefault()
-            void runAction('change')
+            if (emailDraft.trim() && !busyAction) void runAction('change')
           }}>
           <label className="profile-screen__field">
             <span>New Email</span>

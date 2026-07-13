@@ -238,6 +238,18 @@ class ConsoleUserEmailApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
 
+    def test_rejects_non_object_json(self):
+        for payload in ([], "new-owner@example.com"):
+            with self.subTest(payload=payload):
+                response = self.client.post(
+                    self.url,
+                    data=json.dumps(payload),
+                    content_type="application/json",
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.content, b"JSON object expected")
+
     def test_change_keeps_verified_current_email_until_confirmation(self):
         response = self.client.post(
             self.url,
@@ -411,6 +423,42 @@ class ConsoleUserEmailApiTests(TestCase):
         self.assertEqual(address.email, "corrected-owner@example.com")
         self.assertTrue(address.primary)
         self.assertFalse(address.verified)
+        self.assertEqual(
+            response.json()["emailVerification"],
+            {
+                "email": "corrected-owner@example.com",
+                "isVerified": False,
+                "pendingEmail": None,
+            },
+        )
+
+    def test_change_replaces_unverified_current_email_without_discarding_verified_history(self):
+        EmailAddress.objects.filter(user=self.user).update(verified=False)
+        EmailAddress.objects.create(
+            user=self.user,
+            email="old-verified@example.com",
+            verified=True,
+        )
+
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"email": "corrected-owner@example.com"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "corrected-owner@example.com")
+        corrected = EmailAddress.objects.get(user=self.user, email=self.user.email)
+        self.assertTrue(corrected.primary)
+        self.assertFalse(corrected.verified)
+        self.assertTrue(
+            EmailAddress.objects.filter(
+                user=self.user,
+                email="old-verified@example.com",
+                verified=True,
+            ).exists()
+        )
         self.assertEqual(
             response.json()["emailVerification"],
             {

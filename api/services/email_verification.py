@@ -131,14 +131,14 @@ def validate_email_change(user, email) -> tuple[AddEmailForm, str | None]:
 
 def start_email_change(request, email: str) -> dict[str, str | bool | None]:
     user = request.user
-    has_verified_identity = EmailAddress.objects.filter(user=user, verified=True).exists()
+    current_email_is_verified = EmailAddress.objects.filter(user=user, email__iexact=user.email, verified=True).exists()
 
     # Keep allauth's canonical pending-address replacement, but send inside the
     # transaction so provider failures restore the previous address.
     with transaction.atomic():
         new_address = EmailAddress.objects.add_new_email(request, user, email, send_verification=False)
         send_email_verification(request, new_address, redirect_url=EMAIL_CHANGE_REDIRECT_URL)
-        if not has_verified_identity:
+        if not current_email_is_verified:
             new_address.set_as_primary()
 
     signals.email_added.send(sender=EmailAddress, request=request, user=user, email_address=new_address)
